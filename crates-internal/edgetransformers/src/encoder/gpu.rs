@@ -14,12 +14,12 @@ use crate::wgpu_context::WgpuContext;
 
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn::FFNWeights;
-use crate::gpu_pipeline::{GpuEncoderPipeline, GpuTransformerLayer};
+use crate::gpu_pipeline::{GpuTransformerPipeline, GpuTransformerLayer};
 
 /// The GPU backend for a generic Transformer Encoder.
 /// It holds the GPU-native weights and the generic pipeline to execute them.
 pub struct GpuTransformerEncoder {
-    pipeline: GpuEncoderPipeline,
+    pipeline: GpuTransformerPipeline,
 
     // CPU-side embeddings for the initial lookup.
     word_embeddings: Array2<f32>,
@@ -42,7 +42,7 @@ impl GpuTransformerEncoder {
     where
         C: EncoderArchitecture + Send + Sync + 'static,
     {
-        let pipeline = GpuEncoderPipeline::new(context.clone())?;
+        let pipeline = GpuTransformerPipeline::new(context.clone())?;
 
         let device = &context.device;
 
@@ -176,54 +176,7 @@ impl GpuTransformerEncoder {
                 norm_weight: upload_1d(&ffn_names.norm_weight)?,
                 norm_bias: upload_1d(&ffn_names.norm_bias)?,
             };
-            // let mut packed_ffn_data: Vec<f32> = Vec::new();
-            // if config.transpose_ffn_weights() {
-            //     // For BERT: Transpose [out, in] -> [in, out] to match the shader's expectation.
-            //     let intermediate_w_t = intermediate_w.t().as_standard_layout().to_owned();
-            //     let output_w_t = output_w.t().as_standard_layout().to_owned();
-
-            //     packed_ffn_data.extend_from_slice(intermediate_w_t.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(intermediate_b.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_w_t.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_b.as_slice().unwrap());
-            // } else {
-            //     // For GPT-2 style models: Use weights as-is.
-            //     packed_ffn_data
-            //         .extend_from_slice(intermediate_w.as_standard_layout().as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(intermediate_b.as_slice().unwrap());
-            //     packed_ffn_data
-            //         .extend_from_slice(output_w.as_standard_layout().as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_b.as_slice().unwrap());
-            // }
-            // // packed_ffn_data
-            // //     .extend_from_slice(intermediate_w.as_standard_layout().as_slice().unwrap());
-            // // packed_ffn_data.extend_from_slice(intermediate_b.as_slice().unwrap());
-            // // packed_ffn_data.extend_from_slice(output_w.as_standard_layout().as_slice().unwrap());
-            // // packed_ffn_data.extend_from_slice(output_b.as_slice().unwrap());
-
-            // let packed_weights = Arc::new(device.create_buffer_init(
-            //     &wgpu::util::BufferInitDescriptor {
-            //         label: Some(&format!("FFN Packed Weights Layer {}", i)),
-            //         contents: bytemuck::cast_slice(&packed_ffn_data),
-            //         usage: wgpu::BufferUsages::STORAGE,
-            //     },
-            // ));
-
-            // let ffn_weights = GpuFeedForwardWeights {
-            //     packed_weights,
-            //     norm_weight: upload_1d(&ffn_names.norm_weight)?,
-            //     norm_bias: upload_1d(&ffn_names.norm_bias)?,
-            // };
-
-            // let ffn_weights = GpuFeedForwardWeights {
-            //     intermediate_weight: upload_2d(&ffn_names.intermediate_weight)?,
-            //     intermediate_bias: upload_1d(&ffn_names.intermediate_bias)?,
-            //     output_weight: upload_2d(&ffn_names.output_weight)?,
-            //     output_bias: upload_1d(&ffn_names.output_bias)?,
-            //     norm_weight: upload_1d(&ffn_names.norm_weight)?,
-            //     norm_bias: upload_1d(&ffn_names.norm_bias)?,
-            // };
-
+            
             layers.push(GpuTransformerLayer {
                 attention_weights,
                 ffn_weights,
@@ -237,7 +190,7 @@ impl GpuTransformerEncoder {
             token_type_embeddings,
             embedding_norm_weights,
             layers,
-            config, // Store the config as a thread-safe trait object
+            config,
         })
     }
 

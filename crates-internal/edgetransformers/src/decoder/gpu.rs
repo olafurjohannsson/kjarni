@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn::FFNWeights;
-use crate::gpu_pipeline::GpuEncoderPipeline;
+use crate::gpu_pipeline::GpuTransformerPipeline;
 use crate::gpu_pipeline::GpuTransformerLayer;
 use crate::traits::{
     Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, Model, TransformerConfig,
@@ -17,7 +17,7 @@ use crate::wgpu_context::WgpuContext;
 
 /// The GPU backend for a generic Transformer Decoder.
 pub struct GpuTransformerDecoder {
-    pipeline: GpuEncoderPipeline,
+    pipeline: GpuTransformerPipeline,
 
     // CPU-side embeddings
     word_embeddings: Array2<f32>,
@@ -35,7 +35,7 @@ impl GpuTransformerDecoder {
     where
         C: DecoderArchitecture + Send + Sync + 'static,
     {
-        let pipeline = GpuEncoderPipeline::new(context.clone())?;
+        let pipeline = GpuTransformerPipeline::new(context.clone())?;
         let device = &context.device;
 
         let upload_1d = |name: &str| -> Result<Arc<wgpu::Buffer>> {
@@ -51,7 +51,7 @@ impl GpuTransformerDecoder {
 
         let upload_2d = |name: &str| -> Result<Arc<wgpu::Buffer>> {
             let tensor = weights.get_array2(name)?;
-            let transposed_tensor = tensor.t().to_owned();
+            let transposed_tensor = tensor; //.t().to_owned();
             Ok(Arc::new(device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(name),
@@ -94,9 +94,9 @@ impl GpuTransformerDecoder {
                 .slice(s![.., 2 * hidden_size..3 * hidden_size])
                 .to_owned();
 
-            let q_weight_t = q_weight.t().to_owned();
-            let k_weight_t = k_weight.t().to_owned();
-            let v_weight_t = v_weight.t().to_owned();
+            let q_weight_t = q_weight; //.t().to_owned();
+            let k_weight_t = k_weight; //.t().to_owned();
+            let v_weight_t = v_weight; //.t().to_owned();
 
             let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
             let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
@@ -226,35 +226,6 @@ impl GpuTransformerDecoder {
                 norm_weight: upload_1d(&ffn_names.norm_weight)?,
                 norm_bias: upload_1d(&ffn_names.norm_bias)?,
             };
-            // let mut packed_ffn_data: Vec<f32> = Vec::new();
-            // if config.transpose_ffn_weights() {
-            //     let intermediate_w_t = intermediate_w.t().as_standard_layout().to_owned();
-            //     let output_w_t = output_w.t().as_standard_layout().to_owned();
-            //     packed_ffn_data.extend_from_slice(intermediate_w_t.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(intermediate_b.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_w_t.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_b.as_slice().unwrap());
-            // } else {
-            //     packed_ffn_data.extend_from_slice(intermediate_w.as_standard_layout().as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(intermediate_b.as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_w.as_standard_layout().as_slice().unwrap());
-            //     packed_ffn_data.extend_from_slice(output_b.as_slice().unwrap());
-            // }
-
-            // let packed_weights = Arc::new(device.create_buffer_init(
-            //     &wgpu::util::BufferInitDescriptor {
-            //         label: Some(&format!("FFN Packed Weights Layer {}", i)),
-            //         contents: bytemuck::cast_slice(&packed_ffn_data),
-            //         usage: wgpu::BufferUsages::STORAGE,
-            //     },
-            // ));
-
-            // let ffn_weights = GpuFeedForwardWeights {
-            //     packed_weights,
-            //     norm_weight: upload_1d(&ffn_names.norm_weight)?,
-            //     norm_bias: upload_1d(&ffn_names.norm_bias)?,
-            // };
-
             layers.push(GpuTransformerLayer {
                 attention_weights,
                 ffn_weights,

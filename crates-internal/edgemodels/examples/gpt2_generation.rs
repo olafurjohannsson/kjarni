@@ -2,12 +2,10 @@ use anyhow::{Result, anyhow};
 use edgemodels::gpt2::GPT2Model;
 use edgetransformers::prelude::Device;
 use edgetransformers::wgpu_context::WgpuContext;
-use edgetransformers::CpuKVCache;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-const USE_GPU: bool = true;  // Start with CPU for testing
 const MAX_NEW_TOKENS: usize = 50;
 
 /// Helper function to ensure model files are available
@@ -38,11 +36,10 @@ async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let device_type_str = if USE_GPU { "GPU (WGPU)" } else { "CPU" };
-    println!("Starting GPT-2 generation example...");
+    println!("=== GPU vs CPU Comparison Test ===\n");
 
-    // --- 1. Define Model and Ensure Files are Present ---
-    let model_repo = "distilgpt2";  // Smaller, faster version of GPT-2
+    // --- 1. Setup Model Files ---
+    let model_repo = "distilgpt2";
     
     let cache_dir = dirs::cache_dir()
         .ok_or_else(|| anyhow!("Failed to get cache directory"))?
@@ -51,80 +48,169 @@ async fn main() -> Result<()> {
     let model_dir = cache_dir.join(model_repo.replace('/', "_"));
 
     ensure_model_files(model_repo, &model_dir).await?;
-    println!("Model files are available in: {:?}", model_dir);
+    println!("Model files are available in: {:?}\n", model_dir);
 
-    // --- 2. Initialize Model ---
-    let wgpu_context: Option<Arc<WgpuContext>> = if USE_GPU {
-        println!("\nInitializing WGPU context...");
-        let context = WgpuContext::new().await;
-        println!("WGPU context initialized successfully.");
-        Some(Arc::new(context))
-    } else {
+    // --- 2. Initialize GPU Model ---
+    println!("Initializing GPU Model...");
+    let wgpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_model = GPT2Model::from_pretrained(
+        &model_dir, 
+        Device::Wgpu, 
+        Some(wgpu_context.clone())
+    )?;
+    println!("✓ GPU model ready\n");
+
+    // --- 3. Initialize CPU Model ---
+    println!("Initializing CPU Model...");
+    let cpu_model = GPT2Model::from_pretrained(
+        &model_dir, 
+        Device::Cpu, 
         None
-    };
+    )?;
+    println!("✓ CPU model ready\n");
+
+    // --- 4. Test Single Generation ---
+    let test_prompt = "Once upon a time";
     
-    println!("\nInitializing GPT-2 Model");
-    let device = if USE_GPU { Device::Wgpu } else { Device::Cpu };
-    let model = GPT2Model::from_pretrained(&model_dir, device, wgpu_context)?;
-    println!("Model initialized successfully.");
+    println!("=== Single Generation Test ===");
+    println!("Prompt: \"{}\"\n", test_prompt);
 
-    // --- 3. Test Prompts ---
-    let prompts = vec![
-        "Once upon a time",
-        // "The future of AI is",
-        // "In a world where technology",
-        // "The quick brown fox",
-    ];
+    // GPU generation
+    println!("🖥️  GPU generating...");
+    let gpu_start = Instant::now();
+    let gpu_output = gpu_model.generate(
+        test_prompt,
+        MAX_NEW_TOKENS,
+        Some(1.0),  // temperature
+        Some(50),   // top_k
+    ).await?;
+    let gpu_time = gpu_start.elapsed();
+    
+    println!("Generated: {}", gpu_output);
+    println!("Time: {:.2}s ({:.1} tokens/sec)\n", 
+        gpu_time.as_secs_f32(),
+        MAX_NEW_TOKENS as f32 / gpu_time.as_secs_f32()
+    );
 
-    println!("\n=== Generation Examples ===\n");
+    // CPU generation
+    println!("💻 CPU generating...");
+    let cpu_start = Instant::now();
+    let cpu_output = cpu_model.generate(
+        test_prompt,
+        MAX_NEW_TOKENS,
+        Some(1.0),  // temperature
+        Some(50),   // top_k
+    ).await?;
+    let cpu_time = cpu_start.elapsed();
+    
+    println!("Generated: {}", cpu_output);
+    println!("Time: {:.2}s ({:.1} tokens/sec)\n", 
+        cpu_time.as_secs_f32(),
+        MAX_NEW_TOKENS as f32 / cpu_time.as_secs_f32()
+    );
 
-    for prompt in prompts {
-        println!("Prompt: \"{}\"", prompt);
-        
-        let start = Instant::now();
-        let generated = model.generate(
-            prompt,
-            MAX_NEW_TOKENS,
-            Some(1.0),  // temperature
-            Some(50),   // top_k
-        ).await?;
-        let elapsed = start.elapsed();
-        
-        println!("Generated: {}", generated);
-        println!("Time: {:.2}s ({:.1} tokens/sec)\n", 
-            elapsed.as_secs_f32(),
-            MAX_NEW_TOKENS as f32 / elapsed.as_secs_f32()
-        );
+    // Compare outputs
+    println!("=== Output Comparison ===");
+    if gpu_output == cpu_output {
+        println!("✅ PERFECT MATCH! GPU and CPU outputs are identical.\n");
+    } else {
+        println!("⚠️  OUTPUTS DIFFER!");
+        println!("GPU: {}", gpu_output);
+        println!("CPU: {}", cpu_output);
+        println!();
     }
 
-    // --- 4. Benchmark Generation Speed ---
-    println!("\n=== Speed Benchmark ===");
-    println!("Generating {} tokens with caching...\n", MAX_NEW_TOKENS);
+    // --- 5. Speed Benchmark ---
+    println!("=== Speed Benchmark ===");
+    println!("Generating {} tokens per run...\n", MAX_NEW_TOKENS);
 
-    let prompt = "The future of artificial intelligence";
-    let mut total_time = 0.0;
+    let bench_prompt = "The future of artificial intelligence";
     let num_runs = 3;
 
+    // GPU Benchmark
+    println!("🖥️  GPU Benchmark:");
+    let mut gpu_total_time = 0.0;
     for run in 1..=num_runs {
         let start = Instant::now();
-        let _ = model.generate(prompt, MAX_NEW_TOKENS, Some(1.0), Some(50)).await?;
+        let output = gpu_model.generate(
+            bench_prompt, 
+            MAX_NEW_TOKENS, 
+            Some(1.0), 
+            Some(50)
+        ).await?;
         let elapsed = start.elapsed();
-        total_time += elapsed.as_secs_f32();
+        gpu_total_time += elapsed.as_secs_f32();
         
         println!("Run {}/{}: {:.2}s ({:.1} tokens/sec)", 
             run, num_runs,
             elapsed.as_secs_f32(),
             MAX_NEW_TOKENS as f32 / elapsed.as_secs_f32()
         );
+        
+        if run == 1 {
+            println!("  Output: {}", output);
+        }
     }
 
-    let avg_time = total_time / num_runs as f32;
-    let avg_tokens_per_sec = MAX_NEW_TOKENS as f32 / avg_time;
+    let gpu_avg_time = gpu_total_time / num_runs as f32;
+    let gpu_avg_speed = MAX_NEW_TOKENS as f32 / gpu_avg_time;
 
-    println!("\n--- Benchmark Results for {} ---", device_type_str);
-    println!("Average time: {:.2}s", avg_time);
-    println!("Average speed: {:.1} tokens/sec", avg_tokens_per_sec);
-    println!("------------------------------------");
+    println!("\n--- GPU Results ---");
+    println!("Average time: {:.2}s", gpu_avg_time);
+    println!("Average speed: {:.1} tokens/sec", gpu_avg_speed);
+    println!("-------------------\n");
+
+    // CPU Benchmark
+    println!("💻 CPU Benchmark:");
+    let mut cpu_total_time = 0.0;
+    for run in 1..=num_runs {
+        let start = Instant::now();
+        let output = cpu_model.generate(
+            bench_prompt, 
+            MAX_NEW_TOKENS, 
+            Some(1.0), 
+            Some(50)
+        ).await?;
+        let elapsed = start.elapsed();
+        cpu_total_time += elapsed.as_secs_f32();
+        
+        println!("Run {}/{}: {:.2}s ({:.1} tokens/sec)", 
+            run, num_runs,
+            elapsed.as_secs_f32(),
+            MAX_NEW_TOKENS as f32 / elapsed.as_secs_f32()
+        );
+        
+        if run == 1 {
+            println!("  Output: {}", output);
+        }
+    }
+
+    let cpu_avg_time = cpu_total_time / num_runs as f32;
+    let cpu_avg_speed = MAX_NEW_TOKENS as f32 / cpu_avg_time;
+
+    println!("\n--- CPU Results ---");
+    println!("Average time: {:.2}s", cpu_avg_time);
+    println!("Average speed: {:.1} tokens/sec", cpu_avg_speed);
+    println!("-------------------\n");
+
+    // --- 6. Final Comparison ---
+    println!("=== Final Comparison ===");
+    let speedup = cpu_avg_time / gpu_avg_time;
+    
+    println!("GPU: {:.1} tokens/sec", gpu_avg_speed);
+    println!("CPU: {:.1} tokens/sec", cpu_avg_speed);
+    println!("Speedup: {:.2}x", speedup);
+    
+    if speedup > 1.0 {
+        println!("✓ GPU is {:.1}% faster", (speedup - 1.0) * 100.0);
+    } else {
+        println!("⚠️  GPU is {:.1}% slower (needs optimization!)", (1.0 - speedup) * 100.0);
+    }
+    
+    println!("\n=== Note ===");
+    println!("Without KV cache, speedup is limited due to recomputation.");
+    println!("Expected speedup with KV cache: 10-25x");
+    println!("Expected speedup with KV cache + batch=32: 50-100x");
 
     Ok(())
 }
