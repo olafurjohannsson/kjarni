@@ -1,5 +1,14 @@
+//! GPU Softmax Primitive
+//! 
+//! Performs numerically stable softmax with optional scaling.
+//! Used in attention mechanisms.
+//!
+//! **Shader:** `softmax.wgsl`
+//! **Complexity:** O(rows * cols)
+//! **Memory:** In-place operation
+
+
 use crate::wgpu_context::WgpuContext;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandEncoder, ComputePipeline, include_wgsl};
 

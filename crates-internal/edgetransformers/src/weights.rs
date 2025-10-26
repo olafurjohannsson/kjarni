@@ -39,6 +39,9 @@ impl ModelWeights {
 
         Self::from_bytes(&data, &config_json)
     }
+     pub fn list_tensor_names(&self) -> Vec<String> {
+        self.tensors.keys().map(|k| k.clone()).collect()
+    }
 
     /// Creates a new `ModelWeights` instance from in-memory byte slices.
     ///
@@ -67,7 +70,7 @@ impl ModelWeights {
                     )
                 }
                 dtype => {
-                    // todo: log/tracing 
+                    // todo: log/tracing
                     println!(
                         "   [Weight Loader Warning] Skipping tensor '{}' with unsupported dtype: {:?}",
                         name, dtype

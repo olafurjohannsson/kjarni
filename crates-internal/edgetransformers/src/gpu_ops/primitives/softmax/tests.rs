@@ -1,7 +1,5 @@
 use super::*;
-use crate::gpu_ops::common::{
-    assert_vecs_are_close, read_buffer_to_ndarray, read_buffer_to_ndarray2d,
-};
+use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_2d};
 use crate::wgpu_context::WgpuContext;
 use ndarray::{Array, Array1, Array2, Array3};
 use ndarray_rand::RandomExt;
@@ -67,7 +65,7 @@ async fn test_softmax_correctness() -> Result<()> {
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_result_array = read_buffer_to_ndarray2d(&context, &data_gpu, (rows, cols)).await?;
+    let gpu_result_array = read_buffer_2d(&context, &data_gpu, (rows, cols)).await?;
 
     // --- 3. Assert ---
     println!("Verifying Softmax GPU kernel against CPU implementation...");

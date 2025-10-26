@@ -1,6 +1,6 @@
 use super::*;
-use crate::gpu_ops::common::{
-    assert_vecs_are_close, read_buffer_to_ndarray, read_buffer_to_ndarray2d,
+use crate::gpu_ops::utils::{
+    assert_vecs_are_close, read_buffer_3d, read_buffer_2d,
 };
 use crate::wgpu_context::WgpuContext;
 use ndarray::{Array, Array1, Array2, Array3};
@@ -65,7 +65,7 @@ async fn test_add_bias_correctness() -> Result<()> {
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_result_array = read_buffer_to_ndarray2d(&context, &output_gpu, (rows, cols)).await?;
+    let gpu_result_array = read_buffer_2d(&context, &output_gpu, (rows, cols)).await?;
 
     // --- 3. Assert ---
     println!("Verifying AddBias GPU kernel against CPU implementation...");

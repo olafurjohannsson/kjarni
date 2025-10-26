@@ -1,5 +1,5 @@
 use super::*;
-use crate::gpu_ops::common::{assert_vecs_are_close, read_buffer_to_ndarray};
+use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d, read_buffer_2d};
 
 use ndarray::{Array, Array1, Array2, Array3};
 use ndarray_rand::RandomExt;
@@ -81,7 +81,7 @@ async fn test_layer_norm_correctness() -> Result<()> {
 
     // Read the result back from the GPU
     let gpu_result_array =
-        read_buffer_to_ndarray(&context, &output_gpu, (batch_size, seq_len, hidden_size)).await?;
+        read_buffer_3d(&context, &output_gpu, (batch_size, seq_len, hidden_size)).await?;
 
     // --- 3. Assert: Compare the results ---
 

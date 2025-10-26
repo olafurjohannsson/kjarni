@@ -1,21 +1,16 @@
 use crate::wgpu_context::WgpuContext;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, Buffer, CommandEncoder, ComputePipeline, Device, Queue, include_wgsl};
+use wgpu::{Buffer, CommandEncoder, ComputePipeline, include_wgsl};
 
-use crate::bind_group::BindGroupCache;
-
-pub fn compile_matmul_pipeline(context: &WgpuContext) -> ComputePipeline {
+pub fn compile_reshape_pipeline(context: &WgpuContext) -> ComputePipeline {
     let device = &context.device;
-    let shader = device.create_shader_module(include_wgsl!("./matmul_tiled.wgsl"));
+    let shader = device.create_shader_module(include_wgsl!("./reshape.wgsl"));
 
-    // Explicitly define the layout to match the shader.
+    // Explicitly define the layout for the three bindings required by the shader.
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Matmul Bind Group Layout"),
+        label: Some("Reshape Bind Group Layout"),
         entries: &[
-            // @binding(0) Uniforms
+            // @binding(0) var<uniform> uniforms
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -26,7 +21,7 @@ pub fn compile_matmul_pipeline(context: &WgpuContext) -> ComputePipeline {
                 },
                 count: None,
             },
-            // @binding(1) Input Matrix A
+            // @binding(1) var<storage, read> input
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -37,20 +32,9 @@ pub fn compile_matmul_pipeline(context: &WgpuContext) -> ComputePipeline {
                 },
                 count: None,
             },
-            // @binding(2) Input Matrix B
+            // @binding(2) var<storage, read_write> output
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // @binding(3) Output Matrix C
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -63,29 +47,31 @@ pub fn compile_matmul_pipeline(context: &WgpuContext) -> ComputePipeline {
     });
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Matmul Pipeline Layout"),
+        label: Some("Reshape Pipeline Layout"),
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Matmul Pipeline"),
+        label: Some("Reshape Pipeline"),
         layout: Some(&pipeline_layout),
         module: &shader,
         entry_point: Some("main"),
         compilation_options: Default::default(),
         cache: None,
     });
+
     pipeline
 }
-
-pub fn compile_bmm_pipeline(context: &WgpuContext) -> ComputePipeline {
+pub fn compile_unreshape_pipeline(context: &WgpuContext) -> ComputePipeline {
     let device = &context.device;
-    let shader = device.create_shader_module(include_wgsl!("./bmm.wgsl"));
+    let shader = device.create_shader_module(include_wgsl!("./unreshape.wgsl"));
 
+    // Explicitly define the layout for the three bindings required by the shader.
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("BMM Bind Group Layout"),
+        label: Some("Unreshape Bind Group Layout"),
         entries: &[
+            // @binding(0) var<uniform> uniforms
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -96,6 +82,7 @@ pub fn compile_bmm_pipeline(context: &WgpuContext) -> ComputePipeline {
                 },
                 count: None,
             },
+            // @binding(1) var<storage, read> input
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -106,18 +93,9 @@ pub fn compile_bmm_pipeline(context: &WgpuContext) -> ComputePipeline {
                 },
                 count: None,
             },
+            // @binding(2) var<storage, read_write> output
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -130,13 +108,13 @@ pub fn compile_bmm_pipeline(context: &WgpuContext) -> ComputePipeline {
     });
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("BMM Pipeline Layout"),
+        label: Some("Unreshape Pipeline Layout"),
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("BMM Pipeline"),
+        label: Some("Unreshape Pipeline"),
         layout: Some(&pipeline_layout),
         module: &shader,
         entry_point: Some("main"),
@@ -146,46 +124,53 @@ pub fn compile_bmm_pipeline(context: &WgpuContext) -> ComputePipeline {
     pipeline
 }
 
-/// A uniform struct to pass matrix dimensions to the bmm.wgsl shader.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct MatmulInfo {
-    b: u32,
-    m: u32,
-    k: u32,
-    n: u32,
-}
-
-/// A helper function to run a batched 2D matrix multiplication `C = A * B` on the GPU.
+/// A self-contained helper to run the batch-aware `reshape.wgsl` shader.
 ///
-/// This kernel is essential for attention score calculation. It treats the inputs
-/// as batches of 2D matrices and performs the multiplication for each item in the batch.
-/// - A shape: [batch, m, k]
-/// - B shape: [batch, k, n]
-/// - C shape: [batch, m, n]
-pub fn run_gpu_bmm(
+/// This kernel is crucial for multi-head attention, permuting the dimensions of the
+/// Q, K, and V projections to prepare them for batched matrix multiplication. It's the
+/// GPU equivalent of `permute()` and is fully aware of the batch dimension.
+pub fn run_gpu_reshape(
     context: &WgpuContext,
     encoder: &mut CommandEncoder,
     pipeline: &ComputePipeline,
-    a: &Buffer,
-    b: &Buffer,
-    c: &Buffer,
-    batch: u32,
-    m: u32,
-    k: u32,
-    n: u32,
+    input: &Buffer,
+    output: &Buffer,
+    b: u32, // batch_size
+    s: u32, // seq_len
+    h: u32, // num_heads
+    d: u32, // head_dim
+    transpose_k: bool,
 ) {
+    /// A uniform struct to pass tensor dimensions to the reshape.wgsl shader.
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+    struct ReshapeUniforms {
+        b: u32,
+        s: u32,
+        h: u32,
+        d: u32,
+        transpose_k: u32,
+        _padding: [u32; 3],
+    }
+
     let device = &context.device;
-    let uniforms = MatmulInfo { b: batch, m, k, n };
-    
+
+    let uniforms = ReshapeUniforms {
+        b,
+        s,
+        h,
+        d,
+        transpose_k: if transpose_k { 1 } else { 0 },
+        _padding: [0; 3],
+    };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("BMM Uniforms"),
+        label: Some("Reshape Uniforms"),
         contents: bytemuck::cast_slice(&[uniforms]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("BMM Bind Group"),
+        label: Some("Reshape Bind Group"),
         layout: &pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry {
@@ -194,75 +179,73 @@ pub fn run_gpu_bmm(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: a.as_entire_binding(),
+                resource: input.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: c.as_entire_binding(),
+                resource: output.as_entire_binding(),
             },
         ],
     });
 
     let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("BMM Compute Pass"),
+        label: Some("Reshape Compute Pass"),
         timestamp_writes: None,
     });
-    compute_pass.set_pipeline(pipeline);
+    compute_pass.set_pipeline(&pipeline);
     compute_pass.set_bind_group(0, &bind_group, &[]);
 
-    const TILE_DIM: u32 = 32;
-    let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
-    let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
-    let workgroup_z = batch;
-
+    // Dispatch a 3D grid of workgroups to cover the batch, sequence, and head dimensions.
+    let workgroup_x = (s + 15) / 16; // Workgroup size is 16 in X dimension
+    let workgroup_y = (h + 15) / 16; // Workgroup size is 16 in Y dimension
+    let workgroup_z = b; // Dispatch one "layer" of workgroups for each item in the batch
     compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
 }
 
-/// Uniform struct for standard matrix multiplication
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct MatmulUniforms {
-    m: u32,
-    k: u32,
-    n: u32,
-    _padding: u32,
-}
-
-/// Run 2D matrix multiplication: C = A * B
-/// - A shape: [m, k]
-/// - B shape: [k, n]
-/// - C shape: [m, n]
-pub fn run_gpu_matmul(
+/// A self-contained helper to run the `unreshape.wgsl` shader.
+///
+/// This kernel is the inverse of the reshape operation, taking the context vectors
+/// from the multi-head format `[B, H, S, D]` and permuting them back into the
+/// standard sequence format `[B, S, H*D]`, ready for the final output projection.
+pub fn run_gpu_unreshape(
     context: &WgpuContext,
     encoder: &mut CommandEncoder,
     pipeline: &ComputePipeline,
-    a: &Buffer,
-    b: &Buffer,
-    c: &Buffer,
-    m: u32,
-    k: u32,
-    n: u32,
+    input: &Buffer,
+    output: &Buffer,
+    b: u32, // batch_size
+    s: u32, // seq_len
+    h: u32, // num_heads
+    d: u32, // head_dim
 ) {
+    /// A uniform struct to pass tensor dimensions to the unreshape.wgsl shader.
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+    struct ReshapeUniforms {
+        b: u32,
+        s: u32,
+        h: u32,
+        d: u32,
+        _padding: [u32; 4],
+    }
+
     let device = &context.device;
-    let uniforms = MatmulUniforms {
-        m,
-        k,
-        n,
-        _padding: 0,
+
+    let uniforms = ReshapeUniforms {
+        b,
+        s,
+        h,
+        d,
+        _padding: [0; 4],
     };
-    
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Matmul Uniforms"),
+        label: Some("Unreshape Uniforms"),
         contents: bytemuck::cast_slice(&[uniforms]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Matmul Bind Group"),
+        label: Some("Unreshape Bind Group"),
         layout: &pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry {
@@ -271,31 +254,27 @@ pub fn run_gpu_matmul(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: a.as_entire_binding(),
+                resource: input.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: c.as_entire_binding(),
+                resource: output.as_entire_binding(),
             },
         ],
     });
 
     let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("Matmul Compute Pass"),
+        label: Some("Unreshape Compute Pass"),
         timestamp_writes: None,
     });
-    compute_pass.set_pipeline(pipeline);
+    compute_pass.set_pipeline(&pipeline);
     compute_pass.set_bind_group(0, &bind_group, &[]);
 
-    const TILE_DIM: u32 = 32;
-    let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
-    let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
-
-    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+    // Dispatch a 3D grid of workgroups to cover the batch, sequence, and head dimensions.
+    let workgroup_x = (s + 15) / 16;
+    let workgroup_y = (h + 15) / 16;
+    let workgroup_z = b;
+    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
 }
 
 #[cfg(test)]

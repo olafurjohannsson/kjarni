@@ -34,7 +34,7 @@ bytemuck = { version = "1.14", features = ["derive"] }
 futures-intrusive = "0.5"
 
 [workspace.dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
 # reqwest and dirs are needed for the example file to download models
 reqwest = { version = "0.12.23", features = ["blocking"] }
 dirs = "6.0.0"

@@ -8,9 +8,11 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use rand::seq::SliceRandom;
+
+//First 10 embeddings for CPU - embeddings: [0.0035335978, -0.04011636, 0.01281298, -0.003992136, 0.053759273, 0.04452073, -0.024588352, -0.015746871, -0.052199967, -0.034857705]
 //First 10 dims: [-0.0123080015, -0.050815407, -0.02291113, -0.008355495, -0.0016676121, -0.0072230296, 0.004740711, 0.01285743, -0.020140342, -0.023169108]
 use std::time::Instant;
-const USE_GPU: bool = false;
+const USE_GPU: bool = true;
 const NUM_RUNS: usize = 1;
 const BATCH_SIZE: usize = 32;
 
@@ -149,6 +151,23 @@ async fn main() -> Result<()> {
     println!("Max latency:  {} ms", max_time_ms);
     println!("p95 latency:  {} ms", p95_time_ms);
     println!("------------------------------------");
+    
+    
+    let e = bi_encoder.encode(vec!["TEST EMBEDDING"], true).await?;
+    for ee in e {
+        let nn = ee.len().min(10);
+        println!("First 10 embeddings for {} - embeddings: {:?}", device_type_str, &ee[0..nn]);
+    }
+
+    
 
     Ok(())
 }
+
+
+    // let t = bi_encoder.encode(vec!["Warmup sentence."], true).await?;
+    // for (i, embedding) in t.iter().enumerate() {
+    //     let norm: f32 = embedding.iter().map(|x| x*x).sum::<f32>().sqrt();
+    //     let n = embedding.len().min(10);
+    //     println!("First 10 dims: {:?}", &embedding[0..n]);
+    // }

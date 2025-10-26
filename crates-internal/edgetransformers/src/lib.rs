@@ -20,6 +20,7 @@ pub mod pooling;
 pub mod prelude;
 pub mod traits;
 pub mod utils;
+pub mod tests;
 pub mod weights;
 pub mod wgpu_context;
 pub mod wgpu_ops;

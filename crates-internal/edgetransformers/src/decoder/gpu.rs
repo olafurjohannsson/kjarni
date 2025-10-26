@@ -5,8 +5,10 @@ use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu_ops::ffn::GpuFeedForwardWeights;
-use crate::gpu_pipeline::{GpuAttentionWeights, GpuEncoderPipeline, GpuTransformerLayer};
+use crate::gpu_ops::blocks::attention::AttentionWeights;
+use crate::gpu_ops::blocks::ffn::FFNWeights;
+use crate::gpu_pipeline::GpuEncoderPipeline;
+use crate::gpu_pipeline::GpuTransformerLayer;
 use crate::traits::{
     Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, Model, TransformerConfig,
 };
@@ -152,7 +154,7 @@ impl GpuTransformerDecoder {
                 },
             ));
 
-            let attention_weights = GpuAttentionWeights {
+            let attention_weights = AttentionWeights {  // ✅ Changed from GpuAttentionWeights
                 q_weight: q_weight_buf,
                 q_bias: q_bias_buf,
                 k_weight: k_weight_buf,
@@ -216,7 +218,7 @@ impl GpuTransformerDecoder {
                 },
             ));
 
-            let ffn_weights = GpuFeedForwardWeights {
+            let ffn_weights = FFNWeights {  // ✅ Changed from GpuFeedForwardWeights
                 fc1_weight: fc1_weight_buf,
                 fc1_bias: fc1_bias_buf,
                 fc2_weight: fc2_weight_buf,

@@ -72,6 +72,7 @@ pub fn run_gpu_apply_mask(
     batch_size: u32,
     num_heads: u32,
     seq_len: u32,
+    is_causal: bool,
 ) {
     #[repr(C)]
     #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,7 +80,7 @@ pub fn run_gpu_apply_mask(
         batch_size: u32,
         num_heads: u32,
         seq_len: u32,
-        _padding: u32,
+        is_causal: u32
     }
 
     let device = &context.device;
@@ -88,7 +89,7 @@ pub fn run_gpu_apply_mask(
         batch_size,
         num_heads,
         seq_len,
-        _padding: 0,
+        is_causal: if is_causal { 1 } else { 0 },
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Apply Mask Uniforms"),

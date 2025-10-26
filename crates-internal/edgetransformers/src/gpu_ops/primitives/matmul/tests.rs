@@ -1,6 +1,6 @@
 use super::*;
-use crate::gpu_ops::common::{
-    assert_vecs_are_close, read_buffer_to_ndarray, read_buffer_to_ndarray2d,
+use crate::gpu_ops::utils::{
+    assert_vecs_are_close, read_buffer_3d, read_buffer_2d,
 };
 use crate::wgpu_context::WgpuContext;
 use ndarray::{Array, Array1, Array2, Array3};
@@ -67,8 +67,7 @@ async fn test_matmul_correctness() -> Result<()> {
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    // We need a 2D version of `read_buffer_to_ndarray`
-    let gpu_result_array = read_buffer_to_ndarray2d(&context, &output_c_gpu, (m, n)).await?;
+    let gpu_result_array = read_buffer_2d(&context, &output_c_gpu, (m, n)).await?;
 
     // --- 3. Assert ---
     println!("Verifying Matmul GPU kernel against CPU implementation...");

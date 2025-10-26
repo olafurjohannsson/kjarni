@@ -1,6 +1,6 @@
 use super::*;
-use crate::gpu_ops::common::{
-    assert_vecs_are_close, read_buffer_to_ndarray, read_buffer_to_ndarray2d,
+use crate::gpu_ops::utils::{
+    assert_vecs_are_close, read_buffer_2d, read_buffer_3d,
 };
 use crate::wgpu_context::WgpuContext;
 use ndarray::{Array, Array1, Array2, Array3};
@@ -83,7 +83,7 @@ async fn test_reshape_unreshape_correctness() -> Result<()> {
     );
     context.queue.submit(std::iter::once(encoder1.finish()));
 
-    let gpu_reshaped_array = read_buffer_to_ndarray(&context, &reshaped_gpu, (b * h, s, d)).await?;
+    let gpu_reshaped_array = read_buffer_3d(&context, &reshaped_gpu, (b * h, s, d)).await?;
 
     println!("Verifying Reshape GPU kernel against CPU implementation...");
     assert_vecs_are_close(
@@ -111,7 +111,7 @@ async fn test_reshape_unreshape_correctness() -> Result<()> {
     context.queue.submit(std::iter::once(encoder2.finish()));
 
     let gpu_unreshaped_array =
-        read_buffer_to_ndarray(&context, &unreshaped_gpu, (b, s, hidden_size)).await?;
+        read_buffer_3d(&context, &unreshaped_gpu, (b, s, hidden_size)).await?;
 
     println!("Verifying Unreshape is the inverse of Reshape...");
     assert_vecs_are_close(
@@ -188,7 +188,7 @@ async fn test_reshape_correctness() -> Result<()> {
 
     // The reshaped GPU buffer has a logical shape of [B, H, S, D], which is flat in memory.
     // For comparison, we can read it back as a 3D array of shape [B*H, S, D].
-    let gpu_reshaped_array = read_buffer_to_ndarray(&context, &output_gpu, (b * h, s, d)).await?;
+    let gpu_reshaped_array = read_buffer_3d(&context, &output_gpu, (b * h, s, d)).await?;
 
     // --- 3. Assert ---
     println!("Verifying Reshape GPU kernel against CPU implementation...");
@@ -269,7 +269,7 @@ async fn test_unreshape_is_inverse_of_reshape() -> Result<()> {
 
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_final_array = read_buffer_to_ndarray(&context, &final_gpu, (b, s, hidden_size)).await?;
+    let gpu_final_array = read_buffer_3d(&context, &final_gpu, (b, s, hidden_size)).await?;
 
     // --- 3. Assert ---
     println!("Verifying Unreshape is the inverse of Reshape...");

@@ -1,5 +1,5 @@
 use super::*;
-use crate::gpu_ops::common::{assert_vecs_are_close, read_buffer_to_ndarray};
+use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d, read_buffer_2d};
 use crate::wgpu_context::WgpuContext;
 use ndarray::{Array, Array1, Array2, Array3, s};
 use ndarray_rand::RandomExt;
@@ -71,10 +71,11 @@ async fn test_apply_mask_correctness() -> Result<()> {
         batch_size as u32,
         num_heads as u32,
         seq_len as u32,
+        false,
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_result_array = read_buffer_to_ndarray(
+    let gpu_result_array = read_buffer_3d(
         &context,
         &scores_gpu,
         (batch_size * num_heads, seq_len, seq_len),

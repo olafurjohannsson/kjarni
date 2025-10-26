@@ -11,9 +11,10 @@ use crate::traits::{
 };
 use crate::weights::ModelWeights;
 use crate::wgpu_context::WgpuContext;
-// Import the new generic components
-use crate::gpu_ops::ffn::GpuFeedForwardWeights;
-use crate::gpu_pipeline::{GpuAttentionWeights, GpuEncoderPipeline, GpuTransformerLayer};
+
+use crate::gpu_ops::blocks::attention::AttentionWeights;
+use crate::gpu_ops::blocks::ffn::FFNWeights;
+use crate::gpu_pipeline::{GpuEncoderPipeline, GpuTransformerLayer};
 
 /// The GPU backend for a generic Transformer Encoder.
 /// It holds the GPU-native weights and the generic pipeline to execute them.
@@ -95,14 +96,20 @@ impl GpuTransformerEncoder {
         for i in 0..config.num_hidden_layers() {
             let attn_names = config.get_attention_names(i);
             let ffn_names = config.get_feed_forward_names(i);
-
-            let attention_weights = GpuAttentionWeights {
-                q_weight: upload_2d(&attn_names.q_weight)?,
-                q_bias: upload_1d(&attn_names.q_bias)?,
-                k_weight: upload_2d(&attn_names.k_weight)?,
-                k_bias: upload_1d(&attn_names.k_bias)?,
-                v_weight: upload_2d(&attn_names.v_weight)?,
-                v_bias: upload_1d(&attn_names.v_bias)?,
+            // Upload attention weights
+            let q_weight_buf = upload_2d(&attn_names.q_weight)?;
+            let q_bias_buf = upload_1d(&attn_names.q_bias)?;
+            let k_weight_buf = upload_2d(&attn_names.k_weight)?;
+            let k_bias_buf = upload_1d(&attn_names.k_bias)?;
+            let v_weight_buf = upload_2d(&attn_names.v_weight)?;
+            let v_bias_buf = upload_1d(&attn_names.v_bias)?;
+            let attention_weights = AttentionWeights {  // ✅ Changed from GpuAttentionWeights
+                q_weight: q_weight_buf,
+                q_bias: q_bias_buf,
+                k_weight: k_weight_buf,
+                k_bias: k_bias_buf,
+                v_weight: v_weight_buf,
+                v_bias: v_bias_buf,
                 output_weight: upload_2d(&attn_names.output_weight)?,
                 output_bias: upload_1d(&attn_names.output_bias)?,
                 norm_weight: upload_1d(&attn_names.norm_weight)?,
@@ -160,7 +167,8 @@ impl GpuTransformerEncoder {
                 },
             ));
 
-            let ffn_weights = GpuFeedForwardWeights {
+
+            let ffn_weights = FFNWeights {  // ✅ Changed from GpuFeedForwardWeights
                 fc1_weight: fc1_weight_buf,
                 fc1_bias: fc1_bias_buf,
                 fc2_weight: fc2_weight_buf,
