@@ -1,13 +1,12 @@
 //! A reusable orchestrator for running a generic transformer encoder pipeline on the GPU.
 
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, s};
-use rand::seq;
-use std::collections::HashMap;
+use anyhow::{Result};
+use ndarray::{Array2, Array3};
+use crate::cache::GpuKVCache;
 use std::sync::Arc;
 use wgpu::ComputePipeline;
 use wgpu::util::DeviceExt;
-use wgpu::{Buffer, CommandEncoder};
+use wgpu::{Buffer};
 
 use crate::gpu_ops::{
     blocks::attention::{
@@ -15,25 +14,16 @@ use crate::gpu_ops::{
         run_attention_block,
     },
     blocks::ffn::{
-        FFNConfig, FFNPipelines, FFNTempBuffers, FFNWeights, compile_fc1_pipeline,
-        compile_fc2_pipeline, run_ffn_block,
+        FFNConfig, FFNPipelines, FFNTempBuffers, FFNWeights, run_ffn_block,
     },
     primitives::{
         add::{compile_add_pipeline, run_gpu_add},
-        add_bias::{compile_add_bias_pipeline, run_gpu_add_bias},
-        apply_mask::{compile_apply_mask_pipeline, run_gpu_apply_mask},
         layer_norm::{compile_layer_norm_pipeline, run_gpu_layer_norm},
-        matmul::{compile_bmm_pipeline, compile_matmul_pipeline, run_gpu_bmm, run_gpu_matmul},
-        reshape::{
-            compile_reshape_pipeline, compile_unreshape_pipeline, run_gpu_reshape,
-            run_gpu_unreshape,
-        },
-        softmax::{compile_softmax_pipeline, run_gpu_softmax},
     },
     utils::read_buffer_3d,
 };
-use crate::traits::{EncoderArchitecture, TransformerConfig};
-use crate::wgpu_context::WgpuContext;
+use crate::traits::{TransformerConfig};
+use crate::gpu_context::WgpuContext;
 
 pub struct TempBuffers {
     pub attention: AttentionTempBuffers,
@@ -133,13 +123,35 @@ impl GpuTransformerPipeline {
             usage,
         })
     }
+
+    /// Forward pass with optional KV caching
+    pub async fn forward_with_cache(
+        &self,
+        config: &dyn TransformerConfig,
+        initial_embeddings: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        final_norm_weights: (&Arc<wgpu::Buffer>, &Arc<wgpu::Buffer>),
+        layers: &[GpuTransformerLayer],
+        cache: Option<&mut GpuKVCache>,
+    ) -> Result<Array3<f32>> {
+        // For now, just call forward without cache
+        // TODO: Implement cache in GPU shaders
+        self.forward(
+            config,
+            initial_embeddings,
+            attention_mask,
+            final_norm_weights,
+            layers,
+        ).await
+    }
+
     /// Executes the full, end-to-end GPU forward pass for a transformer encoder.
     pub async fn forward(
         &self,
         config: &dyn TransformerConfig,
         initial_embeddings: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        norm_weights: (&Buffer, &Buffer),
+        norm_weights: (&Arc<wgpu::Buffer>, &Arc<wgpu::Buffer>),
         layers: &[GpuTransformerLayer],
     ) -> Result<Array3<f32>> {
         let (batch_size, seq_len, hidden_size) = initial_embeddings.dim();

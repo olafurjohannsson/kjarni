@@ -1,4 +1,4 @@
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandEncoder, ComputePipeline, include_wgsl};
 

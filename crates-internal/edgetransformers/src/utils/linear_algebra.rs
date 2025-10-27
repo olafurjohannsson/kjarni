@@ -5,7 +5,7 @@ use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
 #[cfg(not(target_arch = "wasm32"))]
 use ndarray::parallel::prelude::*;
 
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use crate::wgpu_ops;
 
 pub async fn feed_forward_gpu(

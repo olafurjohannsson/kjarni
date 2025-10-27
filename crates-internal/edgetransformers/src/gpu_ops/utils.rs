@@ -6,7 +6,7 @@
 //! Buffer readback functions (`read_buffer_*`) are **SLOW** - they cause CPU/GPU sync.
 //! Only use for testing and debugging, never in production hot paths.
 
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 use wgpu::util::DeviceExt;

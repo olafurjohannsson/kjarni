@@ -1,4 +1,4 @@
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use ndarray::{Array1, Array2, Array3, s};
 use wgpu::PollType;
 use wgpu::util::DeviceExt;

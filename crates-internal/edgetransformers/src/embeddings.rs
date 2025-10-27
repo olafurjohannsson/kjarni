@@ -1,6 +1,6 @@
 //! Embedding layers for transformers
 
-use ndarray::{Axis, Array2, Array3, s};
+use ndarray::{Array2, Array3, Axis, s};
 
 /// Configuration for embedding layers
 pub struct EmbeddingConfig {
@@ -29,7 +29,7 @@ impl Embeddings {
             token_type_embeddings,
         }
     }
-    
+
     /// Embed input tokens
     pub fn forward(
         &self,
@@ -38,9 +38,18 @@ impl Embeddings {
     ) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.word_embeddings.shape()[1];
-        
+        let max_position = self.position_embeddings.shape()[0];
+        let vocab_size = self.word_embeddings.shape()[0];
+
+        if seq_len > max_position {
+            panic!(
+                "Sequence length {} exceeds max position embeddings {}. Please truncate your input.",
+                seq_len, max_position
+            );
+        }
+
         let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
-        
+
         // Word embeddings
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -51,45 +60,69 @@ impl Embeddings {
                 .zip(input_ids.axis_iter(Axis(0)))
                 .for_each(|(mut hidden_slice, ids)| {
                     for (j, &token_id) in ids.iter().enumerate() {
-                        let word_emb = self.word_embeddings.row(token_id as usize);
+                        let token_id = token_id as usize;
+                        // Bounds check
+                        if token_id >= vocab_size {
+                            panic!(
+                                "Token ID {} is out of vocabulary range [0, {})",
+                                token_id, vocab_size
+                            );
+                        }
+                        let word_emb = self.word_embeddings.row(token_id);
                         hidden_slice.slice_mut(s![j, ..]).assign(&word_emb);
                     }
                 });
         }
-        
+
         #[cfg(target_arch = "wasm32")]
         {
             for i in 0..batch_size {
                 for j in 0..seq_len {
                     let token_id = input_ids[[i, j]] as usize;
+                    // Bounds check
+                    if token_id >= vocab_size {
+                        panic!(
+                            "Token ID {} is out of vocabulary range [0, {})",
+                            token_id, vocab_size
+                        );
+                    }
                     let word_emb = self.word_embeddings.row(token_id);
                     hidden.slice_mut(s![i, j, ..]).assign(&word_emb);
                 }
             }
         }
-        
+
         // Position embeddings
         let pos_embeddings = self.position_embeddings.slice(s![0..seq_len, ..]);
         hidden += &pos_embeddings;
-        
-        // Token type embeddings (only if present)
+
+        // Token type embeddings
         if let Some(ref token_type_emb) = self.token_type_embeddings {
+            let type_vocab_size = token_type_emb.shape()[0];
+
             if let Some(type_ids) = token_type_ids {
                 for i in 0..batch_size {
                     for j in 0..seq_len {
                         let type_id = type_ids[[i, j]] as usize;
+                        // Bounds check
+                        if type_id >= type_vocab_size {
+                            panic!(
+                                "Token type ID {} is out of range [0, {})",
+                                type_id, type_vocab_size
+                            );
+                        }
                         let type_emb = token_type_emb.row(type_id);
                         let mut slice = hidden.slice_mut(s![i, j, ..]);
                         slice += &type_emb;
                     }
                 }
             } else {
-                // Default to type 0 if available
+                // Default to type 0
                 let type_embeddings = token_type_emb.row(0);
                 hidden += &type_embeddings;
             }
         }
-        
+
         hidden
     }
 }

@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-use edgetransformers::wgpu_context::WgpuContext;
+use edgetransformers::gpu_context::WgpuContext;
 mod config;
 pub use config::{BertConfig, RobertaConfig, BertBaseConfig};
 

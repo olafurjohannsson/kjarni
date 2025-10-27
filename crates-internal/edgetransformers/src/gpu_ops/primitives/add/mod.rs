@@ -1,6 +1,6 @@
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use wgpu::util::DeviceExt;
-use wgpu::{Buffer, CommandEncoder, ComputePipeline, include_wgsl};
+use wgpu::{ComputePipeline, include_wgsl};
 
 pub fn compile_add_pipeline(context: &WgpuContext) -> ComputePipeline {
     let device = &context.device;

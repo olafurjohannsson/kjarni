@@ -31,6 +31,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
+pub use crate::cache::Cache;
+
 
 /// Supported computation backends.
 ///
@@ -48,7 +50,7 @@ pub enum Device {
 ///
 /// Provides a common interface for identifying the model's computation device.
 /// It requires `Send + Sync` to ensure models can be safely used across threads.
-pub trait Model: Send + Sync {
+pub trait TransformerModel: Send + Sync {
     /// Returns the computation device this model instance is configured to use.
     fn device(&self) -> Device;
 }
@@ -57,25 +59,6 @@ pub trait Model: Send + Sync {
 ///
 /// This allows for generic model loading and initialization from configuration data.
 pub trait ModelConfig: Send + Sync + Any {}
-
-/// A type-erased, thread-safe container for mutable inference state.
-///
-/// This is essential for efficient autoregressive generation. Concrete implementations
-/// might store attention Key-Value tensors, beam search hypotheses, or other
-/// intermediate state that needs to be preserved across generation steps.
-///
-/// The `AsAny` and `AsAnyMut` methods are crucial for downcasting a `&mut dyn Cache`
-/// back to its concrete type within a model's `forward` implementation.
-pub trait Cache: Send + Sync {
-    /// Returns a reference to the underlying cache as a type-erased `Any` object.
-    fn as_any(&self) -> &dyn Any;
-    /// Returns a mutable reference to the underlying cache as a type-erased `Any` object.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    /// Get the current sequence length (number of cached tokens)
-    fn get_seq_length(&self) -> usize;
-    /// Clear the cache
-    fn clear(&mut self);
-}
 
 /// The standard output from an encoder model.
 pub struct EncoderOutput<T = f32> {
@@ -99,7 +82,7 @@ pub struct DecoderOutput<T = f32> {
 /// An encoder processes an entire input sequence at once, creating a
 /// rich, contextualized representation.
 #[async_trait]
-pub trait Encoder: Model {
+pub trait Encoder: TransformerModel {
     type Input;
     type Output;
 
@@ -116,6 +99,15 @@ pub trait Encoder: Model {
         input: &Self::Input,
         attention_mask: &Array2<f32>,
     ) -> Result<Self::Output>;
+
+    /// Get raw hidden states
+    /// 
+    /// Default implementation calls forward and extracts last_hidden_state.
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>>;
 }
 
 /// Defines the asynchronous interface for a standalone decoder model (e.g., GPT-2).
@@ -124,7 +116,7 @@ pub trait Encoder: Model {
 /// one token at a time. It uses a causal attention mask to ensure that a given
 /// position can only attend to previous positions.
 #[async_trait]
-pub trait Decoder: Model {
+pub trait Decoder: TransformerModel {
     type Input;
     type Output;
 
@@ -144,6 +136,15 @@ pub trait Decoder: Model {
         attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output>;
+
+    /// Get raw hidden states
+    /// 
+    /// Default implementation calls forward with no cache and extracts last_hidden_state.
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>>;
 }
 
 /// Defines the asynchronous interface for a decoder that uses cross-attention (e.g., BART Decoder).
@@ -151,7 +152,7 @@ pub trait Decoder: Model {
 /// This type of decoder attends to two sources: its own previously generated tokens
 /// (self-attention) and the output of an encoder (cross-attention).
 #[async_trait]
-pub trait CrossAttentionDecoder: Model {
+pub trait CrossAttentionDecoder: TransformerModel {
     type Input;
     type Output;
 
@@ -181,7 +182,7 @@ pub trait CrossAttentionDecoder: Model {
 /// This provides the essential hyperparameters needed to construct the layers
 /// of a transformer model, such as the hidden dimensions and the number of
 /// layers to build.
-pub trait TransformerConfig: Send + Sync {
+pub trait TransformerConfig: Send + Sync {  
     /// The size of the hidden states and embedding dimensions.
     fn hidden_size(&self) -> usize;
     /// The number of attention heads in each multi-head attention layer.
@@ -196,13 +197,41 @@ pub trait TransformerConfig: Send + Sync {
     fn is_prenorm(&self) -> bool;
 }
 
+/// Language model configuration (extends TransformerConfig)
+///
+/// Adds language-model-specific properties like vocabulary size,
+/// sequence length, and intermediate dimensions.
+pub trait LanguageModelConfig: TransformerConfig {
+    /// Size of the vocabulary
+    fn vocab_size(&self) -> usize;
+    
+    /// Maximum sequence length (position embeddings)
+    fn max_position_embeddings(&self) -> usize;
+    
+    /// Size of the intermediate (feedforward) layer
+    fn intermediate_size(&self) -> usize;
+    
+    /// If we should transpose the feedforward weighs
+    /// The most common convention and vajority of models do this and tre-transpose the weights in FeedForward::new
+    /// The older GPT2 architecture doesn't do this
+    fn transpose_ffn_weights(&self) -> bool {
+        false
+    }
+
+    fn transpose_attention_weights(&self) -> bool {
+        false
+    }
+}
+
+
+
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
 ///
 /// This trait acts as a "blueprint" that a generic `TransformerEncoder` can use to
 /// construct itself. It provides a mapping from abstract component concepts (e.g., "the query
 /// projection of the first layer's attention") to the concrete tensor names found in a
 /// `safetensors` weight file.
-pub trait EncoderArchitecture: TransformerConfig {
+pub trait EncoderArchitecture: LanguageModelConfig {
     /// Returns the tensor names for the word, position, and token type embeddings.
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>); // RoBERTa has no token_type_embeddings
 
@@ -214,22 +243,13 @@ pub trait EncoderArchitecture: TransformerConfig {
 
     /// Returns the names of all weights and biases for the feed-forward component of a specific encoder layer.
     fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
-
-    /// If we should transpose the feedforward weighs
-    /// The most common convention and vajority of models do this and tre-transpose the weights in FeedForward::new
-    /// The older GPT2 architecture doesn't do this
-    fn transpose_ffn_weights(&self) -> bool;
-
-     fn transpose_attention_weights(&self) -> bool;
 }
 
 /// Describes the architectural specifics of a Decoder-only model (e.g., GPT-2, Llama).
 ///
 /// This trait will enable the creation of a generic `TransformerDecoder` for
 /// autoregressive language models by providing the necessary weight tensor names.
-pub trait DecoderArchitecture: TransformerConfig {
-    fn transpose_ffn_weights(&self) -> bool;
-
+pub trait DecoderArchitecture: LanguageModelConfig {
     /// Returns the tensor names for the word and position embeddings.
     fn get_embedding_weight_names(&self) -> (&str, &str);
     /// Returns the tensor names for the final LayerNorm before the LM head.
@@ -289,8 +309,6 @@ pub struct LayerFeedForwardNames {
     /// Bias tensor for the LayerNorm following the feed-forward block.
     pub norm_bias: String,
 }
-
-
 
 /// A container for the concrete tensor names of a decoder's causal self-attention block.
 ///

@@ -11,18 +11,18 @@
 mod cpu;
 mod gpu;
 
-use anyhow::{Context, Result, anyhow};
-use async_trait::async_trait;
-use ndarray::{Array2, Array3};
-use std::sync::Arc;
-pub use crate::{Cache, CpuKVCache, GpuKVCache};
 use crate::traits::{
-    Device, Decoder, DecoderArchitecture, DecoderOutput, Model, ModelConfig, TransformerConfig,
+    Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
+pub use crate::{Cache, CpuKVCache, GpuKVCache};
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use cpu::CpuTransformerDecoder;
 use gpu::GpuTransformerDecoder;
+use ndarray::{Array2, Array3};
+use std::sync::Arc;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///
@@ -50,19 +50,26 @@ impl TransformerDecoder {
         C: DecoderArchitecture + Send + Sync + 'static,
     {
         match device {
-            Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(weights, config.clone())?)),
+            Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
+                weights,
+                config.clone(),
+            )?)),
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| {
                     anyhow!("A WGPU context is required to create a GPU-based decoder.")
                 })?;
-                Ok(Self::Gpu(GpuTransformerDecoder::new(weights, config.clone(), ctx)?))
+                Ok(Self::Gpu(GpuTransformerDecoder::new(
+                    weights,
+                    config.clone(),
+                    ctx,
+                )?))
             }
         }
     }
 }
 
 /// Implements the base `Model` trait for the generic decoder, delegating to the backend.
-impl Model for TransformerDecoder {
+impl TransformerModel for TransformerDecoder {
     fn device(&self) -> Device {
         match self {
             Self::Cpu(model) => model.device(),
@@ -86,6 +93,16 @@ impl Decoder for TransformerDecoder {
         match self {
             Self::Cpu(model) => model.forward(input, attention_mask, cache).await,
             Self::Gpu(model) => model.forward(input, attention_mask, cache).await,
+        }
+    }
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        match self {
+            Self::Cpu(model) => model.get_hidden_states(input, attention_mask).await,
+            Self::Gpu(model) => model.get_hidden_states(input, attention_mask).await,
         }
     }
 }

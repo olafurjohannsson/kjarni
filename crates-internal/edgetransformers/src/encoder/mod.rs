@@ -18,10 +18,11 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, Model, ModelConfig, TransformerConfig,
+    Device, Encoder, EncoderArchitecture, EncoderOutput, ModelConfig, TransformerConfig,
+    TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
 use cpu::CpuTransformerEncoder;
 use gpu::GpuTransformerEncoder;
@@ -52,19 +53,26 @@ impl TransformerEncoder {
         C: EncoderArchitecture + Send + Sync + 'static,
     {
         match device {
-            Device::Cpu => Ok(Self::Cpu(CpuTransformerEncoder::new(weights, config.clone())?)),
+            Device::Cpu => Ok(Self::Cpu(CpuTransformerEncoder::new(
+                weights,
+                config.clone(),
+            )?)),
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| {
                     anyhow!("A WGPU context is required to create a GPU-based encoder.")
                 })?;
-                Ok(Self::Gpu(GpuTransformerEncoder::new(weights, config.clone(), ctx)?))
+                Ok(Self::Gpu(GpuTransformerEncoder::new(
+                    weights,
+                    config.clone(),
+                    ctx,
+                )?))
             }
         }
     }
 }
 
-/// Implements the base `Model` trait for the generic encoder, delegating to the backend.
-impl Model for TransformerEncoder {
+/// Implements the base `TransformerModel` trait for the generic encoder, delegating to the backend.
+impl TransformerModel for TransformerEncoder {
     fn device(&self) -> Device {
         match self {
             Self::Cpu(model) => model.device(),
@@ -87,6 +95,16 @@ impl Encoder for TransformerEncoder {
         match self {
             Self::Cpu(model) => model.forward(input, attention_mask).await,
             Self::Gpu(model) => model.forward(input, attention_mask).await,
+        }
+    }
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        match self {
+            Self::Cpu(model) => model.get_hidden_states(input, attention_mask).await,
+            Self::Gpu(model) => model.get_hidden_states(input, attention_mask).await,
         }
     }
 }

@@ -20,7 +20,7 @@ pub fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<A
         .sum_axis(Axis(1))
         .mapv(|x| x.max(1.0))
         .insert_axis(Axis(1));
-    
+
     Ok(sum / &count)
 }
 
@@ -39,7 +39,7 @@ pub fn max_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Ar
             *h = f32::NEG_INFINITY;
         }
     });
-    
+
     Ok(masked_hidden.fold_axis(Axis(1), f32::NEG_INFINITY, |&acc, &x| acc.max(x)))
 }
 
@@ -48,17 +48,16 @@ pub fn last_token_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Re
     let batch_size = hidden.shape()[0];
     let hidden_size = hidden.shape()[2];
     let mut output = Array2::<f32>::zeros((batch_size, hidden_size));
-    
+
     for i in 0..batch_size {
         // Find last non-padding position
         let seq_mask = attention_mask.row(i);
-        let last_pos = seq_mask
-            .iter()
-            .rposition(|&x| x > 0.0)
-            .unwrap_or(0);
-        
-        output.row_mut(i).assign(&hidden.slice(ndarray::s![i, last_pos, ..]));
+        let last_pos = seq_mask.iter().rposition(|&x| x > 0.0).unwrap_or(0);
+
+        output
+            .row_mut(i)
+            .assign(&hidden.slice(ndarray::s![i, last_pos, ..]));
     }
-    
+
     Ok(output)
 }

@@ -4,10 +4,10 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, Model, ModelConfig, TransformerConfig,
+    Device, Encoder, EncoderArchitecture, EncoderOutput, ModelConfig, TransformerConfig,
+    TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::wgpu_context::WgpuContext;
 use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
 
 /// The CPU backend implementation for the generic `TransformerEncoder`.
@@ -111,7 +111,7 @@ impl CpuTransformerEncoder {
     }
 }
 
-impl Model for CpuTransformerEncoder {
+impl TransformerModel for CpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
@@ -131,26 +131,34 @@ impl Encoder for CpuTransformerEncoder {
     ) -> Result<Self::Output> {
         // Embed inputs
         let mut hidden_states = self.embeddings.forward(input_ids, None);
-        
+
         // DEBUG: Print embeddings BEFORE layer norm
         println!("\n[CPU ENCODER] Initial embeddings (before layer norm):");
         println!("  Shape: {:?}", hidden_states.dim());
-        println!("  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        println!(
+            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
             hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            hidden_states
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max),
             hidden_states.mean().unwrap()
         );
         println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
 
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-        
+
         // DEBUG: Print after embeddings layer norm
         println!("\n[CPU ENCODER] After embeddings layer norm:");
         println!("  Shape: {:?}", hidden_states.dim());
-        println!("  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        println!(
+            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
             hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            hidden_states
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max),
             hidden_states.mean().unwrap()
         );
         println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
@@ -158,25 +166,33 @@ impl Encoder for CpuTransformerEncoder {
         // Transformer layers
         for (i, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
-            
+
             // DEBUG: Print after each layer
             println!("\n[CPU ENCODER] After layer {}:", i);
-            println!("  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+            println!(
+                "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
                 hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-                hidden_states.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+                hidden_states
+                    .iter()
+                    .cloned()
+                    .fold(f32::NEG_INFINITY, f32::max),
                 hidden_states.mean().unwrap()
             );
             if i == 0 {
                 println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
             }
         }
-        
+
         // DEBUG: Print final output
         println!("\n[CPU ENCODER] Final output:");
         println!("  Shape: {:?}", hidden_states.dim());
-        println!("  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        println!(
+            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
             hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            hidden_states
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max),
             hidden_states.mean().unwrap()
         );
         println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
@@ -184,5 +200,13 @@ impl Encoder for CpuTransformerEncoder {
         Ok(EncoderOutput {
             last_hidden_state: hidden_states,
         })
+    }
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        let output = self.forward(input, attention_mask).await?;
+        Ok(output.last_hidden_state)
     }
 }

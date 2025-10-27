@@ -1,14 +1,17 @@
+use crate::cache::CpuKVCache;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4, s};
 use std::sync::Arc;
 
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, Model, TransformerConfig,
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
+};
+use crate::utils::{
+    create_causal_mask, create_padding_mask_from_attention, create_padding_mask_from_tokens,
 };
 use crate::weights::ModelWeights;
 use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
-use crate::utils::{create_causal_mask, create_padding_mask};
 
 /// The CPU backend implementation for the generic `TransformerDecoder`.
 pub struct CpuTransformerDecoder {
@@ -116,36 +119,10 @@ impl CpuTransformerDecoder {
         })
     }
 
-    fn embed_with_offset(&self, input_ids: &Array2<f32>, position_offset: usize) -> Array3<f32> {
-        let (batch_size, seq_len) = input_ids.dim();
-        let hidden_size = self.config.hidden_size();
-
-        let mut hidden_states = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
-
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                let word_emb = self.embeddings.word_embeddings.row(token_id);
-                hidden_states.slice_mut(s![i, j, ..]).assign(&word_emb);
-            }
-        }
-
-        // Add position embeddings with offset
-        for j in 0..seq_len {
-            let pos_idx = position_offset + j;
-            let pos_emb = self.embeddings.position_embeddings.row(pos_idx);
-            for i in 0..batch_size {
-                hidden_states
-                    .slice_mut(s![i, j, ..])
-                    .scaled_add(1.0, &pos_emb);
-            }
-        }
-
-        hidden_states
-    }
+    
 }
 
-impl Model for CpuTransformerDecoder {
+impl TransformerModel for CpuTransformerDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
@@ -162,51 +139,92 @@ impl Decoder for CpuTransformerDecoder {
         attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        let position_offset = if let Some(ref cache) = cache {
-            cache.get_seq_length()
-        } else {
-            0
-        };
+        // Get position offset from cache
+        let position_offset = cache.as_ref()
+            .map(|c| c.get_seq_length())
+            .unwrap_or(0);
 
-        // Embed inputs
+        // Embed inputs with position offset
         let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
 
-        // Create causal mask if needed
-        let mask = if self.config.is_causal() {
-            let seq_len = input_ids.shape()[1];
-            let total_len = position_offset + seq_len;
-            create_causal_mask(total_len)
-        } else {
+        // Downcast cache to CpuKVCache if provided
+        let mut cpu_cache: Option<&mut CpuKVCache> = cache.and_then(|c| {
+            c.as_any_mut().downcast_mut::<CpuKVCache>()
+        });
+
+        
+        let (batch_size, seq_len) = input_ids.dim();
+        let total_len = position_offset + seq_len;
+        // let mask = if self.config.is_causal() {
+        //     create_causal_mask(total_len)
+        // } else {
+        //     attention_mask.clone()
+        // };
+        let padding_mask = if attention_mask.shape()[1] == total_len {
+            // Mask already has correct total length
             attention_mask.clone()
+        } else {
+            // Create full attention mask for total sequence
+            Array2::ones((batch_size, total_len))
         };
 
-        // Pass through transformer layers with config
-        for layer in self.layers.iter() {
-            hidden_states = layer.forward(
+        // Pass through layers with cache
+        for (layer_idx, layer) in self.layers.iter().enumerate() {
+            hidden_states = layer.forward_with_cache(
                 hidden_states,
-                &mask,
-                self.config.as_ref(), // ← Add this!
+                &padding_mask,
+                self.config.as_ref(),
+                layer_idx,
+                cpu_cache.as_deref_mut(),
             )?;
         }
+
+        // Apply final layer norm
         hidden_states = self.final_layer_norm.forward_3d(&hidden_states);
 
         Ok(DecoderOutput {
             last_hidden_state: hidden_states,
-            past_key_values: None,
+            past_key_values: None, // Cache is updated in-place
         })
+    }
+    
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        let output = self.forward(input, attention_mask, None).await?;
+        Ok(output.last_hidden_state)
+    }
+}
 
-        // // Pass through transformer layers (NO embedding layer norm for GPT-2!)
-        // // TODO: Integrate cache for KV reuse
-        // for (layer_idx, layer) in self.layers.iter().enumerate() {
-        //     hidden_states = layer.forward(hidden_states, attention_mask)?;
-        // }
+impl CpuTransformerDecoder {
+    fn embed_with_offset(&self, input_ids: &Array2<f32>, position_offset: usize) -> Array3<f32> {
+        let (batch_size, seq_len) = input_ids.dim();
+        let hidden_size = self.config.hidden_size();
 
-        // // Apply final layer norm
-        // hidden_states = self.final_layer_norm.forward_3d(&hidden_states);
+        let mut hidden_states = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
 
-        // Ok(DecoderOutput {
-        //     last_hidden_state: hidden_states,
-        //     past_key_values: None, // TODO: Extract from cache
-        // })
+        // Word embeddings
+        for i in 0..batch_size {
+            for j in 0..seq_len {
+                let token_id = input_ids[[i, j]] as usize;
+                let word_emb = self.embeddings.word_embeddings.row(token_id);
+                hidden_states.slice_mut(s![i, j, ..]).assign(&word_emb);
+            }
+        }
+
+        // Position embeddings with offset
+        for j in 0..seq_len {
+            let pos_idx = position_offset + j;
+            let pos_emb = self.embeddings.position_embeddings.row(pos_idx);
+            for i in 0..batch_size {
+                hidden_states
+                    .slice_mut(s![i, j, ..])
+                    .scaled_add(1.0, &pos_emb);
+            }
+        }
+
+        hidden_states
     }
 }

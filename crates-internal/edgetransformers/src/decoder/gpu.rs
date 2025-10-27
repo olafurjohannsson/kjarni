@@ -5,15 +5,14 @@ use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu_ops::blocks::attention::AttentionWeights;
-use crate::gpu_ops::blocks::ffn::FFNWeights;
-use crate::gpu_pipeline::GpuTransformerPipeline;
-use crate::gpu_pipeline::GpuTransformerLayer;
+use crate::cache::GpuKVCache;
+use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::blocks::{attention::AttentionWeights, ffn::FFNWeights};
+use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, Model, TransformerConfig,
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::wgpu_context::WgpuContext;
 
 /// The GPU backend for a generic Transformer Decoder.
 pub struct GpuTransformerDecoder {
@@ -24,7 +23,7 @@ pub struct GpuTransformerDecoder {
     position_embeddings: Array2<f32>,
 
     // GPU-side weight buffers
-    final_layer_norm_weights: (Arc<wgpu::Buffer>, Arc<wgpu::Buffer>), // Changed name
+    final_layer_norm_weights: (Arc<wgpu::Buffer>, Arc<wgpu::Buffer>),
     layers: Vec<GpuTransformerLayer>,
 
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
@@ -154,7 +153,7 @@ impl GpuTransformerDecoder {
                 },
             ));
 
-            let attention_weights = AttentionWeights {  // ✅ Changed from GpuAttentionWeights
+            let attention_weights = AttentionWeights {
                 q_weight: q_weight_buf,
                 q_bias: q_bias_buf,
                 k_weight: k_weight_buf,
@@ -171,7 +170,7 @@ impl GpuTransformerDecoder {
             let intermediate_b = weights.get_array1(&ffn_names.intermediate_bias)?;
             let output_w = weights.get_array2(&ffn_names.output_weight)?;
             let output_b = weights.get_array1(&ffn_names.output_bias)?;
-            // Transpose if needed (for BERT-style models)
+
             let fc1_weight_data = if config.transpose_ffn_weights() {
                 intermediate_w.t().as_standard_layout().to_owned()
             } else {
@@ -218,7 +217,7 @@ impl GpuTransformerDecoder {
                 },
             ));
 
-            let ffn_weights = FFNWeights {  // ✅ Changed from GpuFeedForwardWeights
+            let ffn_weights = FFNWeights {
                 fc1_weight: fc1_weight_buf,
                 fc1_bias: fc1_bias_buf,
                 fc2_weight: fc2_weight_buf,
@@ -273,7 +272,7 @@ impl GpuTransformerDecoder {
     }
 }
 
-impl Model for GpuTransformerDecoder {
+impl TransformerModel for GpuTransformerDecoder {
     fn device(&self) -> Device {
         Device::Wgpu
     }
@@ -296,31 +295,71 @@ impl Decoder for GpuTransformerDecoder {
             0
         };
 
-        // Step 1: CPU-Side Embedding
         let initial_embeddings = self.perform_cpu_embedding(input, position_offset)?;
 
-        // Step 2: Forward through pipeline (no embedding layer norm for GPT-2!)
-        // TODO: Pass empty/identity norm for first layer, use final norm at end
+        // Downcast cache to GpuKVCache if provided
+        let mut gpu_cache: Option<&mut GpuKVCache> =
+            cache.and_then(|c| c.as_any_mut().downcast_mut::<GpuKVCache>());
+
+        let (batch_size, seq_len) = input.dim();
+        let total_len = position_offset + seq_len;
+
+        // Create padding mask for total sequence
+        let padding_mask = if attention_mask.shape()[1] == total_len {
+            attention_mask.clone()
+        } else {
+            Array2::ones((batch_size, total_len))
+        };
+        // Forward through GPU pipeline with cache
         let last_hidden_state = self
             .pipeline
-            .forward(
+            .forward_with_cache(
                 self.config.as_ref(),
                 &initial_embeddings,
-                attention_mask,
+                &padding_mask,
                 (
                     &self.final_layer_norm_weights.0, // This should be applied at END, not beginning
                     &self.final_layer_norm_weights.1,
                 ),
                 &self.layers,
+                gpu_cache.as_deref_mut(),
             )
             .await?;
 
-        // TODO: Apply final layer norm here instead of in pipeline
-        // TODO: Extract and store K, V tensors in cache
-
         Ok(DecoderOutput {
             last_hidden_state,
-            past_key_values: None, // TODO: populate from cache
+            past_key_values: None,
         })
+        // TODO: Pass empty/identity norm for first layer, use final norm at end
+        // let last_hidden_state = self
+        //     .pipeline
+        //     .forward(
+        //         self.config.as_ref(),
+        //         &initial_embeddings,
+        //         attention_mask,
+        //         (
+        //             &self.final_layer_norm_weights.0, // This should be applied at END, not beginning
+        //             &self.final_layer_norm_weights.1,
+        //         ),
+        //         &self.layers,
+        //     )
+        //     .await?;
+
+        // // TODO: Apply final layer norm here instead of in pipeline
+        // // TODO: Extract and store K, V tensors in cache
+
+        // Ok(DecoderOutput {
+        //     last_hidden_state,
+        //     past_key_values: None, // TODO: populate from cache
+        // })
+    }
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        // Forward without cache
+        let output = self.forward(input, attention_mask, None).await?;
+        Ok(output.last_hidden_state)
     }
 }

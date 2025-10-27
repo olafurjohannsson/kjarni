@@ -1,9 +1,7 @@
 use super::*;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d, read_buffer_2d};
-use crate::wgpu_context::WgpuContext;
-use ndarray::{Array, Array1, Array2, Array3, s};
-use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
+use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
+use crate::gpu_context::WgpuContext;
+use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 
 use anyhow::Result;

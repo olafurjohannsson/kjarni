@@ -1,11 +1,11 @@
 use super::*;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d, read_buffer_2d};
+use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
 
-use ndarray::{Array, Array1, Array2, Array3};
+use ndarray::{Array, Array1, Array3};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
 use std::sync::Arc;
-use crate::{LayerNorm, wgpu_context::WgpuContext, FeedForward};
+use crate::{LayerNorm, gpu_context::WgpuContext};
 
 use anyhow::Result;
 use wgpu::util::DeviceExt;

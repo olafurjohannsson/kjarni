@@ -7,14 +7,14 @@ use wgpu::include_wgsl;
 use wgpu::util::DeviceExt;
 
 use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, Model, TransformerConfig,
+    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerConfig, TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn::FFNWeights;
-use crate::gpu_pipeline::{GpuTransformerPipeline, GpuTransformerLayer};
+use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 
 /// The GPU backend for a generic Transformer Encoder.
 /// It holds the GPU-native weights and the generic pipeline to execute them.
@@ -103,7 +103,8 @@ impl GpuTransformerEncoder {
             let k_bias_buf = upload_1d(&attn_names.k_bias)?;
             let v_weight_buf = upload_2d(&attn_names.v_weight)?;
             let v_bias_buf = upload_1d(&attn_names.v_bias)?;
-            let attention_weights = AttentionWeights {  // ✅ Changed from GpuAttentionWeights
+            let attention_weights = AttentionWeights {
+                // ✅ Changed from GpuAttentionWeights
                 q_weight: q_weight_buf,
                 q_bias: q_bias_buf,
                 k_weight: k_weight_buf,
@@ -167,8 +168,8 @@ impl GpuTransformerEncoder {
                 },
             ));
 
-
-            let ffn_weights = FFNWeights {  // ✅ Changed from GpuFeedForwardWeights
+            let ffn_weights = FFNWeights {
+                // ✅ Changed from GpuFeedForwardWeights
                 fc1_weight: fc1_weight_buf,
                 fc1_bias: fc1_bias_buf,
                 fc2_weight: fc2_weight_buf,
@@ -176,7 +177,7 @@ impl GpuTransformerEncoder {
                 norm_weight: upload_1d(&ffn_names.norm_weight)?,
                 norm_bias: upload_1d(&ffn_names.norm_bias)?,
             };
-            
+
             layers.push(GpuTransformerLayer {
                 attention_weights,
                 ffn_weights,
@@ -218,8 +219,7 @@ impl GpuTransformerEncoder {
     }
 }
 
-// NOW THIS COMPILES: The `config` field is `Arc`, which is `Send + Sync`.
-impl Model for GpuTransformerEncoder {
+impl TransformerModel for GpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Wgpu
     }
@@ -290,5 +290,13 @@ impl Encoder for GpuTransformerEncoder {
             &last_hidden_state.as_slice().unwrap()[..10]
         );
         Ok(EncoderOutput { last_hidden_state })
+    }
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        attention_mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
+        let output = self.forward(input, attention_mask).await?;
+        Ok(output.last_hidden_state)
     }
 }

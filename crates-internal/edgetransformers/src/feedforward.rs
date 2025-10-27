@@ -2,7 +2,7 @@
 
 use crate::activations::gelu;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_3d_2d_gpu, feed_forward_gpu};
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array1, Array2, Array3};
 

@@ -1,14 +1,12 @@
 use super::*;
 use crate::gpu_ops::utils::{
-    assert_vecs_are_close, read_buffer_3d, read_buffer_2d,
+    assert_vecs_are_close, read_buffer_2d,
 };
-use crate::wgpu_context::WgpuContext;
-use ndarray::{Array, Array1, Array2, Array3};
+use crate::gpu_context::WgpuContext;
+use ndarray::{Array, Array2};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
 use std::sync::Arc;
-use std::sync::Mutex;
-use crate::bind_group::BindGroupCache;
 use anyhow::Result;
 use wgpu::util::DeviceExt;
 

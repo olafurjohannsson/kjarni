@@ -12,7 +12,7 @@ use crate::gpu_ops::primitives::{
     reshape::{run_gpu_reshape, run_gpu_unreshape, compile_reshape_pipeline, compile_unreshape_pipeline},
     softmax::{run_gpu_softmax, compile_softmax_pipeline},
 };
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use std::sync::Arc;
 use wgpu::{Buffer, CommandEncoder, ComputePipeline};
 

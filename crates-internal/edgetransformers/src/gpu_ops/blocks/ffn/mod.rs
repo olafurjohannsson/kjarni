@@ -7,7 +7,7 @@
 //! - FC1: matmul + bias + GELU in one pass
 //! - FC2: matmul + bias in one pass
 
-use crate::wgpu_context::WgpuContext;
+use crate::gpu_context::WgpuContext;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandEncoder, ComputePipeline, include_wgsl};

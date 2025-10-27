@@ -1,7 +1,6 @@
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, CommandEncoder, include_wgsl, ComputePipeline};
-use crate::wgpu_context::WgpuContext;
-use std::sync::Arc;
+use crate::gpu_context::WgpuContext;
 
 pub fn compile_add_bias_pipeline(context: &WgpuContext) -> ComputePipeline {
     let device = &context.device;
