@@ -99,6 +99,10 @@ impl Embeddings {
         // Token type embeddings
         if let Some(ref token_type_emb) = self.token_type_embeddings {
             let type_vocab_size = token_type_emb.shape()[0];
+            
+            if type_vocab_size == 0 {
+                return hidden;
+            }
 
             if let Some(type_ids) = token_type_ids {
                 for i in 0..batch_size {

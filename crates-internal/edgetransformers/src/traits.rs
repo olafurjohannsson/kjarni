@@ -202,6 +202,7 @@ pub trait TransformerConfig: Send + Sync {
 /// Adds language-model-specific properties like vocabulary size,
 /// sequence length, and intermediate dimensions.
 pub trait LanguageModelConfig: TransformerConfig {
+    
     /// Size of the vocabulary
     fn vocab_size(&self) -> usize;
     

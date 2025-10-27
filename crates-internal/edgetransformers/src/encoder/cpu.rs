@@ -26,20 +26,18 @@ impl CpuTransformerEncoder {
     ///
     /// This function uses the `EncoderArchitecture` trait to dynamically look up
     /// the names of all required weight tensors and constructs the full model stack.
-    pub fn new<C>(weights: &ModelWeights, config: Arc<C>) -> Result<Self>
-    where
-        C: EncoderArchitecture + Send + Sync + 'static,
+    pub fn new(weights: &ModelWeights, config: Arc<dyn EncoderArchitecture + Send + Sync>) -> Result<Self>
     {
         // Load embedding weights using the names provided by the config.
         let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
         let token_type_embeddings = match type_w {
-            Some(name) => weights.get_array2(name)?, // Load if present
-            None => Array2::zeros((0, config.hidden_size())), // Empty for RoBERTa
+            Some(name) => Some(weights.get_array2(name)?), // Load if present
+            None => None,
         };
         let embeddings = Embeddings::new(
             weights.get_array2(word_w)?,
             weights.get_array2(pos_w)?,
-            Some(token_type_embeddings),
+            token_type_embeddings,
         );
 
         let (norm_w, norm_b) = config.get_embedding_layer_norm_names();
@@ -132,70 +130,13 @@ impl Encoder for CpuTransformerEncoder {
         // Embed inputs
         let mut hidden_states = self.embeddings.forward(input_ids, None);
 
-        // DEBUG: Print embeddings BEFORE layer norm
-        println!("\n[CPU ENCODER] Initial embeddings (before layer norm):");
-        println!("  Shape: {:?}", hidden_states.dim());
-        println!(
-            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-            hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max),
-            hidden_states.mean().unwrap()
-        );
-        println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
-
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-
-        // DEBUG: Print after embeddings layer norm
-        println!("\n[CPU ENCODER] After embeddings layer norm:");
-        println!("  Shape: {:?}", hidden_states.dim());
-        println!(
-            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-            hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max),
-            hidden_states.mean().unwrap()
-        );
-        println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
 
         // Transformer layers
         for (i, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
-
-            // DEBUG: Print after each layer
-            println!("\n[CPU ENCODER] After layer {}:", i);
-            println!(
-                "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-                hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-                hidden_states
-                    .iter()
-                    .cloned()
-                    .fold(f32::NEG_INFINITY, f32::max),
-                hidden_states.mean().unwrap()
-            );
-            if i == 0 {
-                println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
-            }
         }
-
-        // DEBUG: Print final output
-        println!("\n[CPU ENCODER] Final output:");
-        println!("  Shape: {:?}", hidden_states.dim());
-        println!(
-            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-            hidden_states.iter().cloned().fold(f32::INFINITY, f32::min),
-            hidden_states
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max),
-            hidden_states.mean().unwrap()
-        );
-        println!("  First 10: {:?}", &hidden_states.as_slice().unwrap()[..10]);
 
         Ok(EncoderOutput {
             last_hidden_state: hidden_states,

@@ -43,14 +43,12 @@ impl TransformerEncoder {
     /// This factory function is generic over any configuration `C` that implements
     /// the `EncoderArchitecture` trait. It uses the trait to dynamically load the
     /// correct weights and build the model stack for either the CPU or GPU backend.
-    pub fn new<C>(
+    pub fn new(
         weights: &ModelWeights,
-        config: Arc<C>,
+        config: Arc<dyn EncoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self>
-    where
-        C: EncoderArchitecture + Send + Sync + 'static,
     {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerEncoder::new(

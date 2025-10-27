@@ -313,5 +313,5 @@ pub fn run_attention_block(
     );
 }
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;

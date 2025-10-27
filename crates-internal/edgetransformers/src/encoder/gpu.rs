@@ -38,9 +38,7 @@ pub struct GpuTransformerEncoder {
 impl GpuTransformerEncoder {
     /// Constructs a new `GpuTransformerEncoder`.
     /// The `C` generic type now has `'static`, `Send`, and `Sync` bounds to ensure thread safety.
-    pub fn new<C>(weights: &ModelWeights, config: Arc<C>, context: Arc<WgpuContext>) -> Result<Self>
-    where
-        C: EncoderArchitecture + Send + Sync + 'static,
+    pub fn new(weights: &ModelWeights, config: Arc<dyn EncoderArchitecture + Send + Sync>, context: Arc<WgpuContext>) -> Result<Self>
     {
         let pipeline = GpuTransformerPipeline::new(context.clone())?;
 

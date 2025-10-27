@@ -1,15 +1,18 @@
 use edgemodels::cross_encoder::CrossEncoder;
 use edgetransformers::models::ModelType;
 use edgetransformers::traits::Device;
+use edgetransformers::gpu_context::WgpuContext;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let ctx = Arc::new(WgpuContext::new().await);
     // Load cross-encoder
     let cross_encoder = CrossEncoder::from_registry(
         ModelType::MiniLML6V2CrossEncoder,
         None,
-        Device::Cpu,
-        None,
+        Device::Wgpu,
+        Some(ctx),
     ).await?;
     
     // === Example 1: Score a single pair ===

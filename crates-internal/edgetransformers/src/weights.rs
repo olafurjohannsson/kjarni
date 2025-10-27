@@ -39,7 +39,7 @@ impl ModelWeights {
 
         Self::from_bytes(&data, &config_json)
     }
-     pub fn list_tensor_names(&self) -> Vec<String> {
+    pub fn list_tensor_names(&self) -> Vec<String> {
         self.tensors.keys().map(|k| k.clone()).collect()
     }
 
@@ -119,5 +119,20 @@ impl ModelWeights {
         );
         Array2::from_shape_vec((shape[0], shape[1]), data.clone())
             .with_context(|| format!("Shape error for tensor '{}'", name))
+    }
+
+    /// Load a Linear layer weight matrix from PyTorch format
+    ///
+    /// PyTorch stores Linear weights as [out_features, in_features],
+    /// but ndarray expects [in_features, out_features] for dot product.
+    pub fn get_linear_weight(&self, name: &str) -> Result<Array2<f32>> {
+        let weight = self.get_array2(name)?;
+        // Always transpose PyTorch Linear layers
+        Ok(weight.t().to_owned())
+    }
+
+    /// Load embedding weight (no transpose needed)
+    pub fn get_embedding_weight(&self, name: &str) -> Result<Array2<f32>> {
+        self.get_array2(name)
     }
 }

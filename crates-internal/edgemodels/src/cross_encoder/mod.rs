@@ -13,7 +13,7 @@ use tokenizers::Tokenizer;
 use edgetransformers::prelude::*;
 use edgetransformers::models::{ModelType, ModelArchitecture};
 use edgetransformers::encoder::TransformerEncoder;
-use edgetransformers::traits::{Encoder, EncoderOutput};
+use edgetransformers::traits::{Encoder, EncoderOutput, LanguageModelConfig, EncoderArchitecture};
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
@@ -26,6 +26,7 @@ pub struct CrossEncoder {
     encoder: TransformerEncoder,
     tokenizer: Tokenizer,
     classifier: ClassificationHead,
+    config: Arc<dyn EncoderArchitecture + Send + Sync>,
     model_type: ModelType,
 }
 
@@ -109,22 +110,25 @@ impl CrossEncoder {
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         // Load encoder
-        let encoder = match model_type {
+        let config = match model_type {
             ModelType::MiniLML6V2CrossEncoder => {
                 let config = Arc::new(MiniLMCrossEncoderConfig::from_json(&weights.config_json)?);
-                TransformerEncoder::new(&weights, config, device, context)?
+                config
             }
             _ => return Err(anyhow!("Unsupported cross-encoder: {:?}", model_type)),
         };
 
+        let encoder = TransformerEncoder::new(&weights, config.clone(), device, context)?;
+
         // Load classification head
-        let classifier_weight = weights.get_array2("classifier.weight")?;
+        let classifier_weight = weights.get_linear_weight("classifier.weight")?;
         let classifier_bias = weights.get_array1("classifier.bias")?;
         let classifier = ClassificationHead::new(classifier_weight, classifier_bias);
-
+        
         Ok(Self {
             encoder,
             tokenizer,
+            config,
             classifier,
             model_type,
         })
@@ -173,7 +177,7 @@ impl CrossEncoder {
         // Tokenize all pairs
         let mut input_ids = Vec::new();
         let mut attention_masks = Vec::new();
-        let mut max_len = 0;
+        let mut max_len = self.max_length();
 
         for (text1, text2) in pairs {
             // Encode with [CLS] text1 [SEP] text2 [SEP]
@@ -187,7 +191,7 @@ impl CrossEncoder {
             attention_masks.push(vec![1u32; ids.len()]);
         }
 
-        // Pad to max length
+        // Pad to max length (TODO: NOT USED?)
         let pad_id = self.tokenizer
             .token_to_id("[PAD]")
             .unwrap_or(0);
@@ -318,4 +322,15 @@ impl TransformerModel for CrossEncoder {
     fn device(&self) -> Device {
         self.encoder.device()
     }
+}
+
+impl LanguageModel for CrossEncoder {
+    fn config(&self) -> &dyn LanguageModelConfig {
+        self.config.as_ref()
+    }
+    
+    fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+    
 }

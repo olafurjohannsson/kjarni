@@ -10,19 +10,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-use edgetransformers::prelude::*;
-use edgetransformers::models::{
-    LanguageModel, 
-    EncoderLanguageModel, 
-    ModelType, 
-    ModelArchitecture,
-};
 use edgetransformers::encoder::TransformerEncoder;
-use edgetransformers::traits::{Encoder, EncoderOutput, LanguageModelConfig, EncoderArchitecture};
+use edgetransformers::models::{EncoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
+use edgetransformers::prelude::*;
+use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
-pub use configs::{MiniLMConfig, MPNetConfig, DistilBERTConfig};
+pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
 
 /// Sentence encoder for semantic similarity tasks
 ///
@@ -84,7 +79,7 @@ impl SentenceEncoder {
         }
 
         let info = model_type.info();
-        
+
         if info.architecture != ModelArchitecture::Encoder {
             return Err(anyhow!(
                 "Model {:?} is not an encoder (architecture: {:?})",
@@ -118,10 +113,7 @@ impl SentenceEncoder {
     ) -> Result<Self> {
         // Validate model type
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
-            return Err(anyhow!(
-                "Unsupported model type: {:?}",
-                model_type
-            ));
+            return Err(anyhow!("Unsupported model type: {:?}", model_type));
         }
 
         // Load weights and tokenizer
@@ -130,21 +122,33 @@ impl SentenceEncoder {
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         // Select config based on model type
-        let config: Arc<dyn EncoderArchitecture + Send + Sync>;
-
-        let (encoder, 
-            config) = match model_type {
+        let (encoder, config): (
+            TransformerEncoder,
+            Arc<dyn EncoderArchitecture + Send + Sync>,
+        ) = match model_type {
             ModelType::MiniLML6V2 => {
-                let config = Arc::new(MiniLMConfig::from_json(&weights.config_json)?);
-                (TransformerEncoder::new(&weights, config, device, context)?, config as Arc<dyn EncoderArchitecture + Send + Sync>)
+                let cfg = Arc::new(MiniLMConfig::from_json(&weights.config_json)?)
+                    as Arc<dyn EncoderArchitecture + Send + Sync>;
+                (
+                    TransformerEncoder::new(&weights, cfg.clone(), device, context)?,
+                    cfg,
+                )
             }
             ModelType::MpnetBaseV2 => {
-                let config = Arc::new(MPNetConfig::from_json(&weights.config_json)?);
-                (TransformerEncoder::new(&weights, config, device, context)?, config as Arc<dyn EncoderArchitecture + Send + Sync>)
+                let cfg = Arc::new(MPNetConfig::from_json(&weights.config_json)?)
+                    as Arc<dyn EncoderArchitecture + Send + Sync>;
+                (
+                    TransformerEncoder::new(&weights, cfg.clone(), device, context)?,
+                    cfg,
+                )
             }
             ModelType::DistilBertBaseCased => {
-                let config = Arc::new(DistilBERTConfig::from_json(&weights.config_json)?);
-                (TransformerEncoder::new(&weights, config, device, context)?, config as Arc<dyn EncoderArchitecture + Send + Sync>)
+                let cfg = Arc::new(DistilBERTConfig::from_json(&weights.config_json)?)
+                    as Arc<dyn EncoderArchitecture + Send + Sync>;
+                (
+                    TransformerEncoder::new(&weights, cfg.clone(), device, context)?,
+                    cfg,
+                )
             }
             _ => return Err(anyhow!("Unsupported encoder model: {:?}", model_type)),
         };
@@ -187,11 +191,11 @@ impl SentenceEncoder {
 
         for (filename, url) in files {
             let local_path = model_dir.join(filename);
-            
+
             if !local_path.exists() {
                 println!("Downloading {}...", filename);
                 let response = reqwest::get(*url).await?;
-                
+
                 if !response.status().is_success() {
                     return Err(anyhow!(
                         "Failed to download {}: HTTP {}",
@@ -199,7 +203,7 @@ impl SentenceEncoder {
                         response.status()
                     ));
                 }
-                
+
                 let bytes = response.bytes().await?;
                 tokio::fs::write(&local_path, &bytes).await?;
                 println!("✓ Downloaded {}", filename);
