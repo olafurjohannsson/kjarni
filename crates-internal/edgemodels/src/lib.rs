@@ -8,8 +8,8 @@ pub mod model;
 pub mod gptweights;
 pub mod bertweights;
 pub mod tokenizer;
-// pub mod generation;
 pub mod tests;
+pub mod tests2;
 pub mod sentence_encoder;
 pub mod cross_encoder;
 
