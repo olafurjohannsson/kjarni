@@ -2,11 +2,13 @@
 //!
 //! This test helps identify where GPU implementation diverges from CPU.
 
-use anyhow::Result;
 use crate::sentence_encoder::SentenceEncoder;
+use anyhow::Result;
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::models::ModelType;
+use edgetransformers::models::{EncoderLanguageModel, LanguageModel};
 use edgetransformers::traits::Device;
+use ndarray::Array2;
 use std::sync::Arc;
 
 const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
@@ -20,7 +22,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool {
     println!("\n=== Comparing: {} ===", name);
-    
+
     if cpu.len() != gpu.len() {
         println!("❌ Length mismatch: CPU {} vs GPU {}", cpu.len(), gpu.len());
         return false;
@@ -35,8 +37,14 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
     let gpu_max = gpu.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let gpu_mean = gpu.iter().sum::<f32>() / gpu.len() as f32;
 
-    println!("CPU: Min: {:.6}, Max: {:.6}, Mean: {:.6}", cpu_min, cpu_max, cpu_mean);
-    println!("GPU: Min: {:.6}, Max: {:.6}, Mean: {:.6}", gpu_min, gpu_max, gpu_mean);
+    println!(
+        "CPU: Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        cpu_min, cpu_max, cpu_mean
+    );
+    println!(
+        "GPU: Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        gpu_min, gpu_max, gpu_mean
+    );
 
     // Element-wise comparison
     let mut max_diff = 0.0f32;
@@ -46,15 +54,18 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
     for (i, (&c, &g)) in cpu.iter().zip(gpu.iter()).enumerate() {
         let diff = (c - g).abs();
         sum_abs_diff += diff;
-        
+
         if diff > max_diff {
             max_diff = diff;
         }
-        
+
         if diff > tolerance {
             num_mismatches += 1;
             if num_mismatches <= 10 {
-                println!("  Mismatch at [{}]: CPU={:.6}, GPU={:.6}, diff={:.6}", i, c, g, diff);
+                println!(
+                    "  Mismatch at [{}]: CPU={:.6}, GPU={:.6}, diff={:.6}",
+                    i, c, g, diff
+                );
             }
         }
     }
@@ -65,7 +76,12 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
     println!("Max diff: {:.6}", max_diff);
     println!("Mean abs diff: {:.6}", mean_abs_diff);
     println!("Cosine similarity: {:.6}", cosine_sim);
-    println!("Mismatches (>{:.1e}): {} / {}", tolerance, num_mismatches, cpu.len());
+    println!(
+        "Mismatches (>{:.1e}): {} / {}",
+        tolerance,
+        num_mismatches,
+        cpu.len()
+    );
 
     // First 10 values
     println!("CPU first 10: {:?}", &cpu[..10.min(cpu.len())]);
@@ -86,32 +102,20 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
 
     // Load CPU encoder
     println!("Loading CPU encoder...");
-    let cpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
     println!("✓ CPU encoder loaded\n");
 
     // Load GPU encoder
     println!("Loading GPU encoder...");
     let context = Arc::new(WgpuContext::new().await);
-    let gpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Wgpu,
-        Some(context),
-    )
-    .await?;
+    let gpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+            .await?;
     println!("✓ GPU encoder loaded\n");
 
     // Test sentences
-    let test_sentences = [
-        "The cat sits on the mat",
-        "Machine learning is fascinating",
-    ];
+    let test_sentences = ["The cat sits on the mat", "Machine learning is fascinating"];
 
     println!("Test sentences:");
     for (i, sentence) in test_sentences.iter().enumerate() {
@@ -145,14 +149,14 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
     // Compute and compare cosine similarities
     if test_sentences.len() >= 2 {
         println!("\n=== Cosine Similarities ===");
-        
+
         let cpu_sim = cosine_similarity(&cpu_embeddings[0], &cpu_embeddings[1]);
         let gpu_sim = cosine_similarity(&gpu_embeddings[0], &gpu_embeddings[1]);
-        
+
         println!("CPU similarity: {:.6}", cpu_sim);
         println!("GPU similarity: {:.6}", gpu_sim);
         println!("Difference: {:.6}", (cpu_sim - gpu_sim).abs());
-        
+
         if (cpu_sim - gpu_sim).abs() > 0.01 {
             println!("❌ Similarity mismatch!");
             all_pass = false;
@@ -166,7 +170,7 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
         Ok(())
     } else {
         println!("❌ SOME TESTS FAILED");
-        
+
         Err(anyhow::anyhow!("CPU-GPU parity test failed"))
     }
 }
@@ -174,29 +178,19 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
 #[tokio::test]
 async fn test_simple_input() -> Result<()> {
     println!("Testing Simple Input: Single Word");
-    
 
-    let cpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
     let context = Arc::new(WgpuContext::new().await);
-    let gpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Wgpu,
-        Some(context),
-    )
-    .await?;
+    let gpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+            .await?;
 
     let simple_text = "hello";
-    
+
     println!("Input: \"{}\"", simple_text);
-    
+
     let cpu_emb = cpu_encoder.encode(simple_text).await?;
     let gpu_emb = gpu_encoder.encode(simple_text).await?;
 
@@ -215,22 +209,13 @@ async fn test_simple_input() -> Result<()> {
 async fn test_identical_sentences() -> Result<()> {
     println!("Testing Identical Sentences");
 
-    let cpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
     let context = Arc::new(WgpuContext::new().await);
-    let gpu_encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Wgpu,
-        Some(context),
-    )
-    .await?;
+    let gpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+            .await?;
 
     let text = "This is a test sentence";
     let sentences = [text, text]; // Same sentence twice
@@ -241,16 +226,32 @@ async fn test_identical_sentences() -> Result<()> {
     // CPU should produce identical embeddings
     let cpu_self_sim = cosine_similarity(&cpu_embeddings[0], &cpu_embeddings[1]);
     println!("CPU self-similarity: {:.6}", cpu_self_sim);
-    assert!((cpu_self_sim - 1.0).abs() < 1e-5, "CPU should produce identical embeddings");
+    assert!(
+        (cpu_self_sim - 1.0).abs() < 1e-5,
+        "CPU should produce identical embeddings"
+    );
 
     // GPU should produce identical embeddings
     let gpu_self_sim = cosine_similarity(&gpu_embeddings[0], &gpu_embeddings[1]);
     println!("GPU self-similarity: {:.6}", gpu_self_sim);
-    assert!((gpu_self_sim - 1.0).abs() < 1e-5, "GPU should produce identical embeddings");
+    assert!(
+        (gpu_self_sim - 1.0).abs() < 1e-5,
+        "GPU should produce identical embeddings"
+    );
 
     // Compare CPU vs GPU
-    let pass1 = compare_vectors("First embedding", &cpu_embeddings[0], &gpu_embeddings[0], TOLERANCE);
-    let pass2 = compare_vectors("Second embedding", &cpu_embeddings[1], &gpu_embeddings[1], TOLERANCE);
+    let pass1 = compare_vectors(
+        "First embedding",
+        &cpu_embeddings[0],
+        &gpu_embeddings[0],
+        TOLERANCE,
+    );
+    let pass2 = compare_vectors(
+        "Second embedding",
+        &cpu_embeddings[1],
+        &gpu_embeddings[1],
+        TOLERANCE,
+    );
 
     if pass1 && pass2 {
         println!("\n✅ Identical sentences test PASSED");
@@ -258,5 +259,86 @@ async fn test_identical_sentences() -> Result<()> {
     } else {
         println!("\n❌ Identical sentences test FAILED");
         Err(anyhow::anyhow!("Identical sentences test failed"))
+    }
+}
+
+#[tokio::test]
+async fn test_gpu_layer_norm_only() -> Result<()> {
+    println!("Testing GPU Layer Norm Only (No Transformer Layers)");
+
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+
+    let context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder = SentenceEncoder::from_registry(
+        ModelType::MiniLML6V2,
+        None,
+        Device::Wgpu,
+        Some(context.clone()),
+    )
+    .await?;
+
+    // Simple test input
+    let text = "hello";
+
+    // Get CPU embeddings + layer norm
+    let tokenizer = cpu_encoder.tokenizer();
+    let encoding = tokenizer.encode(text, true).unwrap();
+    let ids: Vec<f32> = encoding.get_ids().iter().map(|&id| id as f32).collect();
+    let input_ids = Array2::from_shape_vec((1, ids.len()), ids)?;
+    let ids = encoding.get_ids();
+    let mask = Array2::ones((1, ids.len()));
+
+    // CPU forward pass
+    use edgetransformers::traits::Encoder;
+    let cpu_output = cpu_encoder.encoder().forward(&input_ids, &mask).await?;
+
+    // GPU forward pass
+    let gpu_output = gpu_encoder.encoder().forward(&input_ids, &mask).await?;
+
+    // Extract [CLS] token (first token)
+    use ndarray::Array1;
+
+    let cpu_cls: Array1<f32> = cpu_output
+        .last_hidden_state
+        .slice(ndarray::s![0, 0, ..])
+        .to_owned();
+    let gpu_cls: Array1<f32> = gpu_output
+        .last_hidden_state
+        .slice(ndarray::s![0, 0, ..])
+        .to_owned();
+
+    let cpu_cls = cpu_cls.to_vec();
+    let gpu_cls = gpu_cls.to_vec();
+
+    println!("\n=== CPU [CLS] token ===");
+    println!(
+        "Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        cpu_cls.iter().cloned().fold(f32::INFINITY, f32::min),
+        cpu_cls.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        cpu_cls.iter().sum::<f32>() / (cpu_cls.len() as f32)
+    );
+
+    println!("First 10: {:?}", &cpu_cls[..10]);
+
+    println!("\n=== GPU [CLS] token ===");
+    println!(
+        "Min: {:.6}, Max: {:.6}, Mean: {:.6}",
+        gpu_cls.iter().cloned().fold(f32::INFINITY, f32::min),
+        gpu_cls.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        gpu_cls.iter().sum::<f32>() / gpu_cls.len() as f32
+    );
+    println!("First 10: {:?}", &gpu_cls[..10]);
+
+    let pass = compare_vectors("Full forward pass", &cpu_cls, &gpu_cls, 0.01);
+
+    if pass {
+        println!("\n✅ GPU produces correct output");
+        Ok(())
+    } else {
+        println!("\n❌ GPU produces wrong output");
+        Err(anyhow::anyhow!(
+            "GPU layer norm or transformer layers are broken"
+        ))
     }
 }

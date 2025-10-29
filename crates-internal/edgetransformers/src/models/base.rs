@@ -259,20 +259,18 @@ pub trait DecoderLanguageModel: LanguageModel {
 #[async_trait]
 pub trait Seq2SeqLanguageModel: LanguageModel {
     /// Encode input text to hidden states
-    async fn encode_input(&self, text: &str) -> Result<Array3<f32>>;
+    async fn encode_input(&self, text: &str) -> Result<EncoderOutput>;
     
-    /// Generate output from encoder hidden states
+    async fn generate(&self, input_text: &str, max_length: usize) -> Result<String>;
+
+    
+    /// Generate output from encoder hidden states.
     async fn generate_from_encoding(
         &self,
-        encoder_hidden: &Array3<f32>,
+        encoder_output: &EncoderOutput,
+        encoder_attention_mask: &Array2<f32>, // The mask is needed for cross-attention
         max_length: usize,
     ) -> Result<String>;
-    
-    /// Full seq2seq generation (encode + decode)
-    async fn generate(&self, input_text: &str, max_length: usize) -> Result<String> {
-        let encoded = self.encode_input(input_text).await?;
-        self.generate_from_encoding(&encoded, max_length).await
-    }
 }
 
 /// Helper: Project hidden states to vocabulary logits

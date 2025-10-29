@@ -3,7 +3,7 @@
 use crate::activations::softmax;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
+use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip};
 
 /// Multi-head attention mechanism
 pub struct MultiHeadAttention {
@@ -84,7 +84,7 @@ impl MultiHeadAttention {
     /// - output: [batch, seq_len, hidden]
     /// - new_k: [batch, seq_len, hidden] - NEW keys only (not concatenated)
     /// - new_v: [batch, seq_len, hidden] - NEW values only (not concatenated)
-    pub fn forward_with_cache(
+pub fn forward_with_cache(
         &self,
         query: &Array3<f32>,
         key_value: Option<&Array3<f32>>,  // For cross-attention
@@ -95,17 +95,19 @@ impl MultiHeadAttention {
         let batch_size = query.shape()[0];
         let seq_len = query.shape()[1];
 
-        // === 1. Linear Projections ===
+        // === 1. Linear Projections & Attention Scaling ===
         
         // Q projection (always from query input)
-        let q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
+        let mut q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
+        
+        // FIX #1: Scale the 3D Query tensor *before* reshaping and matrix multiplication.
+        // This matches the standard implementation in both BART and GPT-2.
+        q *= self.scale_factor;
         
         // K, V projections
         let kv_source = key_value.unwrap_or(query);
         let k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
         let v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
-        
-        let current_kv_len = k.shape()[1];
         
         // === 2. Concatenate with Cached K, V ===
         
@@ -139,20 +141,22 @@ impl MultiHeadAttention {
         
         // === 4. Compute Attention Scores: Q @ K^T ===
         
-        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
-        let mut scores = matmul_4d(&q, &k_transposed);
+        // FIX #2: Ensure all array "views" are converted to a standard, contiguous
+        // memory layout before being passed to matmul to prevent incorrect results.
+        let q_contiguous = q.as_standard_layout().to_owned();
+        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]); 
+        let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
+
+        let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
         
-        // Apply scaling
-        scores *= self.scale_factor;
+        // The incorrect scaling (`scores *= self.scale_factor;`) has been REMOVED from here.
         
         // === 5. Apply Masks ===
         
-        // Apply padding mask if provided
         if let Some(mask) = attention_mask {
             scores = self.apply_padding_mask(scores, mask)?;
         }
         
-        // Apply causal mask if needed
         if is_causal {
             let cache_len = full_kv_len - seq_len;
             scores = self.apply_causal_mask(scores, cache_len)?;
@@ -164,11 +168,12 @@ impl MultiHeadAttention {
         
         // === 7. Apply Attention to Values ===
         
-        let context = matmul_4d(&weights, &v_reshaped);
+        // FIX #2 (continued): Ensure 'v' is also contiguous for the final matmul.
+        let v_contiguous = v_reshaped.as_standard_layout().to_owned();
+        let context = matmul_4d(&weights, &v_contiguous);
         
         // === 8. Reshape Back ===
         
-        // [batch, num_heads, seq_len, head_dim] → [batch, seq_len, hidden]
         let context = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
@@ -180,7 +185,6 @@ impl MultiHeadAttention {
         let output = matmul_3d_2d(&context, &self.output_weight) + &self.output_bias;
         
         // === 10. Return (output, new_k, new_v) ===
-        // Note: Return k and v (not full_k, full_v) - these are the NEW keys/values only
         
         Ok((output, k, v))
     }

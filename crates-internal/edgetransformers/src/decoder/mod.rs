@@ -40,14 +40,12 @@ impl TransformerDecoder {
     /// This factory function is generic over any configuration `C` that implements
     /// the `DecoderArchitecture` trait. It uses the trait to dynamically load the
     /// correct weights and build the model stack for either the CPU or GPU backend.
-    pub fn new<C>(
+    pub fn new(
         weights: &ModelWeights,
-        config: Arc<C>,
+        config: Arc<dyn DecoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self>
-    where
-        C: DecoderArchitecture + Send + Sync + 'static,
     {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
@@ -83,6 +81,20 @@ impl TransformerModel for TransformerDecoder {
 impl Decoder for TransformerDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
+
+    // pub async fn forward_cross_attention(
+    //     &self,
+    //     input: &Self::Input,
+    //     decoder_attention_mask: &Array2<f32>,
+    //     encoder_output: &EncoderOutput,
+    //     encoder_attention_mask: &Array2<f32>,
+    //     cache: Option<&mut dyn Cache>,
+    // ) -> Result<DecoderOutput> {
+    //     match self {
+    //         Self::Cpu(model) => model.forward_cross_attention(input, decoder_attention_mask, encoder_output, encoder_attention_mask, cache).await,
+    //         Self::Gpu(model) => model.forward_cross_attention(input, decoder_attention_mask, encoder_output, encoder_attention_mask, cache).await,
+    //     }
+    // }
 
     async fn forward(
         &self,

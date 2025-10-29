@@ -40,6 +40,9 @@ impl LanguageModelConfig for MiniLMCrossEncoderConfig {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn transpose_ffn_weights(&self) -> bool {
+        true
+    }
 }
 
 impl TransformerConfig for MiniLMCrossEncoderConfig {

@@ -5,7 +5,8 @@ use ndarray::{Array2, Array3, Array4, s};
 use std::sync::Arc;
 
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
+    Cache, Decoder, EncoderOutput as EncoderOutputTrait,
+     DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel, CrossAttentionDecoder,
 };
 use crate::utils::{
     create_causal_mask, create_padding_mask_from_attention, create_padding_mask_from_tokens,
@@ -22,9 +23,7 @@ pub struct CpuTransformerDecoder {
 }
 
 impl CpuTransformerDecoder {
-    pub fn new<C>(weights: &ModelWeights, config: Arc<C>) -> Result<Self>
-    where
-        C: DecoderArchitecture + Send + Sync + 'static,
+    pub fn new(weights: &ModelWeights, config: Arc<dyn DecoderArchitecture + Send + Sync>) -> Result<Self>
     {
         // Load embedding weights (no token_type for decoder)
         let (word_w, pos_w) = config.get_embedding_weight_names();
@@ -90,24 +89,26 @@ impl CpuTransformerDecoder {
                 weights.get_array1(&ffn_names.output_bias)?,
             );
 
-            // GPT-2 style: layer norm BEFORE attention (pre-norm)
-            let layer_norm1 = LayerNorm::new(
+            
+            let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&attn_names.norm_weight)?,
                 weights.get_array1(&attn_names.norm_bias)?,
                 config.layer_norm_eps(),
             );
 
-            let layer_norm2 = LayerNorm::new(
+            let ffn_layer_norm = LayerNorm::new(
                 weights.get_array1(&ffn_names.norm_weight)?,
                 weights.get_array1(&ffn_names.norm_bias)?,
                 config.layer_norm_eps(),
             );
 
-            layers.push(TransformerLayer {
-                attention,
+           layers.push(TransformerLayer {
+                self_attn: attention,
+                self_attn_layer_norm,
+                cross_attn: None, // A decoder-only model has no cross-attention
+                cross_attn_layer_norm: None,
                 feedforward: feed_forward,
-                layer_norm1,
-                layer_norm2,
+                ffn_layer_norm,
             });
         }
 
@@ -160,19 +161,20 @@ impl Decoder for CpuTransformerDecoder {
         // } else {
         //     attention_mask.clone()
         // };
-        let padding_mask = if attention_mask.shape()[1] == total_len {
-            // Mask already has correct total length
-            attention_mask.clone()
-        } else {
-            // Create full attention mask for total sequence
-            Array2::ones((batch_size, total_len))
-        };
+        // let padding_mask = if attention_mask.shape()[1] == total_len {
+        //     // Mask already has correct total length
+        //     attention_mask.clone()
+        // } else {
+        //     // Create full attention mask for total sequence
+        //     Array2::ones((batch_size, total_len))
+        // };
+        let attention_mask = Array2::ones((batch_size, total_len));
 
         // Pass through layers with cache
         for (layer_idx, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward_with_cache(
                 hidden_states,
-                &padding_mask,
+                &attention_mask, //&padding_mask,
                 self.config.as_ref(),
                 layer_idx,
                 cpu_cache.as_deref_mut(),
@@ -228,3 +230,4 @@ impl CpuTransformerDecoder {
         hidden_states
     }
 }
+

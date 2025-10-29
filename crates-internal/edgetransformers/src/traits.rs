@@ -61,6 +61,7 @@ pub trait TransformerModel: Send + Sync {
 pub trait ModelConfig: Send + Sync + Any {}
 
 /// The standard output from an encoder model.
+#[derive(Clone)]
 pub struct EncoderOutput<T = f32> {
     /// The final hidden states of the encoder.
     /// Shape: `(batch_size, sequence_length, hidden_size)`.
@@ -137,6 +138,15 @@ pub trait Decoder: TransformerModel {
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output>;
 
+    // pub async fn forward_cross_attention(
+    //     &self,
+    //     input: &Self::Input,
+    //     decoder_attention_mask: &Array2<f32>,
+    //     encoder_output: &EncoderOutput,
+    //     encoder_attention_mask: &Array2<f32>,
+    //     cache: Option<&mut dyn Cache>,
+    // ) -> Result<DecoderOutput>;
+
     /// Get raw hidden states
     /// 
     /// Default implementation calls forward with no cache and extracts last_hidden_state.
@@ -167,13 +177,24 @@ pub trait CrossAttentionDecoder: TransformerModel {
     ///
     /// # Returns
     /// A `DecoderOutput` containing the new hidden states and the updated cache.
+    // async fn forward_cross_attention(
+    //     &self,
+    //     input: &Self::Input,
+    //     decoder_attention_mask: &Array2<f32>,
+    //     encoder_output: &EncoderOutput,
+    //     encoder_attention_mask: &Array2<f32>,
+    //     cache: Option<&mut dyn Cache>,
+    // ) -> Result<Self::Output>;
+
+    /// Asynchronously performs a forward pass through the full encoder-decoder stack.
     async fn forward(
         &self,
-        input: &Self::Input,
-        decoder_attention_mask: &Array2<f32>,
-        encoder_output: &EncoderOutput,
+        encoder_input_ids: &Self::Input,
+        decoder_input_ids: &Self::Input,
         encoder_attention_mask: &Array2<f32>,
+        decoder_attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
+        encoder_output_opt: Option<&EncoderOutput>,
     ) -> Result<Self::Output>;
 }
 
@@ -261,6 +282,7 @@ pub trait DecoderArchitecture: LanguageModelConfig {
     fn get_attention_names(&self, layer_index: usize) -> LayerDecoderAttentionNames;
     /// Returns the names for the feed-forward block in a decoder layer.
     fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
+    
 }
 
 /// A container for the concrete tensor names of an attention block in a transformer layer.
@@ -336,22 +358,25 @@ pub struct LayerDecoderAttentionNames {
 /// sequence-to-sequence tasks. It provides methods to get tensor names for all
 /// components: the shared embeddings, the encoder stack, and the decoder stack
 /// (including its self-attention and cross-attention blocks).
-pub trait EncoderDecoderArchitecture: TransformerConfig {
-    /// Returns the name of the shared word embedding weight tensor.
+pub trait EncoderDecoderArchitecture: LanguageModelConfig { // <-- Inherit from LanguageModelConfig
+    // --- Shared ---
     fn get_shared_embedding_weight_name(&self) -> &str;
+    fn get_lm_head_name(&self) -> &str;
+    fn get_final_logits_bias_name(&self) -> Option<&str>;
+    
+    fn num_encoder_layers(&self) -> usize;
+    fn num_decoder_layers(&self) -> usize;
 
-    /// Returns the names for the encoder's specific components.
+    // --- Encoder Methods ---
+    fn get_encoder_embedding_names(&self) -> (&str, &str, Option<&str>);
+    fn get_encoder_embedding_ln_names(&self) -> (&str, &str);
     fn get_encoder_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_encoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 
-    /// Returns the names for the decoder's self-attention block.
+    // --- Decoder Methods ---
+    fn get_decoder_embedding_names(&self) -> (&str, &str);
+    fn get_decoder_embedding_ln_names(&self) -> (&str, &str);
     fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
-    /// Returns the names for the decoder's cross-attention block, which attends to encoder outputs.
     fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
-    /// Returns the names for the decoder's feed-forward block.
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
-
-    /// Returns the name of the optional final bias tensor applied to the logits.
-    /// (e.g., `final_logits_bias` in BART). Returns `None` if not present.
-    fn get_final_logits_bias_name(&self) -> Option<&str>;
 }

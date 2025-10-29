@@ -102,7 +102,7 @@ impl CrossEncoder {
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
-            return Err(anyhow!("Unsupported model type: {:?}", model_type));
+            return Err(anyhow!("CrossEncoder: Unsupported model type: {:?}", model_type));
         }
 
         let weights = ModelWeights::new(model_path)?;

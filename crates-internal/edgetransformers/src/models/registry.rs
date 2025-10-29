@@ -1,7 +1,5 @@
 //! Pretrained model registry with metadata
 
-use std::path::PathBuf;
-
 /// Distinguishes the architectural type of a transformer model
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelArchitecture {
@@ -189,9 +187,9 @@ impl ModelType {
             ModelType::DistilBartCnn => ModelInfo {
                 architecture: ModelArchitecture::EncoderDecoder,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/sshleifer/distilbart-cnn-12-6/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/sshleifer/distilbart-cnn-12-6/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/sshleifer/distilbart-cnn-12-6/resolve/main/config.json",
+                    weights_url: "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/olafuraron/distilbart-cnn-12-6/resolve/main/config.json",
                 },
                 description: "Distilled BART-CNN. 60% faster and smaller, great for summarization on limited hardware.",
                 size_mb: 1000,

@@ -6,7 +6,6 @@ use crate::cache::GpuKVCache;
 use std::sync::Arc;
 use wgpu::ComputePipeline;
 use wgpu::util::DeviceExt;
-use wgpu::{Buffer};
 
 use crate::gpu_ops::{
     blocks::attention::{

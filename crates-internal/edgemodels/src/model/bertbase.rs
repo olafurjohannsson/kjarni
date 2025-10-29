@@ -89,24 +89,34 @@ impl BertBase {
             );
 
             // Load layer norms
-            let layer_norm1 = LayerNorm::new(
+            let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&format!("{}.attention.output.LayerNorm.weight", prefix))?,
                 weights.get_array1(&format!("{}.attention.output.LayerNorm.bias", prefix))?,
                 config.layer_norm_eps,
             );
 
-            let layer_norm2 = LayerNorm::new(
+            let ffn_layer_norm = LayerNorm::new(
                 weights.get_array1(&format!("{}.output.LayerNorm.weight", prefix))?,
                 weights.get_array1(&format!("{}.output.LayerNorm.bias", prefix))?,
                 config.layer_norm_eps,
             );
 
             layers.push(TransformerLayer {
-                attention,
-                feedforward,
-                layer_norm1,
-                layer_norm2,
+                self_attn: attention,
+                self_attn_layer_norm,
+                cross_attn: None, // An encoder layer has no cross-attention
+                cross_attn_layer_norm: None,
+                feedforward: feedforward,
+                ffn_layer_norm,
             });
+
+            // layers.push(TransformerLayer {
+
+            //     attention,
+            //     feedforward,
+            //     layer_norm1,
+            //     layer_norm2,
+            // });
         }
 
         Ok(Self {

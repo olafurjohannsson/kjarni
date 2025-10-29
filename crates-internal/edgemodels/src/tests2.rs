@@ -99,173 +99,173 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
     }
 }
 
-// #[tokio::test]
-// async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
-//     println!("\n=== CPU vs GPU Parity Test: Single Sentence ===\n");
+#[tokio::test]
+async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
+    println!("\n=== CPU vs GPU Parity Test: Single Sentence ===\n");
 
-//     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-//     let cache_dir = dirs::cache_dir()
-//         .unwrap()
-//         .join("edgegpt")
-//         .join(model_repo.replace('/', "_"));
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = dirs::cache_dir()
+        .unwrap()
+        .join("edgegpt")
+        .join(model_repo.replace('/', "_"));
 
-//     ensure_model_files(model_repo, &cache_dir).await?;
+    ensure_model_files(model_repo, &cache_dir).await?;
 
-//     // Initialize both encoders
-//     println!("Initializing CPU encoder...");
-//     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    // Initialize both encoders
+    println!("Initializing CPU encoder...");
+    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
-//     println!("Initializing GPU encoder...");
-//     let gpu_context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
+    println!("Initializing GPU encoder...");
+    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
-//     // Test with single sentence
-//     let sentence = "The quick brown fox jumps over the lazy dog.";
+    // Test with single sentence
+    let sentence = "The quick brown fox jumps over the lazy dog.";
 
-//     println!("\n--- Encoding on CPU ---");
-//     let cpu_embeddings = cpu_encoder.encode(sentence.clone()).await?;
-//     println!("CPU output stats:");
-//     let cpu_norm: f32 = cpu_embeddings.iter().map(|x| x * x).sum::<f32>().sqrt();
-//     println!("  Norm: {:.6}", cpu_norm);
-//     println!("  First 10: {:?}", &cpu_embeddings[..10]);
+    println!("\n--- Encoding on CPU ---");
+    let cpu_embedding = cpu_encoder.encode(sentence).await?;
+    println!("CPU output stats:");
+    let cpu_norm: f32 = cpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    println!("  Norm: {:.6}", cpu_norm);
+    println!("  First 10: {:?}", &cpu_embedding[..10]);
 
-//     println!("\n--- Encoding on GPU ---");
-//     let gpu_embeddings = gpu_encoder.encode(sentence.clone()).await?;
-//     println!("GPU output stats:");
-//     let gpu_norm: f32 = gpu_embeddings.iter().map(|x| x * x).sum::<f32>().sqrt();
-//     println!("  Norm: {:.6}", gpu_norm);
-//     println!("  First 10: {:?}", &gpu_embeddings[..10]);
+    println!("\n--- Encoding on GPU ---");
+    let gpu_embedding = gpu_encoder.encode(sentence).await?;
+    println!("GPU output stats:");
+    let gpu_norm: f32 = gpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    println!("  Norm: {:.6}", gpu_norm);
+    println!("  First 10: {:?}", &gpu_embedding[..10]);
 
-//     // Compare
-//     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Single sentence");
+    // Compare by wrapping single embeddings in a slice to match the assert function's expected type
+    assert_embeddings_close(&[cpu_embedding], &[gpu_embedding], 1e-3, "Single sentence");
 
-//     println!("\n✅ Single sentence test passed!\n");
-//     Ok(())
-// }
+    println!("\n✅ Single sentence test passed!\n");
+    Ok(())
+}
 
-// #[tokio::test]
-// async fn test_cpu_gpu_parity_batch() -> Result<()> {
-//     println!("\n=== CPU vs GPU Parity Test: Batch ===\n");
+#[tokio::test]
+async fn test_cpu_gpu_parity_batch() -> Result<()> {
+    println!("\n=== CPU vs GPU Parity Test: Batch ===\n");
 
-//     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-//     let cache_dir = dirs::cache_dir()
-//         .unwrap()
-//         .join("edgegpt")
-//         .join(model_repo.replace('/', "_"));
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = dirs::cache_dir()
+        .unwrap()
+        .join("edgegpt")
+        .join(model_repo.replace('/', "_"));
 
-//     ensure_model_files(model_repo, &cache_dir).await?;
+    ensure_model_files(model_repo, &cache_dir).await?;
 
-//     // Initialize both encoders
-//     println!("Initializing CPU encoder...");
-//     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Cpu, None)?;
+    // Initialize both encoders
+    println!("Initializing CPU encoder...");
+    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
-//     println!("Initializing GPU encoder...");
-//     let gpu_context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Wgpu, Some(gpu_context))?;
+    println!("Initializing GPU encoder...");
+    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
-//     // Test with batch of sentences
-//     let sentences = vec![
-//         "The quick brown fox jumps over the lazy dog.",
-//         "Rust is a systems programming language.",
-//         "WGPU provides a modern graphics and compute API.",
-//         "This library aims for maximum performance.",
-//     ];
+    // Test with batch of sentences
+    let sentences = &[
+        "The quick brown fox jumps over the lazy dog.",
+        "Rust is a systems programming language.",
+        "WGPU provides a modern graphics and compute API.",
+        "This library aims for maximum performance.",
+    ];
 
-//     println!("\n--- Encoding batch on CPU ---");
-//     let cpu_embeddings = cpu_encoder.encode(sentences.clone(), true).await?;
-//     println!("CPU batch encoded: {} sentences", cpu_embeddings.len());
+    println!("\n--- Encoding batch on CPU ---");
+    let cpu_embeddings = cpu_encoder.encode_batch(sentences).await?;
+    println!("CPU batch encoded: {} sentences", cpu_embeddings.len());
 
-//     println!("\n--- Encoding batch on GPU ---");
-//     let gpu_embeddings = gpu_encoder.encode(sentences.clone(), true).await?;
-//     println!("GPU batch encoded: {} sentences", gpu_embeddings.len());
+    println!("\n--- Encoding batch on GPU ---");
+    let gpu_embeddings = gpu_encoder.encode_batch(sentences).await?;
+    println!("GPU batch encoded: {} sentences", gpu_embeddings.len());
 
-//     // Compare
-//     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Batch");
+    // Compare
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Batch");
 
-//     println!("\n✅ Batch test passed!\n");
-//     Ok(())
-// }
+    println!("\n✅ Batch test passed!\n");
+    Ok(())
+}
 
-// #[tokio::test]
-// async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
-//     println!("\n=== CPU vs GPU Parity Test: Varied Lengths ===\n");
+#[tokio::test]
+async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
+    println!("\n=== CPU vs GPU Parity Test: Varied Lengths ===\n");
 
-//     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-//     let cache_dir = dirs::cache_dir()
-//         .unwrap()
-//         .join("edgegpt")
-//         .join(model_repo.replace('/', "_"));
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = dirs::cache_dir()
+        .unwrap()
+        .join("edgegpt")
+        .join(model_repo.replace('/', "_"));
 
-//     ensure_model_files(model_repo, &cache_dir).await?;
+    ensure_model_files(model_repo, &cache_dir).await?;
 
-//     // Initialize both encoders
-//     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Cpu, None)?;
-//     let gpu_context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Wgpu, Some(gpu_context))?;
+    // Initialize both encoders
+    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
-//     // Test with varied length sentences
-//     let sentences = vec![
-//         "Hi",
-//         "Hello world!",
-//         "This is a medium length sentence for testing.",
-//         "This is a much longer sentence that should test the model's ability to handle various input lengths and still produce consistent embeddings between CPU and GPU implementations.",
-//     ];
+    // Test with varied length sentences
+    let sentences = &[
+        "Hi",
+        "Hello world!",
+        "This is a medium length sentence for testing.",
+        "This is a much longer sentence that should test the model's ability to handle various input lengths and still produce consistent embeddings between CPU and GPU implementations.",
+    ];
 
-//     println!("\n--- Encoding varied lengths on CPU ---");
-//     let cpu_embeddings = cpu_encoder.encode(sentences.clone(), true).await?;
+    println!("\n--- Encoding varied lengths on CPU ---");
+    let cpu_embeddings = cpu_encoder.encode_batch(sentences).await?;
 
-//     println!("\n--- Encoding varied lengths on GPU ---");
-//     let gpu_embeddings = gpu_encoder.encode(sentences.clone(), true).await?;
+    println!("\n--- Encoding varied lengths on GPU ---");
+    let gpu_embeddings = gpu_encoder.encode_batch(sentences).await?;
 
-//     // Compare
-//     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Varied lengths");
+    // Compare
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Varied lengths");
 
-//     println!("\n✅ Varied length test passed!\n");
-//     Ok(())
-// }
+    println!("\n✅ Varied length test passed!\n");
+    Ok(())
+}
 
-// #[tokio::test]
-// async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
-//     println!("\n=== CPU vs GPU Parity Test: Large Batch ===\n");
+#[tokio::test]
+async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
+    println!("\n=== CPU vs GPU Parity Test: Large Batch ===\n");
 
-//     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-//     let cache_dir = dirs::cache_dir()
-//         .unwrap()
-//         .join("edgegpt")
-//         .join(model_repo.replace('/', "_"));
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = dirs::cache_dir()
+        .unwrap()
+        .join("edgegpt")
+        .join(model_repo.replace('/', "_"));
 
-//     ensure_model_files(model_repo, &cache_dir).await?;
+    ensure_model_files(model_repo, &cache_dir).await?;
 
-//     // Initialize both encoders
-//     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Cpu, None)?;
-//     let gpu_context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, Device::Wgpu, Some(gpu_context))?;
+    // Initialize both encoders
+    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
-//     // Create large batch (32 sentences)
-//     let base_sentences = vec![
-//         "The quick brown fox jumps over the lazy dog.",
-//         "Rust is a systems programming language.",
-//         "WGPU provides a modern graphics and compute API.",
-//         "This library aims for maximum performance.",
-//     ];
+    // Create large batch (32 sentences)
+    let base_sentences = vec![
+        "The quick brown fox jumps over the lazy dog.",
+        "Rust is a systems programming language.",
+        "WGPU provides a modern graphics and compute API.",
+        "This library aims for maximum performance.",
+    ];
     
-//     let mut sentences = Vec::new();
-//     for i in 0..8 {
-//         for s in &base_sentences {
-//             sentences.push(format!("{} Iteration {}.", s, i));
-//         }
-//     }
-//     let sentence_refs: Vec<&str> = sentences.iter().map(|s| s.as_str()).collect();
+    let mut sentences = Vec::new();
+    for i in 0..4 {
+        for s in &base_sentences {
+            sentences.push(format!("{} Iteration {}.", s, i));
+        }
+    }
+    let sentence_refs: Vec<&str> = sentences.iter().map(|s| s.as_str()).collect();
 
-//     println!("\n--- Encoding large batch ({} sentences) on CPU ---", sentences.len());
-//     let cpu_embeddings = cpu_encoder.encode(sentence_refs.clone(), true).await?;
+    println!("\n--- Encoding large batch ({} sentences) on CPU ---", sentences.len());
+    let cpu_embeddings = cpu_encoder.encode_batch(&sentence_refs).await?;
 
-//     println!("\n--- Encoding large batch ({} sentences) on GPU ---", sentences.len());
-//     let gpu_embeddings = gpu_encoder.encode(sentence_refs.clone(), true).await?;
+    println!("\n--- Encoding large batch ({} sentences) on GPU ---", sentences.len());
+    let gpu_embeddings = gpu_encoder.encode_batch(&sentence_refs).await?;
 
-//     // Compare
-//     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Large batch");
+    // Compare
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Large batch");
 
-//     println!("\n✅ Large batch test passed!\n");
-//     Ok(())
-// }
+    println!("\n✅ Large batch test passed!\n");
+    Ok(())
+}

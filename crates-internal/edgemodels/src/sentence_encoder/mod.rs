@@ -72,7 +72,7 @@ impl SentenceEncoder {
         // Validate model type
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!(
-                "Unsupported model type: {:?}. Supported: {:?}",
+                "SentenceEncoder: Unsupported model type: {:?}. Supported: {:?}",
                 model_type,
                 Self::SUPPORTED_MODELS
             ));

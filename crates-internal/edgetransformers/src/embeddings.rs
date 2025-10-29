@@ -30,6 +30,28 @@ impl Embeddings {
         }
     }
 
+        /// Embed input tokens without adding positional or token_type embeddings.
+    pub fn forward_word_only(&self, input_ids: &Array2<f32>) -> Array3<f32> {
+        let (batch_size, seq_len) = input_ids.dim();
+        let hidden_size = self.word_embeddings.shape()[1];
+        let vocab_size = self.word_embeddings.shape()[0];
+
+        let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
+
+        // This can be parallelized in the future if needed
+        for i in 0..batch_size {
+            for j in 0..seq_len {
+                let token_id = input_ids[[i, j]] as usize;
+                if token_id >= vocab_size {
+                    panic!("Token ID {} is out of vocabulary range [0, {})", token_id, vocab_size);
+                }
+                let word_emb = self.word_embeddings.row(token_id);
+                hidden.slice_mut(s![i, j, ..]).assign(&word_emb);
+            }
+        }
+        hidden
+    }
+
     /// Embed input tokens
     pub fn forward(
         &self,

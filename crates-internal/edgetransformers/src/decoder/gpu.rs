@@ -30,9 +30,7 @@ pub struct GpuTransformerDecoder {
 }
 
 impl GpuTransformerDecoder {
-    pub fn new<C>(weights: &ModelWeights, config: Arc<C>, context: Arc<WgpuContext>) -> Result<Self>
-    where
-        C: DecoderArchitecture + Send + Sync + 'static,
+    pub fn new(weights: &ModelWeights, config: Arc<dyn DecoderArchitecture + Send + Sync>, context: Arc<WgpuContext>) -> Result<Self>
     {
         let pipeline = GpuTransformerPipeline::new(context.clone())?;
         let device = &context.device;
