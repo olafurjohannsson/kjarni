@@ -6,63 +6,55 @@
 //! EdgeTransformers: Fast transformer models for Rust
 
 pub mod activations;
-pub mod traits;
-pub mod models;
+pub mod attention;
+pub mod cache;
+pub mod decoder;
+pub mod embeddings;
 pub mod encoder;
 pub mod encoder_decoder;
-pub mod decoder;
-pub mod utils;
-pub mod attention;
 pub mod feedforward;
-pub mod layer_norm;
-pub mod embeddings;
+pub mod gpu_context;
 pub mod gpu_ops;
 pub mod gpu_pipeline;
-pub mod gpu_context;
-pub mod wgpu_ops;
-pub mod weights;
+pub mod layer_norm;
+pub mod models;
 pub mod pooling;
-pub mod cache;
+pub mod traits;
+pub mod utils;
+pub mod weights;
+pub mod wgpu_ops;
 
 // Re-export commonly used items
-pub use cache::{Cache, CpuKVCache, GpuKVCache};
-pub use traits::{Device, TransformerModel, Encoder, Decoder, TransformerConfig, CrossAttentionDecoder};
-pub use gpu_context::WgpuContext;
 pub use crate::{
-    feedforward::FeedForward,
     attention::MultiHeadAttention,
-    layer_norm::LayerNorm,
-    weights::ModelWeights,
     embeddings::Embeddings,
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool}
+    feedforward::FeedForward,
+    layer_norm::LayerNorm,
+    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
+    weights::ModelWeights,
+};
+pub use cache::{Cache, CpuKVCache, GpuKVCache};
+pub use gpu_context::WgpuContext;
+pub use traits::{
+    CrossAttentionDecoder, Decoder, Device, Encoder, TransformerConfig, TransformerModel,
 };
 
-use ndarray::{Array2, Array3};
 use anyhow::{Result, anyhow};
+use ndarray::{Array2, Array3};
 
 // Re-export model traits and registry
 pub use models::{
-    LanguageModel,
-    EncoderLanguageModel,
-    DecoderLanguageModel,
+    DecoderLanguageModel, EncoderLanguageModel, LanguageModel, ModelArchitecture, ModelType,
     Seq2SeqLanguageModel,
-    ModelType,
-    ModelArchitecture,
-    
 };
 
 // Prelude for easy imports
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache, GpuKVCache};
-    pub use crate::traits::{Device, TransformerModel, Encoder, Decoder};
-    pub use crate::models::{
-        LanguageModel,
-        DecoderLanguageModel,
-        EncoderLanguageModel,
-    };
     pub use crate::gpu_context::WgpuContext;
+    pub use crate::models::{DecoderLanguageModel, EncoderLanguageModel, LanguageModel};
+    pub use crate::traits::{Decoder, Device, Encoder, TransformerModel};
 }
-
 
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,
@@ -96,29 +88,81 @@ impl TransformerLayer {
 
         if is_prenorm {
             // === PRE-NORM (e.g., GPT-2) ===
-            let residual = hidden.clone();
+
+            // --- 1. First Sub-layer: Self-Attention ---
+            let residual_1 = hidden.clone();
             let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
-            
+
             let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
+
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &ln1_out,
-                None, // Self-attention
+                None,
                 Some(attention_mask),
                 is_causal,
                 cached_kv,
             )?;
-            
-            if let Some(cache) = cache {
-                cache.update(layer_idx, new_k, new_v)?;
-            }
-            
-            hidden = residual + attn_out;
 
-            let residual = hidden.clone();
-            let ln2_out = self.ffn_layer_norm.forward_3d(&hidden);
+            if let Some(c) = cache {
+                c.update(layer_idx, new_k, new_v)?;
+            }
+
+            // First residual connection. The result is `attn_block_output`.
+            let attn_block_output = residual_1 + attn_out;
+
+            // --- 2. Second Sub-layer: Feed-Forward Network (MLP) ---
+            let residual_2 = attn_block_output.clone();
+
+            // ============================ THE FIX ============================
+            // Ensure the tensor is in a standard memory layout before passing it
+            // to the next layer norm and FFN. This is the missing piece.
+            let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
+            let ln2_out = self
+                .ffn_layer_norm
+                .forward_3d(&attn_block_output_contiguous);
+            // ===============================================================
+
             let ffn_out = self.feedforward.forward(&ln2_out)?;
-            hidden = residual + ffn_out;
-            
+
+            // Second residual connection
+            let block_output = residual_2.as_standard_layout().to_owned() + 
+                ffn_out.as_standard_layout().to_owned();
+
+            hidden = block_output;
+            // === PRE-NORM (e.g., GPT-2) ===
+            // let residual = hidden.clone();
+            // let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
+
+            // // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
+
+            // let cached_kv = if cache.is_some() {
+            //     cache.as_ref().and_then(|c| c.get(layer_idx))
+            // } else {
+            //     None
+            // };
+
+            // let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
+            //     &ln1_out,
+            //     None, // Self-attention
+            //     Some(attention_mask),
+            //     is_causal,
+            //     cached_kv,
+            // )?;
+
+            // if let Some(cache) = cache {
+            //     cache.update(layer_idx, new_k, new_v)?;
+            // }
+
+            // hidden = residual + attn_out;
+
+            // let residual = hidden.clone();
+            // // let ln2_out = self.ffn_layer_norm.forward_3d(&hidden);
+
+            // let hidden_contiguous = hidden.as_standard_layout().to_owned();
+            // let ln2_out = self.ffn_layer_norm.forward_3d(&hidden_contiguous);
+
+            // let ffn_out = self.feedforward.forward(&ln2_out)?;
+            // hidden = residual + ffn_out;
         } else {
             // === POST-NORM (e.g., BERT, BART) ===
             let residual = hidden.clone();
@@ -131,11 +175,11 @@ impl TransformerLayer {
                 is_causal,
                 cached_kv,
             )?;
-            
+
             if let Some(cache) = cache {
                 cache.update(layer_idx, new_k, new_v)?;
             }
-            
+
             hidden = residual + attn_out;
             hidden = self.self_attn_layer_norm.forward_3d(&hidden);
 
@@ -148,7 +192,7 @@ impl TransformerLayer {
         Ok(hidden)
     }
 
-     pub fn forward_cross_attention(
+    pub fn forward_cross_attention(
         &self,
         mut hidden_states: Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
@@ -158,17 +202,28 @@ impl TransformerLayer {
         layer_idx: usize,
         cache: Option<&mut CpuKVCache>,
     ) -> Result<Array3<f32>> {
-        let cross_attn = self.cross_attn.as_ref().ok_or_else(|| anyhow!("Layer is not configured for cross-attention (cross_attn is None)"))?;
-        let cross_attn_ln = self.cross_attn_layer_norm.as_ref().ok_or_else(|| anyhow!("Layer is not configured for cross-attention (cross_attn_layer_norm is None)"))?;
+        let cross_attn = self.cross_attn.as_ref().ok_or_else(|| {
+            anyhow!("Layer is not configured for cross-attention (cross_attn is None)")
+        })?;
+        let cross_attn_ln = self.cross_attn_layer_norm.as_ref().ok_or_else(|| {
+            anyhow!("Layer is not configured for cross-attention (cross_attn_layer_norm is None)")
+        })?;
 
-        anyhow::ensure!(!config.is_prenorm(), "Cross-attention forward pass currently only supports post-norm architectures like BART.");
+        anyhow::ensure!(
+            !config.is_prenorm(),
+            "Cross-attention forward pass currently only supports post-norm architectures like BART."
+        );
 
         // === 1. Self-Attention Block (cached) ===
         let residual = hidden_states.clone();
         let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
-        
+
         let (self_attn_output, new_k, new_v) = self.self_attn.forward_with_cache(
-            &hidden_states, None, Some(decoder_attention_mask), true, cached_kv,
+            &hidden_states,
+            None,
+            Some(decoder_attention_mask),
+            true,
+            cached_kv,
         )?;
 
         if let Some(cache) = cache {
@@ -180,9 +235,13 @@ impl TransformerLayer {
 
         // === 2. Cross-Attention Block ===
         let residual = hidden_states.clone();
-        
+
         let (cross_attn_output, _, _) = cross_attn.forward_with_cache(
-            &hidden_states, Some(encoder_hidden_states), Some(encoder_attention_mask), false, None,
+            &hidden_states,
+            Some(encoder_hidden_states),
+            Some(encoder_attention_mask),
+            false,
+            None,
         )?;
 
         hidden_states = residual + &cross_attn_output;

@@ -12,8 +12,10 @@ pub mod seq2seq;
 pub mod tests;
 pub mod tests2;
 pub mod text_generation;
+// pub mod generation_old;
 pub mod sentence_encoder;
 pub mod cross_encoder;
+pub mod generation;
 
 pub use sentence_encoder::SentenceEncoder;
 pub use cross_encoder::CrossEncoder;

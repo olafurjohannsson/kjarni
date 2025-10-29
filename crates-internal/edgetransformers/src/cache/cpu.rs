@@ -3,6 +3,8 @@ use ndarray::Array3;
 use std::any::Any;
 
 /// CPU-based KV cache storing key and value tensors in ndarray format
+/// 
+#[derive(Clone)]
 pub struct CpuKVCache {
     pub keys: Vec<Option<Array3<f32>>>,
     pub values: Vec<Option<Array3<f32>>>,
@@ -34,19 +36,27 @@ impl CpuKVCache {
 
         self.keys[layer_idx] = Some(match self.keys[layer_idx].take() {
             None => new_keys,
-            Some(cached) => ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_keys.view()])?,
+            Some(cached) => {
+                ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_keys.view()])?
+            }
         });
 
         self.values[layer_idx] = Some(match self.values[layer_idx].take() {
             None => new_values,
-            Some(cached) => ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_values.view()])?,
+            Some(cached) => {
+                ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_values.view()])?
+            }
         });
 
-        if layer_idx == 0 {
-            self.seq_length = self.keys[0].as_ref().unwrap().shape()[1];
-        }
+        // REMOVE the entire `if layer_idx == 0` block.
+        // We also need a way to update the sequence length from outside.
 
         Ok(())
+    }
+
+    // Add a new public method to CpuKVCache to set the length
+    pub fn set_seq_length(&mut self, new_length: usize) {
+        self.seq_length = new_length;
     }
 
     /// Get cached K, V for a specific layer
@@ -59,9 +69,15 @@ impl CpuKVCache {
 }
 
 impl Cache for CpuKVCache {
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
-    fn get_seq_length(&self) -> usize { self.seq_length }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn get_seq_length(&self) -> usize {
+        self.seq_length
+    }
     fn clear(&mut self) {
         self.keys.iter_mut().for_each(|k| *k = None);
         self.values.iter_mut().for_each(|v| *v = None);

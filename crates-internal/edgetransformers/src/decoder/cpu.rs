@@ -5,8 +5,8 @@ use ndarray::{Array2, Array3, Array4, s};
 use std::sync::Arc;
 
 use crate::traits::{
-    Cache, Decoder, EncoderOutput as EncoderOutputTrait,
-     DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel, CrossAttentionDecoder,
+    Cache, CrossAttentionDecoder, Decoder, DecoderArchitecture, DecoderOutput, Device,
+    EncoderOutput as EncoderOutputTrait, TransformerConfig, TransformerModel,
 };
 use crate::utils::{
     create_causal_mask, create_padding_mask_from_attention, create_padding_mask_from_tokens,
@@ -23,8 +23,10 @@ pub struct CpuTransformerDecoder {
 }
 
 impl CpuTransformerDecoder {
-    pub fn new(weights: &ModelWeights, config: Arc<dyn DecoderArchitecture + Send + Sync>) -> Result<Self>
-    {
+    pub fn new(
+        weights: &ModelWeights,
+        config: Arc<dyn DecoderArchitecture + Send + Sync>,
+    ) -> Result<Self> {
         // Load embedding weights (no token_type for decoder)
         let (word_w, pos_w) = config.get_embedding_weight_names();
         let embeddings = Embeddings::new(
@@ -89,7 +91,6 @@ impl CpuTransformerDecoder {
                 weights.get_array1(&ffn_names.output_bias)?,
             );
 
-            
             let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&attn_names.norm_weight)?,
                 weights.get_array1(&attn_names.norm_bias)?,
@@ -102,7 +103,7 @@ impl CpuTransformerDecoder {
                 config.layer_norm_eps(),
             );
 
-           layers.push(TransformerLayer {
+            layers.push(TransformerLayer {
                 self_attn: attention,
                 self_attn_layer_norm,
                 cross_attn: None, // A decoder-only model has no cross-attention
@@ -119,8 +120,6 @@ impl CpuTransformerDecoder {
             config: config as Arc<dyn DecoderArchitecture + Send + Sync>,
         })
     }
-
-    
 }
 
 impl TransformerModel for CpuTransformerDecoder {
@@ -137,59 +136,45 @@ impl Decoder for CpuTransformerDecoder {
     async fn forward(
         &self,
         input_ids: &Self::Input,
-        attention_mask: &Array2<f32>,
+        attention_mask: &Array2<f32>, // This is the top-level mask from the generator
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        // Get position offset from cache
-        let position_offset = cache.as_ref()
-            .map(|c| c.get_seq_length())
-            .unwrap_or(0);
+        let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
+        
 
-        // Embed inputs with position offset
         let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
 
-        // Downcast cache to CpuKVCache if provided
-        let mut cpu_cache: Option<&mut CpuKVCache> = cache.and_then(|c| {
-            c.as_any_mut().downcast_mut::<CpuKVCache>()
-        });
+        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
-        
         let (batch_size, seq_len) = input_ids.dim();
         let total_len = position_offset + seq_len;
-        // let mask = if self.config.is_causal() {
-        //     create_causal_mask(total_len)
-        // } else {
-        //     attention_mask.clone()
-        // };
-        // let padding_mask = if attention_mask.shape()[1] == total_len {
-        //     // Mask already has correct total length
-        //     attention_mask.clone()
-        // } else {
-        //     // Create full attention mask for total sequence
-        //     Array2::ones((batch_size, total_len))
-        // };
-        let attention_mask = Array2::ones((batch_size, total_len));
 
-        // Pass through layers with cache
+        let internal_mask = Array2::ones((batch_size, total_len));
+
         for (layer_idx, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward_with_cache(
                 hidden_states,
-                &attention_mask, //&padding_mask,
+                &internal_mask,
                 self.config.as_ref(),
                 layer_idx,
-                cpu_cache.as_deref_mut(),
+                cpu_cache_opt.as_deref_mut(),
             )?;
         }
 
         // Apply final layer norm
         hidden_states = self.final_layer_norm.forward_3d(&hidden_states);
 
+        // FIX: Update the cache's sequence length here, AFTER all layers are processed.
+        if let Some(cache) = cpu_cache_opt {
+            cache.set_seq_length(total_len);
+        }
+
         Ok(DecoderOutput {
             last_hidden_state: hidden_states,
-            past_key_values: None, // Cache is updated in-place
+            past_key_values: None,
         })
     }
-    
+
     async fn get_hidden_states(
         &self,
         input: &Self::Input,
@@ -230,4 +215,3 @@ impl CpuTransformerDecoder {
         hidden_states
     }
 }
-

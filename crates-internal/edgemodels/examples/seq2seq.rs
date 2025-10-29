@@ -2,6 +2,7 @@ use edgemodels::seq2seq::Seq2SeqModel;
 use edgetransformers::models::ModelType;
 use edgetransformers::traits::Device;
 use edgetransformers::Seq2SeqLanguageModel;
+use edgetransformers::models::base::GenerationConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,7 +30,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Generate the summary
     println!("\nGenerating summary...");
-    let summary = summarizer.generate(article, 60).await?; // Generate a summary with a max length of 60 tokens
+    let cfg = summarizer.generation_config_from_preset();
+    
+    let summary = summarizer.generate(article, &cfg).await?; // Generate a summary with a max length of 60 tokens
 
     println!("\n--- GENERATED SUMMARY ---");
     println!("{}", summary);

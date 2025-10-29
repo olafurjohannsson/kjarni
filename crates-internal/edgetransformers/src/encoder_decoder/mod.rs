@@ -57,7 +57,7 @@ impl TransformerEncoderDecoder {
 
 // Implement the main forward pass via the CrossAttentionDecoder trait
 #[async_trait]
-impl CrossAttentionDecoder for TransformerEncoderDecoder {
+impl<'a> CrossAttentionDecoder<'a> for TransformerEncoderDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
@@ -68,7 +68,7 @@ impl CrossAttentionDecoder for TransformerEncoderDecoder {
         encoder_attention_mask: &Array2<f32>,
         decoder_attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&EncoderOutput>,
+        encoder_output_opt: Option<&'a EncoderOutput>,
     ) -> Result<Self::Output> {
         match self {
             Self::Cpu(model) => {

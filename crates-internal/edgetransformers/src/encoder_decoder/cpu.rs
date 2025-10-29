@@ -143,7 +143,7 @@ impl CpuTransformerEncoderDecoder {
 }
 
 #[async_trait]
-impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
+impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
@@ -152,48 +152,58 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         encoder_input_ids: &Self::Input,
         decoder_input_ids: &Self::Input,
         encoder_attention_mask: &Array2<f32>,
-        _decoder_attention_mask: &Array2<f32>,
+        decoder_attention_mask_from_generator: &Array2<f32>, // Renamed for clarity
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&EncoderOutputTrait>,
+        encoder_output_opt: Option<&'a EncoderOutputTrait>,
     ) -> Result<Self::Output> {
+
+
+        let encoder_output_ref: &EncoderOutputTrait;
+        let encoder_output_owned: EncoderOutputTrait; // Holder for the owned value if we must create it
+
         let encoder_output = match encoder_output_opt {
-            Some(output) => output.clone(),
-            None => self.encoder.forward(encoder_input_ids, encoder_attention_mask).await?,
+            Some(output_ref) => {
+                encoder_output_ref = output_ref; // Borrow the existing output
+                encoder_output_ref
+            },
+            None => {
+                encoder_output_owned = self.encoder.forward(encoder_input_ids, encoder_attention_mask).await?;
+                &encoder_output_owned // Borrow the newly created output
+            },
         };
 
-        // --- EMBEDDING LOGIC IS NOW SELF-CONTAINED HERE ---
         let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
         let seq_len = decoder_input_ids.shape()[1];
+        let total_len = position_offset + seq_len;
 
-        // 1. Get word embeddings
-        let mut hidden_states = self.decoder_embeddings.forward_word_only(decoder_input_ids);
+        let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
+        hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
+
+        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
         
-        // 2. Add correct positional embeddings
-        let start_idx = position_offset + 2; // BART offset
-        let end_idx = position_offset + seq_len + 2;
-        let pos_embeddings_to_add = self.decoder_embeddings.position_embeddings.slice(s![start_idx..end_idx, ..]);
-        hidden_states += &pos_embeddings_to_add;
-
-        // 3. *** APPLY THE MISSING LAYER NORM ***
-        let mut hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
-        // --- END OF EMBEDDING LOGIC ---
-
-        let mut cpu_cache: Option<&mut CpuKVCache> = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
-        let decoder_attention_mask = Array2::ones((decoder_input_ids.shape()[0], position_offset + seq_len));
+        // FIX #1: Use the correctly-sized mask passed in from the generator,
+        // rather than ignoring it with `_` and creating a new, potentially incorrect one.
+        // This ensures the mask length always matches the total key length.
+        let decoder_self_attention_mask = decoder_attention_mask_from_generator;
 
         for (layer_idx, layer) in self.decoder_layers.iter().enumerate() {
             hidden_states = layer.forward_cross_attention(
                 hidden_states,
                 &encoder_output.last_hidden_state,
-                &decoder_attention_mask,
+                decoder_self_attention_mask, // Use the correct mask
                 encoder_attention_mask,
                 self.config.as_ref(),
                 layer_idx,
-                cpu_cache.as_deref_mut(),
+                cpu_cache_opt.as_deref_mut(),
             )?;
         }
-        // GPT does do this
-        // hidden_states = self.decoder_final_layer_norm.forward_3d(&hidden_states);
+
+        // FIX #2: Atomically update the cache's sequence length AFTER all layers
+        // have been processed. This is the exact same fix we applied to the other decoder.
+        if let Some(cache) = cpu_cache_opt {
+            cache.set_seq_length(total_len);
+        }
+
         Ok(DecoderOutput {
             last_hidden_state: hidden_states,
             past_key_values: None,

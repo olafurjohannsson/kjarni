@@ -55,7 +55,7 @@ impl GpuTransformerEncoderDecoder {
 }
 
 #[async_trait]
-impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
+impl<'a> CrossAttentionDecoder<'a> for GpuTransformerEncoderDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
@@ -66,7 +66,7 @@ impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
         _encoder_attention_mask: &Array2<f32>,
         _decoder_attention_mask: &Array2<f32>,
         _cache: Option<&mut dyn Cache>,
-        _encoder_output_opt: Option<&EncoderOutputTrait>,
+        encoder_output_opt: Option<&'a EncoderOutputTrait>,
     ) -> Result<Self::Output> {
         // The orchestration logic will be the same as the CPU.
         // 1. Run encoder pass on GPU.

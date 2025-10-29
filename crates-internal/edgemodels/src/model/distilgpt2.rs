@@ -4,7 +4,7 @@ use anyhow::Result;
 use crate::gptconfig::GPTConfig;
 use crate::gptweights::GPTModelWeights;
 use crate::model::gptbase::GPTBase;
-use crate::generation::{GenerationConfig, generate_text};
+use crate::generation_old::{GenerationConfig, generate_text};
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;

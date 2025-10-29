@@ -162,7 +162,7 @@ pub trait Decoder: TransformerModel {
 /// This type of decoder attends to two sources: its own previously generated tokens
 /// (self-attention) and the output of an encoder (cross-attention).
 #[async_trait]
-pub trait CrossAttentionDecoder: TransformerModel {
+pub trait CrossAttentionDecoder<'a>: TransformerModel {
     type Input;
     type Output;
 
@@ -194,7 +194,7 @@ pub trait CrossAttentionDecoder: TransformerModel {
         encoder_attention_mask: &Array2<f32>,
         decoder_attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&EncoderOutput>,
+        encoder_output_opt: Option<&'a EncoderOutput>,
     ) -> Result<Self::Output>;
 }
 
@@ -358,7 +358,7 @@ pub struct LayerDecoderAttentionNames {
 /// sequence-to-sequence tasks. It provides methods to get tensor names for all
 /// components: the shared embeddings, the encoder stack, and the decoder stack
 /// (including its self-attention and cross-attention blocks).
-pub trait EncoderDecoderArchitecture: LanguageModelConfig { // <-- Inherit from LanguageModelConfig
+pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any { // <-- Inherit from LanguageModelConfig
     // --- Shared ---
     fn get_shared_embedding_weight_name(&self) -> &str;
     fn get_lm_head_name(&self) -> &str;
@@ -366,7 +366,7 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig { // <-- Inherit from 
     
     fn num_encoder_layers(&self) -> usize;
     fn num_decoder_layers(&self) -> usize;
-
+    fn as_any(&self) -> &dyn Any;
     // --- Encoder Methods ---
     fn get_encoder_embedding_names(&self) -> (&str, &str, Option<&str>);
     fn get_encoder_embedding_ln_names(&self) -> (&str, &str);
@@ -379,4 +379,9 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig { // <-- Inherit from 
     fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
+
+       fn eos_token_id(&self) -> u32;
+
+    /// Returns the token ID that should begin the decoder's generation sequence.
+    fn decoder_start_token_id(&self) -> u32;
 }

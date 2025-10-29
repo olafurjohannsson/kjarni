@@ -1,17 +1,22 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{s, Array1, Array2};
+use ndarray::{Array1, Array2, s};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+use crate::generation::{
+    apply_no_repeat_ngram, apply_repetition_penalty, log_softmax_1d, sample_token,
+};
+use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
 
-use edgetransformers::prelude::*;
-use edgetransformers::models::{ModelType, ModelArchitecture, DecoderLanguageModel, LanguageModel};
-use edgetransformers::decoder::TransformerDecoder;
-use edgetransformers::traits::{DecoderArchitecture, LanguageModelConfig, Decoder, DecoderOutput};
-use edgetransformers::weights::ModelWeights;
 use edgetransformers::CpuKVCache;
+use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::models::project_to_vocab;
+use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
+use edgetransformers::prelude::*;
+use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
+use edgetransformers::weights::ModelWeights;
 
 mod configs;
 pub use configs::Gpt2Config;
@@ -38,10 +43,21 @@ impl TextGenerator {
         device: Device,
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self> {
-        if !Self::SUPPORTED_MODELS.contains(&model_type) { return Err(anyhow!("Unsupported text generator model: {:?}", model_type)); }
-        if model_type.info().architecture != ModelArchitecture::Decoder { return Err(anyhow!("Model {:?} is not a decoder model.", model_type)); }
+        if !Self::SUPPORTED_MODELS.contains(&model_type) {
+            return Err(anyhow!(
+                "Unsupported text generator model: {:?}",
+                model_type
+            ));
+        }
+        if model_type.info().architecture != ModelArchitecture::Decoder {
+            return Err(anyhow!("Model {:?} is not a decoder model.", model_type));
+        }
 
-        let cache_dir = cache_dir.unwrap_or_else(|| dirs::cache_dir().expect("No cache directory found").join("edgetransformers"));
+        let cache_dir = cache_dir.unwrap_or_else(|| {
+            dirs::cache_dir()
+                .expect("No cache directory found")
+                .join("edgetransformers")
+        });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         Self::download_model_files(&model_dir, &model_type.info().paths).await?;
@@ -55,60 +71,224 @@ impl TextGenerator {
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
-        let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
+        let tokenizer =
+            Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
 
-        
         let config: Arc<dyn DecoderArchitecture + Send + Sync> = match model_type {
-            ModelType::DistilGpt2 | ModelType::Gpt2 | ModelType::Gpt2Medium | ModelType::Gpt2Large | ModelType::Gpt2XL => {
+            ModelType::DistilGpt2
+            | ModelType::Gpt2
+            | ModelType::Gpt2Medium
+            | ModelType::Gpt2Large
+            | ModelType::Gpt2XL => {
                 Arc::new(serde_json::from_str::<Gpt2Config>(&weights.config_json)?)
-            },
-            _ => return Err(anyhow!("Configuration for {:?} not yet implemented.", model_type)),
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Configuration for {:?} not yet implemented.",
+                    model_type
+                ));
+            }
         };
-        
+
         let model = TransformerDecoder::new(&weights, config.clone(), device, context)?;
-        
+
         let lm_head = weights.get_array2(config.get_lm_head_name())?;
 
-        Ok(Self { model, tokenizer, config, lm_head })
+        Ok(Self {
+            model,
+            tokenizer,
+            config,
+            lm_head,
+        })
     }
 
-    pub async fn generate(&self, prompt: &str, max_new_tokens: usize) -> Result<String> {
-        let mut tokens = self.tokenizer().encode(prompt, true).map_err(|e| anyhow!(e))?.get_ids().to_vec();
+    pub async fn generate(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
+        let mut tokens = self
+            .tokenizer()
+            .encode(prompt, true)
+            .map_err(|e| anyhow!(e))?
+            .get_ids()
+            .to_vec();
         let batch_size = 1;
         let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
+        let vocab_size = self.config().vocab_size();
+        
+        let prompt_len = tokens.len();
+        let mut next_token_logits: Array1<f32>;
 
-        for _ in 0..max_new_tokens {
-            let start_pos = cache.get_seq_length();
-            let context_tokens = &tokens[start_pos..];
-            let input_ids = Array2::from_shape_vec((batch_size, context_tokens.len()), context_tokens.iter().map(|&t| t as f32).collect())?;
-            
-            // The attention mask must cover the entire sequence length (past + current)
-            let attention_mask = Array2::ones((batch_size, tokens.len()));
+        let effective_max_length = if let Some(new_tokens) = config.max_new_tokens {
+            prompt_len + new_tokens
+        } else {
+            config.max_length
+        };
 
-            let decoder_output = self.model.forward(&input_ids, &attention_mask, Some(&mut cache)).await?;
-            let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, &self.lm_head.t().to_owned())?;
+        // --- PHASE 1: PROMPT PROCESSING ---
+        if !tokens.is_empty() {
+            let prompt_len = tokens.len();
+            let prompt_input_ids = Array2::from_shape_vec(
+                (batch_size, prompt_len),
+                tokens.iter().map(|&t| t as f32).collect(),
+            )?;
+
+            // ============================ FIX 1 ============================
+            // The attention mask must cover the entire prompt length.
+            let attention_mask = Array2::ones((batch_size, prompt_len));
+            // ===============================================================
+
+            let decoder_output = self
+                .model
+                .forward(&prompt_input_ids, &attention_mask, Some(&mut cache))
+                .await?;
+
+            let logits_3d = project_to_vocab(
+                &decoder_output.last_hidden_state,
+                &self.lm_head.t().to_owned(),
+            )?;
+            next_token_logits = logits_3d.slice(s![0, -1, ..]).to_owned();
+        } else {
+            // Handle empty prompt, unchanged
+            let bos_token_id = self.bos_token_id().unwrap_or(0);
+            tokens.push(bos_token_id);
+            let input_ids = Array2::from_shape_vec((1, 1), vec![bos_token_id as f32])?;
+            let attention_mask = Array2::ones((1, 1));
+            let decoder_output = self
+                .model
+                .forward(&input_ids, &attention_mask, Some(&mut cache))
+                .await?;
+            let logits_3d = project_to_vocab(
+                &decoder_output.last_hidden_state,
+                &self.lm_head.t().to_owned(),
+            )?;
+            next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+        }
+
+        // --- PHASE 2: AUTOREGRESSIVE DECODING LOOP ---
+        for _ in 0..effective_max_length {
+            // --- APPLY SAMPLING LOGIC ---
+            let mut bounded_logits = Array1::<f32>::from_elem(vocab_size, f32::NEG_INFINITY);
+            let actual_size = next_token_logits.len().min(vocab_size);
             
-            let next_token_logits = logits_3d.slice(s![0, -1, ..]);
+            bounded_logits
+                .slice_mut(s![..actual_size])
+                .assign(&next_token_logits.slice(s![..actual_size]));
             
-            let next_token = next_token_logits.iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx as u32)
-                .unwrap();
             
+            let penalized_logits =
+                apply_repetition_penalty(bounded_logits, &tokens, config.repetition_penalty);
+
+
+            let next_token = sample_token(penalized_logits, &config)?.min(vocab_size as u32 - 1);
             tokens.push(next_token);
-
-            if next_token == self.eos_token_id().unwrap_or(50256) { // 50256 is GPT-2's EOS
+            if Some(next_token) == self.eos_token_id() {
                 break;
             }
+
+            // --- PREPARE FOR NEXT ITERATION ---
+            let input_ids = Array2::from_shape_vec((1, 1), vec![next_token as f32])?;
+
+            // ============================ FIX 2 ============================
+            // The mask must now cover the length of the cache PLUS the new token.
+            let total_len = cache.get_seq_length() + 1;
+            let attention_mask = Array2::ones((batch_size, total_len));
+            // ===============================================================
+
+            let decoder_output = self
+                .model
+                .forward(&input_ids, &attention_mask, Some(&mut cache))
+                .await?;
+            let logits_3d = project_to_vocab(
+                &decoder_output.last_hidden_state,
+                &self.lm_head.t().to_owned(),
+            )?;
+            next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
         }
-        
-        self.tokenizer().decode(&tokens, true).map_err(|e| anyhow!(e))
+
+        self.tokenizer()
+            .decode(&tokens, true)
+            .map_err(|e| anyhow!(e))
     }
 
-    async fn download_model_files(model_dir: &Path, paths: &edgetransformers::models::ModelPaths) -> Result<()> {
+    // pub async fn generate(
+    //     &self,
+    //     prompt: &str,
+    //     config: &GenerationConfig, // <-- Accept GenerationConfig
+    // ) -> Result<String> {
+    //     let mut tokens = self
+    //         .tokenizer()
+    //         .encode(prompt, true)
+    //         .map_err(|e| anyhow!(e))?
+    //         .get_ids()
+    //         .to_vec();
+    //     let batch_size = 1;
+    //     let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
+    //     let vocab_size = self.config().vocab_size(); // Get vocab size from the config trait
+
+    //     // --- PROMPT PROCESSING ---
+    //     if !tokens.is_empty() {
+    //         let prompt_input_ids = Array2::from_shape_vec(
+    //             (batch_size, tokens.len()),
+    //             tokens.iter().map(|&t| t as f32).collect(),
+    //         )?;
+    //         // This pass just populates the cache. We don't need the output logits yet.
+    //         self.model
+    //             .forward(&prompt_input_ids, &Array2::ones((1, 1)), Some(&mut cache))
+    //             .await?;
+    //     }
+
+    //     // --- TOKEN-BY-TOKEN GENERATION ---
+    //     for _ in 0..config.max_new_tokens {
+    //         // The input is ONLY the single, most recently generated token.
+    //         let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0)); // Handle empty prompt
+    //         let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
+
+    //         // Forward pass for the single token
+    //         let decoder_output = self
+    //             .model
+    //             .forward(&input_ids, &Array2::ones((1, 1)), Some(&mut cache))
+    //             .await?;
+
+    //         // Project to vocab
+    //         let logits_3d = project_to_vocab(
+    //             &decoder_output.last_hidden_state,
+    //             &self.lm_head.t().to_owned(),
+    //         )?;
+
+    //         let next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+
+    //         // --- APPLY SAMPLING LOGIC (Copied from old code) ---
+    //         let mut bounded_logits = Array1::<f32>::from_elem(vocab_size, f32::NEG_INFINITY);
+    //         let actual_size = next_token_logits.len().min(vocab_size);
+    //         bounded_logits
+    //             .slice_mut(s![..actual_size])
+    //             .assign(&next_token_logits.slice(s![..actual_size]));
+
+    //         let penalized_logits =
+    //             apply_repetition_penalty(bounded_logits, &tokens, config.repetition_penalty);
+
+    //         let next_token = sample_token(penalized_logits, &config)?.min(vocab_size as u32 - 1);
+
+    //         tokens.push(next_token);
+
+    //         if Some(next_token) == self.eos_token_id() {
+    //             break;
+    //         }
+    //     }
+
+    //     self.tokenizer()
+    //         .decode(&tokens, true)
+    //         .map_err(|e| anyhow!(e))
+    // }
+
+    async fn download_model_files(
+        model_dir: &Path,
+        paths: &edgetransformers::models::ModelPaths,
+    ) -> Result<()> {
         tokio::fs::create_dir_all(model_dir).await?;
-        let files = [("model.safetensors", paths.weights_url), ("tokenizer.json", paths.tokenizer_url), ("config.json", paths.config_url)];
+        let files = [
+            ("model.safetensors", paths.weights_url),
+            ("tokenizer.json", paths.tokenizer_url),
+            ("config.json", paths.config_url),
+        ];
         for (filename, url) in files {
             let local_path = model_dir.join(filename);
             if !local_path.exists() {
@@ -123,13 +303,20 @@ impl TextGenerator {
 }
 
 impl TransformerModel for TextGenerator {
-    fn device(&self) -> Device { self.model.device() }
+    fn device(&self) -> Device {
+        self.model.device()
+    }
 }
 
 impl LanguageModel for TextGenerator {
-    fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
-    fn config(&self) -> &dyn LanguageModelConfig { self.config.as_ref() }
+    fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+    fn config(&self) -> &dyn LanguageModelConfig {
+        self.config.as_ref()
+    }
 }
+
 
 #[async_trait]
 impl DecoderLanguageModel for TextGenerator {

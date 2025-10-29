@@ -7,9 +7,76 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
 use tokenizers::Tokenizer;
+use crate::cache::CpuKVCache;
 
 use crate::traits::{TransformerModel, Encoder, Decoder, EncoderOutput, DecoderOutput, LanguageModelConfig};
 use crate::utils::create_full_attention_mask;
+
+/// Configuration for text generation
+#[derive(Clone, Debug)]
+pub struct GenerationConfig {
+    
+    // Let's make this optional. If it's `Some`, it takes precedence.
+    pub max_new_tokens: Option<usize>,
+    
+    // This will be our ultimate authority for loop termination.
+    pub max_length: usize,
+
+    // pub max_new_tokens: usize,
+    pub temperature: f32,
+    pub top_k: Option<usize>,
+    pub top_p: Option<f32>,
+    pub repetition_penalty: f32,
+    pub sampling_strategy: SamplingStrategy,
+    pub eos_token_id: Option<u32>,
+    pub pad_token_id: Option<u32>,
+    pub num_beams: usize,
+    pub min_length: usize,
+    
+    pub length_penalty: f32,
+    pub early_stopping: bool,
+    pub no_repeat_ngram_size: usize,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            // General sampling params
+            max_new_tokens: None,
+            temperature: 0.7,
+            top_k: Some(50),
+            top_p: Some(0.9),
+            repetition_penalty: 1.1,
+            sampling_strategy: SamplingStrategy::TopKTopP,
+            eos_token_id: Some(50256), // default GPT-2 EOS
+            pad_token_id: Some(50256),
+            // Beam search specific params (from BART config)
+            num_beams: 4,
+            min_length: 56,
+            max_length: 142,
+            no_repeat_ngram_size: 3,
+            length_penalty: 2.0,
+            early_stopping: true,
+        }
+    }
+}
+
+pub struct BeamHypothesis {
+    pub tokens: Vec<u32>,
+    pub score: f32,
+    pub cache: CpuKVCache,
+}
+
+// No changes needed here
+#[derive(Clone, Debug)]
+pub enum SamplingStrategy {
+    Greedy,
+    TopK,
+    TopP,
+    TopKTopP,
+    Temperature,
+    BeamSearch, // We'll use this strategy implicitly for Seq2Seq
+}
 
 /// Base trait for all language models - provides tokenization
 ///
@@ -261,7 +328,7 @@ pub trait Seq2SeqLanguageModel: LanguageModel {
     /// Encode input text to hidden states
     async fn encode_input(&self, text: &str) -> Result<EncoderOutput>;
     
-    async fn generate(&self, input_text: &str, max_length: usize) -> Result<String>;
+    async fn generate(&self, input_text: &str, config: &GenerationConfig) -> Result<String>;
 
     
     /// Generate output from encoder hidden states.
@@ -269,7 +336,7 @@ pub trait Seq2SeqLanguageModel: LanguageModel {
         &self,
         encoder_output: &EncoderOutput,
         encoder_attention_mask: &Array2<f32>, // The mask is needed for cross-attention
-        max_length: usize,
+        config: &GenerationConfig
     ) -> Result<String>;
 }
 

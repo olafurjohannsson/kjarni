@@ -3,7 +3,7 @@
 use crate::activations::softmax;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip};
+use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
 
 /// Multi-head attention mechanism
 pub struct MultiHeadAttention {
@@ -16,7 +16,7 @@ pub struct MultiHeadAttention {
     pub v_bias: Array1<f32>,
     pub output_weight: Array2<f32>,
     pub output_bias: Array1<f32>,
-    
+
     pub num_heads: usize,
     pub head_dim: usize,
     pub scale_factor: f32,
@@ -64,8 +64,8 @@ impl MultiHeadAttention {
             hidden_states,
             encoder_hidden_states,
             attention_mask,
-            false,  // Not causal for encoder
-            None,   // No cache
+            false, // Not causal for encoder
+            None,  // No cache
         )?;
         Ok(output)
     }
@@ -84,10 +84,10 @@ impl MultiHeadAttention {
     /// - output: [batch, seq_len, hidden]
     /// - new_k: [batch, seq_len, hidden] - NEW keys only (not concatenated)
     /// - new_v: [batch, seq_len, hidden] - NEW values only (not concatenated)
-pub fn forward_with_cache(
+    pub fn forward_with_cache(
         &self,
         query: &Array3<f32>,
-        key_value: Option<&Array3<f32>>,  // For cross-attention
+        key_value: Option<&Array3<f32>>, // For cross-attention
         attention_mask: Option<&Array2<f32>>,
         is_causal: bool,
         cached_kv: Option<(&Array3<f32>, &Array3<f32>)>,
@@ -96,21 +96,21 @@ pub fn forward_with_cache(
         let seq_len = query.shape()[1];
 
         // === 1. Linear Projections & Attention Scaling ===
-        
+
         // Q projection (always from query input)
         let mut q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
-        
+
         // FIX #1: Scale the 3D Query tensor *before* reshaping and matrix multiplication.
         // This matches the standard implementation in both BART and GPT-2.
-        q *= self.scale_factor;
-        
+        // q *= self.scale_factor;
+
         // K, V projections
         let kv_source = key_value.unwrap_or(query);
         let k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
         let v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
-        
+
         // === 2. Concatenate with Cached K, V ===
-        
+
         let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
             // Concatenate: [batch, cache_len, hidden] + [batch, seq_len, hidden]
             let full_k = ndarray::concatenate(Axis(1), &[cached_k.view(), k.view()])?;
@@ -119,73 +119,74 @@ pub fn forward_with_cache(
         } else {
             (k.clone(), v.clone())
         };
-        
+
         let full_kv_len = full_k.shape()[1];
-        
+
         // === 3. Reshape for Multi-Head Attention ===
-        
+
         // Q: [batch, seq_len, hidden] → [batch, num_heads, seq_len, head_dim]
         let q = q
             .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
-        
+
         // K: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
         let k_reshaped = full_k
             .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
-        
+
         // V: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
         let v_reshaped = full_v
             .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
-        
+
         // === 4. Compute Attention Scores: Q @ K^T ===
-        
+
         // FIX #2: Ensure all array "views" are converted to a standard, contiguous
         // memory layout before being passed to matmul to prevent incorrect results.
         let q_contiguous = q.as_standard_layout().to_owned();
-        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]); 
+        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
         let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
 
         let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
-        
+        scores *= self.scale_factor;
+        // scores *= self.scale_factor;
         // The incorrect scaling (`scores *= self.scale_factor;`) has been REMOVED from here.
-        
+
         // === 5. Apply Masks ===
-        
+
         if let Some(mask) = attention_mask {
             scores = self.apply_padding_mask(scores, mask)?;
         }
-        
+
         if is_causal {
             let cache_len = full_kv_len - seq_len;
             scores = self.apply_causal_mask(scores, cache_len)?;
         }
-        
+
         // === 6. Softmax ===
-        
+
         let weights = softmax(&scores);
-        
+
         // === 7. Apply Attention to Values ===
-        
+
         // FIX #2 (continued): Ensure 'v' is also contiguous for the final matmul.
         let v_contiguous = v_reshaped.as_standard_layout().to_owned();
         let context = matmul_4d(&weights, &v_contiguous);
-        
+
         // === 8. Reshape Back ===
-        
+
         let context = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
-            .into_shape((batch_size, seq_len, self.num_heads * self.head_dim))?
+            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
             .to_owned();
-        
+
         // === 9. Output Projection ===
-        
+
         let output = matmul_3d_2d(&context, &self.output_weight) + &self.output_bias;
-        
+
         // === 10. Return (output, new_k, new_v) ===
-        
+
         Ok((output, k, v))
     }
 
@@ -198,7 +199,7 @@ pub fn forward_with_cache(
         mask: &Array2<f32>,
     ) -> Result<Array4<f32>> {
         let (batch_size, num_heads, seq_q, seq_k) = scores.dim();
-        
+
         if mask.shape()[0] != batch_size {
             return Err(anyhow!(
                 "Mask batch size {} doesn't match scores batch size {}",
@@ -206,7 +207,7 @@ pub fn forward_with_cache(
                 batch_size
             ));
         }
-        
+
         if mask.shape()[1] != seq_k {
             return Err(anyhow!(
                 "Mask sequence length {} doesn't match key sequence length {}",
@@ -214,15 +215,13 @@ pub fn forward_with_cache(
                 seq_k
             ));
         }
-        
+
         // Expand mask: [batch, seq_k] → [batch, 1, 1, seq_k]
-        let mask_expanded = mask
-            .view()
-            .insert_axis(Axis(1))
-            .insert_axis(Axis(1));
-        
+        let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
+
         // Broadcast and apply
-        if let Some(broadcast_mask) = mask_expanded.broadcast((batch_size, num_heads, seq_q, seq_k)) {
+        if let Some(broadcast_mask) = mask_expanded.broadcast((batch_size, num_heads, seq_q, seq_k))
+        {
             Zip::from(&mut scores)
                 .and(&broadcast_mask)
                 .for_each(|s, &m| {
@@ -231,40 +230,64 @@ pub fn forward_with_cache(
                     }
                 });
         }
-        
+
         Ok(scores)
     }
-
     /// Apply causal mask to attention scores
     ///
-    /// Ensures position i can only attend to positions 0..=i in the full sequence
-    /// Takes into account the cache length for proper positioning
-    fn apply_causal_mask(
-        &self,
-        mut scores: Array4<f32>,
-        cache_len: usize,
-    ) -> Result<Array4<f32>> {
-        let (batch_size, num_heads, seq_q, seq_k) = scores.dim();
-        
-        // For each query position, mask out positions that are "in the future"
-        for b in 0..batch_size {
-            for h in 0..num_heads {
-                for i in 0..seq_q {
-                    // Current position in the full sequence
-                    let current_pos = cache_len + i;
-                    
-                    // Mask all key positions > current_pos
-                    for j in 0..seq_k {
-                        if j > current_pos {
-                            scores[[b, h, i, j]] = f32::NEG_INFINITY;
-                        }
-                    }
+    /// Ensures position `i` can only attend to positions `0..=i` in the full sequence.
+    /// Takes into account the cache length for proper positioning.
+    fn apply_causal_mask(&self, mut scores: Array4<f32>, cache_len: usize) -> Result<Array4<f32>> {
+        let (_batch_size, _num_heads, seq_q, seq_k) = scores.dim();
+
+        // For each query position...
+        for i in 0..seq_q {
+            // This is the absolute position of the query token in the full sequence.
+            let query_pos = cache_len + i;
+
+            // ...iterate through all key positions.
+            for j in 0..seq_k {
+                // A key is "in the future" if its absolute position `j` is
+                // greater than the query's absolute position `query_pos`.
+                if j > query_pos {
+                    // Mask this position for all batches and heads.
+                    scores.slice_mut(s![.., .., i, j]).fill(f32::NEG_INFINITY);
                 }
             }
         }
-        
+
         Ok(scores)
     }
+    // /// Apply causal mask to attention scores
+    // ///
+    // /// Ensures position i can only attend to positions 0..=i in the full sequence
+    // /// Takes into account the cache length for proper positioning
+    // fn apply_causal_mask(
+    //     &self,
+    //     mut scores: Array4<f32>,
+    //     cache_len: usize,
+    // ) -> Result<Array4<f32>> {
+    //     let (batch_size, num_heads, seq_q, seq_k) = scores.dim();
+
+    //     // For each query position, mask out positions that are "in the future"
+    //     for b in 0..batch_size {
+    //         for h in 0..num_heads {
+    //             for i in 0..seq_q {
+    //                 // Current position in the full sequence
+    //                 let current_pos = cache_len + i;
+
+    //                 // Mask all key positions > current_pos
+    //                 for j in 0..seq_k {
+    //                     if j > current_pos {
+    //                         scores[[b, h, i, j]] = f32::NEG_INFINITY;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     Ok(scores)
+    // }
 }
 
 #[cfg(test)]
@@ -317,8 +340,8 @@ mod tests {
         let hidden_size = 64;
         let num_heads = 4;
         let batch_size = 1;
-        let seq_len = 1;  // Single token (incremental decoding)
-        let cache_len = 5;  // 5 tokens already cached
+        let seq_len = 1; // Single token (incremental decoding)
+        let cache_len = 5; // 5 tokens already cached
 
         let q_weight = Array2::zeros((hidden_size, hidden_size));
         let q_bias = Array1::zeros(hidden_size);
@@ -351,7 +374,7 @@ mod tests {
             &input,
             None,
             Some(&mask),
-            true,  // Causal
+            true, // Causal
             Some((&cached_k, &cached_v)),
         );
 
@@ -502,7 +525,6 @@ mod tests {
 //         let k_proj = matmul_3d_2d(kv_source, &self.key_weight_t) + &self.key_bias;
 //         let v_proj = matmul_3d_2d(kv_source, &self.value_weight_t) + &self.value_bias;
 //         let q_proj_scaled = &q_proj * self.scale_factor;
-
 
 //         let q = q_proj_scaled
 //             .into_shape_with_order((batch_size, query_len, self.num_heads, self.head_dim))?

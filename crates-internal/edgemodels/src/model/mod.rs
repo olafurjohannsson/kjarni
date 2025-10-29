@@ -1,7 +1,7 @@
 //! GPT model implementations
 
 // pub mod bart;
-// pub mod gptbase;
+pub mod gptbase;
 // pub mod distilgpt2;
 // pub mod gpt2;
 // pub mod generative;
