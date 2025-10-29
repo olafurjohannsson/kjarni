@@ -36,7 +36,8 @@ async fn main() -> anyhow::Result<()> {
         
         // Repetition penalty is useful for all generation types
         repetition_penalty: 1.1,
-        
+        temperature: 0.7,
+
         // Use the "struct update syntax" to fill in all other fields
         // with their default values (e.g., max_length, num_beams, etc.).
         // This makes our config robust to future changes.

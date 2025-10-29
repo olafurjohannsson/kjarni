@@ -103,6 +103,64 @@ impl TextGenerator {
     }
 
     pub async fn generate(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
+        // 1. Tokenize
+        let mut tokens = self.tokenizer().encode(prompt, true).map_err(|e| anyhow!(e))?.get_ids().to_vec();
+        let prompt_len = tokens.len();
+
+        // 2. Determine effective max length
+        let effective_max_length = if let Some(new_tokens) = config.max_new_tokens {
+            prompt_len + new_tokens
+        } else {
+            config.max_length
+        };
+        
+        // 3. Initialize Cache
+        let batch_size = 1;
+        let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
+
+        // 4. Prime the Cache with the prompt
+        if prompt_len > 0 {
+            let prompt_ids = Array2::from_shape_vec((batch_size, prompt_len), tokens.iter().map(|&t| t as f32).collect())?;
+            let attention_mask = Array2::ones((batch_size, prompt_len));
+            self.model.forward(&prompt_ids, &attention_mask, Some(&mut cache)).await?;
+        }
+
+        // 5. Autoregressive Loop
+        loop {
+            // --- Stop Conditions ---
+            if tokens.len() >= effective_max_length { break; }
+
+            // --- Prepare single-token input ---
+            let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
+            let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
+            let attention_mask = Array2::ones((batch_size, cache.get_seq_length() + 1));
+
+            // --- Forward Pass ---
+            let decoder_output = self.model.forward(&input_ids, &attention_mask, Some(&mut cache)).await?;
+
+            // --- Get Logits (CRITICAL FIX: NO TRANSPOSE) ---
+            let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, 
+                &self.lm_head.t().to_owned())?;
+            let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+
+            // --- Apply Penalties & Sample ---
+            next_token_logits = apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
+            let next_token = sample_token(next_token_logits, config)?;
+            tokens.push(next_token);
+
+            // --- EOS Stop Condition ---
+            if Some(next_token) == self.eos_token_id() && tokens.len() > config.min_length {
+                break;
+            }
+        }
+
+        // 6. Decode
+        self.tokenizer().decode(&tokens, true).map_err(|e| anyhow!(e))
+    }
+
+
+    ////  WAS WORKING:
+    pub async fn generate2(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
         let mut tokens = self
             .tokenizer()
             .encode(prompt, true)
@@ -207,6 +265,9 @@ impl TextGenerator {
             .decode(&tokens, true)
             .map_err(|e| anyhow!(e))
     }
+    
+
+/// Sample a token from logits
 
     // pub async fn generate(
     //     &self,
