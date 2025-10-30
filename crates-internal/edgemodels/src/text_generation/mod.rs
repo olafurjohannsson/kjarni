@@ -1,14 +1,14 @@
+use crate::generation::{
+    apply_no_repeat_ngram, apply_repetition_penalty, log_softmax_1d, sample_token,
+};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
 use ndarray::{Array1, Array2, s};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-use crate::generation::{
-    apply_no_repeat_ngram, apply_repetition_penalty, log_softmax_1d, sample_token,
-};
-use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
 
 use edgetransformers::CpuKVCache;
 use edgetransformers::decoder::TransformerDecoder;
@@ -103,242 +103,97 @@ impl TextGenerator {
     }
 
     pub async fn generate(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
-        // 1. Tokenize
-        let mut tokens = self.tokenizer().encode(prompt, true).map_err(|e| anyhow!(e))?.get_ids().to_vec();
-        let prompt_len = tokens.len();
-
-        // 2. Determine effective max length
-        let effective_max_length = if let Some(new_tokens) = config.max_new_tokens {
-            prompt_len + new_tokens
-        } else {
-            config.max_length
-        };
-        
-        // 3. Initialize Cache
-        let batch_size = 1;
-        let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
-
-        // 4. Prime the Cache with the prompt
-        if prompt_len > 0 {
-            let prompt_ids = Array2::from_shape_vec((batch_size, prompt_len), tokens.iter().map(|&t| t as f32).collect())?;
-            let attention_mask = Array2::ones((batch_size, prompt_len));
-            self.model.forward(&prompt_ids, &attention_mask, Some(&mut cache)).await?;
-        }
-
-        // 5. Autoregressive Loop
-        loop {
-            // --- Stop Conditions ---
-            if tokens.len() >= effective_max_length { break; }
-
-            // --- Prepare single-token input ---
-            let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
-            let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
-            let attention_mask = Array2::ones((batch_size, cache.get_seq_length() + 1));
-
-            // --- Forward Pass ---
-            let decoder_output = self.model.forward(&input_ids, &attention_mask, Some(&mut cache)).await?;
-
-            // --- Get Logits (CRITICAL FIX: NO TRANSPOSE) ---
-            let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, 
-                &self.lm_head.t().to_owned())?;
-            let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-
-            // --- Apply Penalties & Sample ---
-            next_token_logits = apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
-            let next_token = sample_token(next_token_logits, config)?;
-            tokens.push(next_token);
-
-            // --- EOS Stop Condition ---
-            if Some(next_token) == self.eos_token_id() && tokens.len() > config.min_length {
-                break;
-            }
-        }
-
-        // 6. Decode
-        self.tokenizer().decode(&tokens, true).map_err(|e| anyhow!(e))
-    }
-
-
-    ////  WAS WORKING:
-    pub async fn generate2(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
+        // 1. Tokenize the input prompt
         let mut tokens = self
             .tokenizer()
             .encode(prompt, true)
             .map_err(|e| anyhow!(e))?
             .get_ids()
             .to_vec();
-        let batch_size = 1;
-        let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
-        let vocab_size = self.config().vocab_size();
-        
         let prompt_len = tokens.len();
-        let mut next_token_logits: Array1<f32>;
+        let batch_size = 1;
 
-        let effective_max_length = if let Some(new_tokens) = config.max_new_tokens {
+        // 2. Determine the final length of the generated sequence
+        let max_len = if let Some(new_tokens) = config.max_new_tokens {
             prompt_len + new_tokens
         } else {
             config.max_length
         };
 
-        // --- PHASE 1: PROMPT PROCESSING ---
-        if !tokens.is_empty() {
-            let prompt_len = tokens.len();
-            let prompt_input_ids = Array2::from_shape_vec(
+        // 3. Initialize the Key-Value cache
+        let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
+        let mut current_pos = 0;
+
+        // 4. Process the prompt in a single "priming" pass to fill the cache
+        if prompt_len > 0 {
+            let prompt_ids = Array2::from_shape_vec(
                 (batch_size, prompt_len),
                 tokens.iter().map(|&t| t as f32).collect(),
             )?;
-
-            // ============================ FIX 1 ============================
-            // The attention mask must cover the entire prompt length.
+            // The attention mask for the prompt is all ones
             let attention_mask = Array2::ones((batch_size, prompt_len));
-            // ===============================================================
 
-            let decoder_output = self
-                .model
-                .forward(&prompt_input_ids, &attention_mask, Some(&mut cache))
+            // This forward pass populates the cache with the prompt's key-value states
+            self.model
+                .forward(&prompt_ids, &attention_mask, Some(&mut cache))
                 .await?;
-
-            let logits_3d = project_to_vocab(
-                &decoder_output.last_hidden_state,
-                &self.lm_head.t().to_owned(),
-            )?;
-            next_token_logits = logits_3d.slice(s![0, -1, ..]).to_owned();
-        } else {
-            // Handle empty prompt, unchanged
-            let bos_token_id = self.bos_token_id().unwrap_or(0);
-            tokens.push(bos_token_id);
-            let input_ids = Array2::from_shape_vec((1, 1), vec![bos_token_id as f32])?;
-            let attention_mask = Array2::ones((1, 1));
-            let decoder_output = self
-                .model
-                .forward(&input_ids, &attention_mask, Some(&mut cache))
-                .await?;
-            let logits_3d = project_to_vocab(
-                &decoder_output.last_hidden_state,
-                &self.lm_head.t().to_owned(),
-            )?;
-            next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+            current_pos = prompt_len;
         }
 
-        // --- PHASE 2: AUTOREGRESSIVE DECODING LOOP ---
-        for _ in 0..effective_max_length {
-            // --- APPLY SAMPLING LOGIC ---
-            let mut bounded_logits = Array1::<f32>::from_elem(vocab_size, f32::NEG_INFINITY);
-            let actual_size = next_token_logits.len().min(vocab_size);
-            
-            bounded_logits
-                .slice_mut(s![..actual_size])
-                .assign(&next_token_logits.slice(s![..actual_size]));
-            
-            
-            let penalized_logits =
-                apply_repetition_penalty(bounded_logits, &tokens, config.repetition_penalty);
-
-
-            let next_token = sample_token(penalized_logits, &config)?.min(vocab_size as u32 - 1);
-            tokens.push(next_token);
-            if Some(next_token) == self.eos_token_id() {
+        // 5. Start the autoregressive generation loop
+        loop {
+            // Check stopping conditions
+            if tokens.len() >= max_len {
                 break;
             }
 
-            // --- PREPARE FOR NEXT ITERATION ---
-            let input_ids = Array2::from_shape_vec((1, 1), vec![next_token as f32])?;
+            // Prepare the input for this step: it's only the *last* token
+            let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
+            let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
 
-            // ============================ FIX 2 ============================
-            // The mask must now cover the length of the cache PLUS the new token.
-            let total_len = cache.get_seq_length() + 1;
-            let attention_mask = Array2::ones((batch_size, total_len));
-            // ===============================================================
+            // Create a full attention mask for the *entire* sequence length (prompt + generated)
+            // The `forward_with_cache` method in the TransformerLayer is responsible for making it causal.
+            let attention_mask = Array2::ones((batch_size, current_pos + 1));
 
+            // Perform the forward pass for the single new token
             let decoder_output = self
                 .model
                 .forward(&input_ids, &attention_mask, Some(&mut cache))
                 .await?;
+
+            current_pos += 1;
+
+            // Project the output hidden state to vocabulary logits
+            // GPT-2's LM head is the word embedding matrix, which needs to be transposed for matmul.
+            // For other models, this might differ. The `transpose_...` flags in the config
+            // are for the main transformer layers, not necessarily the standalone LM head.
             let logits_3d = project_to_vocab(
                 &decoder_output.last_hidden_state,
                 &self.lm_head.t().to_owned(),
             )?;
-            next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+
+            // Get the logits for the new token (it's the only one in the sequence dimension)
+            let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+
+            // Apply repetition penalty
+            next_token_logits =
+                apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
+
+            // Sample the next token using the specified strategy (e.g., greedy)
+            let next_token = sample_token(next_token_logits, config)?;
+            tokens.push(next_token);
+
+            // Check for End-Of-Sequence token
+            if Some(next_token) == self.eos_token_id() {
+                break;
+            }
         }
 
+        // 6. Decode the final sequence of tokens back to a string
         self.tokenizer()
             .decode(&tokens, true)
             .map_err(|e| anyhow!(e))
     }
-    
-
-/// Sample a token from logits
-
-    // pub async fn generate(
-    //     &self,
-    //     prompt: &str,
-    //     config: &GenerationConfig, // <-- Accept GenerationConfig
-    // ) -> Result<String> {
-    //     let mut tokens = self
-    //         .tokenizer()
-    //         .encode(prompt, true)
-    //         .map_err(|e| anyhow!(e))?
-    //         .get_ids()
-    //         .to_vec();
-    //     let batch_size = 1;
-    //     let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
-    //     let vocab_size = self.config().vocab_size(); // Get vocab size from the config trait
-
-    //     // --- PROMPT PROCESSING ---
-    //     if !tokens.is_empty() {
-    //         let prompt_input_ids = Array2::from_shape_vec(
-    //             (batch_size, tokens.len()),
-    //             tokens.iter().map(|&t| t as f32).collect(),
-    //         )?;
-    //         // This pass just populates the cache. We don't need the output logits yet.
-    //         self.model
-    //             .forward(&prompt_input_ids, &Array2::ones((1, 1)), Some(&mut cache))
-    //             .await?;
-    //     }
-
-    //     // --- TOKEN-BY-TOKEN GENERATION ---
-    //     for _ in 0..config.max_new_tokens {
-    //         // The input is ONLY the single, most recently generated token.
-    //         let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0)); // Handle empty prompt
-    //         let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
-
-    //         // Forward pass for the single token
-    //         let decoder_output = self
-    //             .model
-    //             .forward(&input_ids, &Array2::ones((1, 1)), Some(&mut cache))
-    //             .await?;
-
-    //         // Project to vocab
-    //         let logits_3d = project_to_vocab(
-    //             &decoder_output.last_hidden_state,
-    //             &self.lm_head.t().to_owned(),
-    //         )?;
-
-    //         let next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-
-    //         // --- APPLY SAMPLING LOGIC (Copied from old code) ---
-    //         let mut bounded_logits = Array1::<f32>::from_elem(vocab_size, f32::NEG_INFINITY);
-    //         let actual_size = next_token_logits.len().min(vocab_size);
-    //         bounded_logits
-    //             .slice_mut(s![..actual_size])
-    //             .assign(&next_token_logits.slice(s![..actual_size]));
-
-    //         let penalized_logits =
-    //             apply_repetition_penalty(bounded_logits, &tokens, config.repetition_penalty);
-
-    //         let next_token = sample_token(penalized_logits, &config)?.min(vocab_size as u32 - 1);
-
-    //         tokens.push(next_token);
-
-    //         if Some(next_token) == self.eos_token_id() {
-    //             break;
-    //         }
-    //     }
-
-    //     self.tokenizer()
-    //         .decode(&tokens, true)
-    //         .map_err(|e| anyhow!(e))
-    // }
 
     async fn download_model_files(
         model_dir: &Path,
@@ -377,7 +232,6 @@ impl LanguageModel for TextGenerator {
         self.config.as_ref()
     }
 }
-
 
 #[async_trait]
 impl DecoderLanguageModel for TextGenerator {

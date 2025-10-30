@@ -1,17 +1,15 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result};
 use async_trait::async_trait;
 use bytemuck;
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
-use wgpu::include_wgsl;
 use wgpu::util::DeviceExt;
 
+use crate::gpu_context::WgpuContext;
 use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerConfig, TransformerModel,
+    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel,
 };
 use crate::weights::ModelWeights;
-use crate::gpu_context::WgpuContext;
-
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn::FFNWeights;
 use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
@@ -20,31 +18,27 @@ use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 /// It holds the GPU-native weights and the generic pipeline to execute them.
 pub struct GpuTransformerEncoder {
     pipeline: GpuTransformerPipeline,
-
     // CPU-side embeddings for the initial lookup.
     word_embeddings: Array2<f32>,
     position_embeddings: Array2<f32>,
     token_type_embeddings: Array2<f32>,
-
     // GPU-side weight buffers, specific to this model instance.
     embedding_norm_weights: (Arc<wgpu::Buffer>, Arc<wgpu::Buffer>),
     layers: Vec<GpuTransformerLayer>,
-
-    // The config must be wrapped in an Arc to be thread-safe (`Send + Sync`).
-    // This allows it to be shared across threads if the model is used in an async context.
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
 }
 
 impl GpuTransformerEncoder {
     /// Constructs a new `GpuTransformerEncoder`.
-    /// The `C` generic type now has `'static`, `Send`, and `Sync` bounds to ensure thread safety.
-    pub fn new(weights: &ModelWeights, config: Arc<dyn EncoderArchitecture + Send + Sync>, context: Arc<WgpuContext>) -> Result<Self>
-    {
+    pub fn new(
+        weights: &ModelWeights,
+        config: Arc<dyn EncoderArchitecture + Send + Sync>,
+        context: Arc<WgpuContext>,
+    ) -> Result<Self> {
         let pipeline = GpuTransformerPipeline::new(context.clone())?;
 
         let device = &context.device;
 
-        // Helper functions
         let upload_1d = |name: &str| -> Result<Arc<wgpu::Buffer>> {
             let tensor = weights.get_array1(name)?;
             Ok(Arc::new(device.create_buffer_init(
@@ -56,15 +50,11 @@ impl GpuTransformerEncoder {
             )))
         };
 
-        /// Helper to upload a 2D tensor from `ModelWeights` to a `wgpu::Buffer`.
         let upload_2d = |name: &str| -> Result<Arc<wgpu::Buffer>> {
-            // 1. Load the tensor.
             let tensor = weights.get_array2(name)?;
 
-            // 2. Transpose it to match the CPU's data format.
             let transposed_tensor = tensor.t().to_owned();
 
-            // 3. Upload the *transposed* tensor.
             Ok(Arc::new(device.create_buffer_init(
                 &wgpu::util::BufferInitDescriptor {
                     label: Some(name),
@@ -94,7 +84,6 @@ impl GpuTransformerEncoder {
         for i in 0..config.num_hidden_layers() {
             let attn_names = config.get_attention_names(i);
             let ffn_names = config.get_feed_forward_names(i);
-            // Upload attention weights
             let q_weight_buf = upload_2d(&attn_names.q_weight)?;
             let q_bias_buf = upload_1d(&attn_names.q_bias)?;
             let k_weight_buf = upload_2d(&attn_names.k_weight)?;
@@ -102,7 +91,6 @@ impl GpuTransformerEncoder {
             let v_weight_buf = upload_2d(&attn_names.v_weight)?;
             let v_bias_buf = upload_1d(&attn_names.v_bias)?;
             let attention_weights = AttentionWeights {
-                // ✅ Changed from GpuAttentionWeights
                 q_weight: q_weight_buf,
                 q_bias: q_bias_buf,
                 k_weight: k_weight_buf,
@@ -119,7 +107,6 @@ impl GpuTransformerEncoder {
             let intermediate_b = weights.get_array1(&ffn_names.intermediate_bias)?;
             let output_w = weights.get_array2(&ffn_names.output_weight)?;
             let output_b = weights.get_array1(&ffn_names.output_bias)?;
-            // Transpose if needed (for BERT-style models)
             let fc1_weight_data = if config.transpose_ffn_weights() {
                 intermediate_w.t().as_standard_layout().to_owned()
             } else {
@@ -167,7 +154,6 @@ impl GpuTransformerEncoder {
             ));
 
             let ffn_weights = FFNWeights {
-                // ✅ Changed from GpuFeedForwardWeights
                 fc1_weight: fc1_weight_buf,
                 fc1_bias: fc1_bias_buf,
                 fc2_weight: fc2_weight_buf,
@@ -193,26 +179,19 @@ impl GpuTransformerEncoder {
         })
     }
 
-    fn perform_cpu_embedding(&self, input_ids: &Array2<f32>) -> Result<Array3<f32>> {
-        let (batch_size, seq_len) = input_ids.dim();
-        let hidden_size = self.config.hidden_size();
-        let mut cpu_hidden_states = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
+    fn perform_cpu_embedding(
+        &self,
+        input_ids: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
+    ) -> Result<Array3<f32>> {
+        let cpu_embedding_layer = crate::Embeddings::new(
+            self.word_embeddings.clone(),
+            self.position_embeddings.clone(),
+            Some(self.token_type_embeddings.clone()),
+        );
 
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                if token_id < self.word_embeddings.shape()[0] {
-                    cpu_hidden_states
-                        .slice_mut(s![i, j, ..])
-                        .assign(&self.word_embeddings.row(token_id));
-                }
-            }
-        }
-        let pos_embeddings_to_add = self.position_embeddings.slice(s![0..seq_len, ..]);
-        cpu_hidden_states += &pos_embeddings_to_add;
-        if self.token_type_embeddings.shape()[0] > 0 {
-            cpu_hidden_states += &self.token_type_embeddings.row(0);
-        }
+        let cpu_hidden_states = cpu_embedding_layer.forward(input_ids, token_type_ids);
+
         Ok(cpu_hidden_states)
     }
 }
@@ -232,32 +211,13 @@ impl Encoder for GpuTransformerEncoder {
         &self,
         input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Self::Output> {
-        // Step 1: CPU-Side Embedding
-        let initial_embeddings = self.perform_cpu_embedding(input_ids)?;
-        println!("\n[GPU ENCODER] Initial embeddings (before GPU pipeline):");
-        println!("  Shape: {:?}", initial_embeddings.dim());
-        println!(
-            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-            initial_embeddings
-                .iter()
-                .cloned()
-                .fold(f32::INFINITY, f32::min),
-            initial_embeddings
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max),
-            initial_embeddings.mean().unwrap()
-        );
-        println!(
-            "  First 10: {:?}",
-            &initial_embeddings.as_slice().unwrap()[..10]
-        );
-        // Step 2: Call the Generic Pipeline
+        let initial_embeddings = self.perform_cpu_embedding(input_ids, token_type_ids)?;
+
         let last_hidden_state = self
             .pipeline
             .forward(
-                // CORRECTED: Pass the Arc as a reference. `as_ref()` gets a `&dyn Trait`.
                 self.config.as_ref(),
                 &initial_embeddings,
                 &attention_mask,
@@ -268,33 +228,17 @@ impl Encoder for GpuTransformerEncoder {
                 &self.layers,
             )
             .await?;
-        // DEBUG: Print output AFTER GPU processing
-        println!("\n[GPU ENCODER] Output (after GPU pipeline):");
-        println!("  Shape: {:?}", last_hidden_state.dim());
-        println!(
-            "  Min: {:.6}, Max: {:.6}, Mean: {:.6}",
-            last_hidden_state
-                .iter()
-                .cloned()
-                .fold(f32::INFINITY, f32::min),
-            last_hidden_state
-                .iter()
-                .cloned()
-                .fold(f32::NEG_INFINITY, f32::max),
-            last_hidden_state.mean().unwrap()
-        );
-        println!(
-            "  First 10: {:?}",
-            &last_hidden_state.as_slice().unwrap()[..10]
-        );
+
         Ok(EncoderOutput { last_hidden_state })
     }
+
     async fn get_hidden_states(
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
-        let output = self.forward(input, attention_mask).await?;
+        let output = self.forward(input, attention_mask, token_type_ids).await?;
         Ok(output.last_hidden_state)
     }
 }

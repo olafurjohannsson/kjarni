@@ -210,7 +210,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
             TransformerEncoderDecoder::Cpu(cpu_model) => {
                 cpu_model
                     .encoder()
-                    .forward(&input_ids, &attention_mask)
+                    .forward(&input_ids, &attention_mask, None) // TODO: token_type_ids ???
                     .await
             }
             TransformerEncoderDecoder::Gpu(_) => todo!("GPU path for encode_input not implemented"),

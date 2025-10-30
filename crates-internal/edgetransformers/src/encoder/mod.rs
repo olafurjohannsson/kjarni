@@ -12,18 +12,16 @@
 mod cpu;
 mod gpu;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, ModelConfig, TransformerConfig,
-    TransformerModel,
+    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel,
 };
 use crate::weights::ModelWeights;
 use crate::gpu_context::WgpuContext;
-use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
 use cpu::CpuTransformerEncoder;
 use gpu::GpuTransformerEncoder;
 
@@ -89,20 +87,22 @@ impl Encoder for TransformerEncoder {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Self::Output> {
         match self {
-            Self::Cpu(model) => model.forward(input, attention_mask).await,
-            Self::Gpu(model) => model.forward(input, attention_mask).await,
+            Self::Cpu(model) => model.forward(input, attention_mask, token_type_ids).await,
+            Self::Gpu(model) => model.forward(input, attention_mask, token_type_ids).await,
         }
     }
     async fn get_hidden_states(
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
         match self {
-            Self::Cpu(model) => model.get_hidden_states(input, attention_mask).await,
-            Self::Gpu(model) => model.get_hidden_states(input, attention_mask).await,
+            Self::Cpu(model) => model.get_hidden_states(input, attention_mask, token_type_ids).await,
+            Self::Gpu(model) => model.get_hidden_states(input, attention_mask, token_type_ids).await,
         }
     }
 }

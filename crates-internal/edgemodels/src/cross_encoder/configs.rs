@@ -1,8 +1,11 @@
 //! Model configurations for cross-encoders
 
 use anyhow::Result;
+use edgetransformers::traits::{
+    EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
+    TransformerConfig,
+};
 use serde::Deserialize;
-use edgetransformers::traits::{EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames, TransformerConfig};
 
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
 #[derive(Debug, Clone, Deserialize)]
@@ -17,7 +20,7 @@ pub struct MiniLMCrossEncoderConfig {
     pub vocab_size: usize,
     pub layer_norm_eps: f32,
     #[serde(default = "default_num_labels")]
-    pub num_labels: usize,  // Typically 1 for ranking
+    pub num_labels: usize, // Typically 1 for ranking
 }
 
 fn default_num_labels() -> usize {
@@ -69,17 +72,14 @@ impl TransformerConfig for MiniLMCrossEncoderConfig {
     fn is_prenorm(&self) -> bool {
         false
     }
-
 }
-
-
 
 impl EncoderArchitecture for MiniLMCrossEncoderConfig {
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "bert.embeddings.word_embeddings.weight",
             "bert.embeddings.position_embeddings.weight",
-            None,
+            Some("bert.embeddings.token_type_embeddings.weight"),
         )
     }
 
@@ -100,8 +100,14 @@ impl EncoderArchitecture for MiniLMCrossEncoderConfig {
             v_bias: format!("bert.encoder.layer.{}.attention.self.value.bias", layer),
             output_weight: format!("bert.encoder.layer.{}.attention.output.dense.weight", layer),
             output_bias: format!("bert.encoder.layer.{}.attention.output.dense.bias", layer),
-            norm_weight: format!("bert.encoder.layer.{}.attention.output.LayerNorm.weight", layer),
-            norm_bias: format!("bert.encoder.layer.{}.attention.output.LayerNorm.bias", layer),
+            norm_weight: format!(
+                "bert.encoder.layer.{}.attention.output.LayerNorm.weight",
+                layer
+            ),
+            norm_bias: format!(
+                "bert.encoder.layer.{}.attention.output.LayerNorm.bias",
+                layer
+            ),
         }
     }
 

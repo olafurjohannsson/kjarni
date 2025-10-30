@@ -118,7 +118,7 @@ impl SentenceEncoder {
 
         // Load weights and tokenizer
         let weights = ModelWeights::new(model_path)?;
-        let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
+        let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         // Select config based on model type
@@ -152,7 +152,20 @@ impl SentenceEncoder {
             }
             _ => return Err(anyhow!("Unsupported encoder model: {:?}", model_type)),
         };
+        // Configure tokenizer padding and truncation using the model's config
+        let truncation_params = tokenizers::TruncationParams {
+            max_length: config.max_position_embeddings(),
+            strategy: tokenizers::TruncationStrategy::LongestFirst,
+            ..Default::default()
+        };
+        
+        _ = tokenizer.with_truncation(Some(truncation_params));
 
+        let padding_params = tokenizers::PaddingParams {
+            strategy: tokenizers::PaddingStrategy::BatchLongest,
+            ..Default::default()
+        };
+        tokenizer.with_padding(Some(padding_params));
         Ok(Self {
             encoder,
             tokenizer,

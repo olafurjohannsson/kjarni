@@ -126,11 +126,12 @@ impl Encoder for CpuTransformerEncoder {
     /// It's marked `async` to match the trait, but all operations are synchronous.
     async fn forward(
         &self,
-        input_ids: &Self::Input, // Expects token IDs, not embeddings
+        input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Self::Output> {
         // Embed inputs
-        let mut hidden_states = self.embeddings.forward(input_ids, None);
+        let mut hidden_states = self.embeddings.forward(input_ids, token_type_ids);
 
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
@@ -148,8 +149,9 @@ impl Encoder for CpuTransformerEncoder {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
-        let output = self.forward(input, attention_mask).await?;
+        let output = self.forward(input, attention_mask, token_type_ids).await?;
         Ok(output.last_hidden_state)
     }
 }

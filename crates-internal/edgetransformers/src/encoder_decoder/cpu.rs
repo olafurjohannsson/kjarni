@@ -155,6 +155,7 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
         decoder_attention_mask_from_generator: &Array2<f32>, // Renamed for clarity
         cache: Option<&mut dyn Cache>,
         encoder_output_opt: Option<&'a EncoderOutputTrait>,
+        
     ) -> Result<Self::Output> {
 
 
@@ -167,7 +168,7 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
                 encoder_output_ref
             },
             None => {
-                encoder_output_owned = self.encoder.forward(encoder_input_ids, encoder_attention_mask).await?;
+                encoder_output_owned = self.encoder.forward(encoder_input_ids, encoder_attention_mask, None).await?; // TODO Token_type_ids ???
                 &encoder_output_owned // Borrow the newly created output
             },
         };

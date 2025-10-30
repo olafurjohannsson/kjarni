@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let ranked_indices = cross_encoder.rerank(query, &documents).await?;
     
     println!("\nReranked results:");
-    for (rank, &idx) in ranked_indices.iter().enumerate().take(3) {
+    for (rank, &idx) in ranked_indices.iter().enumerate() {
         let score = cross_encoder.predict(query, documents[idx]).await?;
         println!("{}. [Score: {:.4}] {}", rank + 1, score, documents[idx]);
     }

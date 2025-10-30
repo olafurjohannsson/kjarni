@@ -9,11 +9,12 @@ use ndarray::{Array1, Array2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+use tokenizers::utils::padding;
 
-use edgetransformers::prelude::*;
-use edgetransformers::models::{ModelType, ModelArchitecture};
 use edgetransformers::encoder::TransformerEncoder;
-use edgetransformers::traits::{Encoder, EncoderOutput, LanguageModelConfig, EncoderArchitecture};
+use edgetransformers::models::{ModelArchitecture, ModelType};
+use edgetransformers::prelude::*;
+use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
@@ -25,15 +26,39 @@ pub use configs::MiniLMCrossEncoderConfig;
 pub struct CrossEncoder {
     encoder: TransformerEncoder,
     tokenizer: Tokenizer,
+    pooler: Pooler,
     classifier: ClassificationHead,
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
     model_type: ModelType,
 }
 
+struct Pooler {
+    dense_weight: Array2<f32>, // [hidden_size, hidden_size]
+    dense_bias: Array1<f32>,   // [hidden_size]
+}
+
+impl Pooler {
+    fn new(dense_weight: Array2<f32>, dense_bias: Array1<f32>) -> Self {
+        Self {
+            dense_weight,
+            dense_bias,
+        }
+    }
+
+    /// Forward pass: [batch, hidden] -> [batch, hidden]
+    fn forward(&self, cls_hidden_state: &Array2<f32>) -> Array2<f32> {
+        let mut pooled_output = cls_hidden_state.dot(&self.dense_weight);
+        pooled_output += &self.dense_bias;
+        // Apply Tanh activation
+        pooled_output.mapv_inplace(f32::tanh);
+        pooled_output
+    }
+}
+
 /// Simple classification head (linear layer)
 struct ClassificationHead {
-    weight: Array2<f32>,  // [hidden_size, num_labels]
-    bias: Array1<f32>,    // [num_labels]
+    weight: Array2<f32>, // [hidden_size, num_labels]
+    bias: Array1<f32>,   // [num_labels]
 }
 
 impl ClassificationHead {
@@ -50,9 +75,7 @@ impl ClassificationHead {
 
 impl CrossEncoder {
     /// Supported cross-encoder model types
-    const SUPPORTED_MODELS: &'static [ModelType] = &[
-        ModelType::MiniLML6V2CrossEncoder,
-    ];
+    const SUPPORTED_MODELS: &'static [ModelType] = &[ModelType::MiniLML6V2CrossEncoder];
 
     /// Create cross-encoder from HuggingFace registry
     pub async fn from_registry(
@@ -70,7 +93,7 @@ impl CrossEncoder {
         }
 
         let info = model_type.info();
-        
+
         if info.architecture != ModelArchitecture::CrossEncoder {
             return Err(anyhow!(
                 "Model {:?} is not a cross-encoder (architecture: {:?})",
@@ -78,7 +101,7 @@ impl CrossEncoder {
                 info.architecture
             ));
         }
-        
+
         let cache_dir = cache_dir.unwrap_or_else(|| {
             dirs::cache_dir()
                 .expect("No cache directory found")
@@ -102,11 +125,15 @@ impl CrossEncoder {
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
-            return Err(anyhow!("CrossEncoder: Unsupported model type: {:?}", model_type));
+            return Err(anyhow!(
+                "CrossEncoder: Unsupported model type: {:?}",
+                model_type
+            ));
         }
 
         let weights = ModelWeights::new(model_path)?;
-        let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
+
+        let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         // Load encoder
@@ -118,16 +145,35 @@ impl CrossEncoder {
             _ => return Err(anyhow!("Unsupported cross-encoder: {:?}", model_type)),
         };
 
+        let truncation_params = tokenizers::TruncationParams {
+            max_length: config.max_position_embeddings(),
+            ..Default::default()
+        };
+
+        _ = tokenizer.with_truncation(Some(truncation_params));
+
+        let padding_params = tokenizers::PaddingParams {
+            strategy: tokenizers::PaddingStrategy::BatchLongest,
+            ..Default::default()
+        };
+        tokenizer.with_padding(Some(padding_params));
+
         let encoder = TransformerEncoder::new(&weights, config.clone(), device, context)?;
+
+        // Load pooler
+        let pooler_weight = weights.get_linear_weight("bert.pooler.dense.weight")?;
+        let pooler_bias = weights.get_array1("bert.pooler.dense.bias")?;
+        let pooler = Pooler::new(pooler_weight, pooler_bias);
 
         // Load classification head
         let classifier_weight = weights.get_linear_weight("classifier.weight")?;
         let classifier_bias = weights.get_array1("classifier.bias")?;
         let classifier = ClassificationHead::new(classifier_weight, classifier_bias);
-        
+
         Ok(Self {
             encoder,
             tokenizer,
+            pooler,
             config,
             classifier,
             model_type,
@@ -174,63 +220,55 @@ impl CrossEncoder {
             return Ok(vec![]);
         }
 
-        // Tokenize all pairs
-        let mut input_ids = Vec::new();
-        let mut attention_masks = Vec::new();
-        let mut max_len = self.max_length();
+        let encodings = self
+            .tokenizer
+            .encode_batch(pairs.to_vec(), true)
+            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        for (text1, text2) in pairs {
-            // Encode with [CLS] text1 [SEP] text2 [SEP]
-            let encoding = self.tokenizer
-                .encode((*text1, *text2), true)
-                .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
-            
-            let ids = encoding.get_ids();
-            max_len = max_len.max(ids.len());
-            input_ids.push(ids.to_vec());
-            attention_masks.push(vec![1u32; ids.len()]);
-        }
+        let batch_size = encodings.len();
+        let max_len = encodings.iter().map(|e| e.len()).max().unwrap_or(0);
 
-        // Pad to max length (TODO: NOT USED?)
-        let pad_id = self.tokenizer
-            .token_to_id("[PAD]")
-            .unwrap_or(0);
-
-        let batch_size = pairs.len();
         let mut batch_input_ids = Array2::<f32>::zeros((batch_size, max_len));
         let mut batch_attention_mask = Array2::<f32>::zeros((batch_size, max_len));
+        let mut batch_token_type_ids = Array2::<f32>::zeros((batch_size, max_len)); // The crucial tensor
 
-        for (i, (ids, mask)) in input_ids.iter().zip(attention_masks.iter()).enumerate() {
-            for (j, &id) in ids.iter().enumerate() {
+        for (i, encoding) in encodings.iter().enumerate() {
+            for (j, &id) in encoding.get_ids().iter().enumerate() {
                 batch_input_ids[[i, j]] = id as f32;
             }
-            for (j, &m) in mask.iter().enumerate() {
-                batch_attention_mask[[i, j]] = m as f32;
+            for (j, &mask) in encoding.get_attention_mask().iter().enumerate() {
+                batch_attention_mask[[i, j]] = mask as f32;
             }
-            // Padding already zeros, so no need to set explicitly
+            // This loop is the fix
+            for (j, &type_id) in encoding.get_type_ids().iter().enumerate() {
+                batch_token_type_ids[[i, j]] = type_id as f32;
+            }
         }
 
-        // Forward through encoder
-        let encoder_output = self.encoder
-            .forward(&batch_input_ids, &batch_attention_mask)
+        // Now pass all three tensors to the encoder
+        let encoder_output = self
+            .encoder
+            .forward(
+                &batch_input_ids,
+                &batch_attention_mask,
+                Some(&batch_token_type_ids),
+            )
             .await?;
 
-        // Extract [CLS] token (first token of each sequence)
+        // Extract [CLS] token
         let cls_embeddings = encoder_output
             .last_hidden_state
             .slice(ndarray::s![.., 0, ..])
             .to_owned();
 
-        // Pass through classifier
-        let logits = self.classifier.forward(&cls_embeddings);
+        // --- ADD THE POOLER FORWARD PASS ---
+        let pooled_output = self.pooler.forward(&cls_embeddings);
 
-        // Extract scores (assuming single label for binary classification)
-        let mut scores = Vec::with_capacity(batch_size);
-        for i in 0..batch_size {
-            scores.push(logits[[i, 0]]);
-        }
+        // --- PASS THE POOLED OUTPUT TO THE CLASSIFIER ---
+        let logits = self.classifier.forward(&pooled_output);
 
-        Ok(scores)
+        // Extract scores
+        Ok(logits.column(0).to_vec())
     }
 
     /// Rerank documents by relevance to a query
@@ -247,7 +285,7 @@ impl CrossEncoder {
     ///     "The weather is sunny today",
     ///     "Deep learning uses neural networks",
     /// ];
-    /// 
+    ///
     /// let ranked_indices = encoder.rerank(query, &documents).await?;
     /// for (rank, &idx) in ranked_indices.iter().enumerate() {
     ///     println!("Rank {}: {}", rank + 1, documents[idx]);
@@ -261,20 +299,14 @@ impl CrossEncoder {
         }
 
         // Create pairs
-        let pairs: Vec<(&str, &str)> = documents
-            .iter()
-            .map(|doc| (query, *doc))
-            .collect();
+        let pairs: Vec<(&str, &str)> = documents.iter().map(|doc| (query, *doc)).collect();
 
         // Score all pairs
         let scores = self.predict_batch(&pairs).await?;
 
         // Sort indices by score (descending)
-        let mut indexed_scores: Vec<(usize, f32)> = scores
-            .into_iter()
-            .enumerate()
-            .collect();
-        
+        let mut indexed_scores: Vec<(usize, f32)> = scores.into_iter().enumerate().collect();
+
         indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
         Ok(indexed_scores.into_iter().map(|(idx, _)| idx).collect())
@@ -294,11 +326,11 @@ impl CrossEncoder {
 
         for (filename, url) in files {
             let local_path = model_dir.join(filename);
-            
+
             if !local_path.exists() {
                 println!("Downloading {}...", filename);
                 let response = reqwest::get(*url).await?;
-                
+
                 if !response.status().is_success() {
                     return Err(anyhow!(
                         "Failed to download {}: HTTP {}",
@@ -306,7 +338,7 @@ impl CrossEncoder {
                         response.status()
                     ));
                 }
-                
+
                 let bytes = response.bytes().await?;
                 tokio::fs::write(&local_path, &bytes).await?;
                 println!("✓ Downloaded {}", filename);
@@ -318,7 +350,6 @@ impl CrossEncoder {
 }
 
 impl TransformerModel for CrossEncoder {
-    
     fn device(&self) -> Device {
         self.encoder.device()
     }
@@ -328,9 +359,8 @@ impl LanguageModel for CrossEncoder {
     fn config(&self) -> &dyn LanguageModelConfig {
         self.config.as_ref()
     }
-    
+
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    
 }

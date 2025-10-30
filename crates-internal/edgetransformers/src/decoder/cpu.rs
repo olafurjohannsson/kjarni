@@ -17,7 +17,7 @@ use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerL
 /// The CPU backend implementation for the generic `TransformerDecoder`.
 pub struct CpuTransformerDecoder {
     embeddings: Embeddings,
-    final_layer_norm: LayerNorm, // Changed from embeddings_layer_norm
+    final_layer_norm: LayerNorm,
     layers: Vec<TransformerLayer>,
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
 }
@@ -43,8 +43,6 @@ impl CpuTransformerDecoder {
             config.layer_norm_eps(),
         );
 
-        // Build each transformer layer
-        // Build each transformer layer
         let mut layers = Vec::with_capacity(config.num_hidden_layers());
         for i in 0..config.num_hidden_layers() {
             let attn_names = config.get_attention_names(i);
