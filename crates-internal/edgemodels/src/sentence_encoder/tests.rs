@@ -7,7 +7,7 @@ use edgetransformers::traits::Device;
 use std::sync::Arc;
 use tokio;
 
-const TOLERANCE: f32 = 1e-3;
+const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
 
 #[tokio::test]
 async fn test_torch_sentence_encoder_golden_values() -> Result<()> {

@@ -246,7 +246,7 @@ pub trait EncoderLanguageModel: LanguageModel {
     /// # Arguments
     /// * `text` - Input text
     /// * `pooling` - Pooling strategy: "cls", or "mean"
-    async fn encode(&self, text: &str, pooling: &str) -> Result<Vec<f32>> {
+    async fn encode(&self, text: &str, pooling: &str, normalize: bool) -> Result<Vec<f32>> {
         let (hidden, attention_mask) = self.get_hidden_states_batch(&[text]).await?;
 
         // Mean pooling requires the attention mask to work correctly
@@ -263,14 +263,18 @@ pub trait EncoderLanguageModel: LanguageModel {
         };
 
         // L2 Normalize the final embedding
-        let norm = (embedding.dot(&embedding)).sqrt();
-        let normalized_embedding = if norm > 0.0 {
-            embedding / norm
-        } else {
-            embedding
-        };
+        if normalize {
+            let norm = (embedding.dot(&embedding)).sqrt();
+            let normalized_embedding = if norm > 0.0 {
+                embedding / norm
+            } else {
+                embedding
+            };
 
-        Ok(normalized_embedding.to_vec())
+            return Ok(normalized_embedding.to_vec());
+        }
+
+        Ok(embedding.to_vec())
     }
 
     /// Encode a batch of texts into L2-normalized embedding vectors.

@@ -1,51 +1,36 @@
 [package]
 name = "edgetransformers"
-version = "0.1.0"
-edition = "2024"
-authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
-description = ""
-repository = "https://github.com/olafurjohannssson/edgetransformers"
-license = "MIT"
-keywords = ["bert", "nlp", "wasm", "transformers", "embeddings"]
-categories = ["wasm", "text-processing", "encoding"]
+description = "Low-level transformer operations for EdgeGPT"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
-[features]
-default = []  # No OpenBLAS by default
-openblas = ["dep:blas-src", "dep:openblas-src", "ndarray/blas"]
 
 [dependencies]
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-
-# Optional BLAS dependencies
-blas-src = { version = "0.10", features = ["openblas"], optional = true }
-openblas-src = { version = "0.10", features = ["cblas", "system"], optional = true }
-wgpu = "27.0.1"
-pollster = "0.4.0"
-bytemuck = "1.24.0"
-futures-intrusive = "0.5.0"
-reqwest = { version = "0.12.23", default-features = false, features = ["blocking", "rustls-tls"] }
-async-trait = "0.1.89"
-half.workspace = true
-safetensors.workspace = true
-rand_distr = "0.5.1"
-ndarray-rand = "0.15"
-futures = "0.3.31"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokenizers = { version = "0.22.1", default-features = false, features = ["onig"] }
-rayon = "1.11.0"
-dirs = "6.0.0"
-ndarray-stats = "0.6.0"
-matrixmultiply = { version = "0.3", features = ["threading", "num_cpus", "cgemm"] }
-ndarray = { version = "0.16", features = ["rayon", "matrixmultiply-threading"] }
-
-rand = "0.8"
-rand_distr = "0.4"
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+safetensors = { workspace = true }
+ndarray = { workspace = true }
+rand = { workspace = true }
+half = { workspace = true }
+pollster = { workspace = true }
+once_cell = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tokenizers = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
+futures-intrusive = { workspace = true }
+rand_distr ={ workspace = true}
 
 [dev-dependencies]
-reqwest = { version = "0.12.23", default-features = false, features = ["blocking", "rustls-tls"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-ndarray-rand = "0.15"
-rand = "0.8"
+ndarray-rand = "0.15.0"

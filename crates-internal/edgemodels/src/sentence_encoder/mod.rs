@@ -15,7 +15,7 @@ use edgetransformers::models::{EncoderLanguageModel, LanguageModel, ModelArchite
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
-
+mod tests;
 mod configs;
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
 
@@ -181,7 +181,13 @@ impl SentenceEncoder {
 
     /// Encode text with default mean pooling
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
-        <Self as EncoderLanguageModel>::encode(self, text, "mean").await
+        <Self as EncoderLanguageModel>::encode(self, text, "mean", true).await
+    }
+
+    /// Encode with pooling strategy and optional normalization
+    pub async fn encode_with(&self, text: &str, pooling_strategy: Option<&str>, normalize: bool) -> Result<Vec<f32>> {
+        let strategy = pooling_strategy.unwrap_or("mean");
+        <Self as EncoderLanguageModel>::encode(self, text, &strategy, normalize).await
     }
 
     /// Encode batch of texts with default mean pooling

@@ -1,17 +1,19 @@
-use super::EdgeGPT;
+// Use the EdgeGPT struct from your library's main file.
+use super::EdgeGPT; 
 use edgetransformers::prelude::{Device, WgpuContext};
 use once_cell::sync::Lazy;
 use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int};
+use std::ptr;
+use std::slice;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 // --- Global Tokio Runtime ---
-// A single, global runtime is needed to execute our async Rust code from the sync C world.
 static RUNTIME: Lazy<Runtime> = Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
 
 // --- Opaque Handle ---
-// The C code will only see this as a `void*`. Rust knows it's a pointer to our EdgeGPT engine.
+// The C code will only see this as a void*, but Rust knows it's a pointer to our EdgeGPT engine.
 pub type EdgeGptHandle = *mut EdgeGPT;
 
 // --- C-style Enum for Device Selection ---
@@ -21,118 +23,126 @@ pub enum EdgeGptDevice {
     Gpu = 1,
 }
 
-/// Creates a new instance of the EdgeGPT engine for a specified device.
-///
-/// Returns a handle to the engine instance. This handle must be freed later
-/// by calling `edgegpt_destroy`.
-///
-/// Returns `null` if creation fails (e.g., no compatible GPU found).
-#[no_mangle]
-pub extern "C" fn edgegpt_create(device_type: EdgeGptDevice) -> EdgeGptHandle {
-    let result = RUNTIME.block_on(async {
-        match device_type {
-            EdgeGptDevice::Cpu => {
-                println!("Creating EdgeGPT engine for CPU...");
-                Ok(EdgeGPT::new(Device::Cpu, None))
-            }
-            EdgeGptDevice::Gpu => {
-                println!("Creating EdgeGPT engine for GPU...");
-                let context = WgpuContext::new().await;
-                Ok(EdgeGPT::new(Device::Wgpu, Some(Arc::new(context))))
-            }
-        }
-    });
+// --- C-compatible struct to return embeddings result ---
+#[repr(C)]
+pub struct CEmbeddingResult {
+    pub embeddings_ptr: *mut f32,
+    pub num_embeddings: usize,
+    pub embedding_dim: usize,
+    pub error_message: *mut c_char,
+}
 
-    match result {
-        Ok(engine) => {
-            // Put the engine on the heap and return a raw pointer to it.
-            // The caller is now responsible for this memory.
-            Box::into_raw(Box::new(engine))
+
+/// Creates a new instance of the EdgeGPT engine.
+///
+/// Returns a handle to the engine. This handle must be freed later
+/// by calling `edgegpt_destroy`. Returns `null` if creation fails.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edgegpt_create(device_type: EdgeGptDevice) -> EdgeGptHandle {
+    let engine = match device_type {
+        EdgeGptDevice::Cpu => {
+            println!("Creating EdgeGPT engine for CPU...");
+            EdgeGPT::new(Device::Cpu, None)
         }
-        Err(e) => {
-            eprintln!("Failed to create EdgeGPT engine: {}", e);
-            std::ptr::null_mut()
+        EdgeGptDevice::Gpu => {
+            println!("Creating EdgeGPT engine for GPU...");
+            // We must block on the async context creation.
+            let context_result = RUNTIME.block_on(WgpuContext::new());
+            EdgeGPT::new(Device::Wgpu, Some(Arc::new(context_result)))
         }
-    }
+    };
+    Box::into_raw(Box::new(engine))
 }
 
 /// Destroys an instance of the EdgeGPT engine and frees its memory.
-///
 /// # Safety
 /// - `handle` must be a valid pointer returned by `edgegpt_create`.
-/// - This function must only be called once for each handle.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn edgegpt_destroy(handle: EdgeGptHandle) {
     if handle.is_null() {
         return;
     }
-    // Reconstruct the Box from the raw pointer and let Rust's drop semantics
-    // handle the cleanup of the EdgeGPT instance and all its loaded models.
     unsafe {
         let _ = Box::from_raw(handle);
     }
 }
 
-/// Summarizes a UTF-8 string using the specified engine instance.
-///
+/// Encodes a batch of sentences using the specified engine instance.
 /// # Safety
 /// - `handle` must be a valid pointer returned by `edgegpt_create`.
-/// - `text_ptr` must be a valid, null-terminated UTF-8 string.
-/// - The returned pointer must be freed by the caller using `edgegpt_free_string`.
-#[no_mangle]
-pub extern "C" fn edgegpt_summarize(handle: EdgeGptHandle, text_ptr: *const c_char, max_length: i32) -> *mut c_char {
-    if handle.is_null() || text_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-    
-    let engine = unsafe { &*handle };
-    let text = unsafe { CStr::from_ptr(text_ptr) }.to_str().unwrap_or("");
-
-    let result = RUNTIME.block_on(engine.summarize(text, max_length as usize));
-
-    let output_str = match result {
-        Ok(summary) => summary,
-        Err(e) => format!("ERROR: {}", e),
-    };
-
-    CString::new(output_str).unwrap().into_raw()
-}
-
-/// Generates text from a UTF-8 prompt using the specified engine instance.
-///
-/// # Safety
-/// - `handle` must be a valid pointer returned by `edgegpt_create`.
-/// - `prompt_ptr` must be a valid, null-terminated UTF-8 string.
-/// - The returned pointer must be freed by the caller using `edgegpt_free_string`.
-#[no_mangle]
-pub extern "C" fn edgegpt_generate(handle: EdgeGptHandle, prompt_ptr: *const c_char, max_new_tokens: i32) -> *mut c_char {
-    if handle.is_null() || prompt_ptr.is_null() {
-        return std::ptr::null_mut();
+/// - `sentences_ptr` must be a valid pointer to an array of null-terminated UTF-8 strings.
+/// - The returned pointer must be freed by the caller using `edgegpt_free_embedding_result`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edgegpt_encode_batch(
+    handle: EdgeGptHandle,
+    sentences_ptr: *const *const c_char,
+    num_sentences: c_int,
+) -> *mut CEmbeddingResult {
+    if handle.is_null() || sentences_ptr.is_null() || num_sentences <= 0 {
+        return ptr::null_mut();
     }
 
     let engine = unsafe { &*handle };
-    let prompt = unsafe { CStr::from_ptr(prompt_ptr) }.to_str().unwrap_or("");
+    let sentences_slice = unsafe { slice::from_raw_parts(sentences_ptr, num_sentences as usize) };
 
-    let result = RUNTIME.block_on(engine.generate(prompt, max_new_tokens as usize));
+    let rust_sentences: Vec<&str> = sentences_slice
+        .iter()
+        .map(|&p| unsafe { CStr::from_ptr(p).to_str().unwrap() })
+        .collect();
 
-    let output_str = match result {
-        Ok(text) => text,
-        Err(e) => format!("ERROR: {}", e),
+    // Call the high-level encode_batch method on our EdgeGPT instance
+    let result = RUNTIME.block_on(engine.encode_batch(&rust_sentences));
+
+    let result_struct = match result {
+        Ok(embeddings) => {
+            let num_embeddings = embeddings.len();
+            let embedding_dim = if num_embeddings > 0 { embeddings[0].len() } else { 0 };
+            
+            // Flatten the Vec<Vec<f32>> into a single Vec<f32> for C
+            let mut flat_embeddings = embeddings.into_iter().flatten().collect::<Vec<f32>>();
+            
+            flat_embeddings.shrink_to_fit();
+            let embeddings_ptr = flat_embeddings.as_mut_ptr();
+            std::mem::forget(flat_embeddings); // Give ownership to the C caller
+
+            CEmbeddingResult {
+                embeddings_ptr,
+                num_embeddings,
+                embedding_dim,
+                error_message: ptr::null_mut(),
+            }
+        }
+        Err(e) => {
+            let error_message = CString::new(format!("ERROR: {}", e)).unwrap().into_raw();
+            CEmbeddingResult {
+                embeddings_ptr: ptr::null_mut(),
+                num_embeddings: 0,
+                embedding_dim: 0,
+                error_message,
+            }
+        }
     };
 
-    CString::new(output_str).unwrap().into_raw()
+    Box::into_raw(Box::new(result_struct))
 }
 
-/// Frees a string that was allocated by this library.
-///
+/// Frees the memory allocated for a CEmbeddingResult.
 /// # Safety
-/// - `ptr` must be a pointer returned by a function from this library.
-#[no_mangle]
-pub extern "C" fn edgegpt_free_string(ptr: *mut c_char) {
-    if ptr.is_null() {
+/// - `result_ptr` must be a pointer returned by `edgegpt_encode_batch`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edgegpt_free_embedding_result(result_ptr: *mut CEmbeddingResult) {
+    if result_ptr.is_null() {
         return;
     }
     unsafe {
-        let _ = CString::from_raw(ptr);
+        let result = Box::from_raw(result_ptr);
+        if !result.error_message.is_null() {
+            let _ = CString::from_raw(result.error_message);
+        }
+        if !result.embeddings_ptr.is_null() {
+            // Reconstruct the flat Vec<f32> to let Rust handle freeing its memory
+            let total_elements = result.num_embeddings * result.embedding_dim;
+            let _ = Vec::from_raw_parts(result.embeddings_ptr, total_elements, total_elements);
+        }
     }
 }
