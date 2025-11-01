@@ -11,16 +11,31 @@ pub enum PoolingStrategy {
     LastToken,
 }
 
-/// Perform mean pooling over sequence dimension
+/// Performs mean pooling over sequence dimension to convert token embeddings to sentence embeddings.
+///
+/// Takes a 3D tensor of shape [batch, sequence_length, hidden_size] containing token embeddings
+/// and produces a 2D tensor of shape [batch, hidden_size] containing sentence embeddings.
+///
+/// The attention_mask indicates which tokens are real (1.0) vs padding (0.0).
+/// Only real tokens contribute to the mean.
 pub fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array2<f32>> {
-    let mask_expanded = attention_mask.clone().insert_axis(Axis(2));
+    // Expand attention mask from [batch, seq] to [batch, seq, 1] for broadcasting
+    let mask_expanded = attention_mask.view().insert_axis(ndarray::Axis(2));
+    
+    // Element-wise multiply hidden states with the mask. This zeros out padding tokens.
     let masked_hidden = hidden * &mask_expanded;
-    let sum = masked_hidden.sum_axis(Axis(1));
+    
+    // Sum along the sequence axis. Shape becomes [batch, hidden_size]
+    let sum = masked_hidden.sum_axis(ndarray::Axis(1));
+    
+    // Count the number of non-padding tokens for each sentence in the batch.
+    // Add a small epsilon (or clamp to 1.0) to avoid division by zero for empty sequences.
     let count = attention_mask
-        .sum_axis(Axis(1))
-        .mapv(|x| x.max(1.0))
-        .insert_axis(Axis(1));
+        .sum_axis(ndarray::Axis(1))
+        .mapv(|x| x.max(1e-9)) // Use max to avoid division by zero
+        .insert_axis(ndarray::Axis(1));
 
+    // Divide the sum by the count to get the mean
     Ok(sum / &count)
 }
 
@@ -31,7 +46,7 @@ pub fn cls_pool(hidden: &Array3<f32>) -> Result<Array2<f32>> {
 
 /// Max pooling over sequence dimension
 pub fn max_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array2<f32>> {
-    let mask_expanded = attention_mask.clone().insert_axis(Axis(2));
+    let mask_expanded = attention_mask.view().insert_axis(Axis(2));
     // Set masked positions to -inf before max pooling
     let mut masked_hidden = hidden.clone();
     masked_hidden.zip_mut_with(&mask_expanded, |h, &m| {

@@ -4,6 +4,7 @@
 //! the low-level architecture traits in `traits.rs`.
 
 use crate::cache::CpuKVCache;
+use crate::pooling::mean_pool;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
@@ -246,6 +247,7 @@ pub trait EncoderLanguageModel: LanguageModel {
     /// # Arguments
     /// * `text` - Input text
     /// * `pooling` - Pooling strategy: "cls", or "mean"
+    /// * `normalize` -
     async fn encode(&self, text: &str, pooling: &str, normalize: bool) -> Result<Vec<f32>> {
         let (hidden, attention_mask) = self.get_hidden_states_batch(&[text]).await?;
 
@@ -286,7 +288,7 @@ pub trait EncoderLanguageModel: LanguageModel {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
         // Apply pooling to the whole batch
-        let pooled = match pooling {
+        let mut pooled = match pooling {
             "cls" => {
                 // Use [CLS] token (first token of each item in the batch)
                 hidden_states.slice(ndarray::s![.., 0, ..]).to_owned()
@@ -296,9 +298,10 @@ pub trait EncoderLanguageModel: LanguageModel {
         };
 
         // L2 Normalize the entire batch of embeddings
-        let normalized = l2_normalize(&pooled);
+        // let normalized = l2_normalize(&pooled);
+        l2_normalize_inplace(&mut pooled);
 
-        Ok(normalized.outer_iter().map(|row| row.to_vec()).collect())
+        Ok(pooled.outer_iter().map(|row| row.to_vec()).collect())
     }
 }
 
@@ -411,30 +414,11 @@ pub fn l2_normalize(embeddings: &Array2<f32>) -> Array2<f32> {
     normalized
 }
 
-/// Performs mean pooling over sequence dimension to convert token embeddings to sentence embeddings.
-///
-/// Takes a 3D tensor of shape [batch, sequence_length, hidden_size] containing token embeddings
-/// and produces a 2D tensor of shape [batch, hidden_size] containing sentence embeddings.
-///
-/// The attention_mask indicates which tokens are real (1.0) vs padding (0.0).
-/// Only real tokens contribute to the mean.
-fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array2<f32>> {
-    // Expand attention mask from [batch, seq] to [batch, seq, 1] for broadcasting
-    let mask_expanded = attention_mask.clone().insert_axis(ndarray::Axis(2));
-    
-    // Element-wise multiply hidden states with the mask. This zeros out padding tokens.
-    let masked_hidden = hidden * &mask_expanded;
-    
-    // Sum along the sequence axis. Shape becomes [batch, hidden_size]
-    let sum = masked_hidden.sum_axis(ndarray::Axis(1));
-    
-    // Count the number of non-padding tokens for each sentence in the batch.
-    // Add a small epsilon (or clamp to 1.0) to avoid division by zero for empty sequences.
-    let count = attention_mask
-        .sum_axis(ndarray::Axis(1))
-        .mapv(|x| x.max(1e-9)) // Use max to avoid division by zero
-        .insert_axis(ndarray::Axis(1));
-
-    // Divide the sum by the count to get the mean
-    Ok(sum / &count)
+pub fn l2_normalize_inplace(embeddings: &mut Array2<f32>) {
+    for mut row in embeddings.rows_mut() {
+        let norm = row.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            row /= norm;
+        }
+    }
 }

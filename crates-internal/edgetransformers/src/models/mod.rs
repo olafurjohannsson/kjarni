@@ -11,6 +11,7 @@ pub use base::{
     Seq2SeqLanguageModel,
     project_to_vocab,
     l2_normalize,
+    l2_normalize_inplace,
 };
 
 pub use registry::{

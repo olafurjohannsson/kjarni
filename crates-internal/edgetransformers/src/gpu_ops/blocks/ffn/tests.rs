@@ -1,6 +1,10 @@
 use super::*;
 use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
-use crate::{FeedForward, LayerNorm, wgpu_context::WgpuContext};
+use crate::{FeedForward, LayerNorm, gpu_context::WgpuContext, gpu_ops::blocks::ffn::FFNWeights};
+use crate::gpu_ops::blocks::ffn::run_ffn_block;
+use crate::gpu_ops::blocks::ffn::FFNPipelines;
+use crate::gpu_ops::blocks::ffn::FFNTempBuffers;
+use crate::gpu_ops::blocks::ffn::FFNConfig;
 use ndarray::{Array, Array1, Array2, Array3};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
@@ -94,7 +98,7 @@ async fn test_ffn_correctness() -> Result<()> {
         usage: wgpu::BufferUsages::STORAGE,
     });
 
-    let gpu_weights = GpuFeedForwardWeights {
+    let gpu_weights = FFNWeights {
         fc1_weight: Arc::new(fc1_weight_gpu),
         fc1_bias: Arc::new(fc1_bias_gpu),
         fc2_weight: Arc::new(fc2_weight_gpu),
@@ -117,22 +121,24 @@ async fn test_ffn_correctness() -> Result<()> {
         label: Some("FFN Test Encoder"),
     });
 
-    let fc1_pipeline = compile_fc1_pipeline(&context);
-    let fc2_pipeline = compile_fc2_pipeline(&context);
+    let fc1_pipeline = Arc::new(compile_fc1_pipeline(&context));
+    let fc2_pipeline = Arc::new(compile_fc2_pipeline(&context));
 
-    run_gpu_ffn(
-        &context,
-        &mut encoder,
-        &fc1_pipeline,
-        &fc2_pipeline,
-        &input_gpu,
-        &intermediate_gpu,
-        &output_gpu,
-        &gpu_weights,
-        (batch_size * seq_len) as u32,
-        hidden_size as u32,
-        intermediate_size as u32,
-    );
+    let pipelines = FFNPipelines { fc1: fc1_pipeline, fc2: fc2_pipeline };
+
+    let cfg = FFNConfig {
+        batch_size: batch_size,
+        hidden_size: hidden_size,
+        intermediate_size: intermediate_size,
+        seq_len: seq_len
+    };
+
+    let buffers = FFNTempBuffers {
+        intermediate: intermediate_gpu
+    };
+
+    run_ffn_block(&context, &mut encoder, &pipelines, &input_gpu, &output_gpu, &cfg, &gpu_weights, &buffers);
+
     context.queue.submit(std::iter::once(encoder.finish()));
     device.poll(wgpu::PollType::wait_indefinitely());
 

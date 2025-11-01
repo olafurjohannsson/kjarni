@@ -19,8 +19,6 @@ async fn test_matmul_correctness() -> Result<()> {
     let context = get_test_context().await;
     let device = &context.device;
 
-    // --- 1. Arrange ---
-    // Test with non-square matrices to catch dimension errors
     let (m, k, n) = (32, 64, 48);
 
     let input_a_cpu: Array2<f32> = Array::random((m, k), Uniform::new(-1.0, 1.0));
@@ -43,8 +41,6 @@ async fn test_matmul_correctness() -> Result<()> {
         mapped_at_creation: false,
     });
 
-    // --- 2. Act ---
-    // Get the ground truth from the CPU `ndarray` implementation
     let cpu_result = input_a_cpu.dot(&input_b_cpu);
 
     // Run the GPU kernel
@@ -67,7 +63,6 @@ async fn test_matmul_correctness() -> Result<()> {
 
     let gpu_result_array = read_buffer_2d(&context, &output_c_gpu, (m, n)).await?;
 
-    // --- 3. Assert ---
     println!("Verifying Matmul GPU kernel against CPU implementation...");
     assert_vecs_are_close(
         cpu_result.as_slice().unwrap(),

@@ -175,92 +175,92 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
     }
 }
 
-// #[tokio::test]
-// async fn test_simple_input() -> Result<()> {
-//     println!("Testing Simple Input: Single Word");
+#[tokio::test]
+async fn test_simple_input() -> Result<()> {
+    println!("Testing Simple Input: Single Word");
 
-//     let cpu_encoder =
-//         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
-//     let context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder =
-//         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
-//             .await?;
+    let context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+            .await?;
 
-//     let simple_text = "hello";
+    let simple_text = "hello";
 
-//     println!("Input: \"{}\"", simple_text);
+    println!("Input: \"{}\"", simple_text);
 
-//     let cpu_emb = cpu_encoder.encode(simple_text).await?;
-//     let gpu_emb = gpu_encoder.encode(simple_text).await?;
+    let cpu_emb = cpu_encoder.encode(simple_text).await?;
+    let gpu_emb = gpu_encoder.encode(simple_text).await?;
 
-//     let pass = compare_vectors("Simple input embedding", &cpu_emb, &gpu_emb, TOLERANCE);
+    let pass = compare_vectors("Simple input embedding", &cpu_emb, &gpu_emb, TOLERANCE);
 
-//     if pass {
-//         println!("\n✅ Simple input test PASSED");
-//         Ok(())
-//     } else {
-//         println!("\n❌ Simple input test FAILED");
-//         Err(anyhow::anyhow!("Simple input test failed"))
-//     }
-// }
+    if pass {
+        println!("\n✅ Simple input test PASSED");
+        Ok(())
+    } else {
+        println!("\n❌ Simple input test FAILED");
+        Err(anyhow::anyhow!("Simple input test failed"))
+    }
+}
 
-// #[tokio::test]
-// async fn test_identical_sentences() -> Result<()> {
-//     println!("Testing Identical Sentences");
+#[tokio::test]
+async fn test_identical_sentences() -> Result<()> {
+    println!("Testing Identical Sentences");
 
-//     let cpu_encoder =
-//         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+    let cpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
-//     let context = Arc::new(WgpuContext::new().await);
-//     let gpu_encoder =
-//         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
-//             .await?;
+    let context = Arc::new(WgpuContext::new().await);
+    let gpu_encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+            .await?;
 
-//     let text = "This is a test sentence";
-//     let sentences = [text, text]; // Same sentence twice
+    let text = "This is a test sentence";
+    let sentences = [text, text]; // Same sentence twice
 
-//     let cpu_embeddings = cpu_encoder.encode_batch(&sentences).await?;
-//     let gpu_embeddings = gpu_encoder.encode_batch(&sentences).await?;
+    let cpu_embeddings = cpu_encoder.encode_batch(&sentences).await?;
+    let gpu_embeddings = gpu_encoder.encode_batch(&sentences).await?;
 
-//     // CPU should produce identical embeddings
-//     let cpu_self_sim = cosine_similarity(&cpu_embeddings[0], &cpu_embeddings[1]);
-//     println!("CPU self-similarity: {:.6}", cpu_self_sim);
-//     assert!(
-//         (cpu_self_sim - 1.0).abs() < 1e-5,
-//         "CPU should produce identical embeddings"
-//     );
+    // CPU should produce identical embeddings
+    let cpu_self_sim = cosine_similarity(&cpu_embeddings[0], &cpu_embeddings[1]);
+    println!("CPU self-similarity: {:.6}", cpu_self_sim);
+    assert!(
+        (cpu_self_sim - 1.0).abs() < 1e-5,
+        "CPU should produce identical embeddings"
+    );
 
-//     // GPU should produce identical embeddings
-//     let gpu_self_sim = cosine_similarity(&gpu_embeddings[0], &gpu_embeddings[1]);
-//     println!("GPU self-similarity: {:.6}", gpu_self_sim);
-//     assert!(
-//         (gpu_self_sim - 1.0).abs() < 1e-5,
-//         "GPU should produce identical embeddings"
-//     );
+    // GPU should produce identical embeddings
+    let gpu_self_sim = cosine_similarity(&gpu_embeddings[0], &gpu_embeddings[1]);
+    println!("GPU self-similarity: {:.6}", gpu_self_sim);
+    assert!(
+        (gpu_self_sim - 1.0).abs() < 1e-5,
+        "GPU should produce identical embeddings"
+    );
 
-//     // Compare CPU vs GPU
-//     let pass1 = compare_vectors(
-//         "First embedding",
-//         &cpu_embeddings[0],
-//         &gpu_embeddings[0],
-//         TOLERANCE,
-//     );
-//     let pass2 = compare_vectors(
-//         "Second embedding",
-//         &cpu_embeddings[1],
-//         &gpu_embeddings[1],
-//         TOLERANCE,
-//     );
+    // Compare CPU vs GPU
+    let pass1 = compare_vectors(
+        "First embedding",
+        &cpu_embeddings[0],
+        &gpu_embeddings[0],
+        TOLERANCE,
+    );
+    let pass2 = compare_vectors(
+        "Second embedding",
+        &cpu_embeddings[1],
+        &gpu_embeddings[1],
+        TOLERANCE,
+    );
 
-//     if pass1 && pass2 {
-//         println!("\n✅ Identical sentences test PASSED");
-//         Ok(())
-//     } else {
-//         println!("\n❌ Identical sentences test FAILED");
-//         Err(anyhow::anyhow!("Identical sentences test failed"))
-//     }
-// }
+    if pass1 && pass2 {
+        println!("\n✅ Identical sentences test PASSED");
+        Ok(())
+    } else {
+        println!("\n❌ Identical sentences test FAILED");
+        Err(anyhow::anyhow!("Identical sentences test failed"))
+    }
+}
 
 // #[tokio::test]
 // async fn test_gpu_layer_norm_only() -> Result<()> {

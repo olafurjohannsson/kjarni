@@ -77,6 +77,10 @@ impl CrossEncoder {
     /// Supported cross-encoder model types
     const SUPPORTED_MODELS: &'static [ModelType] = &[ModelType::MiniLML6V2CrossEncoder];
 
+    pub fn encoder(&self) -> &TransformerEncoder {
+        &self.encoder
+    }
+
     /// Create cross-encoder from HuggingFace registry
     pub async fn from_registry(
         model_type: ModelType,
