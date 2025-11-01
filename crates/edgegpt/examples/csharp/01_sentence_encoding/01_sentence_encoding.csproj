@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../../include/edgegpt.cs" />
+  </ItemGroup>
+
+  <Target Name="CopyEdgeGptNativeLib" AfterTargets="Build">
+  <ItemGroup>
+    <NativeLib Include="../../../../../target/release/libedgegpt.so" />
+  </ItemGroup>
+  <Copy SourceFiles="@(NativeLib)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+</Target>
+</Project>

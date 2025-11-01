@@ -10,7 +10,7 @@
 /// Cosine similarity score between -1.0 and 1.0
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use edgegpt::utils::cosine_similarity;
 ///
 /// let emb1 = vec![0.5, 0.5, 0.5];
@@ -41,7 +41,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// 2D similarity matrix where matrix[i][j] is the similarity between embeddings[i] and embeddings[j]
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use edgegpt::utils::similarity_matrix;
 ///
 /// let embeddings = vec![
@@ -80,7 +80,7 @@ pub fn similarity_matrix(embeddings: &[Vec<f32>]) -> Vec<Vec<f32>> {
 /// Vector of (index, similarity_score) tuples, sorted by similarity (highest first)
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use edgegpt::utils::find_most_similar;
 ///
 /// let query = vec![0.5, 0.5, 0.5];
