@@ -26,8 +26,10 @@ impl CpuTransformerEncoder {
     ///
     /// This function uses the `EncoderArchitecture` trait to dynamically look up
     /// the names of all required weight tensors and constructs the full model stack.
-    pub fn new(weights: &ModelWeights, config: Arc<dyn EncoderArchitecture + Send + Sync>) -> Result<Self>
-    {
+    pub fn new(
+        weights: &ModelWeights,
+        config: Arc<dyn EncoderArchitecture + Send + Sync>,
+    ) -> Result<Self> {
         // Load embedding weights using the names provided by the config.
         let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
         let token_type_embeddings = match type_w {
@@ -92,7 +94,7 @@ impl CpuTransformerEncoder {
                 config.layer_norm_eps(),
             );
 
-           layers.push(TransformerLayer {
+            layers.push(TransformerLayer {
                 self_attn: attention,
                 self_attn_layer_norm,
                 cross_attn: None, // An encoder layer has no cross-attention
@@ -108,6 +110,9 @@ impl CpuTransformerEncoder {
             layers,
             config: config as Arc<dyn EncoderArchitecture + Send + Sync>,
         })
+    }
+    pub fn config(&self) -> &Arc<dyn EncoderArchitecture + Send + Sync> {
+        &self.config
     }
 }
 

@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-
+use edgetransformers::models::download_model_files;
 use edgetransformers::CpuKVCache;
 use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::models::project_to_vocab;
@@ -60,7 +60,7 @@ impl TextGenerator {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        Self::download_model_files(&model_dir, &model_type.info().paths).await?;
+        download_model_files(&model_dir, &model_type.info().paths).await?;
         Self::from_pretrained(&model_dir, model_type, device, context)
     }
 
@@ -195,27 +195,6 @@ impl TextGenerator {
             .map_err(|e| anyhow!(e))
     }
 
-    async fn download_model_files(
-        model_dir: &Path,
-        paths: &edgetransformers::models::ModelPaths,
-    ) -> Result<()> {
-        tokio::fs::create_dir_all(model_dir).await?;
-        let files = [
-            ("model.safetensors", paths.weights_url),
-            ("tokenizer.json", paths.tokenizer_url),
-            ("config.json", paths.config_url),
-        ];
-        for (filename, url) in files {
-            let local_path = model_dir.join(filename);
-            if !local_path.exists() {
-                println!("Downloading {}...", filename);
-                let response = reqwest::get(url).await?;
-                anyhow::ensure!(response.status().is_success(), "Failed to download {}", url);
-                tokio::fs::write(&local_path, &response.bytes().await?).await?;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl TransformerModel for TextGenerator {

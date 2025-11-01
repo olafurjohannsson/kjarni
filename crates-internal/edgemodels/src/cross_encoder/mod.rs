@@ -5,11 +5,11 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use edgetransformers::models::download_model_files;
 use ndarray::{Array1, Array2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-use tokenizers::utils::padding;
 
 use edgetransformers::encoder::TransformerEncoder;
 use edgetransformers::models::{ModelArchitecture, ModelType};
@@ -18,6 +18,7 @@ use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, Lang
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
+mod tests;
 pub use configs::MiniLMCrossEncoderConfig;
 
 /// Cross-encoder for computing relevance scores between text pairs
@@ -115,7 +116,7 @@ impl CrossEncoder {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download files
-        Self::download_model_files(&model_dir, &info.paths).await?;
+        download_model_files(&model_dir, &info.paths).await?;
 
         // Load from local path
         Self::from_pretrained(&model_dir, model_type, device, context)
@@ -277,7 +278,7 @@ impl CrossEncoder {
 
     /// Rerank documents by relevance to a query
     ///
-    /// Returns indices sorted by relevance (highest first).
+    /// Returns tuples of (document_index, relevance_score) sorted by relevance (highest first).
     ///
     /// # Example
     /// ```no_run
@@ -290,14 +291,14 @@ impl CrossEncoder {
     ///     "Deep learning uses neural networks",
     /// ];
     ///
-    /// let ranked_indices = encoder.rerank(query, &documents).await?;
-    /// for (rank, &idx) in ranked_indices.iter().enumerate() {
-    ///     println!("Rank {}: {}", rank + 1, documents[idx]);
+    /// let ranked = encoder.rerank(query, &documents).await?;
+    /// for (rank, (idx, score)) in ranked.iter().enumerate() {
+    ///     println!("Rank {}: {} (score: {:.4})", rank + 1, documents[*idx], score);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<usize>> {
+    pub async fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<(usize, f32)>> {
         if documents.is_empty() {
             return Ok(vec![]);
         }
@@ -310,46 +311,108 @@ impl CrossEncoder {
 
         // Sort indices by score (descending)
         let mut indexed_scores: Vec<(usize, f32)> = scores.into_iter().enumerate().collect();
+        indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-        Ok(indexed_scores.into_iter().map(|(idx, _)| idx).collect())
+        Ok(indexed_scores)
+    }
+    /// Rerank documents and return only the indices (for backward compatibility)
+    ///
+    /// Returns document indices sorted by relevance (highest first).
+    ///
+    /// # Example
+    /// ```no_run
+    /// use edgemodels::cross_encoder::CrossEncoder;
+    /// # async fn example(encoder: &CrossEncoder) -> anyhow::Result<()> {
+    /// let query = "What is machine learning?";
+    /// let documents = vec![
+    ///     "Machine learning is a subset of AI",
+    ///     "The weather is sunny today",
+    ///     "Deep learning uses neural networks",
+    /// ];
+    ///
+    /// let ranked_indices = encoder.rerank_indices(query, &documents).await?;
+    /// for (rank, idx) in ranked_indices.iter().enumerate() {
+    ///     println!("Rank {}: {}", rank + 1, documents[*idx]);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rerank_indices(&self, query: &str, documents: &[&str]) -> Result<Vec<usize>> {
+        let ranked = self.rerank(query, documents).await?;
+        Ok(ranked.into_iter().map(|(idx, _)| idx).collect())
     }
 
-    async fn download_model_files(
-        model_dir: &Path,
-        paths: &edgetransformers::models::ModelPaths,
-    ) -> Result<()> {
-        tokio::fs::create_dir_all(model_dir).await?;
+    /// Rerank documents and return only the top K results
+    ///
+    /// Returns tuples of (document_index, relevance_score) for the top K documents.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use edgemodels::cross_encoder::CrossEncoder;
+    /// # async fn example(encoder: &CrossEncoder) -> anyhow::Result<()> {
+    /// let query = "What is machine learning?";
+    /// let documents = vec![
+    ///     "Machine learning is a subset of AI",
+    ///     "The weather is sunny today",
+    ///     "Deep learning uses neural networks",
+    ///     "Neural networks have multiple layers",
+    ///     "AI is transforming industries",
+    /// ];
+    ///
+    /// // Get only top 3 results
+    /// let top_3 = encoder.rerank_top_k(query, &documents, 3).await?;
+    /// for (rank, (idx, score)) in top_3.iter().enumerate() {
+    ///     println!("Rank {}: {} (score: {:.4})", rank + 1, documents[*idx], score);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rerank_top_k(
+        &self,
+        query: &str,
+        documents: &[&str],
+        k: usize,
+    ) -> Result<Vec<(usize, f32)>> {
+        let mut ranked = self.rerank(query, documents).await?;
+        ranked.truncate(k);
+        Ok(ranked)
+    }
 
-        let files = [
-            ("model.safetensors", &paths.weights_url),
-            ("tokenizer.json", &paths.tokenizer_url),
-            ("config.json", &paths.config_url),
-        ];
+    /// Rerank documents and return only the top K indices
+    ///
+    /// # Example
+    /// ```no_run
+    /// use edgemodels::cross_encoder::CrossEncoder;
+    /// # async fn example(encoder: &CrossEncoder) -> anyhow::Result<()> {
+    /// let query = "What is machine learning?";
+    /// let documents = vec![
+    ///     "Machine learning is a subset of AI",
+    ///     "The weather is sunny today",
+    ///     "Deep learning uses neural networks",
+    ///     "Neural networks have multiple layers",
+    ///     "AI is transforming industries",
+    /// ];
+    ///
+    /// let top_3_indices = encoder.rerank_top_k_indices(query, &documents, 3).await?;
+    /// for (rank, idx) in top_3_indices.iter().enumerate() {
+    ///     println!("Rank {}: {}", rank + 1, documents[*idx]);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rerank_top_k_indices(
+        &self,
+        query: &str,
+        documents: &[&str],
+        k: usize,
+    ) -> Result<Vec<usize>> {
+        let top_k = self.rerank_top_k(query, documents, k).await?;
+        Ok(top_k.into_iter().map(|(idx, _)| idx).collect())
+    }
 
-        for (filename, url) in files {
-            let local_path = model_dir.join(filename);
-
-            if !local_path.exists() {
-                println!("Downloading {}...", filename);
-                let response = reqwest::get(*url).await?;
-
-                if !response.status().is_success() {
-                    return Err(anyhow!(
-                        "Failed to download {}: HTTP {}",
-                        filename,
-                        response.status()
-                    ));
-                }
-
-                let bytes = response.bytes().await?;
-                tokio::fs::write(&local_path, &bytes).await?;
-                println!("✓ Downloaded {}", filename);
-            }
-        }
-
-        Ok(())
+    /// Get the maximum sequence length
+    pub fn max_seq_length(&self) -> usize {
+        self.encoder.max_length()
     }
 }
 

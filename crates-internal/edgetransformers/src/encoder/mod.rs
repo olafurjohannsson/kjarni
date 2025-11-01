@@ -17,11 +17,9 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
-use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel,
-};
-use crate::weights::ModelWeights;
 use crate::gpu_context::WgpuContext;
+use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
+use crate::weights::ModelWeights;
 use cpu::CpuTransformerEncoder;
 use gpu::GpuTransformerEncoder;
 
@@ -46,8 +44,7 @@ impl TransformerEncoder {
         config: Arc<dyn EncoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-    ) -> Result<Self>
-    {
+    ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerEncoder::new(
                 weights,
@@ -63,6 +60,21 @@ impl TransformerEncoder {
                     ctx,
                 )?))
             }
+        }
+    }
+    /// Get the hidden size
+    pub fn hidden_size(&self) -> usize {
+        match self {
+            Self::Cpu(model) => model.config().hidden_size(),
+            Self::Gpu(model) => model.config().hidden_size(),
+        }
+    }
+
+    /// Get the max sequence length
+    pub fn max_length(&self) -> usize {
+        match self {
+            Self::Cpu(model) => model.config().max_position_embeddings(),
+            Self::Gpu(model) => model.config().max_position_embeddings(),
         }
     }
 }
@@ -101,8 +113,16 @@ impl Encoder for TransformerEncoder {
         token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
         match self {
-            Self::Cpu(model) => model.get_hidden_states(input, attention_mask, token_type_ids).await,
-            Self::Gpu(model) => model.get_hidden_states(input, attention_mask, token_type_ids).await,
+            Self::Cpu(model) => {
+                model
+                    .get_hidden_states(input, attention_mask, token_type_ids)
+                    .await
+            }
+            Self::Gpu(model) => {
+                model
+                    .get_hidden_states(input, attention_mask, token_type_ids)
+                    .await
+            }
         }
     }
 }

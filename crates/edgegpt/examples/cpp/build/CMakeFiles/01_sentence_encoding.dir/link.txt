@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/01_sentence_encoding.dir/01_sentence_encoding.cpp.o -o 01_sentence_encoding   -L/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release  -Wl,-rpath,/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release -ledgegpt -lpthread -ldl -lm 

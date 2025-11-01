@@ -12,6 +12,7 @@ use edgetransformers::traits::{
     CrossAttentionDecoder, EncoderDecoderArchitecture, EncoderOutput, LanguageModelConfig,
     TransformerModel,
 };
+use edgetransformers::models::download_model_files;
 use edgetransformers::weights::ModelWeights;
 use edgetransformers::{LanguageModel, Seq2SeqLanguageModel};
 use ndarray::{Array1, Array2, s};
@@ -63,7 +64,7 @@ impl Seq2SeqModel {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        Self::download_model_files(&model_dir, &model_type.info().paths).await?;
+        download_model_files(&model_dir, &model_type.info().paths).await?;
 
         Self::from_pretrained(&model_dir, model_type, device, context)
     }
@@ -153,27 +154,6 @@ impl Seq2SeqModel {
             lm_head,
             final_logits_bias,
         })
-    }
-    async fn download_model_files(
-        model_dir: &Path,
-        paths: &edgetransformers::models::ModelPaths,
-    ) -> Result<()> {
-        tokio::fs::create_dir_all(model_dir).await?;
-        let files = [
-            ("model.safetensors", paths.weights_url),
-            ("tokenizer.json", paths.tokenizer_url),
-            ("config.json", paths.config_url),
-        ];
-        for (filename, url) in files {
-            let local_path = model_dir.join(filename);
-            if !local_path.exists() {
-                println!("Downloading {}...", filename);
-                let response = reqwest::get(url).await?;
-                anyhow::ensure!(response.status().is_success(), "Failed to download {}", url);
-                tokio::fs::write(&local_path, &response.bytes().await?).await?;
-            }
-        }
-        Ok(())
     }
 }
 

@@ -11,12 +11,13 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use edgetransformers::encoder::TransformerEncoder;
+use edgetransformers::models::download_model_files;
 use edgetransformers::models::{EncoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
-mod tests;
 mod configs;
+mod tests;
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
 
 /// Sentence encoder for semantic similarity tasks
@@ -98,7 +99,7 @@ impl SentenceEncoder {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download model files if needed
-        Self::download_model_files(&model_dir, &info.paths).await?;
+        download_model_files(&model_dir, &info.paths).await?;
 
         // Load from local path
         Self::from_pretrained(&model_dir, model_type, device, context)
@@ -158,7 +159,7 @@ impl SentenceEncoder {
             strategy: tokenizers::TruncationStrategy::LongestFirst,
             ..Default::default()
         };
-        
+
         _ = tokenizer.with_truncation(Some(truncation_params));
 
         let padding_params = tokenizers::PaddingParams {
@@ -174,62 +175,61 @@ impl SentenceEncoder {
         })
     }
 
+    /// Get the embedding dimension (same as hidden size)
+    pub fn embedding_dim(&self) -> usize {
+        self.encoder.hidden_size()
+    }
+
+    /// Get the maximum sequence length
+    pub fn max_seq_length(&self) -> usize {
+        self.encoder.max_length()
+    }
+
     /// Get the model type
     pub fn model_type(&self) -> ModelType {
         self.model_type
     }
 
-    /// Encode text with default mean pooling
+    /// Encode text with default mean pooling and normalization
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
         <Self as EncoderLanguageModel>::encode(self, text, "mean", true).await
     }
 
+    /// Encode text without normalization (raw embeddings)
+    pub async fn encode_raw(&self, text: &str) -> Result<Vec<f32>> {
+        <Self as EncoderLanguageModel>::encode(self, text, "mean", false).await
+    }
+
     /// Encode with pooling strategy and optional normalization
-    pub async fn encode_with(&self, text: &str, pooling_strategy: Option<&str>, normalize: bool) -> Result<Vec<f32>> {
+    pub async fn encode_with(
+        &self,
+        text: &str,
+        pooling_strategy: Option<&str>,
+        normalize: bool,
+    ) -> Result<Vec<f32>> {
         let strategy = pooling_strategy.unwrap_or("mean");
         <Self as EncoderLanguageModel>::encode(self, text, &strategy, normalize).await
     }
 
-    /// Encode batch of texts with default mean pooling
+    /// Encode batch of texts with default mean pooling and normalization
     pub async fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        <Self as EncoderLanguageModel>::encode_batch(self, texts, "mean").await
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, "mean", true).await
     }
 
-    /// Download model files from HuggingFace
-    async fn download_model_files(
-        model_dir: &Path,
-        paths: &edgetransformers::models::ModelPaths,
-    ) -> Result<()> {
-        tokio::fs::create_dir_all(model_dir).await?;
+    /// Encode batch of texts without normalization (raw embeddings)
+    pub async fn encode_batch_raw(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, "mean", false).await
+    }
 
-        let files = [
-            ("model.safetensors", &paths.weights_url),
-            ("tokenizer.json", &paths.tokenizer_url),
-            ("config.json", &paths.config_url),
-        ];
-
-        for (filename, url) in files {
-            let local_path = model_dir.join(filename);
-
-            if !local_path.exists() {
-                println!("Downloading {}...", filename);
-                let response = reqwest::get(*url).await?;
-
-                if !response.status().is_success() {
-                    return Err(anyhow!(
-                        "Failed to download {}: HTTP {}",
-                        filename,
-                        response.status()
-                    ));
-                }
-
-                let bytes = response.bytes().await?;
-                tokio::fs::write(&local_path, &bytes).await?;
-                println!("✓ Downloaded {}", filename);
-            }
-        }
-
-        Ok(())
+    /// Encode batch with custom pooling strategy and normalization
+    pub async fn encode_batch_with(
+        &self,
+        texts: &[&str],
+        pooling_strategy: Option<&str>,
+        normalize: bool,
+    ) -> Result<Vec<Vec<f32>>> {
+        let strategy = pooling_strategy.unwrap_or("mean");
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, strategy, normalize).await
     }
 }
 

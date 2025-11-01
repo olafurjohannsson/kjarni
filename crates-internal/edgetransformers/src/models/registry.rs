@@ -1,5 +1,8 @@
 //! Pretrained model registry with metadata
 
+use anyhow::{Result, anyhow};
+use std::path::Path;
+
 /// Distinguishes the architectural type of a transformer model
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelArchitecture {
@@ -239,4 +242,65 @@ impl ModelType {
             "unknown".to_string()
         }
     }
+}
+
+
+/// Download model files (weights, tokenizer, config) to a local directory
+///
+/// If files already exist, they are not re-downloaded.
+///
+/// # Arguments
+/// * `model_dir` - Local directory to store the model files
+/// * `paths` - URLs for model weights, tokenizer, and config
+///
+/// # Example
+/// ```no_run
+/// use edgetransformers::models::{ModelType, download_model_files};
+/// use std::path::Path;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let model_type = ModelType::MiniLML6V2;
+/// let model_info = model_type.info();
+/// let cache_dir = Path::new("./models/mini-lm");
+/// 
+/// download_model_files(cache_dir, &model_info.paths).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn download_model_files(
+    model_dir: &Path,
+    paths: &crate::models::ModelPaths,
+) -> Result<()> {
+    tokio::fs::create_dir_all(model_dir).await?;
+
+    let files = [
+        ("model.safetensors", paths.weights_url),
+        ("tokenizer.json", paths.tokenizer_url),
+        ("config.json", paths.config_url),
+    ];
+
+    for (filename, url) in files {
+        let local_path = model_dir.join(filename);
+
+        if !local_path.exists() {
+            println!("Downloading {}...", filename);
+            let response = reqwest::get(url).await?;
+
+            if !response.status().is_success() {
+                return Err(anyhow!(
+                    "Failed to download {}: HTTP {}",
+                    filename,
+                    response.status()
+                ));
+            }
+
+            let bytes = response.bytes().await?;
+            tokio::fs::write(&local_path, &bytes).await?;
+            println!("✓ Downloaded {}", filename);
+        } else {
+            println!("✓ {} already exists, skipping download", filename);
+        }
+    }
+
+    Ok(())
 }

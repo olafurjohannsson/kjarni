@@ -10,17 +10,19 @@ categories.workspace = true
 description = "EdgeGPT: The SQLite of AI. A fast, small-footprint, dependency-free toolkit. Making edge and browser AI a first class citizen, but also works native cross-platform"
 
 
-
 [lib]
 name = "edgegpt"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-
-
 edgetransformers = { path = "../../crates-internal/edgetransformers" }
 edgemodels = { path = "../../crates-internal/edgemodels" }
-
 anyhow = { workspace = true }
 once_cell = { workspace = true }
 tokio = { workspace = true }
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+c-bindings = []

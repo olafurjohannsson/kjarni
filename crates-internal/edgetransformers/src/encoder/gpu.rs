@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use bytemuck;
 use ndarray::{Array2, Array3, s};
@@ -6,13 +6,11 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_context::WgpuContext;
-use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel,
-};
-use crate::weights::ModelWeights;
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn::FFNWeights;
 use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
+use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
+use crate::weights::ModelWeights;
 
 /// The GPU backend for a generic Transformer Encoder.
 /// It holds the GPU-native weights and the generic pipeline to execute them.
@@ -177,6 +175,10 @@ impl GpuTransformerEncoder {
             layers,
             config,
         })
+    }
+
+    pub fn config(&self) -> &Arc<dyn EncoderArchitecture + Send + Sync> {
+        &self.config
     }
 
     fn perform_cpu_embedding(

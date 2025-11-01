@@ -19,4 +19,5 @@ pub use registry::{
     ModelArchitecture,
     ModelInfo,
     ModelPaths,
+    download_model_files
 };

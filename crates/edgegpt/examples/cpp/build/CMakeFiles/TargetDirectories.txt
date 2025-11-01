@@ -1,0 +1,7 @@
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/01_sentence_encoding.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/02_batch_encoding.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/03_similarity.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/04_semantic_search.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/05_reranking.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/edit_cache.dir
+/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/build/CMakeFiles/rebuild_cache.dir

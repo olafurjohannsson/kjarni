@@ -279,8 +279,18 @@ pub trait EncoderLanguageModel: LanguageModel {
         Ok(embedding.to_vec())
     }
 
-    /// Encode a batch of texts into L2-normalized embedding vectors.
-    async fn encode_batch(&self, texts: &[&str], pooling: &str) -> Result<Vec<Vec<f32>>> {
+    /// Encode a batch of texts into embedding vectors.
+    ///
+    /// # Arguments
+    /// * `texts` - Input texts
+    /// * `pooling` - Pooling strategy: "cls", or "mean"
+    /// * `normalize` - Whether to L2-normalize the outputs
+    async fn encode_batch(
+        &self,
+        texts: &[&str],
+        pooling: &str,
+        normalize: bool,
+    ) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -297,9 +307,10 @@ pub trait EncoderLanguageModel: LanguageModel {
             _ => return Err(anyhow!("Unknown pooling strategy: {}", pooling)),
         };
 
-        // L2 Normalize the entire batch of embeddings
-        // let normalized = l2_normalize(&pooled);
-        l2_normalize_inplace(&mut pooled);
+        // Conditionally L2 normalize the entire batch of embeddings
+        if normalize {
+            l2_normalize_inplace(&mut pooled);
+        }
 
         Ok(pooled.outer_iter().map(|row| row.to_vec()).collect())
     }
