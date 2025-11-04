@@ -1,5 +1,6 @@
 pub mod add;
 pub mod add_bias;
+pub mod add_bias_old;
 pub mod apply_mask;
 pub mod layer_norm;
 pub mod reshape;
@@ -7,3 +8,4 @@ pub mod softmax;
 pub mod matmul;
 pub mod matmul_old;
 pub mod bmm;
+pub mod softmax_old;

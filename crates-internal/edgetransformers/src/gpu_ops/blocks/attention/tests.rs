@@ -4,7 +4,7 @@ mod tests {
     use crate::gpu_ops::blocks::attention::{AttentionTempBuffers, AttentionConfig, AttentionPipelines, AttentionWeights, run_attention_block};
     use crate::gpu_ops::primitives::{
         add::{compile_add_pipeline, run_gpu_add},
-        add_bias::{compile_add_bias_pipeline, run_gpu_add_bias},
+        add_bias_old::{compile_add_bias_pipeline, run_gpu_add_bias},
         apply_mask::{compile_apply_mask_pipeline, run_gpu_apply_mask},
         layer_norm::{compile_layer_norm_pipeline, run_gpu_layer_norm},
         matmul_old::{compile_bmm_pipeline, compile_matmul_pipeline, run_gpu_bmm, run_gpu_matmul},
@@ -12,7 +12,7 @@ mod tests {
             compile_reshape_pipeline, compile_unreshape_pipeline, run_gpu_reshape,
             run_gpu_unreshape,
         },
-        softmax::{compile_softmax_pipeline, run_gpu_softmax},
+        softmax_old::{compile_softmax_pipeline, run_gpu_softmax},
     };
     use crate::gpu_ops::utils::{read_buffer_2d, read_buffer_3d};
     use crate::gpu_pipeline::TempBuffers;

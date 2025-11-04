@@ -1,80 +1,63 @@
+#[path = "../../../tests/common.rs"]
+mod common;
+
 use super::*;
-use crate::gpu_ops::utils::{
-    assert_vecs_are_close, read_buffer_2d,
-};
-use crate::gpu_context::WgpuContext;
-use ndarray::{Array, Array1, Array2};
-use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
-use std::sync::Arc;
-
+use crate::gpu_ops::{DType, GpuTensor};
+use common::{read_gpu_tensor_to_vec};
 use anyhow::Result;
-use wgpu::util::DeviceExt;
+use ndarray::{Array, Array1, Array2};
+use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::RandomExt;
 
+fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
+    let diff = (a - b).mapv(f32::abs);
+    let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
+    assert!(
+        max_diff < tolerance,
+        "Arrays are not close. Max difference: {}, Tolerance: {}",
+        max_diff,
+        tolerance
+    );
+}
 async fn get_test_context() -> Arc<WgpuContext> {
     Arc::new(WgpuContext::new().await)
 }
 
 #[tokio::test]
-async fn test_add_bias_correctness() -> Result<()> {
+async fn test_add_bias_parity() -> Result<()> {
     let context = get_test_context().await;
-    let device = &context.device;
+    let add_bias_kernel = GpuAddBias::new(&context);
 
-    // --- 1. Arrange ---
-    let (rows, cols) = (4, 128);
-    let total_elements = (rows * cols) as u32;
+    // Simulate the output of a typical linear layer
+    let rows = 128;
+    let cols = 768; // hidden_size
 
-    let input_cpu: Array2<f32> = Array::random((rows, cols), Uniform::new(-1.0, 1.0));
-    let bias_cpu: Array1<f32> = Array::random(cols, Uniform::new(-0.5, 0.5));
+    // 1. Create CPU data
+    let cpu_input = Array::random((rows, cols), Uniform::new(-10.0, 10.0));
+    let cpu_bias = Array::random(cols, Uniform::new(-1.0, 1.0));
 
-    let input_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test AddBias Input"),
-        contents: bytemuck::cast_slice(input_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let bias_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test AddBias Bias"),
-        contents: bytemuck::cast_slice(bias_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let output_gpu = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test AddBias Output"),
-        size: (total_elements as u64) * std::mem::size_of::<f32>() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
+    // 2. Create GPU tensors
+    let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
+    let gpu_bias = GpuTensor::from_ndarray(&context, &cpu_bias)?; // from_ndarray works for 1D Array1 as well
+    let gpu_output = GpuTensor::uninitialized(&context, vec![rows, cols], DType::F32, "AddBias Output");
 
-    // --- 2. Act ---
-    // CPU ground truth: ndarray broadcasting handles this automatically.
-    let cpu_result = &input_cpu + &bias_cpu;
-
-    // Run the GPU kernel
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-    let pipeline = compile_add_bias_pipeline(&context);
-
-    run_gpu_add_bias(
-        &context,
-        &mut encoder,
-        &pipeline,
-        &input_gpu,
-        &bias_gpu,
-        &output_gpu,
-        total_elements,
-    );
+    // 3. Execute GPU kernel
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    add_bias_kernel.encode(&mut encoder, &[&gpu_input, &gpu_bias], &gpu_output);
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_result_array = read_buffer_2d(&context, &output_gpu, (rows, cols)).await?;
+    // 4. Read back GPU result
+    let (gpu_result_vec, result_shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;
+    let gpu_result = Array2::from_shape_vec((result_shape[0], result_shape[1]), gpu_result_vec)?;
 
-    // --- 3. Assert ---
-    println!("Verifying AddBias GPU kernel against CPU implementation...");
-    assert_vecs_are_close(
-        cpu_result.as_slice().unwrap(),
-        gpu_result_array.as_slice().unwrap(),
-        1e-6,
-    );
-    println!("✅ AddBias GPU implementation is correct!");
+    // 5. Execute CPU ground truth
+    // ndarray handles broadcasting the 1D bias vector across the rows of the 2D input array.
+    let cpu_result = &cpu_input + &cpu_bias;
+
+    // 6. Assert
+    println!("Verifying GpuAddBias parity...");
+    assert_all_close(&gpu_result, &cpu_result, 1e-6); // Should be very precise
+    println!("✅ GpuAddBias parity test passed!");
 
     Ok(())
 }

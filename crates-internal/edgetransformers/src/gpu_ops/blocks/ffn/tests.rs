@@ -1,160 +1,78 @@
+#[path = "../../../tests/common.rs"]
+mod common;
+
 use super::*;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
-use crate::{FeedForward, LayerNorm, gpu_context::WgpuContext, gpu_ops::blocks::ffn::FFNWeights};
-use crate::gpu_ops::blocks::ffn::run_ffn_block;
-use crate::gpu_ops::blocks::ffn::FFNPipelines;
-use crate::gpu_ops::blocks::ffn::FFNTempBuffers;
-use crate::gpu_ops::blocks::ffn::FFNConfig;
-use ndarray::{Array, Array1, Array2, Array3};
-use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
-use std::sync::Arc;
-
-
+use crate::feedforward::FeedForward as CpuFeedForward;
+use crate::gpu_ops::{DType, GpuTensor};
+use common::{read_gpu_tensor_to_vec};
 use anyhow::Result;
-use wgpu::util::DeviceExt;
+use ndarray::{Array, Array1, Array2, Array3};
+use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::RandomExt;
 
 async fn get_test_context() -> Arc<WgpuContext> {
     Arc::new(WgpuContext::new().await)
 }
 
-/// Tests that the `run_gpu_ffn` kernel produces the same result as the CPU `FeedForward`.
-#[tokio::test]
-async fn test_ffn_correctness() -> Result<()> {
-    let context = get_test_context().await;
-    let device = &context.device;
+fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
+    let diff = (a - b).mapv(f32::abs);
+    let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
+    assert!(max_diff < tolerance, "Arrays not close. Max diff: {}", max_diff);
+}
 
-    // --- 1. Arrange ---
+#[tokio::test]
+async fn test_ffn_block_parity() -> Result<()> {
+    let context = get_test_context().await;
+    
     let batch_size = 1;
-    let seq_len = 8;
-    let hidden_size = 32;
+    let seq_len = 128;
+    let hidden_size = 768;
     let intermediate_size = hidden_size * 4;
 
-    let input_cpu: Array3<f32> =
-        Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
-    let intermediate_w_cpu: Array2<f32> =
-        Array::random((hidden_size, intermediate_size), Uniform::new(-0.5, 0.5));
-    let intermediate_b_cpu: Array1<f32> = Array::random(intermediate_size, Uniform::new(-0.5, 0.5));
-    let output_w_cpu: Array2<f32> =
-        Array::random((intermediate_size, hidden_size), Uniform::new(-0.5, 0.5));
-    let output_b_cpu: Array1<f32> = Array::random(hidden_size, Uniform::new(-0.5, 0.5));
-
-    // Upload separate weights (no packing)
-    let fc1_weight_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FC1 Weight"),
-        contents: bytemuck::cast_slice(intermediate_w_cpu.as_standard_layout().as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let fc1_bias_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FC1 Bias"),
-        contents: bytemuck::cast_slice(intermediate_b_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let fc2_weight_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FC2 Weight"),
-        contents: bytemuck::cast_slice(output_w_cpu.as_standard_layout().as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let fc2_bias_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FC2 Bias"),
-        contents: bytemuck::cast_slice(output_b_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let input_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test FFN Input"),
-        contents: bytemuck::cast_slice(input_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    // Intermediate buffer between FC1 and FC2
-    let intermediate_gpu = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test FFN Intermediate"),
-        size: (batch_size * seq_len * intermediate_size * std::mem::size_of::<f32>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-
-    let output_gpu = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test FFN Output"),
-        size: (batch_size * seq_len * hidden_size * std::mem::size_of::<f32>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let dummy_norm_w_cpu: Array1<f32> = Array1::zeros(hidden_size);
-    let dummy_norm_b_cpu: Array1<f32> = Array1::zeros(hidden_size);
-
-    let dummy_norm_w_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Dummy Norm W"),
-        contents: bytemuck::cast_slice(dummy_norm_w_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let dummy_norm_b_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Dummy Norm B"),
-        contents: bytemuck::cast_slice(dummy_norm_b_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let gpu_weights = FFNWeights {
-        fc1_weight: Arc::new(fc1_weight_gpu),
-        fc1_bias: Arc::new(fc1_bias_gpu),
-        fc2_weight: Arc::new(fc2_weight_gpu),
-        fc2_bias: Arc::new(fc2_bias_gpu),
-        norm_weight: Arc::new(dummy_norm_w_gpu),
-        norm_bias: Arc::new(dummy_norm_b_gpu),
-    };
-
-    // CPU computation
-    let cpu_ffn = FeedForward::new(
-        intermediate_w_cpu.as_standard_layout().to_owned(),
-        intermediate_b_cpu.clone(),
-        output_w_cpu.as_standard_layout().to_owned(),
-        output_b_cpu.clone(),
+    // 1. Create CPU weights and FFN block
+    let cpu_fc1_w = Array::random((hidden_size, intermediate_size), Uniform::new(-0.1, 0.1));
+    let cpu_fc1_b = Array::random(intermediate_size, Uniform::new(-0.1, 0.1));
+    let cpu_fc2_w = Array::random((intermediate_size, hidden_size), Uniform::new(-0.1, 0.1));
+    let cpu_fc2_b = Array::random(hidden_size, Uniform::new(-0.1, 0.1));
+    
+    let cpu_ffn = CpuFeedForward::new(
+        cpu_fc1_w.t().as_standard_layout().to_owned(), // Your CPU FFN expects transposed weights
+        cpu_fc1_b.clone(),
+        cpu_fc2_w.t().as_standard_layout().to_owned(),
+        cpu_fc2_b.clone(),
     );
-    let cpu_result = cpu_ffn.forward(&input_cpu)?;
 
-    // GPU computation
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("FFN Test Encoder"),
-    });
+    // 2. Create GPU weights (as Tensors) and GpuFeedForward block
+    let gpu_fc1_w = GpuTensor::from_ndarray(&context, &cpu_fc1_w)?;
+    let gpu_fc1_b = GpuTensor::from_ndarray(&context, &cpu_fc1_b)?;
+    let gpu_fc2_w = GpuTensor::from_ndarray(&context, &cpu_fc2_w)?;
+    let gpu_fc2_b = GpuTensor::from_ndarray(&context, &cpu_fc2_b)?;
 
-    let fc1_pipeline = Arc::new(compile_fc1_pipeline(&context));
-    let fc2_pipeline = Arc::new(compile_fc2_pipeline(&context));
+    let gpu_ffn = GpuFeedForward::new(&context, gpu_fc1_w, gpu_fc1_b, gpu_fc2_w, gpu_fc2_b);
 
-    let pipelines = FFNPipelines { fc1: fc1_pipeline, fc2: fc2_pipeline };
+    // 3. Create input data
+    let cpu_input = Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
+    let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
+    
+    // Create output & temporary buffers for the GPU
+    let gpu_intermediate = GpuTensor::uninitialized(&context, vec![batch_size, seq_len, intermediate_size], DType::F32, "FFN Intermediate");
+    let gpu_output = GpuTensor::uninitialized(&context, vec![batch_size, seq_len, hidden_size], DType::F32, "FFN Output");
 
-    let cfg = FFNConfig {
-        batch_size: batch_size,
-        hidden_size: hidden_size,
-        intermediate_size: intermediate_size,
-        seq_len: seq_len
-    };
-
-    let buffers = FFNTempBuffers {
-        intermediate: intermediate_gpu
-    };
-
-    run_ffn_block(&context, &mut encoder, &pipelines, &input_gpu, &output_gpu, &cfg, &gpu_weights, &buffers);
-
+    // 4. Execute
+    // a. GPU
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    gpu_ffn.forward(&mut encoder, &gpu_input, &gpu_intermediate, &gpu_output);
     context.queue.submit(std::iter::once(encoder.finish()));
-    device.poll(wgpu::PollType::wait_indefinitely());
+    let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;
+    let gpu_result = Array3::from_shape_vec((shape[0], shape[1], shape[2]), gpu_vec)?;
 
-    let gpu_result_array =
-        read_buffer_3d(&context, &output_gpu, (batch_size, seq_len, hidden_size)).await?;
+    // b. CPU
+    let cpu_result = cpu_ffn.forward(&cpu_input)?;
 
-    // --- 3. Assert ---
-    println!("Verifying FFN GPU kernel against CPU implementation...");
-    assert_vecs_are_close(
-        cpu_result.as_slice().unwrap(),
-        gpu_result_array.as_slice().unwrap(),
-        1e-4,
-    );
-    println!("✅ FFN GPU implementation is correct!");
+    // 5. Assert
+    println!("Verifying GpuFeedForward block parity...");
+    assert_all_close(&gpu_result, &cpu_result, 1e-3); // Looser tolerance for fused kernel
+    println!("✅ GpuFeedForward passed!");
 
     Ok(())
 }
-

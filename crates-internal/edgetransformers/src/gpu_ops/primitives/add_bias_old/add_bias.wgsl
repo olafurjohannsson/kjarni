@@ -11,9 +11,8 @@ struct Uniforms {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
     if (idx >= uniforms.size) { return; }
-
+    // This assumes the bias is a 1D vector being added to a 2D matrix,
+    // so we use modulo to get the correct bias index.
     let bias_dim = arrayLength(&bias);
-    if (bias_dim == 0u) { return; } // Safety check
-
     output[idx] = input[idx] + bias[idx % bias_dim];
 }

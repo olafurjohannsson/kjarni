@@ -120,7 +120,7 @@ impl Seq2SeqModel {
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
         let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
-            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+            .map_err(|e| anyhow!("Failed to load tokenizer: {} - Model Path: {}", e, model_path.to_str().unwrap()))?;
         println!(
             "--- Loaded config.json ---\n{}\n--------------------------",
             &weights.config_json
@@ -204,6 +204,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
         encoder_attention_mask: &Array2<f32>,
         config: &GenerationConfig,
     ) -> Result<String> {
+        println!("generate_from_encoding");
         let batch_size = encoder_output.last_hidden_state.shape()[0];
         let eos_token_id = self.config.eos_token_id();
         let decoder_start_token_id = self.config.decoder_start_token_id();

@@ -30,8 +30,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Generate the summary
     println!("\nGenerating summary...");
-    let mut cfg = summarizer.generation_config_from_preset();
-    cfg.num_beams = 1;
+    // let mut cfg = summarizer.generation_config_from_preset();
+    let cfg = GenerationConfig {
+        num_beams: 4,
+        max_new_tokens: Some(40),
+        ..Default::default()
+    };
+    // cfg.num_beams = 1;
     
     let summary = summarizer.generate(article, &cfg).await?; // Generate a summary with a max length of 60 tokens
 

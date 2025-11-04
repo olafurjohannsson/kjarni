@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::AttentionWeights;
-use crate::gpu_ops::blocks::ffn::FFNWeights;
+use crate::gpu_ops::blocks::ffn_old::FFNWeights;
 use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
