@@ -12,7 +12,7 @@ use crate::gpu_ops::{
         AttentionConfig, AttentionPipelines, AttentionTempBuffers, AttentionWeights,
         run_attention_block,
     },
-    blocks::ffn::{
+    blocks::ffn_old::{
         FFNConfig, FFNPipelines, FFNTempBuffers, FFNWeights, run_ffn_block,
     },
     primitives::{

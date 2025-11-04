@@ -35,7 +35,7 @@ pub async fn wgpu_feed_forward_2d(
         .device
         .create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("FFN Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_ops/blocks/ffn/fc1.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_ops/blocks/ffn_old/fc1.wgsl").into()),
         });
 
     let bind_group_layout =
