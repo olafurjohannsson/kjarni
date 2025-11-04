@@ -7,7 +7,7 @@ mod tests {
         add_bias::{compile_add_bias_pipeline, run_gpu_add_bias},
         apply_mask::{compile_apply_mask_pipeline, run_gpu_apply_mask},
         layer_norm::{compile_layer_norm_pipeline, run_gpu_layer_norm},
-        matmul::{compile_bmm_pipeline, compile_matmul_pipeline, run_gpu_bmm, run_gpu_matmul},
+        matmul_old::{compile_bmm_pipeline, compile_matmul_pipeline, run_gpu_bmm, run_gpu_matmul},
         reshape::{
             compile_reshape_pipeline, compile_unreshape_pipeline, run_gpu_reshape,
             run_gpu_unreshape,

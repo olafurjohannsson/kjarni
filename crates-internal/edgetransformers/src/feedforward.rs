@@ -1,8 +1,7 @@
 //! Feed-forward network implementation
 
 use crate::activations::gelu;
-use crate::utils::linear_algebra::{matmul_3d_2d, matmul_3d_2d_gpu, feed_forward_gpu};
-use crate::gpu_context::WgpuContext;
+use crate::utils::linear_algebra::{matmul_3d_2d};
 use anyhow::Result;
 use ndarray::{Array1, Array2, Array3};
 
@@ -49,53 +48,6 @@ impl FeedForward {
         let mut intermediate = self.fc1(hidden)?;
         self.apply_activation(&mut intermediate);
         let output = self.fc2(&intermediate)?;
-        Ok(output)
-    }
-
-    pub async fn forward_gpu2(
-        &self,
-        hidden: &Array3<f32>,
-        context: &WgpuContext,
-    ) -> Result<Array3<f32>> {
-        let output = feed_forward_gpu(
-            context,
-            hidden,
-            &self.dense1_weight_t,
-            &self.dense1_bias,
-            &self.dense2_weight_t,
-            &self.dense2_bias,
-        ).await;
-        Ok(output)
-    }
-
-    pub async fn forward_gpu(
-        &self,
-        hidden: &Array3<f32>,
-        context: &WgpuContext,
-    ) -> Result<Array3<f32>> {
-        let mut intermediate = self.fc1_gpu(hidden, context).await?;
-        self.apply_activation(&mut intermediate);
-        let output = self.fc2_gpu(&intermediate, context).await?;
-        Ok(output)
-    }
-
-    pub async fn fc1_gpu(
-        &self,
-        hidden: &Array3<f32>,
-        context: &WgpuContext,
-    ) -> Result<Array3<f32>> {
-        let mut output = matmul_3d_2d_gpu(context, hidden, &self.dense1_weight_t).await;
-        output += &self.dense1_bias;
-        Ok(output)
-    }
-
-    pub async fn fc2_gpu(
-        &self,
-        hidden: &Array3<f32>,
-        context: &WgpuContext,
-    ) -> Result<Array3<f32>> {
-        let mut output = matmul_3d_2d_gpu(context, hidden, &self.dense2_weight_t).await;
-        output += &self.dense2_bias;
         Ok(output)
     }
 }

@@ -21,6 +21,7 @@ pub mod models;
 pub mod pooling;
 pub mod traits;
 pub mod utils;
+pub mod tests;
 pub mod weights;
 pub mod wgpu_ops;
 

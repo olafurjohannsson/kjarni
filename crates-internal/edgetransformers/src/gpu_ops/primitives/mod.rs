@@ -5,3 +5,5 @@ pub mod layer_norm;
 pub mod reshape;
 pub mod softmax;
 pub mod matmul;
+pub mod matmul_old;
+pub mod bmm;

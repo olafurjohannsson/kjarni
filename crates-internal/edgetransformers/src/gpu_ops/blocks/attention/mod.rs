@@ -8,7 +8,7 @@
 use crate::gpu_ops::primitives::{
     add_bias::{run_gpu_add_bias, compile_add_bias_pipeline},
     apply_mask::{run_gpu_apply_mask, compile_apply_mask_pipeline},
-    matmul::{run_gpu_bmm, run_gpu_matmul, compile_bmm_pipeline, compile_matmul_pipeline},
+    matmul_old::{run_gpu_bmm, run_gpu_matmul, compile_bmm_pipeline, compile_matmul_pipeline},
     reshape::{run_gpu_reshape, run_gpu_unreshape, compile_reshape_pipeline, compile_unreshape_pipeline},
     softmax::{run_gpu_softmax, compile_softmax_pipeline},
 };

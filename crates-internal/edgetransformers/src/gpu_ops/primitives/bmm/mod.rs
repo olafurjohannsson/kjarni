@@ -4,26 +4,28 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
-// The uniform struct is now private to this module.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct MatmulUniforms {
+struct MatmulInfo {
+    b: u32,
     m: u32,
     k: u32,
     n: u32,
-    _padding: u32,
+    a_stride_batch: u32,
+    b_stride_batch: u32,
+    _padding1: u32,
+    _padding2: u32,
 }
 
-// The public-facing Kernel struct. It holds the pre-compiled pipeline.
-pub struct GpuMatMul {
+pub struct GpuBatchedMatMul {
     pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
     context: Arc<WgpuContext>,
 }
 
-impl GpuMatMul {
+impl GpuBatchedMatMul {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
-        let (pipeline, bind_group_layout) = compile_matmul_pipeline(context);
+        let (pipeline, bind_group_layout) = compile_bmm_pipeline(context);
         Self {
             pipeline: Arc::new(pipeline),
             bind_group_layout: Arc::new(bind_group_layout),
@@ -32,49 +34,40 @@ impl GpuMatMul {
     }
 }
 
-impl Kernel for GpuMatMul {
-    fn encode(
-        &self,
-        encoder: &mut CommandEncoder,
-        inputs: &[&GpuTensor],
-        output: &GpuTensor,
-    ) {
+impl Kernel for GpuBatchedMatMul {
+    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
         let a = inputs[0];
         let b = inputs[1];
 
-        // Safety assertions
-        assert_eq!(a.rank(), 2, "Input A must be a 2D tensor");
-        assert_eq!(b.rank(), 2, "Input B must be a 2D tensor");
-        assert_eq!(
-            a.shape()[1],
-            b.shape()[0],
-            "Inner dimensions of A and B do not match"
-        );
-        assert_eq!(
-            output.shape(),
-            &[a.shape()[0], b.shape()[1]],
-            "Output shape is incorrect"
-        );
+        assert!(a.rank() >= 2 && a.rank() <= 3, "Input A must be a 2D or 3D tensor");
+        assert!(b.rank() >= 2 && b.rank() <= 3, "Input B must be a 2D or 3D tensor");
+        let a_shape = if a.rank() == 2 { vec![1, a.shape()[0], a.shape()[1]] } else { a.shape().to_vec() };
+        let b_shape = if b.rank() == 2 { vec![1, b.shape()[0], b.shape()[1]] } else { b.shape().to_vec() };
+        
+        let batch = a_shape[0].max(b_shape[0]);
+        let m = a_shape[1];
+        let k = a_shape[2];
+        let n = b_shape[2];
 
-        let m = a.shape()[0] as u32;
-        let k = a.shape()[1] as u32;
-        let n = b.shape()[1] as u32;
+        assert_eq!(k, b_shape[1], "Inner dimensions of A and B do not match");
+        assert_eq!(output.shape(), &[batch, m, n], "Output shape is incorrect");
+        if a.rank() == 3 && b.rank() == 3 {
+            assert!(a.shape()[0] == b.shape()[0] || a.shape()[0] == 1 || b.shape()[0] == 1, "Batch dimensions must match or one must be 1 for broadcasting");
+        }
 
-        run_internal_matmul(
-            &self.context,
-            encoder,
-            &self.pipeline,
-            &self.bind_group_layout,
-            a.buffer(),
-            b.buffer(),
-            output.buffer(),
-            m, k, n
+        let a_stride_batch = if a.shape().len() == 3 && a.shape()[0] > 1 { (m * k) as u32 } else { 0 };
+        let b_stride_batch = if b.shape().len() == 3 && b.shape()[0] > 1 { (k * n) as u32 } else { 0 };
+
+        run_internal_bmm(
+            &self.context, encoder, &self.pipeline, &self.bind_group_layout,
+            a.buffer(), b.buffer(), output.buffer(),
+            batch as u32, m as u32, k as u32, n as u32,
+            a_stride_batch, b_stride_batch,
         );
     }
 }
 
-/// The internal, private implementation that mirrors your old `run_gpu_matmul`.
-fn run_internal_matmul(
+fn run_internal_bmm(
     context: &WgpuContext,
     encoder: &mut CommandEncoder,
     pipeline: &ComputePipeline,
@@ -82,32 +75,46 @@ fn run_internal_matmul(
     a: &Buffer,
     b: &Buffer,
     c: &Buffer,
+    batch: u32,
     m: u32,
     k: u32,
     n: u32,
+    a_stride_batch: u32, b_stride_batch: u32,
 ) {
     let device = &context.device;
-    let uniforms = MatmulUniforms { m, k, n, _padding: 0 };
+    let uniforms = MatmulInfo { b: batch, m, k, n, a_stride_batch, b_stride_batch, _padding1:0, _padding2: 0 };
 
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Matmul Uniforms"),
+        label: Some("BMM Uniforms"),
         contents: bytemuck::cast_slice(&[uniforms]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Matmul Bind Group"),
+        label: Some("BMM Bind Group"),
         layout: bind_group_layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: c.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: c.as_entire_binding(),
+            },
         ],
     });
 
     let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("Matmul Compute Pass"),
+        label: Some("BMM Compute Pass"),
         timestamp_writes: None,
     });
     compute_pass.set_pipeline(pipeline);
@@ -116,21 +123,18 @@ fn run_internal_matmul(
     const TILE_DIM: u32 = 32;
     let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
     let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
+    let workgroup_z = batch;
 
-    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
 }
 
-/// The internal, private compilation function. It now returns the layout as well.
-fn compile_matmul_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
+fn compile_bmm_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
-    // We assume the shader file is in the same directory for `include_wgsl`.
-    // If not, adjust the path.
-    let shader = device.create_shader_module(wgpu::include_wgsl!("./matmul_tiled.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("./bmm.wgsl"));
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Matmul Bind Group Layout"),
+        label: Some("BMM Bind Group Layout"),
         entries: &[
-            // @binding(0) Uniforms
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -141,7 +145,6 @@ fn compile_matmul_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroup
                 },
                 count: None,
             },
-            // @binding(1) Input Matrix A
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -152,7 +155,6 @@ fn compile_matmul_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroup
                 },
                 count: None,
             },
-            // @binding(2) Input Matrix B
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -163,7 +165,6 @@ fn compile_matmul_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroup
                 },
                 count: None,
             },
-            // @binding(3) Output Matrix C
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -178,23 +179,20 @@ fn compile_matmul_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroup
     });
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Matmul Pipeline Layout"),
+        label: Some("BMM Pipeline Layout"),
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
 
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Matmul Pipeline"),
+        label: Some("BMM Pipeline"),
         layout: Some(&pipeline_layout),
         module: &shader,
-        entry_point: Some("main"), // Ensure this matches your WGSL fn name
+        entry_point: Some("main"),
         compilation_options: Default::default(),
         cache: None,
     });
-
     (pipeline, bind_group_layout)
 }
-
-
 #[cfg(test)]
 mod tests;
