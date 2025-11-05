@@ -2,6 +2,7 @@ use crate::cache::CpuKVCache;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4, s};
+use rand::seq;
 use std::sync::Arc;
 
 use crate::traits::{
@@ -161,15 +162,17 @@ impl Decoder for CpuTransformerDecoder {
 
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
-        let (batch_size, seq_len) = input_ids.dim();
+        // let (batch_size, seq_len) = input_ids.dim();
+        let seq_len = input_ids.shape()[1];
         let total_len = position_offset + seq_len;
 
-        let internal_mask = Array2::ones((batch_size, total_len));
+        // let internal_mask = Array2::ones((batch_size, total_len));
 
         for (layer_idx, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward_with_cache(
                 hidden_states,
-                &internal_mask,
+                // &internal_mask,
+                &attention_mask,
                 self.config.as_ref(),
                 layer_idx,
                 cpu_cache_opt.as_deref_mut(),
@@ -181,7 +184,8 @@ impl Decoder for CpuTransformerDecoder {
 
         // FIX: Update the cache's sequence length here, AFTER all layers are processed.
         if let Some(cache) = cpu_cache_opt {
-            cache.set_seq_length(total_len);
+            // cache.set_seq_length(total_len);
+            cache.increment_len(seq_len);
         }
 
         Ok(DecoderOutput {

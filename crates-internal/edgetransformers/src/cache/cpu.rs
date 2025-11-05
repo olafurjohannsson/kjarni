@@ -1,67 +1,84 @@
-pub use crate::traits::Cache;
-use ndarray::Array3;
+use crate::traits::Cache;
+use ndarray::{s, Array3, ArrayView3};
 use std::any::Any;
 
-/// CPU-based KV cache storing key and value tensors in ndarray format
-/// 
-#[derive(Clone)]
+/// A high-performance, pre-allocated Key-Value cache for CPU decoding.
+///
+/// This implementation avoids the overhead of re-allocating and concatenating on every step
+/// by pre-allocating memory to the maximum required capacity at creation.
+/// The `update` operation becomes a highly efficient copy into a slice of the buffer.
 pub struct CpuKVCache {
-    pub keys: Vec<Option<Array3<f32>>>,
-    pub values: Vec<Option<Array3<f32>>>,
-    seq_length: usize,
-    batch_size: usize,
+    /// A Vec of (Key, Value) tuples, one for each decoder layer.
+    /// The Arrays are pre-allocated to the maximum sequence length.
+    layers: Vec<(Array3<f32>, Array3<f32>)>,
+    /// The current number of tokens stored in the cache. This is the main state variable.
+    current_len: usize,
 }
 
 impl CpuKVCache {
-    /// Create a new empty cache for a given number of layers and batch size.
-    pub fn new(num_layers: usize, batch_size: usize) -> Self {
+    /// Creates a new, empty cache pre-allocated to the maximum size.
+    ///
+    /// # Arguments
+    /// * `num_layers` - The number of decoder layers in the model.
+    /// * `batch_size` - The batch size for the generation.
+    /// * `max_len` - The maximum sequence length the model supports (e.g., `max_position_embeddings`).
+    /// * `hidden_size` - The hidden dimensionality of the model.
+    pub fn new(num_layers: usize, batch_size: usize, max_len: usize, hidden_size: usize) -> Self {
+        let mut layers = Vec::with_capacity(num_layers);
+        for _ in 0..num_layers {
+            let k_cache = Array3::zeros((batch_size, max_len, hidden_size));
+            let v_cache = Array3::zeros((batch_size, max_len, hidden_size));
+            layers.push((k_cache, v_cache));
+        }
         Self {
-            keys: vec![None; num_layers],
-            values: vec![None; num_layers],
-            seq_length: 0,
-            batch_size,
+            layers,
+            current_len: 0,
         }
     }
 
-    /// Update the cache for a specific layer by appending new K, V states
+    /// Appends the new key and value tensors to the cache for a specific layer.
+    ///
+    /// This is a highly efficient operation that copies the new data into a
+    /// slice of the pre-allocated buffer without triggering any new heap allocations.
     pub fn update(
         &mut self,
         layer_idx: usize,
-        new_keys: Array3<f32>,
-        new_values: Array3<f32>,
+        new_k: &Array3<f32>,
+        new_v: &Array3<f32>,
     ) -> anyhow::Result<()> {
-        if layer_idx >= self.keys.len() {
+        if layer_idx >= self.layers.len() {
             anyhow::bail!("Layer index {} out of bounds", layer_idx);
         }
 
-        self.keys[layer_idx] = Some(match self.keys[layer_idx].take() {
-            None => new_keys,
-            Some(cached) => {
-                ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_keys.view()])?
-            }
-        });
+        let new_tokens_len = new_k.shape()[1];
+        let target_slice = s![.., self.current_len..self.current_len + new_tokens_len, ..];
 
-        self.values[layer_idx] = Some(match self.values[layer_idx].take() {
-            None => new_values,
-            Some(cached) => {
-                ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_values.view()])?
-            }
-        });
+        let (cache_k, cache_v) = &mut self.layers[layer_idx];
+        cache_k.slice_mut(target_slice).assign(new_k);
+        cache_v.slice_mut(target_slice).assign(new_v);
 
         Ok(())
     }
 
-    // Add a new public method to CpuKVCache to set the length
-    pub fn set_seq_length(&mut self, new_length: usize) {
-        self.seq_length = new_length;
+    /// Retrieves a view of the cached keys and values for a specific layer.
+    ///
+    /// Returns a tuple of views, `(Key, Value)`, containing all tokens
+    /// processed so far. This is a zero-copy operation.
+    pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<f32>, ArrayView3<f32>)> {
+        if layer_idx >= self.layers.len() {
+            return None;
+        }
+        let (cache_k, cache_v) = &self.layers[layer_idx];
+        let active_slice = s![.., 0..self.current_len, ..];
+        Some((cache_k.slice(active_slice), cache_v.slice(active_slice)))
     }
 
-    /// Get cached K, V for a specific layer
-    pub fn get(&self, layer_idx: usize) -> Option<(&Array3<f32>, &Array3<f32>)> {
-        match (self.keys.get(layer_idx), self.values.get(layer_idx)) {
-            (Some(Some(k)), Some(Some(v))) => Some((k, v)),
-            _ => None,
-        }
+    /// Increments the internal length counter.
+    ///
+    /// This should be called once per generation step by the orchestrator (e.g., `TextGenerator`)
+    /// after all layers have been updated for that step.
+    pub fn increment_len(&mut self, new_tokens_len: usize) {
+        self.current_len += new_tokens_len;
     }
 }
 
@@ -73,11 +90,96 @@ impl Cache for CpuKVCache {
         self
     }
     fn get_seq_length(&self) -> usize {
-        self.seq_length
+        self.current_len
     }
     fn clear(&mut self) {
-        self.keys.iter_mut().for_each(|k| *k = None);
-        self.values.iter_mut().for_each(|v| *v = None);
-        self.seq_length = 0;
+        // Clearing the cache is now a very cheap operation.
+        // We just reset the length counter. The data in the buffers becomes
+        // garbage and will be overwritten on the next run.
+        self.current_len = 0;
     }
 }
+
+// pub use crate::traits::Cache;
+// use ndarray::Array3;
+// use std::any::Any;
+
+// /// CPU-based KV cache storing key and value tensors in ndarray format
+// /// 
+// #[derive(Clone)]
+// pub struct CpuKVCache {
+//     pub keys: Vec<Option<Array3<f32>>>,
+//     pub values: Vec<Option<Array3<f32>>>,
+//     seq_length: usize,
+//     batch_size: usize,
+// }
+
+// impl CpuKVCache {
+//     /// Create a new empty cache for a given number of layers and batch size.
+//     pub fn new(num_layers: usize, batch_size: usize) -> Self {
+//         Self {
+//             keys: vec![None; num_layers],
+//             values: vec![None; num_layers],
+//             seq_length: 0,
+//             batch_size,
+//         }
+//     }
+
+//     /// Update the cache for a specific layer by appending new K, V states
+//     pub fn update(
+//         &mut self,
+//         layer_idx: usize,
+//         new_keys: Array3<f32>,
+//         new_values: Array3<f32>,
+//     ) -> anyhow::Result<()> {
+//         if layer_idx >= self.keys.len() {
+//             anyhow::bail!("Layer index {} out of bounds", layer_idx);
+//         }
+
+//         self.keys[layer_idx] = Some(match self.keys[layer_idx].take() {
+//             None => new_keys,
+//             Some(cached) => {
+//                 ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_keys.view()])?
+//             }
+//         });
+
+//         self.values[layer_idx] = Some(match self.values[layer_idx].take() {
+//             None => new_values,
+//             Some(cached) => {
+//                 ndarray::concatenate(ndarray::Axis(1), &[cached.view(), new_values.view()])?
+//             }
+//         });
+
+//         Ok(())
+//     }
+
+//     // Add a new public method to CpuKVCache to set the length
+//     pub fn set_seq_length(&mut self, new_length: usize) {
+//         self.seq_length = new_length;
+//     }
+
+//     /// Get cached K, V for a specific layer
+//     pub fn get(&self, layer_idx: usize) -> Option<(&Array3<f32>, &Array3<f32>)> {
+//         match (self.keys.get(layer_idx), self.values.get(layer_idx)) {
+//             (Some(Some(k)), Some(Some(v))) => Some((k, v)),
+//             _ => None,
+//         }
+//     }
+// }
+
+// impl Cache for CpuKVCache {
+//     fn as_any(&self) -> &dyn Any {
+//         self
+//     }
+//     fn as_any_mut(&mut self) -> &mut dyn Any {
+//         self
+//     }
+//     fn get_seq_length(&self) -> usize {
+//         self.seq_length
+//     }
+//     fn clear(&mut self) {
+//         self.keys.iter_mut().for_each(|k| *k = None);
+//         self.values.iter_mut().for_each(|v| *v = None);
+//         self.seq_length = 0;
+//     }
+// }

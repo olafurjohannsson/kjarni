@@ -5,6 +5,7 @@ use anyhow::{Result, anyhow};
 use edgetransformers::CpuKVCache;
 use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
 use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
+use edgetransformers::models::download_model_files;
 use edgetransformers::models::{ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput as EncoderOutputTrait;
@@ -12,7 +13,6 @@ use edgetransformers::traits::{
     CrossAttentionDecoder, EncoderDecoderArchitecture, EncoderOutput, LanguageModelConfig,
     TransformerModel,
 };
-use edgetransformers::models::download_model_files;
 use edgetransformers::weights::ModelWeights;
 use edgetransformers::{LanguageModel, Seq2SeqLanguageModel};
 use ndarray::{Array1, Array2, s};
@@ -119,8 +119,13 @@ impl Seq2SeqModel {
         context: Option<Arc<WgpuContext>>,
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
-        let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
-            .map_err(|e| anyhow!("Failed to load tokenizer: {} - Model Path: {}", e, model_path.to_str().unwrap()))?;
+        let tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| {
+            anyhow!(
+                "Failed to load tokenizer: {} - Model Path: {}",
+                e,
+                model_path.to_str().unwrap()
+            )
+        })?;
         println!(
             "--- Loaded config.json ---\n{}\n--------------------------",
             &weights.config_json
@@ -211,7 +216,13 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
 
         // 1. Initialize Beams
         // Create an empty cache. Each beam will get a clone of this to start.
-        let initial_cache = CpuKVCache::new(self.config.num_decoder_layers(), batch_size);
+        //pub fn new(num_layers: usize, batch_size: usize, max_len: usize, hidden_size: usize) -> Self {
+        let initial_cache = Arc::new(CpuKVCache::new(
+            self.config.num_decoder_layers(),
+            batch_size,
+            config.max_length,
+            self.config.hidden_size(),
+        ));
         let mut beams = vec![BeamHypothesis {
             tokens: vec![decoder_start_token_id],
             score: 0.0,
@@ -237,7 +248,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
                 let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
 
                 // Each beam needs its own mutable cache for the forward pass.
-                let mut current_cache = hypo.cache.clone();
+                let mut current_cache = &hypo.cache;
 
                 // --- THE CORRECT FORWARD CALL ---
                 let decoder_output = self
@@ -247,7 +258,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
                         &decoder_input_ids,
                         encoder_attention_mask,
                         &decoder_attention_mask,
-                        Some(&mut current_cache), // Pass the mutable cache for this beam
+                        None, //Some(current_cache.as_any_mut()), // Pass the mutable cache for this beam
                         Some(encoder_output),     // Pass the pre-computed encoder output
                     )
                     .await?;
@@ -277,12 +288,12 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
                 for (token_id, token_log_prob) in top_candidates {
                     let mut new_tokens = hypo.tokens.clone();
                     new_tokens.push(token_id);
-                    all_new_candidates.push(BeamHypothesis {
-                        tokens: new_tokens,
-                        score: hypo.score + token_log_prob,
-                        // The new hypothesis gets the updated cache from the forward pass
-                        cache: current_cache.clone(),
-                    });
+                    // all_new_candidates.push(BeamHypothesis {
+                    //     tokens: new_tokens,
+                    //     score: hypo.score + token_log_prob,
+                    //     // The new hypothesis gets the updated cache from the forward pass
+                    //     cache: current_cache,
+                    // });
                 }
             }
 

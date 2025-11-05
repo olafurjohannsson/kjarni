@@ -1,11 +1,10 @@
 //! Multi-head attention implementation with KV caching support
 
 use crate::activations::softmax;
+use crate::utils::MASK_VALUE;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
-use crate::utils::MASK_VALUE;
-
 
 /// Multi-head attention mechanism
 pub struct MultiHeadAttention {
@@ -92,104 +91,94 @@ impl MultiHeadAttention {
         key_value: Option<&Array3<f32>>, // For cross-attention
         attention_mask: Option<&Array2<f32>>,
         is_causal: bool,
-        cached_kv: Option<(&Array3<f32>, &Array3<f32>)>,
+        cached_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
-        let batch_size = query.shape()[0];
-        let seq_len = query.shape()[1];
-
-        // === 1. Linear Projections & Attention Scaling ===
-
-        // Q projection (always from query input)
-        let mut q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
-
-        // FIX #1: Scale the 3D Query tensor *before* reshaping and matrix multiplication.
-        // This matches the standard implementation in both BART and GPT-2.
-        // q *= self.scale_factor;
-
-        // K, V projections
+        // Step 1: Compute the new K and V states. These are the owned values we will return.
         let kv_source = key_value.unwrap_or(query);
-        let k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
-        let v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
+        let new_k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
+        let new_v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
 
-        // === 2. Concatenate with Cached K, V ===
+        // This block calculates the final `output` tensor.
+        let output = {
+            let batch_size = query.shape()[0];
+            let seq_len = query.shape()[1];
+            let q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
 
-        let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
-            // Concatenate: [batch, cache_len, hidden] + [batch, seq_len, hidden]
-            let full_k = ndarray::concatenate(Axis(1), &[cached_k.view(), k.view()])?;
-            let full_v = ndarray::concatenate(Axis(1), &[cached_v.view(), v.view()])?;
-            (full_k, full_v)
-        } else {
-            (k.clone(), v.clone())
-        };
+            // Step 2: Manually and performantly construct the temporary calculation tensors.
+            let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
+                let cache_len = cached_k.shape()[1];
+                let new_len = new_k.shape()[1];
+                let full_len = cache_len + new_len;
+                let hidden_size = new_k.shape()[2];
 
-        let full_kv_len = full_k.shape()[1];
+                // Pre-allocate the temporary arrays. This is what `concatenate` does internally.
+                let mut full_k = Array3::zeros((batch_size, full_len, hidden_size));
+                let mut full_v = Array3::zeros((batch_size, full_len, hidden_size));
 
-        // === 3. Reshape for Multi-Head Attention ===
+                // Perform two fast, explicit copies. This has no complex lifetimes.
+                full_k.slice_mut(s![.., 0..cache_len, ..]).assign(&cached_k);
+                full_k
+                    .slice_mut(s![.., cache_len..full_len, ..])
+                    .assign(&new_k);
 
-        // Q: [batch, seq_len, hidden] → [batch, num_heads, seq_len, head_dim]
-        let q = q
-            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
+                full_v.slice_mut(s![.., 0..cache_len, ..]).assign(&cached_v);
+                full_v
+                    .slice_mut(s![.., cache_len..full_len, ..])
+                    .assign(&new_v);
 
-        // K: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
-        let k_reshaped = full_k
-            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
+                (full_k, full_v)
+            } else {
+                // No cache exists. To allow `new_k` and `new_v` to be returned, `full_k`
+                // and `full_v` must take ownership of clones.
+                (new_k.clone(), new_v.clone())
+            };
 
-        // V: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
-        let v_reshaped = full_v
-            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
+            // --- The rest of the calculation is now guaranteed to be safe ---
+            let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
+            let full_kv_len = full_k.shape()[1];
 
-        // === 4. Compute Attention Scores: Q @ K^T ===
+            // (All your existing, correct logic for reshape, matmul, mask, etc. goes here)
+            let q_reshaped = q
+                .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
+                .permuted_axes([0, 2, 1, 3]);
 
-        // FIX #2: Ensure all array "views" are converted to a standard, contiguous
-        // memory layout before being passed to matmul to prevent incorrect results.
-        let q_contiguous = q.as_standard_layout().to_owned();
-        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
-        let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
+            let k_reshaped = full_k
+                .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+                .permuted_axes([0, 2, 1, 3]);
 
-        let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
-        scores *= self.scale_factor;
-        // scores *= self.scale_factor;
-        // The incorrect scaling (`scores *= self.scale_factor;`) has been REMOVED from here.
+            let v_reshaped = full_v
+                .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+                .permuted_axes([0, 2, 1, 3]);
 
-        // === 5. Apply Masks ===
+            let q_contiguous = q_reshaped.as_standard_layout().to_owned();
+            let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
+            let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
 
-        if let Some(mask) = attention_mask {
-            scores = apply_padding_mask(scores, mask)?;
-        }
+            let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
+            scores *= self.scale_factor;
 
-        if is_causal {
-            let cache_len = full_kv_len - seq_len;
-            scores = apply_causal_mask(scores, cache_len)?;
-        }
+            if let Some(mask) = attention_mask {
+                scores = apply_padding_mask(scores, mask)?;
+            }
+            if is_causal {
+                scores = apply_causal_mask(scores, cache_len)?;
+            }
 
-        // === 6. Softmax ===
+            let weights = softmax(&scores);
+            let v_contiguous = v_reshaped.as_standard_layout().to_owned();
+            let context = matmul_4d(&weights, &v_contiguous);
 
-        let weights = softmax(&scores);
+            let context_reshaped = context
+                .permuted_axes([0, 2, 1, 3])
+                .as_standard_layout()
+                .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
+                .to_owned();
 
-        // === 7. Apply Attention to Values ===
+            matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias
+        }; // All temporaries, including `full_k` and `full_v`, are dropped here.
 
-        // FIX #2 (continued): Ensure 'v' is also contiguous for the final matmul.
-        let v_contiguous = v_reshaped.as_standard_layout().to_owned();
-        let context = matmul_4d(&weights, &v_contiguous);
-
-        // === 8. Reshape Back ===
-
-        let context = context
-            .permuted_axes([0, 2, 1, 3])
-            .as_standard_layout()
-            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
-            .to_owned();
-
-        // === 9. Output Projection ===
-
-        let output = matmul_3d_2d(&context, &self.output_weight) + &self.output_bias;
-
-        // === 10. Return (output, new_k, new_v) ===
-
-        Ok((output, k, v))
+        // Step 3: Return the original, un-borrowed values.
+        Ok((output, new_k, new_v))
     }
 }
 
@@ -342,7 +331,7 @@ mod tests {
             None,
             Some(&mask),
             true, // Causal
-            Some((&cached_k, &cached_v)),
+            Some((cached_k.view(), cached_v.view())),
         );
 
         assert!(result.is_ok());

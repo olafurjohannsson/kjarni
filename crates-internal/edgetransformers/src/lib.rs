@@ -105,7 +105,7 @@ impl TransformerLayer {
             )?;
 
             if let Some(c) = cache {
-                c.update(layer_idx, new_k, new_v)?;
+                c.update(layer_idx, &new_k, &new_v)?;
             }
 
             // First residual connection. The result is `attn_block_output`.
@@ -178,7 +178,7 @@ impl TransformerLayer {
             )?;
 
             if let Some(cache) = cache {
-                cache.update(layer_idx, new_k, new_v)?;
+                cache.update(layer_idx, &new_k, &new_v)?;
             }
 
             hidden = residual + attn_out;
@@ -228,7 +228,7 @@ impl TransformerLayer {
         )?;
 
         if let Some(cache) = cache {
-            cache.update(layer_idx, new_k, new_v)?;
+            cache.update(layer_idx, &new_k, &new_v)?;
         }
 
         hidden_states = residual + &self_attn_output;

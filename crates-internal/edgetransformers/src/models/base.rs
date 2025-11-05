@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
 use tokenizers::Tokenizer;
-
+use std::sync::Arc;
 use crate::traits::{
     Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
 };
@@ -66,7 +66,7 @@ impl Default for GenerationConfig {
 pub struct BeamHypothesis {
     pub tokens: Vec<u32>,
     pub score: f32,
-    pub cache: CpuKVCache,
+    pub cache: Arc<CpuKVCache>,
 }
 
 // No changes needed here

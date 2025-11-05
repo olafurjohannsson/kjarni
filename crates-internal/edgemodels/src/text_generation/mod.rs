@@ -3,20 +3,20 @@ use crate::generation::{
 };
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
-use ndarray::{Array1, Array2, s};
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokenizers::Tokenizer;
-use edgetransformers::models::download_model_files;
 use edgetransformers::CpuKVCache;
 use edgetransformers::decoder::TransformerDecoder;
+use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
+use edgetransformers::models::download_model_files;
 use edgetransformers::models::project_to_vocab;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
+use ndarray::{Array1, Array2, s};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokenizers::Tokenizer;
 
 mod configs;
 pub use configs::Gpt2Config;
@@ -25,7 +25,7 @@ pub struct TextGenerator {
     model: TransformerDecoder,
     tokenizer: Tokenizer,
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
-    lm_head: Array2<f32>,
+    lm_head_t: Array2<f32>,
 }
 
 impl TextGenerator {
@@ -92,13 +92,16 @@ impl TextGenerator {
 
         let model = TransformerDecoder::new(&weights, config.clone(), device, context)?;
 
-        let lm_head = weights.get_array2(config.get_lm_head_name())?;
+        let lm_head_t = weights
+            .get_array2(config.get_lm_head_name())?
+            .t()
+            .to_owned();
 
         Ok(Self {
             model,
             tokenizer,
             config,
-            lm_head,
+            lm_head_t,
         })
     }
 
@@ -119,10 +122,15 @@ impl TextGenerator {
         } else {
             config.max_length
         };
-
+        let full_attention_mask = Array2::ones((batch_size, max_len));
         // 3. Initialize the Key-Value cache
         let mut cache: Box<dyn Cache> = match self.model.device() {
-            Device::Cpu => Box::new(CpuKVCache::new(self.config.num_hidden_layers(), batch_size)),
+            Device::Cpu => Box::new(CpuKVCache::new(
+                self.config.num_hidden_layers(),
+                batch_size,
+                max_len,                   // The maximum capacity for pre-allocation
+                self.config.hidden_size(), // The hidden size for pre-allocation
+            )),
             Device::Wgpu => {
                 let context = self
                     .model
@@ -148,11 +156,11 @@ impl TextGenerator {
                 tokens.iter().map(|&t| t as f32).collect(),
             )?;
             // The attention mask for the prompt is all ones
-            let attention_mask = Array2::ones((batch_size, prompt_len));
-
+            // let attention_mask = Array2::ones((batch_size, prompt_len));
+            let prompt_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
             // This forward pass populates the cache with the prompt's key-value states
             self.model
-                .forward(&prompt_ids, &attention_mask, Some(cache.as_mut()))
+                .forward(&prompt_ids, &prompt_mask, Some(cache.as_mut()))
                 .await?;
             current_pos = prompt_len;
         }
@@ -163,19 +171,23 @@ impl TextGenerator {
             if tokens.len() >= max_len {
                 break;
             }
-
+            let current_len = tokens.len();
             // Prepare the input for this step: it's only the *last* token
             let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
             let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
 
             // Create a full attention mask for the *entire* sequence length (prompt + generated)
             // The `forward_with_cache` method in the TransformerLayer is responsible for making it causal.
-            let attention_mask = Array2::ones((batch_size, current_pos + 1));
-
+            // let attention_mask = Array2::ones((batch_size, current_pos + 1));
+            let attention_mask_view = full_attention_mask.slice(s![.., 0..current_len + 1]);
             // Perform the forward pass for the single new token
             let decoder_output = self
                 .model
-                .forward(&input_ids, &attention_mask, Some(cache.as_mut()))
+                .forward(
+                    &input_ids,
+                    &attention_mask_view.to_owned(),
+                    Some(cache.as_mut()),
+                )
                 .await?;
 
             current_pos += 1;
@@ -184,10 +196,7 @@ impl TextGenerator {
             // GPT-2's LM head is the word embedding matrix, which needs to be transposed for matmul.
             // For other models, this might differ. The `transpose_...` flags in the config
             // are for the main transformer layers, not necessarily the standalone LM head.
-            let logits_3d = project_to_vocab(
-                &decoder_output.last_hidden_state,
-                &self.lm_head.t().to_owned(),
-            )?;
+            let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, &self.lm_head_t)?;
 
             // Get the logits for the new token (it's the only one in the sequence dimension)
             let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
@@ -211,7 +220,6 @@ impl TextGenerator {
             .decode(&tokens, true)
             .map_err(|e| anyhow!(e))
     }
-
 }
 
 impl TransformerModel for TextGenerator {
@@ -235,6 +243,6 @@ impl DecoderLanguageModel for TextGenerator {
         &self.model
     }
     fn lm_head(&self) -> &Array2<f32> {
-        &self.lm_head
+        &self.lm_head_t
     }
 }
