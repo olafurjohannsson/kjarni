@@ -8,12 +8,24 @@ use ndarray::parallel::prelude::*;
 const SQRT_2_OVER_PI: f32 = 0.7978845608_f32;
 const GELU_COEFF: f32 = 0.044715_f32;
 
-/// Activation function types
+#[derive(Debug, Clone, Copy)]
 pub enum Activation {
     Gelu,
+    GeluNew,
     Relu,
     Tanh,
-    Swish,
+    Swish, // Also known as SiLU
+}
+
+pub fn apply_activation(hidden: &mut Array3<f32>, activation: Activation) {
+    match activation {
+        Activation::Gelu => gelu(hidden),
+        Activation::GeluNew => gelu(hidden),
+        Activation::Relu => relu(hidden),
+        Activation::Swish => swish(hidden),
+        Activation::Tanh => hidden.mapv_inplace(|x| x.tanh()),
+        // TODO: verify
+    }
 }
 
 /// Apply GELU activation in-place

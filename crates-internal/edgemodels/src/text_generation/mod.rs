@@ -121,7 +121,24 @@ impl TextGenerator {
         };
 
         // 3. Initialize the Key-Value cache
-        let mut cache = CpuKVCache::new(self.config.num_hidden_layers(), batch_size);
+        let mut cache: Box<dyn Cache> = match self.model.device() {
+            Device::Cpu => Box::new(CpuKVCache::new(self.config.num_hidden_layers(), batch_size)),
+            Device::Wgpu => {
+                let context = self
+                    .model
+                    .context()
+                    .ok_or_else(|| anyhow!("GPU model should have context"))?;
+
+                Box::new(GpuKVCache::new(
+                    &context,
+                    self.config.num_hidden_layers(),
+                    batch_size,
+                    self.config.num_attention_heads(),
+                    self.config.hidden_size() / self.config.num_attention_heads(),
+                    max_len, // The capacity is the max length of the sequence
+                )?)
+            }
+        };
         let mut current_pos = 0;
 
         // 4. Process the prompt in a single "priming" pass to fill the cache
@@ -135,7 +152,7 @@ impl TextGenerator {
 
             // This forward pass populates the cache with the prompt's key-value states
             self.model
-                .forward(&prompt_ids, &attention_mask, Some(&mut cache))
+                .forward(&prompt_ids, &attention_mask, Some(cache.as_mut()))
                 .await?;
             current_pos = prompt_len;
         }
@@ -158,7 +175,7 @@ impl TextGenerator {
             // Perform the forward pass for the single new token
             let decoder_output = self
                 .model
-                .forward(&input_ids, &attention_mask, Some(&mut cache))
+                .forward(&input_ids, &attention_mask, Some(cache.as_mut()))
                 .await?;
 
             current_pos += 1;

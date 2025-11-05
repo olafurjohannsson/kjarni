@@ -5,6 +5,7 @@ use ndarray::{Array2, Array3};
 use crate::cache::GpuKVCache;
 use std::sync::Arc;
 use wgpu::ComputePipeline;
+use crate::gpu_ops::blocks::ffn::GpuFeedForward;
 use wgpu::util::DeviceExt;
 
 use crate::gpu_ops::{
@@ -79,6 +80,7 @@ impl TempBuffers {
 pub struct GpuTransformerLayer {
     pub attention_weights: AttentionWeights,
     pub ffn_weights: FFNWeights,
+    pub ffn: Option<GpuFeedForward>,
 }
 
 /// The reusable orchestrator for the GPU encoder pipeline.

@@ -114,6 +114,7 @@ async fn test_ffn_correctness() -> Result<()> {
         intermediate_b_cpu.clone(),
         output_w_cpu.as_standard_layout().to_owned(),
         output_b_cpu.clone(),
+        crate::activations::Activation::Gelu,
     );
     let cpu_result = cpu_ffn.forward(&input_cpu)?;
 

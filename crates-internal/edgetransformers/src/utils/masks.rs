@@ -1,5 +1,7 @@
 use ndarray::{Array2, Array3};
 
+pub const MASK_VALUE: f32 = -1e9; // SAME as GPU
+
 /// Create a full attention mask (all positions visible)
 ///
 /// Used for testing or when no masking is needed.
@@ -36,14 +38,6 @@ pub fn create_batched_causal_mask(batch_size: usize, seq_len: usize) -> Array3<f
     
     batched
 }
-
-/// Create a padding mask from attention mask
-///
-/// Simply returns a clone - useful for consistency in API
-pub fn create_padding_mask_from_attention(attention_mask: &Array2<f32>) -> Array2<f32> {
-    attention_mask.clone()
-}
-
 /// Create a padding mask from token IDs
 ///
 /// Marks positions with pad_token_id as 0.0, others as 1.0
@@ -52,13 +46,6 @@ pub fn create_padding_mask_from_tokens(token_ids: &Array2<f32>, pad_token_id: f3
     token_ids.mapv(|id| if id == pad_token_id { 0.0 } else { 1.0 })
 }
 
-/// Combine causal and padding masks
-///
-/// Used in decoder when you need both causal masking AND padding masking
-/// Returns element-wise minimum (both must be 1.0 for position to be visible)
-pub fn combine_masks(causal_mask: &Array2<f32>, padding_mask: &Array2<f32>) -> Array2<f32> {
-    causal_mask * padding_mask
-}
 
 /// Expand padding mask for multi-head attention
 ///

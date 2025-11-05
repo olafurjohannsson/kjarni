@@ -71,14 +71,33 @@ impl CpuTransformerEncoder {
                 weights.get_array1(&attn_names.output_bias)?,
             );
 
+            let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
+            let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
+
+            // The loader is now responsible for handling the transpose convention.
+            // It prepares the weights into the [in, out] format that CpuFeedForward expects.
+            let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
+                // The raw weight from a BERT-style model is [out, in].
+                // We must transpose it to [in, out] for our standard block.
+                raw_intermediate_w.t().as_standard_layout().to_owned()
+            } else {
+                // The raw weight is already [in, out]. Use it as is.
+                raw_intermediate_w
+            };
+
+            let fc2_weight_for_constructor = if config.transpose_ffn_weights() {
+                raw_output_w.t().as_standard_layout().to_owned()
+            } else {
+                raw_output_w
+            };
+            
+            // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feed_forward = FeedForward::new(
-                weights
-                    .get_array2(&ffn_names.intermediate_weight)?
-                    .t()
-                    .to_owned(),
+                fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
-                weights.get_array2(&ffn_names.output_weight)?.t().to_owned(),
+                fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
+                crate::activations::Activation::Gelu, // This should also come from config eventually
             );
 
             // The original BERT has two layer norms per block.

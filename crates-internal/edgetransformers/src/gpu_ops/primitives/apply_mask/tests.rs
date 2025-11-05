@@ -1,93 +1,212 @@
+#[path = "../../../tests/common.rs"]
+mod common;
+
 use super::*;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
-use crate::gpu_context::WgpuContext;
-use ndarray::{Array2, Array3, s};
+use crate::attention::{apply_causal_mask, apply_padding_mask};
+use crate::gpu_ops::{DType, GpuTensor};
+use crate::utils::linear_algebra::apply_attention_mask;
+use crate::utils::masks::{
+    create_batched_causal_mask, create_causal_mask, create_full_attention_mask,
+    create_padding_mask_from_tokens, expand_mask_for_attention,
+};
+use anyhow::Result;
+use common::read_gpu_tensor_to_vec;
+use ndarray::{Array, Array2, Array4, Axis, s};
 use std::sync::Arc;
 
-use anyhow::Result;
-use wgpu::util::DeviceExt;
+const MASK_VALUE: f32 = -1e9;
 
 async fn get_test_context() -> Arc<WgpuContext> {
     Arc::new(WgpuContext::new().await)
 }
 
-#[tokio::test]
-async fn test_apply_mask_correctness() -> Result<()> {
-    let context = get_test_context().await;
-    let device = &context.device;
+fn generate_expected_scores(
+    scores: &Array4<f32>,
+    padding_mask: &Array2<f32>,
+    is_causal: bool,
+    position_offset: u32,
+) -> Result<Array4<f32>> {
+    let mut current_scores = scores.clone();
 
-    // --- 1. Arrange ---
-    let (batch_size, num_heads, seq_len) = (2, 4, 8);
-
-    // Create a simple mask: first batch item allows all, second allows half.
-    let mut mask_cpu = Array2::<f32>::ones((batch_size, seq_len));
-    mask_cpu.slice_mut(s![1, seq_len / 2..]).fill(0.0);
-
-    // Create initial scores (e.g., all zeros)
-    let scores_cpu: Array3<f32> = Array3::zeros((batch_size * num_heads, seq_len, seq_len));
-
-    let scores_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test Mask Scores"),
-        contents: bytemuck::cast_slice(scores_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-    });
-    let mask_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test Mask"),
-        contents: bytemuck::cast_slice(mask_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    // --- 2. Act ---
-
-    // CPU Ground Truth
-    let mut cpu_result = scores_cpu.clone();
-    let neg_inf = -1.0e9;
-    for b in 0..batch_size {
-        for h in 0..num_heads {
-            for s_q in 0..seq_len {
-                for s_k in 0..seq_len {
-                    if mask_cpu[[b, s_k]] == 0.0 {
-                        cpu_result[[b * num_heads + h, s_q, s_k]] = neg_inf;
-                    }
-                }
-            }
-        }
+    // Call the REAL production functions
+    if is_causal {
+        current_scores = apply_causal_mask(current_scores, position_offset as usize)?;
     }
+    current_scores = apply_padding_mask(current_scores, padding_mask)?;
 
-    // GPU Path
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    let pipeline = compile_apply_mask_pipeline(&context);
-    run_gpu_apply_mask(
-        &context,
+    Ok(current_scores)
+}
+#[tokio::test]
+async fn test_mask_encoder_case() -> Result<()> {
+    println!("\n--- Testing GpuApplyMask (Encoder) ---");
+    let context = get_test_context().await;
+    let kernel = GpuApplyMask::new(&context);
+
+    let (b, h, s) = (1, 2, 4);
+    let cpu_scores = Array::from_shape_fn((b, h, s, s), |(i, j, k, l)| (i + j + k + l) as f32);
+    let cpu_tokens = Array2::from_shape_vec((b, s), vec![1.0, 1.0, 1.0, 0.0])?;
+    let cpu_mask = create_padding_mask_from_tokens(&cpu_tokens, 0.0);
+
+    let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
+    let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, false, 0);
+    context.queue.submit(std::iter::once(encoder.finish()));
+
+    let expected_result = generate_expected_scores(&cpu_scores, &cpu_mask, false, 0)?;
+
+    let gpu_result_vec = read_gpu_tensor_to_vec::<f32>(&gpu_scores).await?.0;
+    let gpu_result = Array4::from_shape_vec((b, h, s, s), gpu_result_vec)?;
+
+    assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
+    println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mask_decoder_prompt_case() -> Result<()> {
+    println!("\n--- Testing GpuApplyMask (Decoder Prompt) ---");
+    let context = get_test_context().await;
+    let kernel = GpuApplyMask::new(&context);
+
+    let (b, h, s) = (1, 2, 4);
+    let cpu_scores = Array::from_shape_fn((b, h, s, s), |(i, j, k, l)| (i + j + k + l) as f32);
+    let cpu_mask = create_full_attention_mask(b, s);
+
+    let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
+    let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, true, 0);
+    context.queue.submit(std::iter::once(encoder.finish()));
+
+    let expected_result = generate_expected_scores(&cpu_scores, &cpu_mask, true, 0)?;
+
+    let gpu_result_vec = read_gpu_tensor_to_vec::<f32>(&gpu_scores).await?.0;
+    let gpu_result = Array4::from_shape_vec((b, h, s, s), gpu_result_vec)?;
+
+    assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
+    println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mask_decoder_generation_case() -> Result<()> {
+    println!("\n--- Testing GpuApplyMask (Decoder Generation) ---");
+    let context = get_test_context().await;
+    let kernel = GpuApplyMask::new(&context);
+
+    let (b, h) = (1, 2);
+    let query_len = 1;
+    let cache_capacity = 8;
+    let position_offset = 4;
+
+    let cpu_scores = Array::from_shape_fn((b, h, query_len, cache_capacity), |(i, j, k, l)| {
+        (i + j + k + l) as f32
+    });
+    let cpu_mask =
+        Array::from_shape_vec((b, cache_capacity), vec![1., 1., 1., 0., 1., 0., 0., 0.])?;
+
+    let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
+    let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    kernel.encode(
         &mut encoder,
-        &pipeline,
-        &scores_gpu,
-        &mask_gpu,
-        batch_size as u32,
-        num_heads as u32,
-        seq_len as u32,
-        false,
+        &gpu_scores,
+        &gpu_mask,
+        true,
+        position_offset as u32,
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
-    let gpu_result_array = read_buffer_3d(
-        &context,
-        &scores_gpu,
-        (batch_size * num_heads, seq_len, seq_len),
-    )
-    .await?;
+    let expected_result =
+        generate_expected_scores(&cpu_scores, &cpu_mask, true, position_offset as u32)?;
 
-    // --- 3. Assert ---
-    println!("Verifying Apply Mask GPU kernel against CPU implementation...");
-    assert_vecs_are_close(
-        cpu_result.as_slice().unwrap(),
-        gpu_result_array.as_slice().unwrap(),
-        1e-6,
+    let gpu_result_vec = read_gpu_tensor_to_vec::<f32>(&gpu_scores).await?.0;
+    let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
+
+    assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
+    println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
+    println!("\n--- Testing GpuApplyMask (Decoder Edge Case: Offset 0) ---");
+    let context = get_test_context().await;
+    let kernel = GpuApplyMask::new(&context);
+
+    let (b, h) = (1, 2);
+    let query_len = 1;
+    let cache_capacity = 4;
+    let position_offset = 0;
+
+    let cpu_scores = Array::from_shape_fn((b, h, query_len, cache_capacity), |(i, j, k, l)| {
+        (i + j + k + l) as f32
+    });
+    let cpu_mask = Array::from_shape_vec((b, cache_capacity), vec![1., 1., 0., 1.])?;
+
+    let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
+    let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    kernel.encode(
+        &mut encoder,
+        &gpu_scores,
+        &gpu_mask,
+        true,
+        position_offset as u32,
     );
-    println!("✅ Apply Mask GPU implementation is correct!");
+    context.queue.submit(std::iter::once(encoder.finish()));
 
+    let expected_result =
+        generate_expected_scores(&cpu_scores, &cpu_mask, true, position_offset as u32)?;
+    let gpu_result_vec = read_gpu_tensor_to_vec::<f32>(&gpu_scores).await?.0;
+    let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
+
+    assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
+    println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mask_decoder_generation_batched() -> Result<()> {
+    println!("\n--- Testing GpuApplyMask (Decoder Batched Generation) ---");
+    let context = get_test_context().await;
+    let kernel = GpuApplyMask::new(&context);
+
+    let (b, h) = (2, 2);
+    let query_len = 1;
+    let cache_capacity = 4;
+    let position_offset = 1;
+
+    let cpu_scores = Array::from_shape_fn((b, h, query_len, cache_capacity), |(i, j, k, l)| {
+        (i + j + k + l) as f32
+    });
+    let cpu_mask =
+        Array::from_shape_vec((b, cache_capacity), vec![1., 0., 1., 1., 1., 1., 1., 0.])?;
+
+    let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
+    let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
+
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    kernel.encode(
+        &mut encoder,
+        &gpu_scores,
+        &gpu_mask,
+        true,
+        position_offset as u32,
+    );
+    context.queue.submit(std::iter::once(encoder.finish()));
+
+    let expected_result =
+        generate_expected_scores(&cpu_scores, &cpu_mask, true, position_offset as u32)?;
+    let gpu_result_vec = read_gpu_tensor_to_vec::<f32>(&gpu_scores).await?.0;
+    let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
+
+    assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
+    println!("✅ Passed!");
     Ok(())
 }

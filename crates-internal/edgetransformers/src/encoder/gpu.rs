@@ -4,13 +4,18 @@ use bytemuck;
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-
+use crate::gpu_ops::GpuTensor;
 use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::blocks::ffn::GpuFeedForward;
 use crate::gpu_ops::blocks::attention::AttentionWeights;
 use crate::gpu_ops::blocks::ffn_old::FFNWeights;
 use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
+
+pub struct GpuEncoderLayer {
+    pub ffn: GpuFeedForward,
+}
 
 /// The GPU backend for a generic Transformer Encoder.
 /// It holds the GPU-native weights and the generic pipeline to execute them.
@@ -159,10 +164,26 @@ impl GpuTransformerEncoder {
                 norm_weight: upload_1d(&ffn_names.norm_weight)?,
                 norm_bias: upload_1d(&ffn_names.norm_bias)?,
             };
+            // TODO: move to this
+            // let fc1_w = GpuTensor::from_ndarray(&context, &intermediate_w.clone())?;
+            // let fc1_b = GpuTensor::from_ndarray(&context, &intermediate_b.clone())?;
+            // let fc2_w = GpuTensor::from_ndarray(&context, &output_w.clone())?;
+            // let fc2_b = GpuTensor::from_ndarray(&context, &output_b.clone())?;
+
+            // let ffn = GpuFeedForward::new(
+            //     &context.clone(),
+            //     fc1_w,
+            //     fc1_b,
+            //     fc2_w,
+            //     fc2_b,
+            //     crate::activations::Activation::Gelu,
+            //     config.transpose_ffn_weights()
+            // )?;
 
             layers.push(GpuTransformerLayer {
                 attention_weights,
                 ffn_weights,
+                ffn: None,
             });
         }
 

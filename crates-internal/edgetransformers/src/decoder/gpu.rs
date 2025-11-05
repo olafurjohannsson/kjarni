@@ -1,18 +1,19 @@
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use bytemuck;
-use ndarray::{Array2, Array3, s};
-use std::sync::Arc;
-use wgpu::util::DeviceExt;
-
 use crate::cache::GpuKVCache;
 use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::blocks::ffn::GpuFeedForward;
 use crate::gpu_ops::blocks::{attention::AttentionWeights, ffn_old::FFNWeights};
 use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 use crate::traits::{
     Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
 };
 use crate::weights::ModelWeights;
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
+use bytemuck;
+use ndarray::{Array2, Array3, s};
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
 
 /// The GPU backend for a generic Transformer Decoder.
 pub struct GpuTransformerDecoder {
@@ -27,11 +28,16 @@ pub struct GpuTransformerDecoder {
     layers: Vec<GpuTransformerLayer>,
 
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
+
+    context: Arc<WgpuContext>,
 }
 
 impl GpuTransformerDecoder {
-    pub fn new(weights: &ModelWeights, config: Arc<dyn DecoderArchitecture + Send + Sync>, context: Arc<WgpuContext>) -> Result<Self>
-    {
+    pub fn new(
+        weights: &ModelWeights,
+        config: Arc<dyn DecoderArchitecture + Send + Sync>,
+        context: Arc<WgpuContext>,
+    ) -> Result<Self> {
         let pipeline = GpuTransformerPipeline::new(context.clone())?;
         let device = &context.device;
 
@@ -223,9 +229,27 @@ impl GpuTransformerDecoder {
                 norm_weight: upload_1d(&ffn_names.norm_weight)?,
                 norm_bias: upload_1d(&ffn_names.norm_bias)?,
             };
+
+            // TODO: move to this
+            // let fc1_w = GpuTensor::from_ndarray(&context, &intermediate_w.clone())?;
+            // let fc1_b = GpuTensor::from_ndarray(&context, &intermediate_b.clone())?;
+            // let fc2_w = GpuTensor::from_ndarray(&context, &output_w.clone())?;
+            // let fc2_b = GpuTensor::from_ndarray(&context, &output_b.clone())?;
+
+            // let ffn = GpuFeedForward::new(
+            //     &context.clone(),
+            //     fc1_w,
+            //     fc1_b,
+            //     fc2_w,
+            //     fc2_b,
+            //     crate::activations::Activation::Gelu,
+            //     config.transpose_ffn_weights()
+            // )?;
+
             layers.push(GpuTransformerLayer {
                 attention_weights,
                 ffn_weights,
+                ffn: None,
             });
         }
 
@@ -236,6 +260,7 @@ impl GpuTransformerDecoder {
             final_layer_norm_weights,
             layers,
             config,
+            context,
         })
     }
 
@@ -274,6 +299,9 @@ impl TransformerModel for GpuTransformerDecoder {
     fn device(&self) -> Device {
         Device::Wgpu
     }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        Some(self.context.clone())
+    }
 }
 
 #[async_trait]
@@ -302,7 +330,7 @@ impl Decoder for GpuTransformerDecoder {
         let (batch_size, seq_len) = input.dim();
         let total_len = position_offset + seq_len;
 
-        // Create padding mask for total sequence
+        // Create padding mask for total sequence TODO:: IS THIS CORRECT??
         let padding_mask = if attention_mask.shape()[1] == total_len {
             attention_mask.clone()
         } else {
@@ -324,32 +352,14 @@ impl Decoder for GpuTransformerDecoder {
             )
             .await?;
 
+        if let Some(cache) = gpu_cache {
+            cache.set_seq_length(total_len);
+        }
+
         Ok(DecoderOutput {
             last_hidden_state,
             past_key_values: None,
         })
-        // TODO: Pass empty/identity norm for first layer, use final norm at end
-        // let last_hidden_state = self
-        //     .pipeline
-        //     .forward(
-        //         self.config.as_ref(),
-        //         &initial_embeddings,
-        //         attention_mask,
-        //         (
-        //             &self.final_layer_norm_weights.0, // This should be applied at END, not beginning
-        //             &self.final_layer_norm_weights.1,
-        //         ),
-        //         &self.layers,
-        //     )
-        //     .await?;
-
-        // // TODO: Apply final layer norm here instead of in pipeline
-        // // TODO: Extract and store K, V tensors in cache
-
-        // Ok(DecoderOutput {
-        //     last_hidden_state,
-        //     past_key_values: None, // TODO: populate from cache
-        // })
     }
     async fn get_hidden_states(
         &self,

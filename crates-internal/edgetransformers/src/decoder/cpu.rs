@@ -8,9 +8,7 @@ use crate::traits::{
     Cache, CrossAttentionDecoder, Decoder, DecoderArchitecture, DecoderOutput, Device,
     EncoderOutput as EncoderOutputTrait, TransformerConfig, TransformerModel,
 };
-use crate::utils::{
-    create_causal_mask, create_padding_mask_from_attention, create_padding_mask_from_tokens,
-};
+use crate::utils::{create_causal_mask, create_padding_mask_from_tokens};
 use crate::weights::ModelWeights;
 use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
 
@@ -81,12 +79,32 @@ impl CpuTransformerDecoder {
                 weights.get_array2(&attn_names.output_weight)?, // No .t()
                 weights.get_array1(&attn_names.output_bias)?,
             );
+            let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
+            let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
 
+            // The loader is now responsible for handling the transpose convention.
+            // It prepares the weights into the [in, out] format that CpuFeedForward expects.
+            let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
+                // The raw weight is [out, in]. Transpose it to [in, out].
+                raw_intermediate_w.t().as_standard_layout().to_owned()
+            } else {
+                // The raw weight is already [in, out]. Use it as is.
+                raw_intermediate_w
+            };
+
+            let fc2_weight_for_constructor = if config.transpose_ffn_weights() {
+                raw_output_w.t().as_standard_layout().to_owned()
+            } else {
+                raw_output_w
+            };
+
+            // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feed_forward = FeedForward::new(
-                weights.get_array2(&ffn_names.intermediate_weight)?, // No .t()
+                fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
-                weights.get_array2(&ffn_names.output_weight)?, // No .t()
+                fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
+                crate::activations::Activation::Gelu,
             );
 
             let self_attn_layer_norm = LayerNorm::new(
@@ -138,7 +156,6 @@ impl Decoder for CpuTransformerDecoder {
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
         let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
-        
 
         let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
 

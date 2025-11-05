@@ -5,44 +5,8 @@ use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
 #[cfg(not(target_arch = "wasm32"))]
 use ndarray::parallel::prelude::*;
 
-use crate::gpu_context::WgpuContext;
-use crate::wgpu_ops;
 
-pub async fn feed_forward_gpu(
-    context: &WgpuContext,
-    input: &Array3<f32>,
-    fc1_weight: &Array2<f32>,
-    fc1_bias: &Array1<f32>,
-    fc2_weight: &Array2<f32>,
-    fc2_bias: &Array1<f32>,
-) -> Array3<f32> {
-    let (batch_size, seq_len, hidden_size) = input.dim();
-    let mut output = Array3::zeros((batch_size, seq_len, hidden_size));
 
-    for i in 0..batch_size {
-        let input_slice = input.slice(s![i, .., ..]);
-        let result_slice = wgpu_ops::wgpu_feed_forward_2d(
-            context,
-            &input_slice.to_owned(),
-            fc1_weight,
-            fc1_bias,
-            fc2_weight,
-            fc2_bias,
-        )
-        .await;
-        output.slice_mut(s![i, .., ..]).assign(&result_slice);
-    }
-
-    output
-}
-
-pub async fn matmul_3d_2d_gpu(
-    context: &WgpuContext,
-    a: &Array3<f32>,
-    b: &Array2<f32>,
-) -> Array3<f32> {
-    wgpu_ops::wgpu_matmul_3d_2d(context, a, b).await
-}
 
 /// Batched matrix multiplication: [batch, m, k] x [k, n] -> [batch, m, n]
 #[inline(always)]

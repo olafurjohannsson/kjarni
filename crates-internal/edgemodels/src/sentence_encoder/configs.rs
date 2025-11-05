@@ -270,7 +270,7 @@ impl LanguageModelConfig for DistilBERTConfig {
         false
     }
     fn transpose_ffn_weights(&self) -> bool {
-        false
+        true
     }
     fn vocab_size(&self) -> usize {
         self.vocab_size

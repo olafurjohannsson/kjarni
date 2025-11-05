@@ -2,6 +2,7 @@ struct FfnUniforms {
     m: u32,
     k: u32,
     n: u32,
+    _padding: u32, // keep alignment to 16 bytes
 }
 
 @group(0) @binding(0) var<uniform> info: FfnUniforms;

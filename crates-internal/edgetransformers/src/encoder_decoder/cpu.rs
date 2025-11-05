@@ -86,12 +86,34 @@ impl CpuTransformerEncoderDecoder {
                 config.layer_norm_eps(),
             );
 
+            let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
+            let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
+
+            // The loader is now responsible for handling the transpose convention.
+            // It prepares the weights into the [in, out] format that CpuFeedForward expects.
+            let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
+                // The raw weight is [out, in]. Transpose it to [in, out].
+                raw_intermediate_w.t().as_standard_layout().to_owned()
+            } else {
+                // The raw weight is already [in, out]. Use it as is.
+                raw_intermediate_w
+            };
+
+            let fc2_weight_for_constructor = if config.transpose_ffn_weights() {
+                raw_output_w.t().as_standard_layout().to_owned()
+            } else {
+                raw_output_w
+            };
+            
+            // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feedforward = FeedForward::new(
-                weights.get_linear_weight(&ffn_names.intermediate_weight)?,
+                fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
-                weights.get_linear_weight(&ffn_names.output_weight)?,
+                fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
+                crate::activations::Activation::Gelu,
             );
+
             let ffn_layer_norm = LayerNorm::new(
                 weights.get_array1(&ffn_names.norm_weight)?,
                 weights.get_array1(&ffn_names.norm_bias)?,

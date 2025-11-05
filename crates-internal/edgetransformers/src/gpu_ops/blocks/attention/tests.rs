@@ -5,7 +5,7 @@ mod tests {
     use crate::gpu_ops::primitives::{
         add::{compile_add_pipeline, run_gpu_add},
         add_bias_old::{compile_add_bias_pipeline, run_gpu_add_bias},
-        apply_mask::{compile_apply_mask_pipeline, run_gpu_apply_mask},
+        apply_mask_old::{compile_apply_mask_pipeline, run_gpu_apply_mask},
         layer_norm::{compile_layer_norm_pipeline, run_gpu_layer_norm},
         matmul_old::{compile_bmm_pipeline, compile_matmul_pipeline, run_gpu_bmm, run_gpu_matmul},
         reshape::{

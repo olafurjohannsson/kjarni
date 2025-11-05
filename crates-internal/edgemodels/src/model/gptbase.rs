@@ -228,6 +228,7 @@ impl GPTBase {
                 weights.get_array1(&format!("transformer.{}.mlp.c_fc.bias", prefix))?,
                 weights.get_array2(&format!("transformer.{}.mlp.c_proj.weight", prefix))?,
                 weights.get_array1(&format!("transformer.{}.mlp.c_proj.bias", prefix))?,
+                edgetransformers::activations::Activation::Gelu,
             );
 
             blocks.push(GPTBlock {

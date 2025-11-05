@@ -32,6 +32,8 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
 pub use crate::cache::Cache;
+use std::sync::Arc;
+use crate::WgpuContext;
 
 
 /// Supported computation backends.
@@ -53,6 +55,10 @@ pub enum Device {
 pub trait TransformerModel: Send + Sync {
     /// Returns the computation device this model instance is configured to use.
     fn device(&self) -> Device;
+    /// Returns the GPU context if this model is running on GPU, None for CPU.
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        None // Default implementation for CPU models
+    }
 }
 
 /// A marker trait for model configuration structs (e.g., `BertConfig`, `GptConfig`).

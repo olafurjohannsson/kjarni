@@ -1,228 +1,160 @@
-//! GPU-based KV cache for transformer decoders
-
+use crate::cache::Cache;
+use crate::gpu_context::WgpuContext;
 use anyhow::{Result, anyhow};
-use ndarray::Array3;
 use std::any::Any;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::cache::Cache;
-use crate::gpu_context::WgpuContext;
-
-/// GPU-side KV cache for decoder generation
+/// A high-performance, GPU-resident KV cache for transformer decoders.
 ///
-/// Stores key and value tensors on GPU memory for each layer.
-/// Used for efficient autoregressive generation by avoiding recomputation.
+/// This cache pre-allocates the full required memory on the GPU at creation time.
+/// During generation, it is updated entirely on the GPU via compute shaders,
+/// avoiding any costly data transfers between the CPU and GPU.
 pub struct GpuKVCache {
-    context: Arc<WgpuContext>,
-    /// Cached K tensors per layer: Vec<Option<Buffer>>
-    /// Each buffer stores [batch, cached_seq_len, hidden_size]
-    cached_k: Vec<Option<Arc<wgpu::Buffer>>>,
-    /// Cached V tensors per layer
-    cached_v: Vec<Option<Arc<wgpu::Buffer>>>,
-    /// Current sequence length (same for all layers)
+    /// A vector of GPU buffers for the K-cache, one for each decoder layer.
+    /// Layout: [Batch, Heads, HeadDim, MaxSequenceLength]
+    k_buffers: Vec<Arc<wgpu::Buffer>>,
+
+    /// A vector of GPU buffers for the V-cache, one for each decoder layer.
+    /// Layout: [Batch, Heads, MaxSequenceLength, HeadDim]
+    v_buffers: Vec<Arc<wgpu::Buffer>>,
+
+    /// The current number of tokens stored in the cache.
     seq_length: usize,
-    /// Batch size
+
+    /// The maximum number of tokens this cache can hold.
+    capacity: usize,
+
     batch_size: usize,
-    /// Hidden size
-    hidden_size: usize,
-    /// Number of layers
-    num_layers: usize,
+    num_heads: usize,
+    head_dim: usize,
 }
 
 impl GpuKVCache {
-    /// Create a new GPU KV cache
+    /// Creates a new, pre-allocated GPU KV cache.
     ///
     /// # Arguments
-    /// * `context` - WGPU context for buffer creation
-    /// * `num_layers` - Number of transformer layers
-    /// * `batch_size` - Batch size (typically 1 for generation)
-    /// * `hidden_size` - Hidden dimension size
+    /// * `context` - The WGPU context used to create buffers.
+    /// * `num_layers` - The number of decoder layers in the model.
+    /// * `batch_size` - The batch size for generation (typically 1).
+    /// * `num_heads` - The number of attention heads.
+    /// * `head_dim` - The dimension of each attention head.
+    /// * `capacity` - The maximum sequence length the cache can hold.
     pub fn new(
-        context: Arc<WgpuContext>,
+        context: &Arc<WgpuContext>,
         num_layers: usize,
         batch_size: usize,
-        hidden_size: usize,
-    ) -> Self {
-        Self {
-            context,
-            cached_k: vec![None; num_layers],
-            cached_v: vec![None; num_layers],
+        num_heads: usize,
+        head_dim: usize,
+        capacity: usize,
+    ) -> Result<Self> {
+        let device = &context.device;
+        let layer_cache_size =
+            (batch_size * num_heads * capacity * head_dim * std::mem::size_of::<f32>()) as u64;
+
+        if layer_cache_size == 0 {
+            return Err(anyhow!("Cache size cannot be zero."));
+        }
+
+        let mut k_buffers = Vec::with_capacity(num_layers);
+        let mut v_buffers = Vec::with_capacity(num_layers);
+
+        // CREATE ZERO BUFFER
+        let zeros = vec![0.0f32; (layer_cache_size / 4) as usize];
+
+        for i in 0..num_layers {
+            let usage = wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC;
+
+            // INITIALIZE WITH ZEROS
+            let k_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Layer {} K-Cache", i)),
+                contents: bytemuck::cast_slice(&zeros),
+                usage,
+            });
+            k_buffers.push(Arc::new(k_buffer));
+
+            let v_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Layer {} V-Cache", i)),
+                contents: bytemuck::cast_slice(&zeros),
+                usage,
+            });
+            v_buffers.push(Arc::new(v_buffer));
+        }
+
+        Ok(Self {
+            k_buffers,
+            v_buffers,
             seq_length: 0,
+            capacity,
             batch_size,
-            hidden_size,
-            num_layers,
+            num_heads,
+            head_dim,
+        })
+    }
+    pub fn batch_size(&self) -> usize {
+        // This is a bit of a workaround since we don't store it directly.
+        // We infer it from the buffer sizes. A better way would be to store it.
+        if self.k_buffers.is_empty() {
+            return 0;
         }
+        let layer_cache_size = self.k_buffers[0].size() as usize;
+        let num_elements = layer_cache_size / std::mem::size_of::<f32>();
+        // num_elements = B * H * D * S_capacity. We need to get B.
+        // Let's add the fields to the struct instead. It's cleaner.
+
+        // I will modify the struct and `new` function below.
+        self.batch_size
     }
 
-    /// Update cache for a specific layer with new K, V tensors
-    ///
-    /// This concatenates new K, V with existing cached K, V on GPU.
-    ///
-    /// # Arguments
-    /// * `layer_idx` - Layer index to update
-    /// * `new_k` - New K tensor [batch, new_seq_len, hidden]
-    /// * `new_v` - New V tensor [batch, new_seq_len, hidden]
-    pub fn update(
-        &mut self,
-        layer_idx: usize,
-        new_k: Array3<f32>,
-        new_v: Array3<f32>,
-    ) -> Result<()> {
-        if layer_idx >= self.num_layers {
-            return Err(anyhow!(
-                "Layer index {} out of bounds (max {})",
-                layer_idx,
-                self.num_layers - 1
-            ));
-        }
-
-        let (batch, new_seq_len, hidden) = new_k.dim();
-        
-        if batch != self.batch_size || hidden != self.hidden_size {
-            return Err(anyhow!(
-                "Tensor shape mismatch: expected [{}, ?, {}], got [{}, {}, {}]",
-                self.batch_size,
-                self.hidden_size,
-                batch,
-                new_seq_len,
-                hidden
-            ));
-        }
-
-        // Concatenate with existing cache (if any)
-        let full_k = if let Some(cached_k_buf) = &self.cached_k[layer_idx] {
-            // Download cached K from GPU
-            let cached_k = self.download_buffer_as_array3(
-                cached_k_buf,
-                self.batch_size,
-                self.seq_length,
-                self.hidden_size,
-            )?;
-            
-            // Concatenate along sequence dimension
-            ndarray::concatenate(ndarray::Axis(1), &[cached_k.view(), new_k.view()])?
-        } else {
-            new_k.clone()
-        };
-
-        let full_v = if let Some(cached_v_buf) = &self.cached_v[layer_idx] {
-            let cached_v = self.download_buffer_as_array3(
-                cached_v_buf,
-                self.batch_size,
-                self.seq_length,
-                self.hidden_size,
-            )?;
-            ndarray::concatenate(ndarray::Axis(1), &[cached_v.view(), new_v.view()])?
-        } else {
-            new_v.clone()
-        };
-
-        // Upload concatenated tensors back to GPU
-        self.cached_k[layer_idx] = Some(self.upload_array3_to_buffer(&full_k, layer_idx, "K")?);
-        self.cached_v[layer_idx] = Some(self.upload_array3_to_buffer(&full_v, layer_idx, "V")?);
-
-        // Update sequence length (only on first layer to avoid redundancy)
-        if layer_idx == 0 {
-            self.seq_length = full_k.shape()[1];
-        }
-
-        Ok(())
+    /// Returns the number of attention heads the cache was configured with.
+    pub fn num_heads(&self) -> usize {
+        self.num_heads
     }
-
-    /// Get cached K, V buffers for a specific layer
-    ///
-    /// Returns None if this layer hasn't been cached yet.
+    // This is the one you need for the printout
     pub fn get_buffers(
         &self,
         layer_idx: usize,
     ) -> Option<(&Arc<wgpu::Buffer>, &Arc<wgpu::Buffer>)> {
-        if layer_idx >= self.num_layers {
-            return None;
-        }
-
-        match (&self.cached_k[layer_idx], &self.cached_v[layer_idx]) {
-            (Some(k), Some(v)) => Some((k, v)),
-            _ => None,
+        if layer_idx < self.k_buffers.len() {
+            Some((&self.k_buffers[layer_idx], &self.v_buffers[layer_idx]))
+        } else {
+            None
         }
     }
-
-    /// Clear the cache
-    pub fn clear(&mut self) {
-        self.cached_k = vec![None; self.num_layers];
-        self.cached_v = vec![None; self.num_layers];
-        self.seq_length = 0;
+    /// Returns the dimension of each attention head.
+    pub fn head_dim(&self) -> usize {
+        self.head_dim
+    }
+    /// Returns a slice of the K-cache buffers for all layers.
+    pub fn k_buffers(&self) -> &[Arc<wgpu::Buffer>] {
+        &self.k_buffers
     }
 
-    /// Helper: Upload Array3 to GPU buffer
-    fn upload_array3_to_buffer(
-        &self,
-        array: &Array3<f32>,
-        layer_idx: usize,
-        name: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
-        let data = array.as_standard_layout();
-        let slice = data
-            .as_slice()
-            .ok_or_else(|| anyhow!("Array must be contiguous"))?;
-
-        let buffer = self.context.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Layer {} Cached {}", layer_idx, name)),
-                contents: bytemuck::cast_slice(slice),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            },
-        );
-
-        Ok(Arc::new(buffer))
+    /// Returns a slice of the V-cache buffers for all layers.
+    pub fn v_buffers(&self) -> &[Arc<wgpu::Buffer>] {
+        &self.v_buffers
     }
 
-    /// Helper: Download GPU buffer as Array3
-    fn download_buffer_as_array3(
-        &self,
-        buffer: &wgpu::Buffer,
-        batch: usize,
-        seq_len: usize,
-        hidden: usize,
-    ) -> Result<Array3<f32>> {
-        let size = (batch * seq_len * hidden * std::mem::size_of::<f32>()) as u64;
-        
-        // Create staging buffer
-        let staging_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("KV Cache Staging"),
-            size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Copy from storage to staging
-        let mut encoder = self.context.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("KV Cache Download"),
-            },
-        );
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
-
-        // Map and read
-        let buffer_slice = staging_buffer.slice(..);
-        let (tx, rx) = futures::channel::oneshot::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            tx.send(result).unwrap();
-        });
-        
-        self.context.device.poll(wgpu::PollType::wait_indefinitely());
-        futures::executor::block_on(rx)
-            .map_err(|_| anyhow!("Failed to receive buffer mapping result"))??;
-
-        let data = buffer_slice.get_mapped_range();
-        let floats: &[f32] = bytemuck::cast_slice(&data);
-        let array = Array3::from_shape_vec((batch, seq_len, hidden), floats.to_vec())?;
-
-        drop(data);
-        staging_buffer.unmap();
-
-        Ok(array)
+    /// Returns the maximum number of tokens the cache can hold.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+    pub fn set_seq_length(&mut self, new_length: usize) {
+        // Ensure we don't exceed the pre-allocated capacity.
+        if new_length > self.capacity {
+            // In a real application, you might want to handle this more gracefully,
+            // e.g., by reallocating or using a sliding window.
+            panic!(
+                "KV Cache capacity exceeded: tried to set seq_length to {}, but capacity is {}.",
+                new_length, self.capacity
+            );
+        }
+        self.seq_length = new_length;
+    }
+    pub fn get_seq_length(&self) -> usize {
+        self.seq_length
     }
 }
 
@@ -232,7 +164,9 @@ impl Cache for GpuKVCache {
     }
 
     fn clear(&mut self) {
-        GpuKVCache::clear(self);
+        // Clearing the cache only requires resetting the sequence length.
+        // The data in the buffers becomes garbage and will be overwritten on the next run.
+        self.seq_length = 0;
     }
 
     fn as_any(&self) -> &dyn Any {

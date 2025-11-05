@@ -1,17 +1,45 @@
+//! A GPU-accelerated Feed-Forward Network (FFN) block.
+//!
+//! This module defines a `GpuFeedForward` struct that encapsulates the logic for
+//! a standard two-layer MLP found in Transformer architectures. It is designed for
+//! performance, using fused kernels to combine matrix multiplication, bias addition,
+//! and activation functions into single GPU passes.
+//!
+//! # Architecture
+//!
+//! 1.  **`GpuFeedForward` struct:** The main public-facing struct. It owns the compiled
+//!     GPU pipelines and the weight/bias tensors for both linear layers.
+//! 2.  **`forward` method:** The primary entry point. It orchestrates the two main
+//!     compute passes (FC1 and FC2).
+//! 3.  **`run_fc1`/`run_fc2` methods:** Helper methods that each encode a single,
+//!     fused compute pass, which can be called individually for testing.
+//! 4.  **Fused Kernels:**
+//!     - `fc1.wgsl`: Performs `MatMul(input, W1) + Bias1` and applies the `GeLU` activation.
+//!     - `fc2.wgsl`: Performs `MatMul(intermediate, W2) + Bias2`.
+//!
+//! # INVARIANT
+//!
+//! The constructor (`::new`) for this struct is "dumb." It expects that the weight tensors
+//! it receives are **already in the correct layout** required by its internal shaders.
+//! The shaders use an output-centric algorithm that is most efficient with a weight layout of
+//! **`[out_features, in_features]`**.
+//!
+//! It is the responsibility of the higher-level model loading code (e.g., `GpuEncoder::new`)
+//! to inspect the model's configuration (`transpose_ffn_weights` flag) and perform any
+//! necessary transpositions *before* calling this constructor.
+
 use crate::gpu_ops::{GpuTensor};
 use crate::WgpuContext;
-// Note: This is a "block", not a primitive "kernel", so it has a `forward` method.
+use crate::activations::Activation;
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
 
 #[cfg(test)]
 mod tests;
 
-pub mod fc1;
-pub mod fc2;
-
-// Uniform struct remains internal to this module
+/// Uniform struct passed to both FC1 and FC2 shaders.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FfnUniforms {
@@ -21,13 +49,13 @@ struct FfnUniforms {
     _padding: u32,
 }
 
+/// Holds the pre-compiled pipelines and their bind group layouts.
 struct FfnPipelines {
-    fc1: Arc<ComputePipeline>,
-    fc1_layout: Arc<BindGroupLayout>,
-    fc2: Arc<ComputePipeline>,
-    fc2_layout: Arc<BindGroupLayout>,
+    fc1: (Arc<ComputePipeline>, Arc<BindGroupLayout>),
+    fc2: (Arc<ComputePipeline>, Arc<BindGroupLayout>),
 }
 
+/// A GPU-accelerated Feed-Forward Network block.
 pub struct GpuFeedForward {
     pipelines: FfnPipelines,
     fc1_weight: GpuTensor,
@@ -38,95 +66,198 @@ pub struct GpuFeedForward {
 }
 
 impl GpuFeedForward {
+        /// Creates a new `GpuFeedForward` block from pre-prepared weights.
+    ///
+    /// # INVARIANT
+    ///
+    /// The weight tensors provided to this constructor **MUST** be in the standard
+    /// **[in_features, out_features]** layout. This is because the internal fused
+    /// kernels are written to expect this format for compatibility with the CPU path.
+    ///
+    /// # Arguments
+    /// * `context` - The shared WGPU context.
+    /// * `fc1_weight` - Weight tensor for FC1, must have layout **[hidden_size, intermediate_size]**.
+    /// * `fc1_bias` - Bias vector for FC1, shape `[intermediate_size]`.
+    /// * `fc2_weight` - Weight tensor for FC2, must have layout **[intermediate_size, hidden_size]**.
+    /// * `fc2_bias` - Bias vector for FC2, shape `[hidden_size]`.
+    /// * `activation` - The activation function to use.
     pub fn new(
         context: &Arc<WgpuContext>,
         fc1_weight: GpuTensor,
         fc1_bias: GpuTensor,
         fc2_weight: GpuTensor,
         fc2_bias: GpuTensor,
-    ) -> Self {
+        activation: Activation,
+    ) -> Result<Self> {
+        match activation {
+            Activation::Gelu => (), // Supported
+            _ => return Err(anyhow!("GpuFeedForward's fused kernel currently only supports GELU.")),
+        }
+
+        // --- FINAL, CORRECT ASSERTIONS for [in, out] layout ---
+        assert_eq!(fc1_weight.rank(), 2, "FC1 weight must be 2D");
+        assert_eq!(fc2_weight.rank(), 2, "FC2 weight must be 2D");
+        assert_eq!(fc1_bias.rank(), 1, "FC1 bias must be 1D");
+        assert_eq!(fc2_bias.rank(), 1, "FC2 bias must be 1D");
+
+        // Checks FC1: output dimension of weight must match bias size.
+        assert_eq!(fc1_weight.shape()[1], fc1_bias.shape()[0], "FC1 weight's [in,OUT] must match bias [OUT]");
+
+        // Checks FC2: output dimension of weight must match bias size.
+        assert_eq!(fc2_weight.shape()[1], fc2_bias.shape()[0], "FC2 weight's [in,OUT] must match bias [OUT]");
+        
+        // Checks connection: FC1 output dimension must match FC2 input dimension.
+        assert_eq!(fc1_weight.shape()[1], fc2_weight.shape()[0], "FC1's out_features must match FC2's in_features");
+
         let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context);
         let (fc2_pipeline, fc2_layout) = compile_fc2_pipeline(context);
-        let pipelines = FfnPipelines {
-            fc1: Arc::new(fc1_pipeline),
-            fc1_layout: Arc::new(fc1_layout),
-            fc2: Arc::new(fc2_pipeline),
-            fc2_layout: Arc::new(fc2_layout),
-        };
-
-        Self {
-            pipelines,
+        
+        Ok(Self {
+            pipelines: FfnPipelines {
+                fc1: (Arc::new(fc1_pipeline), Arc::new(fc1_layout)),
+                fc2: (Arc::new(fc2_pipeline), Arc::new(fc2_layout)),
+            },
             fc1_weight,
             fc1_bias,
             fc2_weight,
             fc2_bias,
             context: context.clone(),
-        }
+        })
     }
 
-    pub fn forward(&self, encoder: &mut CommandEncoder, input: &GpuTensor, intermediate: &GpuTensor, output: &GpuTensor) {
-        let input_shape = input.shape();
+    /// Encodes the complete FFN forward pass into the command encoder.
+    pub fn forward(
+        &self,
+        encoder: &mut CommandEncoder,
+        input: &GpuTensor,
+        intermediate: &GpuTensor,
+        output: &GpuTensor,
+    ) {
+        self.run_fc1(encoder, input, intermediate);
+        self.run_fc2(encoder, intermediate, output);
+    }
+
+
+    /// Encodes the first fused kernel pass: `MatMul(input, W1) + Bias1 + GeLU`.
+    pub fn run_fc1(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
+      let input_shape = input.shape();
         let rows = (input_shape[0] * input_shape[1]) as u32;
         let hidden_size = input_shape[2] as u32;
         let intermediate_size = self.fc1_weight.shape()[1] as u32;
 
-        let uniforms_fc1 = FfnUniforms { m: rows, k: hidden_size, n: intermediate_size, _padding: 0 };
-        let uniform_buffer_fc1 = self.context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("FFN FC1 Uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms_fc1]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let uniforms = FfnUniforms { m: rows, k: hidden_size, n: intermediate_size, _padding: 0 };
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("FFN FC1 Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
-        let fc1_bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("FC1 Bind Group"),
-            layout: &self.pipelines.fc1_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer_fc1.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.fc1_weight.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: self.fc1_bias.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: input.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: intermediate.buffer().as_entire_binding() },
-            ],
-        });
-        
-        let workgroups_fc1 = (rows * intermediate_size + 511) / 512;
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("FC1 Bind Group"),
+                layout: &self.pipelines.fc1.1,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.fc1_weight.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.fc1_bias.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: input.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: output.buffer().as_entire_binding(),
+                    },
+                ],
+            });
+
+        let workgroups = (rows * intermediate_size + 511) / 512;
         {
-            let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-            compute_pass.set_pipeline(&self.pipelines.fc1);
-            compute_pass.set_bind_group(0, &fc1_bind_group, &[]);
-            compute_pass.dispatch_workgroups(workgroups_fc1, 1, 1);
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FC1 Pass"),
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(&self.pipelines.fc1.0);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.dispatch_workgroups(workgroups, 1, 1);
         }
+    }
 
-        let uniforms_fc2 = FfnUniforms { m: rows, k: intermediate_size, n: hidden_size, _padding: 0 };
-        let uniform_buffer_fc2 = self.context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-             label: Some("FFN FC2 Uniforms"),
-             contents: bytemuck::cast_slice(&[uniforms_fc2]),
-             usage: wgpu::BufferUsages::UNIFORM,
-        });
+    /// Encodes the second fused kernel pass: `MatMul(intermediate, W2) + Bias2`.
+    pub fn run_fc2(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
+        let input_shape = input.shape();
+        let rows = (input_shape[0] * input_shape[1]) as u32;
+        let intermediate_size = input_shape[2] as u32;
+        let hidden_size = self.fc2_weight.shape()[1] as u32;
 
-        let fc2_bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("FC2 Bind Group"),
-            layout: &self.pipelines.fc2_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer_fc2.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.fc2_weight.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: self.fc2_bias.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: intermediate.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: output.buffer().as_entire_binding() },
-            ],
-        });
+        let uniforms = FfnUniforms { m: rows, k: intermediate_size, n: hidden_size, _padding: 0 };
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("FFN FC2 Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
-        let workgroups_fc2 = (rows * hidden_size + 511) / 512;
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("FC2 Bind Group"),
+                layout: &self.pipelines.fc2.1,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.fc2_weight.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.fc2_bias.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: input.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: output.buffer().as_entire_binding(),
+                    },
+                ],
+            });
+
+        let workgroups = (rows * hidden_size + 511) / 512;
         {
-            let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-            compute_pass.set_pipeline(&self.pipelines.fc2);
-            compute_pass.set_bind_group(0, &fc2_bind_group, &[]);
-            compute_pass.dispatch_workgroups(workgroups_fc2, 1, 1);
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FC2 Pass"),
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(&self.pipelines.fc2.0);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.dispatch_workgroups(workgroups, 1, 1);
         }
     }
 }
 
-pub fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
+fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
     let shader = device.create_shader_module(wgpu::include_wgsl!("./fc1/fc1.wgsl"));
 
@@ -209,7 +340,7 @@ pub fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGrou
     (pipeline, bind_group_layout)
 }
 
-pub fn compile_fc2_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
+fn compile_fc2_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
     let shader = device.create_shader_module(wgpu::include_wgsl!("./fc2/fc2.wgsl"));
 
@@ -290,5 +421,4 @@ pub fn compile_fc2_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGrou
     });
 
     (pipeline, bind_group_layout)
-
 }

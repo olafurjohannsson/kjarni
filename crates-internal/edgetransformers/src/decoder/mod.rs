@@ -11,11 +11,9 @@
 mod cpu;
 mod gpu;
 
-use crate::traits::{
-    Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel,
-};
-use crate::weights::ModelWeights;
 use crate::gpu_context::WgpuContext;
+use crate::traits::{Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
+use crate::weights::ModelWeights;
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -45,8 +43,7 @@ impl TransformerDecoder {
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-    ) -> Result<Self>
-    {
+    ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
                 weights,
@@ -74,6 +71,12 @@ impl TransformerModel for TransformerDecoder {
             Self::Gpu(model) => model.device(),
         }
     }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        match self {
+            Self::Cpu(model) => model.context(),
+            Self::Gpu(model) => model.context(),
+        }
+    }
 }
 
 /// Implements the `Decoder` trait for the generic decoder, delegating to the backend.
@@ -81,20 +84,6 @@ impl TransformerModel for TransformerDecoder {
 impl Decoder for TransformerDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
-
-    // pub async fn forward_cross_attention(
-    //     &self,
-    //     input: &Self::Input,
-    //     decoder_attention_mask: &Array2<f32>,
-    //     encoder_output: &EncoderOutput,
-    //     encoder_attention_mask: &Array2<f32>,
-    //     cache: Option<&mut dyn Cache>,
-    // ) -> Result<DecoderOutput> {
-    //     match self {
-    //         Self::Cpu(model) => model.forward_cross_attention(input, decoder_attention_mask, encoder_output, encoder_attention_mask, cache).await,
-    //         Self::Gpu(model) => model.forward_cross_attention(input, decoder_attention_mask, encoder_output, encoder_attention_mask, cache).await,
-    //     }
-    // }
 
     async fn forward(
         &self,

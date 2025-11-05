@@ -48,9 +48,6 @@ impl CpuKVCache {
             }
         });
 
-        // REMOVE the entire `if layer_idx == 0` block.
-        // We also need a way to update the sequence length from outside.
-
         Ok(())
     }
 

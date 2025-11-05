@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use ndarray::{Array2, Array3, Axis};
+use crate::utils::MASK_VALUE;
 
 /// Pooling strategies for sequence outputs
 pub enum PoolingStrategy {
@@ -51,11 +52,11 @@ pub fn max_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Ar
     let mut masked_hidden = hidden.clone();
     masked_hidden.zip_mut_with(&mask_expanded, |h, &m| {
         if m == 0.0 {
-            *h = f32::NEG_INFINITY;
+            *h = MASK_VALUE;
         }
     });
 
-    Ok(masked_hidden.fold_axis(Axis(1), f32::NEG_INFINITY, |&acc, &x| acc.max(x)))
+    Ok(masked_hidden.fold_axis(Axis(1), MASK_VALUE, |&acc, &x| acc.max(x)))
 }
 
 /// Extract last token embedding
