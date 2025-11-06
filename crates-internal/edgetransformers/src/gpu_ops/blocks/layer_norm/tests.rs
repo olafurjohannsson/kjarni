@@ -1,6 +1,6 @@
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::primitives::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use anyhow::Result;
 use ndarray::{Array, Array1, Array3, Axis, Ix3};
 use std::sync::Arc;
@@ -56,10 +56,10 @@ async fn test_gpu_layernorm_parity() -> Result<()> {
     let beta_cpu = Array1::from_shape_fn(h, |i| 0.0 + i as f32 * -0.002);
 
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
-    let weights_gpu = GpuLayerNormWeights {
-        gamma: GpuTensor::from_ndarray(&context, &gamma_cpu)?,
-        beta: GpuTensor::from_ndarray(&context, &beta_cpu)?,
-    };
+    let weights_gpu = GpuLayerNormWeights::new(
+        GpuTensor::from_ndarray(&context, &gamma_cpu)?,
+        GpuTensor::from_ndarray(&context, &beta_cpu)?,
+    )?;
     let output_gpu =
         GpuTensor::uninitialized(&context, vec![b, s, h], input_gpu.dtype(), "LN Output");
 
@@ -72,7 +72,7 @@ async fn test_gpu_layernorm_parity() -> Result<()> {
 
     // 3. GPU Execution
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    gpu_layernorm.encode(&mut encoder, &input_gpu, &weights_gpu, &output_gpu);
+    gpu_layernorm.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 
     // 4. Compare

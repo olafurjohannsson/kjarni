@@ -1,81 +1,68 @@
-use super::*;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_3d};
 use crate::gpu_context::WgpuContext;
-use ndarray::{Array, Array3};
-use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu_ops::{Kernel, GpuTensor};
+use anyhow::Result;
+use ndarray::{Array, Array3, Ix3};
 use std::sync::Arc;
 
-use anyhow::Result;
-use wgpu::util::DeviceExt;
+// --- You will need these helper functions in your test module ---
 
-async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+// Helper to read a GpuTensor back to the CPU for comparison.
+async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
+    let shape = tensor.shape().to_vec();
+    let raw_data = tensor.read_raw_data().await?;
+    let data_slice: &[f32] = bytemuck::cast_slice(&raw_data);
+    Ok(Array::from_shape_vec(shape, data_slice.to_vec())?.into_dimensionality::<D>()?)
 }
 
+/// A crucial helper function to compare CPU and GPU tensors with a tolerance.
+async fn assert_tensors_are_close(
+    cpu_tensor: &Array3<f32>,
+    gpu_tensor: &GpuTensor,
+    label: &str,
+    tolerance: f32,
+) {
+    let gpu_as_cpu = read_gpu_tensor::<Ix3>(gpu_tensor).await.unwrap();
+    let close = cpu_tensor
+        .iter()
+        .zip(gpu_as_cpu.iter())
+        .all(|(a, b)| (a - b).abs() < tolerance);
+
+    if !close {
+        println!("Mismatch in tensor '{}'", label);
+        println!("CPU tensor (shape {:?}): \n{:?}", cpu_tensor.shape(), cpu_tensor);
+        println!("GPU tensor (shape {:?}): \n{:?}", gpu_as_cpu.shape(), gpu_as_cpu);
+        panic!("Tensor '{}' is not close enough to its GPU counterpart.", label);
+    }
+}
+
+// --- The Actual Test ---
+
 #[tokio::test]
-async fn test_add_correctness() -> Result<()> {
-    let context = get_test_context().await;
-    let device = &context.device;
+async fn test_gpu_add_parity() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await);
+    let gpu_add = GpuAdd::new(&context);
 
-    // --- 1. Arrange ---
-    let batch_size = 2;
-    let seq_len = 16;
-    let hidden_size = 64;
-    let total_elements = (batch_size * seq_len * hidden_size) as u32;
+    // 1. Setup: Create two tensors on the CPU and GPU
+    let shape = (4, 256, 512);
+    let a_cpu = Array3::from_shape_fn(shape, |(i, j, k)| (i + j + k) as f32 * 0.1);
+    let b_cpu = Array3::from_shape_fn(shape, |(i, j, k)| (k + j + i) as f32 * -0.2);
 
-    let input_a_cpu: Array3<f32> =
-        Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
-    let input_b_cpu: Array3<f32> =
-        Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
+    let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
+    let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
+    let output_gpu = GpuTensor::uninitialized(&context, vec![shape.0, shape.1, shape.2], a_gpu.dtype(), "Add Output");
 
-    let input_a_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test Add Input A"),
-        contents: bytemuck::cast_slice(input_a_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let input_b_gpu = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Test Add Input B"),
-        contents: bytemuck::cast_slice(input_b_cpu.as_slice().unwrap()),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let output_gpu = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test Add Output"),
-        size: (total_elements as u64) * std::mem::size_of::<f32>() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
+    // 2. CPU Ground Truth
+    let expected_cpu = &a_cpu + &b_cpu;
 
-    // --- 2. Act ---
-    let cpu_result = &input_a_cpu + &input_b_cpu;
+    // 3. GPU Execution
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    gpu_add.encode(&mut encoder, &[&a_gpu, &b_gpu], &output_gpu);
+    context.queue.submit(Some(encoder.finish()));
 
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    // 4. Compare
+    assert_tensors_are_close(&expected_cpu, &output_gpu, "Add Output", 1e-6).await;
 
-    let pipeline = compile_add_pipeline(&context);
-    
-    run_gpu_add(
-        &context,
-        &mut encoder,
-        &pipeline,
-        &input_a_gpu,
-        &input_b_gpu,
-        &output_gpu,
-        total_elements,
-    );
-    context.queue.submit(std::iter::once(encoder.finish()));
-
-    let gpu_result_array =
-        read_buffer_3d(&context, &output_gpu, (batch_size, seq_len, hidden_size)).await?;
-
-    // --- 3. Assert ---
-    println!("Verifying Add GPU kernel against CPU implementation...");
-    assert_vecs_are_close(
-        cpu_result.as_slice().unwrap(),
-        gpu_result_array.as_slice().unwrap(),
-        1e-6,
-    );
-    println!("✅ Add GPU implementation is correct!");
-
+    println!("✅ GpuAdd passed parity test!");
     Ok(())
 }

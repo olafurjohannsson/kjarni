@@ -7,11 +7,9 @@ use crate::gpu_ops::primitives::{
     layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape, matmul::GpuMatMul,
     softmax::GpuSoftmax,
 };
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-// --- TempStorage and GpuAttentionWeights structs remain the same. ---
-// (Included here for completeness of the copy-pasteable file)
 
 /// A simple memory pool for managing temporary, intermediate GPU tensors.
 pub struct TempStorage {
@@ -65,25 +63,81 @@ impl TempStorage {
 
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
-    pub q_weight: GpuTensor,
-    pub q_bias: GpuTensor,
-    pub k_weight: GpuTensor,
-    pub k_bias: GpuTensor,
-    pub v_weight: GpuTensor,
-    pub v_bias: GpuTensor,
-    pub output_weight: GpuTensor,
-    pub output_bias: GpuTensor,
+    pub(crate) q_weight: GpuTensor,
+    pub(crate) q_bias: GpuTensor,
+    pub(crate) k_weight: GpuTensor,
+    pub(crate) k_bias: GpuTensor,
+    pub(crate) v_weight: GpuTensor,
+    pub(crate) v_bias: GpuTensor,
+    pub(crate) output_weight: GpuTensor,
+    pub(crate) output_bias: GpuTensor,
 }
 
-// --- GpuAttention struct is updated to use the correct primitives ---
+impl GpuAttentionWeights {
+    pub fn new(
+        q_weight: GpuTensor,
+        q_bias: GpuTensor,
+        k_weight: GpuTensor,
+        k_bias: GpuTensor,
+        v_weight: GpuTensor,
+        v_bias: GpuTensor,
+        output_weight: GpuTensor,
+        output_bias: GpuTensor,
+    ) -> Result<Self> {
+        // --- dimensional checks ---
+        for (name, w, b) in [
+            ("Q", &q_weight, &q_bias),
+            ("K", &k_weight, &k_bias),
+            ("V", &v_weight, &v_bias),
+            ("Output", &output_weight, &output_bias),
+        ] {
+            assert_eq!(w.rank(), 2, "{name} weight must be 2D");
+            assert_eq!(b.rank(), 1, "{name} bias must be 1D");
+            assert_eq!(
+                w.shape()[1],
+                b.shape()[0],
+                "{name} weight's output dim must match its bias size"
+            );
+        }
 
-/// A reusable, configurable GPU Multi-Head Attention block.
+        // Check that Q, K, V weights all share the same input dimension
+        assert_eq!(
+            q_weight.shape()[0],
+            k_weight.shape()[0],
+            "Q and K must have same input dimension"
+        );
+        assert_eq!(
+            q_weight.shape()[0],
+            v_weight.shape()[0],
+            "Q and V must have same input dimension"
+        );
+
+        // Ensure output_weight input dim matches Q/K/V output dim (projected dimension)
+        assert_eq!(
+            output_weight.shape()[0],
+            q_weight.shape()[1] + k_weight.shape()[1] + v_weight.shape()[1],
+            "Output projection input dim must equal concatenated QKV dim"
+        );
+
+        Ok(Self {
+            q_weight,
+            q_bias,
+            k_weight,
+            k_bias,
+            v_weight,
+            v_bias,
+            output_weight,
+            output_bias,
+        })
+    }
+}
+
 pub struct GpuAttention {
     matmul: GpuMatMul,
     bmm: GpuBatchedMatMul,
     add_bias: GpuAddBias,
-    reshape: GpuReshape,     // Use the specialized reshape kernel
-    unreshape: GpuUnreshape, // Use the specialized unreshape kernel
+    reshape: GpuReshape,     
+    unreshape: GpuUnreshape, 
     apply_mask: GpuApplyMask,
     softmax: GpuSoftmax,
     permute: GpuPermute,
@@ -110,8 +164,6 @@ impl GpuAttention {
         }
     }
 
-    /// GPU equivalent of the CPU `forward_with_cache` method.
-    /// GPU equivalent of the CPU `forward_with_cache` method.
     ///
     /// This function is now a stateless calculator. It assumes the caller (e.g., a TransformerLayer
     /// or a test) has already updated the KV cache with the results from the previous step.
@@ -234,7 +286,7 @@ impl GpuAttention {
     ///
     /// # Returns
     /// The final 3D output tensor of the attention block.
- pub fn attend(
+    pub fn attend(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         query: &GpuTensor, // Input hidden states for this step [B, S_q, H]

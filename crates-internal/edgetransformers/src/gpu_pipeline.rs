@@ -17,8 +17,8 @@ use crate::gpu_ops::{
         FFNConfig, FFNPipelines, FFNTempBuffers, FFNWeights, run_ffn_block,
     },
     primitives::{
-        add::{compile_add_pipeline, run_gpu_add},
-        layer_norm::{compile_layer_norm_pipeline, run_gpu_layer_norm},
+        add_old::{compile_add_pipeline, run_gpu_add},
+        layer_norm_old::{compile_layer_norm_pipeline, run_gpu_layer_norm},
     },
     utils::read_buffer_3d,
 };

@@ -28,10 +28,10 @@
 //! to inspect the model's configuration (`transpose_ffn_weights` flag) and perform any
 //! necessary transpositions *before* calling this constructor.
 
-use crate::gpu_ops::{GpuTensor};
 use crate::WgpuContext;
 use crate::activations::Activation;
-use anyhow::{anyhow, Result};
+use crate::gpu_ops::GpuTensor;
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
@@ -55,18 +55,69 @@ struct FfnPipelines {
     fc2: (Arc<ComputePipeline>, Arc<BindGroupLayout>),
 }
 
+pub struct GpuFeedForwardWeights {
+    // Fields are now crate-public to be accessible by GpuFeedForward, but not user-constructible
+    pub(crate) fc1_weight: GpuTensor,
+    pub(crate) fc1_bias: GpuTensor,
+    pub(crate) fc2_weight: GpuTensor,
+    pub(crate) fc2_bias: GpuTensor,
+}
+
+impl GpuFeedForwardWeights {
+    /// Creates a new `GpuFeedForwardWeights` container, validating tensor shapes.
+    ///
+    /// This is the new "gatekeeper" for weight integrity. It will panic if the
+    /// provided tensors have mismatched or incorrect dimensions.
+    pub fn new(
+        fc1_weight: GpuTensor,
+        fc1_bias: GpuTensor,
+        fc2_weight: GpuTensor,
+        fc2_bias: GpuTensor,
+    ) -> Result<Self> {
+        // --- ALL THE ASSERTIONS ARE MOVED HERE ---
+        assert_eq!(fc1_weight.rank(), 2, "FC1 weight must be 2D");
+        assert_eq!(fc2_weight.rank(), 2, "FC2 weight must be 2D");
+        assert_eq!(fc1_bias.rank(), 1, "FC1 bias must be 1D");
+        assert_eq!(fc2_bias.rank(), 1, "FC2 bias must be 1D");
+
+        // Checks FC1: output dimension of weight must match bias size.
+        assert_eq!(
+            fc1_weight.shape()[1],
+            fc1_bias.shape()[0],
+            "FC1 weight's [in,OUT] must match bias [OUT]"
+        );
+
+        // Checks FC2: output dimension of weight must match bias size.
+        assert_eq!(
+            fc2_weight.shape()[1],
+            fc2_bias.shape()[0],
+            "FC2 weight's [in,OUT] must match bias [OUT]"
+        );
+
+        // Checks connection: FC1 output dimension must match FC2 input dimension.
+        assert_eq!(
+            fc1_weight.shape()[1],
+            fc2_weight.shape()[0],
+            "FC1's out_features must match FC2's in_features"
+        );
+
+        Ok(Self {
+            fc1_weight,
+            fc1_bias,
+            fc2_weight,
+            fc2_bias,
+        })
+    }
+}
+
 /// A GPU-accelerated Feed-Forward Network block.
 pub struct GpuFeedForward {
     pipelines: FfnPipelines,
-    fc1_weight: GpuTensor,
-    fc1_bias: GpuTensor,
-    fc2_weight: GpuTensor,
-    fc2_bias: GpuTensor,
     context: Arc<WgpuContext>,
 }
 
 impl GpuFeedForward {
-        /// Creates a new `GpuFeedForward` block from pre-prepared weights.
+    /// Creates a new `GpuFeedForward` block from pre-prepared weights.
     ///
     /// # INVARIANT
     ///
@@ -76,51 +127,25 @@ impl GpuFeedForward {
     ///
     /// # Arguments
     /// * `context` - The shared WGPU context.
-    /// * `fc1_weight` - Weight tensor for FC1, must have layout **[hidden_size, intermediate_size]**.
-    /// * `fc1_bias` - Bias vector for FC1, shape `[intermediate_size]`.
-    /// * `fc2_weight` - Weight tensor for FC2, must have layout **[intermediate_size, hidden_size]**.
-    /// * `fc2_bias` - Bias vector for FC2, shape `[hidden_size]`.
     /// * `activation` - The activation function to use.
-    pub fn new(
-        context: &Arc<WgpuContext>,
-        fc1_weight: GpuTensor,
-        fc1_bias: GpuTensor,
-        fc2_weight: GpuTensor,
-        fc2_bias: GpuTensor,
-        activation: Activation,
-    ) -> Result<Self> {
+    pub fn new(context: &Arc<WgpuContext>, activation: Activation) -> Result<Self> {
         match activation {
             Activation::Gelu => (), // Supported
-            _ => return Err(anyhow!("GpuFeedForward's fused kernel currently only supports GELU.")),
+            _ => {
+                return Err(anyhow!(
+                    "GpuFeedForward's fused kernel currently only supports GELU."
+                ));
+            }
         }
-
-        // --- FINAL, CORRECT ASSERTIONS for [in, out] layout ---
-        assert_eq!(fc1_weight.rank(), 2, "FC1 weight must be 2D");
-        assert_eq!(fc2_weight.rank(), 2, "FC2 weight must be 2D");
-        assert_eq!(fc1_bias.rank(), 1, "FC1 bias must be 1D");
-        assert_eq!(fc2_bias.rank(), 1, "FC2 bias must be 1D");
-
-        // Checks FC1: output dimension of weight must match bias size.
-        assert_eq!(fc1_weight.shape()[1], fc1_bias.shape()[0], "FC1 weight's [in,OUT] must match bias [OUT]");
-
-        // Checks FC2: output dimension of weight must match bias size.
-        assert_eq!(fc2_weight.shape()[1], fc2_bias.shape()[0], "FC2 weight's [in,OUT] must match bias [OUT]");
-        
-        // Checks connection: FC1 output dimension must match FC2 input dimension.
-        assert_eq!(fc1_weight.shape()[1], fc2_weight.shape()[0], "FC1's out_features must match FC2's in_features");
 
         let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context);
         let (fc2_pipeline, fc2_layout) = compile_fc2_pipeline(context);
-        
+
         Ok(Self {
             pipelines: FfnPipelines {
                 fc1: (Arc::new(fc1_pipeline), Arc::new(fc1_layout)),
                 fc2: (Arc::new(fc2_pipeline), Arc::new(fc2_layout)),
             },
-            fc1_weight,
-            fc1_bias,
-            fc2_weight,
-            fc2_bias,
             context: context.clone(),
         })
     }
@@ -129,23 +154,34 @@ impl GpuFeedForward {
     pub fn forward(
         &self,
         encoder: &mut CommandEncoder,
+        weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         intermediate: &GpuTensor,
         output: &GpuTensor,
     ) {
-        self.run_fc1(encoder, input, intermediate);
-        self.run_fc2(encoder, intermediate, output);
+        self.run_fc1(encoder, weights, input, intermediate);
+        self.run_fc2(encoder, weights, intermediate, output);
     }
 
-
     /// Encodes the first fused kernel pass: `MatMul(input, W1) + Bias1 + GeLU`.
-    pub fn run_fc1(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
-      let input_shape = input.shape();
+    pub fn run_fc1(
+        &self,
+        encoder: &mut CommandEncoder,
+        weights: &GpuFeedForwardWeights,
+        input: &GpuTensor,
+        output: &GpuTensor,
+    ) {
+        let input_shape = input.shape();
         let rows = (input_shape[0] * input_shape[1]) as u32;
         let hidden_size = input_shape[2] as u32;
-        let intermediate_size = self.fc1_weight.shape()[1] as u32;
+        let intermediate_size = weights.fc1_weight.shape()[1] as u32;
 
-        let uniforms = FfnUniforms { m: rows, k: hidden_size, n: intermediate_size, _padding: 0 };
+        let uniforms = FfnUniforms {
+            m: rows,
+            k: hidden_size,
+            n: intermediate_size,
+            _padding: 0,
+        };
         let uniform_buffer =
             self.context
                 .device
@@ -168,11 +204,11 @@ impl GpuFeedForward {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: self.fc1_weight.buffer().as_entire_binding(),
+                        resource: weights.fc1_weight.buffer().as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: self.fc1_bias.buffer().as_entire_binding(),
+                        resource: weights.fc1_bias.buffer().as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
@@ -198,13 +234,24 @@ impl GpuFeedForward {
     }
 
     /// Encodes the second fused kernel pass: `MatMul(intermediate, W2) + Bias2`.
-    pub fn run_fc2(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
+    pub fn run_fc2(
+        &self,
+        encoder: &mut CommandEncoder,
+        weights: &GpuFeedForwardWeights,
+        input: &GpuTensor,
+        output: &GpuTensor,
+    ) {
         let input_shape = input.shape();
         let rows = (input_shape[0] * input_shape[1]) as u32;
         let intermediate_size = input_shape[2] as u32;
-        let hidden_size = self.fc2_weight.shape()[1] as u32;
+        let hidden_size = weights.fc2_weight.shape()[1] as u32;
 
-        let uniforms = FfnUniforms { m: rows, k: intermediate_size, n: hidden_size, _padding: 0 };
+        let uniforms = FfnUniforms {
+            m: rows,
+            k: intermediate_size,
+            n: hidden_size,
+            _padding: 0,
+        };
         let uniform_buffer =
             self.context
                 .device
@@ -227,11 +274,11 @@ impl GpuFeedForward {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: self.fc2_weight.buffer().as_entire_binding(),
+                        resource: weights.fc2_weight.buffer().as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: self.fc2_bias.buffer().as_entire_binding(),
+                        resource: weights.fc2_bias.buffer().as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,

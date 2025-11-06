@@ -60,19 +60,19 @@ async fn test_fc1_kernel_parity() -> Result<()> {
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let gpu_fc1_w = GpuTensor::from_ndarray(&context, &cpu_fc1_w)?; // Pass [in, out] directly
     let gpu_fc1_b = GpuTensor::from_ndarray(&context, &cpu_fc1_b)?;
-    
+
     // Dummy weights for the constructor must also have the correct [in, out] shapes.
-    let dummy_fc2_w = GpuTensor::uninitialized(&context, vec![intermediate_size, hidden_size], DType::F32, "dummy_w2");
+    let dummy_fc2_w = GpuTensor::uninitialized(
+        &context,
+        vec![intermediate_size, hidden_size],
+        DType::F32,
+        "dummy_w2",
+    );
     let dummy_fc2_b = GpuTensor::uninitialized(&context, vec![hidden_size], DType::F32, "dummy_b2");
 
-    let gpu_ffn_partial = GpuFeedForward::new(
-        &context,
-        gpu_fc1_w,
-        gpu_fc1_b,
-        dummy_fc2_w,
-        dummy_fc2_b,
-        crate::activations::Activation::Gelu,
-    )?;
+    let weights = GpuFeedForwardWeights::new(gpu_fc1_w, gpu_fc1_b, dummy_fc2_w, dummy_fc2_b)?;
+
+    let gpu_ffn_partial = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
 
     let gpu_intermediate = GpuTensor::uninitialized(
         &context,
@@ -83,7 +83,7 @@ async fn test_fc1_kernel_parity() -> Result<()> {
 
     // a. Encode the GPU command
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    gpu_ffn_partial.run_fc1(&mut encoder, &gpu_input, &gpu_intermediate);
+    gpu_ffn_partial.run_fc1(&mut encoder, &weights, &gpu_input, &gpu_intermediate);
     context.queue.submit(std::iter::once(encoder.finish()));
 
     // b. Read back the result
@@ -100,7 +100,7 @@ async fn test_fc1_kernel_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_fc2_kernel_parity() -> Result<()> {
-   let context = get_test_context().await;
+    let context = get_test_context().await;
 
     let batch_size = 1;
     let seq_len = 128;
@@ -108,7 +108,10 @@ async fn test_fc2_kernel_parity() -> Result<()> {
     let intermediate_size = hidden_size * 4;
 
     // 1. Create data. Input to FC2 is intermediate size.
-    let cpu_input = Array::random((batch_size, seq_len, intermediate_size), Uniform::new(-1.0, 1.0));
+    let cpu_input = Array::random(
+        (batch_size, seq_len, intermediate_size),
+        Uniform::new(-1.0, 1.0),
+    );
     // FC2 weight is [in, out] -> [intermediate_size, hidden_size]
     let raw_fc2_w = Array::random((intermediate_size, hidden_size), Uniform::new(-0.1, 0.1));
     let cpu_fc2_b = Array::random(hidden_size, Uniform::new(-0.1, 0.1));
@@ -130,25 +133,38 @@ async fn test_fc2_kernel_parity() -> Result<()> {
     let gpu_fc2_w = GpuTensor::from_ndarray(&context, &raw_fc2_w)?; // NO .t()
     let gpu_fc2_b = GpuTensor::from_ndarray(&context, &cpu_fc2_b)?;
 
-    let gpu_ffn_partial = GpuFeedForward::new(
-        &context,
-        // Correct dummy shape [in, out] for FC1
-        GpuTensor::uninitialized(&context, vec![hidden_size, intermediate_size], DType::F32, "dummy_w"),
+    let weights = GpuFeedForwardWeights::new(
+        GpuTensor::uninitialized(
+            &context,
+            vec![hidden_size, intermediate_size],
+            DType::F32,
+            "dummy_w",
+        ),
         GpuTensor::uninitialized(&context, vec![intermediate_size], DType::F32, "dummy_b"),
         gpu_fc2_w, // The real [in, out] weight
         gpu_fc2_b,
+    )?;
+
+    let gpu_ffn_partial = GpuFeedForward::new(
+        &context,
+        // Correct dummy shape [in, out] for FC1
         crate::activations::Activation::Gelu,
     )?;
 
-    let gpu_output = GpuTensor::uninitialized(&context, vec![batch_size, seq_len, hidden_size], DType::F32, "FC2 Output");
+    let gpu_output = GpuTensor::uninitialized(
+        &context,
+        vec![batch_size, seq_len, hidden_size],
+        DType::F32,
+        "FC2 Output",
+    );
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    gpu_ffn_partial.run_fc2(&mut encoder, &gpu_input, &gpu_output);
+    gpu_ffn_partial.run_fc2(&mut encoder, &weights, &gpu_input, &gpu_output);
     context.queue.submit(std::iter::once(encoder.finish()));
 
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;
     let gpu_result = Array3::from_shape_vec((shape[0], shape[1], shape[2]), gpu_vec)?;
-    
+
     // --- Assert ---
     assert_all_close(&gpu_result, &cpu_result, 1e-3);
     println!("✅ FC2 Kernel Passed Parity Check!");
@@ -183,9 +199,17 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
 
     // --- LOADER LOGIC: Prepare weights into the standard [in, out] format ---
     // This logic is now identical for both CPU and GPU paths.
-    let fc1_w_prepared = if transpose_weights { raw_fc1_w.clone() } else { raw_fc1_w.t().to_owned() };
-    let fc2_w_prepared = if transpose_weights { raw_fc2_w.clone() } else { raw_fc2_w.t().to_owned() };
-    
+    let fc1_w_prepared = if transpose_weights {
+        raw_fc1_w.clone()
+    } else {
+        raw_fc1_w.t().to_owned()
+    };
+    let fc2_w_prepared = if transpose_weights {
+        raw_fc2_w.clone()
+    } else {
+        raw_fc2_w.t().to_owned()
+    };
+
     // --- CPU PATH ---
     // The "dumb" CpuFeedForward constructor receives the prepared [in, out] weights.
     let cpu_ffn = CpuFeedForward::new(
@@ -202,25 +226,36 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
     let gpu_fc2_w = GpuTensor::from_ndarray(&context, &fc2_w_prepared)?;
     let gpu_fc1_b = GpuTensor::from_ndarray(&context, &cpu_fc1_b)?;
     let gpu_fc2_b = GpuTensor::from_ndarray(&context, &cpu_fc2_b)?;
-    
-    let gpu_ffn = GpuFeedForward::new(
-        &context,
-        gpu_fc1_w,
-        gpu_fc1_b,
-        gpu_fc2_w,
-        gpu_fc2_b,
-        crate::activations::Activation::Gelu,
-    )?;
+
+    let weights = GpuFeedForwardWeights::new(gpu_fc1_w, gpu_fc1_b, gpu_fc2_w, gpu_fc2_b)?;
+
+    let gpu_ffn = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
 
     // 3. Create common input data and buffers
     let cpu_input = Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-    let gpu_intermediate = GpuTensor::uninitialized(&context, vec![batch_size, seq_len, intermediate_size], DType::F32, "FFN Intermediate");
-    let gpu_output = GpuTensor::uninitialized(&context, vec![batch_size, seq_len, hidden_size], DType::F32, "FFN Output");
+    let gpu_intermediate = GpuTensor::uninitialized(
+        &context,
+        vec![batch_size, seq_len, intermediate_size],
+        DType::F32,
+        "FFN Intermediate",
+    );
+    let gpu_output = GpuTensor::uninitialized(
+        &context,
+        vec![batch_size, seq_len, hidden_size],
+        DType::F32,
+        "FFN Output",
+    );
 
     // 4. Execute and Assert
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    gpu_ffn.forward(&mut encoder, &gpu_input, &gpu_intermediate, &gpu_output);
+    gpu_ffn.forward(
+        &mut encoder,
+        &weights,
+        &gpu_input,
+        &gpu_intermediate,
+        &gpu_output,
+    );
     context.queue.submit(std::iter::once(encoder.finish()));
 
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_output).await?;

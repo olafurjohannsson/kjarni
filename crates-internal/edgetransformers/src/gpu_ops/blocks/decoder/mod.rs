@@ -5,13 +5,15 @@ use anyhow::Result;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::attention::attention::GpuAttention;
-use crate::gpu_ops::blocks::ffn::GpuFeedForward;
+use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
 
 use crate::gpu_ops::blocks::attention::attention::GpuAttentionWeights;
 
 
-use crate::gpu_ops::primitives::layernorm::GpuLayerNorm;
-use crate::gpu_ops::blocks::layernorm::GpuLayerNormWeights;
+use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
+use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
+
+mod tests;
 
 /// Represents a single layer for a decoder-only transformer model (e.g., GPT-2) on the GPU.
 ///
@@ -66,7 +68,7 @@ impl GpuDecoderLayer {
     ) -> Result<Self> {
         let self_attn = GpuAttention::new(context, hidden_size, num_heads);
         let self_attn_layer_norm = GpuLayerNorm::new(context);
-
+        
         let feedforward = GpuFeedForward::new(context, hidden_size, intermediate_size);
         let ffn_layer_norm = GpuLayerNorm::new(context);
 
