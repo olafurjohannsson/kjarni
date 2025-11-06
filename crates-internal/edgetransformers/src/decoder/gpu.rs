@@ -353,7 +353,7 @@ impl Decoder for GpuTransformerDecoder {
             .await?;
 
         if let Some(cache) = gpu_cache {
-            cache.set_seq_length(total_len);
+            cache.increment_len(total_len);
         }
 
         Ok(DecoderOutput {

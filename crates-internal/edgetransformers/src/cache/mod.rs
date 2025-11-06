@@ -3,6 +3,8 @@
 mod cpu;
 mod gpu;
 
+mod tests;
+
 pub use cpu::CpuKVCache;
 pub use gpu::GpuKVCache;
 
@@ -25,4 +27,6 @@ pub trait Cache: Send + Sync {
     fn get_seq_length(&self) -> usize;
     /// Clear the cache
     fn clear(&mut self);
+
+    fn increment_len(&mut self, new_tokens_len: usize);
 }

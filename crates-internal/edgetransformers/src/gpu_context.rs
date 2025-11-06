@@ -30,7 +30,7 @@ impl WgpuContext {
     //         .expect("Could not create adapter")
     // }
     pub async fn new() -> Self {
-        println!("=== Initializing WGPU ===");
+        // println!("=== Initializing WGPU ===");
 
         let instance = Instance::new(&InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -48,26 +48,26 @@ impl WgpuContext {
             .expect("Failed to find an appropriate adapter");
 
         // Log adapter info
-        let info = adapter.get_info();
-        println!("Selected GPU: {}", info.name);
-        println!("  Backend: {:?}", info.backend);
-        println!("  Device Type: {:?}", info.device_type);
-        println!("  Vendor: {:?}", info.vendor);
-        println!("  Driver: {}", info.driver);
+        // let info = adapter.get_info();
+        // println!("Selected GPU: {}", info.name);
+        // println!("  Backend: {:?}", info.backend);
+        // println!("  Device Type: {:?}", info.device_type);
+        // println!("  Vendor: {:?}", info.vendor);
+        // println!("  Driver: {}", info.driver);
 
         // Get adapter limits to see what's available
-        let adapter_limits = adapter.limits();
-        println!("Adapter Limits:");
-        println!(
-            "  Max buffer size: {} MB",
-            adapter_limits.max_buffer_size / 1_048_576
-        );
-        println!(
-            "  Max compute workgroup size: {}x{}x{}",
-            adapter_limits.max_compute_workgroup_size_x,
-            adapter_limits.max_compute_workgroup_size_y,
-            adapter_limits.max_compute_workgroup_size_z
-        );
+        // let adapter_limits = adapter.limits();
+        // println!("Adapter Limits:");
+        // println!(
+        //     "  Max buffer size: {} MB",
+        //     adapter_limits.max_buffer_size / 1_048_576
+        // );
+        // println!(
+        //     "  Max compute workgroup size: {}x{}x{}",
+        //     adapter_limits.max_compute_workgroup_size_x,
+        //     adapter_limits.max_compute_workgroup_size_y,
+        //     adapter_limits.max_compute_workgroup_size_z
+        // );
 
         let (device, queue) = adapter
             .request_device(&DeviceDescriptor {
@@ -87,12 +87,12 @@ impl WgpuContext {
             .await
             .expect("Failed to create device");
 
-        println!("Device created successfully");
-        println!(
-            "  Max buffer size: {} MB",
-            device.limits().max_buffer_size / 1_048_576
-        );
-        println!("=========================\n");
+        // println!("Device created successfully");
+        // println!(
+        //     "  Max buffer size: {} MB",
+        //     device.limits().max_buffer_size / 1_048_576
+        // );
+        // println!("=========================\n");
 
         Self { device, queue }
     }

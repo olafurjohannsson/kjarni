@@ -54,21 +54,157 @@ impl MultiHeadAttention {
         }
     }
 
-    /// Forward pass without cache (for encoders or testing)
+    // /// Forward pass without cache (for encoders or testing)
+    // pub fn forward(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     encoder_hidden_states: Option<&Array3<f32>>,
+    //     attention_mask: Option<&Array2<f32>>,
+    // ) -> Result<Array3<f32>> {
+    //     let (output, _, _) = self.forward_with_cache(
+    //         hidden_states,
+    //         encoder_hidden_states,
+    //         attention_mask,
+    //         false, // Not causal for encoder
+    //         None,  // No cache
+    //     )?;
+    //     Ok(output)
+    // }
+
+    /// Projects the input hidden states into new Key and Value states.
+    /// This should be called by the orchestrator (e.g., the decoder loop)
+    /// to generate the K/V for the current token(s).
+    ///
+    /// # Returns
+    /// A tuple of `(new_k, new_v)`.
+    pub fn project_kv(&self, key_value_source: &Array3<f32>) -> (Array3<f32>, Array3<f32>) {
+        let new_k = matmul_3d_2d(key_value_source, &self.k_weight) + &self.k_bias;
+        let new_v = matmul_3d_2d(key_value_source, &self.v_weight) + &self.v_bias;
+        (new_k, new_v)
+    }
+
+    /// Performs the core attention calculation using a query and the full, final
+    /// Key and Value caches for this step.
+    ///
+    /// The caller is responsible for cache management (i.e., updating the cache
+    /// with the latest projections before calling this function).
+    ///
+    /// # Arguments
+    /// * `query` - Query hidden states for the current step [B, S_q, H]
+    /// * `full_k_cache` - The complete Key cache for this step [B, S_total, H]
+    /// * `full_v_cache` - The complete Value cache for this step [B, S_total, H]
+    /// * `attention_mask` - Optional mask [B, S_total]
+    /// * `is_causal` - Whether to apply causal masking.
+    /// * `position_offset` - The starting position for causal masking (i.e., the length of the cache before this step).
+    pub fn attend(
+        &self,
+        query: &Array3<f32>,
+        full_k_cache: &Array3<f32>,
+        full_v_cache: &Array3<f32>,
+        attention_mask: Option<&Array2<f32>>,
+        is_causal: bool,
+        position_offset: usize,
+    ) -> Result<Array3<f32>> {
+        let batch_size = query.shape()[0];
+        let seq_len = query.shape()[1];
+        let full_kv_len = full_k_cache.shape()[1];
+
+        // --- Assertions for Robustness ---
+        assert_eq!(
+            full_k_cache.shape(),
+            full_v_cache.shape(),
+            "K and V cache shapes must match."
+        );
+        assert_eq!(
+            query.shape()[0],
+            full_k_cache.shape()[0],
+            "Batch sizes of query and cache must match."
+        );
+        if let Some(mask) = attention_mask {
+            assert_eq!(
+                mask.shape()[0],
+                batch_size,
+                "Mask batch size does not match input."
+            );
+            assert_eq!(
+                mask.shape()[1],
+                full_kv_len,
+                "Mask length does not match total key/value sequence length."
+            );
+        }
+        // --- End Assertions ---
+
+        // Project Query
+        let q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
+
+        // Reshape, Permute, Matmul, etc. (The rest of your existing logic)
+        // IMPORTANT: Use `full_k_cache` and `full_v_cache` directly.
+        // DO NOT perform any concatenation here.
+
+        let q_reshaped = q
+            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        let k_reshaped = full_k_cache
+            .to_owned() // Use to_owned() or clone() as we don't own the cache
+            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        let v_reshaped = full_v_cache
+            .to_owned()
+            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        let q_contiguous = q_reshaped.as_standard_layout().to_owned();
+        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
+        let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
+
+        let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
+        scores *= self.scale_factor;
+
+        if let Some(mask) = attention_mask {
+            scores = apply_padding_mask(scores, mask)?;
+        }
+        if is_causal {
+            // Use the position_offset here instead of calculating cache_len
+            scores = apply_causal_mask(scores, position_offset)?;
+        }
+
+        // ... rest of the function (softmax, context, output projection)
+        let weights = softmax(&scores);
+        let v_contiguous = v_reshaped.as_standard_layout().to_owned();
+        let context = matmul_4d(&weights, &v_contiguous);
+
+        let context_reshaped = context
+            .permuted_axes([0, 2, 1, 3])
+            .as_standard_layout()
+            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
+            .to_owned();
+
+        Ok(matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias)
+    }
+    /// A simple forward pass for non-causal contexts (like an encoder).
+    /// This can now be implemented as a simple wrapper around the new methods.
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
-        encoder_hidden_states: Option<&Array3<f32>>,
+        // cross-attention source
+        key_value_source: Option<&Array3<f32>>,
         attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
-        let (output, _, _) = self.forward_with_cache(
-            hidden_states,
-            encoder_hidden_states,
+        let kv_source = key_value_source.unwrap_or(hidden_states);
+
+        // In this simple case, the "cache" is just the projections of the input itself.
+        let (k_states, v_states) = self.project_kv(kv_source);
+
+        self.attend(
+            hidden_states, // query
+            &k_states,     // full_k_cache
+            &v_states,     // full_v_cache
             attention_mask,
-            false, // Not causal for encoder
-            None,  // No cache
-        )?;
-        Ok(output)
+            false, // is_causal = false for encoders
+            0,     // position_offset = 0
+        )
     }
 
     /// Forward pass with KV caching support

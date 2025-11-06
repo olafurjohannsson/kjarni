@@ -24,6 +24,7 @@ pub mod utils;
 pub mod tests;
 pub mod weights;
 pub mod wgpu_ops;
+pub mod decoder_layer;
 
 // Re-export commonly used items
 pub use crate::{
@@ -41,7 +42,7 @@ pub use traits::{
 };
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3};
+use ndarray::{Array2, Array3, Axis};
 
 // Re-export model traits and registry
 pub use models::{
@@ -76,6 +77,7 @@ pub struct TransformerLayer {
 
 impl TransformerLayer {
     /// Forward pass for an encoder or decoder-only layer with KV caching.
+
     pub fn forward_with_cache(
         &self,
         mut hidden: Array3<f32>,
@@ -193,6 +195,7 @@ impl TransformerLayer {
         Ok(hidden)
     }
 
+
     pub fn forward_cross_attention(
         &self,
         mut hidden_states: Array3<f32>,
@@ -266,4 +269,84 @@ impl TransformerLayer {
     ) -> Result<Array3<f32>> {
         self.forward_with_cache(hidden, attention_mask, config, 0, None)
     }
+
+    /// Performs a forward pass through the transformer layer.
+    ///
+    /// This method is now stateless with respect to the KV cache. It takes the past
+    /// key/value state for this layer as an input and returns the new key/value
+    /// state it generated as an output. The caller (the decoder loop) is responsible for managing the cache.
+    ///
+    /// # Arguments
+    /// * `hidden_states`: The input from the previous layer or embeddings.
+    /// * `attention_mask`: The attention mask for the full sequence.
+    /// * `position_offset`: The number of tokens already in the cache, used for causal masking.
+    /// * `config`: The model's configuration trait to check for pre-norm, etc.
+    /// * `past_kv`: An optional tuple containing the readonly `(K, V)` caches from previous steps for this layer.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// 1. The output hidden states for this layer.
+    /// 2. A tuple `(new_k, new_v)` representing the key/value states generated in this pass.
+    pub fn forward_2(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        config: &dyn TransformerConfig,
+        past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
+    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        // We only implement the pre-norm logic as that's what the original code used.
+        // The post-norm path can be refactored similarly if needed.
+        if !config.is_prenorm() {
+            anyhow::bail!("This refactored forward pass currently only supports pre-norm architectures like GPT-2.");
+        }
+
+        // === PRE-NORM (e.g., GPT-2) ===
+
+        // --- 1. First Sub-layer: Self-Attention ---
+        let residual = hidden_states.clone();
+        let ln1_out = self.self_attn_layer_norm.forward_3d(hidden_states);
+
+        // Step 1a: Project the current hidden states to get the K/V for THIS token.
+        // This is the "new" state that will be returned to the cache manager.
+        let (new_k, new_v) = self.self_attn.project_kv(&ln1_out);
+
+        // Step 1b: If a cache exists, combine the past state with the new state
+        // to create the full K/V context for the attention calculation.
+        let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
+            (
+                ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
+                ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
+            )
+        } else {
+            // No cache (e.g., priming pass), so the "full" context is just the new state.
+            (new_k.clone(), new_v.clone())
+        };
+
+        // Step 1c: Perform the attention calculation with the complete K/V state.
+        let attn_out = self.self_attn.attend(
+            &ln1_out,
+            &full_k,
+            &full_v,
+            Some(attention_mask),
+            config.is_causal(),
+            position_offset,
+        )?;
+
+        // First residual connection.
+        let attn_block_output = residual + attn_out;
+
+        // --- 2. Second Sub-layer: Feed-Forward Network (MLP) ---
+        let residual = attn_block_output.clone();
+        let ln2_out = self.ffn_layer_norm.forward_3d(&attn_block_output);
+        let ffn_out = self.feedforward.forward(&ln2_out)?;
+
+        // Second residual connection
+        let final_output = residual + ffn_out;
+
+        // Finally, return the output hidden state and the NEW K/V slices.
+        // The caller (`CpuTransformerDecoder`) is now responsible for storing these in the cache.
+        Ok((final_output, (new_k, new_v)))
+    }
+
 }

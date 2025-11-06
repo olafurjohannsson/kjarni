@@ -1,10 +1,13 @@
 use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate root
+use crate::gpu_ops::primitives::layout::permute::GpuPermute;
+use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array2, Array3, Dimension};
+use std::fmt;
 use std::sync::Arc;
+use wgpu::CommandEncoder;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages};
-use std::fmt;
 
 /// Defines the data type of the elements in a GpuTensor.
 /// This is crucial for handling different weight formats from files like GGUF.
@@ -29,7 +32,7 @@ impl fmt::Debug for GpuTensor {
         f.debug_struct("GpuTensor")
             .field("shape", &self.shape)
             .field("dtype", &self.dtype)
-            .field("buffer_size", &self.buffer.size()) 
+            .field("buffer_size", &self.buffer.size())
             .finish_non_exhaustive() // Indicates that fields like `context` are omitted
     }
 }
@@ -57,6 +60,44 @@ impl GpuTensor {
         }
     }
 
+    /// Returns the dimensions of the tensor as a 3-tuple.
+    /// Panics if the tensor is not rank 3.
+    pub fn dims3(&self) -> (usize, usize, usize) {
+        assert_eq!(self.rank(), 3, "Tensor is not rank 3");
+        (self.shape[0], self.shape[1], self.shape[2])
+    }
+
+    /// Returns the dimensions of the tensor as a 4-tuple.
+    /// Panics if the tensor is not rank 4.
+    pub fn dims4(&self) -> (usize, usize, usize, usize) {
+        assert_eq!(self.rank(), 4, "Tensor is not rank 4");
+        (self.shape[0], self.shape[1], self.shape[2], self.shape[3])
+    }
+
+    /// Creates a new view of the tensor with a different shape, without copying data.
+    ///
+    /// This is a metadata-only operation. The new `GpuTensor` shares the same underlying
+    /// GPU buffer as the original.
+    ///
+    /// Panics if the total number of elements in the new shape does not match the original.
+    pub fn view(&self, shape: Vec<usize>) -> Self {
+        let new_num_elements: usize = shape.iter().product();
+        assert_eq!(
+            self.num_elements(),
+            new_num_elements,
+            "Cannot view tensor of shape {:?} as {:?}; number of elements mismatch.",
+            self.shape(),
+            &shape
+        );
+
+        Self {
+            buffer: self.buffer.clone(), // Clone the Arc, not the buffer data
+            shape,
+            dtype: self.dtype,
+            context: self.context.clone(),
+        }
+    }
+
     /// Creates a new, uninitialized tensor, for example, to serve as an output buffer for a kernel.
     pub fn uninitialized(
         context: &Arc<WgpuContext>,
@@ -79,6 +120,94 @@ impl GpuTensor {
         }
     }
 
+    /// Creates a new GpuTensor by copying a slice from this tensor using a dedicated kernel.
+    ///
+    /// # Arguments
+    /// * `encoder` - The command encoder to record the copy command.
+    /// * `slice_kernel` - A reference to the pre-initialized GpuSlice kernel.
+    /// * `offset` - The starting indices for the slice in each dimension (e.g., [0, 0, 5, 0]).
+    /// * `shape` - The desired shape of the new sliced tensor (e.g., [1, 4, 1, 64]).
+    ///
+    /// # Returns
+    /// A new, tightly-sized `GpuTensor` containing the copied data.
+    pub fn slice(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        slice_kernel: &GpuSlice,
+        offset: &[usize],
+        shape: &[usize],
+    ) -> Result<GpuTensor> {
+        assert_eq!(
+            self.rank(),
+            offset.len(),
+            "Offset dimensions must match tensor rank."
+        );
+        assert_eq!(
+            self.rank(),
+            shape.len(),
+            "Shape dimensions must match tensor rank."
+        );
+        for i in 0..self.rank() {
+            assert!(
+                offset[i] + shape[i] <= self.shape()[i],
+                "Slice exceeds source tensor dimensions."
+            );
+        }
+
+        // 1. Create the destination tensor with the target shape.
+        let dst_tensor =
+            GpuTensor::uninitialized(&self.context, shape.to_vec(), self.dtype, "Sliced Tensor");
+
+        // 2. Encode the kernel call to perform the copy.
+        slice_kernel.encode(encoder, self, &dst_tensor, offset);
+
+        // 3. Return the new tensor.
+        Ok(dst_tensor)
+    }
+
+    /// Permutes the dimensions of the tensor according to the specified axes.
+    ///
+    /// This operation performs a GPU copy and requires a command encoder.
+    ///
+    /// # Arguments
+    /// * `encoder` - A command encoder to record the GPU operation.
+    /// * `permute_kernel` - A reference to the pre-compiled GpuPermute kernel.
+    /// * `axes` - A slice defining the permutation. e.g., `&[0, 2, 1, 3]` to swap axes 1 and 2.
+    ///
+    /// # Returns
+    /// A new `GpuTensor` containing the permuted data.
+    pub fn permute(
+        &self,
+        encoder: &mut CommandEncoder,
+        permute_kernel: &GpuPermute,
+        axes: &[usize],
+    ) -> Self {
+        assert_eq!(
+            self.rank(),
+            axes.len(),
+            "Permutation axes must match tensor rank"
+        );
+
+        // 1. Calculate the shape of the output tensor
+        let mut output_shape = self.shape().to_vec();
+        for i in 0..self.rank() {
+            output_shape[i] = self.shape()[axes[i]];
+        }
+
+        // 2. Create a new, uninitialized tensor to hold the permuted output
+        let output = GpuTensor::uninitialized(
+            &self.context,
+            output_shape,
+            self.dtype,
+            "Permute Output", // A descriptive label for debugging
+        );
+
+        // 3. Encode the kernel call to perform the data permutation
+        permute_kernel.encode(encoder, self, &output, axes);
+
+        // 4. Return the new tensor
+        output
+    }
     /// Creates a GpuTensor by copying data from a CPU-based ndarray::Array.
     /// This is the primary way to get data from the CPU onto the GPU.
     pub fn from_ndarray<A, D>(context: &Arc<WgpuContext>, arr: &Array<A, D>) -> Result<Self>
@@ -134,25 +263,72 @@ impl GpuTensor {
         )?)
     }
 
-    async fn read_raw_data(&self) -> Result<Vec<u8>> {
-        let buffer_slice = self.buffer.slice(..);
+    // pub async fn read_raw_data(&self) -> Result<Vec<u8>> {
+    //     let buffer_slice = self.buffer.slice(..);
 
+    //     let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+    //     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+    //         let _ = tx.send(result);
+    //     });
+
+    //     self.context
+    //         .device
+    //         .poll(wgpu::PollType::wait_indefinitely());
+    //     rx.receive()
+    //         .await
+    //         .ok_or(anyhow!("GPU readback channel closed"))??;
+
+    //     let data = buffer_slice.get_mapped_range().to_vec();
+    //     self.buffer.unmap();
+
+    //     Ok(data)
+    // }
+    pub async fn read_raw_data(&self) -> Result<Vec<u8>> {
+        let device = &self.context.device;
+        let queue = &self.context.queue;
+        let buffer_size = self.buffer.size();
+
+        // 1. Create a temporary "staging" buffer that is readable by the CPU.
+        let staging_buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("Staging Readback Buffer"),
+            size: buffer_size,
+            // This is the correct usage combination for a readback buffer.
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // 2. Encode a command to copy from the GPU-only compute buffer to the staging buffer.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Readback Encoder"),
+        });
+        encoder.copy_buffer_to_buffer(self.buffer(), 0, &staging_buffer, 0, buffer_size);
+
+        // 3. Submit the copy command to the GPU.
+        queue.submit(Some(encoder.finish()));
+
+        // 4. Map the staging buffer and wait for the result.
+        let buffer_slice = staging_buffer.slice(..);
         let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
 
-        self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        // This is a critical step to ensure the submission is processed.
+        device.poll(wgpu::PollType::wait_indefinitely());
+
+        // Wait for the map_async callback to complete
         rx.receive()
             .await
             .ok_or(anyhow!("GPU readback channel closed"))??;
 
+        // 5. Get the data from the mapped staging buffer.
         let data = buffer_slice.get_mapped_range().to_vec();
-        self.buffer.unmap();
+
+        // 6. Unmap the staging buffer so it can be reused or dropped.
+        staging_buffer.unmap();
 
         Ok(data)
     }
-
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }

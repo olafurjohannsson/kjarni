@@ -16,6 +16,9 @@ use crate::gpu_context::WgpuContext;
 use std::sync::Arc;
 use wgpu::{Buffer, CommandEncoder, ComputePipeline};
 
+mod gpu_attention_test;
+pub mod attention;
+
 /// Configuration for attention computation
 #[derive(Debug, Clone)]
 pub struct AttentionConfig {
