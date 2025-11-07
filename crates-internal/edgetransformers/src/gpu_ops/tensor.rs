@@ -59,7 +59,10 @@ impl GpuTensor {
             context,
         }
     }
-
+    pub fn dims2(&self) -> (usize, usize) {
+        assert_eq!(self.rank(), 2, "Tensor is not rank 2");
+        (self.shape[0], self.shape[1])
+    }
     /// Returns the dimensions of the tensor as a 3-tuple.
     /// Panics if the tensor is not rank 3.
     pub fn dims3(&self) -> (usize, usize, usize) {

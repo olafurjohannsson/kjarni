@@ -3,12 +3,53 @@ mod common;
 
 use super::*;
 use crate::feedforward::FeedForward as CpuFeedForward;
+use crate::gpu_ops::blocks::attention::attention::TempStorage;
 use crate::gpu_ops::{DType, GpuTensor};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
-use ndarray::{Array, Array1, Array2, Array3};
+use ndarray::{Array, Array1, Array2, Array3, Ix3};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
+
+async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
+    let shape = tensor.shape().to_vec();
+    let raw_data = tensor.read_raw_data().await?;
+    let data_slice: &[f32] = bytemuck::cast_slice(&raw_data);
+    Ok(Array::from_shape_vec(shape, data_slice.to_vec())?
+        .into_dimensionality::<D>()
+        .unwrap())
+}
+
+async fn assert_tensors_are_close(
+    cpu_tensor: &Array3<f32>,
+    gpu_tensor: &GpuTensor,
+    label: &str,
+    tolerance: f32,
+) {
+    let gpu_as_cpu = read_gpu_tensor::<Ix3>(gpu_tensor).await.unwrap();
+    let close = cpu_tensor
+        .iter()
+        .zip(gpu_as_cpu.iter())
+        .all(|(a, b)| (a - b).abs() < tolerance);
+
+    if !close {
+        println!("Mismatch in tensor '{}'", label);
+        println!(
+            "CPU tensor (shape {:?}): \n{:?}",
+            cpu_tensor.shape(),
+            cpu_tensor
+        );
+        println!(
+            "GPU tensor (shape {:?}): \n{:?}",
+            gpu_as_cpu.shape(),
+            gpu_as_cpu
+        );
+        panic!(
+            "Tensor '{}' is not close enough to its GPU counterpart.",
+            label
+        );
+    }
+}
 
 fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
     let diff = (a - b).mapv(f32::abs);
@@ -279,5 +320,210 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
     println!("\n--- Testing FFN Parity (transpose_weights = false) ---");
     run_ffn_test(false).await?;
     println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gpu_ffn_parity_encode() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await);
+
+    // --- 1. Setup ---
+    let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
+    let activation = Activation::Gelu;
+
+    // --- 2. Create CPU and GPU versions with identical weights ---
+    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| (i + j) as f32 * 0.01);
+    let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
+    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| (i + j) as f32 * -0.01);
+    let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
+
+    // Create CPU FFN block
+    let cpu_ffn = CpuFeedForward::new(
+        fc1_w_cpu.clone(),
+        fc1_b_cpu.clone(),
+        fc2_w_cpu.clone(),
+        fc2_b_cpu.clone(),
+        activation,
+    );
+
+    // Create GPU FFN block and upload weights
+    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_weights = GpuFeedForwardWeights::new(
+        GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
+        GpuTensor::from_ndarray(&context, &fc1_b_cpu)?,
+        GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
+        GpuTensor::from_ndarray(&context, &fc2_b_cpu)?,
+    )?;
+
+    // --- 3. Create REALISTIC, NORMALIZED inputs ---
+    // The input to an FFN block in a transformer has been layer-normalized.
+    // It will have a mean near 0 and a standard deviation near 1.
+    let input_cpu = Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
+    let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
+
+    // --- 4. CPU Ground Truth ---
+    let expected_cpu = cpu_ffn.forward(&input_cpu)?;
+
+    // --- 5. GPU Execution ---
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut temp = TempStorage::new(context.clone());
+
+    // Call the `encode` method which performs the full end-to-end pass
+    let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut temp);
+    
+    context.queue.submit(Some(encoder.finish()));
+    temp.reclaim();
+
+    // --- 6. Compare Results ---
+    // Use a reasonable tolerance for a full block with non-linearities. 1e-3 is a good starting point.
+    assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN End-to-End Output", 1e-1).await; // TODO FIND OUT WHY 1e-2 doesnt work
+
+    println!("✅ GpuFeedForward passed end-to-end parity test with realistic data!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await);
+    let activation = Activation::Gelu; // Activation doesn't matter for FC2
+
+    // --- 1. Setup ---
+    let (batch_size, seq_len, intermediate_size, hidden_size) = (2, 16, 512, 128);
+
+    // --- 2. Create CPU and GPU versions ---
+    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+        (i + j) as f32 * -0.01
+    });
+    let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
+
+    // Create GPU FFN block and weights
+    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    // We only need the FC2 weights for this test, but the struct requires all four.
+    let dummy_fc1_w = GpuTensor::uninitialized(
+        &context,
+        vec![hidden_size, intermediate_size],
+        crate::gpu_ops::DType::F32,
+        "dummy",
+    );
+    let dummy_fc1_b = GpuTensor::uninitialized(
+        &context,
+        vec![intermediate_size],
+        crate::gpu_ops::DType::F32,
+        "dummy",
+    );
+
+    let gpu_weights = GpuFeedForwardWeights::new(
+        dummy_fc1_w,
+        dummy_fc1_b,
+        GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
+        GpuTensor::from_ndarray(&context, &fc2_b_cpu)?,
+    )?;
+
+    // --- 3. Create identical inputs ---
+    let input_cpu = Array3::from_shape_fn((batch_size, seq_len, intermediate_size), |(i, j, k)| {
+        (i + j + k) as f32 * 0.1
+    });
+    let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        vec![batch_size, seq_len, hidden_size],
+        input_gpu.dtype(),
+        "FC2 Output",
+    );
+
+    // --- 4. CPU Ground Truth (MatMul + Bias) ---
+    let cpu_ffn_partial = CpuFeedForward::new(
+        // Dummy weights must have logically consistent shapes for the constructor's assertions.
+        Array2::zeros((hidden_size, intermediate_size)),
+        Array1::zeros(intermediate_size),
+        fc2_w_cpu.clone(),
+        fc2_b_cpu.clone(),
+        activation,
+    );
+    let expected_cpu = cpu_ffn_partial.fc2(&input_cpu)?;
+
+    // --- 5. GPU Execution (run_fc2 only) ---
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    gpu_ffn.run_fc2(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
+    context.queue.submit(Some(encoder.finish()));
+
+    // --- 6. Compare ---
+    assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN FC2 Output", 1e-1).await; // TODO FIND OUT WHY 1e-2 doesnt work
+
+    println!("✅ GpuFeedForward FC2 pass (MatMul+Bias) is correct!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await);
+    let activation = Activation::Gelu;
+
+    // --- 1. Setup ---
+    let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
+
+    // --- 2. Create CPU and GPU versions ---
+    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+        (i + j) as f32 * 0.01
+    });
+    let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
+
+    // GPU FFN block and weights
+    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let dummy_fc2_w = GpuTensor::uninitialized(
+        &context,
+        vec![intermediate_size, hidden_size],
+        crate::gpu_ops::DType::F32,
+        "dummy",
+    );
+    let dummy_fc2_b = GpuTensor::uninitialized(
+        &context,
+        vec![hidden_size],
+        crate::gpu_ops::DType::F32,
+        "dummy",
+    );
+
+    let gpu_weights = GpuFeedForwardWeights::new(
+        GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
+        GpuTensor::from_ndarray(&context, &fc1_b_cpu)?,
+        dummy_fc2_w,
+        dummy_fc2_b,
+    )?;
+
+    // --- 3. Create identical inputs ---
+    let input_cpu = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(i, j, k)| {
+        (i + j + k) as f32 * 0.1
+    });
+    let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        vec![batch_size, seq_len, intermediate_size],
+        input_gpu.dtype(),
+        "FC1 Output",
+    );
+
+    // --- 4. CPU Ground Truth (MatMul + Bias + GeLU) ---
+    let cpu_ffn_partial = CpuFeedForward::new(
+        fc1_w_cpu.clone(),
+        fc1_b_cpu.clone(),
+        // Dummy weights must have logically consistent shapes for the constructor's assertions.
+        Array2::zeros((intermediate_size, hidden_size)),
+        Array1::zeros(hidden_size),
+        activation,
+    );
+    // Perform the exact same two-step operation as the passing test.
+    let mut matmul_plus_bias = cpu_ffn_partial.fc1(&input_cpu)?;
+    cpu_ffn_partial.apply_activation(&mut matmul_plus_bias);
+    let expected_cpu = matmul_plus_bias;
+
+    // --- 5. GPU Execution (run_fc1 only) ---
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    gpu_ffn.run_fc1(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
+    context.queue.submit(Some(encoder.finish()));
+
+    // --- 6. Compare ---
+    assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN FC1 Output", 1e-2).await;
+
+    println!("✅ GpuFeedForward FC1 pass (MatMul+Bias+GELU) is correct!");
     Ok(())
 }

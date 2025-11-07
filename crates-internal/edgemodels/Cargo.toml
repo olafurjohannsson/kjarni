@@ -31,6 +31,11 @@ async-trait = { workspace = true }
 tokenizers = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
+log = { workspace = true }
+lru = "0.12.3"
+
+
+[dev-dependencies]
+env_logger = "0.10"
 
 # Unique deps
-lru = "0.12.3"

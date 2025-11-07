@@ -112,11 +112,28 @@ impl GpuAttentionWeights {
             "Q and V must have same input dimension"
         );
 
-        // Ensure output_weight input dim matches Q/K/V output dim (projected dimension)
+        // // Ensure output_weight input dim matches Q/K/V output dim (projected dimension)
+        // assert_eq!(
+        //     output_weight.shape()[0],
+        //     q_weight.shape()[1] + k_weight.shape()[1] + v_weight.shape()[1],
+        //     "Output projection input dim must equal concatenated QKV dim"
+        // );
         assert_eq!(
             output_weight.shape()[0],
-            q_weight.shape()[1] + k_weight.shape()[1] + v_weight.shape()[1],
-            "Output projection input dim must equal concatenated QKV dim"
+            q_weight.shape()[0], // Use the INPUT dimension of Q as the reference for hidden size
+            "Output projection input dim must equal the model's hidden dimension"
+        );
+
+        // It's also good to ensure the output dimensions of Q, K, V are consistent.
+        assert_eq!(
+            q_weight.shape()[1],
+            k_weight.shape()[1],
+            "Q and K must have the same output dimension"
+        );
+        assert_eq!(
+            q_weight.shape()[1],
+            v_weight.shape()[1],
+            "Q and V must have the same output dimension"
         );
 
         Ok(Self {
@@ -136,8 +153,8 @@ pub struct GpuAttention {
     matmul: GpuMatMul,
     bmm: GpuBatchedMatMul,
     add_bias: GpuAddBias,
-    reshape: GpuReshape,     
-    unreshape: GpuUnreshape, 
+    reshape: GpuReshape,
+    unreshape: GpuUnreshape,
     apply_mask: GpuApplyMask,
     softmax: GpuSoftmax,
     permute: GpuPermute,

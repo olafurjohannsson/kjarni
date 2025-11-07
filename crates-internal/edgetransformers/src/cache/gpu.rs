@@ -95,6 +95,9 @@ impl GpuKVCache {
 
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
+        if self.seq_length == 0 {
+            return None;
+        }
         if layer_idx >= self.k_tensors.len() {
             return None;
         }

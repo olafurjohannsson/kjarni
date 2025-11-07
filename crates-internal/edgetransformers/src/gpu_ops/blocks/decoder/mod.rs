@@ -1,14 +1,19 @@
-use std::sync::Arc;
-use wgpu::CommandEncoder;
-use anyhow::Result;
-
+use crate::activations;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::attention::attention::GpuAttention;
-use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
-
+use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::attention::GpuAttentionWeights;
-
+use crate::gpu_ops::blocks::attention::attention::{GpuAttention, TempStorage};
+use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
+use crate::traits::CrossAttentionDecoder;
+use crate::traits::{
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
+};
+use anyhow::Result;
+use std::sync::Arc;
+use wgpu::CommandEncoder;
 
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
@@ -24,7 +29,7 @@ mod tests;
 /// to allow for efficient batching of GPU commands. For example, the decoder can perform
 /// all `project_kv` operations for all layers, then all cache updates, then all `attend`
 /// operations, minimizing kernel dispatch overhead.
-pub struct GpuDecoderLayer {
+pub struct GpuPreNormDecoderLayer {
     // The self-attention block, containing kernels for matmul, softmax, etc.
     pub self_attn: GpuAttention,
     // The weights associated with the self-attention block.
@@ -39,9 +44,13 @@ pub struct GpuDecoderLayer {
     // The layer normalization applied before the feed-forward block.
     pub ffn_layer_norm: GpuLayerNorm,
     pub ffn_ln_weights: GpuLayerNormWeights,
+
+    add: GpuAdd,
+    concat: GpuConcatenate,
+    config: Arc<dyn DecoderArchitecture + Send + Sync>,
 }
 
-impl GpuDecoderLayer {
+impl GpuPreNormDecoderLayer {
     /// Creates a new GPU-based decoder layer.
     ///
     /// This function initializes the GPU kernels for each component and moves the
@@ -62,15 +71,19 @@ impl GpuDecoderLayer {
         self_attn_ln_weights: GpuLayerNormWeights,
         ff_weights: GpuFeedForwardWeights,
         ffn_ln_weights: GpuLayerNormWeights,
-        hidden_size: u32,
-        num_heads: u32,
-        intermediate_size: u32,
+        config: Arc<dyn DecoderArchitecture + Send + Sync>,
     ) -> Result<Self> {
+        let hidden_size = config.hidden_size() as u32;
+        let num_heads = config.num_attention_heads() as u32;
+
         let self_attn = GpuAttention::new(context, hidden_size, num_heads);
-        let self_attn_layer_norm = GpuLayerNorm::new(context);
-        
-        let feedforward = GpuFeedForward::new(context, hidden_size, intermediate_size);
-        let ffn_layer_norm = GpuLayerNorm::new(context);
+        let self_attn_layer_norm = GpuLayerNorm::new(context, config.layer_norm_eps());
+
+        let feedforward = GpuFeedForward::new(context, activations::Activation::Gelu)?;
+        let ffn_layer_norm = GpuLayerNorm::new(context, config.layer_norm_eps());
+
+        let add = GpuAdd::new(&context);
+        let concat = GpuConcatenate::new(&context);
 
         Ok(Self {
             self_attn,
@@ -81,24 +94,102 @@ impl GpuDecoderLayer {
             ff_weights,
             ffn_layer_norm,
             ffn_ln_weights,
+            config,
+            add,
+            concat,
         })
     }
+    pub fn forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        hidden_states: &GpuTensor,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        // The signature now mirrors the CPU version exactly
+        past_kv: Option<(&GpuTensor, &GpuTensor)>,
+        temp: &mut TempStorage,
+    ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
+        // --- 1. First Sub-layer: Self-Attention (Pre-Norm) ---
+        let residual = hidden_states;
 
-    // NOTE: A monolithic `forward` method is intentionally omitted here.
-    // The `GpuTransformerDecoder` will call the components' `encode` methods directly.
-    // This allows the orchestrator to control the command encoder and manage the
-    // execution flow for maximum efficiency (e.g., batching all projections first).
-    //
-    // For example, the orchestrator's logic for this layer will look like:
-    //
-    // 1. residual = hidden_states
-    // 2. ln1_out = self.self_attn_layer_norm.encode(encoder, hidden_states, ln1_weights)
-    // 3. (new_k, new_v) = self.self_attn.project_kv(encoder, &ln1_out, attn_weights)
-    //    -> `new_k`, `new_v` are returned to orchestrator to update cache.
-    // 4. attn_out = self.self_attn.attend(encoder, &ln1_out, full_cache_view, ...)
-    // 5. attn_block_output = residual + attn_out  (using an "add" kernel)
-    // 6. residual = attn_block_output
-    // 7. ln2_out = self.ffn_layer_norm.encode(encoder, attn_block_output, ffn_ln_weights)
-    // 8. ffn_out = self.feedforward.encode(encoder, &ln2_out, ff_weights)
-    // 9. final_output = residual + ffn_out (using an "add" kernel)
+        let ln1_out = temp.get(hidden_states.shape().to_vec());
+        self.self_attn_layer_norm.encode(
+            encoder,
+            &self.self_attn_ln_weights,
+            hidden_states,
+            &ln1_out,
+        );
+
+        // Project the K/V for this step. These are the raw 3D tensors.
+        let (new_k, new_v) =
+            self.self_attn
+                .project_kv(encoder, &ln1_out, &self.self_attn_weights, temp);
+
+        // --- Cache Preparation (Now identical to CPU logic) ---
+        // We must split the heads of the new K/V tensors before concatenation.
+        let new_k_split = self.self_attn.split_heads(encoder, &new_k, temp);
+        let new_v_split = self.self_attn.split_heads(encoder, &new_v, temp);
+
+        let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
+            // Concatenate the past (already head-split) with the new (now head-split)
+            let full_k_shape = vec![
+                past_k.shape()[0],
+                past_k.shape()[1],
+                past_k.shape()[2] + new_k_split.shape()[2],
+                past_k.shape()[3],
+            ];
+            let full_v_shape = vec![
+                past_v.shape()[0],
+                past_v.shape()[1],
+                past_v.shape()[2] + new_v_split.shape()[2],
+                past_v.shape()[3],
+            ];
+
+            let fk = temp.get(full_k_shape);
+            let fv = temp.get(full_v_shape);
+
+            // Use the GpuConcatenate kernel along axis 2 (the sequence dimension)
+            self.concat.encode(encoder, &[past_k, &new_k_split], &fk, 2);
+            self.concat.encode(encoder, &[past_v, &new_v_split], &fv, 2);
+
+            (fk, fv)
+        } else {
+            // No cache (priming pass), so the "full" cache is just the new head-split state.
+            (new_k_split, new_v_split)
+        };
+
+        // Perform the attention calculation. `full_k` and `full_v` are now correctly shaped.
+        let attn_out = self.self_attn.attend(
+            encoder,
+            &ln1_out,
+            &self.self_attn_weights,
+            attention_mask,
+            true, // is_causal
+            (&full_k, &full_v),
+            position_offset,
+            temp,
+        );
+
+        let attn_block_output = temp.get(hidden_states.shape().to_vec());
+        self.add
+            .encode(encoder, &[residual, &attn_out], &attn_block_output);
+
+        // --- 2. Second Sub-layer: Feed-Forward Network (Pre-Norm) ---
+        let residual_2 = &attn_block_output;
+
+        let ln2_out = temp.get(residual_2.shape().to_vec());
+        self.ffn_layer_norm
+            .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
+
+        let ffn_out = self
+            .feedforward
+            .encode(encoder, &ln2_out, &self.ff_weights, temp);
+
+        let final_output = temp.get(residual_2.shape().to_vec());
+        self.add
+            .encode(encoder, &[residual_2, &ffn_out], &final_output);
+
+        // Return the raw 3D K/V tensors for the cache manager.
+        Ok((final_output, (new_k, new_v)))
+    }
 }

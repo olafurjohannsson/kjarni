@@ -12,6 +12,7 @@ use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchite
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
+use log::{debug, info};
 use ndarray::{Array1, Array2, s};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -106,6 +107,7 @@ impl TextGenerator {
     }
 
     pub async fn generate(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
+        info!("Starting text generation...");
         // 1. Tokenize the input prompt
         let mut tokens = self
             .tokenizer()
@@ -115,6 +117,7 @@ impl TextGenerator {
             .to_vec();
         let prompt_len = tokens.len();
         let batch_size = 1;
+        debug!("[Setup] Initial prompt token count: {}", prompt_len);
 
         // 2. Determine the final length of the generated sequence
         let max_len = if let Some(new_tokens) = config.max_new_tokens {
@@ -122,65 +125,107 @@ impl TextGenerator {
         } else {
             config.max_length
         };
+        debug!("[Setup] Max sequence length set to: {}", max_len);
         let full_attention_mask = Array2::ones((batch_size, max_len));
+
         // 3. Initialize the Key-Value cache
         let mut cache: Box<dyn Cache> = match self.model.device() {
-            Device::Cpu => Box::new(CpuKVCache::new(
-                self.config.num_hidden_layers(),
-                batch_size,
-                max_len,                   // The maximum capacity for pre-allocation
-                self.config.hidden_size(), // The hidden size for pre-allocation
-            )),
+            Device::Cpu => {
+                info!("Using CPU backend.");
+                Box::new(CpuKVCache::new(
+                    self.config.num_hidden_layers(),
+                    batch_size,
+                    max_len,
+                    self.config.hidden_size(),
+                ))
+            }
             Device::Wgpu => {
+                info!("Using GPU (WGPU) backend.");
                 let context = self
                     .model
                     .context()
                     .ok_or_else(|| anyhow!("GPU model should have context"))?;
-
                 Box::new(GpuKVCache::new(
                     &context,
                     self.config.num_hidden_layers(),
                     batch_size,
                     self.config.num_attention_heads(),
                     self.config.hidden_size() / self.config.num_attention_heads(),
-                    max_len, // The capacity is the max length of the sequence
+                    max_len,
                 )?)
             }
         };
-        let mut current_pos = 0;
+        debug!("[Setup] Initialized cache with capacity: {}", max_len);
 
         // 4. Process the prompt in a single "priming" pass to fill the cache
         if prompt_len > 0 {
+            info!("[Priming Pass] Processing initial prompt...");
             let prompt_ids = Array2::from_shape_vec(
                 (batch_size, prompt_len),
                 tokens.iter().map(|&t| t as f32).collect(),
             )?;
-            // The attention mask for the prompt is all ones
-            // let attention_mask = Array2::ones((batch_size, prompt_len));
             let prompt_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
-            // This forward pass populates the cache with the prompt's key-value states
+
+            // --- STRATEGIC LOGGING (Priming) ---
+            debug!(
+                "[Priming Pass] Cache sequence length BEFORE forward: {}",
+                cache.get_seq_length()
+            );
+            debug!(
+                "[Priming Pass] `prompt_ids` shape: {:?}",
+                prompt_ids.shape()
+            );
+            debug!(
+                "[Priming Pass] `prompt_mask` shape: {:?}",
+                prompt_mask.shape()
+            );
+
             self.model
                 .forward(&prompt_ids, &prompt_mask, Some(cache.as_mut()))
                 .await?;
-            current_pos = prompt_len;
+
+            debug!(
+                "[Priming Pass] Cache sequence length AFTER forward: {}",
+                cache.get_seq_length()
+            );
         }
 
         // 5. Start the autoregressive generation loop
+        info!("Starting autoregressive generation loop...");
         loop {
             // Check stopping conditions
             if tokens.len() >= max_len {
+                info!("[Loop] Reached max length ({}), stopping.", max_len);
                 break;
             }
+
             let current_len = tokens.len();
-            // Prepare the input for this step: it's only the *last* token
+            let step = current_len - prompt_len + 1;
+
             let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
             let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
 
-            // Create a full attention mask for the *entire* sequence length (prompt + generated)
-            // The `forward_with_cache` method in the TransformerLayer is responsible for making it causal.
-            // let attention_mask = Array2::ones((batch_size, current_pos + 1));
             let attention_mask_view = full_attention_mask.slice(s![.., 0..current_len + 1]);
-            // Perform the forward pass for the single new token
+
+            // --- STRATEGIC LOGGING (Generation Step) ---
+            info!(
+                "[Step {}] Generating token {}/{}...",
+                step,
+                current_len + 1,
+                max_len
+            );
+            debug!(
+                "[Step {}] Cache sequence length BEFORE forward: {}",
+                step,
+                cache.get_seq_length()
+            );
+            debug!("[Step {}] `input_ids` shape: {:?}", step, input_ids.shape());
+            debug!(
+                "[Step {}] `attention_mask` shape: {:?}",
+                step,
+                attention_mask_view.shape()
+            );
+
             let decoder_output = self
                 .model
                 .forward(
@@ -190,32 +235,27 @@ impl TextGenerator {
                 )
                 .await?;
 
-            current_pos += 1;
+            debug!(
+                "[Step {}] Cache sequence length AFTER forward: {}",
+                step,
+                cache.get_seq_length()
+            );
 
-            // Project the output hidden state to vocabulary logits
-            // GPT-2's LM head is the word embedding matrix, which needs to be transposed for matmul.
-            // For other models, this might differ. The `transpose_...` flags in the config
-            // are for the main transformer layers, not necessarily the standalone LM head.
             let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, &self.lm_head_t)?;
-
-            // Get the logits for the new token (it's the only one in the sequence dimension)
             let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-
-            // Apply repetition penalty
             next_token_logits =
                 apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
-
-            // Sample the next token using the specified strategy (e.g., greedy)
             let next_token = sample_token(next_token_logits, config)?;
             tokens.push(next_token);
 
-            // Check for End-Of-Sequence token
             if Some(next_token) == self.eos_token_id() {
+                info!("[Loop] End-Of-Sequence token found, stopping.");
                 break;
             }
         }
 
         // 6. Decode the final sequence of tokens back to a string
+        info!("Decoding final tokens...");
         self.tokenizer()
             .decode(&tokens, true)
             .map_err(|e| anyhow!(e))

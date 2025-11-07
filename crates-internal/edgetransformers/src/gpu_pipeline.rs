@@ -2,7 +2,7 @@
 
 use anyhow::{Result};
 use ndarray::{Array2, Array3};
-use crate::cache::GpuKVCache;
+use crate::{cache::GpuKVCache, gpu_ops::blocks::decoder::GpuPreNormDecoderLayer};
 use std::sync::Arc;
 use wgpu::ComputePipeline;
 use crate::gpu_ops::blocks::ffn::GpuFeedForward;
@@ -124,7 +124,7 @@ impl GpuTransformerPipeline {
             usage,
         })
     }
-
+ 
     /// Forward pass with optional KV caching
     pub async fn forward_with_cache(
         &self,

@@ -31,6 +31,9 @@ bytemuck = { workspace = true }
 futures = { workspace = true }
 futures-intrusive = { workspace = true }
 rand_distr ={ workspace = true}
+log = { workspace = true }
+
 
 [dev-dependencies]
+env_logger = "0.10"
 ndarray-rand = "0.15.0"
