@@ -32,8 +32,8 @@ async fn main() -> anyhow::Result<()> {
     println!("\nGenerating summary...");
     // let mut cfg = summarizer.generation_config_from_preset();
     let cfg = GenerationConfig {
-        num_beams: 4,
-        max_new_tokens: Some(40),
+        num_beams: 1,
+        max_new_tokens: Some(142),
         ..Default::default()
     };
     // cfg.num_beams = 1;

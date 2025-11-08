@@ -220,11 +220,8 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
                 cpu_cache_opt.as_deref_mut(),
             )?;
         }
-
-        // FIX #2: Atomically update the cache's sequence length AFTER all layers
-        // have been processed. This is the exact same fix we applied to the other decoder.
         if let Some(cache) = cpu_cache_opt {
-            cache.increment_len(total_len);
+            cache.increment_len(seq_len);
         }
 
         Ok(DecoderOutput {

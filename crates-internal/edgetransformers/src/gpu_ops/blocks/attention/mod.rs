@@ -103,6 +103,8 @@ impl AttentionPipelines {
 /// * `weights` - Pre-uploaded GPU weights
 /// * `pipelines` - Pre-compiled compute pipelines
 /// * `temp` - Temporary buffers
+/// 
+// TODO:: THIS IS THE OLD ATTENTION BLOCK, the new GpuAttention will SUPERCEDE THIS
 pub fn run_attention_block(
     context: &WgpuContext,
     encoder: &mut CommandEncoder,

@@ -149,6 +149,7 @@ impl GpuPreNormDecoderLayer {
             let fv = temp.get(full_v_shape);
 
             // Use the GpuConcatenate kernel along axis 2 (the sequence dimension)
+            // TODO: remove and use strides for cache in GpuBatchedMatMul and GpuApplyMask
             self.concat.encode(encoder, &[past_k, &new_k_split], &fk, 2);
             self.concat.encode(encoder, &[past_v, &new_v_split], &fv, 2);
 

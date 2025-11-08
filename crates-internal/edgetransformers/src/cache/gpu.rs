@@ -10,6 +10,7 @@ use wgpu::CommandEncoder;
 ///
 /// This cache pre-allocates memory and uses a specialized compute kernel
 /// for efficient, in-place updates, mirroring the design of the `CpuKVCache`.
+
 pub struct GpuKVCache {
     // A vector of K-cache tensors, one for each decoder layer.
     // Layout: [Batch, Heads, MaxSequenceLength, HeadDim] for efficient attention.

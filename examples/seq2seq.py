@@ -29,7 +29,7 @@ print("✓ Model loaded.")
 
 # Generate the summary with a max length of 60 tokens
 print("\nGenerating summary...")
-summary = summarizer(article, num_beams=1)
+summary = summarizer(article)
 
 print("\n--- ARTICLE ---")
 print(article)

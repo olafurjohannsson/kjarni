@@ -7,20 +7,6 @@ use ndarray::{Array1, Array2, Array3};
 
 /// A standard two-layer feed-forward network (FFN) for CPU computation.
 ///
-/// This struct implements the FFN logic using `ndarray` for CPU-based computation.
-/// It consists of two linear transformations with a configurable activation function.
-///
-/// FFN(x) = Activation(x @ W1 + b1) @ W2 + b2
-///
-/// # INVARIANT
-///
-/// The constructor (`::new`) for this struct is "dumb." It expects that the weight tensors
-/// it receives are **already in the `[in_features, out_features]` layout** required
-/// by its internal `matmul_3d_2d` function (which wraps `ndarray::dot`).
-///
-/// It is the responsibility of the higher-level model loading code (e.g., `CpuEncoder::new`)
-/// to inspect the model's configuration (`transpose_ffn_weights` flag) and perform any
-/// necessary transpositions *before* calling this constructor.
 pub struct FeedForward {
     // These fields are now public again, as they represent the clean, expected layout.
     /// The weight matrix for the first linear layer (up-projection).

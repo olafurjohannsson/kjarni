@@ -7,6 +7,7 @@ use std::any::Any;
 /// This implementation avoids the overhead of re-allocating and concatenating on every step
 /// by pre-allocating memory to the maximum required capacity at creation.
 /// The `update` operation becomes a highly efficient copy into a slice of the buffer.
+#[derive(Clone)]
 pub struct CpuKVCache {
     /// A Vec of (Key, Value) tuples, one for each decoder layer.
     /// The Arrays are pre-allocated to the maximum sequence length.
@@ -71,6 +72,10 @@ impl CpuKVCache {
         let (cache_k, cache_v) = &self.layers[layer_idx];
         let active_slice = s![.., 0..self.current_len, ..];
         Some((cache_k.slice(active_slice), cache_v.slice(active_slice)))
+    }
+
+    pub fn clone_box(&self) -> Box<CpuKVCache> {
+        Box::new(self.clone())
     }
 }
 

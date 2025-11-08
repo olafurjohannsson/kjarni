@@ -3,6 +3,7 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
+use crate::Cache;
 use crate::cache::CpuKVCache;
 use crate::pooling::mean_pool;
 use anyhow::{Result, anyhow};
@@ -66,7 +67,7 @@ impl Default for GenerationConfig {
 pub struct BeamHypothesis {
     pub tokens: Vec<u32>,
     pub score: f32,
-    pub cache: Arc<CpuKVCache>,
+    pub cache: Box<dyn Cache>,
 }
 
 // No changes needed here

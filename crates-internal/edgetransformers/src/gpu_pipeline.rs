@@ -84,6 +84,8 @@ pub struct GpuTransformerLayer {
 }
 
 /// The reusable orchestrator for the GPU encoder pipeline.
+/// NOTE AND TODO!!! THIS PIPELINE IS USED BY GPU ENCODER AND GPU CROSS ENCODER
+/// TODO: REMOVE THIS AND TRANSITION TO GPUENCODERLAYER(LIKE THE DECODER)
 pub struct GpuTransformerPipeline {
     context: Arc<WgpuContext>,
     attention_pipelines: AttentionPipelines,

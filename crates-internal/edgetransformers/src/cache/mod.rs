@@ -29,4 +29,7 @@ pub trait Cache: Send + Sync {
     fn clear(&mut self);
 
     fn increment_len(&mut self, new_tokens_len: usize);
+
 }
+
+

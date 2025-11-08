@@ -23,7 +23,6 @@ pub mod traits;
 pub mod utils;
 pub mod tests;
 pub mod weights;
-pub mod wgpu_ops;
 pub mod decoder_layer;
 
 // Re-export commonly used items
@@ -75,6 +74,9 @@ pub struct TransformerLayer {
     pub ffn_layer_norm: LayerNorm,
 }
 
+// NOTE: THIS IS THE OLD LAYER, ONLY USED BY CPU ENCODER AND CROSS-ENCODER
+// CPU AND GPU DECODER USE THE NEW SPECIFIC GPU/CPU DECODER LAYER, 
+// TODO: REMOVE
 impl TransformerLayer {
     /// Forward pass for an encoder or decoder-only layer with KV caching.
 
@@ -132,40 +134,6 @@ impl TransformerLayer {
                 ffn_out.as_standard_layout().to_owned();
 
             hidden = block_output;
-            // === PRE-NORM (e.g., GPT-2) ===
-            // let residual = hidden.clone();
-            // let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
-
-            // // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
-
-            // let cached_kv = if cache.is_some() {
-            //     cache.as_ref().and_then(|c| c.get(layer_idx))
-            // } else {
-            //     None
-            // };
-
-            // let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-            //     &ln1_out,
-            //     None, // Self-attention
-            //     Some(attention_mask),
-            //     is_causal,
-            //     cached_kv,
-            // )?;
-
-            // if let Some(cache) = cache {
-            //     cache.update(layer_idx, new_k, new_v)?;
-            // }
-
-            // hidden = residual + attn_out;
-
-            // let residual = hidden.clone();
-            // // let ln2_out = self.ffn_layer_norm.forward_3d(&hidden);
-
-            // let hidden_contiguous = hidden.as_standard_layout().to_owned();
-            // let ln2_out = self.ffn_layer_norm.forward_3d(&hidden_contiguous);
-
-            // let ffn_out = self.feedforward.forward(&ln2_out)?;
-            // hidden = residual + ffn_out;
         } else {
             // === POST-NORM (e.g., BERT, BART) ===
             let residual = hidden.clone();

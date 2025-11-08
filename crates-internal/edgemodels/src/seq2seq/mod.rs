@@ -3,6 +3,7 @@ use crate::generation::{
 };
 use anyhow::{Result, anyhow};
 use edgetransformers::CpuKVCache;
+use edgetransformers::cache::Cache;
 use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
 use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
 use edgetransformers::models::download_model_files;
@@ -217,7 +218,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
         // 1. Initialize Beams
         // Create an empty cache. Each beam will get a clone of this to start.
         //pub fn new(num_layers: usize, batch_size: usize, max_len: usize, hidden_size: usize) -> Self {
-        let initial_cache = Arc::new(CpuKVCache::new(
+        let initial_cache: Box<dyn Cache> = Box::new(CpuKVCache::new(
             self.config.num_decoder_layers(),
             batch_size,
             config.max_length,
@@ -237,63 +238,68 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
             }
             let mut all_new_candidates: Vec<BeamHypothesis> = Vec::new();
 
-            for hypo in &beams {
-                // --- Prepare inputs for the model's `forward` call ---
-                let last_token = *hypo.tokens.last().unwrap();
-                let decoder_input_ids =
-                    Array2::from_shape_vec((batch_size, 1), vec![last_token as f32])?;
+            match self.model.device() {
+                Device::Cpu => {
+                    // For the CPU, we use the "smart clone" strategy.
+                    for mut hypo in beams.drain(..) {
+                        let last_token = *hypo.tokens.last().unwrap();
+                        let decoder_input_ids =
+                            Array2::from_shape_vec((batch_size, 1), vec![last_token as f32])?;
+                        let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
 
-                // This mask covers the ENTIRE sequence generated so far for this hypothesis.
-                // This is the `decoder_attention_mask_from_generator` argument.
-                let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
+                        // Downcast to the concrete, Clone-able CpuKVCache
+                        let cpu_cache = hypo
+                            .cache
+                            .as_any_mut()
+                            .downcast_mut::<CpuKVCache>()
+                            .unwrap();
 
-                // Each beam needs its own mutable cache for the forward pass.
-                let mut current_cache = &hypo.cache;
+                        // Pass the mutable cache to be updated in-place
+                        let decoder_output = self
+                            .model
+                            .forward(
+                                &Array2::zeros((0, 0)),
+                                &decoder_input_ids,
+                                encoder_attention_mask,
+                                &decoder_attention_mask,
+                                Some(cpu_cache),
+                                Some(encoder_output),
+                            )
+                            .await?;
 
-                // --- THE CORRECT FORWARD CALL ---
-                let decoder_output = self
-                    .model
-                    .forward(
-                        &Array2::zeros((0, 0)), // Dummy, not used when `encoder_output_opt` is Some
-                        &decoder_input_ids,
-                        encoder_attention_mask,
-                        &decoder_attention_mask,
-                        None, //Some(current_cache.as_any_mut()), // Pass the mutable cache for this beam
-                        Some(encoder_output),     // Pass the pre-computed encoder output
-                    )
-                    .await?;
-                // --- END FORWARD CALL ---
+                        // ... (Logits calculation is the same) ...
+                        let last_hidden_state =
+                            decoder_output.last_hidden_state.slice(s![0, -1, ..]);
+                        let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
+                        // ...
+                        let log_probs = log_softmax_1d(&logits);
+                        let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
 
-                let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-                let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
-                if let Some(bias) = &self.final_logits_bias {
-                    logits += bias;
+                        let mut is_first_candidate = true;
+                        for (token_id, token_log_prob) in top_candidates {
+                            let mut new_tokens = hypo.tokens.clone();
+                            new_tokens.push(token_id);
+
+                            // Efficiently handle the cache for the new hypotheses
+                            let new_cache: Box<dyn Cache> = if is_first_candidate {
+                                is_first_candidate = false;
+                                Box::new(cpu_cache.clone()) // Just clone the updated cache
+                            } else {
+                                Box::new(cpu_cache.clone())
+                            };
+
+                            all_new_candidates.push(BeamHypothesis {
+                                tokens: new_tokens,
+                                score: hypo.score + token_log_prob,
+                                cache: new_cache,
+                            });
+                        }
+                    }
                 }
+                Device::Wgpu => {
+                    // For the GPU, we would use the batched forward pass and the `reorder_cache` kernel.
 
-                // Apply penalties using the generic helpers
-                logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
-                logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
-                let log_probs = log_softmax_1d(&logits);
-
-                // Get top `num_beams` candidates from this single hypothesis
-                let mut top_candidates: Vec<(u32, f32)> = log_probs
-                    .iter()
-                    .enumerate()
-                    .map(|(id, &lp)| (id as u32, lp))
-                    .collect();
-                top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                top_candidates.truncate(config.num_beams);
-
-                // Create new, full hypotheses from the candidates
-                for (token_id, token_log_prob) in top_candidates {
-                    let mut new_tokens = hypo.tokens.clone();
-                    new_tokens.push(token_id);
-                    // all_new_candidates.push(BeamHypothesis {
-                    //     tokens: new_tokens,
-                    //     score: hypo.score + token_log_prob,
-                    //     // The new hypothesis gets the updated cache from the forward pass
-                    //     cache: current_cache,
-                    // });
+                    todo!("GPU batched beam search with cache reordering not implemented yet.");
                 }
             }
 
@@ -305,6 +311,9 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
                 if candidate.tokens.last() == Some(&eos_token_id) {
                     if candidate.tokens.len() >= config.min_length {
                         completed_beams.push(candidate);
+                    } else {
+                        // Still keep it as an active beam if under min_length
+                        beams.push(candidate);
                     }
                 } else {
                     beams.push(candidate);
@@ -362,5 +371,63 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
         let encoder_output = self.encode_input(input_text).await?;
         self.generate_from_encoding(&encoder_output, &attention_mask, config)
             .await
+    }
+}
+
+/// Selects the top `k` tokens and their log probabilities from a log probability distribution.
+///
+/// This is a core component of beam search, used to find the most likely next
+/// tokens to expand upon.
+///
+/// # Arguments
+/// * `log_probs`: A 1D array of log probabilities for the entire vocabulary.
+/// * `k`: The number of top tokens to select.
+///
+/// # Returns
+/// A `Vec` containing tuples of `(token_id, log_probability)`, sorted from highest
+/// log probability to lowest.
+pub fn get_top_k_from_log_probs(log_probs: &Array1<f32>, k: usize) -> Vec<(u32, f32)> {
+    // 1. Create a vector of (index, value) pairs from the log probabilities array.
+    let mut indexed_log_probs: Vec<(usize, f32)> = log_probs
+        .iter()
+        .enumerate()
+        .map(|(i, &lp)| (i, lp))
+        .collect();
+
+    // 2. Sort the vector in descending order based on the log probability (the f32 value).
+    //    We use `partial_cmp` and reverse the comparison to sort from highest to lowest.
+    //    `unwrap()` is safe here because f32 log_probs from a softmax will not be NaN.
+    indexed_log_probs.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+    // 3. Take the top `k` elements from the sorted vector.
+    indexed_log_probs.truncate(k);
+
+    // 4. Map the result to the final `(u32, f32)` format for token IDs.
+    indexed_log_probs
+        .into_iter()
+        .map(|(i, lp)| (i as u32, lp))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::arr1;
+
+    #[test]
+    fn test_get_top_k() {
+        let log_probs = arr1(&[-2.3, -1.1, -5.0, -0.5, -3.1, -0.8]);
+        let k = 3;
+
+        let top_k = get_top_k_from_log_probs(&log_probs, k);
+
+        // The expected order is based on the log_probs:
+        // 1st: -0.5 (index 3)
+        // 2nd: -0.8 (index 5)
+        // 3rd: -1.1 (index 1)
+        let expected = vec![(3, -0.5), (5, -0.8), (1, -1.1)];
+
+        assert_eq!(top_k.len(), 3);
+        assert_eq!(top_k, expected);
     }
 }

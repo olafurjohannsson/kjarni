@@ -1,31 +1,6 @@
 //! Core model traits and data structures for transformer architectures.
 //!
-//! This module defines the fundamental, asynchronous traits that all models
-//! in the library should implement. It establishes a clear contract for encoders,
-//! decoders, and encoder-decoder models, providing a flexible abstraction that
-//! is agnostic to the underlying computation backend (CPU or WGPU).
-//!
-//! The design principles are:
-//! 1.  **Asynchronous by Default**: All `forward` methods are `async` to natively
-//!     support non-blocking GPU operations via WGPU. The `async-trait` crate
-//!     is used to enable `async` functions in traits.
-//! 2.  **Stateless Models, Stateful Caches**: Models themselves are immutable (`&self`)
-//!     during inference. All mutable state required for generation, such as Key-Value
-//!     caches, is managed externally in a `Cache` object, which is passed mutably
-//!     (`&mut dyn Cache`). This improves safety and allows for parallel inference.
-//! 3.  **Backend Agnostic**: The `Device` enum allows a model to know its backend,
-//!     but the trait signatures themselves are generic. Implementations will handle
-//!     dispatching to the correct CPU or GPU code internally.
-//! 4.  **Composition over Implementation**: These traits define architectural patterns.
-//!     A concrete model like BART would be a struct that contains an `Encoder`
-//!     implementation and a `CrossAttentionDecoder` implementation.
-//!
-//! # Crate Dependencies
-//! Make sure to add `async-trait` to your `Cargo.toml`:
-//! ```toml
-//! [dependencies]
-//! async-trait = "0.1"
-//! ```
+
 
 use anyhow::Result;
 use async_trait::async_trait;

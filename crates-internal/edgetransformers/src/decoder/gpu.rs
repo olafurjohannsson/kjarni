@@ -264,6 +264,8 @@ impl Decoder for GpuTransformerDecoder {
 
                 // 2. SLICE the physical buffers to the current logical length (`position_offset`).
                 let (b, h, _, d) = physical_k.dims4();
+
+                // TODO: remove and use strides for cache in GpuBatchedMatMul and GpuApplyMask
                 temp_k = physical_k.slice(
                     &mut encoder,
                     &self.slicer,

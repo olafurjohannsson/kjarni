@@ -2,7 +2,6 @@
 use crate::gpu_ops::{
     primitives::matmul::{compile_matmul_pipeline, run_gpu_matmul}
 };
-use crate::wgpu_ops::wgpu_matmul_3d_2d;
 use crate::utils::linear_algebra::matmul_3d_2d;
 use crate::weights::ModelWeights;
 use crate::gpu_context::WgpuContext;

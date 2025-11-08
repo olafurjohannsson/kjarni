@@ -4,6 +4,8 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
+pub mod reorder;
+
 #[cfg(test)]
 mod tests;
 
