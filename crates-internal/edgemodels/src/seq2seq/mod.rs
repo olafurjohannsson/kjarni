@@ -1,5 +1,5 @@
 use crate::generation::{
-    apply_no_repeat_ngram, apply_repetition_penalty, log_softmax_1d, sample_token,
+    log_softmax_1d, 
 };
 use anyhow::{Result, anyhow};
 use edgetransformers::CpuKVCache;
@@ -267,11 +267,10 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
                             )
                             .await?;
 
-                        // ... (Logits calculation is the same) ...
                         let last_hidden_state =
                             decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-                        let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
-                        // ...
+                        let logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
+                        
                         let log_probs = log_softmax_1d(&logits);
                         let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
 

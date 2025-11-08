@@ -1,4 +1,3 @@
-use anyhow::Result;
 use edgemodels::sentence_encoder::SentenceEncoder;
 use edgetransformers::models::{LanguageModel, ModelType};
 use edgetransformers::traits::Device;

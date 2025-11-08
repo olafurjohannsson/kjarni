@@ -1,6 +1,6 @@
 use edgetransformers::traits::{
     EncoderDecoderArchitecture, LanguageModelConfig, LayerAttentionNames,
-    LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
+    LayerFeedForwardNames, TransformerConfig,
 };
 use serde::Deserialize;
 use std::any::Any;

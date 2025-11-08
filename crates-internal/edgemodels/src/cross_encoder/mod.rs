@@ -4,7 +4,6 @@
 //! Used for reranking search results or computing pairwise similarity.
 
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use edgetransformers::models::download_model_files;
 use ndarray::{Array1, Array2};
 use std::path::{Path, PathBuf};
@@ -14,7 +13,7 @@ use tokenizers::Tokenizer;
 use edgetransformers::encoder::TransformerEncoder;
 use edgetransformers::models::{ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
-use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
+use edgetransformers::traits::{Encoder, EncoderArchitecture, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
 
 mod configs;

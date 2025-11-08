@@ -77,6 +77,7 @@ impl PreNormDecoderLayer {
             Some(attention_mask),
             true, // is_causal is always true for a DecoderLayer
             position_offset,
+            None,
         )?;
 
         // First residual connection.

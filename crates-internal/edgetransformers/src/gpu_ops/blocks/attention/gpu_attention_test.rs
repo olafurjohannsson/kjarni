@@ -131,7 +131,7 @@ async fn test_attention_encoder_parity() -> Result<()> {
 
     // 3. Run CPU forward pass
     let (cpu_output, cpu_new_k, cpu_new_v) =
-        cpu_attn.forward_with_cache(&input_cpu, None, Some(&mask_cpu), false, None)?;
+        cpu_attn.forward_with_cache(&input_cpu, None, Some(&mask_cpu), false, None, None)?;
 
     // 4. Run GPU forward pass
     let mut encoder = context.device.create_command_encoder(&Default::default());
@@ -213,6 +213,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
         Some(&mask_cpu),
         true,       // Causal attention is a must for decoders
         prompt_len, // The offset is the length of what was already in the cache
+        None,
     )?;
 
     // 4. --- GPU EXECUTION ---

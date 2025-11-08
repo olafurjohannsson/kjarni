@@ -9,6 +9,7 @@ use tokio::fs;
 use std::sync::Arc;
 
 /// Helper to ensure model files exist
+
 async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
     if !local_dir.exists() {
         tokio::fs::create_dir_all(local_dir).await?;

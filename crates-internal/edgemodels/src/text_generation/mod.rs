@@ -1,11 +1,9 @@
-use crate::generation::{
-    apply_no_repeat_ngram, apply_repetition_penalty, log_softmax_1d, sample_token,
-};
+use crate::generation::{apply_repetition_penalty, sample_token};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::CpuKVCache;
 use edgetransformers::decoder::TransformerDecoder;
-use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
+use edgetransformers::models::base::GenerationConfig;
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::project_to_vocab;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
@@ -13,8 +11,7 @@ use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
 use log::{debug, info};
-use ndarray::{Array1, Array2, s};
-use std::collections::{HashMap, HashSet};
+use ndarray::{Array2, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -81,7 +78,11 @@ impl TextGenerator {
             | ModelType::Gpt2Medium
             | ModelType::Gpt2Large
             | ModelType::Gpt2XL => {
-                Arc::new(serde_json::from_str::<Gpt2Config>(&weights.config_json)?)
+                let mut cfg = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
+                if model_type == ModelType::DistilGpt2 {
+                    cfg.set_model_type("distilgpt2".to_string()); // special handling for weight names
+                };
+                Arc::new(cfg)
             }
             _ => {
                 return Err(anyhow!(

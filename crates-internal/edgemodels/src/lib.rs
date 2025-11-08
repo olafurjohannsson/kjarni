@@ -2,23 +2,17 @@
 //! 
 //! Provides autoregressive language models for text generation.
 
-pub mod gptconfig;
-pub mod bertconfig;
-pub mod model;
-pub mod gptweights;
-pub mod bertweights;
 pub mod tokenizer;
 pub mod seq2seq;
-pub mod tests;
-pub mod tests2;
+
 pub mod text_generation;
-// pub mod generation_old;
 pub mod sentence_encoder;
 pub mod cross_encoder;
-pub mod generation;
+mod generation;
 
 pub use sentence_encoder::SentenceEncoder;
 pub use cross_encoder::CrossEncoder;
+pub use text_generation::TextGenerator;
 
 /// A callback for streaming generated tokens.
 ///
@@ -29,11 +23,8 @@ pub type TokenCallback<'a> = Box<dyn FnMut(u32, &str) -> bool + 'a>;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
-// Re-exports
-// pub use gptconfig::GPTConfig;
-// pub use model::{GenerativeModel, GenerativeModelType};
-pub use gptweights::GPTModelWeights;
-// pub use generation::{GenerationConfig, SamplingStrategy};
+#[cfg(test)]
+pub mod tests;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use tokenizers::Tokenizer;

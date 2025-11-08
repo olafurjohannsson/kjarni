@@ -23,17 +23,21 @@ pub enum ModelType {
     MiniLML6V2,
     MpnetBaseV2,
     DistilBertBaseCased,
-    
+
     // === Cross Encoders ===
     MiniLML6V2CrossEncoder,
-    
+
     // === Decoders ===
     DistilGpt2,
     Gpt2,
     Gpt2Medium,
     Gpt2Large,
     Gpt2XL,
-    
+    Llama3_2_1B,
+    // Llama3_2_3B,
+    // Llama3_8B,
+    // Llama2_7B,
+
     // === Encoder-Decoder ===
     BartLargeCnn,
     DistilBartCnn,
@@ -75,7 +79,7 @@ impl ModelType {
                 size_mb: 90,
                 params_millions: 22,
             },
-            
+
             ModelType::MpnetBaseV2 => ModelInfo {
                 architecture: ModelArchitecture::Encoder,
                 paths: ModelPaths {
@@ -87,7 +91,7 @@ impl ModelType {
                 size_mb: 420,
                 params_millions: 110,
             },
-            
+
             ModelType::DistilBertBaseCased => ModelInfo {
                 architecture: ModelArchitecture::Encoder,
                 paths: ModelPaths {
@@ -125,7 +129,7 @@ impl ModelType {
                 size_mb: 319,
                 params_millions: 82,
             },
-            
+
             ModelType::Gpt2 => ModelInfo {
                 architecture: ModelArchitecture::Decoder,
                 paths: ModelPaths {
@@ -137,7 +141,7 @@ impl ModelType {
                 size_mb: 548,
                 params_millions: 117,
             },
-            
+
             ModelType::Gpt2Medium => ModelInfo {
                 architecture: ModelArchitecture::Decoder,
                 paths: ModelPaths {
@@ -149,7 +153,7 @@ impl ModelType {
                 size_mb: 1400,
                 params_millions: 345,
             },
-            
+
             ModelType::Gpt2Large => ModelInfo {
                 architecture: ModelArchitecture::Decoder,
                 paths: ModelPaths {
@@ -161,7 +165,7 @@ impl ModelType {
                 size_mb: 3100,
                 params_millions: 774,
             },
-            
+
             ModelType::Gpt2XL => ModelInfo {
                 architecture: ModelArchitecture::Decoder,
                 paths: ModelPaths {
@@ -172,6 +176,18 @@ impl ModelType {
                 description: "GPT-2 XL (1.5B parameters): strong open decoder model. Not suitable for edge devices; requires high-end GPU.",
                 size_mb: 6100,
                 params_millions: 1500,
+            },
+
+            ModelType::Llama3_2_1B => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/config.json",
+                },
+                description: "TODO",
+                size_mb: 0,
+                params_millions: 1000
             },
 
             // === ENCODER-DECODER ===
@@ -186,7 +202,7 @@ impl ModelType {
                 size_mb: 1600,
                 params_millions: 406,
             },
-            
+
             ModelType::DistilBartCnn => ModelInfo {
                 architecture: ModelArchitecture::EncoderDecoder,
                 paths: ModelPaths {
@@ -198,7 +214,7 @@ impl ModelType {
                 size_mb: 1000,
                 params_millions: 306,
             },
-            
+
             ModelType::T5Small => ModelInfo {
                 architecture: ModelArchitecture::EncoderDecoder,
                 paths: ModelPaths {
@@ -210,7 +226,7 @@ impl ModelType {
                 size_mb: 240,
                 params_millions: 60,
             },
-            
+
             ModelType::MarianEnIs => ModelInfo {
                 architecture: ModelArchitecture::EncoderDecoder,
                 paths: ModelPaths {
@@ -224,12 +240,12 @@ impl ModelType {
             },
         }
     }
-    
+
     /// Get the architecture type
     pub fn architecture(&self) -> ModelArchitecture {
         self.info().architecture
     }
-    
+
     /// Get the repo ID from the URL
     pub fn repo_id(&self) -> String {
         let info = self.info();
@@ -243,7 +259,6 @@ impl ModelType {
         }
     }
 }
-
 
 /// Download model files (weights, tokenizer, config) to a local directory
 ///
@@ -262,7 +277,7 @@ impl ModelType {
 /// let model_type = ModelType::MiniLML6V2;
 /// let model_info = model_type.info();
 /// let cache_dir = Path::new("./models/mini-lm");
-/// 
+///
 /// download_model_files(cache_dir, &model_info.paths).await?;
 /// # Ok(())
 /// # }

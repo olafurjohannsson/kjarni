@@ -9,15 +9,13 @@ use env_logger;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    println!("--- DistilGPT-2 Text Generation Example (CPU) ---");
 
-    println!("Loading DistilGPT-2 model...");
     let context = std::sync::Arc::new(edgetransformers::WgpuContext::new().await);
     let generator = TextGenerator::from_registry(
-        ModelType::DistilGpt2,
+        ModelType::Gpt2Medium,
         None, 
-        Device::Cpu,
-        None, //Some(context), 
+        Device::Wgpu,
+        Some(context), 
     ).await?;
     println!("✓ Model loaded.");
 
@@ -25,11 +23,9 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n--- PROMPT ---");
     println!("{}", prompt);
-
-    println!("\nGenerating text using Greedy Search...");
     
     let config = GenerationConfig {
-        max_new_tokens: Some(100),
+        max_new_tokens: Some(2000),
         sampling_strategy: SamplingStrategy::Greedy,
         repetition_penalty: 1.1,
         temperature: 0.7,

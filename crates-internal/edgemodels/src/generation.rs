@@ -2,13 +2,10 @@
 
 
 use anyhow::Result;
-// use edgetransformers::TransformerConfig;
-use edgetransformers::CpuKVCache;
-use ndarray::{s, Array1, Array2, Array3, Array4};
+use ndarray::{Array1};
 use rand::Rng;
 use std::collections::{HashSet, HashMap};
 
-use edgetransformers::gpu_context::WgpuContext;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
@@ -16,7 +13,7 @@ use tokenizers::Tokenizer;
 #[cfg(target_arch = "wasm32")]
 use crate::tokenizer::wasm::BPETokenizer as Tokenizer;
 
-use edgetransformers::models::base::{BeamHypothesis, GenerationConfig, SamplingStrategy};
+use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
 
 
 

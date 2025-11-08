@@ -23,7 +23,9 @@ pub mod traits;
 pub mod utils;
 pub mod tests;
 pub mod weights;
+pub mod rms_norm;
 pub mod decoder_layer;
+pub mod rope;
 
 // Re-export commonly used items
 pub use crate::{
@@ -106,6 +108,7 @@ impl TransformerLayer {
                 Some(attention_mask),
                 is_causal,
                 cached_kv,
+                None,
             )?;
 
             if let Some(c) = cache {
@@ -145,6 +148,7 @@ impl TransformerLayer {
                 Some(attention_mask),
                 is_causal,
                 cached_kv,
+                None,
             )?;
 
             if let Some(cache) = cache {
@@ -196,6 +200,7 @@ impl TransformerLayer {
             Some(decoder_attention_mask),
             true,
             cached_kv,
+            None,
         )?;
 
         if let Some(cache) = cache {
@@ -213,6 +218,7 @@ impl TransformerLayer {
             Some(encoder_hidden_states),
             Some(encoder_attention_mask),
             false,
+            None,
             None,
         )?;
 
@@ -299,6 +305,7 @@ impl TransformerLayer {
             Some(attention_mask),
             config.is_causal(),
             position_offset,
+            None,
         )?;
 
         // First residual connection.
