@@ -3,7 +3,7 @@ mod common;
 
 use super::*;
 use crate::feedforward::FeedForward as CpuFeedForward;
-use crate::gpu_ops::blocks::attention::attention::TempStorage;
+use crate::gpu_ops::blocks::attention::TempStorage;
 use crate::gpu_ops::{DType, GpuTensor};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;

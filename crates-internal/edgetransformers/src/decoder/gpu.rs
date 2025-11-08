@@ -1,27 +1,22 @@
 use crate::cache::GpuKVCache;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::attention::attention::GpuAttention;
-use crate::gpu_ops::blocks::attention::attention::GpuAttentionWeights;
-use crate::gpu_ops::blocks::attention::attention::TempStorage;
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::attention::TempStorage;
 use crate::gpu_ops::blocks::decoder::GpuPreNormDecoderLayer;
-use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::blocks::ffn::{GpuFeedForwardWeights};
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-use crate::gpu_ops::blocks::{attention::AttentionWeights, ffn_old::FFNWeights};
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::gpu_pipeline::{GpuTransformerLayer, GpuTransformerPipeline};
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel,
 };
 use crate::weights::ModelWeights;
-use anyhow::{Result, anyhow};
+use anyhow::{Result};
 use async_trait::async_trait;
-use bytemuck;
 use log::{debug, info};
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 /// The GPU backend for a generic Transformer Decoder.
 pub struct GpuTransformerDecoder {

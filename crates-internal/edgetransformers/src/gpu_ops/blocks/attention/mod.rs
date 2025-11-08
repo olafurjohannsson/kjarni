@@ -1,322 +1,431 @@
-//! Attention Block
-//!
-//! Multi-head self-attention mechanism configurable for:
-//! - Encoder (bidirectional)
-//! - Decoder (causal)
-//! - Cross-attention (encoder-decoder)
-
-use crate::gpu_ops::primitives::{
-    add_bias_old::{run_gpu_add_bias, compile_add_bias_pipeline},
-    apply_mask_old::{run_gpu_apply_mask, compile_apply_mask_pipeline},
-    matmul_old::{run_gpu_bmm, run_gpu_matmul, compile_bmm_pipeline, compile_matmul_pipeline},
-    reshape::{run_gpu_reshape, run_gpu_unreshape, compile_reshape_pipeline, compile_unreshape_pipeline},
-    softmax_old::{run_gpu_softmax, compile_softmax_pipeline},
-};
 use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::kernel::Kernel;
+use crate::gpu_ops::primitives::layout::permute::GpuPermute;
+use crate::gpu_ops::primitives::{
+    add_bias::GpuAddBias, apply_mask::GpuApplyMask, bmm::GpuBatchedMatMul,
+    layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape, matmul::GpuMatMul,
+    softmax::GpuSoftmax,
+};
+use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
-use wgpu::{Buffer, CommandEncoder, ComputePipeline};
 
-mod gpu_attention_test;
-pub mod attention;
-
-/// Configuration for attention computation
-#[derive(Debug, Clone)]
-pub struct AttentionConfig {
-    pub batch_size: usize,
-    pub seq_len: usize,
-    pub num_heads: usize,
-    pub head_dim: usize,
-    pub hidden_size: usize,
-    pub is_causal: bool,
+/// A simple memory pool for managing temporary, intermediate GPU tensors.
+pub struct TempStorage {
+    context: Arc<WgpuContext>,
+    pool: HashMap<Vec<usize>, Vec<GpuTensor>>,
+    active: Vec<GpuTensor>,
 }
 
-/// GPU buffers for attention weights
-pub struct AttentionWeights {
-    pub q_weight: Arc<Buffer>,
-    pub q_bias: Arc<Buffer>,
-    pub k_weight: Arc<Buffer>,
-    pub k_bias: Arc<Buffer>,
-    pub v_weight: Arc<Buffer>,
-    pub v_bias: Arc<Buffer>,
-    pub output_weight: Arc<Buffer>,
-    pub output_bias: Arc<Buffer>,
-    pub norm_weight: Arc<Buffer>,
-    pub norm_bias: Arc<Buffer>,
-}
-
-/// Temporary buffers for attention computation
-pub struct AttentionTempBuffers {
-    pub q_proj: Buffer,
-    pub k_proj: Buffer,
-    pub v_proj: Buffer,
-    pub proj_biased: Buffer,
-    pub q_permuted: Buffer,
-    pub k_permuted_t: Buffer,
-    pub v_permuted: Buffer,
-    pub scores: Buffer,
-    pub context_vectors: Buffer,
-    pub ffn_intermediate: Buffer,
-}
-
-/// Pre-compiled pipelines for attention operations
-pub struct AttentionPipelines {
-    pub matmul: Arc<ComputePipeline>,
-    pub add_bias: Arc<ComputePipeline>,
-    pub reshape: Arc<ComputePipeline>,
-    pub unreshape: Arc<ComputePipeline>,
-    pub bmm: Arc<ComputePipeline>,
-    pub softmax: Arc<ComputePipeline>,
-    pub apply_mask: Arc<ComputePipeline>,
-}
-
-impl AttentionPipelines {
-    pub fn new(context: &WgpuContext) -> Self {
+impl TempStorage {
+    pub fn new(context: Arc<WgpuContext>) -> Self {
         Self {
-            matmul: Arc::new(compile_matmul_pipeline(context)),
-            add_bias: Arc::new(compile_add_bias_pipeline(context)),
-            reshape: Arc::new(compile_reshape_pipeline(context)),
-            unreshape: Arc::new(compile_unreshape_pipeline(context)),
-            bmm: Arc::new(compile_bmm_pipeline(context)),
-            softmax: Arc::new(compile_softmax_pipeline(context)),
-            apply_mask: Arc::new(compile_apply_mask_pipeline(context)),
+            context,
+            pool: HashMap::new(),
+            active: Vec::new(),
+        }
+    }
+
+    pub fn get(&mut self, shape: Vec<usize>) -> GpuTensor {
+        let tensor = if let Some(tensors) = self.pool.get_mut(&shape) {
+            if let Some(tensor) = tensors.pop() {
+                tensor
+            } else {
+                GpuTensor::uninitialized(
+                    &self.context,
+                    shape,
+                    crate::gpu_ops::DType::F32,
+                    "TempTensor",
+                )
+            }
+        } else {
+            GpuTensor::uninitialized(
+                &self.context,
+                shape,
+                crate::gpu_ops::DType::F32,
+                "TempTensor",
+            )
+        };
+        self.active.push(tensor.clone());
+        tensor
+    }
+
+    pub fn reclaim(&mut self) {
+        for tensor in self.active.drain(..) {
+            self.pool
+                .entry(tensor.shape().to_vec())
+                .or_default()
+                .push(tensor);
         }
     }
 }
 
-// First 10 embeddings for GPU (WGPU) - embeddings: [0.0035336413, -0.040116385, 0.012812932, -0.0039921585,
-/// Run complete attention block on GPU
-///
-/// This orchestrates:
-/// 1. Q, K, V projections
-/// 2. Reshape to [batch, heads, seq, head_dim]
-/// 3. Compute scores: Q @ K^T / sqrt(d)
-/// 4. Apply mask (causal or padding)
-/// 5. Softmax over scores
-/// 6. Apply to values: Softmax @ V
-/// 7. Reshape back and output projection
-///
-/// # Arguments
-/// * `input` - Input hidden states [batch, seq, hidden]
-/// * `output` - Output buffer [batch, seq, hidden]
-/// * `mask` - Attention mask
-/// * `config` - Attention configuration
-/// * `weights` - Pre-uploaded GPU weights
-/// * `pipelines` - Pre-compiled compute pipelines
-/// * `temp` - Temporary buffers
-/// 
-// TODO:: THIS IS THE OLD ATTENTION BLOCK, the new GpuAttention will SUPERCEDE THIS
-pub fn run_attention_block(
-    context: &WgpuContext,
-    encoder: &mut CommandEncoder,
-    pipelines: &AttentionPipelines,
-    input: &Buffer,
-    output: &Buffer,
-    mask: &Buffer,
-    config: &AttentionConfig,
-    weights: &AttentionWeights,
-    temp: &AttentionTempBuffers,
-) {
-    let m = (config.batch_size * config.seq_len) as u32;
-    let k = config.hidden_size as u32;
-
-    // === Q Projection: input @ W_q + b_q ===
-    run_gpu_matmul(
-        context,
-        encoder,
-        &pipelines.matmul,
-        input,
-        &weights.q_weight,
-        &temp.q_proj,
-        m,
-        k,
-        k,
-    );
-    run_gpu_add_bias(
-        context,
-        encoder,
-        &pipelines.add_bias,
-        &temp.q_proj,
-        &weights.q_bias,
-        &temp.proj_biased,
-        m * k,
-    );
-
-    // Reshape to [batch, heads, seq, head_dim]
-    run_gpu_reshape(
-        context,
-        encoder,
-        &pipelines.reshape,
-        &temp.proj_biased,
-        &temp.q_permuted,
-        config.batch_size as u32,
-        config.seq_len as u32,
-        config.num_heads as u32,
-        config.head_dim as u32,
-        false,
-    );
-
-    // === K Projection: input @ W_k + b_k ===
-    run_gpu_matmul(
-        context,
-        encoder,
-        &pipelines.matmul,
-        input,
-        &weights.k_weight,
-        &temp.k_proj,
-        m,
-        k,
-        k,
-    );
-
-    run_gpu_add_bias(
-        context,
-        encoder,
-        &pipelines.add_bias,
-        &temp.k_proj,
-        &weights.k_bias,
-        &temp.proj_biased,
-        m * k,
-    );
-
-    // Reshape and transpose for K
-    run_gpu_reshape(
-        context,
-        encoder,
-        &pipelines.reshape,
-        &temp.proj_biased,
-        &temp.k_permuted_t,
-        config.batch_size as u32,
-        config.seq_len as u32,
-        config.num_heads as u32,
-        config.head_dim as u32,
-        true, // Transpose K
-    );
-
-    // === V Projection: input @ W_v + b_v ===
-    run_gpu_matmul(
-        context,
-        encoder,
-        &pipelines.matmul,
-        input,
-        &weights.v_weight,
-        &temp.v_proj,
-        m,
-        k,
-        k,
-    );
-
-    run_gpu_add_bias(
-        context,
-        encoder,
-        &pipelines.add_bias,
-        &temp.v_proj,
-        &weights.v_bias,
-        &temp.proj_biased,
-        m * k,
-    );
-
-    run_gpu_reshape(
-        context,
-        encoder,
-        &pipelines.reshape,
-        &temp.proj_biased,
-        &temp.v_permuted,
-        config.batch_size as u32,
-        config.seq_len as u32,
-        config.num_heads as u32,
-        config.head_dim as u32,
-        false,
-    );
-
-    // === Attention Scores: Q @ K^T ===
-    run_gpu_bmm(
-        context,
-        encoder,
-        &pipelines.bmm,
-        &temp.q_permuted,
-        &temp.k_permuted_t,
-        &temp.scores,
-        (config.batch_size * config.num_heads) as u32,
-        config.seq_len as u32,
-        config.head_dim as u32,
-        config.seq_len as u32,
-    );
-
-    // === Apply Mask ===
-    run_gpu_apply_mask(
-        context,
-        encoder,
-        &pipelines.apply_mask,
-        &temp.scores,
-        mask,
-        config.batch_size as u32,
-        config.num_heads as u32,
-        config.seq_len as u32,
-        config.is_causal,
-    );
-
-    // === Softmax with Scaling ===
-    let scale = 1.0 / (config.head_dim as f32).sqrt();
-    run_gpu_softmax(
-        context,
-        encoder,
-        &pipelines.softmax,
-        &temp.scores,
-        (config.batch_size * config.num_heads * config.seq_len) as u32,
-        config.seq_len as u32,
-        scale,
-    );
-
-    // === Apply to Values: Attention @ V ===
-    run_gpu_bmm(
-        context,
-        encoder,
-        &pipelines.bmm,
-        &temp.scores,
-        &temp.v_permuted,
-        &temp.context_vectors,
-        (config.batch_size * config.num_heads) as u32,
-        config.seq_len as u32,
-        config.seq_len as u32,
-        config.head_dim as u32,
-    );
-
-    // === Reshape Back to [batch, seq, hidden] ===
-    run_gpu_unreshape(
-        context,
-        encoder,
-        &pipelines.unreshape,
-        &temp.context_vectors,
-        &temp.proj_biased,
-        config.batch_size as u32,
-        config.seq_len as u32,
-        config.num_heads as u32,
-        config.head_dim as u32,
-    );
-
-    // === Output Projection: context @ W_o + b_o ===
-    run_gpu_matmul(
-        context,
-        encoder,
-        &pipelines.matmul,
-        &temp.proj_biased,
-        &weights.output_weight,
-        &temp.q_proj, // Reuse as temporary
-        m,
-        k,
-        k,
-    );
-
-    run_gpu_add_bias(
-        context,
-        encoder,
-        &pipelines.add_bias,
-        &temp.q_proj,
-        &weights.output_bias,
-        output,
-        m * k,
-    );
+/// GPU tensors for attention weights.
+pub struct GpuAttentionWeights {
+    pub(crate) q_weight: GpuTensor,
+    pub(crate) q_bias: GpuTensor,
+    pub(crate) k_weight: GpuTensor,
+    pub(crate) k_bias: GpuTensor,
+    pub(crate) v_weight: GpuTensor,
+    pub(crate) v_bias: GpuTensor,
+    pub(crate) output_weight: GpuTensor,
+    pub(crate) output_bias: GpuTensor,
 }
 
-#[cfg(test)]
-mod tests;
+impl GpuAttentionWeights {
+    pub fn new(
+        q_weight: GpuTensor,
+        q_bias: GpuTensor,
+        k_weight: GpuTensor,
+        k_bias: GpuTensor,
+        v_weight: GpuTensor,
+        v_bias: GpuTensor,
+        output_weight: GpuTensor,
+        output_bias: GpuTensor,
+    ) -> Result<Self> {
+        // --- dimensional checks ---
+        for (name, w, b) in [
+            ("Q", &q_weight, &q_bias),
+            ("K", &k_weight, &k_bias),
+            ("V", &v_weight, &v_bias),
+            ("Output", &output_weight, &output_bias),
+        ] {
+            assert_eq!(w.rank(), 2, "{name} weight must be 2D");
+            assert_eq!(b.rank(), 1, "{name} bias must be 1D");
+            assert_eq!(
+                w.shape()[1],
+                b.shape()[0],
+                "{name} weight's output dim must match its bias size"
+            );
+        }
+
+        // Check that Q, K, V weights all share the same input dimension
+        assert_eq!(
+            q_weight.shape()[0],
+            k_weight.shape()[0],
+            "Q and K must have same input dimension"
+        );
+        assert_eq!(
+            q_weight.shape()[0],
+            v_weight.shape()[0],
+            "Q and V must have same input dimension"
+        );
+
+        // // Ensure output_weight input dim matches Q/K/V output dim (projected dimension)
+        // assert_eq!(
+        //     output_weight.shape()[0],
+        //     q_weight.shape()[1] + k_weight.shape()[1] + v_weight.shape()[1],
+        //     "Output projection input dim must equal concatenated QKV dim"
+        // );
+        assert_eq!(
+            output_weight.shape()[0],
+            q_weight.shape()[0], // Use the INPUT dimension of Q as the reference for hidden size
+            "Output projection input dim must equal the model's hidden dimension"
+        );
+
+        // It's also good to ensure the output dimensions of Q, K, V are consistent.
+        assert_eq!(
+            q_weight.shape()[1],
+            k_weight.shape()[1],
+            "Q and K must have the same output dimension"
+        );
+        assert_eq!(
+            q_weight.shape()[1],
+            v_weight.shape()[1],
+            "Q and V must have the same output dimension"
+        );
+
+        Ok(Self {
+            q_weight,
+            q_bias,
+            k_weight,
+            k_bias,
+            v_weight,
+            v_bias,
+            output_weight,
+            output_bias,
+        })
+    }
+}
+
+pub struct GpuAttention {
+    matmul: GpuMatMul,
+    bmm: GpuBatchedMatMul,
+    add_bias: GpuAddBias,
+    reshape: GpuReshape,
+    unreshape: GpuUnreshape,
+    apply_mask: GpuApplyMask,
+    softmax: GpuSoftmax,
+    permute: GpuPermute,
+    num_heads: u32,
+    scale_factor: f32,
+}
+
+impl GpuAttention {
+    pub fn new(context: &Arc<WgpuContext>, hidden_size: u32, num_heads: u32) -> Self {
+        let head_dim = hidden_size / num_heads;
+        let scale_factor = 1.0 / (head_dim as f32).sqrt();
+
+        Self {
+            matmul: GpuMatMul::new(context),
+            bmm: GpuBatchedMatMul::new(context),
+            add_bias: GpuAddBias::new(context),
+            reshape: GpuReshape::new(context),
+            unreshape: GpuUnreshape::new(context),
+            apply_mask: GpuApplyMask::new(context),
+            softmax: GpuSoftmax::new(context),
+            permute: GpuPermute::new(context),
+            num_heads,
+            scale_factor,
+        }
+    }
+
+    ///
+    /// This function is now a stateless calculator. It assumes the caller (e.g., a TransformerLayer
+    /// or a test) has already updated the KV cache with the results from the previous step.
+    pub fn forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor,
+        key_value: &GpuTensor,
+        weights: &GpuAttentionWeights,
+        attention_mask: &GpuTensor,
+        is_causal: bool,
+        // The cache now contains the FULL, up-to-date K and V states for this step.
+        cached_kv: Option<(&GpuTensor, &GpuTensor)>,
+        position_offset: usize,
+        temp: &mut TempStorage,
+    ) -> (GpuTensor, GpuTensor, GpuTensor) {
+        let (batch_size, query_len, hidden_size) = query.dims3();
+        let head_dim = hidden_size / self.num_heads as usize;
+
+        // === 1. Linear Projections ===
+        // These are the NEW K/V values that will be returned for the *next* step's cache update.
+        let q_biased = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
+        let new_k = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, temp);
+        let new_v = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, temp);
+
+        // === 2. Split Heads of the NEW projections ===
+        // Note: We only split `q_biased` here. K/V are handled by the cache update kernel.
+        let q_split = self.split_heads(encoder, &q_biased, temp);
+
+        // === 3. Determine which K/V tensors to use for the calculation ===
+        let (k_for_attn, v_for_attn);
+        let (new_k_split, new_v_split);
+        if let Some((cache_k, cache_v)) = cached_kv {
+            // If cache exists, point our attention tensors to the cache.
+            k_for_attn = cache_k;
+            v_for_attn = cache_v;
+        } else {
+            // If no cache, split the heads and point our attention tensors to the new, owned results.
+            new_k_split = self.split_heads(encoder, &new_k, temp);
+            new_v_split = self.split_heads(encoder, &new_v, temp);
+            k_for_attn = &new_k_split;
+            v_for_attn = &new_v_split;
+        };
+
+        // Transpose the K tensor for BMM.
+        let k_transposed = k_for_attn.permute(encoder, &self.permute, &[0, 1, 3, 2]);
+
+        // === 4. Compute Attention Scores (QKᵀ) ===
+        let scores = self.bmm_4d(encoder, &q_split, &k_transposed, temp);
+
+        // === 5. Apply Masks ===
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            is_causal,
+            position_offset as u32,
+        );
+
+        // === 6. Softmax ===
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+        let attention_weights = scores;
+
+        // === 7. Compute Context (Score-V) ===
+        let context = self.bmm_4d(encoder, &attention_weights, v_for_attn, temp);
+
+        // === 8. Merge Heads & 9. Output Projection ===
+        let context_merged = self.merge_heads(encoder, &context, temp);
+        let output = self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            temp,
+        );
+
+        // === 10. Return ===
+        // We return the raw, 3D `new_k` and `new_v` for the orchestrator to update the cache with.
+        (output, new_k, new_v)
+    }
+
+    /// Computes the new K and V tensors from the input hidden states.
+    /// This is the first part of the attention mechanism, separated to allow for
+    /// the "update-then-calculate" cache pattern.
+    ///
+    /// # Returns
+    /// A tuple of `(new_k, new_v)`, which are the raw, 3D projection outputs.
+    pub fn project_kv(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        key_value: &GpuTensor, // Source for K/V [B, S, H]
+        weights: &GpuAttentionWeights,
+        temp: &mut TempStorage,
+    ) -> (GpuTensor, GpuTensor) {
+        let (b, s, h) = key_value.dims3();
+        let input_2d = key_value.view(vec![b * s, h]);
+
+        // Project K
+        let k_proj_2d = temp.get(vec![b * s, h]);
+        self.matmul
+            .encode(encoder, &[&input_2d, &weights.k_weight], &k_proj_2d);
+        let new_k_2d = temp.get(vec![b * s, h]);
+        self.add_bias
+            .encode(encoder, &[&k_proj_2d, &weights.k_bias], &new_k_2d);
+        let new_k = new_k_2d.view(vec![b, s, h]);
+
+        // Project V
+        let v_proj_2d = temp.get(vec![b * s, h]);
+        self.matmul
+            .encode(encoder, &[&input_2d, &weights.v_weight], &v_proj_2d);
+        let new_v_2d = temp.get(vec![b * s, h]);
+        self.add_bias
+            .encode(encoder, &[&v_proj_2d, &weights.v_bias], &new_v_2d);
+        let new_v = new_v_2d.view(vec![b, s, h]);
+
+        (new_k, new_v)
+    }
+
+    /// Performs the core attention calculation using the pre-updated KV cache.
+    ///
+    /// # Returns
+    /// The final 3D output tensor of the attention block.
+    pub fn attend(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor, // Input hidden states for this step [B, S_q, H]
+        weights: &GpuAttentionWeights,
+        attention_mask: &GpuTensor,
+        is_causal: bool,
+        // The cache now contains the FULL, up-to-date K and V states.
+        // Shape: [B, H, S_total, D]
+        kv_cache: (&GpuTensor, &GpuTensor),
+        position_offset: usize,
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (cache_k, cache_v) = kv_cache;
+
+        // === 1. Project and Split Heads for Q ===
+        // This is the only projection and split needed inside `attend`.
+        let q_biased = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
+        let q_split = self.split_heads(encoder, &q_biased, temp);
+
+        // === 2. Transpose K for BMM (The Correct Way) ===
+        // The K cache is already in the correct 4D head-split format [B, H, S, D].
+        // To prepare it for batched matrix multiplication, we simply need to permute
+        // the last two dimensions to get [B, H, D, S].
+        // `GpuPermute` is the correct, efficient tool for this operation.
+        let k_transposed = cache_k.permute(encoder, &self.permute, &[0, 1, 3, 2]);
+
+        // === 3. Compute Attention Scores (QKᵀ) ===
+        let scores = self.bmm_4d(encoder, &q_split, &k_transposed, temp);
+
+        // === 4. Apply Masks & Softmax ===
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            is_causal,
+            position_offset as u32,
+        );
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+        let attention_weights = scores;
+
+        // === 5. Compute Context (Score-V) ===
+        // The V cache is already in the correct [B, H, S, D] format.
+        let context = self.bmm_4d(encoder, &attention_weights, cache_v, temp);
+
+        // === 6. Merge Heads & Output Projection ===
+        let context_merged = self.merge_heads(encoder, &context, temp);
+        self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            temp,
+        )
+    }
+
+    /// A helper for the common `view -> matmul -> add_bias -> view` pattern.
+    fn project(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        input: &GpuTensor,
+        weight: &GpuTensor,
+        bias: &GpuTensor,
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (b, s, h) = input.dims3();
+        let input_2d = input.view(vec![b * s, h]);
+
+        let proj_2d = temp.get(vec![b * s, h]);
+        self.matmul.encode(encoder, &[&input_2d, weight], &proj_2d);
+
+        let biased_2d = temp.get(vec![b * s, h]);
+        self.add_bias.encode(encoder, &[&proj_2d, bias], &biased_2d);
+
+        biased_2d.view(vec![b, s, h])
+    }
+
+    /// Splits heads from [B, S, H*D] into [B, H, S, D] (or [B, H, D, S] if transposed).
+    pub fn split_heads(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        input: &GpuTensor,
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (b, s, _) = input.dims3();
+        let h = self.num_heads as usize;
+        let d = input.shape()[2] / h;
+        let output = temp.get(vec![b, h, s, d]);
+        self.reshape.encode(encoder, input, &output, false);
+        output
+    }
+
+    /// Merges heads from [B, H, S, D] back to [B, S, H*D].
+    pub fn merge_heads(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        input: &GpuTensor,
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (b, h, s, d) = input.dims4();
+        let output = temp.get(vec![b, s, h * d]);
+        self.unreshape.encode(encoder, input, &output);
+        output
+    }
+
+    /// A helper for the `view -> bmm -> view` pattern needed for 4D attention.
+    fn bmm_4d(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        a: &GpuTensor, // [B, H, M, K]
+        b: &GpuTensor, // [B, H, K, N]
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (b_size, h_size, m, k1) = a.dims4();
+        let (_, _, k2, n) = b.dims4();
+        assert_eq!(k1, k2, "Matrix dimensions are incompatible for BMM");
+
+        let a_3d = a.view(vec![b_size * h_size, m, k1]);
+        let b_3d = b.view(vec![b_size * h_size, k1, n]);
+
+        let c_3d = temp.get(vec![b_size * h_size, m, n]);
+        self.bmm.encode(encoder, &[&a_3d, &b_3d], &c_3d);
+
+        c_3d.view(vec![b_size, h_size, m, n])
+    }
+}

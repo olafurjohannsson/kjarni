@@ -3,7 +3,7 @@ use wgpu::CommandEncoder;
 use anyhow::Result;
 
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::attention::attention::{GpuAttentionWeights, GpuAttention, TempStorage};
+use crate::gpu_ops::blocks::attention::{GpuAttentionWeights, GpuAttention, TempStorage};
 use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;

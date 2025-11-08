@@ -121,15 +121,6 @@ pub trait Decoder: TransformerModel {
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output>;
 
-    // pub async fn forward_cross_attention(
-    //     &self,
-    //     input: &Self::Input,
-    //     decoder_attention_mask: &Array2<f32>,
-    //     encoder_output: &EncoderOutput,
-    //     encoder_attention_mask: &Array2<f32>,
-    //     cache: Option<&mut dyn Cache>,
-    // ) -> Result<DecoderOutput>;
-
     /// Get raw hidden states
     /// 
     /// Default implementation calls forward with no cache and extracts last_hidden_state.
@@ -148,26 +139,6 @@ pub trait Decoder: TransformerModel {
 pub trait CrossAttentionDecoder<'a>: TransformerModel {
     type Input;
     type Output;
-
-    /// Asynchronously performs a forward pass through the cross-attention decoder.
-    ///
-    /// # Arguments
-    /// * `input` - The input tensor for the current decoder step(s).
-    /// * `decoder_attention_mask` - The causal mask for the decoder's self-attention.
-    /// * `encoder_output` - The output from an `Encoder` model, to be used in cross-attention.
-    /// * `encoder_attention_mask` - The padding mask corresponding to the encoder's output.
-    /// * `cache` - An optional mutable reference to the decoder's self-attention KV cache.
-    ///
-    /// # Returns
-    /// A `DecoderOutput` containing the new hidden states and the updated cache.
-    // async fn forward_cross_attention(
-    //     &self,
-    //     input: &Self::Input,
-    //     decoder_attention_mask: &Array2<f32>,
-    //     encoder_output: &EncoderOutput,
-    //     encoder_attention_mask: &Array2<f32>,
-    //     cache: Option<&mut dyn Cache>,
-    // ) -> Result<Self::Output>;
 
     /// Asynchronously performs a forward pass through the full encoder-decoder stack.
     async fn forward(

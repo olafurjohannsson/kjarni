@@ -154,7 +154,7 @@ impl GpuFeedForward {
         encoder: &mut wgpu::CommandEncoder,
         input: &GpuTensor,
         weights: &GpuFeedForwardWeights,
-        temp: &mut crate::gpu_ops::blocks::attention::attention::TempStorage,
+        temp: &mut crate::gpu_ops::blocks::attention::TempStorage,
     ) -> GpuTensor {
         // Get a temporary tensor for the intermediate result.
         let intermediate_shape = vec![
@@ -330,7 +330,7 @@ impl GpuFeedForward {
 
 fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
-    let shader = device.create_shader_module(wgpu::include_wgsl!("./fc1/fc1.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("./fc1.wgsl"));
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("FC1 Bind Group Layout"),
@@ -413,7 +413,7 @@ fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLay
 
 fn compile_fc2_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
-    let shader = device.create_shader_module(wgpu::include_wgsl!("./fc2/fc2.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("./fc2.wgsl"));
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("FC2 Bind Group Layout"),

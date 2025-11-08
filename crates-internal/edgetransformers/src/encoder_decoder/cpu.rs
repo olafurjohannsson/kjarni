@@ -14,13 +14,13 @@ use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 
 use crate::{
-    Cache, CpuKVCache, Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer,
+    Cache, CpuKVCache, Embeddings, FeedForward, LayerNorm, MultiHeadAttention, encoder_layer::EncoderLayer,
 };
 
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct CpuTransformerEncoderDecoder {
     encoder: TransformerEncoder,
-    decoder_layers: Vec<TransformerLayer>,
+    decoder_layers: Vec<EncoderLayer>,
     decoder_embeddings: Embeddings,
     decoder_embed_layer_norm: LayerNorm,
     config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
@@ -120,7 +120,7 @@ impl CpuTransformerEncoderDecoder {
                 config.layer_norm_eps(),
             );
 
-            decoder_layers.push(TransformerLayer {
+            decoder_layers.push(EncoderLayer {
                 self_attn,
                 self_attn_layer_norm,
                 cross_attn: Some(cross_attn),

@@ -1,20 +1,18 @@
 use crate::cache::CpuKVCache;
 use crate::decoder_layer::PreNormDecoderLayer;
 use crate::traits::{
-    Cache, CrossAttentionDecoder, Decoder, DecoderArchitecture, DecoderOutput, Device,
-    EncoderOutput as EncoderOutputTrait, TransformerConfig, TransformerModel,
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device,
+    TransformerModel,
 };
-use crate::utils::{create_causal_mask, create_padding_mask_from_tokens};
 use crate::weights::ModelWeights;
 use crate::{
-    Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer,
+    Embeddings, FeedForward, LayerNorm, MultiHeadAttention,
     decoder_layer::DecoderLayer,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result};
 use async_trait::async_trait;
 use log::{debug, info};
-use ndarray::{Array2, Array3, Array4, s};
-use rand::seq;
+use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 
 /// The CPU backend implementation for the generic `TransformerDecoder`.
@@ -129,14 +127,6 @@ impl CpuTransformerDecoder {
                 feedforward: feed_forward,
                 ffn_layer_norm,
             }));
-            // layers.push(TransformerLayer {
-            //     self_attn: attention,
-            //     self_attn_layer_norm,
-            //     cross_attn: None, // A decoder-only model has no cross-attention
-            //     cross_attn_layer_norm: None,
-            //     feedforward: feed_forward,
-            //     ffn_layer_norm,
-            // });
         }
 
         Ok(Self {
@@ -159,56 +149,13 @@ impl Decoder for CpuTransformerDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
-    // async fn forward(
-    //     &self,
-    //     input_ids: &Self::Input,
-    //     attention_mask: &Array2<f32>, // This is the top-level mask from the generator
-    //     cache: Option<&mut dyn Cache>,
-    // ) -> Result<Self::Output> {
-    //     let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
 
-    //     let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
-
-    //     let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
-
-    //     // let (batch_size, seq_len) = input_ids.dim();
-    //     let seq_len = input_ids.shape()[1];
-    //     let total_len = position_offset + seq_len;
-
-    //     // let internal_mask = Array2::ones((batch_size, total_len));
-
-    //     for (layer_idx, layer) in self.layers.iter().enumerate() {
-    //         hidden_states = layer.forward_with_cache(
-    //             hidden_states,
-    //             // &internal_mask,
-    //             &attention_mask,
-    //             self.config.as_ref(),
-    //             layer_idx,
-    //             cpu_cache_opt.as_deref_mut(),
-    //         )?;
-    //     }
-
-    //     // Apply final layer norm
-    //     hidden_states = self.final_layer_norm.forward_3d(&hidden_states);
-
-    //     // FIX: Update the cache's sequence length here, AFTER all layers are processed.
-    //     if let Some(cache) = cpu_cache_opt {
-    //         // cache.set_seq_length(total_len);
-    //         cache.increment_len(seq_len);
-    //     }
-
-    //     Ok(DecoderOutput {
-    //         last_hidden_state: hidden_states,
-    //         past_key_values: None,
-    //     })
-    // }
     async fn forward(
         &self,
         input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        // --- 1. Setup ---
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input_ids.shape()[1];
         debug!(
@@ -216,7 +163,6 @@ impl Decoder for CpuTransformerDecoder {
             position_offset
         );
 
-        // --- 2. Embeddings ---
         let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
         debug!(
             "[CPU Decoder] Initial hidden_states shape: {:?}",

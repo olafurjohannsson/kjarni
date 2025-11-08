@@ -1,14 +1,11 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
-use crate::traits::{
-    Device, Encoder, EncoderArchitecture, EncoderOutput, ModelConfig, TransformerConfig,
-    TransformerModel,
-};
+use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
-use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerLayer};
+use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, encoder_layer::EncoderLayer};
 
 /// The CPU backend implementation for the generic `TransformerEncoder`.
 ///
@@ -17,7 +14,7 @@ use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, TransformerL
 pub struct CpuTransformerEncoder {
     embeddings: Embeddings,
     embeddings_layer_norm: LayerNorm,
-    layers: Vec<TransformerLayer>,
+    layers: Vec<EncoderLayer>,
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
 }
 
@@ -55,19 +52,31 @@ impl CpuTransformerEncoder {
             let attn_names = config.get_attention_names(i);
             let ffn_names = config.get_feed_forward_names(i);
 
+            let transpose_attn = config.transpose_attention_weights();
+
+            // Helper closure to prepare weights, mirroring the GPU implementation
+            let prep_attn_w = |name: &str| -> Result<Array2<f32>> {
+                let raw = weights.get_array2(name)?;
+                // This logic assumes that if the flag is false (like for GPT-2), the weights
+                // are [out, in] and need to be transposed to [in, out] for the matmul.
+                if transpose_attn {
+                    Ok(raw)
+                } else {
+                    Ok(raw.t().as_standard_layout().to_owned())
+                }
+            };
+
+            // Now, construct the MultiHeadAttention with the prepared weights.
             let attention = MultiHeadAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                weights.get_array2(&attn_names.q_weight)?.t().to_owned(),
+                prep_attn_w(&attn_names.q_weight)?,
                 weights.get_array1(&attn_names.q_bias)?,
-                weights.get_array2(&attn_names.k_weight)?.t().to_owned(),
+                prep_attn_w(&attn_names.k_weight)?,
                 weights.get_array1(&attn_names.k_bias)?,
-                weights.get_array2(&attn_names.v_weight)?.t().to_owned(),
+                prep_attn_w(&attn_names.v_weight)?,
                 weights.get_array1(&attn_names.v_bias)?,
-                weights
-                    .get_array2(&attn_names.output_weight)?
-                    .t()
-                    .to_owned(),
+                prep_attn_w(&attn_names.output_weight)?,
                 weights.get_array1(&attn_names.output_bias)?,
             );
 
@@ -90,7 +99,7 @@ impl CpuTransformerEncoder {
             } else {
                 raw_output_w
             };
-            
+
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feed_forward = FeedForward::new(
                 fc1_weight_for_constructor,
@@ -113,7 +122,7 @@ impl CpuTransformerEncoder {
                 config.layer_norm_eps(),
             );
 
-            layers.push(TransformerLayer {
+            layers.push(EncoderLayer {
                 self_attn: attention,
                 self_attn_layer_norm,
                 cross_attn: None, // An encoder layer has no cross-attention

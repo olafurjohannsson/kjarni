@@ -1,9 +1,8 @@
 
-use crate::TransformerLayer;
 use crate::attention::MultiHeadAttention;
 use crate::layer_norm::LayerNorm;
 use crate::feedforward::FeedForward;
-use anyhow::{Result, anyhow};
+use anyhow::{Result};
 use ndarray::{Array2, Array3, Axis};
 
 /// Represents a single layer for a decoder-only transformer model (e.g., GPT-2).
