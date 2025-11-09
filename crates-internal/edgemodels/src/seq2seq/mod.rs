@@ -95,10 +95,6 @@ impl Seq2SeqModel {
                 };
             }
         }
-
-        // --- END CORRECTION ---
-
-        // If downcasting or finding params fails, return the default.
         println!(
             "Warning: Could not find 'task_specific_params.summarization' in config or config is not a BartConfig. Using default generation settings."
         );
@@ -106,10 +102,7 @@ impl Seq2SeqModel {
     }
 
     pub async fn summarize(&self, input_text: &str) -> Result<String> {
-        // 1. Get the best configuration from the model's preset.
         let config = self.generation_config_from_preset();
-
-        // 2. Call the powerful, explicit trait method with that config.
         self.generate(input_text, &config).await
     }
 

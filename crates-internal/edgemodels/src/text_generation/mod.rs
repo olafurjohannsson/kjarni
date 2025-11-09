@@ -15,9 +15,12 @@ use ndarray::{Array2, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-
+mod llama;
 mod configs;
+mod llama_configs;
 pub use configs::Gpt2Config;
+pub use llama::LlamaModel;
+pub use llama_configs::LlamaConfig;
 
 pub struct TextGenerator {
     model: TransformerDecoder,
@@ -92,7 +95,7 @@ impl TextGenerator {
             }
         };
 
-        let model = TransformerDecoder::new(&weights, config.clone(), device, context)?;
+        let model = TransformerDecoder::new(&weights, config.clone(), device, context, None)?;
 
         let lm_head_t = weights
             .get_array2(config.get_lm_head_name())?

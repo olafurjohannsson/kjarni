@@ -3,15 +3,15 @@ pub use crate::{
     attention::MultiHeadAttention,
     embeddings::Embeddings,
     feedforward::FeedForward,
-    layer_norm::LayerNorm,
+    normalization::LayerNorm,
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
     weights::ModelWeights,
     traits::TransformerConfig,
-    cache::CpuKVCache
+    cache::CpuKVCache,
 };
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, Axis};
+use ndarray::{Array2, Array3};
 
 
 /// A generic transformer layer combining attention and feedforward.
@@ -46,9 +46,6 @@ impl EncoderLayer {
         let is_causal = config.is_causal();
 
         if is_prenorm {
-            // === PRE-NORM (e.g., GPT-2) ===
-
-            // --- 1. First Sub-layer: Self-Attention ---
             let residual_1 = hidden.clone();
             let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
 
@@ -67,33 +64,19 @@ impl EncoderLayer {
                 c.update(layer_idx, &new_k, &new_v)?;
             }
 
-            // First residual connection. The result is `attn_block_output`.
             let attn_block_output = residual_1 + attn_out;
-
-            // --- 2. Second Sub-layer: Feed-Forward Network (MLP) ---
             let residual_2 = attn_block_output.clone();
-
-            // ============================ THE FIX ============================
-            // Ensure the tensor is in a standard memory layout before passing it
-            // to the next layer norm and FFN. This is the missing piece.
             let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
             let ln2_out = self
                 .ffn_layer_norm
                 .forward_3d(&attn_block_output_contiguous);
-            // ===============================================================
-
             let ffn_out = self.feedforward.forward(&ln2_out)?;
-
-            // Second residual connection
             let block_output = residual_2.as_standard_layout().to_owned() + 
                 ffn_out.as_standard_layout().to_owned();
-
             hidden = block_output;
         } else {
-            // === POST-NORM (e.g., BERT, BART) ===
             let residual = hidden.clone();
             let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
-
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &hidden,
                 None,
@@ -161,8 +144,6 @@ impl EncoderLayer {
 
         hidden_states = residual + &self_attn_output;
         hidden_states = self.self_attn_layer_norm.forward_3d(&hidden_states);
-
-        // === 2. Cross-Attention Block ===
         let residual = hidden_states.clone();
 
         let (cross_attn_output, _, _) = cross_attn.forward_with_cache(
@@ -176,8 +157,6 @@ impl EncoderLayer {
 
         hidden_states = residual + &cross_attn_output;
         hidden_states = cross_attn_ln.forward_3d(&hidden_states);
-
-        // === 3. Feed-Forward Block ===
         let residual = hidden_states.clone();
         let ffn_output = self.feedforward.forward(&hidden_states)?;
         hidden_states = residual + &ffn_output;

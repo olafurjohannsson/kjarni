@@ -1,0 +1,31 @@
+✓ model.safetensors already exists, skipping download
+✓ tokenizer.json already exists, skipping download
+✓ config.json already exists, skipping download
+Building CpuTransformerDecoder...
+  Layers: 6
+  Hidden size: 768
+  Attention heads: 12
+  Pre-norm: false
+  RoPE: false
+  Loading embeddings...
+    Word embeddings: transformer.wte.weight
+    Position embeddings: transformer.wpe.weight
+  Loading final layer norm...
+  Building 6 decoder layers...
+    Layer 0/6
+Combined QKV!
+Combined QKV!
+Combined QKV!
+Combined QKV!
+    Layer 4/6
+Combined QKV!
+Combined QKV!
+✓ CpuTransformerDecoder built successfully
+✓ Model loaded.
+
+--- PROMPT ---
+The field of Artificial Intelligence has seen a lot of progress
+
+--- GENERATED TEXT ---
+The field of Artificial Intelligence has seen a lot of progressb0.7MediaW�i,is"
+2_S1IK3SourceNextsE9AaiiyYAbout-4ny/BINIfWhenYouanItRighte,"PlayerBet (GA

@@ -1,9 +1,11 @@
 use std::arch::x86_64::_MM_SET_ROUNDING_MODE;
 
+use anyhow::Result;
 use edgetransformers::traits::{
-    DecoderArchitecture, LanguageModelConfig, LayerDecoderAttentionNames, LayerFeedForwardNames,
-    TransformerConfig,
+    DecoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerDecoderAttentionNames,
+    LayerFeedForwardNames, TransformerConfig,
 };
+use std::any::Any;
 use serde::Deserialize;
 
 // This config is for GPT-2 style models like DistilGPT2, GPT-2, etc.
@@ -81,6 +83,9 @@ impl DecoderArchitecture for Gpt2Config {
             ("wte.weight", "wpe.weight")
         }
     }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
     fn get_final_layer_norm_names(&self) -> (&str, &str) {
         if self.is_distil() {
             ("transformer.ln_f.weight", "transformer.ln_f.bias")
@@ -95,7 +100,9 @@ impl DecoderArchitecture for Gpt2Config {
             "wte.weight" // Standard GPT2 shares weights without the prefix
         }
     } // Shares weights with word embeddings
-
+    fn get_layer_attention_names(&self, layer_index: usize) -> LayerAttentionNames {
+        unimplemented!("get_layer_attention_names not implemented")
+    }
     fn get_attention_names(&self, i: usize) -> LayerDecoderAttentionNames {
         let prefix = if self.is_distil() {
             "transformer.h"
@@ -125,6 +132,7 @@ impl DecoderArchitecture for Gpt2Config {
             output_bias: format!("{}.{}.mlp.c_proj.bias", prefix, i),
             norm_weight: format!("{}.{}.ln_2.weight", prefix, i),
             norm_bias: format!("{}.{}.ln_2.bias", prefix, i),
+            gate_weight: None,
         }
     }
 }

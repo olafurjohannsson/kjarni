@@ -1,15 +1,13 @@
 //! Core model traits and data structures for transformer architectures.
 //!
 
-
+use crate::WgpuContext;
+pub use crate::cache::Cache;
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
-pub use crate::cache::Cache;
 use std::sync::Arc;
-use crate::WgpuContext;
-
 
 /// Supported computation backends.
 ///
@@ -84,7 +82,7 @@ pub trait Encoder: TransformerModel {
     ) -> Result<Self::Output>;
 
     /// Get raw hidden states
-    /// 
+    ///
     /// Default implementation calls forward and extracts last_hidden_state.
     async fn get_hidden_states(
         &self,
@@ -122,7 +120,7 @@ pub trait Decoder: TransformerModel {
     ) -> Result<Self::Output>;
 
     /// Get raw hidden states
-    /// 
+    ///
     /// Default implementation calls forward with no cache and extracts last_hidden_state.
     async fn get_hidden_states(
         &self,
@@ -157,7 +155,7 @@ pub trait CrossAttentionDecoder<'a>: TransformerModel {
 /// This provides the essential hyperparameters needed to construct the layers
 /// of a transformer model, such as the hidden dimensions and the number of
 /// layers to build.
-pub trait TransformerConfig: Send + Sync {  
+pub trait TransformerConfig: Send + Sync {
     /// The size of the hidden states and embedding dimensions.
     fn hidden_size(&self) -> usize;
     /// The number of attention heads in each multi-head attention layer.
@@ -177,16 +175,15 @@ pub trait TransformerConfig: Send + Sync {
 /// Adds language-model-specific properties like vocabulary size,
 /// sequence length, and intermediate dimensions.
 pub trait LanguageModelConfig: TransformerConfig {
-    
     /// Size of the vocabulary
     fn vocab_size(&self) -> usize;
-    
+
     /// Maximum sequence length (position embeddings)
     fn max_position_embeddings(&self) -> usize;
-    
+
     /// Size of the intermediate (feedforward) layer
     fn intermediate_size(&self) -> usize;
-    
+
     /// If we should transpose the feedforward weighs
     /// The most common convention and vajority of models do this and tre-transpose the weights in FeedForward::new
     /// The older GPT2 architecture doesn't do this
@@ -198,8 +195,6 @@ pub trait LanguageModelConfig: TransformerConfig {
         false
     }
 }
-
-
 
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
 ///
@@ -236,7 +231,17 @@ pub trait DecoderArchitecture: LanguageModelConfig {
     fn get_attention_names(&self, layer_index: usize) -> LayerDecoderAttentionNames;
     /// Returns the names for the feed-forward block in a decoder layer.
     fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
-    
+
+    fn get_layer_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
+    fn num_key_value_heads(&self) -> usize {
+        self.num_attention_heads() // Default: same as query heads
+    }
+    fn as_any(&self) -> &dyn Any;
+    /// KV projection dimension
+    fn kv_dim(&self) -> usize {
+        let head_dim = self.hidden_size() / self.num_attention_heads();
+        self.num_key_value_heads() * head_dim
+    }
 }
 
 /// A container for the concrete tensor names of an attention block in a transformer layer.
@@ -244,6 +249,7 @@ pub trait DecoderArchitecture: LanguageModelConfig {
 /// An instance of this struct is returned by `EncoderArchitecture::get_attention_names`,
 /// providing the generic `TransformerEncoder` with all the keys it needs to load the
 /// weights for a single attention component from a `ModelWeights` object.
+#[derive(Debug)]
 pub struct LayerAttentionNames {
     /// Weight tensor for the Query projection.
     pub q_weight: String,
@@ -272,6 +278,7 @@ pub struct LayerAttentionNames {
 /// An instance of this struct is returned by `EncoderArchitecture::get_feed_forward_names`,
 /// providing the generic `TransformerEncoder` with all the keys it needs to load the
 /// weights for a single feed-forward component from a `ModelWeights` object.
+#[derive(Debug)]
 pub struct LayerFeedForwardNames {
     /// Weight tensor for the intermediate (first) dense layer.
     pub intermediate_weight: String,
@@ -285,6 +292,9 @@ pub struct LayerFeedForwardNames {
     pub norm_weight: String,
     /// Bias tensor for the LayerNorm following the feed-forward block.
     pub norm_bias: String,
+    /// Gate projection weight (only for SwiGLU/LLaMA)
+    /// If None, uses standard FFN. If Some, uses SwiGLU.
+    pub gate_weight: Option<String>,
 }
 
 /// A container for the concrete tensor names of a decoder's causal self-attention block.
@@ -312,12 +322,13 @@ pub struct LayerDecoderAttentionNames {
 /// sequence-to-sequence tasks. It provides methods to get tensor names for all
 /// components: the shared embeddings, the encoder stack, and the decoder stack
 /// (including its self-attention and cross-attention blocks).
-pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any { // <-- Inherit from LanguageModelConfig
+pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
+    // <-- Inherit from LanguageModelConfig
     // --- Shared ---
     fn get_shared_embedding_weight_name(&self) -> &str;
     fn get_lm_head_name(&self) -> &str;
     fn get_final_logits_bias_name(&self) -> Option<&str>;
-    
+
     fn num_encoder_layers(&self) -> usize;
     fn num_decoder_layers(&self) -> usize;
     fn as_any(&self) -> &dyn Any;
@@ -334,7 +345,7 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any { // <-- Inherit
     fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 
-       fn eos_token_id(&self) -> u32;
+    fn eos_token_id(&self) -> u32;
 
     /// Returns the token ID that should begin the decoder's generation sequence.
     fn decoder_start_token_id(&self) -> u32;

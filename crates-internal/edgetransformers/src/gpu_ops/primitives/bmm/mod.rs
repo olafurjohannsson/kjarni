@@ -1,5 +1,5 @@
-use crate::gpu_ops::{GpuTensor, Kernel};
 use crate::WgpuContext;
+use crate::gpu_ops::{GpuTensor, Kernel};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
@@ -13,14 +13,79 @@ struct MatmulInfo {
     n: u32,
     a_stride_batch: u32,
     b_stride_batch: u32,
-    _padding1: u32,
-    _padding2: u32,
+    b_stride_row: u32,
+    b_stride_col: u32,
+}
+
+pub struct BStrides {
+    pub row: u32,
+    pub col: u32,
 }
 
 pub struct GpuBatchedMatMul {
     pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
     context: Arc<WgpuContext>,
+}
+
+impl Kernel for GpuBatchedMatMul {
+    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
+        let a = inputs[0];
+        let b = inputs[1];
+
+        assert!(
+            a.rank() >= 2 && a.rank() <= 3,
+            "Input A must be a 2D or 3D tensor"
+        );
+        assert!(
+            b.rank() >= 2 && b.rank() <= 3,
+            "Input B must be a 2D or 3D tensor"
+        );
+
+        // Handle 2D tensors by treating them as 3D with batch=1
+        let a_shape = if a.rank() == 2 {
+            vec![1, a.shape()[0], a.shape()[1]]
+        } else {
+            a.shape().to_vec()
+        };
+        let b_shape = if b.rank() == 2 {
+            vec![1, b.shape()[0], b.shape()[1]]
+        } else {
+            b.shape().to_vec()
+        };
+
+        let batch = a_shape[0].max(b_shape[0]);
+        let m = a_shape[1];
+        let k = a_shape[2];
+        let n = b_shape[2];
+
+        assert_eq!(k, b_shape[1], "Inner dimensions of A and B do not match");
+
+        // Validate output shape
+        let expected_output_shape = if a.rank() == 2 && b.rank() == 2 {
+            vec![m, n] // 2D output for 2D inputs
+        } else {
+            vec![batch, m, n] // 3D output otherwise
+        };
+        assert_eq!(
+            output.shape(),
+            &expected_output_shape,
+            "Output shape {:?} doesn't match expected {:?}",
+            output.shape(),
+            expected_output_shape
+        );
+
+        // For standard matmul, B is [batch, K, N] in row-major
+        // Row stride = N (to go down a row, skip N elements)
+        // Col stride = 1 (to go across a column, skip 1 element)
+        let b_strides = BStrides {
+            row: n as u32,
+            col: 1,
+        };
+
+        // Call the internal method with proper 3D shapes
+        self.encode_internal(encoder, a, b, output, &a_shape, &b_shape, b_strides);
+    }
 }
 
 impl GpuBatchedMatMul {
@@ -32,37 +97,102 @@ impl GpuBatchedMatMul {
             context: context.clone(),
         }
     }
-}
-
-impl Kernel for GpuBatchedMatMul {
-    fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
-        let a = inputs[0];
-        let b = inputs[1];
-
-        assert!(a.rank() >= 2 && a.rank() <= 3, "Input A must be a 2D or 3D tensor");
-        assert!(b.rank() >= 2 && b.rank() <= 3, "Input B must be a 2D or 3D tensor");
-        let a_shape = if a.rank() == 2 { vec![1, a.shape()[0], a.shape()[1]] } else { a.shape().to_vec() };
-        let b_shape = if b.rank() == 2 { vec![1, b.shape()[0], b.shape()[1]] } else { b.shape().to_vec() };
-        
+    // Internal implementation that works with normalized 3D shapes
+    fn encode_internal(
+        &self,
+        encoder: &mut CommandEncoder,
+        a: &GpuTensor,
+        b: &GpuTensor,
+        output: &GpuTensor,
+        a_shape: &[usize], // Normalized 3D shape [batch, m, k]
+        b_shape: &[usize], // Normalized 3D shape [batch, k, n]
+        b_strides: BStrides,
+    ) {
         let batch = a_shape[0].max(b_shape[0]);
         let m = a_shape[1];
         let k = a_shape[2];
         let n = b_shape[2];
 
-        assert_eq!(k, b_shape[1], "Inner dimensions of A and B do not match");
-        assert_eq!(output.shape(), &[batch, m, n], "Output shape is incorrect");
-        if a.rank() == 3 && b.rank() == 3 {
-            assert!(a.shape()[0] == b.shape()[0] || a.shape()[0] == 1 || b.shape()[0] == 1, "Batch dimensions must match or one must be 1 for broadcasting");
-        }
+        // Calculate batch strides for broadcasting
+        let a_stride_batch = if a_shape[0] > 1 { (m * k) as u32 } else { 0 };
 
-        let a_stride_batch = if a.shape().len() == 3 && a.shape()[0] > 1 { (m * k) as u32 } else { 0 };
-        let b_stride_batch = if b.shape().len() == 3 && b.shape()[0] > 1 { (k * n) as u32 } else { 0 };
+        // For B, we need the physical stride
+        let b_stride_batch = if b_shape[0] > 1 {
+            (b_shape[1] * b_shape[2]) as u32 // k * n
+        } else {
+            0
+        };
 
         run_internal_bmm(
-            &self.context, encoder, &self.pipeline, &self.bind_group_layout,
-            a.buffer(), b.buffer(), output.buffer(),
-            batch as u32, m as u32, k as u32, n as u32,
-            a_stride_batch, b_stride_batch,
+            &self.context,
+            encoder,
+            &self.pipeline,
+            &self.bind_group_layout,
+            a.buffer(),
+            b.buffer(),
+            output.buffer(),
+            batch as u32,
+            m as u32,
+            k as u32,
+            n as u32,
+            a_stride_batch,
+            b_stride_batch,
+            b_strides.row,
+            b_strides.col,
+        );
+    }
+
+    /// Matmul with custom strides for B matrix (for KV cache optimization)
+    pub fn encode_with_b_strides(
+        &self,
+        encoder: &mut CommandEncoder,
+        a: &GpuTensor,
+        b: &GpuTensor,
+        output: &GpuTensor,
+        b_strides: BStrides,
+    ) {
+        // This version requires 3D tensors
+        assert_eq!(a.rank(), 3, "A must be 3D for strided matmul");
+        assert_eq!(b.rank(), 3, "B must be 3D for strided matmul");
+        assert_eq!(output.rank(), 3, "Output must be 3D for strided matmul");
+
+        let a_shape = a.shape().to_vec();
+        let b_shape = b.shape().to_vec(); // Physical shape of B
+
+        let batch = a_shape[0];
+        let m = a_shape[1];
+        let k = a_shape[2];
+        let n = output.shape()[2]; // Logical N from output
+
+        assert_eq!(batch, b_shape[0], "Batch dimensions must match");
+        assert_eq!(batch, output.shape()[0], "Batch dimensions must match");
+
+        // Calculate batch strides
+        let a_stride_batch = if batch > 1 { (m * k) as u32 } else { 0 };
+
+        // For b_stride_batch, use the physical layout
+        let b_stride_batch = if batch > 1 {
+            (b_shape[1] * b_shape[2]) as u32
+        } else {
+            0
+        };
+
+        run_internal_bmm(
+            &self.context,
+            encoder,
+            &self.pipeline,
+            &self.bind_group_layout,
+            a.buffer(),
+            b.buffer(),
+            output.buffer(),
+            batch as u32,
+            m as u32,
+            k as u32,
+            n as u32,
+            a_stride_batch,
+            b_stride_batch,
+            b_strides.row,
+            b_strides.col,
         );
     }
 }
@@ -79,10 +209,22 @@ fn run_internal_bmm(
     m: u32,
     k: u32,
     n: u32,
-    a_stride_batch: u32, b_stride_batch: u32,
+    a_stride_batch: u32,
+    b_stride_batch: u32,
+    b_stride_row: u32,
+    b_stride_col: u32,
 ) {
     let device = &context.device;
-    let uniforms = MatmulInfo { b: batch, m, k, n, a_stride_batch, b_stride_batch, _padding1:0, _padding2: 0 };
+    let uniforms = MatmulInfo {
+        b: batch,
+        m,
+        k,
+        n,
+        a_stride_batch,
+        b_stride_batch,
+        b_stride_row,
+        b_stride_col,
+    };
 
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("BMM Uniforms"),

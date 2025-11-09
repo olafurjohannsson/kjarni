@@ -151,6 +151,7 @@ impl EncoderDecoderArchitecture for BartConfig {
             output_bias: format!("model.encoder.layers.{}.fc2.bias", i),
             norm_weight: format!("model.encoder.layers.{}.final_layer_norm.weight", i),
             norm_bias: format!("model.encoder.layers.{}.final_layer_norm.bias", i),
+            gate_weight: None,
         }
     }
 
@@ -203,6 +204,7 @@ impl EncoderDecoderArchitecture for BartConfig {
             output_bias: format!("model.decoder.layers.{}.fc2.bias", i),
             norm_weight: format!("model.decoder.layers.{}.final_layer_norm.weight", i),
             norm_bias: format!("model.decoder.layers.{}.final_layer_norm.bias", i),
+            gate_weight: None,
         }
     }
 }

@@ -2,7 +2,7 @@
 mod common;
 
 use super::*;
-use crate::feedforward::FeedForward as CpuFeedForward;
+use crate::feedforward::StdFeedForward as CpuFeedForward;
 use crate::gpu_ops::blocks::attention::TempStorage;
 use crate::gpu_ops::{DType, GpuTensor};
 use anyhow::Result;

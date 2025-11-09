@@ -21,6 +21,8 @@ use cpu::CpuTransformerDecoder;
 use gpu::GpuTransformerDecoder;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
+use crate::rope::RoPE;
+use log::{debug, info};
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///
@@ -43,11 +45,13 @@ impl TransformerDecoder {
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        rope: Option<Arc<RoPE>>,
     ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
                 weights,
                 config.clone(),
+                rope,
             )?)),
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| {

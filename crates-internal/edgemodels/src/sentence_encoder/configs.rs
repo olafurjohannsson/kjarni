@@ -107,6 +107,7 @@ impl EncoderArchitecture for MiniLMConfig {
             output_bias: format!("encoder.layer.{}.output.dense.bias", layer),
             norm_weight: format!("encoder.layer.{}.output.LayerNorm.weight", layer),
             norm_bias: format!("encoder.layer.{}.output.LayerNorm.bias", layer),
+            gate_weight: None,
         }
     }
 }
@@ -211,6 +212,7 @@ impl EncoderArchitecture for MPNetConfig {
             output_bias: format!("mpnet.encoder.layer.{}.ffn.output.bias", layer),
             norm_weight: format!("mpnet.encoder.layer.{}.LayerNorm.weight", layer),
             norm_bias: format!("mpnet.encoder.layer.{}.LayerNorm.bias", layer),
+            gate_weight: None,
         }
     }
 }
@@ -349,6 +351,7 @@ impl EncoderArchitecture for DistilBERTConfig {
                 "distilbert.transformer.layer.{}.output_layer_norm.bias",
                 layer
             ),
+            gate_weight: None,
         }
     }
 }

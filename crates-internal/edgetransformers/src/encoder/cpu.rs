@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
-use crate::{Embeddings, FeedForward, LayerNorm, MultiHeadAttention, encoder_layer::EncoderLayer};
+use crate::{
+    Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
+    feedforward::StdFeedForward, normalization::LayerNorm,
+};
 
 /// The CPU backend implementation for the generic `TransformerEncoder`.
 ///
@@ -78,6 +81,7 @@ impl CpuTransformerEncoder {
                 weights.get_array1(&attn_names.v_bias)?,
                 prep_attn_w(&attn_names.output_weight)?,
                 weights.get_array1(&attn_names.output_bias)?,
+                None,
             );
 
             let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
@@ -101,13 +105,13 @@ impl CpuTransformerEncoder {
             };
 
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
-            let feed_forward = FeedForward::new(
+            let feed_forward = FeedForward::Standard(StdFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
-                crate::activations::Activation::Gelu, // This should also come from config eventually
-            );
+                crate::activations::Activation::Gelu, // TODO: should also come from config
+            ));
 
             // The original BERT has two layer norms per block.
             let self_attn_layer_norm = LayerNorm::new(

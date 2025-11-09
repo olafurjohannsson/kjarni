@@ -5,8 +5,8 @@ struct MatmulInfo {
     n: u32,
     a_stride_batch: u32,
     b_stride_batch: u32,
-    _padding1: u32,
-    _padding2: u32,
+    b_stride_row: u32,
+    b_stride_col: u32,
 }
 
 @group(0) @binding(0) var<uniform> info: MatmulInfo;
@@ -48,8 +48,16 @@ fn main(
         }
 
         // Load tile for B from its (potentially broadcasted) batch
+        // if (b_row < info.k && global_col < info.n) {
+        //     b_tile[local_id.y][local_id.x] = b_in[b_batch_offset + b_row * info.n + global_col];
+        // } else {
+        //     b_tile[local_id.y][local_id.x] = 0.0;
+        // }
         if (b_row < info.k && global_col < info.n) {
-            b_tile[local_id.y][local_id.x] = b_in[b_batch_offset + b_row * info.n + global_col];
+            let b_idx = b_batch_offset + 
+                        b_row * info.b_stride_row +     // Row stride
+                        global_col * info.b_stride_col;  // Column stride
+            b_tile[local_id.y][local_id.x] = b_in[b_idx];
         } else {
             b_tile[local_id.y][local_id.x] = 0.0;
         }

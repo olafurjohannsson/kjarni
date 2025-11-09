@@ -119,6 +119,7 @@ impl EncoderArchitecture for MiniLMCrossEncoderConfig {
             output_bias: format!("bert.encoder.layer.{}.output.dense.bias", layer),
             norm_weight: format!("bert.encoder.layer.{}.output.LayerNorm.weight", layer),
             norm_bias: format!("bert.encoder.layer.{}.output.LayerNorm.bias", layer),
+            gate_weight: None,
         }
     }
 }

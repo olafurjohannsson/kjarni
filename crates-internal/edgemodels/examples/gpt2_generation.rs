@@ -12,10 +12,10 @@ async fn main() -> anyhow::Result<()> {
 
     let context = std::sync::Arc::new(edgetransformers::WgpuContext::new().await);
     let generator = TextGenerator::from_registry(
-        ModelType::Gpt2Medium,
+        ModelType::DistilGpt2,
         None, 
-        Device::Wgpu,
-        Some(context), 
+        Device::Cpu,
+        None, //Some(context), 
     ).await?;
     println!("✓ Model loaded.");
 
@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", prompt);
     
     let config = GenerationConfig {
-        max_new_tokens: Some(2000),
+        max_new_tokens: Some(100),
         sampling_strategy: SamplingStrategy::Greedy,
         repetition_penalty: 1.1,
         temperature: 0.7,

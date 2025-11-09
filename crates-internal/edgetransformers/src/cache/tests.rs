@@ -1,8 +1,8 @@
-use super::{CpuKVCache, GpuKVCache, Cache};
+use super::{Cache, CpuKVCache, GpuKVCache};
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{blocks::cache::GpuUpdateCache, GpuTensor}; // Ensure GpuUpdateCache is public
+use crate::gpu_ops::{GpuTensor, blocks::cache::GpuUpdateCache}; // Ensure GpuUpdateCache is public
 use anyhow::Result;
-use ndarray::{s, Array, Array3, Array4, Ix3, Ix4};
+use ndarray::{Array, Array3, Array4, Ix3, Ix4, s};
 use std::sync::Arc;
 
 // Helper to read a GPU tensor back to a generic ndarray for comparison.
@@ -30,22 +30,19 @@ async fn test_cache_symmetry() -> Result<()> {
     let num_heads = 4;
     let head_dim = hidden_size / num_heads;
     let mut gpu_cache = GpuKVCache::new(
-        &context,
-        num_layers,
-        batch_size,
-        num_heads,
-        head_dim,
-        max_len,
+        &context, num_layers, batch_size, num_heads, head_dim, max_len,
     )?;
 
     // 2. SIMULATE STEP 1 (Prompt processing, seq_len = 3)
     let prompt_len = 3;
-    let new_k_cpu_1 = Array3::<f32>::from_shape_fn((batch_size, prompt_len, hidden_size), |(b, s, h)| {
-        (b * 100 + s * 10 + h) as f32
-    });
-    let new_v_cpu_1 = Array3::<f32>::from_shape_fn((batch_size, prompt_len, hidden_size), |(b, s, h)| {
-        (b * 100 + s * 10 + h) as f32 * 10.0
-    });
+    let new_k_cpu_1 =
+        Array3::<f32>::from_shape_fn((batch_size, prompt_len, hidden_size), |(b, s, h)| {
+            (b * 100 + s * 10 + h) as f32
+        });
+    let new_v_cpu_1 =
+        Array3::<f32>::from_shape_fn((batch_size, prompt_len, hidden_size), |(b, s, h)| {
+            (b * 100 + s * 10 + h) as f32 * 10.0
+        });
 
     // Update CPU Cache
     cpu_cache.update(layer_idx, &new_k_cpu_1, &new_v_cpu_1)?;
@@ -99,13 +96,13 @@ async fn test_cache_symmetry() -> Result<()> {
     // THE FIX: Slice the downloaded GPU data to the active length for comparison.
     let gpu_k_active_view = gpu_k_full_cpu.slice(s![.., .., 0..final_len, ..]);
     let gpu_v_active_view = gpu_v_full_cpu.slice(s![.., .., 0..final_len, ..]);
-    
+
     // CPU data needs to be reshaped to match the GPU's head-split layout for comparison.
     let cpu_k_reshaped = cpu_k_final_view
         .to_owned()
         .into_shape((batch_size, final_len, num_heads, head_dim))?
         .permuted_axes([0, 2, 1, 3]);
-    
+
     let cpu_v_reshaped = cpu_v_final_view
         .to_owned()
         .into_shape((batch_size, final_len, num_heads, head_dim))?
@@ -133,4 +130,82 @@ async fn test_cache_symmetry() -> Result<()> {
 
     println!("✅ CPU and GPU KV Caches passed symmetry test!");
     Ok(())
+}
+
+#[test]
+fn test_cache_initialization() {
+    let cache = CpuKVCache::new(16, 1, 100, 512);
+
+    assert_eq!(cache.get_seq_length(), 0);
+    assert_eq!(cache.layers().len(), 16);
+
+    for i in 0..16 {
+        let (k, v) = cache.get(i).unwrap();
+        assert_eq!(k.shape(), &[1, 0, 512]);
+        assert_eq!(v.shape(), &[1, 0, 512]);
+    }
+
+    println!("✓ Cache initialization test passed");
+}
+
+#[test]
+fn test_cache_update_and_grow() {
+    use ndarray::Array3;
+
+    let mut cache = CpuKVCache::new(2, 1, 100, 512);
+
+    // First update - add 11 tokens
+    let k1 = Array3::ones((1, 11, 512));
+    let v1 = Array3::ones((1, 11, 512));
+
+    cache.update(0, &k1, &v1).unwrap();
+    cache.increment_len(11);
+
+    assert_eq!(cache.get_seq_length(), 11);
+    let (cached_k, cached_v) = cache.get(0).unwrap();
+    assert_eq!(cached_k.shape(), &[1, 11, 512]);
+    assert_eq!(cached_v.shape(), &[1, 11, 512]);
+
+    // Second update - add 1 more token
+    let k2 = Array3::ones((1, 1, 512)) * 2.0;
+    let v2 = Array3::ones((1, 1, 512)) * 2.0;
+
+    cache.update(0, &k2, &v2).unwrap();
+    cache.increment_len(1);
+
+    assert_eq!(cache.get_seq_length(), 12);
+    let (cached_k, cached_v) = cache.get(0).unwrap();
+    assert_eq!(cached_k.shape(), &[1, 12, 512]);
+    assert_eq!(cached_v.shape(), &[1, 12, 512]);
+
+    // Check values are correct
+    assert_eq!(cached_k[[0, 0, 0]], 1.0); // First token
+    assert_eq!(cached_k[[0, 11, 0]], 2.0); // Last token
+
+    println!("✓ Cache update and grow test passed");
+}
+
+#[test]
+fn test_cache_multiple_layers() {
+    use ndarray::Array3;
+
+    let mut cache = CpuKVCache::new(3, 1, 100, 512);
+
+    // Update each layer with different values
+    for layer in 0..3 {
+        let k = Array3::ones((1, 5, 512)) * (layer as f32 + 1.0);
+        let v = Array3::ones((1, 5, 512)) * (layer as f32 + 1.0);
+        cache.update(layer, &k, &v).unwrap();
+    }
+    cache.increment_len(5);
+
+    // Verify each layer has correct values
+    for layer in 0..3 {
+        let (k, v) = cache.get(layer).unwrap();
+        assert_eq!(k.shape(), &[1, 5, 512]);
+        assert_eq!(k[[0, 0, 0]], (layer as f32 + 1.0));
+        assert_eq!(v[[0, 0, 0]], (layer as f32 + 1.0));
+    }
+
+    println!("✓ Cache multiple layers test passed");
 }

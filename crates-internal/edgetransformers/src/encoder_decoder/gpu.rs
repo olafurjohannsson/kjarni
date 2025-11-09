@@ -41,6 +41,7 @@ impl GpuTransformerEncoderDecoder {
             decoder_config_adapter,
             Device::Wgpu,
             Some(context.clone()),
+            None,
         )?;
 
         // This is a placeholder. In reality, you'd build a GPU-specific decoder stack here

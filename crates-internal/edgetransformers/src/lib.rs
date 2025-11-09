@@ -13,16 +13,15 @@ pub mod embeddings;
 pub mod encoder;
 pub mod encoder_decoder;
 pub mod feedforward;
+pub mod normalization;
 pub mod gpu_context;
 pub mod gpu_ops;
-pub mod layer_norm;
 pub mod models;
 pub mod pooling;
 pub mod traits;
 pub mod utils;
 pub mod tests;
 pub mod weights;
-pub mod rms_norm;
 pub mod decoder_layer;
 pub mod encoder_layer;
 pub mod rope;
@@ -32,7 +31,7 @@ pub use crate::{
     attention::MultiHeadAttention,
     embeddings::Embeddings,
     feedforward::FeedForward,
-    layer_norm::LayerNorm,
+    normalization::Normalization,
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
     weights::ModelWeights,
 };
@@ -41,9 +40,6 @@ pub use gpu_context::WgpuContext;
 pub use traits::{
     CrossAttentionDecoder, Decoder, Device, Encoder, TransformerConfig, TransformerModel,
 };
-
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, Axis};
 
 // Re-export model traits and registry
 pub use models::{

@@ -12,9 +12,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
-
+use std::any::Any;
 use crate::{
-    Cache, CpuKVCache, Embeddings, FeedForward, LayerNorm, MultiHeadAttention, encoder_layer::EncoderLayer,
+    Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
+    feedforward::StdFeedForward, normalization::LayerNorm,
 };
 
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
@@ -42,7 +43,11 @@ impl CpuTransformerEncoderDecoder {
         );
 
         let (embed_norm_w, embed_norm_b) = config.get_decoder_embedding_ln_names();
-        let decoder_embed_layer_norm = LayerNorm::new(weights.get_array1(embed_norm_w)?, weights.get_array1(embed_norm_b)?, config.layer_norm_eps());
+        let decoder_embed_layer_norm = LayerNorm::new(
+            weights.get_array1(embed_norm_w)?,
+            weights.get_array1(embed_norm_b)?,
+            config.layer_norm_eps(),
+        );
 
         let mut decoder_layers = Vec::with_capacity(config.num_decoder_layers());
         for i in 0..config.num_decoder_layers() {
@@ -61,6 +66,7 @@ impl CpuTransformerEncoderDecoder {
                 weights.get_array1(&self_attn_names.v_bias)?,
                 weights.get_linear_weight(&self_attn_names.output_weight)?,
                 weights.get_array1(&self_attn_names.output_bias)?,
+                None,
             );
             let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&self_attn_names.norm_weight)?,
@@ -79,6 +85,7 @@ impl CpuTransformerEncoderDecoder {
                 weights.get_array1(&cross_attn_names.v_bias)?,
                 weights.get_linear_weight(&cross_attn_names.output_weight)?,
                 weights.get_array1(&cross_attn_names.output_bias)?,
+                None,
             );
             let cross_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&cross_attn_names.norm_weight)?,
@@ -104,15 +111,15 @@ impl CpuTransformerEncoderDecoder {
             } else {
                 raw_output_w
             };
-            
+
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
-            let feedforward = FeedForward::new(
+            let feedforward = FeedForward::Standard(StdFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
                 crate::activations::Activation::Gelu,
-            );
+            ));
 
             let ffn_layer_norm = LayerNorm::new(
                 weights.get_array1(&ffn_names.norm_weight)?,
@@ -150,16 +157,17 @@ impl CpuTransformerEncoderDecoder {
     ) -> Array3<f32> {
         let (_batch_size, seq_len) = input_ids.dim();
         let mut hidden_states = self.decoder_embeddings.forward_word_only(input_ids);
-        
+
         // TODO: BART specific stuff
         let start_idx = position_offset + 2;
         let end_idx = position_offset + seq_len + 2;
 
-        let pos_embeddings_to_add = self
-            .decoder_embeddings
-            .position_embeddings
-            .slice(s![start_idx..end_idx, ..]);
-        hidden_states += &pos_embeddings_to_add;
+        // TODO: RE-ADD
+        // let pos_embeddings_to_add = self
+        //     .decoder_embeddings
+        //     .position_embeddings?
+        //     .slice(s![start_idx..end_idx, ..]);
+        // hidden_states += &pos_embeddings_to_add;
         hidden_states
     }
 }
@@ -177,10 +185,7 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
         decoder_attention_mask_from_generator: &Array2<f32>, // Renamed for clarity
         cache: Option<&mut dyn Cache>,
         encoder_output_opt: Option<&'a EncoderOutputTrait>,
-        
     ) -> Result<Self::Output> {
-
-
         let encoder_output_ref: &EncoderOutputTrait;
         let encoder_output_owned: EncoderOutputTrait; // Holder for the owned value if we must create it
 
@@ -188,11 +193,14 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
             Some(output_ref) => {
                 encoder_output_ref = output_ref; // Borrow the existing output
                 encoder_output_ref
-            },
+            }
             None => {
-                encoder_output_owned = self.encoder.forward(encoder_input_ids, encoder_attention_mask, None).await?; // TODO Token_type_ids ???
+                encoder_output_owned = self
+                    .encoder
+                    .forward(encoder_input_ids, encoder_attention_mask, None)
+                    .await?; // TODO Token_type_ids ???
                 &encoder_output_owned // Borrow the newly created output
-            },
+            }
         };
 
         let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
@@ -203,7 +211,7 @@ impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
 
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
-        
+
         // FIX #1: Use the correctly-sized mask passed in from the generator,
         // rather than ignoring it with `_` and creating a new, potentially incorrect one.
         // This ensures the mask length always matches the total key length.
@@ -338,6 +346,9 @@ impl DecoderArchitecture for DecoderConfigAdapter {
     fn get_embedding_weight_names(&self) -> (&str, &str) {
         self.0.get_decoder_embedding_names()
     }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
     fn get_final_layer_norm_names(&self) -> (&str, &str) {
         unimplemented!()
     }
@@ -351,5 +362,8 @@ impl DecoderArchitecture for DecoderConfigAdapter {
     }
     fn get_feed_forward_names(&self, layer: usize) -> LayerFeedForwardNames {
         self.0.get_decoder_feed_forward_names(layer)
+    }
+    fn get_layer_attention_names(&self, layer_index: usize) -> LayerAttentionNames {
+        unimplemented!()
     }
 }

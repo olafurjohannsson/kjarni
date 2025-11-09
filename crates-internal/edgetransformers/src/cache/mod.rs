@@ -31,5 +31,3 @@ pub trait Cache: Send + Sync {
     fn increment_len(&mut self, new_tokens_len: usize);
 
 }
-
-

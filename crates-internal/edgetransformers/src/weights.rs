@@ -68,6 +68,15 @@ impl ModelWeights {
                             .map(|b| f16::from_le_bytes(b.try_into().unwrap()).to_f32())
                             .collect(),
                     )
+                },
+                Dtype::BF16 => {
+                    use half::bf16;
+                    Some(
+                        view.data()
+                            .chunks_exact(2)
+                            .map(|b| bf16::from_le_bytes(b.try_into().unwrap()).to_f32())
+                            .collect(),
+                    )
                 }
                 dtype => {
                     // todo: log/tracing

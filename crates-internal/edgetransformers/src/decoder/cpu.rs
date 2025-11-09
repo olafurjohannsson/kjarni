@@ -1,140 +1,287 @@
 use crate::cache::CpuKVCache;
-use crate::decoder_layer::PreNormDecoderLayer;
-use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device,
-    TransformerModel,
-};
+use crate::decoder_layer::DecoderLayer;
+use crate::feedforward::SwiGluFeedForward;
+use crate::rope::RoPE;
+use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
 use crate::weights::ModelWeights;
 use crate::{
-    Embeddings, FeedForward, LayerNorm, MultiHeadAttention,
-    decoder_layer::DecoderLayer,
+    Embeddings, FeedForward, MultiHeadAttention, feedforward::StdFeedForward,
+    normalization::LayerNorm, normalization::Normalization, normalization::RMSNorm,
 };
-use anyhow::{Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{debug, info};
-use ndarray::{Array2, Array3, s};
+use ndarray::{Array1, Array2, Array3, s};
 use std::sync::Arc;
 
 /// The CPU backend implementation for the generic `TransformerDecoder`.
 pub struct CpuTransformerDecoder {
     embeddings: Embeddings,
-    final_layer_norm: LayerNorm,
+    final_layer_norm: Normalization,
     layers: Vec<DecoderLayer>,
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
+    rope: Option<Arc<RoPE>>,
 }
 
 impl CpuTransformerDecoder {
     pub fn new(
         weights: &ModelWeights,
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
+        rope: Option<Arc<RoPE>>,
     ) -> Result<Self> {
-        // Load embedding weights (no token_type for decoder)
+        debug!("Building CpuTransformerDecoder...");
+        debug!("[CPU Decoder] Layers: {}", config.num_hidden_layers());
+        debug!("[CPU Decoder] Hidden size: {}", config.hidden_size());
+        debug!("[CPU Decoder] Attention heads: {}", config.num_attention_heads());
+        debug!("[CPU Decoder] Pre-norm: {}", config.is_prenorm());
+        debug!("[CPU Decoder] RoPE: {}", rope.is_some());
+
+        // Load embedding weights with optional position embeddings
         let (word_w, pos_w) = config.get_embedding_weight_names();
-        let embeddings = Embeddings::new(
-            weights.get_array2(word_w)?,
-            weights.get_array2(pos_w)?,
-            None, // No token_type_embeddings for decoder
-        );
 
-        // Get final layer norm (not embedding layer norm!)
+        debug!("[CPU Decoder] Loading embeddings...");
+        debug!("    Word embeddings: {}", word_w);
+
+        let word_embeddings = weights.get_array2(word_w)?;
+        let position_embeddings = if !pos_w.is_empty() {
+            debug!("[CPU Decoder] Position embeddings: {}", pos_w);
+            Some(weights.get_array2(pos_w)?)
+        } else {
+            debug!("[CPU Decoder] Position embeddings: None (using RoPE)");
+            None
+        };
+
+        let embeddings = if let Some(pos_emb) = position_embeddings {
+            Embeddings::new(word_embeddings, pos_emb, None)
+        } else {
+            // For models without position embeddings (LLaMA with RoPE)
+            Embeddings::new_without_position(word_embeddings, None)
+        };
+
+        // Get final layer norm
         let (norm_w, norm_b) = config.get_final_layer_norm_names();
-        let final_layer_norm = LayerNorm::new(
-            weights.get_array1(norm_w)?,
-            weights.get_array1(norm_b)?,
-            config.layer_norm_eps(),
+        debug!("  Loading final layer norm...");
+
+        let final_layer_norm =
+            Self::load_normalization(weights, &(norm_w, norm_b), config.layer_norm_eps())?
+                .ok_or_else(|| anyhow!("Final layer normalization is required"))?;
+
+        // Build decoder layers
+        debug!(
+            "  Building {} decoder layers...",
+            config.num_hidden_layers()
         );
-
         let mut layers = Vec::with_capacity(config.num_hidden_layers());
+
         for i in 0..config.num_hidden_layers() {
-            let attn_names = config.get_attention_names(i);
-            let ffn_names = config.get_feed_forward_names(i);
-
-            // For GPT-2: QKV is combined, stored as [hidden, 3*hidden] - NO transpose needed!
-            let qkv_weight = weights.get_array2(&attn_names.qkv_weight)?; // Remove .t()
-            let qkv_bias = weights.get_array1(&attn_names.qkv_bias)?;
-
-            let hidden_size = config.hidden_size();
-
-            // Split along axis 1 (columns) into Q, K, V
-            let q_weight = qkv_weight.slice(s![.., 0..hidden_size]).to_owned();
-            let k_weight = qkv_weight
-                .slice(s![.., hidden_size..2 * hidden_size])
-                .to_owned();
-            let v_weight = qkv_weight
-                .slice(s![.., 2 * hidden_size..3 * hidden_size])
-                .to_owned();
-
-            let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
-            let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
-            let v_bias = qkv_bias
-                .slice(s![2 * hidden_size..3 * hidden_size])
-                .to_owned();
-
-            let attention = MultiHeadAttention::new(
-                config.hidden_size(),
-                config.num_attention_heads(),
-                q_weight, // No .t() - GPT-2 weights are already [in, out]
-                q_bias,
-                k_weight,
-                k_bias,
-                v_weight,
-                v_bias,
-                weights.get_array2(&attn_names.output_weight)?, // No .t()
-                weights.get_array1(&attn_names.output_bias)?,
-            );
-            let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
-            let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
-
-            // The loader is now responsible for handling the transpose convention.
-            // It prepares the weights into the [in, out] format that CpuFeedForward expects.
-            let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
-                // The raw weight is [out, in]. Transpose it to [in, out].
-                raw_intermediate_w.t().as_standard_layout().to_owned()
-            } else {
-                // The raw weight is already [in, out]. Use it as is.
-                raw_intermediate_w
-            };
-
-            let fc2_weight_for_constructor = if config.transpose_ffn_weights() {
-                raw_output_w.t().as_standard_layout().to_owned()
-            } else {
-                raw_output_w
-            };
-
-            // Now, call the simple "dumb" constructor with the correctly prepared weights.
-            let feed_forward = FeedForward::new(
-                fc1_weight_for_constructor,
-                weights.get_array1(&ffn_names.intermediate_bias)?,
-                fc2_weight_for_constructor,
-                weights.get_array1(&ffn_names.output_bias)?,
-                crate::activations::Activation::Gelu,
-            );
-
-            let self_attn_layer_norm = LayerNorm::new(
-                weights.get_array1(&attn_names.norm_weight)?,
-                weights.get_array1(&attn_names.norm_bias)?,
-                config.layer_norm_eps(),
-            );
-
-            let ffn_layer_norm = LayerNorm::new(
-                weights.get_array1(&ffn_names.norm_weight)?,
-                weights.get_array1(&ffn_names.norm_bias)?,
-                config.layer_norm_eps(),
-            );
-            layers.push(DecoderLayer::PreNorm(PreNormDecoderLayer {
-                self_attn: attention,
-                self_attn_layer_norm,
-                feedforward: feed_forward,
-                ffn_layer_norm,
-            }));
+            let layer = Self::build_layer(weights, config.as_ref(), i, rope.clone())?;
+            layers.push(layer);
         }
+
+        debug!("✓ CpuTransformerDecoder built successfully");
 
         Ok(Self {
             embeddings,
             final_layer_norm,
             layers,
             config: config as Arc<dyn DecoderArchitecture + Send + Sync>,
+            rope,
         })
+    }
+
+    /// Build a single decoder layer (works for both GPT-2 and LLaMA)
+    fn build_layer(
+        weights: &ModelWeights,
+        config: &dyn DecoderArchitecture,
+        layer_idx: usize,
+        rope: Option<Arc<RoPE>>,
+    ) -> Result<DecoderLayer> {
+        let attn_names = config.get_attention_names(layer_idx);
+
+        let ffn_names = config.get_feed_forward_names(layer_idx);
+        let hidden_size = config.hidden_size();
+        let kv_dim = config.kv_dim();
+
+        // Load attention weights (handle both combined QKV and separate Q/K/V)
+        let (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias) =
+            if !attn_names.qkv_weight.is_empty() {
+                // GPT-2 style: Combined QKV
+                let qkv_weight = weights.get_array2(&attn_names.qkv_weight)?;
+                let qkv_bias = weights.get_array1(&attn_names.qkv_bias)?;
+
+                let q_weight = qkv_weight.slice(s![.., 0..hidden_size]).to_owned();
+                let k_weight = qkv_weight
+                    .slice(s![.., hidden_size..2 * hidden_size])
+                    .to_owned();
+                let v_weight = qkv_weight
+                    .slice(s![.., 2 * hidden_size..3 * hidden_size])
+                    .to_owned();
+                let o_weight = weights.get_array2(&attn_names.output_weight)?;
+
+                let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
+                let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
+                let v_bias = qkv_bias
+                    .slice(s![2 * hidden_size..3 * hidden_size])
+                    .to_owned();
+                let o_bias = weights.get_array1(&attn_names.output_bias)?;
+
+                (
+                    q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
+                )
+            } else {
+                let layer_attn_names = config.get_layer_attention_names(layer_idx);
+                // LLaMA style: Separate Q, K, V
+                let q_weight = weights.get_linear_weight(&layer_attn_names.q_weight)?;
+                let k_weight = weights.get_linear_weight(&layer_attn_names.k_weight)?;
+                let v_weight = weights.get_linear_weight(&layer_attn_names.v_weight)?;
+                let o_weight = weights.get_linear_weight(&layer_attn_names.output_weight)?;
+
+                let q_bias =
+                    Self::load_optional_bias(weights, &layer_attn_names.q_bias, hidden_size)?;
+                let k_bias =
+                    Self::load_optional_bias(weights, &layer_attn_names.k_bias, kv_dim)?;
+                let v_bias =
+                    Self::load_optional_bias(weights, &layer_attn_names.v_bias, kv_dim)?;
+                let o_bias =
+                    Self::load_optional_bias(weights, &layer_attn_names.output_bias, hidden_size)?;
+
+                (
+                    q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
+                )
+            };
+        
+        let attention = MultiHeadAttention::new(
+            hidden_size,
+            config.num_attention_heads(),
+            q_weight,
+            q_bias,
+            k_weight,
+            k_bias,
+            v_weight,
+            v_bias,
+            o_weight,
+            o_bias,
+            Some(config.num_key_value_heads()),
+        );
+        
+        // Load FFN (standard or SwiGLU)
+        let feed_forward = if let Some(gate_weight_name) = &ffn_names.gate_weight {
+            // SwiGLU (LLaMA)
+            let gate_weight = weights.get_linear_weight(gate_weight_name)?;
+            let up_weight = weights.get_linear_weight(&ffn_names.intermediate_weight)?;
+            let down_weight = weights.get_linear_weight(&ffn_names.output_weight)?;
+
+            FeedForward::SwiGLU(SwiGluFeedForward::new(gate_weight, up_weight, down_weight))
+        } else {
+            // Standard FFN (GPT-2)
+            let intermediate_weight = if config.transpose_ffn_weights() {
+                weights.get_linear_weight(&ffn_names.intermediate_weight)?
+            } else {
+                weights.get_array2(&ffn_names.intermediate_weight)?
+            };
+
+            let output_weight = if config.transpose_ffn_weights() {
+                weights.get_linear_weight(&ffn_names.output_weight)?
+            } else {
+                weights.get_array2(&ffn_names.output_weight)?
+            };
+
+            let intermediate_bias = Self::load_optional_bias(
+                weights,
+                &ffn_names.intermediate_bias,
+                config.intermediate_size(),
+            )?;
+
+            let output_bias =
+                Self::load_optional_bias(weights, &ffn_names.output_bias, hidden_size)?;
+
+            FeedForward::Standard(StdFeedForward::new(
+                intermediate_weight,
+                intermediate_bias,
+                output_weight,
+                output_bias,
+                crate::activations::Activation::Gelu,
+            ))
+        };
+        // Load normalization layers
+        let self_attn_layer_norm = if !attn_names.qkv_weight.is_empty() {
+            Self::load_normalization(
+                weights,
+                &(
+                    attn_names.norm_weight.as_str(),
+                    attn_names.norm_bias.as_str(),
+                ),
+                config.layer_norm_eps(),
+            )?
+            .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
+        } else {
+            let layer_attn_names = config.get_layer_attention_names(layer_idx);
+            Self::load_normalization(
+                weights,
+                &(
+                    layer_attn_names.norm_weight.as_str(),
+                    layer_attn_names.norm_bias.as_str(),
+                ),
+                config.layer_norm_eps(),
+            )?
+            .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
+        };
+
+        let ffn_layer_norm = Self::load_normalization(
+            weights,
+            &(ffn_names.norm_weight.as_str(), ffn_names.norm_bias.as_str()),
+            config.layer_norm_eps(),
+        )?
+        .ok_or_else(|| anyhow!("FFN normalization required for layer {}", layer_idx))?;
+
+        Ok(DecoderLayer {
+            self_attn: attention,
+            self_attn_layer_norm,
+            feedforward: feed_forward,
+            ffn_layer_norm,
+            is_prenorm: config.is_prenorm(),
+            rope: rope,
+        })
+    }
+
+    /// Load optional bias (returns zeros if name is empty)
+    fn load_optional_bias(
+        weights: &ModelWeights,
+        name: &str,
+        expected_size: usize,
+    ) -> Result<Array1<f32>> {
+        if name.is_empty() {
+            // LLaMA has no biases - return zeros
+            Ok(Array1::zeros(expected_size))
+        } else {
+            weights.get_array1(name)
+        }
+    }
+
+    /// Load normalization layer (LayerNorm or RMSNorm)
+    fn load_normalization(
+        weights: &ModelWeights,
+        names: &(&str, &str),
+        eps: f32,
+    ) -> Result<Option<Normalization>> {
+        let (weight_name, bias_name) = names;
+
+        if weight_name.is_empty() {
+            return Ok(None);
+        }
+
+        let weight = weights.get_array1(weight_name)?;
+
+        if bias_name.is_empty() {
+            // RMSNorm (no bias) - LLaMA
+            Ok(Some(Normalization::RMSNorm(RMSNorm::new(weight, eps))))
+        } else {
+            // LayerNorm (with bias) - GPT-2
+            let bias = weights.get_array1(bias_name)?;
+            Ok(Some(Normalization::LayerNorm(LayerNorm::new(
+                weight, bias, eps,
+            ))))
+        }
     }
 }
 
@@ -148,7 +295,6 @@ impl TransformerModel for CpuTransformerDecoder {
 impl Decoder for CpuTransformerDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
-
 
     async fn forward(
         &self,
@@ -174,10 +320,8 @@ impl Decoder for CpuTransformerDecoder {
         );
 
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
-
         let mut new_key_values = Vec::with_capacity(self.layers.len());
 
-        // --- 3. Layer-by-Layer Execution Loop ---
         info!(
             "[CPU Decoder] Executing {} decoder layers...",
             self.layers.len()
@@ -216,7 +360,6 @@ impl Decoder for CpuTransformerDecoder {
                 );
             }
 
-            // Call the layer's stateless forward method.
             let (new_hidden_states, (new_k, new_v)) = layer.forward(
                 &hidden_states,
                 attention_mask,
@@ -246,7 +389,7 @@ impl Decoder for CpuTransformerDecoder {
 
         // --- 4. Final Layer Normalization ---
         info!("[CPU Decoder] Applying final layer normalization...");
-        hidden_states = self.final_layer_norm.forward_3d(&hidden_states);
+        hidden_states = self.final_layer_norm.forward(&hidden_states);
         debug!(
             "[CPU Decoder] Final hidden_states shape after LN: {:?}",
             hidden_states.shape()
@@ -281,6 +424,14 @@ impl Decoder for CpuTransformerDecoder {
 }
 
 impl CpuTransformerDecoder {
+    /// Embed tokens with optional position offset for autoregressive generation
+    ///
+    /// For models with learned position embeddings (GPT-2):
+    ///   - Adds position embeddings using absolute position (position_offset + j)
+    ///
+    /// For models with RoPE (LLaMA):
+    ///   - Only returns word embeddings (RoPE is applied in attention layer)
+    ///   - position_offset is still tracked for RoPE in attention
     fn embed_with_offset(&self, input_ids: &Array2<f32>, position_offset: usize) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.config.hidden_size();
@@ -296,16 +447,19 @@ impl CpuTransformerDecoder {
             }
         }
 
-        // Position embeddings with offset
-        for j in 0..seq_len {
-            let pos_idx = position_offset + j;
-            let pos_emb = self.embeddings.position_embeddings.row(pos_idx);
-            for i in 0..batch_size {
-                hidden_states
-                    .slice_mut(s![i, j, ..])
-                    .scaled_add(1.0, &pos_emb);
+        // Position embeddings with offset (only if present - GPT-2 has them, LLaMA doesn't)
+        if let Some(ref pos_embeddings) = self.embeddings.position_embeddings {
+            for j in 0..seq_len {
+                let pos_idx = position_offset + j;
+                let pos_emb = pos_embeddings.row(pos_idx);
+                for i in 0..batch_size {
+                    hidden_states
+                        .slice_mut(s![i, j, ..])
+                        .scaled_add(1.0, &pos_emb);
+                }
             }
         }
+        // For RoPE models (LLaMA), position is handled in attention layer
 
         hidden_states
     }

@@ -245,7 +245,7 @@ impl ModelType {
     pub fn architecture(&self) -> ModelArchitecture {
         self.info().architecture
     }
-
+//weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/model.safetensors",
     /// Get the repo ID from the URL
     pub fn repo_id(&self) -> String {
         let info = self.info();

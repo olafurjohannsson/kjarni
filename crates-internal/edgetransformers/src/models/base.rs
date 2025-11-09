@@ -15,6 +15,16 @@ use crate::traits::{
     Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
 };
 use crate::utils::create_full_attention_mask;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RopeScalingConfig {
+    pub factor: f32,
+    pub high_freq_factor: f32,
+    pub low_freq_factor: f32,
+    pub original_max_position_embeddings: usize,
+    pub rope_type: String,
+}
 
 /// Configuration for text generation
 #[derive(Clone, Debug)]

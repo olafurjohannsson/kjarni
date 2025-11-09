@@ -3,8 +3,12 @@ use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::kernel::Kernel;
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::{
-    add_bias::GpuAddBias, apply_mask::GpuApplyMask, bmm::GpuBatchedMatMul,
-    layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape, matmul::GpuMatMul,
+    add_bias::GpuAddBias,
+    apply_mask::GpuApplyMask,
+    bmm::{BStrides, GpuBatchedMatMul},
+    layout::reshape::GpuReshape,
+    layout::unreshape::GpuUnreshape,
+    matmul::GpuMatMul,
     softmax::GpuSoftmax,
 };
 use anyhow::Result;
@@ -298,7 +302,74 @@ impl GpuAttention {
 
         (new_k, new_v)
     }
+    pub fn attend_with_physical_cache(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor,          // [batch*heads, 1, head_dim]
+        physical_k: &GpuTensor,     // [batch*heads, max_seq_len, head_dim]
+        physical_v: &GpuTensor,     // [batch*heads, max_seq_len, head_dim]
+        attention_mask: &GpuTensor, // [batch, logical_len]
+        weights: &GpuAttentionWeights,
+        position_offset: usize,
+        logical_len: usize, // Current valid length in cache
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        let (batch_heads, query_len, head_dim) = query.dims3();
+        let (_, max_seq_len, _) = physical_k.dims3();
 
+        // 1. Project query
+        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
+
+        // 2. Q @ K^T with physical K
+        let k_t = physical_k.permute(encoder, &self.permute, &[0, 2, 1]); // [B*H, D, max_seq]
+
+        // Strides for transposed K: [batch*heads, head_dim, max_seq_len]
+        // Row-major means: to go down a row (in dim=1), skip `max_seq_len` elements
+        //                  to go across a col (in dim=2), skip 1 element
+        let k_strides = BStrides {
+            row: max_seq_len as u32, // Stride for dimension 1 (head_dim)
+            col: 1,                  // Stride for dimension 2 (seq_len)
+        };
+
+        // Output scores: [batch*heads, query_len, LOGICAL_len]
+        let scores = temp.get(vec![batch_heads, query_len, logical_len]);
+
+        self.bmm
+            .encode_with_b_strides(encoder, &q_proj, &k_t, &scores, k_strides);
+
+        // 3. Apply mask (already handles physical buffers!)
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            true, // is_causal
+            position_offset as u32,
+        );
+
+        // 4. Softmax
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+
+        // 5. Scores @ V with physical V
+        // V is [batch*heads, max_seq_len, head_dim]
+        let v_strides = BStrides {
+            row: head_dim as u32, // To go down a row (seq), skip head_dim elements
+            col: 1,               // To go across a col (head_dim), skip 1
+        };
+
+        let context = temp.get(vec![batch_heads, query_len, head_dim]);
+
+        self.bmm
+            .encode_with_b_strides(encoder, &scores, physical_v, &context, v_strides);
+
+        // 6. Output projection
+        self.project(
+            encoder,
+            &context,
+            &weights.output_weight,
+            &weights.output_bias,
+            temp,
+        )
+    }
     /// Performs the core attention calculation using the pre-updated KV cache.
     ///
     /// # Returns

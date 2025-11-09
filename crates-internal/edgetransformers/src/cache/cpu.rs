@@ -37,6 +37,10 @@ impl CpuKVCache {
         }
     }
 
+    pub fn layers(&self) -> &Vec<(Array3<f32>, Array3<f32>)> {
+        &self.layers
+    }
+
     /// Appends the new key and value tensors to the cache for a specific layer.
     ///
     /// This is a highly efficient operation that copies the new data into a
