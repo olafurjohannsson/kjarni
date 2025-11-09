@@ -4,15 +4,13 @@ use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::attention::TempStorage;
 use crate::gpu_ops::blocks::decoder::GpuPreNormDecoderLayer;
-use crate::gpu_ops::blocks::ffn::{GpuFeedForwardWeights};
+use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel,
-};
+use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
 use crate::weights::ModelWeights;
-use anyhow::{Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, info};
 use ndarray::{Array2, Array3, s};
@@ -245,68 +243,121 @@ impl Decoder for GpuTransformerDecoder {
         for (i, layer) in self.layers.iter().enumerate() {
             debug!("[GPU Decoder] --- Layer {} ---", i);
 
-            // ========================= THE FINAL, CORRECT LOGIC =========================
+            // ✅ OPTIMIZED PATH: Pass PHYSICAL cache buffers directly
+            let physical_past_kv_3d = if position_offset > 0 {
+                let (k_4d, v_4d) = gpu_cache.as_ref().unwrap().get(i).unwrap();
 
-            // This will hold the correctly prepared past_kv view for the layer.
-            // We need to declare the variables that will own the temporary sliced tensors here.
-            let (mut temp_k, mut temp_v);
-            let past_kv_for_layer: Option<(&GpuTensor, &GpuTensor)>;
+                // Reshape [batch, heads, max_seq, head_dim] -> [batch*heads, max_seq, head_dim]
+                let (b, h, max_seq, d) = k_4d.dims4();
 
-            if position_offset > 0 {
-                // --- GENERATION PASS ---
-                // 1. Get the PHYSICAL cache buffers.
-                let (physical_k, physical_v) = gpu_cache.as_ref().unwrap().get(i).unwrap();
-
-                // 2. SLICE the physical buffers to the current logical length (`position_offset`).
-                let (b, h, _, d) = physical_k.dims4();
-
-                // TODO: remove and use strides for cache in GpuBatchedMatMul and GpuApplyMask
-                temp_k = physical_k.slice(
-                    &mut encoder,
-                    &self.slicer,
-                    &[0, 0, 0, 0],
-                    &[b, h, position_offset, d], // Slice to the length of what's already in the cache
-                )?;
-                temp_v = physical_v.slice(
-                    &mut encoder,
-                    &self.slicer,
-                    &[0, 0, 0, 0],
-                    &[b, h, position_offset, d],
-                )?;
-
-                // The layer will receive a view of these new, temporary sliced tensors.
-                past_kv_for_layer = Some((&temp_k, &temp_v));
+                // View as 3D (no copy, just different shape interpretation)
+                let k_3d = k_4d.view_as_3d(b * h, max_seq, d)?;
+                let v_3d = v_4d.view_as_3d(b * h, max_seq, d)?;
+                println!(
+                    "[GPU Decoder] Layer {} cache shapes => k_4d: {:?} rank={}, v_4d: {:?} rank={} | k_3d: {:?} rank={}, v_3d: {:?} rank={}",
+                    i,
+                    k_4d.shape(),
+                    k_4d.rank(),
+                    v_4d.shape(),
+                    v_4d.rank(),
+                    k_3d.shape(),
+                    k_3d.rank(),
+                    v_3d.shape(),
+                    v_3d.rank(),
+                );
+                Some((k_3d, v_3d))
             } else {
-                // --- PRIMING PASS ---
-                // There is no past state, so we pass None.
-                past_kv_for_layer = None;
-            }
+                None
+            };
 
-            if let Some((k, _)) = past_kv_for_layer {
+            if let Some((k, _)) = &physical_past_kv_3d {
                 debug!(
-                    "[GPU Decoder] Layer {} past_kv shape for forward: {:?}",
+                    "[GPU Decoder] Layer {} using physical cache with shape: {:?}",
                     i,
                     k.shape()
                 );
             } else {
-                debug!("[GPU Decoder] Layer {} past_kv is None (priming pass).", i);
+                debug!("[GPU Decoder] Layer {} priming pass (no cache)", i);
             }
 
-            // Call the layer's forward method. It now receives the correct data in all cases.
+            // Call layer with physical buffers (no slicing/concatenating!)
             let (output, (new_k, new_v)) = layer.forward(
                 &mut encoder,
                 &hidden_states,
                 &attention_mask_gpu,
                 position_offset,
-                past_kv_for_layer,
+                physical_past_kv_3d.as_ref().map(|(k, v)| (k, v)), // Convert Option<(T, T)> to Option<(&T, &T)>
                 &mut temp,
             )?;
-
-            // ==============================================================================
 
             hidden_states = output;
             new_key_values.push((new_k, new_v));
         }
+        // for (i, layer) in self.layers.iter().enumerate() {
+        //     debug!("[GPU Decoder] --- Layer {} ---", i);
+
+        //     // ========================= THE FINAL, CORRECT LOGIC =========================
+
+        //     // This will hold the correctly prepared past_kv view for the layer.
+        //     // We need to declare the variables that will own the temporary sliced tensors here.
+        //     let (mut temp_k, mut temp_v);
+        //     let past_kv_for_layer: Option<(&GpuTensor, &GpuTensor)>;
+
+        //     if position_offset > 0 {
+        //         // --- GENERATION PASS ---
+        //         // 1. Get the PHYSICAL cache buffers.
+        //         let (physical_k, physical_v) = gpu_cache.as_ref().unwrap().get(i).unwrap();
+
+        //         // 2. SLICE the physical buffers to the current logical length (`position_offset`).
+        //         let (b, h, _, d) = physical_k.dims4();
+
+        //         // TODO: remove and use strides for cache in GpuBatchedMatMul and GpuApplyMask
+        //         temp_k = physical_k.slice(
+        //             &mut encoder,
+        //             &self.slicer,
+        //             &[0, 0, 0, 0],
+        //             &[b, h, position_offset, d], // Slice to the length of what's already in the cache
+        //         )?;
+        //         temp_v = physical_v.slice(
+        //             &mut encoder,
+        //             &self.slicer,
+        //             &[0, 0, 0, 0],
+        //             &[b, h, position_offset, d],
+        //         )?;
+
+        //         // The layer will receive a view of these new, temporary sliced tensors.
+        //         past_kv_for_layer = Some((&temp_k, &temp_v));
+        //     } else {
+        //         // --- PRIMING PASS ---
+        //         // There is no past state, so we pass None.
+        //         past_kv_for_layer = None;
+        //     }
+
+        //     if let Some((k, _)) = past_kv_for_layer {
+        //         debug!(
+        //             "[GPU Decoder] Layer {} past_kv shape for forward: {:?}",
+        //             i,
+        //             k.shape()
+        //         );
+        //     } else {
+        //         debug!("[GPU Decoder] Layer {} past_kv is None (priming pass).", i);
+        //     }
+
+        //     // Call the layer's forward method. It now receives the correct data in all cases.
+        //     let (output, (new_k, new_v)) = layer.forward(
+        //         &mut encoder,
+        //         &hidden_states,
+        //         &attention_mask_gpu,
+        //         position_offset,
+        //         past_kv_for_layer,
+        //         &mut temp,
+        //     )?;
+
+        //     // ==============================================================================
+
+        //     hidden_states = output;
+        //     new_key_values.push((new_k, new_v));
+        // }
 
         // --- 4. Cache Update ---
         if let Some(ref mut cache) = gpu_cache {

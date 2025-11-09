@@ -76,7 +76,41 @@ impl GpuTensor {
         assert_eq!(self.rank(), 4, "Tensor is not rank 4");
         (self.shape[0], self.shape[1], self.shape[2], self.shape[3])
     }
+    // View a 4D tensor as 3D by merging the first two dimensions
+    /// [B, H, S, D] -> [B*H, S, D]
+    pub fn view_as_3d(&self, dim0: usize, dim1: usize, dim2: usize) -> Result<GpuTensor> {
+        assert_eq!(self.rank(), 4, "Can only view 4D tensors as 3D");
 
+        let (b, h, s, d) = self.dims4();
+        assert_eq!(dim0, b * h, "First dimension must equal batch * heads");
+        assert_eq!(dim1, s, "Second dimension must match");
+        assert_eq!(dim2, d, "Third dimension must match");
+
+        // Create a new tensor with 3D shape but same buffer
+        Ok(GpuTensor {
+            context: self.context.clone(),
+            buffer: self.buffer.clone(),
+            shape: vec![dim0, dim1, dim2],
+            dtype: self.dtype,
+            // label: format!("{}_view3d", self.label),
+        })
+    }
+
+    /// View a [B*H, S, D] tensor as [B, H, S, D]
+    pub fn view_as_4d(&self, b: usize, h: usize, s: usize, d: usize) -> Result<GpuTensor> {
+        assert_eq!(self.rank(), 3, "Can only view 3D tensors as 4D");
+        let (bh, s0, d0) = self.dims3();
+        assert_eq!(bh, b * h, "First dimension mismatch (B*H != bh)");
+        assert_eq!(s, s0, "Second dimension mismatch");
+        assert_eq!(d, d0, "Third dimension mismatch");
+
+        Ok(GpuTensor {
+            context: self.context.clone(),
+            buffer: self.buffer.clone(),
+            shape: vec![b, h, s, d],
+            dtype: self.dtype,
+        })
+    }
     /// Creates a new view of the tensor with a different shape, without copying data.
     ///
     /// This is a metadata-only operation. The new `GpuTensor` shares the same underlying

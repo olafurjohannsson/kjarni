@@ -305,66 +305,96 @@ impl GpuAttention {
     pub fn attend_with_physical_cache(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        query: &GpuTensor,          // [batch*heads, 1, head_dim]
-        physical_k: &GpuTensor,     // [batch*heads, max_seq_len, head_dim]
-        physical_v: &GpuTensor,     // [batch*heads, max_seq_len, head_dim]
-        attention_mask: &GpuTensor, // [batch, logical_len]
+        query: &GpuTensor,      // [batch, query_len, hidden_size] - NOT split yet!
+        physical_k: &GpuTensor, // [batch*heads, max_seq_len, head_dim] - already 3D
+        physical_v: &GpuTensor, // [batch*heads, max_seq_len, head_dim]
+        attention_mask: &GpuTensor,
         weights: &GpuAttentionWeights,
         position_offset: usize,
-        logical_len: usize, // Current valid length in cache
+        logical_len: usize,
         temp: &mut TempStorage,
     ) -> GpuTensor {
-        let (batch_heads, query_len, head_dim) = query.dims3();
-        let (_, max_seq_len, _) = physical_k.dims3();
+        println!("query: {:?}", query.shape());
+        println!("physk: {:?}", physical_k.shape());
+        println!("physv: {:?}", physical_v.shape());
+        let (batch_heads, max_seq_len, head_dim) = physical_k.dims3();
+        let (batch, query_len, _) = query.dims3();
+
+        let num_heads = batch_heads / batch; // Derive num_heads
 
         // 1. Project query
         let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
 
-        // 2. Q @ K^T with physical K
-        let k_t = physical_k.permute(encoder, &self.permute, &[0, 2, 1]); // [B*H, D, max_seq]
+        // 2. Split heads: [batch, query_len, hidden] -> [batch*heads, query_len, head_dim]
+        let q_split = self.split_heads(encoder, &q_proj, temp);
+        println!("q_split: {:?}", q_split.shape());
+        let (b, h, s, d) = q_split.dims4(); // [B, H, S, D]
+        
+        let q_split_3d = q_split.view_as_3d(b * h, s, d).unwrap_or(q_split);
+        println!("q_split_3d: {:?}", q_split_3d.shape());
+
+        // Now q_split is [batch*heads, query_len, head_dim] ✅
+        let (batch_heads_q, _, _) = q_split_3d.dims3();
+        
+        assert_eq!(
+            batch_heads_q, batch_heads,
+            "Query and cache batch dimensions must match"
+        );
+
+        // 3. Q @ K^T with physical K
+        // Transpose K: [batch*heads, max_seq, head_dim] -> [batch*heads, head_dim, max_seq]
+        let k_t = physical_k.permute(encoder, &self.permute, &[0, 2, 1]);
 
         // Strides for transposed K: [batch*heads, head_dim, max_seq_len]
-        // Row-major means: to go down a row (in dim=1), skip `max_seq_len` elements
-        //                  to go across a col (in dim=2), skip 1 element
         let k_strides = BStrides {
-            row: max_seq_len as u32, // Stride for dimension 1 (head_dim)
-            col: 1,                  // Stride for dimension 2 (seq_len)
+            row: max_seq_len as u32, // To go down a row (head_dim), skip max_seq_len
+            col: 1,                  // To go across a col (seq), skip 1
         };
 
-        // Output scores: [batch*heads, query_len, LOGICAL_len]
+        // Output scores: [batch*heads, query_len, logical_len]
         let scores = temp.get(vec![batch_heads, query_len, logical_len]);
 
-        self.bmm
-            .encode_with_b_strides(encoder, &q_proj, &k_t, &scores, k_strides);
+        self.bmm.encode_with_b_strides(
+            encoder, &q_split_3d, //  Now [batch*heads, query_len, head_dim]
+            &k_t,     // [batch*heads, head_dim, max_seq_len]
+            &scores,  // [batch*heads, query_len, logical_len]
+            k_strides,
+        );
 
-        // 3. Apply mask (already handles physical buffers!)
+      
+
+        // 4. Apply mask
         self.apply_mask.encode(
             encoder,
             &scores,
             attention_mask,
-            true, // is_causal
+            true,
             position_offset as u32,
         );
 
-        // 4. Softmax
+        // 5. Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
 
-        // 5. Scores @ V with physical V
-        // V is [batch*heads, max_seq_len, head_dim]
+        // 6. Scores @ V with physical V
         let v_strides = BStrides {
-            row: head_dim as u32, // To go down a row (seq), skip head_dim elements
+            row: head_dim as u32, // To go down a row (seq), skip head_dim
             col: 1,               // To go across a col (head_dim), skip 1
         };
 
         let context = temp.get(vec![batch_heads, query_len, head_dim]);
 
-        self.bmm
-            .encode_with_b_strides(encoder, &scores, physical_v, &context, v_strides);
+        self.bmm.encode_with_b_strides(
+            encoder, &scores,    // [batch*heads, query_len, logical_len]
+            physical_v, // [batch*heads, max_seq_len, head_dim]
+            &context,   // [batch*heads, query_len, head_dim]
+            v_strides,
+        );
 
-        // 6. Output projection
+        // 7. Merge heads and output projection
+        let context_merged = self.merge_heads(encoder, &context, temp);
         self.project(
             encoder,
-            &context,
+            &context_merged,
             &weights.output_weight,
             &weights.output_bias,
             temp,
