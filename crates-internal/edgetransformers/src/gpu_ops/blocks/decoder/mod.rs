@@ -1,3 +1,4 @@
+use crate::GpuKVCache;
 use crate::activations;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
@@ -104,10 +105,9 @@ impl GpuPreNormDecoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
+        layer_idx: usize,
         position_offset: usize,
-        // The signature now mirrors the CPU version exactly
-        // past_kv: Option<(&GpuTensor, &GpuTensor)>,
-        physical_past_kv: Option<(&GpuTensor, &GpuTensor)>,
+        gpu_cache: Option<&mut GpuKVCache>,
         temp: &mut TempStorage,
     ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
         // --- 1. First Sub-layer: Self-Attention (Pre-Norm) ---
@@ -126,25 +126,22 @@ impl GpuPreNormDecoderLayer {
             self.self_attn
                 .project_kv(encoder, &ln1_out, &self.self_attn_weights, temp);
 
-        let logical_len = if let Some((physical_k, _)) = physical_past_kv {
-            // Generation pass: logical length = cache + new tokens
-            position_offset + new_k.shape()[1]
-        } else {
-            // Priming pass: logical length = just new tokens
-            new_k.shape()[1]
-        };
+        let attn_out = if let Some(cache) = gpu_cache {
+            cache.update(encoder, layer_idx, &new_k, &new_v, cache.get_seq_length())?;
 
-        let attn_out = if let Some((physical_k, physical_v)) = physical_past_kv {
-            // ✅ Use strided attention with physical cache
+            let (physical_k, physical_v) = cache.get(layer_idx).unwrap();
+            let (b, h, max_seq, d) = physical_k.dims4();
+            let k_3d = physical_k.view_as_3d(b * h, max_seq, d)?;
+            let v_3d = physical_v.view_as_3d(b * h, max_seq, d)?;
+
             self.self_attn.attend_with_physical_cache(
                 encoder,
                 &ln1_out,
-                physical_k,
-                physical_v,
+                &k_3d,
+                &v_3d,
                 attention_mask,
                 &self.self_attn_weights,
                 position_offset,
-                logical_len,
                 temp,
             )
         } else {
@@ -164,53 +161,6 @@ impl GpuPreNormDecoderLayer {
                 temp,
             )
         };
-
-        // --- Cache Preparation (Now identical to CPU logic) ---
-        // We must split the heads of the new K/V tensors before concatenation.
-        // let new_k_split = self.self_attn.split_heads(encoder, &new_k, temp);
-        // let new_v_split = self.self_attn.split_heads(encoder, &new_v, temp);
-
-        // let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
-        //     // Concatenate the past (already head-split) with the new (now head-split)
-        //     let full_k_shape = vec![
-        //         past_k.shape()[0],
-        //         past_k.shape()[1],
-        //         past_k.shape()[2] + new_k_split.shape()[2],
-        //         past_k.shape()[3],
-        //     ];
-        //     let full_v_shape = vec![
-        //         past_v.shape()[0],
-        //         past_v.shape()[1],
-        //         past_v.shape()[2] + new_v_split.shape()[2],
-        //         past_v.shape()[3],
-        //     ];
-
-        //     let fk = temp.get(full_k_shape);
-        //     let fv = temp.get(full_v_shape);
-
-        //     // Use the GpuConcatenate kernel along axis 2 (the sequence dimension)
-        //     // TODO: remove and use strides for cache in GpuBatchedMatMul and GpuApplyMask
-        //     self.concat.encode(encoder, &[past_k, &new_k_split], &fk, 2);
-        //     self.concat.encode(encoder, &[past_v, &new_v_split], &fv, 2);
-
-        //     (fk, fv)
-        // } else {
-        //     // No cache (priming pass), so the "full" cache is just the new head-split state.
-        //     (new_k_split, new_v_split)
-        // };
-
-        // // Perform the attention calculation. `full_k` and `full_v` are now correctly shaped.
-        // let attn_out = self.self_attn.attend(
-        //     encoder,
-        //     &ln1_out,
-        //     &self.self_attn_weights,
-        //     attention_mask,
-        //     true, // is_causal
-        //     (&full_k, &full_v),
-        //     position_offset,
-        //     temp,
-        // );
-
         let attn_block_output = temp.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);

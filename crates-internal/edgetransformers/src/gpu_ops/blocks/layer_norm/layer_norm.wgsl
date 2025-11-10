@@ -2,6 +2,7 @@ struct NormUniforms {
     m: u32, // batch_size * seq_len
     n: u32, // hidden_size
     eps: f32,
+    _padding1: f32
 };
 
 @group(0) @binding(0) var<uniform> uniforms: NormUniforms;

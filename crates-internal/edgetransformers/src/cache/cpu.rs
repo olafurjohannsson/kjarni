@@ -65,15 +65,16 @@ impl CpuKVCache {
         Ok(())
     }
 
-    /// Retrieves a view of the cached keys and values for a specific layer.
-    ///
-    /// Returns a tuple of views, `(Key, Value)`, containing all tokens
-    /// processed so far. This is a zero-copy operation.
     pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<f32>, ArrayView3<f32>)> {
+        // if self.current_len == 0 {
+        //     return None;
+        // }
         if layer_idx >= self.layers.len() {
             return None;
         }
+
         let (cache_k, cache_v) = &self.layers[layer_idx];
+
         let active_slice = s![.., 0..self.current_len, ..];
         Some((cache_k.slice(active_slice), cache_v.slice(active_slice)))
     }

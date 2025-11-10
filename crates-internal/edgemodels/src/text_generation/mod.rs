@@ -15,8 +15,8 @@ use ndarray::{Array2, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-mod llama;
 mod configs;
+mod llama;
 mod llama_configs;
 pub use configs::Gpt2Config;
 pub use llama::LlamaModel;
@@ -130,7 +130,8 @@ impl TextGenerator {
             config.max_length
         };
         debug!("[Setup] Max sequence length set to: {}", max_len);
-        let full_attention_mask = Array2::ones((batch_size, max_len));
+        // let mut full_attention_mask = Array2::ones((batch_size, max_len));
+        let mut full_attention_mask = Array2::zeros((batch_size, max_len)); // ✅ CORRECT
 
         // 3. Initialize the Key-Value cache
         let mut cache: Box<dyn Cache> = match self.model.device() {
@@ -168,8 +169,25 @@ impl TextGenerator {
                 (batch_size, prompt_len),
                 tokens.iter().map(|&t| t as f32).collect(),
             )?;
-            let prompt_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
+            // full_attention_mask.slice_mut(s![.., 0..prompt_len]).fill(1.0);
+            // let prompt_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
+            // ✅ Unmask prompt positions
+            full_attention_mask
+                .slice_mut(s![.., 0..prompt_len])
+                .fill(1.0);
 
+            // ✅ CREATE the sliced mask for priming
+            // let prompt_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
+            let mask_to_use_for_priming = match self.model.device() {
+                Device::Cpu => {
+                    // CPU needs the sliced mask
+                    full_attention_mask.slice(s![.., 0..prompt_len]).to_owned()
+                }
+                Device::Wgpu => {
+                    // GPU needs the full physical mask
+                    full_attention_mask.clone()
+                }
+            };
             // --- STRATEGIC LOGGING (Priming) ---
             debug!(
                 "[Priming Pass] Cache sequence length BEFORE forward: {}",
@@ -181,11 +199,11 @@ impl TextGenerator {
             );
             debug!(
                 "[Priming Pass] `prompt_mask` shape: {:?}",
-                prompt_mask.shape()
+                mask_to_use_for_priming.shape()
             );
 
             self.model
-                .forward(&prompt_ids, &prompt_mask, Some(cache.as_mut()))
+                .forward(&prompt_ids, &mask_to_use_for_priming, Some(cache.as_mut()))
                 .await?;
 
             debug!(
@@ -205,11 +223,11 @@ impl TextGenerator {
 
             let current_len = tokens.len();
             let step = current_len - prompt_len + 1;
-
+            full_attention_mask[[0, current_len]] = 1.0;
             let last_token = *tokens.last().unwrap_or(&self.bos_token_id().unwrap_or(0));
             let input_ids = Array2::from_shape_vec((1, 1), vec![last_token as f32])?;
 
-            let attention_mask_view = full_attention_mask.slice(s![.., 0..current_len + 1]);
+            // let attention_mask_view = full_attention_mask.slice(s![.., 0..current_len + 1]);
 
             // --- STRATEGIC LOGGING (Generation Step) ---
             info!(
@@ -224,19 +242,30 @@ impl TextGenerator {
                 cache.get_seq_length()
             );
             debug!("[Step {}] `input_ids` shape: {:?}", step, input_ids.shape());
-            debug!(
-                "[Step {}] `attention_mask` shape: {:?}",
-                step,
-                attention_mask_view.shape()
-            );
+            // debug!(
+            //     "[Step {}] `attention_mask` shape: {:?}",
+            //     step,
+            //     attention_mask_view.shape()
+            // );
+            let generation_mask = full_attention_mask
+                .slice(s![.., 0..current_len + 1])
+                .to_owned();
+            let mask_to_use = match self.model.device() {
+                Device::Cpu => {
+                    // CPU uses concatenated approach: needs sliced mask
+                    full_attention_mask
+                        .slice(s![.., 0..current_len + 1])
+                        .to_owned()
+                }
+                Device::Wgpu => {
+                    // GPU uses physical cache approach: needs full mask
+                    full_attention_mask.clone()
+                }
+            };
 
             let decoder_output = self
                 .model
-                .forward(
-                    &input_ids,
-                    &attention_mask_view.to_owned(),
-                    Some(cache.as_mut()),
-                )
+                .forward(&input_ids, &mask_to_use.to_owned(), Some(cache.as_mut()))
                 .await?;
 
             debug!(
@@ -246,10 +275,48 @@ impl TextGenerator {
             );
 
             let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, &self.lm_head_t)?;
+
             let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+            if step <= 20 {
+                // Get top 5 token predictions
+                let mut indexed_logits: Vec<(usize, f32)> = next_token_logits
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (i, v))
+                    .collect();
+                indexed_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+                println!("[Step {}] Top-5 logits BEFORE penalty:", step);
+                for (i, (token_id, logit)) in indexed_logits.iter().take(5).enumerate() {
+                    let token_str = self
+                        .tokenizer()
+                        .decode(&[*token_id as u32], false)
+                        .unwrap_or_default();
+                    println!(
+                        "  {}. Token {}: {} (logit: {:.4})",
+                        i + 1,
+                        token_id,
+                        token_str,
+                        logit
+                    );
+                }
+            }
             next_token_logits =
                 apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
+
             let next_token = sample_token(next_token_logits, config)?;
+
+            if step <= 20 {
+                let selected_token_str = self
+                    .tokenizer()
+                    .decode(&[next_token], false)
+                    .unwrap_or_default();
+                println!(
+                    "[Step {}] Selected token: {} (id: {})",
+                    step, selected_token_str, next_token
+                );
+            }
+
             tokens.push(next_token);
 
             if Some(next_token) == self.eos_token_id() {

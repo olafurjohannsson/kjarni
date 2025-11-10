@@ -3,7 +3,10 @@ use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{GpuTensor, blocks::cache::GpuUpdateCache}; // Ensure GpuUpdateCache is public
 use anyhow::Result;
 use ndarray::{Array, Array3, Array4, Ix3, Ix4, s};
+use ndarray_rand::rand_distr::Uniform;
 use std::sync::Arc;
+use ndarray_rand::RandomExt;
+
 
 // Helper to read a GPU tensor back to a generic ndarray for comparison.
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
@@ -52,7 +55,7 @@ async fn test_cache_symmetry() -> Result<()> {
     let new_k_gpu_1 = GpuTensor::from_ndarray(&context, &new_k_cpu_1)?;
     let new_v_gpu_1 = GpuTensor::from_ndarray(&context, &new_v_cpu_1)?;
     let mut encoder1 = context.device.create_command_encoder(&Default::default());
-    gpu_cache.update(&mut encoder1, layer_idx, &new_k_gpu_1, &new_v_gpu_1)?;
+    gpu_cache.update(&mut encoder1, layer_idx, &new_k_gpu_1, &new_v_gpu_1, gpu_cache.get_seq_length())?;
     context.queue.submit(Some(encoder1.finish()));
     gpu_cache.increment_len(prompt_len);
 
@@ -75,7 +78,8 @@ async fn test_cache_symmetry() -> Result<()> {
     let new_k_gpu_2 = GpuTensor::from_ndarray(&context, &new_k_cpu_2)?;
     let new_v_gpu_2 = GpuTensor::from_ndarray(&context, &new_v_cpu_2)?;
     let mut encoder2 = context.device.create_command_encoder(&Default::default());
-    gpu_cache.update(&mut encoder2, layer_idx, &new_k_gpu_2, &new_v_gpu_2)?;
+    
+    gpu_cache.update(&mut encoder2, layer_idx, &new_k_gpu_2, &new_v_gpu_2, gpu_cache.get_seq_length())?;
     context.queue.submit(Some(encoder2.finish()));
     gpu_cache.increment_len(gen_len);
 
@@ -208,4 +212,70 @@ fn test_cache_multiple_layers() {
     }
 
     println!("✓ Cache multiple layers test passed");
+}
+#[tokio::test]
+async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
+    // --- 1. Arrange ---
+    let context = Arc::new(WgpuContext::new().await);
+    let num_layers = 2;
+    let batch_size = 1;
+    let num_heads = 4;
+    let head_dim = 32;
+    let capacity = 16; // Max sequence length
+
+    let mut cache = GpuKVCache::new(
+        &context, num_layers, batch_size, num_heads, head_dim, capacity,
+    )?;
+
+    let new_seq_len = 3;
+    let position_offset = 5; // Write into the middle of the cache
+    let layer_idx_to_test = 1;
+
+    // Create dummy data on the CPU
+    let new_k_cpu = Array::random(
+        (batch_size, new_seq_len, num_heads * head_dim),
+        Uniform::new(-1.0, 1.0),
+    );
+    let new_v_cpu = Array::random(
+        (batch_size, new_seq_len, num_heads * head_dim),
+        Uniform::new(-1.0, 1.0),
+    );
+
+    // Upload to GPU
+    let new_k_gpu = GpuTensor::from_ndarray(&context, &new_k_cpu)?;
+    let new_v_gpu = GpuTensor::from_ndarray(&context, &new_v_cpu)?;
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+    // --- 2. Act ---
+    // Update the cache at the specified offset
+    cache.update(&mut encoder, layer_idx_to_test, &new_k_gpu, &new_v_gpu, position_offset)?;
+    context.queue.submit(Some(encoder.finish()));
+
+    // Get the full physical buffer and download it
+    let (k_cache_gpu, _) = cache.get(layer_idx_to_test).unwrap();
+    let k_cache_cpu_result: Array4<f32> = k_cache_gpu.to_ndarray_4d().await?;
+
+    // --- 3. Assert ---
+    // Reshape the original CPU data to match the cache layout for comparison
+    let new_k_cpu_reshaped = new_k_cpu
+        .into_shape((batch_size, new_seq_len, num_heads, head_dim))?
+        .permuted_axes([0, 2, 1, 3]);
+
+    // Check that the data was written to the correct slice
+    let updated_slice = k_cache_cpu_result.slice(s![
+        ..,
+        ..,
+        position_offset..position_offset + new_seq_len,
+        ..
+    ]);
+    assert_eq!(updated_slice, new_k_cpu_reshaped.as_standard_layout());
+
+    // Check that the data BEFORE the slice is still zero
+    let prefix_slice = k_cache_cpu_result.slice(s![.., .., 0..position_offset, ..]);
+    assert!(prefix_slice.iter().all(|&x| x == 0.0));
+
+    println!("✓ GPU cache update and readback test passed.");
+    Ok(())
 }

@@ -311,87 +311,88 @@ impl GpuAttention {
         attention_mask: &GpuTensor,
         weights: &GpuAttentionWeights,
         position_offset: usize,
-        logical_len: usize,
         temp: &mut TempStorage,
     ) -> GpuTensor {
-        println!("query: {:?}", query.shape());
-        println!("physk: {:?}", physical_k.shape());
-        println!("physv: {:?}", physical_v.shape());
         let (batch_heads, max_seq_len, head_dim) = physical_k.dims3();
         let (batch, query_len, _) = query.dims3();
 
-        let num_heads = batch_heads / batch; // Derive num_heads
+        let num_heads = batch_heads / batch;
 
         // 1. Project query
         let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
 
-        // 2. Split heads: [batch, query_len, hidden] -> [batch*heads, query_len, head_dim]
+        // 2. Split heads: [batch, query_len, hidden] -> [batch, heads, query_len, head_dim]
         let q_split = self.split_heads(encoder, &q_proj, temp);
-        println!("q_split: {:?}", q_split.shape());
-        let (b, h, s, d) = q_split.dims4(); // [B, H, S, D]
-        
-        let q_split_3d = q_split.view_as_3d(b * h, s, d).unwrap_or(q_split);
-        println!("q_split_3d: {:?}", q_split_3d.shape());
+        let (b, h, s, d) = q_split.dims4();
 
-        // Now q_split is [batch*heads, query_len, head_dim] ✅
-        let (batch_heads_q, _, _) = q_split_3d.dims3();
-        
-        assert_eq!(
-            batch_heads_q, batch_heads,
-            "Query and cache batch dimensions must match"
-        );
+        // View as 3D for BMM: [batch*heads, query_len, head_dim]
+        let q_split_3d = q_split.view_as_3d(b * h, s, d).unwrap();
 
         // 3. Q @ K^T with physical K
-        // Transpose K: [batch*heads, max_seq, head_dim] -> [batch*heads, head_dim, max_seq]
         let k_t = physical_k.permute(encoder, &self.permute, &[0, 2, 1]);
 
-        // Strides for transposed K: [batch*heads, head_dim, max_seq_len]
+        // println!(
+        //     "[Permute Debug] Before permute: {:?}, After permute: {:?}, Same buffer? {}",
+        //     physical_k.shape(),
+        //     k_t.shape(),
+        //     std::ptr::eq(physical_k.buffer(), k_t.buffer()) // Check if same GPU buffer
+        // );
+
         let k_strides = BStrides {
-            row: max_seq_len as u32, // To go down a row (head_dim), skip max_seq_len
-            col: 1,                  // To go across a col (seq), skip 1
+            row: max_seq_len as u32,
+            col: 1,
         };
 
-        // Output scores: [batch*heads, query_len, logical_len]
-        let scores = temp.get(vec![batch_heads, query_len, logical_len]);
+        // ✅ Create scores as 4D first: [batch, heads, query_len, logical_len]
+        let scores_4d = temp.get(vec![batch, num_heads, query_len, max_seq_len]);
+
+        // View as 3D for BMM: [batch*heads, query_len, logical_len]
+        let scores_3d = scores_4d
+            .view_as_3d(batch * num_heads, query_len, max_seq_len)
+            .unwrap();
 
         self.bmm.encode_with_b_strides(
-            encoder, &q_split_3d, //  Now [batch*heads, query_len, head_dim]
-            &k_t,     // [batch*heads, head_dim, max_seq_len]
-            &scores,  // [batch*heads, query_len, logical_len]
+            encoder,
+            &q_split_3d, // [batch*heads, query_len, head_dim]
+            &k_t,        // [batch*heads, head_dim, max_seq_len]
+            &scores_3d,  // [batch*heads, query_len, logical_len]
             k_strides,
         );
 
-      
-
-        // 4. Apply mask
+        // 4. Apply mask - use the 4D view!
         self.apply_mask.encode(
             encoder,
-            &scores,
+            &scores_4d, // ✅ 4D: [batch, heads, query_len, logical_len]
             attention_mask,
             true,
             position_offset as u32,
         );
 
-        // 5. Softmax
-        self.softmax.encode(encoder, &scores, self.scale_factor);
+        // 5. Softmax on 3D view
+        self.softmax.encode(encoder, &scores_3d, self.scale_factor);
 
         // 6. Scores @ V with physical V
         let v_strides = BStrides {
-            row: head_dim as u32, // To go down a row (seq), skip head_dim
-            col: 1,               // To go across a col (head_dim), skip 1
+            row: head_dim as u32,
+            col: 1,
         };
 
-        let context = temp.get(vec![batch_heads, query_len, head_dim]);
+        // Create context as 4D: [batch, heads, query_len, head_dim]
+        let context_4d = temp.get(vec![batch, num_heads, query_len, head_dim]);
+        let context_3d = context_4d
+            .view_as_3d(batch * num_heads, query_len, head_dim)
+            .unwrap();
 
         self.bmm.encode_with_b_strides(
-            encoder, &scores,    // [batch*heads, query_len, logical_len]
-            physical_v, // [batch*heads, max_seq_len, head_dim]
-            &context,   // [batch*heads, query_len, head_dim]
+            encoder,
+            &scores_3d,  // [batch*heads, query_len, logical_len]
+            physical_v,  // [batch*heads, max_seq_len, head_dim]
+            &context_3d, // [batch*heads, query_len, head_dim]
             v_strides,
         );
 
-        // 7. Merge heads and output projection
-        let context_merged = self.merge_heads(encoder, &context, temp);
+        // 7. Merge heads - use 4D view!
+        let context_merged = self.merge_heads(encoder, &context_4d, temp);
         self.project(
             encoder,
             &context_merged,

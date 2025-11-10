@@ -14,8 +14,9 @@ async fn main() -> anyhow::Result<()> {
     let generator = TextGenerator::from_registry(
         ModelType::DistilGpt2,
         None, 
-        Device::Cpu,
-        None, //Some(context), 
+        Device::Wgpu,
+        //None,
+        Some(context), 
     ).await?;
     println!("✓ Model loaded.");
 
@@ -28,7 +29,6 @@ async fn main() -> anyhow::Result<()> {
         max_new_tokens: Some(100),
         sampling_strategy: SamplingStrategy::Greedy,
         repetition_penalty: 1.1,
-        temperature: 0.7,
         ..Default::default()
     };
     

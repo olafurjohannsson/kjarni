@@ -78,27 +78,32 @@ impl GpuKVCache {
         &self,
         encoder: &mut CommandEncoder,
         layer_idx: usize,
-        new_k: &GpuTensor, // The raw projection output [B, S_new, H*D]
-        new_v: &GpuTensor, // The raw projection output [B, S_new, H*D]
+        new_k: &GpuTensor,
+        new_v: &GpuTensor,
+        position_offset: usize,
     ) -> Result<()> {
         if layer_idx >= self.k_tensors.len() {
             anyhow::bail!("Layer index {} out of bounds", layer_idx);
         }
-
+        if new_k.rank() != 3 || new_v.rank() != 3 {
+            return Err(anyhow::anyhow!(
+                "Input tensors for cache update must be rank 3"
+            ));
+        }
         let cache_k = &self.k_tensors[layer_idx];
         let cache_v = &self.v_tensors[layer_idx];
 
         self.update_kernel
-            .encode(encoder, new_k, new_v, cache_k, cache_v, self.seq_length);
+            .encode(encoder, new_k, new_v, cache_k, cache_v, position_offset); //self.seq_length);
 
         Ok(())
     }
 
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
-        if self.seq_length == 0 {
-            return None;
-        }
+        // if self.seq_length == 0 {
+        //     return None;
+        // }
         if layer_idx >= self.k_tensors.len() {
             return None;
         }

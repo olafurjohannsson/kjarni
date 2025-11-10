@@ -48,10 +48,15 @@ impl DecoderLayer {
         let residual = hidden_states.clone();
         let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
         let (new_k, new_v) = self.self_attn.project_kv(&ln1_out);
+        
+
         let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
             (
+                // ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
+                // ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
                 ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
                 ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
+                // (past_k.to_owned(), past_v.to_owned())
             )
         } else {
             (new_k.clone(), new_v.clone())

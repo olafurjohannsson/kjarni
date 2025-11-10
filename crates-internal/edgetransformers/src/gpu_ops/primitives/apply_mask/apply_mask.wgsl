@@ -30,19 +30,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let score_idx = head_batch_idx * uniforms.query_len * uniforms.key_stride + query_pos * uniforms.key_stride + key_pos;
     
     var should_mask = false;
-    
-    // 1. Apply causal mask
-    // This logic uses the LOGICAL length.
-    let absolute_query_pos = uniforms.position_offset + query_pos;
-    if (uniforms.is_causal != 0u && key_pos > absolute_query_pos) {
+    if (key_pos >= uniforms.logical_key_len) {
         should_mask = true;
-    }
-    
-    // 2. Apply padding mask
-    // This logic uses the PHYSICAL key_stride for indexing.
-    let mask_idx = batch_idx * uniforms.key_stride + key_pos;
-    if (mask[mask_idx] == 0.0) {
-        should_mask = true;
+    } else {
+        // Only if the key is within the logical boundary do we need to
+        // perform the more expensive causal and padding checks.
+
+        // 1. Apply causal mask
+        let absolute_query_pos = uniforms.position_offset + query_pos;
+        if (uniforms.is_causal != 0u && key_pos > absolute_query_pos) {
+            should_mask = true;
+        }
+        
+        // 2. Apply padding mask
+        let mask_idx = batch_idx * uniforms.key_stride + key_pos;
+        if (mask[mask_idx] == 0.0) {
+            should_mask = true;
+        }
     }
     
     if (should_mask) {

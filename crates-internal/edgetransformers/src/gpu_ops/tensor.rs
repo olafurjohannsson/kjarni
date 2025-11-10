@@ -2,7 +2,7 @@ use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate roo
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::{Result, anyhow};
-use ndarray::{Array, Array2, Array3, Dimension};
+use ndarray::{Array, Array2, Array3, Array4, Dimension};
 use std::fmt;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -296,6 +296,20 @@ impl GpuTensor {
         let data_slice: &[A] = bytemuck::cast_slice(&raw_data);
         Ok(Array3::from_shape_vec(
             (self.shape[0], self.shape[1], self.shape[2]),
+            data_slice.to_vec(),
+        )?)
+    }
+
+        /// Asynchronously reads the GpuTensor's data back to the CPU as an Array3.
+    pub async fn to_ndarray_4d<A>(&self) -> Result<Array4<A>>
+    where
+        A: bytemuck::Pod + Copy,
+    {
+        anyhow::ensure!(self.rank() == 4, "Tensor rank is not 4");
+        let raw_data = self.read_raw_data().await?;
+        let data_slice: &[A] = bytemuck::cast_slice(&raw_data);
+        Ok(Array4::from_shape_vec(
+            (self.shape[0], self.shape[1], self.shape[2], self.shape[3]),
             data_slice.to_vec(),
         )?)
     }

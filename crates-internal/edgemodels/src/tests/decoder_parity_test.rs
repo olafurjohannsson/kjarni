@@ -1,13 +1,20 @@
-
 use crate::sentence_encoder::SentenceEncoder;
-use crate::text_generation::{TextGenerator, Gpt2Config};
-use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
+use crate::text_generation::{Gpt2Config, TextGenerator};
 use anyhow::Result;
+use edgetransformers::cache::{Cache, CpuKVCache, GpuKVCache};
+use edgetransformers::decoder::TransformerDecoder;
+use edgetransformers::decoder::{CpuTransformerDecoder, GpuTransformerDecoder};
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::models::ModelType;
-use edgetransformers::models::{EncoderLanguageModel, LanguageModel, DecoderLanguageModel};
+use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
+use edgetransformers::models::{DecoderLanguageModel, EncoderLanguageModel, LanguageModel};
 use edgetransformers::traits::Device;
-use ndarray::Array2;
+use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput};
+use edgetransformers::weights::ModelWeights;
+use ndarray::{Array, Array2, Array3, Array4, s};
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
@@ -95,7 +102,6 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
     }
 }
 
-
 #[tokio::test]
 async fn test_full_text_generation_parity() -> Result<()> {
     println!("\n--- Full End-to-End CPU vs. GPU Parity Test ---");
@@ -111,42 +117,156 @@ async fn test_full_text_generation_parity() -> Result<()> {
 
     // --- 2. Generate with CPU Backend ---
     println!("\n[1/2] Generating text with CPU backend...");
-    
+
     // Create a TextGenerator for the CPU. No WgpuContext is needed.
-    let cpu_generator = TextGenerator::from_registry(
-        model_type,
-        None,
-        Device::Cpu,
-        None,
-    ).await?;
-    
+    let cpu_generator = TextGenerator::from_registry(model_type, None, Device::Cpu, None).await?;
+
     let cpu_generated_text = cpu_generator.generate(prompt, &config).await?;
     println!("- CPU Output: '{}'", cpu_generated_text);
-    
+
     // --- 3. Generate with GPU Backend ---
     println!("\n[2/2] Generating text with GPU backend...");
-    
+
     // Create a WgpuContext and a TextGenerator for the GPU.
     let context = Arc::new(edgetransformers::WgpuContext::new().await);
-    let gpu_generator = TextGenerator::from_registry(
-        model_type,
-        None, 
-        Device::Wgpu,
-        Some(context), 
-    ).await?;
-    
+    let gpu_generator =
+        TextGenerator::from_registry(model_type, None, Device::Wgpu, Some(context)).await?;
+
     let gpu_generated_text = gpu_generator.generate(prompt, &config).await?;
     println!("- GPU Output: '{}'", gpu_generated_text);
 
     // --- 4. Assert Equivalence ---
     println!("\nComparing outputs...");
     assert_eq!(
-        cpu_generated_text,
-        gpu_generated_text,
+        cpu_generated_text, gpu_generated_text,
         "The final generated text from CPU and GPU backends did not match!"
     );
 
     println!("\n✅ Full text generation parity test passed!");
-    
+
+    Ok(())
+}
+
+/// A helper function to compare two tensors for approximate equality.
+fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
+    assert_eq!(a.shape(), b.shape(), "Tensor shapes do not match");
+    for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
+        assert!(
+            (val_a - val_b).abs() < tolerance,
+            "Tensor values differ at index {}: a={}, b={}",
+            i,
+            val_a,
+            val_b
+        );
+    }
+    println!("✓ Tensors are approximately equal.");
+}
+
+/// This is the most critical test. It ensures that for a given set of weights
+/// and inputs, the CPU and GPU decoders produce nearly identical outputs.
+/// It tests both the priming (prompt processing) and a single generation step.
+#[tokio::test]
+async fn test_full_forward_pass_parity() -> Result<()> {
+    // --- 1. Arrange ---
+    let model_dir = PathBuf::from("/home/olafurj/.cache/edgegpt/distilgpt2/");
+    let weights = ModelWeights::new(&model_dir)?;
+    let mut config1 = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
+    config1.set_model_type("distilgpt2".to_string());
+    let config: Arc<dyn DecoderArchitecture + Send + Sync> = Arc::new(config1);
+    let context = Arc::new(WgpuContext::new().await);
+    let cpu_decoder =
+        TransformerDecoder::Cpu(CpuTransformerDecoder::new(&weights, config.clone(), None)?);
+    let gpu_decoder = TransformerDecoder::Gpu(GpuTransformerDecoder::new(
+        &weights,
+        config.clone(),
+        context.clone(),
+    )?);
+
+    let batch_size = 1;
+    let prompt_len = 11;
+    let max_len = 32;
+    let tolerance = 1e-3;
+
+    let input_ids = Array::random((batch_size, prompt_len), Uniform::new(0., 50256.))
+        .mapv(|v: f32| v.floor() as f32);
+
+    // --- 2. Act & Assert: Priming Pass (cache = None) ---
+    println!("\n--- Testing Priming Pass Parity ---");
+
+    let mut full_attention_mask = Array2::zeros((batch_size, max_len));
+    full_attention_mask
+        .slice_mut(s![.., 0..prompt_len])
+        .fill(1.0);
+
+    // When cache is None, BOTH decoders expect a mask sliced to the input length.
+    let sliced_mask_priming = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
+
+    let cpu_output_priming = cpu_decoder
+        .forward(&input_ids, &sliced_mask_priming, None)
+        .await?;
+    let gpu_output_priming = gpu_decoder
+        .forward(&input_ids, &sliced_mask_priming, None) // ✅ FIX 1: Use sliced mask
+        .await?;
+
+    assert_tensors_approx_equal(
+        &cpu_output_priming.last_hidden_state,
+        &gpu_output_priming.last_hidden_state,
+        tolerance,
+    );
+
+    // --- 3. Act & Assert: Generation Step (cache = Some) ---
+    println!("\n--- Testing Generation Step Parity ---");
+
+    // Set up caches
+    let mut cpu_cache = CpuKVCache::new(
+        config.num_hidden_layers(),
+        batch_size,
+        max_len,
+        config.hidden_size(),
+    );
+    let mut gpu_cache = GpuKVCache::new(
+        &context,
+        config.num_hidden_layers(),
+        batch_size,
+        config.num_attention_heads(),
+        config.hidden_size() / config.num_attention_heads(),
+        max_len,
+    )?;
+
+    // Manually "prime" the caches.
+    // The CPU still needs a sliced mask.
+    cpu_decoder
+        .forward(&input_ids, &sliced_mask_priming, Some(&mut cpu_cache))
+        .await?;
+
+    // ✅ FIX 2: When priming WITH a cache, the GPU expects the FULL physical mask.
+    gpu_decoder
+        .forward(&input_ids, &full_attention_mask, Some(&mut gpu_cache))
+        .await?;
+
+    // Prepare inputs for a single new token
+    let next_token_id = Array2::from_elem((batch_size, 1), 500.0f32);
+    let current_len = prompt_len;
+    full_attention_mask[[0, current_len]] = 1.0;
+
+    // For the actual generation step, CPU gets a sliced mask, GPU gets the full mask.
+    let cpu_mask_gen = full_attention_mask
+        .slice(s![.., 0..current_len + 1])
+        .to_owned();
+    let gpu_mask_gen = full_attention_mask.clone();
+
+    let cpu_output_gen = cpu_decoder
+        .forward(&next_token_id, &cpu_mask_gen, Some(&mut cpu_cache))
+        .await?;
+    let gpu_output_gen = gpu_decoder
+        .forward(&next_token_id, &gpu_mask_gen, Some(&mut gpu_cache))
+        .await?;
+
+    assert_tensors_approx_equal(
+        &cpu_output_gen.last_hidden_state,
+        &gpu_output_gen.last_hidden_state,
+        tolerance,
+    );
+
     Ok(())
 }

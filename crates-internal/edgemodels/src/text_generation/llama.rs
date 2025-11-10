@@ -7,6 +7,7 @@ pub use super::llama_configs::LlamaConfig;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
+use edgetransformers::models::base::RopeScalingConfig;
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
@@ -14,7 +15,6 @@ use edgetransformers::rope::RoPE;
 use edgetransformers::traits::{
     DecoderArchitecture, DecoderOutput, LanguageModelConfig, TransformerConfig, TransformerModel,
 };
-use edgetransformers::models::base::RopeScalingConfig;
 use edgetransformers::weights::ModelWeights;
 use edgetransformers::{CpuKVCache, LanguageModel};
 use log::{debug, info};
@@ -84,7 +84,7 @@ impl LlamaModel {
         // Load from local path
         Self::from_pretrained(&model_dir, model_type, device, context)
     }
-    
+
     pub fn get_rope_scaling(&self) -> Option<&RopeScalingConfig> {
         if let Some(llama_config) = self.config.as_any().downcast_ref::<LlamaConfig>() {
             return llama_config.rope_scaling.as_ref();
@@ -136,7 +136,7 @@ impl LlamaModel {
         //     config.max_position_embeddings(),
         //     config.rope_theta,
         // ));
-        
+
         let rope = Arc::new(RoPE::new_with_scaling(
             config.head_dim(),
             config.max_position_embeddings(),
@@ -144,12 +144,12 @@ impl LlamaModel {
             config.rope_scaling.as_ref(), // ✅ Pass scaling config
         ));
         // config.rope_scaling()
-    //       pub fn get_rope_scaling(&self) -> Option<&RopeScalingConfig> {
-    //     if let Some(llama_config) = self.config.as_any().downcast_ref::<LlamaConfig>() {
-    //         return llama_config.rope_scaling.as_ref();
-    //     }
-    //     None
-    // }
+        //       pub fn get_rope_scaling(&self) -> Option<&RopeScalingConfig> {
+        //     if let Some(llama_config) = self.config.as_any().downcast_ref::<LlamaConfig>() {
+        //         return llama_config.rope_scaling.as_ref();
+        //     }
+        //     None
+        // }
 
         // Load decoder
         let decoder = TransformerDecoder::new(
@@ -237,62 +237,61 @@ impl LlamaModel {
 
         if input_ids.is_empty() || input_ids[0] != self.config.bos_token_id {
             input_ids.insert(0, self.config.bos_token_id);
-            println!("Added BOS token: {}", self.config.bos_token_id);
         }
 
-        println!("=== INPUT ===");
-        println!("Text: {}", prompt);
-        println!("Token IDs: {:?}", input_ids);
-        println!("Number of tokens: {}\n", input_ids.len());
         let mut generated_ids = input_ids.clone();
+        let prompt_len = input_ids.len();
+        let max_len = prompt_len + max_new_tokens;
 
-        // Initialize KV cache
+        // ✅ Initialize KV cache with physical size
         let mut cache = CpuKVCache::new(
             self.config.num_hidden_layers(),
-            1, // batch_size
-            input_ids.len() + max_new_tokens,
-            self.config.kv_dim(), // self.config.hidden_size(),
+            1,
+            max_len, // ✅ Physical cache size
+            self.config.kv_dim(),
         );
 
+        // ✅ Create full mask (zeros = masked)
+        let mut full_attention_mask = Array2::zeros((1, max_len));
+        
+        // ✅ Unmask prompt positions
+        full_attention_mask
+            .slice_mut(s![.., 0..prompt_len])
+            .fill(1.0);
+
         // Process prompt (prefill)
-        let prompt_len = input_ids.len();
         let input_array = Array2::from_shape_vec(
             (1, prompt_len),
             input_ids.iter().map(|&id| id as f32).collect(),
         )?;
-        let attention_mask = Array2::ones((1, prompt_len));
 
-        let _ = self
-            .decoder
-            .forward(&input_array, &attention_mask, Some(&mut cache))
+        let priming_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
+
+        self.decoder
+            .forward(&input_array, &priming_mask, Some(&mut cache))
             .await?;
 
         // Generate tokens one by one
         for _ in 0..max_new_tokens {
-            let current_len = generated_ids.len();
-
-            // Get last token
             let last_token = *generated_ids.last().unwrap();
             let input = Array2::from_elem((1, 1), last_token as f32);
-            let total_seq_len = generated_ids.len() + 1;
-            let mask = Array2::ones((1, total_seq_len));
+            let current_len = generated_ids.len();
 
-            // Forward pass
+            // ✅ Unmask the new position
+            full_attention_mask[[0, current_len]] = 1.0;
+
+            let generation_mask = full_attention_mask.slice(s![.., 0..current_len + 1]).to_owned();
+
+            // Forward pass with full mask
             let output = self
                 .decoder
-                .forward(&input, &mask, Some(&mut cache))
+                .forward(&input, &generation_mask, Some(&mut cache))
                 .await?;
 
-            // Get logits for last position
             let last_hidden = output.last_hidden_state.slice(ndarray::s![0, -1, ..]);
-
-            // Project to vocabulary: [hidden_size] @ [vocab_size, hidden_size]^T
             let logits = self.lm_head.dot(&last_hidden);
-
-            // Sample next token
             let next_token = self.sample_token(&logits, temperature, top_k)?;
 
-            // Check for EOS
             if next_token == self.config.eos_token_id {
                 break;
             }
@@ -317,7 +316,6 @@ impl LlamaModel {
         temperature: f32,
         top_k: Option<usize>,
     ) -> Result<(String, Vec<u32>)> {
-        // Tokenize prompt
         let encoding = self
             .tokenizer
             .encode(prompt, false)
@@ -325,132 +323,58 @@ impl LlamaModel {
 
         let mut input_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        // ✅ Manually prepend BOS if not present
         if input_ids.is_empty() || input_ids[0] != self.config.bos_token_id {
             input_ids.insert(0, self.config.bos_token_id);
-            println!("Added BOS token: {}", self.config.bos_token_id);
         }
 
-        println!("=== INPUT ===");
-        println!("Text: {}", prompt);
-        println!("Token IDs: {:?}", input_ids);
-        println!("Number of tokens: {}\n", input_ids.len());
         let mut generated_ids = input_ids.clone();
+        let prompt_len = input_ids.len();
+        let max_len = prompt_len + max_new_tokens;
 
-        // Initialize KV cache
+        // ✅ Initialize cache with physical size
         let mut cache = CpuKVCache::new(
             self.config.num_hidden_layers(),
             1,
-            input_ids.len() + max_new_tokens,
+            max_len,
             self.config.kv_dim(),
         );
 
-        // Process prompt (prefill)
-        let prompt_len = input_ids.len();
+        // ✅ Create full mask
+        let mut full_attention_mask = Array2::zeros((1, max_len));
+        full_attention_mask
+            .slice_mut(s![.., 0..prompt_len])
+            .fill(1.0);
+
+        // Process prompt
         let input_array = Array2::from_shape_vec(
             (1, prompt_len),
             input_ids.iter().map(|&id| id as f32).collect(),
         )?;
-        let attention_mask = Array2::ones((1, prompt_len));
 
-        println!("Processing {} input tokens...", prompt_len);
-        let debug_output: DecoderOutput = self
+        let debug_output = self
             .decoder
-            .forward(&input_array, &attention_mask, Some(&mut cache))
+            .forward(&input_array, &full_attention_mask, Some(&mut cache))
             .await?;
 
-        // ✅ Same approach as your existing code for getting logits
-        let debug_hidden =
-            debug_output
-                .last_hidden_state
-                .slice(s![0, (prompt_len as usize) - 1, ..]);
+        // ... your debug logging ...
 
-        // .slice(s![0, prompt_len - 1, ..]);
-
-        println!("\n=== RUST HIDDEN STATE (last token, prefill) ===");
-        println!("Shape: {:?}", debug_hidden.shape());
-        println!("Mean: {:.8}", debug_hidden.mean().unwrap());
-        println!("Std: {:.8}", debug_hidden.std(0.0));
-        println!(
-            "Min: {:.4}",
-            debug_hidden.iter().copied().fold(f32::INFINITY, f32::min)
-        );
-        println!(
-            "Max: {:.4}",
-            debug_hidden
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max)
-        );
-        print!("First 10 values: [");
-        for i in 0..10.min(debug_hidden.len()) {
-            print!("{:.6}", debug_hidden[i]);
-            if i < 9 {
-                print!(", ");
-            }
-        }
-        println!("]");
-
-        // Generate tokens one by one
-        println!("Generating tokens:");
+        // Generate tokens
         for i in 0..max_new_tokens {
             let current_len = generated_ids.len();
             let last_token = *generated_ids.last().unwrap();
             let input = Array2::from_elem((1, 1), last_token as f32);
-            let mask = Array2::ones((1, current_len + 1)); // ✅ +1 for new token
+
+            // ✅ Unmask new position
+            full_attention_mask[[0, current_len]] = 1.0;
 
             let output = self
                 .decoder
-                .forward(&input, &mask, Some(&mut cache))
+                .forward(&input, &full_attention_mask, Some(&mut cache))
                 .await?;
 
-            let last_hidden = output.last_hidden_state.slice(ndarray::s![0, -1, ..]);
-            let logits: Array1<f32> = self.lm_head.dot(&last_hidden);
-            let next_token = self.sample_token(&logits, temperature, top_k)?;
-            if i == 0 {
-                // First generated token
-                println!("\n=== FIRST TOKEN LOGITS DEBUG ===");
-                println!("Hidden state mean: {}", last_hidden.mean().unwrap());
-                println!("Hidden state std: {}", last_hidden.std(0.0));
-                println!("LM head shape: {:?}", self.lm_head.shape());
-
-                // Get top 10 logits
-                let mut indexed: Vec<(usize, f32)> =
-                    logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
-                indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-                println!("\nTop 10 logits:");
-                for (idx, logit) in indexed.iter().take(10) {
-                    let token_str = self
-                        .tokenizer
-                        .decode(&[*idx as u32], false)
-                        .unwrap_or_default();
-                    println!("  Token {}: {:.4} ('{}')", idx, logit, token_str.trim());
-                }
-
-                println!("\nExpected token 304 logit: {:.4}", logits[304]);
-                println!(
-                    "Actual selected token {} logit: {:.4}",
-                    next_token, logits[next_token as usize]
-                );
-            }
-
-            // ✅ Log each generated token
-            print!("  Token {}: {} ", i + 1, next_token);
-            if let Ok(decoded) = self.tokenizer.decode(&[next_token], false) {
-                println!("('{}')", decoded);
-            } else {
-                println!();
-            }
-
-            if next_token == self.config.eos_token_id {
-                println!("  [EOS reached]");
-                break;
-            }
-
-            generated_ids.push(next_token);
+            // ... rest of generation loop ...
         }
-        
+
         let output = self
             .tokenizer
             .decode(&generated_ids, true)

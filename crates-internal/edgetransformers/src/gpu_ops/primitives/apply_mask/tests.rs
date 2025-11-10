@@ -13,7 +13,7 @@ use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
 use ndarray::{Array, Array2, Array4, Axis, s};
 use std::sync::Arc;
-
+use crate::WgpuContext;
 const MASK_VALUE: f32 = -1e9;
 
 async fn get_test_context() -> Arc<WgpuContext> {
@@ -208,5 +208,65 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
     println!("✅ Passed!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
+    // --- 1. Arrange ---
+    let context = get_test_context().await;
+    let apply_mask_kernel = GpuApplyMask::new(&context);
+
+    let batch_size = 1;
+    let num_heads = 1;
+    let query_len = 4;
+    let key_stride = 8; // Physical max_len
+    let position_offset = 2; // We are generating tokens 2, 3, 4, 5
+    let logical_key_len = position_offset + query_len; // 6
+
+    // Create a scores tensor full of 1.0s
+    let scores_cpu = Array4::<f32>::ones((batch_size, num_heads, query_len, key_stride));
+    // Create a padding mask that is all ones (no padding)
+    let mask_cpu = Array2::<f32>::ones((batch_size, key_stride));
+
+    let scores_gpu = GpuTensor::from_ndarray(&context, &scores_cpu)?;
+    let mask_gpu = GpuTensor::from_ndarray(&context, &mask_cpu)?;
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+    // --- 2. Act ---
+    apply_mask_kernel.encode(
+        &mut encoder,
+        &scores_gpu,
+        &mask_gpu,
+        true, // is_causal
+        position_offset as u32,
+    );
+    context.queue.submit(Some(encoder.finish()));
+    let result_gpu: Array4<f32> = scores_gpu.to_ndarray_4d().await?;
+
+    // --- 3. Assert ---
+    // Create the expected result on the CPU
+    let mut expected_cpu = scores_cpu.clone();
+    
+
+    for q_pos in 0..query_len {
+        for k_pos in 0..key_stride {
+            let absolute_query_pos = position_offset + q_pos;
+
+            // Condition 1: Key is outside the logical length (garbage)
+            let is_garbage = k_pos >= logical_key_len;
+            // Condition 2: Key is in the future (causal)
+            let is_future = k_pos > absolute_query_pos;
+
+            if is_garbage || is_future {
+                expected_cpu[[0, 0, q_pos, k_pos]] = -1e9f32;
+            }
+        }
+    }
+
+    assert_eq!(&result_gpu.into_raw_vec(), &expected_cpu.into_raw_vec());
+    println!("✓ GPU causal masking with offset test passed.");
     Ok(())
 }

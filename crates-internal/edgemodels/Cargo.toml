@@ -32,6 +32,7 @@ tokenizers = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
 log = { workspace = true }
+ndarray-rand = { workspace = true }
 lru = "0.12.3"
 
 

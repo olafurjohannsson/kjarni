@@ -47,7 +47,36 @@ pub fn apply_repetition_penalty(
     }
     logits
 }
-
+pub fn apply_repetition_penalty2(
+    mut logits: Array1<f32>,
+    generated_ids: &[u32],
+    penalty: f32,
+) -> Array1<f32> {
+    if penalty == 1.0 {
+        return logits;
+    }
+    
+    // Count occurrences of each token
+    let mut token_counts: HashMap<u32, usize> = HashMap::new();
+    for &id in generated_ids {
+        *token_counts.entry(id).or_insert(0) += 1;
+    }
+    
+    for (&id, &count) in &token_counts {
+        let idx = id as usize;
+        if idx >= logits.len() {
+            continue;
+        }
+        
+        // Apply penalty once per unique token (not per occurrence)
+        if logits[idx] < 0.0 {
+            logits[idx] *= penalty;
+        } else {
+            logits[idx] /= penalty;
+        }
+    }
+    logits
+}
 /// Efficient no-repeat n-gram blocking for generation.
 ///
 /// This prevents generating any n-gram that has already appeared in the sequence.
