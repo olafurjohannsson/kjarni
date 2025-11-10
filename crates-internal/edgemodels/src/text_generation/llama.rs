@@ -253,7 +253,7 @@ impl LlamaModel {
 
         // ✅ Create full mask (zeros = masked)
         let mut full_attention_mask = Array2::zeros((1, max_len));
-        
+
         // ✅ Unmask prompt positions
         full_attention_mask
             .slice_mut(s![.., 0..prompt_len])
@@ -280,7 +280,9 @@ impl LlamaModel {
             // ✅ Unmask the new position
             full_attention_mask[[0, current_len]] = 1.0;
 
-            let generation_mask = full_attention_mask.slice(s![.., 0..current_len + 1]).to_owned();
+            let generation_mask = full_attention_mask
+                .slice(s![.., 0..current_len + 1])
+                .to_owned();
 
             // Forward pass with full mask
             let output = self
@@ -350,10 +352,10 @@ impl LlamaModel {
             (1, prompt_len),
             input_ids.iter().map(|&id| id as f32).collect(),
         )?;
-
+        let priming_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
         let debug_output = self
             .decoder
-            .forward(&input_array, &full_attention_mask, Some(&mut cache))
+            .forward(&input_array, &priming_mask, Some(&mut cache))
             .await?;
 
         // ... your debug logging ...
@@ -366,13 +368,23 @@ impl LlamaModel {
 
             // ✅ Unmask new position
             full_attention_mask[[0, current_len]] = 1.0;
-
+            let generation_mask = full_attention_mask
+                .slice(s![.., 0..current_len + 1])
+                .to_owned();
             let output = self
                 .decoder
-                .forward(&input, &full_attention_mask, Some(&mut cache))
+                .forward(&input, &generation_mask, Some(&mut cache))
                 .await?;
 
-            // ... rest of generation loop ...
+            let last_hidden = output.last_hidden_state.slice(ndarray::s![0, -1, ..]);
+            let logits = self.lm_head.dot(&last_hidden);
+            let next_token = self.sample_token(&logits, temperature, top_k)?;
+
+            if next_token == self.config.eos_token_id {
+                break;
+            }
+
+            generated_ids.push(next_token);
         }
 
         let output = self

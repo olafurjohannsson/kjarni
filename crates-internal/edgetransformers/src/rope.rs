@@ -16,13 +16,13 @@ use std::f32::consts::PI;
 /// Rotary Position Embeddings
 pub struct RoPE {
     /// Cosine cache: [max_seq_len, head_dim]
-    cos_cache: Array2<f32>,
+    pub cos_cache: Array2<f32>,
     /// Sine cache: [max_seq_len, head_dim]
-    sin_cache: Array2<f32>,
+    pub sin_cache: Array2<f32>,
     /// Dimension of each attention head
-    head_dim: usize,
+    pub head_dim: usize,
     /// Base value for computing rotation frequencies (typically 10000.0)
-    theta: f32,
+    pub theta: f32,
 }
 
 impl RoPE {
