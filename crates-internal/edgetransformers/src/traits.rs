@@ -184,13 +184,41 @@ pub trait LanguageModelConfig: TransformerConfig {
     /// Size of the intermediate (feedforward) layer
     fn intermediate_size(&self) -> usize;
 
-    /// If we should transpose the feedforward weighs
-    /// The most common convention and vajority of models do this and tre-transpose the weights in FeedForward::new
-    /// The older GPT2 architecture doesn't do this
+    /// The number of key/value heads (for Grouped-Query Attention).
+    /// Defaults to the number of attention heads for standard multi-head attention.
+    fn num_key_value_heads(&self) -> usize {
+        self.num_attention_heads()
+    }
+
+    /// The total dimensionality of the key/value projections.
+    fn kv_dim(&self) -> usize {
+        let head_dim = self.hidden_size() / self.num_attention_heads();
+        self.num_key_value_heads() * head_dim
+    }
+
+    /// The Beginning-Of-Sequence token ID, if specified by the model config.
+    fn bos_token_id(&self) -> Option<u32> {
+        None
+    }
+
+    /// The End-Of-Sequence token ID, if specified by the model config.
+    fn eos_token_id(&self) -> Option<u32> {
+        None
+    }
+
+    /// The Padding token ID, if specified by the model config.
+    fn pad_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn sliding_window_size(&self) -> Option<usize> {
+        None // Default to no sliding window
+    }
+    /// If we should transpose the feedforward weights.
     fn transpose_ffn_weights(&self) -> bool {
         false
     }
 
+    /// If we should transpose the attention weights.
     fn transpose_attention_weights(&self) -> bool {
         false
     }
@@ -233,15 +261,13 @@ pub trait DecoderArchitecture: LanguageModelConfig {
     fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 
     fn get_layer_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
-    fn num_key_value_heads(&self) -> usize {
-        self.num_attention_heads() // Default: same as query heads
-    }
+
     fn as_any(&self) -> &dyn Any;
-    /// KV projection dimension
-    fn kv_dim(&self) -> usize {
-        let head_dim = self.hidden_size() / self.num_attention_heads();
-        self.num_key_value_heads() * head_dim
-    }
+    // KV projection dimension
+    // fn kv_dim(&self) -> usize {
+    //     let head_dim = self.hidden_size() / self.num_attention_heads();
+    //     self.num_key_value_heads() * head_dim
+    // }
 }
 
 /// A container for the concrete tensor names of an attention block in a transformer layer.
@@ -345,7 +371,7 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
     fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 
-    fn eos_token_id(&self) -> u32;
+    // fn eos_token_id(&self) -> u32;
 
     /// Returns the token ID that should begin the decoder's generation sequence.
     fn decoder_start_token_id(&self) -> u32;

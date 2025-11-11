@@ -61,58 +61,26 @@ impl SwiGluFeedForward {
     }
 
     /// Forward pass for 3D input [batch, seq_len, hidden_size]
-    ///
-    /// # Formula
-    /// 1. gate_out = x @ gate_weight         [batch, seq, intermediate]
-    /// 2. up_out = x @ up_weight             [batch, seq, intermediate]
-    /// 3. activated = SiLU(gate_out) ⊙ up_out [batch, seq, intermediate]
-    /// 4. output = activated @ down_weight    [batch, seq, hidden]
     pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
-        let batch_size = hidden.shape()[0];
-        let seq_len = hidden.shape()[1];
-
-        // 1. Gate projection
+        // 1. Gate and Up projections
         let gate_out = matmul_3d_2d(hidden, &self.gate_weight);
-
-        // 2. Up projection
         let up_out = matmul_3d_2d(hidden, &self.up_weight);
 
-        // 3. Apply SwiGLU: SiLU(gate) * up
-        let mut activated = Array3::zeros((batch_size, seq_len, self.gate_weight.shape()[1]));
-        for b in 0..batch_size {
-            for s in 0..seq_len {
-                for i in 0..self.gate_weight.shape()[1] {
-                    let gate_val = gate_out[[b, s, i]];
-                    let up_val = up_out[[b, s, i]];
-                    // SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
-                    let silu = gate_val / (1.0 + (-gate_val).exp());
-                    activated[[b, s, i]] = silu * up_val;
-                }
-            }
-        }
+        // 2. ✅ CORRECTED: Apply SwiGLU activation in a vectorized way
+        let activated = silu_3d(&gate_out) * up_out;
 
-        // 4. Down projection
+        // 3. Down projection
         Ok(matmul_3d_2d(&activated, &self.down_weight))
     }
 
     /// Forward pass for 2D input [batch, hidden_size]
     pub fn forward_2d(&self, hidden: &Array2<f32>) -> Array2<f32> {
-        let batch_size = hidden.shape()[0];
-
         // 1. Gate and up projections
         let gate_out = hidden.dot(&self.gate_weight);
         let up_out = hidden.dot(&self.up_weight);
 
-        // 2. SwiGLU activation
-        let mut activated = Array2::zeros((batch_size, self.gate_weight.shape()[1]));
-        for b in 0..batch_size {
-            for i in 0..self.gate_weight.shape()[1] {
-                let gate_val = gate_out[[b, i]];
-                let up_val = up_out[[b, i]];
-                let silu = gate_val / (1.0 + (-gate_val).exp());
-                activated[[b, i]] = silu * up_val;
-            }
-        }
+        // 2. ✅ CORRECTED: Apply SwiGLU activation in a vectorized way
+        let activated = silu_2d(&gate_out) * up_out;
 
         // 3. Down projection
         activated.dot(&self.down_weight)

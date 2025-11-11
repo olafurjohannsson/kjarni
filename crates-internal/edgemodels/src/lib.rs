@@ -8,7 +8,8 @@ pub mod seq2seq;
 pub mod text_generation;
 pub mod sentence_encoder;
 pub mod cross_encoder;
-mod generation;
+mod generation2;
+pub mod generation;
 
 pub use sentence_encoder::SentenceEncoder;
 pub use cross_encoder::CrossEncoder;

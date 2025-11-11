@@ -1,4 +1,4 @@
-use crate::generation::{
+use crate::generation2::{
     log_softmax_1d, 
 };
 use anyhow::{Result, anyhow};
@@ -205,7 +205,7 @@ impl Seq2SeqLanguageModel for Seq2SeqModel {
     ) -> Result<String> {
         println!("generate_from_encoding");
         let batch_size = encoder_output.last_hidden_state.shape()[0];
-        let eos_token_id = self.config.eos_token_id();
+        let eos_token_id = self.config.eos_token_id().unwrap_or(128001);
         let decoder_start_token_id = self.config.decoder_start_token_id();
 
         // 1. Initialize Beams

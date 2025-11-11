@@ -6,8 +6,8 @@ use edgetransformers::traits::{
     DecoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerDecoderAttentionNames,
     LayerFeedForwardNames, TransformerConfig,
 };
-use std::any::Any;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 
 /// Configuration for LLaMA models
 ///
@@ -232,6 +232,21 @@ impl LanguageModelConfig for LlamaConfig {
     fn transpose_ffn_weights(&self) -> bool {
         true // LLaMA uses same convention as other transformers
     }
+    fn num_key_value_heads(&self) -> usize {
+        self.num_key_value_heads
+    }
+
+    fn bos_token_id(&self) -> Option<u32> {
+        Some(self.bos_token_id)
+    }
+
+    fn eos_token_id(&self) -> Option<u32> {
+        Some(self.eos_token_id)
+    }
+
+    fn pad_token_id(&self) -> Option<u32> {
+        self.pad_token_id
+    }
 }
 
 impl TransformerConfig for LlamaConfig {
@@ -271,9 +286,9 @@ impl DecoderArchitecture for LlamaConfig {
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
-    fn num_key_value_heads(&self) -> usize {
-        self.num_key_value_heads // 8 for LLaMA 3.2 1B
-    }
+    // fn num_key_value_heads(&self) -> usize {
+    //     self.num_key_value_heads // 8 for LLaMA 3.2 1B
+    // }
     fn get_attention_names(&self, _layer_index: usize) -> LayerDecoderAttentionNames {
         LayerDecoderAttentionNames {
             qkv_weight: String::new(),

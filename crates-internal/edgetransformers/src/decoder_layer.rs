@@ -45,39 +45,67 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        let residual = hidden_states.clone();
-        let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
-        let (new_k, new_v) = self.self_attn.project_kv(&ln1_out);
+        // let residual = hidden_states.clone();
+        // let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
+        // let (new_k, new_v) = self.self_attn.project_kv(&ln1_out);
         
 
-        let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
-            (
-                // ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
-                // ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
-                ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
-                ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
-                // (past_k.to_owned(), past_v.to_owned())
-            )
-        } else {
-            (new_k.clone(), new_v.clone())
-        };
-        let attn_out = self.self_attn.attend(
-            &ln1_out,
-            &full_k,
-            &full_v,
-            Some(attention_mask),
-            true, // is_causal is always true for a DecoderLayer
-            position_offset,
-            self.rope.as_deref(),
-        )?;
+        // let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
+        //     (
+        //         // ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
+        //         // ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
+        //         ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
+        //         ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
+        //         // (past_k.to_owned(), past_v.to_owned())
+        //     )
+        // } else {
+        //     (new_k.clone(), new_v.clone())
+        // };
+        // let attn_out = self.self_attn.attend(
+        //     &ln1_out,
+        //     &full_k,
+        //     &full_v,
+        //     Some(attention_mask),
+        //     true, // is_causal is always true for a DecoderLayer
+        //     position_offset,
+        //     self.rope.as_deref(),
+        // )?;
 
-        // First residual connection.
-        let attn_block_output = residual + attn_out;
-        let residual = attn_block_output.clone();
-        let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
-        let ffn_out = self.feedforward.forward(&ln2_out)?;
-        let final_output = residual + ffn_out;
-        Ok((final_output, (new_k, new_v)))
+        // // First residual connection.
+        // let attn_block_output = residual + attn_out;
+        // let residual = attn_block_output.clone();
+        // let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
+        // let ffn_out = self.feedforward.forward(&ln2_out)?;
+        // let final_output = residual + ffn_out;
+        // Ok((final_output, (new_k, new_v)))
+            let residual = hidden_states.clone();
+    
+    // 1. Normalize the input. This is the input to the Q, K, and V projections.
+    let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
+
+    // 2. ✅ UNIFIED LOGIC: Always call `forward_with_cache`.
+    // This function now correctly handles everything: projections, RoPE, and caching logic.
+    // It works for BOTH the prefill step (past_kv=None) and generation steps.
+    let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
+        &ln1_out, // The query source is the normalized hidden state
+        None,     // For self-attention, key_value source is the same
+        Some(attention_mask),
+        true, // is_causal is always true for a DecoderLayer
+        past_kv,
+        self.rope.as_deref(),
+    )?;
+
+    // 3. First residual connection.
+    let attn_block_output = residual + attn_out;
+
+    // 4. FFN block (this part is correct)
+    let residual = attn_block_output.clone();
+    let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
+    let ffn_out = self.feedforward.forward(&ln2_out)?;
+    let final_output = residual + ffn_out;
+
+    // 5. Return the final output and the new K/V pair to be cached by the caller.
+    Ok((final_output, (new_k, new_v)))
     }
     fn forward_postnorm(
         &self,

@@ -98,9 +98,9 @@ impl EncoderDecoderArchitecture for BartConfig {
         Some("final_logits_bias")
     }
 
-    fn eos_token_id(&self) -> u32 {
-        self.eos_token_id
-    }
+    // fn eos_token_id(&self) -> u32 {
+    //     self.eos_token_id
+    // }
     fn decoder_start_token_id(&self) -> u32 {
         self.decoder_start_token_id
     }

@@ -33,6 +33,9 @@ rayon = { workspace = true }
 reqwest = { workspace = true }
 log = { workspace = true }
 ndarray-rand = { workspace = true }
+futures-util = { workspace = true }
+futures-core = { workspace = true }
+async-stream = { workspace = true }
 lru = "0.12.3"
 
 

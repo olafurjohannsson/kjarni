@@ -311,89 +311,128 @@ impl LlamaModel {
     }
 
     // DEBUG
-    pub async fn generate_with_ids(
-        &self,
-        prompt: &str,
-        max_new_tokens: usize,
-        temperature: f32,
-        top_k: Option<usize>,
-    ) -> Result<(String, Vec<u32>)> {
-        let encoding = self
-            .tokenizer
-            .encode(prompt, false)
-            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+pub async fn generate_with_ids(
+    &self,
+    prompt: &str,
+    max_new_tokens: usize,
+    temperature: f32,
+    top_k: Option<usize>,
+) -> Result<(String, Vec<u32>)> {
+    // --- 1. Tokenization and Setup ---
+    let encoding = self
+        .tokenizer
+        .encode(prompt, false)
+        .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        let mut input_ids: Vec<u32> = encoding.get_ids().to_vec();
+    let mut input_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        if input_ids.is_empty() || input_ids[0] != self.config.bos_token_id {
-            input_ids.insert(0, self.config.bos_token_id);
-        }
+    if input_ids.is_empty() || input_ids.get(0) != Some(&self.config.bos_token_id) {
+        input_ids.insert(0, self.config.bos_token_id);
+    }
 
-        let mut generated_ids = input_ids.clone();
-        let prompt_len = input_ids.len();
-        let max_len = prompt_len + max_new_tokens;
+    let mut generated_ids = input_ids.clone();
+    let prompt_len = generated_ids.len();
+    let max_len = prompt_len + max_new_tokens;
 
-        // ✅ Initialize cache with physical size
-        let mut cache = CpuKVCache::new(
-            self.config.num_hidden_layers(),
-            1,
-            max_len,
-            self.config.kv_dim(),
-        );
+    let mut cache = CpuKVCache::new(
+        self.config.num_hidden_layers(),
+        1,
+        max_len,
+        self.config.kv_dim(),
+    );
 
-        // ✅ Create full mask
-        let mut full_attention_mask = Array2::zeros((1, max_len));
+    let mut full_attention_mask = Array2::zeros((1, max_len));
+    
+    // --- 2. Prefill Pass & First Token Generation ---
+    if prompt_len > 0 {
         full_attention_mask
             .slice_mut(s![.., 0..prompt_len])
             .fill(1.0);
-
-        // Process prompt
+            
         let input_array = Array2::from_shape_vec(
             (1, prompt_len),
             input_ids.iter().map(|&id| id as f32).collect(),
         )?;
         let priming_mask = full_attention_mask.slice(s![.., 0..prompt_len]).to_owned();
-        let debug_output = self
+
+        println!("\n--- RUST PREFILL STEP ---");
+        println!("Prompt length: {}", prompt_len);
+        println!("Cache length BEFORE forward: {}", cache.get_seq_length());
+
+        let prefill_output = self
             .decoder
             .forward(&input_array, &priming_mask, Some(&mut cache))
             .await?;
 
-        // ... your debug logging ...
-
-        // Generate tokens
-        for i in 0..max_new_tokens {
-            let current_len = generated_ids.len();
-            let last_token = *generated_ids.last().unwrap();
-            let input = Array2::from_elem((1, 1), last_token as f32);
-
-            // ✅ Unmask new position
-            full_attention_mask[[0, current_len]] = 1.0;
-            let generation_mask = full_attention_mask
-                .slice(s![.., 0..current_len + 1])
-                .to_owned();
-            let output = self
-                .decoder
-                .forward(&input, &generation_mask, Some(&mut cache))
-                .await?;
-
-            let last_hidden = output.last_hidden_state.slice(ndarray::s![0, -1, ..]);
-            let logits = self.lm_head.dot(&last_hidden);
-            let next_token = self.sample_token(&logits, temperature, top_k)?;
-
-            if next_token == self.config.eos_token_id {
-                break;
-            }
-
-            generated_ids.push(next_token);
+        println!("Cache length AFTER forward: {}", cache.get_seq_length());
+        
+        // Generate the first token using the hidden state of the last prompt token
+        let last_hidden = prefill_output.last_hidden_state.slice(s![0, -1, ..]);
+        let logits = self.lm_head.dot(&last_hidden);
+        let first_token = self.sample_token(&logits, temperature, top_k)?;
+        
+        println!("Selected first token: {}", first_token);
+        
+        if first_token == self.config.eos_token_id {
+            let output = self.tokenizer.decode(&generated_ids, true).map_err(|e| anyhow!("Decoding failed: {}", e))?;
+            return Ok((output, generated_ids));
         }
+        
+        generated_ids.push(first_token);
+    }
+    
+    // --- 3. Autoregressive Generation Loop ---
+    // Loop for the REMAINING (max_new_tokens - 1) tokens
+    for i in 1..max_new_tokens {
+        let current_len = generated_ids.len();
+        let last_token = *generated_ids.last().unwrap();
+        let input = Array2::from_elem((1, 1), last_token as f32);
+
+        println!("\n--- RUST GEN STEP {} ---", i + 1);
+        println!("Current total length: {}", current_len);
+        println!("Processing token ID: {}", last_token);
+        println!("Cache length BEFORE forward: {}", cache.get_seq_length());
+
+        // ✅ CRITICAL FIX: Unmask the position for the token we are ABOUT to process.
+        // `current_len - 1` is the index of `last_token`.
+        full_attention_mask[[0, current_len - 1]] = 1.0;
+        
+        // Create the mask for this step. Its length will be `current_len`.
+        let generation_mask = full_attention_mask
+            .slice(s![.., 0..current_len])
+            .to_owned();
+            
+        println!("Mask shape for this step: {:?}", generation_mask.shape());
 
         let output = self
-            .tokenizer
-            .decode(&generated_ids, true)
-            .map_err(|e| anyhow!("Decoding failed: {}", e))?;
+            .decoder
+            .forward(&input, &generation_mask, Some(&mut cache))
+            .await?;
 
-        Ok((output, generated_ids))
+        println!("Cache length AFTER forward: {}", cache.get_seq_length());
+
+        // The output hidden state has shape [1, 1, hidden_size], so we slice the middle dimension at 0.
+        let last_hidden = output.last_hidden_state.slice(s![0, 0, ..]);
+        let logits = self.lm_head.dot(&last_hidden);
+        let next_token = self.sample_token(&logits, temperature, top_k)?;
+
+        println!("Selected next token: {}", next_token);
+
+        if next_token == self.config.eos_token_id {
+            break;
+        }
+
+        generated_ids.push(next_token);
     }
+
+    // --- 4. Decode ---
+    let output_text = self
+        .tokenizer
+        .decode(&generated_ids, true)
+        .map_err(|e| anyhow!("Decoding failed: {}", e))?;
+
+    Ok((output_text, generated_ids))
+}
     // DEBUG
 
     /// Generate with greedy decoding (deterministic)

@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     
     // ✅ Generate with logging
     let (generated_text, generated_ids) = generator.generate_with_ids(prompt, 5, 0.0, None).await?;
+    
 
     println!("=== RUST OUTPUT ===");
     println!("{}", generated_text);

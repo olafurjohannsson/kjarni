@@ -16,38 +16,49 @@ struct RoPEUniforms {
 
 @compute @workgroup_size(16, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let dim_pair_idx = global_id.x; // Index for the dimension pair (0 to head_dim/2 - 1)
-    let seq_idx = global_id.y;      // Index in the sequence (0 to seq_len - 1)
-    let head_batch_idx = global_id.z; // Flattened (batch * num_heads) index
+    // Each thread now handles one dimension in the FIRST HALF of the head_dim.
+    let dim_idx = global_id.x;
+    let seq_idx = global_id.y;
+    let head_batch_idx = global_id.z;
+
+    let half_dim = uniforms.head_dim / 2u;
 
     // Bounds check
-    if (dim_pair_idx >= uniforms.head_dim / 2u || seq_idx >= uniforms.seq_len || head_batch_idx >= uniforms.batch_size * uniforms.num_heads) {
+    if (dim_idx >= half_dim || seq_idx >= uniforms.seq_len || head_batch_idx >= uniforms.batch_size * uniforms.num_heads) {
         return;
     }
 
     let pos = uniforms.position_offset + seq_idx;
-    let dim1 = dim_pair_idx * 2u;
-    let dim2 = dim1 + 1u;
+    
+    // Get cos and sin. The precomputation logic makes cos[i] == cos[i + half_dim].
+    let cos = cos_cache[pos * uniforms.cos_stride + dim_idx];
+    let sin = sin_cache[pos * uniforms.sin_stride + dim_idx];
 
-    // Get cos and sin for this position from the precomputed cache
-    let cos = cos_cache[pos * uniforms.cos_stride + dim1];
-    let sin = sin_cache[pos * uniforms.sin_stride + dim1];
-
-    // --- ✅ FIX: Inlined logic for Q tensor ---
+    // --- Inlined logic for Q tensor ---
     {
         let base_idx = head_batch_idx * uniforms.seq_len * uniforms.head_dim + seq_idx * uniforms.head_dim;
-        let x0 = q_tensor[base_idx + dim1];
-        let x1 = q_tensor[base_idx + dim2];
-        q_tensor[base_idx + dim1] = x0 * cos - x1 * sin;
-        q_tensor[base_idx + dim2] = x0 * sin + x1 * cos;
+        
+        // Get the pair of values from the first and second halves of the vector
+        let q0 = q_tensor[base_idx + dim_idx];
+        let q1 = q_tensor[base_idx + dim_idx + half_dim];
+
+        // Apply the rotation based on the `rotate_half` formula:
+        // q_rot[i]              = q[i] * cos[i] - q[i + half_dim] * sin[i]
+        // q_rot[i + half_dim]   = q[i + half_dim] * cos[i] + q[i] * sin[i]
+        q_tensor[base_idx + dim_idx]            = q0 * cos - q1 * sin;
+        q_tensor[base_idx + dim_idx + half_dim] = q1 * cos + q0 * sin;
     }
 
-    // --- ✅ FIX: Inlined logic for K tensor ---
+    // --- Inlined logic for K tensor ---
     {
         let base_idx = head_batch_idx * uniforms.seq_len * uniforms.head_dim + seq_idx * uniforms.head_dim;
-        let x0 = k_tensor[base_idx + dim1];
-        let x1 = k_tensor[base_idx + dim2];
-        k_tensor[base_idx + dim1] = x0 * cos - x1 * sin;
-        k_tensor[base_idx + dim2] = x0 * sin + x1 * cos;
+
+        // Get the pair of values from the first and second halves of the vector
+        let k0 = k_tensor[base_idx + dim_idx];
+        let k1 = k_tensor[base_idx + dim_idx + half_dim];
+
+        // Apply the same rotation
+        k_tensor[base_idx + dim_idx]            = k0 * cos - k1 * sin;
+        k_tensor[base_idx + dim_idx + half_dim] = k1 * cos + k0 * sin;
     }
 }

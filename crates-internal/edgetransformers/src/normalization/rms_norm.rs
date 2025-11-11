@@ -14,6 +14,7 @@ use ndarray::{Array1, Array3, Axis};
 ///
 /// Formula: y = (x / RMS(x)) * weight
 /// where RMS(x) = sqrt(mean(x^2) + eps)
+#[derive(Clone)]
 pub struct RMSNorm {
     pub weight: Array1<f32>,
     pub eps: f32,
@@ -76,7 +77,91 @@ impl RMSNorm {
 mod tests {
     use super::*;
     use ndarray::{Array3, array};
+    /// Helper function to compare two 3D tensors for approximate equality.
+    fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
+        assert_eq!(a.shape(), b.shape(), "Tensor shapes do not match");
+        for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
+            assert!(
+                (val_a - val_b).abs() < tolerance,
+                "Tensor values differ at index {}: a={}, b={}. Difference: {}",
+                i,
+                val_a,
+                val_b,
+                (val_a - val_b).abs()
+            );
+        }
+        println!("✓ Tensors are approximately equal.");
+    }
 
+    #[test]
+    fn test_rmsnorm_pytorch_parity() {
+        // --- 1. Arrange: Use the golden values from the Python script ---
+        let eps = 1e-5;
+
+        // --- RMSNorm Input ---
+        // Shape: [1, 1, 8]
+        let input_vec = vec![
+            0.33669036626815796,
+            0.12880940735340118,
+            0.23446236550807953,
+            0.23033303022384644,
+            -1.1228563785552979,
+            -0.18632829189300537,
+            2.2082014083862305,
+            -0.637997031211853,
+        ];
+        let input_cpu = Array3::from_shape_vec((1, 1, 8), input_vec).unwrap();
+
+        // --- RMSNorm Gamma (Weight) ---
+        // Shape: [8]
+        let gamma_vec = vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+        let gamma_cpu = Array1::from_vec(gamma_vec);
+
+        // --- RMSNorm Golden Output ---
+        // Shape: [1, 1, 8]
+        let expected_output_vec = vec![
+            0.18237116932868958,
+            0.1395414024591446,
+            0.3809955418109894,
+            0.49904727935791016,
+            -3.041023015975952,
+            -0.6055577397346497,
+            8.372635841369629,
+            -2.7646117210388184,
+        ];
+        let expected_output_cpu = Array3::from_shape_vec((1, 1, 8), expected_output_vec).unwrap();
+
+        // --- 2. Act: Run our Rust RMSNorm implementation ---
+        let rms_norm = RMSNorm::new(gamma_cpu, eps);
+        // Directly call the `forward_3d` method which matches the tensor shape.
+        let actual_output_cpu = rms_norm.forward_3d(&input_cpu);
+
+        // --- 3. Assert: Compare the results ---
+        // A slightly higher tolerance might be needed if libm implementations differ,
+        // but 1e-6 is a good starting point for CPU-to-CPU.
+        let tolerance = 1e-6;
+        assert_tensors_approx_equal(&expected_output_cpu, &actual_output_cpu, tolerance);
+
+        println!("✓ CPU RMSNorm implementation passed PyTorch parity test.");
+    }
+
+    #[test]
+    fn test_rms_norm_near_zero() {
+        // Test stability with near-zero values
+        let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
+        let eps = 1e-6;
+        let rms_norm = RMSNorm::new(weight, eps);
+
+        let hidden = Array3::from_shape_vec((1, 1, 3), vec![1e-8, 2e-8, 1e-8]).unwrap();
+        // Call the method being tested
+        let output = rms_norm.forward_3d(&hidden);
+
+        // Should not panic or produce NaN/Inf
+        assert!(output[[0, 0, 0]].is_finite());
+        assert!(output[[0, 0, 1]].is_finite());
+        assert!(output[[0, 0, 2]].is_finite());
+        println!("✓ RMSNorm near-zero stability test passed.");
+    }
     #[test]
     fn test_rms_norm_basic() {
         // Simple test with known values
@@ -155,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rms_norm_near_zero() {
+    fn test_rms_norm_near_zero_2() {
         // Test stability with near-zero values
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let eps = 1e-6;

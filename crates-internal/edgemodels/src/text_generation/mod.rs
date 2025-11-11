@@ -1,4 +1,4 @@
-use crate::generation::{apply_repetition_penalty, sample_token};
+use crate::generation2::{apply_repetition_penalty, sample_token};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::CpuKVCache;
@@ -18,6 +18,8 @@ use tokenizers::Tokenizer;
 mod configs;
 mod llama;
 mod llama_configs;
+mod gpt2;
+pub use gpt2::Gpt2Model;
 pub use configs::Gpt2Config;
 pub use llama::LlamaModel;
 pub use llama_configs::LlamaConfig;
