@@ -189,7 +189,7 @@ pub trait LanguageModelConfig: TransformerConfig {
     fn num_key_value_heads(&self) -> usize {
         self.num_attention_heads()
     }
-
+    
     /// The total dimensionality of the key/value projections.
     fn kv_dim(&self) -> usize {
         let head_dim = self.hidden_size() / self.num_attention_heads();

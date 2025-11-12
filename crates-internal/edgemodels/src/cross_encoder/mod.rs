@@ -422,6 +422,9 @@ impl TransformerModel for CrossEncoder {
 }
 
 impl LanguageModel for CrossEncoder {
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+        panic!("Cross Encoder does not support KV Cache");
+    }
     fn config(&self) -> &dyn LanguageModelConfig {
         self.config.as_ref()
     }

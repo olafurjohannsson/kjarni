@@ -27,7 +27,10 @@ async fn main() -> anyhow::Result<()> {
     println!("Number of tokens: {}\n", input_ids.len());
     
     // ✅ Generate with logging
-    let (generated_text, generated_ids) = generator.generate_with_ids(prompt, 5, 0.0, None).await?;
+// Rust: The field of Artificial Intelligence has seen a lot of progress in the last few years. The field has been able to make a lot
+// Pyth: The field of Artificial Intelligence has seen a lot of progress in the last few years. The field has been able to make a lot
+// Rust NEW: The field of Artificial Intelligence has seen a lot of progress in the last few years. The field is now being used in many different
+    let (generated_text, generated_ids) = generator.generate_with_ids(prompt, 20, 0.0, None).await?;
     
 
     println!("=== RUST OUTPUT ===");

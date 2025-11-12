@@ -32,10 +32,7 @@ def main():
     # This mirrors the Rust `GenerationConfig` struct.
     # ==================================================================
     prompt = "The field of Artificial Intelligence has seen a lot of progress"
-    max_new_tokens = 100
-    temperature = 0.7
-    top_k = 50
-    top_p = 0.9
+    max_new_tokens = 5
     repetition_penalty = 1.1
     
     # Get special token IDs from the tokenizer
@@ -102,22 +99,7 @@ def main():
                     else:
                         next_token_logits[0, token_id] = logit / repetition_penalty
 
-            # --- Apply Temperature, Top-K, Top-P Sampling ---
-            # This whole block is equivalent to `sample_token(...)`
-            
-            # 1. Temperature
-            # if temperature != 1.0:
-            #     next_token_logits = next_token_logits / temperature
 
-            # # 2. Top-K and Top-P
-            # # We filter the logits, setting low-probability ones to -inf
-            # filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
-            
-            # 3. Sample
-            # Convert filtered logits to probabilities and sample one token.
-            # Equivalent to `softmax_1d` and `sample_from_probs`
-            # probs = F.softmax(filtered_logits, dim=-1)
-            # next_token = torch.multinomial(probs, num_samples=1)
             next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             # --- Update for Next Iteration ---
             generated_tokens = torch.cat((generated_tokens, next_token), dim=1)
@@ -126,45 +108,14 @@ def main():
             # --- Check for End of Sequence ---
             if next_token.item() == eos_token_id:
                 break
-    
-    # ==================================================================
-    # 4. Decode and Print
-    # Equivalent to `tokenizer.decode(...)`
+
+
     # ==================================================================
     generated_text = tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
     
     print("\n--- GENERATED TEXT ---")
     print(generated_text)
 
-
-# This helper function is a direct port of the Top-K/Top-P logic.
-def top_k_top_p_filtering(logits, top_k=0, top_p=1.0, filter_value=-float("Inf")):
-    """
-    Filter a distribution of logits using top-k and/or nucleus (top-p) filtering.
-    - Top-k: keeps only top k tokens with highest probability (sets others to -inf).
-    - Top-p: keeps the smallest set of tokens with cumulative probability >= top_p.
-    """
-    top_k = min(top_k, logits.size(-1))  # Safety check
-
-    if top_k > 0:
-        # Remove all tokens with a probability less than the last token of the top-k
-        indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-        logits[indices_to_remove] = filter_value
-
-    if top_p < 1.0:
-        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-        # Remove tokens with cumulative probability above the threshold
-        sorted_indices_to_remove = cumulative_probs > top_p
-        # Shift the indices to the right to keep also the first token above the threshold
-        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-        sorted_indices_to_remove[..., 0] = 0
-
-        indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-        logits[indices_to_remove] = filter_value
-        
-    return logits
 
 if __name__ == "__main__":
     main()

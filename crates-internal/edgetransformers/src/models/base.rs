@@ -49,6 +49,21 @@ pub struct GenerationConfig {
     pub length_penalty: f32,
     pub early_stopping: bool,
     pub no_repeat_ngram_size: usize,
+    
+    /// Whether to prepend the BOS token to the prompt
+    /// Defaults to true
+    pub add_bos_token: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationStrategy {
+    /// Efficient, pipelined logic. Uses the prefill output directly.
+    /// Correct for Llama and the "theoretically correct" approach.
+    Pipelined,
+    /// Inefficient, two-pass logic. Discards prefill output and re-processes
+    /// the last prompt token to get the first logits.
+    /// Required for parity with Hugging Face's GPT-2 implementation.
+    Legacy,
 }
 
 impl Default for GenerationConfig {
@@ -70,6 +85,7 @@ impl Default for GenerationConfig {
             no_repeat_ngram_size: 3,
             length_penalty: 2.0,
             early_stopping: true,
+            add_bos_token: true,
         }
     }
 }
@@ -103,6 +119,12 @@ pub trait LanguageModel: TransformerModel {
     /// vocab_size, max_position_embeddings, hidden_size, etc.
     fn config(&self) -> &dyn LanguageModelConfig;
 
+    /// Creates a new, empty Key-Value cache appropriately configured for this model.
+    ///
+    /// The model implementation is responsible for choosing the correct cache type
+    /// (CPU/GPU) and initializing it with the correct dimensions.
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>>;
+    
     /// Maximum sequence length the model can handle
     fn max_length(&self) -> usize {
         self.config().max_position_embeddings()
@@ -338,6 +360,12 @@ pub trait DecoderLanguageModel: LanguageModel {
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;
 
+    /// Specifies the generation loop strategy required for this model
+    /// to maintain parity with its reference implementation.
+    fn generation_strategy(&self) -> GenerationStrategy;
+
+    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
+
     /// Get hidden states for input text
     async fn get_hidden_states(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
@@ -365,10 +393,7 @@ pub trait DecoderLanguageModel: LanguageModel {
             .forward(&input_ids, &attention_mask, None)
             .await?;
 
-        // Project to vocabulary
-        let logits = project_to_vocab(&decoder_output.last_hidden_state, self.lm_head())?;
-
-        Ok(logits)
+        self.project_to_logits(&decoder_output.last_hidden_state)
     }
 }
 

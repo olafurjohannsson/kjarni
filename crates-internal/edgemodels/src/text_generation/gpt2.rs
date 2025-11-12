@@ -7,15 +7,16 @@
 //! which can operate on any model that implements the `DecoderLanguageModel` trait.
 
 use crate::text_generation::configs::Gpt2Config;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
+use edgetransformers::models::base::GenerationStrategy;
 use edgetransformers::weights::ModelWeights;
-use ndarray::Array2;
+use ndarray::{Array2, Array3};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -102,7 +103,8 @@ impl Gpt2Model {
             .get_array2(config_arc.get_lm_head_name())?
             .t()
             .to_owned();
-            
+        println!("[NEW MODEL LOADING] LM Head Mean: {}", lm_head.mean().unwrap());
+        println!("[NEW MODEL LOADING] LM Head Std Dev: {}", lm_head.std(0.0));
         // Downcast the Arc back to the concrete Gpt2Config type for storage.
         let config = config_arc
             .as_any()
@@ -139,6 +141,36 @@ impl LanguageModel for Gpt2Model {
     fn config(&self) -> &dyn LanguageModelConfig {
         self.config.as_ref()
     }
+    fn bos_token_id(&self) -> Option<u32> {
+        Some(50256)
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        Some(50256)
+    }
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+        Ok(match self.device() {
+            Device::Cpu => Box::new(CpuKVCache::new(
+                self.num_layers(),
+                batch_size,
+                max_len,
+                self.hidden_size(),
+            )),
+            Device::Wgpu => {
+                let context = self
+                    .context()
+                    .ok_or_else(|| anyhow!("GPU model missing context"))?;
+                let head_dim = self.hidden_size() / self.num_heads();
+                Box::new(GpuKVCache::new(
+                    &context,
+                    self.num_layers(),
+                    batch_size,
+                    self.num_heads(),
+                    head_dim,
+                    max_len,
+                )?)
+            }
+        })
+    }
 }
 
 #[async_trait]
@@ -148,5 +180,134 @@ impl DecoderLanguageModel for Gpt2Model {
     }
     fn lm_head(&self) -> &Array2<f32> {
         &self.lm_head
+    }
+    fn generation_strategy(&self) -> GenerationStrategy {
+        GenerationStrategy::Legacy
+    }
+    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        assert_eq!(
+            self.hidden_size(),
+            self.lm_head.shape()[0],
+            "lm_head first dim must equal hidden_size"
+        );
+        assert_eq!(
+            self.vocab_size(),
+            self.lm_head.shape()[1],
+            "lm_head second dim must equal vocab_size"
+        );
+        // This is the logic from your original `project_to_vocab` function.
+        // It works because Gpt2Model's lm_head is already transposed to [hidden_size, vocab_size].
+        let (batch_size, seq_len, hidden_size) = hidden_states.dim();
+
+        // Reshape to 2D for efficient matmul
+        let hidden_2d = hidden_states.to_shape((batch_size * seq_len, hidden_size))?;
+
+        // Matrix multiplication: [batch*seq, hidden] @ [hidden, vocab]
+        let logits_2d = hidden_2d.dot(&self.lm_head);
+
+        // Reshape back to 3D
+        logits_2d
+            .into_shape_with_order((batch_size, seq_len, self.vocab_size()))
+            .map_err(|e| anyhow!(e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generation::{Generator, GenerationConfig, GenerationStrategy, SamplingStrategy};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_distilgpt2_generation_parity() -> Result<()> {
+        // This test verifies that our implementation produces the exact same output
+        // as the HuggingFace transformers library for a deterministic (greedy) generation task.
+        
+        // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
+        let model_type = ModelType::DistilGpt2;
+        let prompt = "The field of Artificial Intelligence has seen a lot of progress";
+        
+        // The "golden" output string from the Python reference script and your now-working Rust implementation.
+        let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
+
+        // Create a config that perfectly matches the reference implementations.
+        let config = GenerationConfig {
+            max_new_tokens: Some(20),
+            sampling_strategy: SamplingStrategy::Greedy,
+            repetition_penalty: 1.1,
+            add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+            ..Default::default()
+        };
+
+        // 2. Load model and create the generator.
+        //    We run on CPU to match the Python script's environment.
+        let gpt2_model = Gpt2Model::from_registry(
+            model_type,
+            None,
+            Device::Cpu,
+            None
+        ).await?;
+        
+        let generator = Generator::new(Box::new(gpt2_model));
+
+        // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
+        let generated_text = generator.generate(prompt, &config).await?;
+
+        // 4. Assert that the generated output is bit-for-bit identical to the golden value.
+        //    We trim both strings to avoid any potential whitespace differences at the end.
+        assert_eq!(generated_text.trim(), expected_output.trim());
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
+        // This test verifies that our implementation produces the exact same output
+        // as the HuggingFace transformers library for a deterministic (greedy) generation task.
+        
+        // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
+        let model_type = ModelType::DistilGpt2;
+        let prompt = "The field of Artificial Intelligence has seen a lot of progress";
+
+        // Create a config that perfectly matches the reference implementations.
+        let config = GenerationConfig {
+            max_new_tokens: Some(5),
+            sampling_strategy: SamplingStrategy::Greedy,
+            repetition_penalty: 1.1,
+            add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+            ..Default::default()
+        };
+
+        // 2. Load model and create the generator.
+        //    We run on CPU to match the Python script's environment.
+        let gpt2_model = Gpt2Model::from_registry(
+            model_type,
+            None,
+            Device::Cpu,
+            None
+        ).await?;
+        
+        
+        let generator = Generator::new(Box::new(gpt2_model));
+
+        // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
+        let generated_text = generator.generate(prompt, &config).await?;
+
+        let ctx = Arc::new(WgpuContext::new().await);
+        let gpt2_model_2 = Gpt2Model::from_registry(
+            model_type,
+            None,
+            Device::Wgpu,
+            Some(ctx)
+        ).await?;
+        let generator_2 = Generator::new(Box::new(gpt2_model_2));
+        let generated_text_2 = generator_2.generate(prompt, &config).await?;
+
+
+        // 4. Assert that the generated output is bit-for-bit identical to the golden value.
+        //    We trim both strings to avoid any potential whitespace differences at the end.
+        assert_eq!(generated_text.trim(), generated_text_2.trim());
+        
+        Ok(())
     }
 }

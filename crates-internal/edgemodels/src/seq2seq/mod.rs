@@ -163,6 +163,9 @@ impl TransformerModel for Seq2SeqModel {
 }
 
 impl LanguageModel for Seq2SeqModel {
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+        panic!("Seq2seq does not support KV Cache");
+    }
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }

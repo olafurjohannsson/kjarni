@@ -5,11 +5,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 model_path = "/home/olafurj/.cache/edgetransformers/meta-llama_Llama-3.2-1B"
 
 # Set a consistent float precision for direct comparison with Rust's f32
-torch.set_default_dtype(torch.bfloat16)
+torch.set_default_dtype(torch.float32)
 
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    torch_dtype=torch.bfloat16,
+    torch_dtype=torch.float32,
     device_map="cpu",
     local_files_only=True,
 ).eval()
@@ -45,7 +45,7 @@ print("Input IDs being sent to model:", inputs_tensor[0].tolist())
 with torch.no_grad():
     outputs = model.generate(
         inputs_tensor,
-        max_new_tokens=5,
+        max_new_tokens=1,
         do_sample=False,
         pad_token_id=tokenizer.eos_token_id,
     )

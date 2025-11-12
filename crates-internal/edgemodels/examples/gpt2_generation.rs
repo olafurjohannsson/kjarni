@@ -14,9 +14,9 @@ async fn main() -> anyhow::Result<()> {
     let generator = TextGenerator::from_registry(
         ModelType::DistilGpt2,
         None, 
-        Device::Wgpu,
-        //None,
-        Some(context), 
+        Device::Cpu,
+        None,
+        //Some(context), 
     ).await?;
     println!("✓ Model loaded.");
 

@@ -235,6 +235,9 @@ impl SentenceEncoder {
 
 // Implement base language model trait
 impl LanguageModel for SentenceEncoder {
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+        panic!("Sentence Encoder does not support KV Cache");
+    }
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }

@@ -9,20 +9,24 @@ use edgetransformers::models::project_to_vocab;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
+use edgetransformers::models::base::GenerationStrategy;
 use edgetransformers::weights::ModelWeights;
 use log::{debug, info};
-use ndarray::{Array2, s};
+use ndarray::{Array2, Array3, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 mod configs;
-mod llama;
-mod llama_configs;
 mod gpt2;
-pub use gpt2::Gpt2Model;
+mod llama;
+mod llama2;
+mod llama_configs;
+
 pub use configs::Gpt2Config;
+pub use gpt2::Gpt2Model;
 pub use llama::LlamaModel;
 pub use llama_configs::LlamaConfig;
+pub use llama2::LlamaModel as LLamaModel2;
 
 pub struct TextGenerator {
     model: TransformerDecoder,
@@ -103,7 +107,8 @@ impl TextGenerator {
             .get_array2(config.get_lm_head_name())?
             .t()
             .to_owned();
-
+        println!("[OLD MODEL LOADING] LM Head Mean: {}", lm_head_t.mean().unwrap());
+        println!("[OLD MODEL LOADING] LM Head Std Dev: {}", lm_head_t.std(0.0));
         Ok(Self {
             model,
             tokenizer,
@@ -123,6 +128,7 @@ impl TextGenerator {
             .to_vec();
         let prompt_len = tokens.len();
         let batch_size = 1;
+        println!("[OLD] Initial Token IDs: {:?}", &tokens);
         debug!("[Setup] Initial prompt token count: {}", prompt_len);
 
         // 2. Determine the final length of the generated sequence
@@ -244,14 +250,7 @@ impl TextGenerator {
                 cache.get_seq_length()
             );
             debug!("[Step {}] `input_ids` shape: {:?}", step, input_ids.shape());
-            // debug!(
-            //     "[Step {}] `attention_mask` shape: {:?}",
-            //     step,
-            //     attention_mask_view.shape()
-            // );
-            let generation_mask = full_attention_mask
-                .slice(s![.., 0..current_len + 1])
-                .to_owned();
+
             let mask_to_use = match self.model.device() {
                 Device::Cpu => {
                     // CPU uses concatenated approach: needs sliced mask
@@ -279,45 +278,23 @@ impl TextGenerator {
             let logits_3d = project_to_vocab(&decoder_output.last_hidden_state, &self.lm_head_t)?;
 
             let mut next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-            if step <= 20 {
-                // Get top 5 token predictions
-                let mut indexed_logits: Vec<(usize, f32)> = next_token_logits
+            if tokens.len() == prompt_len {
+                println!(
+                    "[OLD] First Logits Mean: {}",
+                    next_token_logits.mean().unwrap()
+                );
+                let argmax = next_token_logits
                     .iter()
                     .enumerate()
-                    .map(|(i, &v)| (i, v))
-                    .collect();
-                indexed_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-                println!("[Step {}] Top-5 logits BEFORE penalty:", step);
-                for (i, (token_id, logit)) in indexed_logits.iter().take(5).enumerate() {
-                    let token_str = self
-                        .tokenizer()
-                        .decode(&[*token_id as u32], false)
-                        .unwrap_or_default();
-                    println!(
-                        "  {}. Token {}: {} (logit: {:.4})",
-                        i + 1,
-                        token_id,
-                        token_str,
-                        logit
-                    );
-                }
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                    .unwrap()
+                    .0;
+                println!("[OLD] First Argmax ID: {}", argmax);
             }
             next_token_logits =
                 apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
 
             let next_token = sample_token(next_token_logits, config)?;
-
-            if step <= 20 {
-                let selected_token_str = self
-                    .tokenizer()
-                    .decode(&[next_token], false)
-                    .unwrap_or_default();
-                println!(
-                    "[Step {}] Selected token: {} (id: {})",
-                    step, selected_token_str, next_token
-                );
-            }
 
             tokens.push(next_token);
 
@@ -348,6 +325,30 @@ impl LanguageModel for TextGenerator {
     fn config(&self) -> &dyn LanguageModelConfig {
         self.config.as_ref()
     }
+    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+        Ok(match self.device() {
+            Device::Cpu => Box::new(CpuKVCache::new(
+                self.num_layers(),
+                batch_size,
+                max_len,
+                self.hidden_size(), // ✅ Correctly use hidden_size for GPT-2
+            )),
+            Device::Wgpu => {
+                let context = self
+                    .context()
+                    .ok_or_else(|| anyhow!("GPU model missing context"))?;
+                let head_dim = self.hidden_size() / self.num_heads();
+                Box::new(GpuKVCache::new(
+                    &context,
+                    self.num_layers(),
+                    batch_size,
+                    self.num_heads(), // GPT-2 uses num_heads for num_key_value_heads
+                    head_dim,
+                    max_len,
+                )?)
+            }
+        })
+    }
 }
 
 #[async_trait]
@@ -355,7 +356,26 @@ impl DecoderLanguageModel for TextGenerator {
     fn decoder(&self) -> &dyn Decoder<Input = Array2<f32>, Output = DecoderOutput> {
         &self.model
     }
+    fn generation_strategy(&self) -> GenerationStrategy {
+        GenerationStrategy::Legacy
+    }
     fn lm_head(&self) -> &Array2<f32> {
         &self.lm_head_t
+    }
+    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        // This is the logic from your original `project_to_vocab` function.
+        // It works because Gpt2Model's lm_head is already transposed to [hidden_size, vocab_size].
+        let (batch_size, seq_len, hidden_size) = hidden_states.dim();
+
+        // Reshape to 2D for efficient matmul
+        let hidden_2d = hidden_states.to_shape((batch_size * seq_len, hidden_size))?;
+
+        // Matrix multiplication: [batch*seq, hidden] @ [hidden, vocab]
+        let logits_2d = hidden_2d.dot(self.lm_head());
+
+        // Reshape back to 3D
+        logits_2d
+            .into_shape((batch_size, seq_len, self.vocab_size()))
+            .map_err(|e| anyhow!(e))
     }
 }
