@@ -5,6 +5,7 @@ use edgetransformers::traits::{
     EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
     TransformerConfig,
 };
+use std::any::Any;
 use serde::Deserialize;
 
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
@@ -45,6 +46,9 @@ impl LanguageModelConfig for MiniLMCrossEncoderConfig {
     }
     fn transpose_ffn_weights(&self) -> bool {
         true
+    }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
 }
 

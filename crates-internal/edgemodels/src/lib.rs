@@ -13,7 +13,8 @@ pub mod generation;
 
 pub use sentence_encoder::SentenceEncoder;
 pub use cross_encoder::CrossEncoder;
-pub use text_generation::TextGenerator;
+// pub use text_generation::TextGenerator;
+pub use generation::Generator;
 
 /// A callback for streaming generated tokens.
 ///

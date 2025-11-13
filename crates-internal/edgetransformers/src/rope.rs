@@ -107,22 +107,6 @@ impl RoPE {
         inv_freq
     }
 
-    /// Builds the cos/sin cache from a given set of inverse frequencies.
-    /// This now correctly implements the "Rotate Half" cache style.
-    fn build_cache2(max_seq_len: usize, inv_freq: &Array1<f32>) -> (Array2<f32>, Array2<f32>) {
-        let half_dim = inv_freq.len();
-        let mut cos_cache = Array2::<f32>::zeros((max_seq_len, half_dim));
-        let mut sin_cache = Array2::<f32>::zeros((max_seq_len, half_dim));
-
-        for pos in 0..max_seq_len {
-            for i in 0..half_dim {
-                let angle = pos as f32 * inv_freq[i];
-                cos_cache[[pos, i]] = angle.cos();
-                sin_cache[[pos, i]] = angle.sin();
-            }
-        }
-        (cos_cache, sin_cache)
-    }
     fn build_cache(max_seq_len: usize, inv_freq: &Array1<f32>) -> (Array2<f32>, Array2<f32>) {
         let half_dim = inv_freq.len();
         let head_dim = half_dim * 2; // The full head dimension
@@ -146,7 +130,33 @@ impl RoPE {
         }
         (cos_cache, sin_cache)
     }
+    fn rotate_4d_in_place(&self, x: &mut Array4<f32>, position_offset: usize) {
+        let (batch, num_heads, seq_len, head_dim) = x.dim();
+        let half_dim = head_dim / 2;
 
+        for b in 0..batch {
+            for h in 0..num_heads {
+                for s in 0..seq_len {
+                    let pos = position_offset + s;
+
+                    for i in 0..half_dim {
+                        let cos = self.cos_cache[[pos, i]];
+                        let sin = self.sin_cache[[pos, i]];
+
+                        // CRITICAL: We must read both values from the tensor *before*
+                        // we write either of them back. Otherwise, the second calculation
+                        // would use the already-modified first value.
+                        let x0 = x[[b, h, s, i]];
+                        let x1 = x[[b, h, s, i + half_dim]];
+
+                        x[[b, h, s, i]] = x0 * cos - x1 * sin;
+                        x[[b, h, s, i + half_dim]] = x0 * sin + x1 * cos;
+                    }
+                }
+            }
+        }
+        // No return value is needed as `x` was modified directly.
+    }
     /// This is the correct "Rotate Half" implementation.
     fn rotate_4d(&self, x: &Array4<f32>, position_offset: usize) -> Array4<f32> {
         let mut rotated = x.to_owned();
@@ -219,29 +229,41 @@ impl RoPE {
             .map_err(|e| anyhow::anyhow!("Failed to reshape K in RoPE: {}", e))?;
 
         // Transpose to [batch, heads, seq_len, head_dim]
-        let q_transposed = q_reshaped.permuted_axes([0, 2, 1, 3]);
-        let k_transposed = k_reshaped.permuted_axes([0, 2, 1, 3]);
+        let mut q_transposed = q_reshaped.permuted_axes([0, 2, 1, 3]).to_owned();
+        let mut k_transposed = k_reshaped.permuted_axes([0, 2, 1, 3]).to_owned();
+        
+        self.rotate_4d_in_place(&mut q_transposed, position_offset);
+        self.rotate_4d_in_place(&mut k_transposed, position_offset);
 
+        // Transpose and reshape back
+        let q_final = q_transposed
+            .permuted_axes([0, 2, 1, 3])
+            .into_shape_with_order((batch, seq_len, hidden_size_q))?
+            .to_owned();
+        let k_final = k_transposed
+            .permuted_axes([0, 2, 1, 3])
+            .into_shape_with_order((batch, seq_len, hidden_size_k))?
+            .to_owned();
         // Apply rotation (apply_4d works on both shapes)
-        let (rotated_q_4d, rotated_k_4d) = self.apply_4d(
-            &q_transposed.to_owned(),
-            &k_transposed.to_owned(),
-            position_offset,
-        );
+        // let (rotated_q_4d, rotated_k_4d) = self.apply_4d(
+        //     &q_transposed.to_owned(),
+        //     &k_transposed.to_owned(),
+        //     position_offset,
+        // );
 
-        // Transpose back
-        let q_back = rotated_q_4d.permuted_axes([0, 2, 1, 3]);
-        let k_back = rotated_k_4d.permuted_axes([0, 2, 1, 3]);
+        // // Transpose back
+        // let q_back = rotated_q_4d.permuted_axes([0, 2, 1, 3]);
+        // let k_back = rotated_k_4d.permuted_axes([0, 2, 1, 3]);
 
-        // Reshape back to original 3D shapes
-        let q_final = q_back
-            .to_shape((batch, seq_len, hidden_size_q))
-            .map_err(|e| anyhow::anyhow!("Failed to reshape Q back in RoPE: {}", e))?
-            .to_owned();
-        let k_final = k_back
-            .to_shape((batch, seq_len, hidden_size_k))
-            .map_err(|e| anyhow::anyhow!("Failed to reshape K back in RoPE: {}", e))?
-            .to_owned();
+        // // Reshape back to original 3D shapes
+        // let q_final = q_back
+        //     .to_shape((batch, seq_len, hidden_size_q))
+        //     .map_err(|e| anyhow::anyhow!("Failed to reshape Q back in RoPE: {}", e))?
+        //     .to_owned();
+        // let k_final = k_back
+        //     .to_shape((batch, seq_len, hidden_size_k))
+        //     .map_err(|e| anyhow::anyhow!("Failed to reshape K back in RoPE: {}", e))?
+        //     .to_owned();
 
         Ok((q_final, k_final))
     }

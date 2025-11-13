@@ -19,16 +19,6 @@ use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
 
 
 
-
-
-
-pub fn log_softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
-    let max_val = logits.fold(f32::NEG_INFINITY, |acc, &x| acc.max(x));
-    let scaled_logits = logits - max_val;
-    let exp_sum = scaled_logits.mapv(f32::exp).sum();
-    scaled_logits - exp_sum.ln()
-}
-
 pub fn apply_repetition_penalty(
     mut logits: Array1<f32>,
     generated_ids: &[u32],

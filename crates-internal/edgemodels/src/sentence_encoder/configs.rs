@@ -5,6 +5,7 @@ use edgetransformers::traits::{
     EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
     TransformerConfig,
 };
+use std::any::Any;
 use serde::Deserialize;
 
 /// Configuration for MiniLM models (sentence-transformers/all-MiniLM-L6-v2)
@@ -30,6 +31,9 @@ impl MiniLMConfig {
 impl LanguageModelConfig for MiniLMConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
+    }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
@@ -173,6 +177,9 @@ impl LanguageModelConfig for MPNetConfig {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
 }
 
 impl EncoderArchitecture for MPNetConfig {
@@ -276,6 +283,9 @@ impl LanguageModelConfig for DistilBERTConfig {
     }
     fn vocab_size(&self) -> usize {
         self.vocab_size
+    }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
 }
 

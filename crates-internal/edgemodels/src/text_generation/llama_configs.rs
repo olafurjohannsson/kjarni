@@ -220,7 +220,9 @@ impl LanguageModelConfig for LlamaConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
-
+fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
     }
@@ -283,9 +285,9 @@ impl DecoderArchitecture for LlamaConfig {
             "", // No position embeddings (uses RoPE instead)
         )
     }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
+    // fn as_any(&self) -> &dyn Any {
+    //     self // Simply return a reference to self as a `&dyn Any`
+    // }
     // fn num_key_value_heads(&self) -> usize {
     //     self.num_key_value_heads // 8 for LLaMA 3.2 1B
     // }

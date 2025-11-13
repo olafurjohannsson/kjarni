@@ -9,6 +9,8 @@ use log::{debug, error};
 use ndarray::{Array1, Array2, s};
 use rand::Rng;
 
+pub mod seq2seq;
+
 pub use edgetransformers::models::base::{GenerationStrategy, SamplingStrategy, GenerationConfig};
 
 /// The type of a token being yielded by the generation stream.
@@ -119,26 +121,6 @@ impl Generator {
                     next_token_logits = Array1::zeros(model.config().vocab_size());
                 }
             }
-            // prefill step
-            // let decoder_output = model
-            //     .decoder()
-            //     .forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut()))
-            //     .await?;
-            // let logits_3d = model.project_to_logits(&decoder_output.last_hidden_state)?;
-
-            // // Take the logits for the very last token of the prompt sequence
-            // next_token_logits = logits_3d.slice(s![0, -1, ..]).to_owned();
-            // println!(
-            //     "[NEW] First Logits Mean: {}",
-            //     next_token_logits.mean().unwrap()
-            // );
-            // let argmax = next_token_logits
-            //     .iter()
-            //     .enumerate()
-            //     .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            //     .unwrap()
-            //     .0;
-            // println!("[NEW] First Argmax ID: {}", argmax);
         } else {
             if let Some(bos_token_id) = model.bos_token_id() {
                 // A BOS token exists, so we can start generation from it.
@@ -191,7 +173,7 @@ impl Generator {
                         if tokens.len() >= max_len { break; }
 
                         // Apply penalties and sample the FIRST token
-                        let processed_logits = apply_repetition_penalty(next_token_logits.clone(), &tokens, config.repetition_penalty);
+                        let processed_logits = apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
                         let next_token = sample_token(processed_logits, config)?;
 
                         tokens.push(next_token);

@@ -45,7 +45,7 @@ print("Input IDs being sent to model:", inputs_tensor[0].tolist())
 with torch.no_grad():
     outputs = model.generate(
         inputs_tensor,
-        max_new_tokens=1,
+        max_new_tokens=50,
         do_sample=False,
         pad_token_id=tokenizer.eos_token_id,
     )

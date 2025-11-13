@@ -98,7 +98,7 @@ impl GpuKVCache {
 
         Ok(())
     }
-
+    
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
         // if self.seq_length == 0 {
@@ -122,7 +122,9 @@ impl Cache for GpuKVCache {
     fn get_seq_length(&self) -> usize {
         self.seq_length
     }
-
+    fn clone_box(&self) -> Box<dyn Cache> {
+        unimplemented!()
+    }
     fn clear(&mut self) {
         self.seq_length = 0;
     }

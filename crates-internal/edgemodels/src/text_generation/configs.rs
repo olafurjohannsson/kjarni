@@ -61,6 +61,9 @@ impl LanguageModelConfig for Gpt2Config {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
     fn max_position_embeddings(&self) -> usize {
         self.n_ctx
     }
@@ -83,9 +86,9 @@ impl DecoderArchitecture for Gpt2Config {
             ("wte.weight", "wpe.weight")
         }
     }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
+    // fn as_any(&self) -> &dyn Any {
+    //     self // Simply return a reference to self as a `&dyn Any`
+    // }
     fn get_final_layer_norm_names(&self) -> (&str, &str) {
         if self.is_distil() {
             ("transformer.ln_f.weight", "transformer.ln_f.bias")

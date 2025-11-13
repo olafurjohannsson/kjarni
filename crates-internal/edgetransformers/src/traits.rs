@@ -134,19 +134,18 @@ pub trait Decoder: TransformerModel {
 /// This type of decoder attends to two sources: its own previously generated tokens
 /// (self-attention) and the output of an encoder (cross-attention).
 #[async_trait]
-pub trait CrossAttentionDecoder<'a>: TransformerModel {
+pub trait CrossAttentionDecoder: TransformerModel {
     type Input;
     type Output;
 
     /// Asynchronously performs a forward pass through the full encoder-decoder stack.
-    async fn forward(
+    async fn forward<'a>(
         &self,
-        encoder_input_ids: &Self::Input,
         decoder_input_ids: &Self::Input,
-        encoder_attention_mask: &Array2<f32>,
-        decoder_attention_mask: &Array2<f32>,
+        encoder_hidden_states: &'a Array3<f32>,
+        encoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&'a EncoderOutput>,
     ) -> Result<Self::Output>;
 }
 
@@ -222,6 +221,7 @@ pub trait LanguageModelConfig: TransformerConfig {
     fn transpose_attention_weights(&self) -> bool {
         false
     }
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
@@ -262,7 +262,7 @@ pub trait DecoderArchitecture: LanguageModelConfig {
 
     fn get_layer_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
 
-    fn as_any(&self) -> &dyn Any;
+    // fn as_any(&self) -> &dyn Any;
     // KV projection dimension
     // fn kv_dim(&self) -> usize {
     //     let head_dim = self.hidden_size() / self.num_attention_heads();
@@ -357,7 +357,7 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
 
     fn num_encoder_layers(&self) -> usize;
     fn num_decoder_layers(&self) -> usize;
-    fn as_any(&self) -> &dyn Any;
+    // fn as_any(&self) -> &dyn Any;
     // --- Encoder Methods ---
     fn get_encoder_embedding_names(&self) -> (&str, &str, Option<&str>);
     fn get_encoder_embedding_ln_names(&self) -> (&str, &str);

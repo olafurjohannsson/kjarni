@@ -12,7 +12,7 @@ mod gpu;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{Array2};
+use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::gpu_context::WgpuContext;
@@ -24,6 +24,7 @@ use crate::weights::ModelWeights;
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
 use cpu::CpuTransformerEncoderDecoder;
 use gpu::GpuTransformerEncoderDecoder;
+use crate::Encoder;
 
 /// A generic, backend-agnostic transformer encoder-decoder stack.
 pub enum TransformerEncoderDecoder {
@@ -37,8 +38,7 @@ impl TransformerEncoderDecoder {
         config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-    ) -> Result<Self>
-    {
+    ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerEncoderDecoder::new(
                 weights, config,
@@ -53,45 +53,57 @@ impl TransformerEncoderDecoder {
             }
         }
     }
+    pub fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput> {
+        match self {
+            Self::Cpu(model) => model.encoder(),
+            Self::Gpu(_) => todo!("GPU encoder not implemented"),
+        }
+    }
+
+    pub fn decoder(
+        &self,
+    ) -> &dyn CrossAttentionDecoder<Input = Array2<f32>, Output = DecoderOutput> {
+        match self {
+            Self::Cpu(model) => model, // The CpuTransformerEncoderDecoder itself implements the trait
+            Self::Gpu(_) => todo!("GPU decoder not implemented"),
+        }
+    }
 }
 
 // Implement the main forward pass via the CrossAttentionDecoder trait
 #[async_trait]
-impl<'a> CrossAttentionDecoder<'a> for TransformerEncoderDecoder {
+impl CrossAttentionDecoder for TransformerEncoderDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
-    async fn forward(
+    async fn forward<'a>(
         &self,
-        encoder_input_ids: &Self::Input,
         decoder_input_ids: &Self::Input,
-        encoder_attention_mask: &Array2<f32>,
-        decoder_attention_mask: &Array2<f32>,
+        encoder_hidden_states: &'a Array3<f32>,
+        encoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&'a EncoderOutput>,
     ) -> Result<Self::Output> {
         match self {
             Self::Cpu(model) => {
                 model
                     .forward(
-                        encoder_input_ids,
                         decoder_input_ids,
+                        encoder_hidden_states,
                         encoder_attention_mask,
                         decoder_attention_mask,
                         cache,
-                        encoder_output_opt,
                     )
                     .await
             }
             Self::Gpu(model) => {
                 model
                     .forward(
-                        encoder_input_ids,
                         decoder_input_ids,
+                        encoder_hidden_states,
                         encoder_attention_mask,
                         decoder_attention_mask,
                         cache,
-                        encoder_output_opt,
                     )
                     .await
             }

@@ -8,7 +8,7 @@ fn default_layer_norm_eps() -> f32 {
     1e-5
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Copy)]
 #[allow(non_snake_case)] // To allow serde to match the camelCase keys
 pub struct SummarizationParams {
     pub early_stopping: bool,
@@ -45,6 +45,7 @@ pub struct BartConfig {
     pub layer_norm_eps: f32,
     pub eos_token_id: u32,
     pub decoder_start_token_id: u32,
+    
 }
 
 impl TransformerConfig for BartConfig {
@@ -84,6 +85,9 @@ impl LanguageModelConfig for BartConfig {
     fn transpose_attention_weights(&self) -> bool {
         true
     }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
 }
 
 impl EncoderDecoderArchitecture for BartConfig {
@@ -111,9 +115,9 @@ impl EncoderDecoderArchitecture for BartConfig {
     fn num_decoder_layers(&self) -> usize {
         self.decoder_layers
     }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
+    // fn as_any(&self) -> &dyn Any {
+    //     self // Simply return a reference to self as a `&dyn Any`
+    // }
 
     // --- Encoder Methods ---
     fn get_encoder_embedding_names(&self) -> (&str, &str, Option<&str>) {

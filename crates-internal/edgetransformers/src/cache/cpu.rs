@@ -1,5 +1,6 @@
 use crate::traits::Cache;
 use ndarray::{Array3, ArrayView3, s};
+use rayon::prelude::*;
 use std::any::Any;
 
 /// A high-performance, pre-allocated Key-Value cache for CPU decoding.
@@ -36,7 +37,41 @@ impl CpuKVCache {
             current_len: 0,
         }
     }
+    /// Reorders the batch dimension of the cache in-place using Rayon for parallelism.
+    ///
+    /// This is a highly efficient, allocation-free alternative to cloning for beam search.
+    ///
+    /// # Arguments
+    /// * `indices`: A slice of `usize` where each value indicates the source batch
+    ///              index to copy from.
+    pub fn reorder(&mut self, indices: &[usize]) {
+        let mut reordered_layers = self.layers.clone();
 
+        // Create parallel iterators for both source and destination
+        let source_iter = self.layers.par_iter();
+        let dest_iter = reordered_layers.par_iter_mut();
+
+        // Zip them together and execute the parallel copy
+        source_iter.zip(reordered_layers.par_iter_mut()).for_each(
+            |((k_cache, v_cache), (k_reordered, v_reordered))| {
+                for (dest_idx, &source_idx) in indices.iter().enumerate() {
+                    // Select the whole slice for the source batch item
+                    let source_k_slice = k_cache.slice(s![source_idx, .., ..]);
+                    // Select the mutable slice for the destination batch item
+                    let mut dest_k_slice = k_reordered.slice_mut(s![dest_idx, .., ..]);
+                    // Assign the data
+                    dest_k_slice.assign(&source_k_slice);
+
+                    // Repeat for the value cache
+                    let source_v_slice = v_cache.slice(s![source_idx, .., ..]);
+                    let mut dest_v_slice = v_reordered.slice_mut(s![dest_idx, .., ..]);
+                    dest_v_slice.assign(&source_v_slice);
+                }
+            },
+        );
+
+        self.layers = reordered_layers;
+    }
     pub fn layers(&self) -> &Vec<(Array3<f32>, Array3<f32>)> {
         &self.layers
     }
@@ -87,6 +122,9 @@ impl CpuKVCache {
 impl Cache for CpuKVCache {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn clone_box(&self) -> Box<dyn Cache> {
+        Box::new(self.clone())
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self

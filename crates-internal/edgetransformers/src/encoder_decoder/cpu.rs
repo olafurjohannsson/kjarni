@@ -8,15 +8,15 @@ use crate::traits::{
     LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
 use crate::weights::ModelWeights;
-use anyhow::Result;
-use async_trait::async_trait;
-use ndarray::{Array2, Array3, s};
-use std::sync::Arc;
-use std::any::Any;
 use crate::{
     Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
     feedforward::StdFeedForward, normalization::LayerNorm,
 };
+use anyhow::Result;
+use async_trait::async_trait;
+use ndarray::{Array2, Array3, Axis, s};
+use std::any::Any;
+use std::sync::Arc;
 
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct CpuTransformerEncoderDecoder {
@@ -33,6 +33,9 @@ impl CpuTransformerEncoderDecoder {
         config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
     ) -> Result<Self> {
         let encoder_config_adapter = Arc::new(EncoderConfigAdapter(config.clone()));
+        let decoder_config_adapter = Arc::new(DecoderConfigAdapter(config.clone()));
+
+        
         let encoder = TransformerEncoder::new(weights, encoder_config_adapter, Device::Cpu, None)?;
 
         let (word_w, pos_w) = config.get_decoder_embedding_names();
@@ -46,7 +49,7 @@ impl CpuTransformerEncoderDecoder {
         let decoder_embed_layer_norm = LayerNorm::new(
             weights.get_array1(embed_norm_w)?,
             weights.get_array1(embed_norm_b)?,
-            config.layer_norm_eps(),
+            decoder_config_adapter.layer_norm_eps(),
         );
 
         let mut decoder_layers = Vec::with_capacity(config.num_decoder_layers());
@@ -158,84 +161,85 @@ impl CpuTransformerEncoderDecoder {
         let (_batch_size, seq_len) = input_ids.dim();
         let mut hidden_states = self.decoder_embeddings.forward_word_only(input_ids);
 
-        // TODO: BART specific stuff
-        let start_idx = position_offset + 2;
-        let end_idx = position_offset + seq_len + 2;
+        // --- FIX START ---
+        if let Some(ref pos_embeddings) = self.decoder_embeddings.position_embeddings {
+            // BART has a learned offset of 2 for its position embeddings.
+            let start_idx = position_offset + 2;
+            let end_idx = start_idx + seq_len;
 
-        // TODO: RE-ADD
-        // let pos_embeddings_to_add = self
-        //     .decoder_embeddings
-        //     .position_embeddings?
-        //     .slice(s![start_idx..end_idx, ..]);
-        // hidden_states += &pos_embeddings_to_add;
+            // Get the slice of position embeddings we need for the current tokens
+            let pos_embeddings_to_add = pos_embeddings.slice(s![start_idx..end_idx, ..]);
+
+            // Add the position embeddings to the word embeddings
+            // We need to reshape the slice to be broadcastable for the addition
+            hidden_states += &pos_embeddings_to_add.insert_axis(Axis(0));
+        }
+        // --- FIX END ---
+
         hidden_states
     }
 }
 
 #[async_trait]
-impl<'a> CrossAttentionDecoder<'a> for CpuTransformerEncoderDecoder {
+impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
     type Input = Array2<f32>;
     type Output = DecoderOutput;
 
-    async fn forward(
+    async fn forward<'a>(
         &self,
-        encoder_input_ids: &Self::Input,
         decoder_input_ids: &Self::Input,
-        encoder_attention_mask: &Array2<f32>,
-        decoder_attention_mask_from_generator: &Array2<f32>, // Renamed for clarity
+        encoder_hidden_states: &'a Array3<f32>,
+        encoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
-        encoder_output_opt: Option<&'a EncoderOutputTrait>,
     ) -> Result<Self::Output> {
-        let encoder_output_ref: &EncoderOutputTrait;
-        let encoder_output_owned: EncoderOutputTrait; // Holder for the owned value if we must create it
+        // --- FIX START ---
 
-        let encoder_output = match encoder_output_opt {
-            Some(output_ref) => {
-                encoder_output_ref = output_ref; // Borrow the existing output
-                encoder_output_ref
-            }
-            None => {
-                encoder_output_owned = self
-                    .encoder
-                    .forward(encoder_input_ids, encoder_attention_mask, None)
-                    .await?; // TODO Token_type_ids ???
-                &encoder_output_owned // Borrow the newly created output
-            }
-        };
-
-        let position_offset = cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(0);
+        // The generator now provides the position offset.
+        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
-        let total_len = position_offset + seq_len;
 
+        // 1. Embed the decoder input tokens and apply layer norm.
         let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
 
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
+        let mut new_key_values = Vec::with_capacity(self.decoder_layers.len());
 
-        // FIX #1: Use the correctly-sized mask passed in from the generator,
-        // rather than ignoring it with `_` and creating a new, potentially incorrect one.
-        // This ensures the mask length always matches the total key length.
-        let decoder_self_attention_mask = decoder_attention_mask_from_generator;
-
+        // 2. Iterate through the decoder layers.
         for (layer_idx, layer) in self.decoder_layers.iter().enumerate() {
-            hidden_states = layer.forward_cross_attention(
-                hidden_states,
-                &encoder_output.last_hidden_state,
-                decoder_self_attention_mask, // Use the correct mask
+            let past_kv_owned = cpu_cache_opt
+                .as_ref()
+                .and_then(|cache| cache.get(layer_idx));
+            let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
+
+            // The EncoderLayer's forward method should be adapted or a new one created
+            // that handles cross-attention. Let's assume you have a method like this:
+            let (new_hidden, (new_k, new_v)) = layer.forward_cross_attention(
+                &hidden_states,
+                encoder_hidden_states,
+                decoder_attention_mask,
                 encoder_attention_mask,
-                self.config.as_ref(),
-                layer_idx,
-                cpu_cache_opt.as_deref_mut(),
+                past_kv_views,
             )?;
+
+            hidden_states = new_hidden;
+            new_key_values.push((new_k, new_v));
         }
+
+        // 3. Update the cache *after* all layers have been processed.
         if let Some(cache) = cpu_cache_opt {
+            for (layer_idx, (k, v)) in new_key_values.into_iter().enumerate() {
+                cache.update(layer_idx, &k, &v)?;
+            }
             cache.increment_len(seq_len);
         }
 
         Ok(DecoderOutput {
             last_hidden_state: hidden_states,
-            past_key_values: None,
+            past_key_values: None, // We manage the cache externally now
         })
+        // --- FIX END ---
     }
 }
 
@@ -287,7 +291,12 @@ impl LanguageModelConfig for EncoderConfigAdapter {
         self.0.transpose_ffn_weights()
     }
     fn transpose_attention_weights(&self) -> bool {
-        self.0.transpose_attention_weights()
+        // self.0.transpose_attention_weights()
+        false // TODO: this flag is  inverted, we actually WANT to transpose in seq2seq
+                // TODO: also consider moving this value to BartConfig
+    }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
 }
 impl EncoderArchitecture for EncoderConfigAdapter {
@@ -336,24 +345,27 @@ impl LanguageModelConfig for DecoderConfigAdapter {
         self.0.intermediate_size()
     }
     fn transpose_ffn_weights(&self) -> bool {
-        self.0.transpose_ffn_weights()
+        true
     }
     fn transpose_attention_weights(&self) -> bool {
-        self.0.transpose_attention_weights()
+        true
+    }
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
 }
 impl DecoderArchitecture for DecoderConfigAdapter {
     fn get_embedding_weight_names(&self) -> (&str, &str) {
         self.0.get_decoder_embedding_names()
     }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
+    // fn as_any(&self) -> &dyn Any {
+    //     self // Simply return a reference to self as a `&dyn Any`
+    // }
     fn get_final_layer_norm_names(&self) -> (&str, &str) {
         unimplemented!()
     }
     fn get_lm_head_name(&self) -> &str {
-        self.0.get_lm_head_name()
+        "model.shared.weight"
     }
     // Note: The generic decoder doesn't have a concept of separate self/cross attention names.
     // This highlights why we build the cross-attention decoder manually.

@@ -1,5 +1,6 @@
 use crate::sentence_encoder::SentenceEncoder;
-use crate::text_generation::{Gpt2Config, TextGenerator};
+use crate::text_generation::{Gpt2Config, Gpt2Model};
+use crate::generation::Generator;
 use anyhow::Result;
 use edgetransformers::cache::{Cache, CpuKVCache, GpuKVCache};
 use edgetransformers::decoder::TransformerDecoder;
@@ -119,9 +120,9 @@ async fn test_full_text_generation_parity() -> Result<()> {
     println!("\n[1/2] Generating text with CPU backend...");
 
     // Create a TextGenerator for the CPU. No WgpuContext is needed.
-    let cpu_generator = TextGenerator::from_registry(model_type, None, Device::Cpu, None).await?;
-
-    let cpu_generated_text = cpu_generator.generate(prompt, &config).await?;
+    let cpu_generator = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+    let cpu_gen = Generator::new(Box::new(cpu_generator));
+    let cpu_generated_text = cpu_gen.generate(prompt, &config).await?;
     println!("- CPU Output: '{}'", cpu_generated_text);
 
     // --- 3. Generate with GPU Backend ---
@@ -130,9 +131,11 @@ async fn test_full_text_generation_parity() -> Result<()> {
     // Create a WgpuContext and a TextGenerator for the GPU.
     let context = Arc::new(edgetransformers::WgpuContext::new().await);
     let gpu_generator =
-        TextGenerator::from_registry(model_type, None, Device::Wgpu, Some(context)).await?;
+        Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context)).await?;
 
-    let gpu_generated_text = gpu_generator.generate(prompt, &config).await?;
+    let gpu_gen = Generator::new(Box::new(gpu_generator));
+
+    let gpu_generated_text = gpu_gen.generate(prompt, &config).await?;
     println!("- GPU Output: '{}'", gpu_generated_text);
 
     // --- 4. Assert Equivalence ---

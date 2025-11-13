@@ -12,7 +12,7 @@ use ndarray::{Array1, Array2, Array3};
 use tokenizers::Tokenizer;
 use std::sync::Arc;
 use crate::traits::{
-    Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
+    Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel, CrossAttentionDecoder
 };
 use crate::utils::create_full_attention_mask;
 use serde::{Serialize, Deserialize};
@@ -209,7 +209,8 @@ pub trait LanguageModel: TransformerModel {
             max_len = max_len.max(encoding.len());
             encodings.push(encoding);
         }
-
+// Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
+// Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime
         let pad_id = self.pad_token_id().unwrap_or(0) as f32;
         let batch_size = texts.len();
 
@@ -347,6 +348,23 @@ pub trait EncoderLanguageModel: LanguageModel {
 
         Ok(pooled.outer_iter().map(|row| row.to_vec()).collect())
     }
+}
+
+#[async_trait]
+pub trait EncoderDecoderLanguageModel: LanguageModel {
+    /// Returns a reference to the model's encoder component.
+    fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput>;
+
+    /// Returns a reference to the model's decoder component.
+    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<f32>, Output = DecoderOutput>;
+
+    /// Projects the final hidden states from the decoder to vocabulary logits.
+    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
+    
+    fn generation_config_from_preset(&self) -> GenerationConfig;
+
+    /// The token ID that should be used to start the decoding process.
+    fn decoder_start_token_id(&self) -> u32;
 }
 
 /// Trait for decoder-only language models (GPT-2, GPT-3, Llama, etc.)

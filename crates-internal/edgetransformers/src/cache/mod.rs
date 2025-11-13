@@ -29,5 +29,6 @@ pub trait Cache: Send + Sync {
     fn clear(&mut self);
 
     fn increment_len(&mut self, new_tokens_len: usize);
+    fn clone_box(&self) -> Box<dyn Cache>;
 
 }

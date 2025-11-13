@@ -212,10 +212,11 @@ impl LlamaModel {
     ///
     /// # Example
     /// ```no_run
-    /// use edgemodels::text_generation::LlamaModel;
+    /// use edgemodels::text_generation::{LlamaModel, Generator};
     /// # async fn example(model: &LlamaModel) -> anyhow::Result<()> {
     /// let prompt = "The capital of France is";
-    /// let generated = model.generate(prompt, 20, 1.0, None).await?;
+    /// let generator = Generator::new(Box::new(model));
+    /// let generated = generator.generate(prompt, 20, 1.0, None).await?;
     /// println!("Generated: {}", generated);
     /// # Ok(())
     /// # }

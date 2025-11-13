@@ -212,8 +212,6 @@ impl MultiHeadAttention {
     ) -> Result<Array3<f32>> {
         let kv_source = key_value_source.unwrap_or(hidden_states);
 
-        // --- ✅ FIX APPLIED HERE ---
-
         // 1. Project Q, K, and V
         let q_proj = matmul_3d_2d(hidden_states, &self.q_weight); // Add bias if exists
         let (k_states, v_states) = self.project_kv(kv_source);
@@ -297,7 +295,6 @@ impl MultiHeadAttention {
         }
         let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
 
-        // --- Step 2: ✅ THIS IS THE CRITICAL CHANGE ---
         // Apply RoPE to the *new* Q and K projections ONLY, before caching.
         let (rotated_q, rotated_k) = if let Some(r) = rope {
             // We use apply_3d because we are still working with [batch, seq, hidden] tensors.
@@ -332,30 +329,6 @@ impl MultiHeadAttention {
         } else {
             (rotated_k.clone(), new_v.clone())
         };
-
-        // 2. Concatenate with cache if it exists
-        // let (full_k, full_v, cache_len) = if let Some((cached_k, cached_v)) = cached_kv {
-        //     let cache_len = cached_k.shape()[1];
-        //     let new_len = new_k.shape()[1];
-        //     let full_len = cache_len + new_len;
-        //     let hidden_size = new_k.shape()[2];
-
-        //     let mut full_k = Array3::zeros((batch_size, full_len, hidden_size));
-        //     let mut full_v = Array3::zeros((batch_size, full_len, hidden_size));
-
-        //     full_k.slice_mut(s![.., 0..cache_len, ..]).assign(&cached_k);
-        //     full_k
-        //         .slice_mut(s![.., cache_len..full_len, ..])
-        //         .assign(&new_k);
-        //     full_v.slice_mut(s![.., 0..cache_len, ..]).assign(&cached_v);
-        //     full_v
-        //         .slice_mut(s![.., cache_len..full_len, ..])
-        //         .assign(&new_v);
-
-        //     (full_k, full_v, cache_len)
-        // } else {
-        //     (new_k.clone(), new_v.clone(), 0)
-        // };
 
         // 3. Compute attention with proper position offset for RoPE
         let output = self.attend(

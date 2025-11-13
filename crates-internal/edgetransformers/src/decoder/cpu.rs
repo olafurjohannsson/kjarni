@@ -11,7 +11,7 @@ use crate::{
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{debug, info};
-use ndarray::{Array1, Array2, Array3, s};
+use ndarray::{Array1, Array2, Array3, Axis, s};
 use std::sync::Arc;
 
 /// The CPU backend implementation for the generic `TransformerDecoder`.
@@ -436,16 +436,19 @@ impl CpuTransformerDecoder {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.config.hidden_size();
 
-        let mut hidden_states = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
+        // Convert input_ids to a flattened slice of usize for indexing
+        // The .as_slice() method is only available on contiguous arrays, which is the default.
+        let indices_slice = input_ids.as_slice().unwrap().iter().map(|&x| x as usize).collect::<Vec<_>>();
 
-        // Word embeddings
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                let word_emb = self.embeddings.word_embeddings.row(token_id);
-                hidden_states.slice_mut(s![i, j, ..]).assign(&word_emb);
-            }
-        }
+        // Chain the operations to correctly infer the final 3D type.
+        let mut hidden_states = self
+            .embeddings
+            .word_embeddings
+            .select(Axis(0), &indices_slice) // select returns a 2D array
+            .into_shape_with_order((batch_size, seq_len, hidden_size)) // reshape into 3D
+            .unwrap()
+            .to_owned(); // Convert the view from into_shape into an owned array
+
 
         // Position embeddings with offset (only if present - GPT-2 has them, LLaMA doesn't)
         if let Some(ref pos_embeddings) = self.embeddings.position_embeddings {
