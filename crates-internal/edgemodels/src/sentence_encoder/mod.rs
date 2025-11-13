@@ -16,6 +16,7 @@ use edgetransformers::models::{EncoderLanguageModel, LanguageModel, ModelArchite
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
+use edgetransformers::models::base::{EncodingConfig, PoolingStrategy};
 mod configs;
 mod tests;
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
@@ -192,12 +193,20 @@ impl SentenceEncoder {
 
     /// Encode text with default mean pooling and normalization
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
-        <Self as EncoderLanguageModel>::encode(self, text, "mean", true).await
+        let config = EncodingConfig {
+            normalize: true,
+            pooling_strategy: PoolingStrategy::Mean
+        };
+        <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
 
     /// Encode text without normalization (raw embeddings)
     pub async fn encode_raw(&self, text: &str) -> Result<Vec<f32>> {
-        <Self as EncoderLanguageModel>::encode(self, text, "mean", false).await
+        let config = EncodingConfig {
+            normalize: false,
+            pooling_strategy: PoolingStrategy::Mean
+        };
+        <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
 
     /// Encode with pooling strategy and optional normalization
@@ -208,17 +217,35 @@ impl SentenceEncoder {
         normalize: bool,
     ) -> Result<Vec<f32>> {
         let strategy = pooling_strategy.unwrap_or("mean");
-        <Self as EncoderLanguageModel>::encode(self, text, &strategy, normalize).await
+        let config = EncodingConfig {
+            normalize: normalize,
+            pooling_strategy: match strategy {
+                "mean" => PoolingStrategy::Mean,
+                "cls" => PoolingStrategy::Cls,
+                "lastToken" => PoolingStrategy::LastToken,
+                "max" => PoolingStrategy::Max,
+                _ => panic!("Unknown pooling strategy {}", strategy)
+            }
+        };
+        <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
 
     /// Encode batch of texts with default mean pooling and normalization
     pub async fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        <Self as EncoderLanguageModel>::encode_batch(self, texts, "mean", true).await
+        let config = EncodingConfig {
+            normalize: true,
+            pooling_strategy: PoolingStrategy::Mean
+        };
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
 
     /// Encode batch of texts without normalization (raw embeddings)
     pub async fn encode_batch_raw(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        <Self as EncoderLanguageModel>::encode_batch(self, texts, "mean", false).await
+        let config = EncodingConfig {
+            normalize: false,
+            pooling_strategy: PoolingStrategy::Mean
+        };
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
 
     /// Encode batch with custom pooling strategy and normalization
@@ -229,13 +256,23 @@ impl SentenceEncoder {
         normalize: bool,
     ) -> Result<Vec<Vec<f32>>> {
         let strategy = pooling_strategy.unwrap_or("mean");
-        <Self as EncoderLanguageModel>::encode_batch(self, texts, strategy, normalize).await
+        let config = EncodingConfig {
+            normalize: normalize,
+            pooling_strategy: match strategy {
+                "mean" => PoolingStrategy::Mean,
+                "cls" => PoolingStrategy::Cls,
+                "lastToken" => PoolingStrategy::LastToken,
+                "max" => PoolingStrategy::Max,
+                _ => panic!("Unknown pooling strategy {}", strategy)
+            }
+        };
+        <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
 }
 
 // Implement base language model trait
 impl LanguageModel for SentenceEncoder {
-    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(&self, _batch_size: usize, _max_len: usize) -> Result<Box<dyn Cache>> {
         panic!("Sentence Encoder does not support KV Cache");
     }
     fn tokenizer(&self) -> &Tokenizer {

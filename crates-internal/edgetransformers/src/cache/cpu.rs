@@ -129,6 +129,9 @@ impl Cache for CpuKVCache {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+     fn set_seq_length(&mut self, len: usize) {
+        self.current_len = len;
+    }
     fn get_seq_length(&self) -> usize {
         self.current_len
     }

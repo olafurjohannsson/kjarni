@@ -132,7 +132,9 @@ impl Cache for GpuKVCache {
     fn as_any(&self) -> &dyn Any {
         self
     }
-
+ fn set_seq_length(&mut self, len: usize) {
+        self.seq_length = len;
+    }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }

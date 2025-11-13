@@ -5,8 +5,8 @@ use edgetransformers::traits::{
     DecoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerDecoderAttentionNames,
     LayerFeedForwardNames, TransformerConfig,
 };
-use std::any::Any;
 use serde::Deserialize;
+use std::any::Any;
 
 // This config is for GPT-2 style models like DistilGPT2, GPT-2, etc.
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +76,15 @@ impl LanguageModelConfig for Gpt2Config {
     fn transpose_attention_weights(&self) -> bool {
         false
     }
+    fn eos_token_id(&self) -> Option<u32> {
+        Some(50256)
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        Some(50256)
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        Some(50256)
+    }
 }
 
 impl DecoderArchitecture for Gpt2Config {
@@ -137,5 +146,70 @@ impl DecoderArchitecture for Gpt2Config {
             norm_bias: format!("{}.{}.ln_2.bias", prefix, i),
             gate_weight: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GPT2_CONFIG_JSON: &str = r#"{
+        "vocab_size": 50257,
+        "n_ctx": 1024,
+        "n_embd": 768,
+        "n_layer": 12,
+        "n_head": 12,
+        "layer_norm_epsilon": 1e-5
+    }"#;
+
+    const DISTILGPT2_CONFIG_JSON: &str = r#"{
+        "model_type": "distilgpt2",
+        "vocab_size": 50257,
+        "n_ctx": 1024,
+        "n_embd": 768,
+        "n_layer": 6,
+        "n_head": 12,
+        "layer_norm_epsilon": 1e-5
+    }"#;
+
+    #[test]
+    fn test_gpt2_deserialization_and_names() {
+        let config: Gpt2Config = serde_json::from_str(GPT2_CONFIG_JSON).unwrap();
+
+        assert!(!config.is_distil());
+        assert_eq!(config.hidden_size(), 768);
+
+        let (embed, pos_embed) = config.get_embedding_weight_names();
+        assert_eq!(embed, "wte.weight");
+        assert_eq!(pos_embed, "wpe.weight");
+
+        let attn_names = config.get_attention_names(5);
+        assert_eq!(attn_names.qkv_weight, "h.5.attn.c_attn.weight");
+
+        let lm_head = config.get_lm_head_name();
+        assert_eq!(lm_head, "wte.weight");
+    }
+
+    #[test]
+    fn test_distilgpt2_deserialization_and_names() {
+        let mut config: Gpt2Config = serde_json::from_str(DISTILGPT2_CONFIG_JSON).unwrap();
+        // In a real scenario, the Gpt2Model loader would call this:
+        config.set_model_type("distilgpt2".to_string());
+
+        assert!(config.is_distil());
+        assert_eq!(config.num_hidden_layers(), 6);
+
+        let (embed, pos_embed) = config.get_embedding_weight_names();
+        assert_eq!(embed, "transformer.wte.weight");
+        assert_eq!(pos_embed, "transformer.wpe.weight");
+
+        let ffn_names = config.get_feed_forward_names(0);
+        assert_eq!(
+            ffn_names.intermediate_weight,
+            "transformer.h.0.mlp.c_fc.weight"
+        );
+
+        let lm_head = config.get_lm_head_name();
+        assert_eq!(lm_head, "transformer.wte.weight");
     }
 }

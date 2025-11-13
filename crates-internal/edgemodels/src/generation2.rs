@@ -1,11 +1,9 @@
 //! Text generation utilities
 
-
 use anyhow::Result;
-use ndarray::{Array1};
+use ndarray::Array1;
 use rand::Rng;
-use std::collections::{HashSet, HashMap};
-
+use std::collections::{HashMap, HashSet};
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
@@ -13,11 +11,9 @@ use tokenizers::Tokenizer;
 #[cfg(target_arch = "wasm32")]
 use crate::tokenizer::wasm::BPETokenizer as Tokenizer;
 
-use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
-
-
-
-
+use edgetransformers::models::base::{
+    DecodingStrategy, GenerationConfig, SamplingParams,
+};
 
 pub fn apply_repetition_penalty(
     mut logits: Array1<f32>,
@@ -45,19 +41,19 @@ pub fn apply_repetition_penalty2(
     if penalty == 1.0 {
         return logits;
     }
-    
+
     // Count occurrences of each token
     let mut token_counts: HashMap<u32, usize> = HashMap::new();
     for &id in generated_ids {
         *token_counts.entry(id).or_insert(0) += 1;
     }
-    
+
     for (&id, &count) in &token_counts {
         let idx = id as usize;
         if idx >= logits.len() {
             continue;
         }
-        
+
         // Apply penalty once per unique token (not per occurrence)
         if logits[idx] < 0.0 {
             logits[idx] *= penalty;
@@ -117,11 +113,9 @@ pub fn apply_no_repeat_ngram(
 }
 
 /// Sample a token from logits
-pub fn sample_token(mut logits: Array1<f32>, config: &GenerationConfig) -> Result<u32> {
-    let mut rng = rand::thread_rng();
-
-    match config.sampling_strategy {
-        SamplingStrategy::Greedy => {
+pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Result<u32> {
+    match strategy {
+        DecodingStrategy::Greedy => {
             // Argmax
             Ok(logits
                 .iter()
@@ -130,62 +124,27 @@ pub fn sample_token(mut logits: Array1<f32>, config: &GenerationConfig) -> Resul
                 .map(|(idx, _)| idx as u32)
                 .unwrap())
         }
-
-        SamplingStrategy::Temperature => {
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::TopK => {
-            // Apply top-k filtering
-            if let Some(k) = config.top_k {
+        DecodingStrategy::Sample(params) => {
+            let mut rng = rand::thread_rng();
+            // 1. Apply Top-K filtering if specified.
+            if let Some(k) = params.top_k {
                 logits = top_k_filtering(logits, k);
             }
 
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::TopP => {
-            // Apply top-p (nucleus) filtering
-            if let Some(p) = config.top_p {
+            // 2. Apply Top-P (nucleus) filtering if specified.
+            //    This can be applied after Top-K.
+            if let Some(p) = params.top_p {
                 logits = top_p_filtering(logits, p);
             }
 
-            // Apply temperature
-            logits /= config.temperature;
+            // 3. Apply temperature scaling.
+            logits /= params.temperature;
 
-            // Softmax and sample
+            // 4. Convert logits to probabilities and sample from the distribution.
             let probs = softmax_1d(&logits);
             sample_from_probs(&probs, &mut rng)
         }
-
-        SamplingStrategy::TopKTopP => {
-            // Apply both top-k and top-p
-            if let Some(k) = config.top_k {
-                logits = top_k_filtering(logits, k);
-            }
-            if let Some(p) = config.top_p {
-                logits = top_p_filtering(logits, p);
-            }
-
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::BeamSearch => {
+        DecodingStrategy::BeamSearch(_) => {
             anyhow::bail!("Invalid configuration, beamsearch is not per-token sampling")
         }
     }

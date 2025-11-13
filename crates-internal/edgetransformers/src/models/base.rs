@@ -6,16 +6,52 @@
 use crate::Cache;
 use crate::cache::CpuKVCache;
 use crate::pooling::mean_pool;
+use crate::traits::{
+    CrossAttentionDecoder, Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig,
+    TransformerModel,
+};
+use crate::utils::create_full_attention_mask;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
-use tokenizers::Tokenizer;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::Arc;
-use crate::traits::{
-    Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel, CrossAttentionDecoder
-};
-use crate::utils::create_full_attention_mask;
-use serde::{Serialize, Deserialize};
+use tokenizers::Tokenizer;
+
+#[derive(Clone, Debug)]
+pub struct EncodingConfig {
+    pub pooling_strategy: PoolingStrategy,
+    pub normalize: bool,
+}
+impl fmt::Display for EncodingConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "EncodingConfig {{ pooling_strategy: {}, normalize: {} }}",
+            self.pooling_strategy, self.normalize
+        )
+    }
+}
+/// Pooling strategies for sequence outputs
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PoolingStrategy {
+    Mean,
+    Max,
+    Cls,
+    LastToken,
+}
+impl fmt::Display for PoolingStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PoolingStrategy::Mean => "Mean",
+            PoolingStrategy::Max => "Max",
+            PoolingStrategy::Cls => "CLS",
+            PoolingStrategy::LastToken => "LastToken",
+        };
+        write!(f, "{}", s)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RopeScalingConfig {
@@ -27,36 +63,36 @@ pub struct RopeScalingConfig {
 }
 
 /// Configuration for text generation
-#[derive(Clone, Debug)]
-pub struct GenerationConfig {
-    // Let's make this optional. If it's `Some`, it takes precedence.
-    pub max_new_tokens: Option<usize>,
+// #[derive(Clone, Debug)]
+// pub struct GenerationConfig {
+//     // Let's make this optional. If it's `Some`, it takes precedence.
+//     pub max_new_tokens: Option<usize>,
 
-    // This will be our ultimate authority for loop termination.
-    pub max_length: usize,
+//     // This will be our ultimate authority for loop termination.
+//     pub max_length: usize,
 
-    // pub max_new_tokens: usize,
-    pub temperature: f32,
-    pub top_k: Option<usize>,
-    pub top_p: Option<f32>,
-    pub repetition_penalty: f32,
-    pub sampling_strategy: SamplingStrategy,
-    pub eos_token_id: Option<u32>,
-    pub pad_token_id: Option<u32>,
-    pub num_beams: usize,
-    pub min_length: usize,
+//     // pub max_new_tokens: usize,
+//     pub temperature: f32,
+//     pub top_k: Option<usize>,
+//     pub top_p: Option<f32>,
+//     pub repetition_penalty: f32,
+//     pub sampling_strategy: SamplingStrategy,
+//     pub eos_token_id: Option<u32>,
+//     pub pad_token_id: Option<u32>,
+//     pub num_beams: usize,
+//     pub min_length: usize,
 
-    pub length_penalty: f32,
-    pub early_stopping: bool,
-    pub no_repeat_ngram_size: usize,
-    
-    /// Whether to prepend the BOS token to the prompt
-    /// Defaults to true
-    pub add_bos_token: bool,
-}
+//     pub length_penalty: f32,
+//     pub early_stopping: bool,
+//     pub no_repeat_ngram_size: usize,
+
+//     /// Whether to prepend the BOS token to the prompt
+//     /// Defaults to true
+//     pub add_bos_token: bool,
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GenerationStrategy {
+pub enum AutoregressiveLoop {
     /// Efficient, pipelined logic. Uses the prefill output directly.
     /// Correct for Llama and the "theoretically correct" approach.
     Pipelined,
@@ -66,45 +102,92 @@ pub enum GenerationStrategy {
     Legacy,
 }
 
+// impl Default for GenerationConfig {
+//     fn default() -> Self {
+//         Self {
+//             // General sampling params
+//             max_new_tokens: None,
+//             temperature: 0.7,
+//             top_k: Some(50),
+//             top_p: Some(0.9),
+//             repetition_penalty: 1.1,
+//             sampling_strategy: SamplingStrategy::TopKTopP,
+//             eos_token_id: Some(50256), // default GPT-2 EOS
+//             pad_token_id: Some(50256),
+//             // Beam search specific params (from BART config)
+//             num_beams: 4,
+//             min_length: 56,
+//             max_length: 142,
+//             no_repeat_ngram_size: 3,
+//             length_penalty: 2.0,
+//             early_stopping: true,
+//             add_bos_token: true,
+//         }
+//     }
+// }
+/// Parameters for sampling-based decoding (Top-K, Top-P, Temperature).
+#[derive(Clone, Debug)]
+pub struct SamplingParams {
+    pub temperature: f32,
+    pub top_k: Option<usize>,
+    pub top_p: Option<f32>,
+}
+
+/// Parameters for beam search decoding.
+#[derive(Clone, Debug)]
+pub struct BeamSearchParams {
+    pub num_beams: usize,
+    pub length_penalty: f32,
+    pub early_stopping: bool,
+}
+
+/// The user-facing decoding algorithm and its specific parameters.
+#[derive(Clone, Debug)]
+pub enum DecodingStrategy {
+    /// Select the most likely token (argmax).
+    Greedy,
+    /// Sample from the distribution using various techniques.
+    Sample(SamplingParams),
+    /// Explore multiple hypotheses to find the most likely sequence.
+    BeamSearch(BeamSearchParams),
+}
+
+/// The main, unified configuration struct for text generation.
+#[derive(Clone, Debug)]
+pub struct GenerationConfig {
+    // --- Common Parameters for all strategies ---
+    pub max_new_tokens: Option<usize>,
+    pub max_length: usize,
+    pub min_length: usize,
+    pub repetition_penalty: f32,
+    pub no_repeat_ngram_size: usize,
+    pub add_bos_token: bool,
+
+    // --- The specific decoding strategy and its parameters ---
+    pub strategy: DecodingStrategy,
+}
+/// A sensible default for decoder-only models (like GPT-2 or Llama).
 impl Default for GenerationConfig {
     fn default() -> Self {
         Self {
-            // General sampling params
-            max_new_tokens: None,
-            temperature: 0.7,
-            top_k: Some(50),
-            top_p: Some(0.9),
-            repetition_penalty: 1.1,
-            sampling_strategy: SamplingStrategy::TopKTopP,
-            eos_token_id: Some(50256), // default GPT-2 EOS
-            pad_token_id: Some(50256),
-            // Beam search specific params (from BART config)
-            num_beams: 4,
-            min_length: 56,
-            max_length: 142,
-            no_repeat_ngram_size: 3,
-            length_penalty: 2.0,
-            early_stopping: true,
+            max_new_tokens: Some(50),
+            max_length: 100,
+            min_length: 0,
+            repetition_penalty: 1.0,
+            no_repeat_ngram_size: 0,
             add_bos_token: true,
+            strategy: DecodingStrategy::Sample(SamplingParams {
+                temperature: 0.7,
+                top_k: Some(50),
+                top_p: Some(0.9),
+            }),
         }
     }
 }
-
 pub struct BeamHypothesis {
     pub tokens: Vec<u32>,
     pub score: f32,
     pub cache: Box<dyn Cache>,
-}
-
-// No changes needed here
-#[derive(Clone, Debug)]
-pub enum SamplingStrategy {
-    Greedy,
-    TopK,
-    TopP,
-    TopKTopP,
-    Temperature,
-    BeamSearch, // We'll use this strategy implicitly for Seq2Seq
 }
 
 /// Base trait for all language models - provides tokenization
@@ -124,7 +207,7 @@ pub trait LanguageModel: TransformerModel {
     /// The model implementation is responsible for choosing the correct cache type
     /// (CPU/GPU) and initializing it with the correct dimensions.
     fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>>;
-    
+
     /// Maximum sequence length the model can handle
     fn max_length(&self) -> usize {
         self.config().max_position_embeddings()
@@ -155,22 +238,25 @@ pub trait LanguageModel: TransformerModel {
 
     /// Get the end-of-sequence token ID (if applicable)
     fn eos_token_id(&self) -> Option<u32> {
-        self.tokenizer()
-            .token_to_id("<|endoftext|>")
+        self.config()
+            .eos_token_id()
             .or_else(|| self.tokenizer().token_to_id("</s>"))
+            .or_else(|| self.tokenizer().token_to_id("<|endoftext|>"))
     }
 
     /// Get the padding token ID (if applicable)
     fn pad_token_id(&self) -> Option<u32> {
-        self.tokenizer()
-            .token_to_id("<pad>")
+        self.config()
+            .pad_token_id()
+            .or_else(|| self.tokenizer().token_to_id("<pad>"))
             .or_else(|| self.tokenizer().token_to_id("[PAD]"))
     }
 
     /// Get the beginning-of-sequence token ID (if applicable)
     fn bos_token_id(&self) -> Option<u32> {
-        self.tokenizer()
-            .token_to_id("<s>")
+        self.config()
+            .bos_token_id()
+            .or_else(|| self.tokenizer().token_to_id("<s>"))
             .or_else(|| self.tokenizer().token_to_id("[CLS]"))
     }
 
@@ -209,8 +295,8 @@ pub trait LanguageModel: TransformerModel {
             max_len = max_len.max(encoding.len());
             encodings.push(encoding);
         }
-// Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
-// Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime
+        // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
+        // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime
         let pad_id = self.pad_token_id().unwrap_or(0) as f32;
         let batch_size = texts.len();
 
@@ -282,24 +368,35 @@ pub trait EncoderLanguageModel: LanguageModel {
     /// * `text` - Input text
     /// * `pooling` - Pooling strategy: "cls", or "mean"
     /// * `normalize` -
-    async fn encode(&self, text: &str, pooling: &str, normalize: bool) -> Result<Vec<f32>> {
+    async fn encode(&self, text: &str, config: &EncodingConfig) -> Result<Vec<f32>> {
         let (hidden, attention_mask) = self.get_hidden_states_batch(&[text]).await?;
 
         // Mean pooling requires the attention mask to work correctly
-        let embedding = match pooling {
-            "cls" => {
+        let embedding = match config.pooling_strategy {
+            PoolingStrategy::Cls => {
                 // Use [CLS] token (first token)
                 hidden.slice(ndarray::s![0, 0, ..]).to_owned()
             }
-            "mean" => {
+            PoolingStrategy::Mean => {
                 // Mean pool using the attention mask
                 mean_pool(&hidden, &attention_mask)?.row(0).to_owned()
             }
-            _ => return Err(anyhow!("Unknown pooling strategy: {}", pooling)),
+            PoolingStrategy::Max => {
+                unimplemented!()
+            }
+            PoolingStrategy::LastToken => {
+                unimplemented!()
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unknown pooling strategy: {}",
+                    config.pooling_strategy
+                ));
+            }
         };
 
         // L2 Normalize the final embedding
-        if normalize {
+        if config.normalize {
             let norm = (embedding.dot(&embedding)).sqrt();
             let normalized_embedding = if norm > 0.0 {
                 embedding / norm
@@ -319,12 +416,7 @@ pub trait EncoderLanguageModel: LanguageModel {
     /// * `texts` - Input texts
     /// * `pooling` - Pooling strategy: "cls", or "mean"
     /// * `normalize` - Whether to L2-normalize the outputs
-    async fn encode_batch(
-        &self,
-        texts: &[&str],
-        pooling: &str,
-        normalize: bool,
-    ) -> Result<Vec<Vec<f32>>> {
+    async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -332,17 +424,28 @@ pub trait EncoderLanguageModel: LanguageModel {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
         // Apply pooling to the whole batch
-        let mut pooled = match pooling {
-            "cls" => {
+        let mut pooled = match config.pooling_strategy {
+            PoolingStrategy::Cls => {
                 // Use [CLS] token (first token of each item in the batch)
                 hidden_states.slice(ndarray::s![.., 0, ..]).to_owned()
             }
-            "mean" => mean_pool(&hidden_states, &attention_mask)?,
-            _ => return Err(anyhow!("Unknown pooling strategy: {}", pooling)),
+            PoolingStrategy::Mean => mean_pool(&hidden_states, &attention_mask)?,
+            PoolingStrategy::LastToken => {
+                unimplemented!()
+            }
+            PoolingStrategy::Max => {
+                unimplemented!()
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unknown pooling strategy: {}",
+                    config.pooling_strategy
+                ));
+            }
         };
 
         // Conditionally L2 normalize the entire batch of embeddings
-        if normalize {
+        if config.normalize {
             l2_normalize_inplace(&mut pooled);
         }
 
@@ -360,11 +463,17 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 
     /// Projects the final hidden states from the decoder to vocabulary logits.
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
-    
-    fn generation_config_from_preset(&self) -> GenerationConfig;
+
+    // fn generation_config_from_preset(&self) -> GenerationConfig;
 
     /// The token ID that should be used to start the decoding process.
     fn decoder_start_token_id(&self) -> u32;
+
+    fn get_default_generation_config(&self) -> GenerationConfig;
+
+    // TODO: maybe dont have these here
+    fn lm_head(&self) -> &Array2<f32>;
+    fn final_logits_bias(&self) -> Option<&Array1<f32>>;
 }
 
 /// Trait for decoder-only language models (GPT-2, GPT-3, Llama, etc.)
@@ -380,7 +489,7 @@ pub trait DecoderLanguageModel: LanguageModel {
 
     /// Specifies the generation loop strategy required for this model
     /// to maintain parity with its reference implementation.
-    fn generation_strategy(&self) -> GenerationStrategy;
+    fn autoregressive_loop(&self) -> AutoregressiveLoop;
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
 

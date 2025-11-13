@@ -172,10 +172,10 @@ impl CpuTransformerEncoderDecoder {
 
             // Add the position embeddings to the word embeddings
             // We need to reshape the slice to be broadcastable for the addition
-            hidden_states += &pos_embeddings_to_add.insert_axis(Axis(0));
+            hidden_states += &pos_embeddings_to_add;
         }
         // --- FIX END ---
-
+        println!("[OLD] Decoder Embeddings Mean (after pos): {}", hidden_states.mean().unwrap());
         hidden_states
     }
 }
@@ -198,6 +198,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         // The generator now provides the position offset.
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
+        let total_len = position_offset + seq_len;
 
         // 1. Embed the decoder input tokens and apply layer norm.
         let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
@@ -213,6 +214,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 .and_then(|cache| cache.get(layer_idx));
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
 
+            
             // The EncoderLayer's forward method should be adapted or a new one created
             // that handles cross-attention. Let's assume you have a method like this:
             let (new_hidden, (new_k, new_v)) = layer.forward_cross_attention(
@@ -232,7 +234,8 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
             for (layer_idx, (k, v)) in new_key_values.into_iter().enumerate() {
                 cache.update(layer_idx, &k, &v)?;
             }
-            cache.increment_len(seq_len);
+            // cache.increment_len(seq_len);
+            cache.set_seq_length(total_len);
         }
 
         Ok(DecoderOutput {

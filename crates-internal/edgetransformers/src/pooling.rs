@@ -4,13 +4,7 @@ use anyhow::Result;
 use ndarray::{Array2, Array3, Axis};
 use crate::utils::MASK_VALUE;
 
-/// Pooling strategies for sequence outputs
-pub enum PoolingStrategy {
-    Mean,
-    Max,
-    Cls,
-    LastToken,
-}
+pub use crate::models::base::{EncodingConfig, PoolingStrategy};
 
 /// Performs mean pooling over sequence dimension to convert token embeddings to sentence embeddings.
 ///

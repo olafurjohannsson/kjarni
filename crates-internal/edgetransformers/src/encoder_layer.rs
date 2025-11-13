@@ -1,4 +1,5 @@
 // Re-export commonly used items
+use crate::utils::linear_algebra::matmul_3d_2d;
 pub use crate::{
     attention::MultiHeadAttention,
     cache::CpuKVCache,
@@ -9,7 +10,6 @@ pub use crate::{
     traits::TransformerConfig,
     weights::ModelWeights,
 };
-use crate::utils::linear_algebra::matmul_3d_2d;
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3, ArrayView3, Axis};
 
@@ -43,7 +43,10 @@ impl EncoderLayer {
     ) -> Result<Array3<f32>> {
         let is_prenorm = config.is_prenorm();
         let is_causal = config.is_causal();
-        println!("EncoderLayer prenorm: {} - causal: {}", is_prenorm, is_causal);
+        println!(
+            "EncoderLayer prenorm: {} - causal: {}",
+            is_prenorm, is_causal
+        );
         if is_prenorm {
             let residual_1 = hidden.clone();
             let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
@@ -112,37 +115,43 @@ impl EncoderLayer {
         // This is a standard post-layernorm decoder layer (like BART)
 
         // --- 1. Self-Attention Block ---
+
+        let owned_kv: Option<(Array3<f32>, Array3<f32>)> =
+            past_kv.as_ref().map(|(k, v)| (k.to_owned(), v.to_owned()));
+
+        let cached_kv: Option<(&Array3<f32>, &Array3<f32>)> =
+            owned_kv.as_ref().map(|(k, v)| (k, v));
+
         let residual = hidden_states.clone();
-        let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache(
-            &hidden_states,
+        let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache_2(
+            hidden_states,
             None, // Key/Value source is the same as query for self-attention
             self_attention_mask,
             true, // Causal mask for self-attention
-            past_kv,
-            None, // No RoPE for BART
+            cached_kv,
         )?;
         let mut hidden_states = residual + attn_output;
         hidden_states = self.self_attn_layer_norm.forward_3d(&hidden_states);
 
-        // --- 2. Cross-Attention Block ---
+        println!(
+            "[FWD_X_ATTN] After Self-Attn + Norm, Mean: {}",
+            hidden_states.mean().unwrap()
+        );
+
+        // --- 2. Cross-Attention Block (REPLACED LOGIC) ---
         let residual = hidden_states.clone();
         let cross_attn = self.cross_attn.as_ref().unwrap();
 
-        // Project Q from decoder state, K and V from encoder state
-        let q = matmul_3d_2d(&hidden_states, &cross_attn.q_weight) + &cross_attn.q_bias;
-        let k = matmul_3d_2d(encoder_hidden_states, &cross_attn.k_weight) + &cross_attn.k_bias;
-        let v = matmul_3d_2d(encoder_hidden_states, &cross_attn.v_weight) + &cross_attn.v_bias;
-
-        // Compute attention using the projected Q, K, V
-        let cross_attn_output = cross_attn.attend(
-            &q,
-            &k,
-            &v,
+        // This block now mirrors the OLD code by calling the high-level `forward_with_cache`
+        // instead of implementing the logic manually.
+        let (cross_attn_output, _, _) = cross_attn.forward_with_cache_2(
+            &hidden_states,              // Query source
+            Some(encoder_hidden_states), // Key/Value source
             cross_attention_mask,
             false, // Not causal
-            0,     // No position offset
-            None,  // No RoPE
+            None,  // No KV cache for cross-attention
         )?;
+
         hidden_states = residual + cross_attn_output;
         hidden_states = self
             .cross_attn_layer_norm
@@ -150,16 +159,26 @@ impl EncoderLayer {
             .unwrap()
             .forward_3d(&hidden_states);
 
+        println!(
+            "[FWD_X_ATTN] After Cross-Attn + Norm, Mean: {}",
+            hidden_states.mean().unwrap()
+        );
+
         // --- 3. Feed-Forward Block ---
         let residual = hidden_states.clone();
         let ffn_output = self.feedforward.forward(&hidden_states)?;
         hidden_states = residual + ffn_output;
         hidden_states = self.ffn_layer_norm.forward_3d(&hidden_states);
 
+        println!(
+            "[FWD_X_ATTN] After FFN + Norm, Mean: {}",
+            hidden_states.mean().unwrap()
+        );
+
         // Return the final hidden state and the NEW self-attention K/V pair to be cached.
         Ok((hidden_states, (new_k, new_v)))
     }
-
+    
     /// Original forward without cache (for compatibility with encoders).
     pub fn forward(
         &self,

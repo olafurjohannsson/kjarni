@@ -1,10 +1,10 @@
 use crate::generation2::{apply_no_repeat_ngram, apply_repetition_penalty};
 use anyhow::{Result, anyhow};
+use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
 use edgetransformers::models::base::EncoderDecoderLanguageModel; // Or wherever you put the trait
-use edgetransformers::models::base::{BeamHypothesis, GenerationConfig};
+use edgetransformers::models::base::{BeamHypothesis, DecodingStrategy, GenerationConfig};
 use edgetransformers::prelude::*;
-use edgetransformers::traits::{EncoderOutput};
-use edgetransformers::encoder_decoder::{TransformerEncoderDecoder};
+use edgetransformers::traits::EncoderOutput;
 use ndarray::{Array1, Array2, s};
 
 /// Selects the top `k` tokens and their log probabilities from a log probability distribution.
@@ -59,7 +59,10 @@ impl Seq2SeqGenerator {
             .map_err(|e| anyhow!(e))?;
         let attention_mask = Array2::ones((1, encoding.len()));
         let encoder_output = self.encode_input(input_text).await?;
-        println!("[NEW] Encoder Attention Mask Shape: {:?}", attention_mask.dim());
+        println!(
+            "[NEW] Encoder Attention Mask Shape: {:?}",
+            attention_mask.dim()
+        );
         self.generate_from_encoding(&encoder_output, &attention_mask, config)
             .await
     }
@@ -76,10 +79,20 @@ impl Seq2SeqGenerator {
             encoding.get_ids().iter().map(|&id| id as f32).collect(),
         )?;
         let attention_mask = Array2::ones(input_ids.dim());
-        
-        let encoder_output: EncoderOutput = self.model.encoder().forward(&input_ids, &attention_mask, None).await?;
-        println!("[NEW] Encoder Output Mean: {}", encoder_output.last_hidden_state.mean().unwrap());
-        println!("[NEW] Encoder Output Std Dev: {}", encoder_output.last_hidden_state.std(0.0));
+
+        let encoder_output: EncoderOutput = self
+            .model
+            .encoder()
+            .forward(&input_ids, &attention_mask, None)
+            .await?;
+        println!(
+            "[NEW] Encoder Output Mean: {}",
+            encoder_output.last_hidden_state.mean().unwrap()
+        );
+        println!(
+            "[NEW] Encoder Output Std Dev: {}",
+            encoder_output.last_hidden_state.std(0.0)
+        );
         Ok(encoder_output)
     }
     pub async fn generate_from_encoding(
@@ -88,7 +101,15 @@ impl Seq2SeqGenerator {
         encoder_attention_mask: &Array2<f32>,
         config: &GenerationConfig,
     ) -> Result<String> {
-        
+        let beam_params = match &config.strategy {
+            DecodingStrategy::BeamSearch(params) => params,
+            // If the user passes a Greedy or Sample config, we return a helpful error.
+            _ => {
+                return Err(anyhow!(
+                    "Seq2SeqGenerator only supports the BeamSearch strategy."
+                ));
+            }
+        };
         let batch_size = encoder_output.last_hidden_state.shape()[0];
         let eos_token_id = 2;
         let decoder_start_token_id = 2;
@@ -101,8 +122,11 @@ impl Seq2SeqGenerator {
             cache: initial_cache,
         }];
         let mut completed_beams: Vec<BeamHypothesis> = Vec::new();
-        println!("MaxLength: {} MaxNewTokens: {}", config.max_length, 
-            config.max_new_tokens.unwrap_or(0));
+        println!(
+            "MaxLength: {} MaxNewTokens: {}",
+            config.max_length,
+            config.max_new_tokens.unwrap_or(0)
+        );
         // Main Generation Loop
         for step in 0..config.max_length {
             if beams.is_empty() {
@@ -120,15 +144,23 @@ impl Seq2SeqGenerator {
 
                 // 1. Clone the cache *before* it gets mutated.
                 let mut current_cache = hypo.cache.clone_box();
-                
+
                 // --- DEBUG PRINTS START ---
                 println!("\n--- Step {} ---", step);
                 println!("[Step {}] Decoder Input Token ID: {}", step, last_token);
                 println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
-                println!("[Step {}] Decoder Attention Mask Shape: {:?}", step, decoder_attention_mask.dim());
-                println!("[Step {}] Cache Length Before Forward: {}", step, current_cache.get_seq_length());
+                println!(
+                    "[Step {}] Decoder Attention Mask Shape: {:?}",
+                    step,
+                    decoder_attention_mask.dim()
+                );
+                println!(
+                    "[Step {}] Cache Length Before Forward: {}",
+                    step,
+                    current_cache.get_seq_length()
+                );
                 // --- DEBUG PRINTS END ---
-                
+
                 // 2. Pass the mutable clone to the forward pass.
                 let decoder_output = self
                     .model
@@ -141,15 +173,21 @@ impl Seq2SeqGenerator {
                         Some(current_cache.as_mut()),
                     )
                     .await?;
-// --- NEW DETAILED LOGGING ---
-println!("\n--- Step {} ---", step);
-println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
-{
-    // Slicing produces a 1D view, so we can index it directly with usize.
-    let hidden_state_slice = decoder_output.last_hidden_state.slice(s![0, 0, ..]);
-    println!("[Step {}] Hidden State [0]:   {:.8}", step, hidden_state_slice[0usize]);
-    println!("[Step {}] Hidden State [100]: {:.8}", step, hidden_state_slice[100usize]);
-}
+                // --- NEW DETAILED LOGGING ---
+                println!("\n--- Step {} ---", step);
+                println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
+                {
+                    // Slicing produces a 1D view, so we can index it directly with usize.
+                    let hidden_state_slice = decoder_output.last_hidden_state.slice(s![0, 0, ..]);
+                    println!(
+                        "[Step {}] Hidden State [0]:   {:.8}",
+                        step, hidden_state_slice[0usize]
+                    );
+                    println!(
+                        "[Step {}] Hidden State [100]: {:.8}",
+                        step, hidden_state_slice[100usize]
+                    );
+                }
 
                 // 3. Project to logits (this now correctly includes the bias).
                 // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
@@ -158,30 +196,72 @@ println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
                 //     logits += bias;
                 // }
 
-                let logits_3d = self
-                    .model
-                    .project_to_logits(&decoder_output.last_hidden_state)?;
-                let mut logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-                
+                // let logits_3d = self
+                //     .model
+                //     .project_to_logits(&decoder_output.last_hidden_state)?;
+                // let mut logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+
+                // --- REVERTED LOGITS LOGIC START ---
+                // This is the logic from your OLD, working code.
+
+                // 1. Get the hidden state for the very last token. This is a 1D view.
+                let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
+
+                // 2. Perform matrix-vector multiplication: [vocab, hidden] @ [hidden] -> [vocab]
+                let mut logits: Array1<f32> = self.model.lm_head().dot(&last_hidden_state);
+
+                // 3. Add the bias if it exists.
+                if let Some(bias) = self.model.final_logits_bias() {
+                    logits += bias;
+                }
+                // --- REVERTED LOGITS LOGIC END ---
+
                 // --- DEBUG PRINTS START ---
                 let hidden_state_slice = decoder_output.last_hidden_state.slice(s![0, 0, ..]);
-                println!("[Step {}] Decoder Hidden State Mean: {:.8}, Std Dev: {:.8}", step, hidden_state_slice.mean().unwrap(), hidden_state_slice.std(0.0));
-                println!("[Step {}] Logits (pre-penalty) Mean: {:.8}, Std Dev: {:.8}", step, logits.mean().unwrap(), logits.std(0.0));
+                println!(
+                    "[Step {}] Decoder Hidden State Mean: {:.8}, Std Dev: {:.8}",
+                    step,
+                    hidden_state_slice.mean().unwrap(),
+                    hidden_state_slice.std(0.0)
+                );
+                println!(
+                    "[Step {}] Logits (pre-penalty) Mean: {:.8}, Std Dev: {:.8}",
+                    step,
+                    logits.mean().unwrap(),
+                    logits.std(0.0)
+                );
                 // --- DEBUG PRINTS END ---
-{
-    println!("[Step {}] Logits (pre-penalty) [0]:     {:.8}", step, logits[0]);
-    println!("[Step {}] Logits (pre-penalty) [100]:   {:.8}", step, logits[100]);
-}
+                {
+                    println!(
+                        "[Step {}] Logits (pre-penalty) [0]:     {:.8}",
+                        step, logits[0]
+                    );
+                    println!(
+                        "[Step {}] Logits (pre-penalty) [100]:   {:.8}",
+                        step, logits[100]
+                    );
+                }
                 // 4. ✅ APPLY ALL PENALTIES from your working code.
                 logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
                 logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
 
                 {
-    println!("[Step {}] Logits (post-penalty) [0]:     {:.8}", step, logits[0]);
-    println!("[Step {}] Logits (post-penalty) [100]:   {:.8}", step, logits[100]);
-}
+                    println!(
+                        "[Step {}] Logits (post-penalty) [0]:     {:.8}",
+                        step, logits[0]
+                    );
+                    println!(
+                        "[Step {}] Logits (post-penalty) [100]:   {:.8}",
+                        step, logits[100]
+                    );
+                }
 
-                println!("[Step {}] Logits (post-penalty) Mean: {:.8}, Std Dev: {:.8}", step, logits.mean().unwrap(), logits.std(0.0));
+                println!(
+                    "[Step {}] Logits (post-penalty) Mean: {:.8}, Std Dev: {:.8}",
+                    step,
+                    logits.mean().unwrap(),
+                    logits.std(0.0)
+                );
                 let log_probs = log_softmax_1d(&logits);
                 // let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
                 let mut top_candidates: Vec<(u32, f32)> = log_probs
@@ -190,11 +270,14 @@ println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
                     .map(|(id, &lp)| (id as u32, lp))
                     .collect();
                 top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                top_candidates.truncate(config.num_beams);
+                top_candidates.truncate(beam_params.num_beams);
                 // --- DEBUG PRINTS START ---
                 // Since num_beams=1 (greedy), there will only be one candidate.
-                    for (token_id, log_prob) in top_candidates.clone() {
-                    println!("[Step {}] Top Candidate Token ID: {} (LogProb: {:.8})", step, token_id, log_prob);
+                for (token_id, log_prob) in top_candidates.clone() {
+                    println!(
+                        "[Step {}] Top Candidate Token ID: {} (LogProb: {:.8})",
+                        step, token_id, log_prob
+                    );
                 }
                 // --- DEBUG PRINTS END ---
                 // 5. Create new hypotheses, each getting a clone of the *updated* cache.
@@ -223,28 +306,43 @@ println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
                 } else {
                     beams.push(candidate);
                 }
-                if beams.len() == config.num_beams {
+                if beams.len() == beam_params.num_beams {
                     break;
                 }
             }
-            if config.early_stopping && completed_beams.len() >= config.num_beams {
+            if beam_params.early_stopping && completed_beams.len() >= beam_params.num_beams {
                 println!("Early stoppin! ");
                 break;
             }
         }
-        println!("early stop: {} num beams: {} total beams {}", config.early_stopping, config.num_beams, beams.len());
-        println!("config.repetition_penalty: {} no_repeat_ngram_size: {}", config.repetition_penalty, config.no_repeat_ngram_size);
+        println!(
+            "early stop: {} num beams: {} total beams {}",
+            beam_params.early_stopping,
+            beam_params.num_beams,
+            beams.len()
+        );
+        println!(
+            "config.repetition_penalty: {} no_repeat_ngram_size: {}",
+            config.repetition_penalty, config.no_repeat_ngram_size
+        );
         // --- 4. FINALIZE AND DECODE (Identical to your working code) ---
-        completed_beams.extend(beams);
-        if completed_beams.is_empty() {
+        let final_hypotheses = if completed_beams.is_empty() {
+            // If no beams reached EOS, use the active (unfinished) beams as candidates.
+            beams
+        } else {
+            // Otherwise, only consider the beams that properly finished.
+            completed_beams
+        };
+
+        if final_hypotheses.is_empty() {
             return Err(anyhow!("No hypothesis was generated."));
         }
 
-        let best_hypo = completed_beams
+        let best_hypo = final_hypotheses
             .iter()
             .max_by(|a, b| {
-                let score_a = a.score / (a.tokens.len() as f32).powf(config.length_penalty);
-                let score_b = b.score / (b.tokens.len() as f32).powf(config.length_penalty);
+                let score_a = a.score / (a.tokens.len() as f32).powf(beam_params.length_penalty);
+                let score_b = b.score / (b.tokens.len() as f32).powf(beam_params.length_penalty);
                 score_a
                     .partial_cmp(&score_b)
                     .unwrap_or(std::cmp::Ordering::Equal)
@@ -258,8 +356,9 @@ println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
         if tokens_to_decode.last() == Some(&eos_token_id) {
             tokens_to_decode = &tokens_to_decode[..tokens_to_decode.len() - 1];
         }
-        
-        self.model.tokenizer()
+
+        self.model
+            .tokenizer()
             .decode(tokens_to_decode, true)
             .map_err(|e| anyhow!(e))
     }

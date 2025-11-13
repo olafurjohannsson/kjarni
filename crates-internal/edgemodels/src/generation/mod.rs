@@ -11,7 +11,7 @@ use rand::Rng;
 
 pub mod seq2seq;
 
-pub use edgetransformers::models::base::{GenerationStrategy, SamplingStrategy, GenerationConfig};
+pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
 
 /// The type of a token being yielded by the generation stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,17 +105,23 @@ impl Generator {
                 Device::Cpu => full_attention_mask.slice(s![.., 0..prompt_len]).to_owned(),
                 Device::Wgpu => full_attention_mask.clone(),
             };
-            match self.model.generation_strategy() {
-                GenerationStrategy::Pipelined => {
+            match self.model.autoregressive_loop() {
+                AutoregressiveLoop::Pipelined => {
                     // Efficient one-pass logic for Llama
-                    let decoder_output = model.decoder().forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut())).await?;
+                    let decoder_output = model
+                        .decoder()
+                        .forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut()))
+                        .await?;
                     let logits_3d = model.project_to_logits(&decoder_output.last_hidden_state)?;
                     next_token_logits = logits_3d.slice(s![0, -1, ..]).to_owned();
                 }
-                GenerationStrategy::Legacy => {
+                AutoregressiveLoop::Legacy => {
                     // Inefficient two-pass logic for GPT-2 parity
                     // 1. Prefill to fill the cache, discard output.
-                    model.decoder().forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut())).await?;
+                    model
+                        .decoder()
+                        .forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut()))
+                        .await?;
                     // 2. We will create a dummy logits tensor. The real logits will be calculated
                     //    on the first iteration of the loop below.
                     next_token_logits = Array1::zeros(model.config().vocab_size());
@@ -142,16 +148,8 @@ impl Generator {
                 ));
             }
         }
-        match self.model.generation_strategy() {
-            GenerationStrategy::Pipelined => {
-                println!("Pipelined!");
-            }
-            GenerationStrategy::Legacy => {
-                println!("Legacy!");
-            }
-        }
         Ok(try_stream! {
-        
+
             for &token_id in &prompt_tokens {
                 if let Some(bos_token_id) = self.model.bos_token_id() {
                     if token_id == bos_token_id {
@@ -166,20 +164,19 @@ impl Generator {
                     token_type: TokenType::Prompt,
                 };
             }
-            match self.model.generation_strategy() {
-                GenerationStrategy::Pipelined => {
-                    println!("Pipelined!");
+            match self.model.autoregressive_loop() {
+                AutoregressiveLoop::Pipelined => {
                     loop {
                         if tokens.len() >= max_len { break; }
 
                         // Apply penalties and sample the FIRST token
                         let processed_logits = apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
-                        let next_token = sample_token(processed_logits, config)?;
+                        let next_token = sample_token(processed_logits, &config.strategy)?;
 
                         tokens.push(next_token);
                         // Yield the newly decoded token.
                         let decoded_token = tokenizer.decode(&[next_token], false).map_err(|e| anyhow!(e))?;
-                        
+
                         yield StreamedToken {
                             text: decoded_token,
                             id: next_token,
@@ -205,8 +202,7 @@ impl Generator {
                         next_token_logits = logits_3d.slice(s![0, 0, ..]).to_owned();
                     }
                 }
-                GenerationStrategy::Legacy => {
-                    println!("Legacy!");
+                AutoregressiveLoop::Legacy => {
                     loop {
                         if tokens.len() >= max_len { break; }
 
@@ -229,7 +225,7 @@ impl Generator {
                         let processed_logits = apply_repetition_penalty(next_token_logits, &tokens, config.repetition_penalty);
 
                         // 5. Sample the *next* token.
-                        let next_token = sample_token(processed_logits, config)?;
+                        let next_token = sample_token(processed_logits, &config.strategy)?;
                         tokens.push(next_token);
 
                         // 6. Yield the token.
@@ -271,11 +267,10 @@ fn apply_repetition_penalty(
 }
 
 /// Sample a token from logits
-pub fn sample_token(mut logits: Array1<f32>, config: &GenerationConfig) -> Result<u32> {
-    let mut rng = rand::thread_rng();
+pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Result<u32> {
 
-    match config.sampling_strategy {
-        SamplingStrategy::Greedy => {
+    match strategy {
+        DecodingStrategy::Greedy => {
             // Argmax
             Ok(logits
                 .iter()
@@ -284,62 +279,28 @@ pub fn sample_token(mut logits: Array1<f32>, config: &GenerationConfig) -> Resul
                 .map(|(idx, _)| idx as u32)
                 .unwrap())
         }
-
-        SamplingStrategy::Temperature => {
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::TopK => {
-            // Apply top-k filtering
-            if let Some(k) = config.top_k {
+        DecodingStrategy::Sample(params) => {
+            let mut rng = rand::thread_rng();
+            // 1. Apply Top-K filtering if specified.
+            if let Some(k) = params.top_k {
                 logits = top_k_filtering(logits, k);
             }
 
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::TopP => {
-            // Apply top-p (nucleus) filtering
-            if let Some(p) = config.top_p {
+            // 2. Apply Top-P (nucleus) filtering if specified.
+            //    This can be applied after Top-K.
+            if let Some(p) = params.top_p {
                 logits = top_p_filtering(logits, p);
             }
 
-            // Apply temperature
-            logits /= config.temperature;
+            // 3. Apply temperature scaling.
+            logits /= params.temperature;
 
-            // Softmax and sample
+            // 4. Convert logits to probabilities and sample from the distribution.
             let probs = softmax_1d(&logits);
             sample_from_probs(&probs, &mut rng)
         }
 
-        SamplingStrategy::TopKTopP => {
-            // Apply both top-k and top-p
-            if let Some(k) = config.top_k {
-                logits = top_k_filtering(logits, k);
-            }
-            if let Some(p) = config.top_p {
-                logits = top_p_filtering(logits, p);
-            }
-
-            // Apply temperature
-            logits /= config.temperature;
-
-            // Softmax and sample
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs, &mut rng)
-        }
-
-        SamplingStrategy::BeamSearch => {
+        DecodingStrategy::BeamSearch(_) => {
             anyhow::bail!("Invalid configuration, beamsearch is not per-token sampling")
         }
     }

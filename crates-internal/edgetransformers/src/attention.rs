@@ -172,7 +172,7 @@ impl MultiHeadAttention {
 
         let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
         scores *= self.scale_factor;
-        
+
         // 5. Apply masks
         if let Some(mask) = attention_mask {
             scores = apply_padding_mask(scores, mask)?;
@@ -248,7 +248,105 @@ impl MultiHeadAttention {
     //         None,  // no RoPE
     //     )
     // }
+    pub fn forward_with_cache_2(
+        &self,
+        query: &Array3<f32>,
+        key_value: Option<&Array3<f32>>, // For cross-attention
+        attention_mask: Option<&Array2<f32>>,
+        is_causal: bool,
+        cached_kv: Option<(&Array3<f32>, &Array3<f32>)>,
+    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        let batch_size = query.shape()[0];
+        let seq_len = query.shape()[1];
 
+        // === 1. Linear Projections & Attention Scaling ===
+
+        // Q projection (always from query input)
+        let mut q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
+
+        // K, V projections
+        let kv_source = key_value.unwrap_or(query);
+        let k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
+        let v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
+
+        // === 2. Concatenate with Cached K, V ===
+
+        let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
+            // Concatenate: [batch, cache_len, hidden] + [batch, seq_len, hidden]
+            let full_k = ndarray::concatenate(Axis(1), &[cached_k.view(), k.view()])?;
+            let full_v = ndarray::concatenate(Axis(1), &[cached_v.view(), v.view()])?;
+            (full_k, full_v)
+        } else {
+            (k.clone(), v.clone())
+        };
+
+        let full_kv_len = full_k.shape()[1];
+
+        // === 3. Reshape for Multi-Head Attention ===
+
+        // Q: [batch, seq_len, hidden] → [batch, num_heads, seq_len, head_dim]
+        let q = q
+            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        // K: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
+        let k_reshaped = full_k
+            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        // V: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
+        let v_reshaped = full_v
+            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3]);
+
+        // === 4. Compute Attention Scores: Q @ K^T ===
+
+        // Ensure all array "views" are converted to a standard, contiguous
+        // memory layout before being passed to matmul to prevent incorrect results.
+        let q_contiguous = q.as_standard_layout().to_owned();
+        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
+        let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
+
+        let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
+        scores *= self.scale_factor;
+
+        // === 5. Apply Masks ===
+
+        if let Some(mask) = attention_mask {
+            scores = apply_padding_mask(scores, mask)?;
+        }
+
+        if is_causal {
+            let cache_len = full_kv_len - seq_len;
+            scores = apply_causal_mask(scores, cache_len)?;
+        }
+
+        // === 6. Softmax ===
+
+        let weights = softmax(&scores);
+
+        // === 7. Apply Attention to Values ===
+
+        // FIX #2 (continued): Ensure 'v' is also contiguous for the final matmul.
+        let v_contiguous = v_reshaped.as_standard_layout().to_owned();
+        let context = matmul_4d(&weights, &v_contiguous);
+
+        // === 8. Reshape Back ===
+
+        let context = context
+            .permuted_axes([0, 2, 1, 3])
+            .as_standard_layout()
+            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
+            .to_owned();
+
+        // === 9. Output Projection ===
+
+        let output = matmul_3d_2d(&context, &self.output_weight) + &self.output_bias;
+
+        // === 10. Return (output, new_k, new_v) ===
+
+        Ok((output, k, v))
+    }
     /// Forward pass with KV cache and optional RoPE support
     ///
     /// This is the primary method for decoder attention with proper cache management.
@@ -299,7 +397,13 @@ impl MultiHeadAttention {
         let (rotated_q, rotated_k) = if let Some(r) = rope {
             // We use apply_3d because we are still working with [batch, seq, hidden] tensors.
             // The apply_3d helper will handle the necessary reshaping.
-            r.apply_3d(&q_proj, &new_k, self.num_heads, self.num_kv_heads, cache_len)?
+            r.apply_3d(
+                &q_proj,
+                &new_k,
+                self.num_heads,
+                self.num_kv_heads,
+                cache_len,
+            )?
         } else {
             (q_proj, new_k)
         };

@@ -5,7 +5,7 @@ use edgemodels::text_generation::Gpt2Model; // The new, refactored struct
 use edgemodels::text_generation::LlamaModel;
 // use edgemodels::text_generation::TextGenerator; 
 use edgetransformers::WgpuContext;
-use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
+use edgetransformers::models::base::{GenerationConfig, DecodingStrategy};
 use edgetransformers::{Device, ModelType};
 use std::io::Write;
 use std::sync::Arc;
@@ -31,9 +31,8 @@ async fn main() -> anyhow::Result<()> {
     // 3. Configure the generation parameters.
     let config: GenerationConfig = GenerationConfig {
         max_new_tokens: Some(50),
-        sampling_strategy: SamplingStrategy::Greedy,
+        strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.0,
-        temperature: 0.0,
         ..Default::default()
     };
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";;

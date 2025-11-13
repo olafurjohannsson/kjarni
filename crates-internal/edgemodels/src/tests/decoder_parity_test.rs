@@ -7,7 +7,7 @@ use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::decoder::{CpuTransformerDecoder, GpuTransformerDecoder};
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::models::ModelType;
-use edgetransformers::models::base::{GenerationConfig, SamplingStrategy};
+use edgetransformers::models::base::{GenerationConfig, DecodingStrategy};
 use edgetransformers::models::{DecoderLanguageModel, EncoderLanguageModel, LanguageModel};
 use edgetransformers::traits::Device;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput};
@@ -112,7 +112,7 @@ async fn test_full_text_generation_parity() -> Result<()> {
     let prompt = "Alan Turing was a"; // Use a slightly shorter prompt for faster testing
     let config = GenerationConfig {
         max_new_tokens: Some(3), // Generate a small number of tokens to keep the test fast
-        sampling_strategy: SamplingStrategy::Greedy,
+        strategy: DecodingStrategy::Greedy,
         ..Default::default()
     };
 

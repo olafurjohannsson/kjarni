@@ -10,11 +10,11 @@ use crate::text_generation::configs::Gpt2Config;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
+use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy};
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
-use edgetransformers::models::base::GenerationStrategy;
 use edgetransformers::weights::ModelWeights;
 use ndarray::{Array2, Array3};
 use std::path::{Path, PathBuf};
@@ -43,7 +43,9 @@ impl Gpt2Model {
         ModelType::Gpt2Large,
         ModelType::Gpt2XL,
     ];
-
+    pub fn concrete_config(&self) -> &Arc<Gpt2Config> {
+        &self.config
+    }
     /// Creates a `Gpt2Model` from the HuggingFace model registry.
     ///
     /// This will download the model files to a local cache directory if they
@@ -103,7 +105,10 @@ impl Gpt2Model {
             .get_array2(config_arc.get_lm_head_name())?
             .t()
             .to_owned();
-        println!("[NEW MODEL LOADING] LM Head Mean: {}", lm_head.mean().unwrap());
+        println!(
+            "[NEW MODEL LOADING] LM Head Mean: {}",
+            lm_head.mean().unwrap()
+        );
         println!("[NEW MODEL LOADING] LM Head Std Dev: {}", lm_head.std(0.0));
         // Downcast the Arc back to the concrete Gpt2Config type for storage.
         let config = config_arc
@@ -181,8 +186,8 @@ impl DecoderLanguageModel for Gpt2Model {
     fn lm_head(&self) -> &Array2<f32> {
         &self.lm_head
     }
-    fn generation_strategy(&self) -> GenerationStrategy {
-        GenerationStrategy::Legacy
+    fn autoregressive_loop(&self) -> AutoregressiveLoop {
+        AutoregressiveLoop::Legacy
     }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         assert_eq!(
@@ -215,25 +220,82 @@ impl DecoderLanguageModel for Gpt2Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generation::{Generator, GenerationConfig, GenerationStrategy, SamplingStrategy};
+    use crate::generation::{DecodingStrategy, GenerationConfig, Generator};
+    use edgetransformers::prelude::{DecoderLanguageModel, LanguageModel};
     use std::sync::Arc;
+
+    /// Helper function to load the DistilGPT2 model for testing.
+    async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {
+        Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Cpu, None).await
+    }
 
     #[tokio::test]
     async fn test_distilgpt2_generation_parity() -> Result<()> {
+        // This test verifies deterministic (greedy) generation output.
+        let model = load_distilgpt2_for_test().await?;
+        let generator = Generator::new(Box::new(model));
+
+        let prompt = "The field of Artificial Intelligence has seen a lot of progress";
+        let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
+
+        let config = GenerationConfig {
+            max_new_tokens: Some(20),
+            add_bos_token: false,
+            strategy: DecodingStrategy::Greedy,
+            repetition_penalty: 1.1,
+            ..Default::default()
+        };
+
+        let generated_text = generator.generate(prompt, &config).await?;
+        assert_eq!(generated_text.trim(), expected_output.trim());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_distilgpt2_architectural_properties() -> Result<()> {
+        // 1. Arrange: Load the model.
+        let model = load_distilgpt2_for_test().await?;
+        let config = model.concrete_config();
+
+        // 2. Assert: Check architectural values directly from the config struct.
+        assert_eq!(config.vocab_size, 50257);
+        assert_eq!(config.n_embd, 768); // hidden size
+        assert_eq!(config.n_layer, 6);
+        assert_eq!(config.n_head, 12);
+        assert_eq!(config.n_ctx, 1024); // max_position_embeddings
+
+        // 3. Assert: Check that the trait implementations correctly expose these values.
+        assert_eq!(model.vocab_size(), 50257);
+        assert_eq!(model.hidden_size(), 768);
+        assert_eq!(model.num_layers(), 6);
+        assert_eq!(model.num_heads(), 12);
+        assert_eq!(model.max_length(), 1024);
+
+        // Check token IDs. GPT-2 uses the same ID for BOS, EOS, and PAD.
+        assert_eq!(model.bos_token_id(), Some(50256));
+        assert_eq!(model.eos_token_id(), Some(50256));
+        assert_eq!(model.pad_token_id(), Some(50256));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_distilgpt2_generation_parity_2() -> Result<()> {
         // This test verifies that our implementation produces the exact same output
         // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-        
+
         // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
         let model_type = ModelType::DistilGpt2;
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
-        
+
         // The "golden" output string from the Python reference script and your now-working Rust implementation.
         let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
 
         // Create a config that perfectly matches the reference implementations.
         let config = GenerationConfig {
             max_new_tokens: Some(20),
-            sampling_strategy: SamplingStrategy::Greedy,
+            strategy: DecodingStrategy::Greedy,
             repetition_penalty: 1.1,
             add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
             ..Default::default()
@@ -241,13 +303,8 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model = Gpt2Model::from_registry(
-            model_type,
-            None,
-            Device::Cpu,
-            None
-        ).await?;
-        
+        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+
         let generator = Generator::new(Box::new(gpt2_model));
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
@@ -256,15 +313,15 @@ mod tests {
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.
         //    We trim both strings to avoid any potential whitespace differences at the end.
         assert_eq!(generated_text.trim(), expected_output.trim());
-        
+
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
         // This test verifies that our implementation produces the exact same output
         // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-        
+
         // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
         let model_type = ModelType::DistilGpt2;
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
@@ -272,7 +329,7 @@ mod tests {
         // Create a config that perfectly matches the reference implementations.
         let config = GenerationConfig {
             max_new_tokens: Some(5),
-            sampling_strategy: SamplingStrategy::Greedy,
+            strategy: DecodingStrategy::Greedy,
             repetition_penalty: 1.1,
             add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
             ..Default::default()
@@ -280,34 +337,23 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model = Gpt2Model::from_registry(
-            model_type,
-            None,
-            Device::Cpu,
-            None
-        ).await?;
-        
-        
+        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+
         let generator = Generator::new(Box::new(gpt2_model));
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config).await?;
 
         let ctx = Arc::new(WgpuContext::new().await);
-        let gpt2_model_2 = Gpt2Model::from_registry(
-            model_type,
-            None,
-            Device::Wgpu,
-            Some(ctx)
-        ).await?;
+        let gpt2_model_2 =
+            Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx)).await?;
         let generator_2 = Generator::new(Box::new(gpt2_model_2));
         let generated_text_2 = generator_2.generate(prompt, &config).await?;
-
 
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.
         //    We trim both strings to avoid any potential whitespace differences at the end.
         assert_eq!(generated_text.trim(), generated_text_2.trim());
-        
+
         Ok(())
     }
 }

@@ -195,6 +195,16 @@ pub trait LanguageModelConfig: TransformerConfig {
         self.num_key_value_heads() * head_dim
     }
 
+    fn extra_pos_embeddings(&self) -> Option<u32> {
+        None
+    }
+    fn is_encoder_decoder(&self) -> Option<bool> {
+        None
+    } 
+    fn model_type(&self) -> Option<String> {
+        None
+    }
+
     /// The Beginning-Of-Sequence token ID, if specified by the model config.
     fn bos_token_id(&self) -> Option<u32> {
         None

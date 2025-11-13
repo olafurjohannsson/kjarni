@@ -25,6 +25,7 @@ pub trait Cache: Send + Sync {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     /// Get the current sequence length (number of cached tokens)
     fn get_seq_length(&self) -> usize;
+    fn set_seq_length(&mut self, len: usize);
     /// Clear the cache
     fn clear(&mut self);
 
