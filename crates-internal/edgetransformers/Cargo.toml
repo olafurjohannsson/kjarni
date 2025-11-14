@@ -33,6 +33,6 @@ futures-intrusive = { workspace = true }
 rand_distr ={ workspace = true}
 log = { workspace = true }
 ndarray-rand = { workspace = true }
-
+libm = { workspace = true }
 [dev-dependencies]
 env_logger = "0.10"

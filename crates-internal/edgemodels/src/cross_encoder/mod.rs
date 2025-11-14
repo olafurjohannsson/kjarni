@@ -232,13 +232,13 @@ impl CrossEncoder {
         let batch_size = encodings.len();
         let max_len = encodings.iter().map(|e| e.len()).max().unwrap_or(0);
 
-        let mut batch_input_ids = Array2::<f32>::zeros((batch_size, max_len));
+        let mut batch_input_ids = Array2::<u32>::zeros((batch_size, max_len));
         let mut batch_attention_mask = Array2::<f32>::zeros((batch_size, max_len));
         let mut batch_token_type_ids = Array2::<f32>::zeros((batch_size, max_len)); // The crucial tensor
 
         for (i, encoding) in encodings.iter().enumerate() {
             for (j, &id) in encoding.get_ids().iter().enumerate() {
-                batch_input_ids[[i, j]] = id as f32;
+                batch_input_ids[[i, j]] = id;
             }
             for (j, &mask) in encoding.get_attention_mask().iter().enumerate() {
                 batch_attention_mask[[i, j]] = mask as f32;

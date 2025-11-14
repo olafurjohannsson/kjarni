@@ -53,7 +53,7 @@ impl TransformerEncoderDecoder {
             }
         }
     }
-    pub fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput> {
+    pub fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
         match self {
             Self::Cpu(model) => model.encoder(),
             Self::Gpu(_) => todo!("GPU encoder not implemented"),
@@ -62,7 +62,7 @@ impl TransformerEncoderDecoder {
 
     pub fn decoder(
         &self,
-    ) -> &dyn CrossAttentionDecoder<Input = Array2<f32>, Output = DecoderOutput> {
+    ) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput> {
         match self {
             Self::Cpu(model) => model, // The CpuTransformerEncoderDecoder itself implements the trait
             Self::Gpu(_) => todo!("GPU decoder not implemented"),
@@ -73,7 +73,7 @@ impl TransformerEncoderDecoder {
 // Implement the main forward pass via the CrossAttentionDecoder trait
 #[async_trait]
 impl CrossAttentionDecoder for TransformerEncoderDecoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = DecoderOutput;
 
     async fn forward<'a>(

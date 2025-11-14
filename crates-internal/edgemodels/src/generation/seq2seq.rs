@@ -74,10 +74,12 @@ impl Seq2SeqGenerator {
             .encode(text, true)
             .map_err(|e| anyhow!(e))?;
         println!("[NEW] Token IDs: {:?}", encoding.get_ids());
+
         let input_ids = Array2::from_shape_vec(
             (1, encoding.len()),
-            encoding.get_ids().iter().map(|&id| id as f32).collect(),
+            encoding.get_ids().iter().map(|&id| id).collect(),
         )?;
+
         let attention_mask = Array2::ones(input_ids.dim());
 
         let encoder_output: EncoderOutput = self
@@ -139,7 +141,7 @@ impl Seq2SeqGenerator {
             // for hypo in beams.drain(..) {
             for hypo in &beams {
                 let last_token = *hypo.tokens.last().unwrap();
-                let decoder_input_ids = Array2::from_elem((1, 1), last_token as f32);
+                let decoder_input_ids = Array2::from_elem((1, 1), last_token);
                 let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
 
                 // 1. Clone the cache *before* it gets mutated.
@@ -213,6 +215,27 @@ impl Seq2SeqGenerator {
                 // 3. Add the bias if it exists.
                 if let Some(bias) = self.model.final_logits_bias() {
                     logits += bias;
+                }
+                if step == 0 {
+                    // Only print this detailed log for the first step
+                    println!("\n--- DEBUG: RUST LOGITS (STEP 0) ---");
+                    println!("Logits Array Shape: {:?}", logits.dim());
+                    println!("Logits Mean: {:.8}", logits.mean().unwrap());
+                    println!("Logits Std Dev: {:.8}", logits.std(0.0));
+                    println!("Logits[0]:     {:.8}", logits[0]);
+                    println!("Logits[100]:   {:.8}", logits[100]);
+                    // Add this one for extra certainty
+                    println!("Logits[1000]:  {:.8}", logits[1000]);
+
+                    // Find and print the argmax to compare with Python's top token
+                    let top_token_id = logits
+                        .iter()
+                        .enumerate()
+                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                        .map(|(index, _)| index)
+                        .unwrap();
+                    println!("Top token predicted at Step 0: ID={}", top_token_id);
+                    println!("------------------------------------");
                 }
                 // --- REVERTED LOGITS LOGIC END ---
 

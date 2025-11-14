@@ -41,7 +41,7 @@ impl Embeddings {
         }
     }
     /// Embed input tokens without adding positional or token_type embeddings.
-    pub fn forward_word_only(&self, input_ids: &Array2<f32>) -> Array3<f32> {
+    pub fn forward_word_only(&self, input_ids: &Array2<u32>) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.word_embeddings.shape()[1];
         let vocab_size = self.word_embeddings.shape()[0];
@@ -66,9 +66,9 @@ impl Embeddings {
     }
 
     /// Embed input tokens
-pub fn forward(
+    pub fn forward(
         &self,
-        input_ids: &Array2<f32>,
+        input_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<f32>>,
     ) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
@@ -209,12 +209,12 @@ mod tests {
         // GPT-2 / BERT style
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
-        
+
         let embeddings = Embeddings::new(word_emb, pos_emb, None);
-        
+
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None);
-        
+
         assert_eq!(output.shape(), &[2, 10, 64]);
     }
 
@@ -222,12 +222,12 @@ mod tests {
     fn test_embeddings_without_position() {
         // LLaMA / RoPE style
         let word_emb = Array2::ones((100, 64));
-        
+
         let embeddings = Embeddings::new_without_position(word_emb, None);
-        
+
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None);
-        
+
         assert_eq!(output.shape(), &[2, 10, 64]);
         // Should work without position embeddings
     }
@@ -237,13 +237,13 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
         let token_type_emb = Array2::ones((2, 64));
-        
+
         let embeddings = Embeddings::new(word_emb, pos_emb, Some(token_type_emb));
-        
+
         let input_ids = Array2::zeros((2, 10));
         let token_type_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, Some(&token_type_ids));
-        
+
         assert_eq!(output.shape(), &[2, 10, 64]);
     }
 
@@ -251,11 +251,11 @@ mod tests {
     #[should_panic(expected = "exceeds max position embeddings")]
     fn test_sequence_too_long() {
         let word_emb = Array2::ones((100, 64));
-        let pos_emb = Array2::ones((10, 64));  // Only 10 positions
-        
+        let pos_emb = Array2::ones((10, 64)); // Only 10 positions
+
         let embeddings = Embeddings::new(word_emb, pos_emb, None);
-        
-        let input_ids = Array2::zeros((2, 20));  // 20 tokens - too long!
+
+        let input_ids = Array2::zeros((2, 20)); // 20 tokens - too long!
         let _ = embeddings.forward(&input_ids, None);
     }
 
@@ -263,12 +263,12 @@ mod tests {
     fn test_llama_long_sequence() {
         // LLaMA without position embeddings can handle any length
         let word_emb = Array2::ones((100, 64));
-        
+
         let embeddings = Embeddings::new_without_position(word_emb, None);
-        
-        let input_ids = Array2::zeros((2, 1000));  // Very long sequence
+
+        let input_ids = Array2::zeros((2, 1000)); // Very long sequence
         let output = embeddings.forward(&input_ids, None);
-        
+
         assert_eq!(output.shape(), &[2, 1000, 64]);
         // Should work fine - RoPE handles position in attention layer
     }
@@ -278,12 +278,12 @@ mod tests {
     fn test_invalid_token_id() {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
-        
+
         let embeddings = Embeddings::new(word_emb, pos_emb, None);
-        
+
         let mut input_ids = Array2::zeros((2, 10));
-        input_ids[[0, 0]] = 150.0;  // Out of vocab range [0, 100)
-        
+        input_ids[[0, 0]] = 150 as u32; // Out of vocab range [0, 100)
+
         let _ = embeddings.forward(&input_ids, None);
     }
 }

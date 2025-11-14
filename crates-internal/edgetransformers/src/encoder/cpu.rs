@@ -129,8 +129,6 @@ impl CpuTransformerEncoder {
             layers.push(EncoderLayer {
                 self_attn: attention,
                 self_attn_layer_norm,
-                cross_attn: None, // An encoder layer has no cross-attention
-                cross_attn_layer_norm: None,
                 feedforward: feed_forward,
                 ffn_layer_norm,
             });
@@ -156,7 +154,7 @@ impl TransformerModel for CpuTransformerEncoder {
 
 #[async_trait]
 impl Encoder for CpuTransformerEncoder {
-    type Input = Array2<f32>; // The direct input is token IDs
+    type Input = Array2<u32>; // The direct input is token IDs
     type Output = EncoderOutput;
 
     /// Executes the forward pass for the CPU encoder.
@@ -172,10 +170,18 @@ impl Encoder for CpuTransformerEncoder {
 
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-
+        println!(
+            "[ENCODER] After Embeddings + Norm, Mean: {:.8}",
+            hidden_states.mean().unwrap()
+        );
         // Transformer layers
         for (i, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
+            println!(
+                "[ENCODER] Layer {} Final Output Mean: {:.8}",
+                i,
+                hidden_states.mean().unwrap()
+            );
         }
 
         Ok(EncoderOutput {

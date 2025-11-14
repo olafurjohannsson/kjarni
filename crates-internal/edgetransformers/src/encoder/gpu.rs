@@ -136,7 +136,7 @@ impl GpuTransformerEncoder {
     }
     fn perform_cpu_embedding(
         &self,
-        input_ids: &Array2<f32>,
+        input_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
         // This is a simplified version of the CPU embedding logic from your old encoder.
@@ -156,7 +156,7 @@ impl TransformerModel for GpuTransformerEncoder {
 
 #[async_trait]
 impl Encoder for GpuTransformerEncoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = EncoderOutput;
 
     async fn forward(

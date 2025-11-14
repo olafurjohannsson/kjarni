@@ -96,7 +96,7 @@ impl Generator {
         if prompt_len > 0 {
             let prompt_ids = Array2::from_shape_vec(
                 (batch_size, prompt_len),
-                tokens.iter().map(|&t| t as f32).collect(),
+                tokens.iter().map(|&t| t ).collect(),
             )?;
             full_attention_mask
                 .slice_mut(s![.., 0..prompt_len])
@@ -130,7 +130,7 @@ impl Generator {
         } else {
             if let Some(bos_token_id) = model.bos_token_id() {
                 // A BOS token exists, so we can start generation from it.
-                let input_ids = Array2::from_elem((1, 1), bos_token_id as f32);
+                let input_ids = Array2::from_elem((1, 1), bos_token_id);
                 full_attention_mask[[0, 0]] = 1.0;
                 let mask = full_attention_mask.slice(s![.., 0..1]).to_owned();
 
@@ -188,7 +188,7 @@ impl Generator {
                         }
 
                         let current_len = tokens.len();
-                        let input_ids = Array2::from_shape_vec((1, 1), vec![next_token as f32])?;
+                        let input_ids = Array2::from_shape_vec((1, 1), vec![next_token])?;
                         full_attention_mask[[0, current_len - 1]] = 1.0;
 
 
@@ -207,7 +207,7 @@ impl Generator {
                         if tokens.len() >= max_len { break; }
 
                         let last_token = *tokens.last().unwrap();
-                        let input_ids = Array2::from_elem((1, 1), last_token as f32);
+                        let input_ids = Array2::from_elem((1, 1), last_token);
 
                         let current_len = tokens.len();
                         full_attention_mask[[0, current_len]] = 1.0;

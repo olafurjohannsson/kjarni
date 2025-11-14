@@ -28,9 +28,24 @@ pub fn apply_activation(hidden: &mut Array3<f32>, activation: Activation) {
     }
 }
 
-/// Apply GELU activation in-place
+use libm::erff;
+
+/// The standard GELU activation function, using the error function (erf).
+/// This is the default implementation in PyTorch and is used by models like BART.
 #[inline(always)]
 pub fn gelu(x: &mut Array3<f32>) {
+    // This scaling factor is 1.0 / sqrt(2.0)
+    const SCALING_FACTOR: f32 = 0.7071067811865475;
+
+    // The mathematical formula is: 0.5 * x * (1.0 + erf(x / sqrt(2.0)))
+    // We implement this by multiplying by the pre-calculated scaling factor.
+    // `erff` is the single-precision (f32) version of the error function from the libm crate.
+    x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SCALING_FACTOR)));
+}
+
+/// Apply GELU activation in-place
+#[inline(always)]
+pub fn gelu_new(x: &mut Array3<f32>) {
     let scaling_factor = (2.0f32).sqrt() / 2.0;
     #[cfg(not(target_arch = "wasm32"))]
     {

@@ -86,7 +86,7 @@ impl TransformerModel for TransformerDecoder {
 /// Implements the `Decoder` trait for the generic decoder, delegating to the backend.
 #[async_trait]
 impl Decoder for TransformerDecoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = DecoderOutput;
 
     async fn forward(

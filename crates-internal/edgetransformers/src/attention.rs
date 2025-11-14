@@ -59,7 +59,7 @@ impl MultiHeadAttention {
             num_kv_heads,
         }
     }
-
+  
     pub fn project_kv(&self, key_value_source: &Array3<f32>) -> (Array3<f32>, Array3<f32>) {
         // K projection
         let new_k = if self.k_bias.len() > 0 {
@@ -77,16 +77,6 @@ impl MultiHeadAttention {
         (new_k, new_v)
     }
 
-    /// Core attention mechanism with optional RoPE support
-    ///
-    /// # Arguments
-    /// * `query` - Query tensor [batch, seq_q, hidden]
-    /// * `full_k_cache` - Full key cache [batch, seq_k, hidden]
-    /// * `full_v_cache` - Full value cache [batch, seq_k, hidden]
-    /// * `attention_mask` - Optional padding mask [batch, seq_k]
-    /// * `is_causal` - Whether to apply causal masking
-    /// * `position_offset` - Position offset for RoPE (length of cached tokens)
-    /// * `rope` - Optional RoPE module for positional encoding
     pub fn attend(
         &self,
         q: &Array3<f32>,
@@ -95,7 +85,6 @@ impl MultiHeadAttention {
         attention_mask: Option<&Array2<f32>>,
         is_causal: bool,
         position_offset: usize,
-        _rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
         let batch_size = q.shape()[0];
         let seq_len = q.shape()[1];
@@ -124,12 +113,6 @@ impl MultiHeadAttention {
             );
         }
 
-        // 1. Project query
-        // let q = if self.q_bias.len() > 0 {
-        //     matmul_3d_2d(query, &self.q_weight) + &self.q_bias
-        // } else {
-        //     matmul_3d_2d(query, &self.q_weight)
-        // };
 
         // 2. Reshape Q, K, V to [batch, num_heads, seq, head_dim]
         let mut q_reshaped = q
@@ -147,20 +130,9 @@ impl MultiHeadAttention {
             .into_shape_with_order((batch_size, full_kv_len, self.num_kv_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
 
-        // 3. Apply RoPE if provided (this is the "correct" place to do it)
-        // if let Some(rope) = rope {
-        //     // Apply RoPE to Q with offset for current query positions
-        //     let (rotated_q, rotated_k) = rope.apply_4d(&q_reshaped, &k_reshaped, position_offset);
-        //     q_reshaped = rotated_q;
-        //     k_reshaped = rotated_k;
-        //     // Note: V is NOT rotated (RoPE only applies to Q and K)
-        // }
-
         if self.num_kv_heads != self.num_heads {
             let num_groups = self.num_heads / self.num_kv_heads;
 
-            // Repeat each KV head num_groups times
-            // [batch, num_kv_heads, seq, head_dim] → [batch, num_heads, seq, head_dim]
             k_reshaped = repeat_kv(&k_reshaped, num_groups)?;
             v_reshaped = repeat_kv(&v_reshaped, num_groups)?;
         }
@@ -193,174 +165,10 @@ impl MultiHeadAttention {
             .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
             .to_owned();
 
-        // 8. Output projection
-        let output = if self.output_bias.len() > 0 {
-            matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias
-        } else {
-            matmul_3d_2d(&context_reshaped, &self.output_weight)
-        };
-        Ok(output)
+        
+        Ok(context_reshaped)
     }
 
-    pub fn forward(
-        &self,
-        hidden_states: &Array3<f32>,
-        // cross-attention source
-        key_value_source: Option<&Array3<f32>>,
-        attention_mask: Option<&Array2<f32>>,
-        rope: Option<&RoPE>,
-    ) -> Result<Array3<f32>> {
-        let kv_source = key_value_source.unwrap_or(hidden_states);
-
-        // 1. Project Q, K, and V
-        let q_proj = matmul_3d_2d(hidden_states, &self.q_weight); // Add bias if exists
-        let (k_states, v_states) = self.project_kv(kv_source);
-
-        // 2. Apply RoPE if this function is ever used in a context that needs it
-        // For prefill (seq_len > 1), the position offset is 0.
-        let (rotated_q, rotated_k) = if let Some(r) = rope {
-            r.apply_3d(&q_proj, &k_states, self.num_heads, self.num_kv_heads, 0)?
-        } else {
-            (q_proj, k_states)
-        };
-
-        // 3. Call attend with the CORRECT, pre-projected and pre-rotated query
-        self.attend(
-            &rotated_q, // Pass the processed query
-            &rotated_k, // Pass the processed key
-            &v_states,  // V is never rotated
-            attention_mask,
-            false, // is_causal is typically false for a simple forward pass
-            0,
-            None,
-        )
-    }
-    //     let kv_source = key_value_source.unwrap_or(hidden_states);
-    //     let (k_states, v_states) = self.project_kv(kv_source);
-
-    //     self.attend(
-    //         hidden_states, // query
-    //         &k_states,     // full_k_cache
-    //         &v_states,     // full_v_cache
-    //         attention_mask,
-    //         false, // is_causal = false for encoders
-    //         0,     // position_offset = 0
-    //         None,  // no RoPE
-    //     )
-    // }
-    pub fn forward_with_cache_2(
-        &self,
-        query: &Array3<f32>,
-        key_value: Option<&Array3<f32>>, // For cross-attention
-        attention_mask: Option<&Array2<f32>>,
-        is_causal: bool,
-        cached_kv: Option<(&Array3<f32>, &Array3<f32>)>,
-    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
-        let batch_size = query.shape()[0];
-        let seq_len = query.shape()[1];
-
-        // === 1. Linear Projections & Attention Scaling ===
-
-        // Q projection (always from query input)
-        let mut q = matmul_3d_2d(query, &self.q_weight) + &self.q_bias;
-
-        // K, V projections
-        let kv_source = key_value.unwrap_or(query);
-        let k = matmul_3d_2d(kv_source, &self.k_weight) + &self.k_bias;
-        let v = matmul_3d_2d(kv_source, &self.v_weight) + &self.v_bias;
-
-        // === 2. Concatenate with Cached K, V ===
-
-        let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
-            // Concatenate: [batch, cache_len, hidden] + [batch, seq_len, hidden]
-            let full_k = ndarray::concatenate(Axis(1), &[cached_k.view(), k.view()])?;
-            let full_v = ndarray::concatenate(Axis(1), &[cached_v.view(), v.view()])?;
-            (full_k, full_v)
-        } else {
-            (k.clone(), v.clone())
-        };
-
-        let full_kv_len = full_k.shape()[1];
-
-        // === 3. Reshape for Multi-Head Attention ===
-
-        // Q: [batch, seq_len, hidden] → [batch, num_heads, seq_len, head_dim]
-        let q = q
-            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        // K: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
-        let k_reshaped = full_k
-            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        // V: [batch, full_kv_len, hidden] → [batch, num_heads, full_kv_len, head_dim]
-        let v_reshaped = full_v
-            .into_shape_with_order((batch_size, full_kv_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        // === 4. Compute Attention Scores: Q @ K^T ===
-
-        // Ensure all array "views" are converted to a standard, contiguous
-        // memory layout before being passed to matmul to prevent incorrect results.
-        let q_contiguous = q.as_standard_layout().to_owned();
-        let k_transposed = k_reshaped.permuted_axes([0, 1, 3, 2]);
-        let k_transposed_contiguous = k_transposed.as_standard_layout().to_owned();
-
-        let mut scores = matmul_4d(&q_contiguous, &k_transposed_contiguous);
-        scores *= self.scale_factor;
-
-        // === 5. Apply Masks ===
-
-        if let Some(mask) = attention_mask {
-            scores = apply_padding_mask(scores, mask)?;
-        }
-
-        if is_causal {
-            let cache_len = full_kv_len - seq_len;
-            scores = apply_causal_mask(scores, cache_len)?;
-        }
-
-        // === 6. Softmax ===
-
-        let weights = softmax(&scores);
-
-        // === 7. Apply Attention to Values ===
-
-        // FIX #2 (continued): Ensure 'v' is also contiguous for the final matmul.
-        let v_contiguous = v_reshaped.as_standard_layout().to_owned();
-        let context = matmul_4d(&weights, &v_contiguous);
-
-        // === 8. Reshape Back ===
-
-        let context = context
-            .permuted_axes([0, 2, 1, 3])
-            .as_standard_layout()
-            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
-            .to_owned();
-
-        // === 9. Output Projection ===
-
-        let output = matmul_3d_2d(&context, &self.output_weight) + &self.output_bias;
-
-        // === 10. Return (output, new_k, new_v) ===
-
-        Ok((output, k, v))
-    }
-    /// Forward pass with KV cache and optional RoPE support
-    ///
-    /// This is the primary method for decoder attention with proper cache management.
-    ///
-    /// # Arguments
-    /// * `query` - Query input [batch, seq, hidden]
-    /// * `key_value` - Optional key-value source (for cross-attention)
-    /// * `attention_mask` - Optional padding mask [batch, full_seq_len]
-    /// * `is_causal` - Whether to apply causal masking
-    /// * `cached_kv` - Optional cached K/V from previous steps
-    /// * `rope` - Optional RoPE for positional encoding
-    ///
-    /// # Returns
-    /// Tuple of (output, new_k, new_v) where new_k and new_v should be added to cache
     pub fn forward_with_cache(
         &self,
         query: &Array3<f32>,
@@ -435,15 +243,21 @@ impl MultiHeadAttention {
         };
 
         // 3. Compute attention with proper position offset for RoPE
-        let output = self.attend(
+        let context_reshaped = self.attend(
             &rotated_q,
             &full_k,
             &full_v,
             attention_mask,
             is_causal,
             cache_len, // This is the position_offset for RoPE
-            None,      // Pass RoPE through
         )?;
+
+        // 8. Output projection
+        let output = if self.output_bias.len() > 0 {
+            matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias
+        } else {
+            matmul_3d_2d(&context_reshaped, &self.output_weight)
+        };
 
         Ok((output, rotated_k, new_v))
     }
@@ -534,52 +348,90 @@ pub fn apply_causal_mask(mut scores: Array4<f32>, cache_len: usize) -> Result<Ar
 
     Ok(scores)
 }
-
+//rust.old: Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . Rust was influenced by languages like C++, Haskell, and Erlang .
+//pyth.tst: Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::Array3;
+    fn create_mock_attention(
+        hidden: usize,
+        heads: usize,
+        kv_heads: Option<usize>,
+    ) -> MultiHeadAttention {
+        let kv_heads = kv_heads.unwrap_or(heads);
+        let k_v_dim = (hidden / heads) * kv_heads;
+
+        MultiHeadAttention::new(
+            hidden,
+            heads,
+            Array2::eye(hidden),
+            Array1::zeros(0),
+            Array2::eye(hidden).slice(s![.., 0..k_v_dim]).to_owned(),
+            Array1::zeros(0),
+            Array2::eye(hidden).slice(s![.., 0..k_v_dim]).to_owned(),
+            Array1::zeros(0),
+            Array2::eye(hidden),
+            Array1::zeros(0),
+            Some(kv_heads),
+        )
+    }
 
     #[test]
-    fn test_attention_without_cache() {
-        let hidden_size = 64;
-        let num_heads = 4;
-        let batch_size = 2;
-        let seq_len = 10;
+    fn test_mha_forward_no_cache() -> Result<()> {
+        let attn = create_mock_attention(64, 4, None);
+        let input = Array3::ones((1, 10, 64));
+        let mask = Array2::ones((1, 10));
 
-        // Create dummy weights
-        let q_weight = Array2::zeros((hidden_size, hidden_size));
-        let q_bias = Array1::zeros(hidden_size);
-        let k_weight = Array2::zeros((hidden_size, hidden_size));
-        let k_bias = Array1::zeros(hidden_size);
-        let v_weight = Array2::zeros((hidden_size, hidden_size));
-        let v_bias = Array1::zeros(hidden_size);
-        let output_weight = Array2::zeros((hidden_size, hidden_size));
-        let output_bias = Array1::zeros(hidden_size);
+        let (output, k, v) =
+            attn.forward_with_cache(&input, None, Some(&mask), false, None, None)?;
 
-        let attention = MultiHeadAttention::new(
-            hidden_size,
-            num_heads,
-            q_weight,
-            q_bias,
-            k_weight,
-            k_bias,
-            v_weight,
-            v_bias,
-            output_weight,
-            output_bias,
-            None,
-        );
-
-        let input = Array3::zeros((batch_size, seq_len, hidden_size));
-        let mask = Array2::ones((batch_size, seq_len));
-
-        let result = attention.forward(&input, None, Some(&mask), None);
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
+        assert_eq!(output.shape(), &[1, 10, 64]);
+        assert_eq!(k.shape(), &[1, 10, 64]);
+        assert_eq!(v.shape(), &[1, 10, 64]);
+        Ok(())
     }
+
+    #[test]
+    fn test_mha_with_cache() -> Result<()> {
+        let attn = create_mock_attention(64, 4, None);
+        let past_k = Array3::zeros((1, 5, 64));
+        let past_v = Array3::zeros((1, 5, 64));
+        let input = Array3::ones((1, 1, 64));
+        let mask = Array2::ones((1, 6)); // Mask for full sequence length
+
+        let (output, k, v) = attn.forward_with_cache(
+            &input,
+            None,
+            Some(&mask),
+            true,
+            Some((past_k.view(), past_v.view())),
+            None,
+        )?;
+
+        assert_eq!(output.shape(), &[1, 1, 64]);
+        assert_eq!(k.shape(), &[1, 1, 64]); // Returns only the NEW key
+        assert_eq!(v.shape(), &[1, 1, 64]); // Returns only the NEW value
+        Ok(())
+    }
+
+    #[test]
+    fn test_gqa_with_rope() -> Result<()> {
+        let attn = create_mock_attention(64, 4, Some(2)); // 4 Q heads, 2 KV heads
+        let rope = RoPE::new(16, 128, 10000.0);
+        let input = Array3::ones((1, 10, 64));
+        let mask = Array2::ones((1, 10));
+
+        let (output, k, v) =
+            attn.forward_with_cache(&input, None, Some(&mask), true, None, Some(&rope))?;
+
+        assert_eq!(output.shape(), &[1, 10, 64]);
+        // K and V have reduced dimension due to GQA
+        assert_eq!(k.shape(), &[1, 10, 32]);
+        assert_eq!(v.shape(), &[1, 10, 32]);
+        Ok(())
+    }
+   
 
     #[test]
     fn test_attention_with_cache() {
@@ -667,8 +519,17 @@ mod tests {
 
         let input = Array3::zeros((batch_size, seq_len, hidden_size));
         let mask = Array2::ones((batch_size, seq_len));
+        
+        let q_proj = matmul_3d_2d(&input, &attention.q_weight); // Add bias if exists
+        let (k_states, v_states) = attention.project_kv(&input);
 
-        let result = attention.forward(&input, None, Some(&mask), None);
+        let result = attention.attend(
+            &q_proj,
+            &k_states,
+            &v_states,
+            Some(&mask),
+            false,
+            0);
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -709,56 +570,23 @@ mod tests {
 
         let input = Array3::zeros((batch_size, seq_len, hidden_size));
         let mask = Array2::ones((batch_size, seq_len));
+        
+        let q_proj = matmul_3d_2d(&input, &attention.q_weight); // Add bias if exists
+        let (k_states, v_states) = attention.project_kv(&input);
 
-        let result = attention.forward(&input, None, Some(&mask), None);
+        let result = attention.attend(
+            &q_proj,
+            &k_states,
+            &v_states,
+            Some(&mask),
+            false,
+            0);
         assert!(result.is_ok());
 
         let output = result.unwrap();
         assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
     }
 
-    #[test]
-    fn test_attention_with_rope() {
-        let hidden_size = 64;
-        let num_heads = 4;
-        let head_dim = hidden_size / num_heads;
-        let batch_size = 1;
-        let seq_len = 8;
-        let max_seq_len = 128;
-
-        let q_weight = Array2::eye(hidden_size);
-        let q_bias = Array1::zeros(0); // No bias (LLaMA style)
-        let k_weight = Array2::eye(hidden_size);
-        let k_bias = Array1::zeros(0);
-        let v_weight = Array2::eye(hidden_size);
-        let v_bias = Array1::zeros(0);
-        let output_weight = Array2::eye(hidden_size);
-        let output_bias = Array1::zeros(0);
-
-        let attention = MultiHeadAttention::new(
-            hidden_size,
-            num_heads,
-            q_weight,
-            q_bias,
-            k_weight,
-            k_bias,
-            v_weight,
-            v_bias,
-            output_weight,
-            output_bias,
-            None,
-        );
-
-        let rope = RoPE::new(head_dim, max_seq_len, 10000.0);
-        let input = Array3::ones((batch_size, seq_len, hidden_size));
-        let mask = Array2::ones((batch_size, seq_len));
-
-        let result = attention.attend(&input, &input, &input, Some(&mask), true, 0, Some(&rope));
-
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
-    }
 
     #[test]
     fn test_attention_with_cache_and_rope() {
@@ -815,71 +643,7 @@ mod tests {
         assert_eq!(new_v.shape(), &[batch_size, seq_len, hidden_size]);
     }
 
-    #[test]
-    fn test_gqa_debug() {
-        use ndarray::{Array1, Array2, Array3, s};
 
-        let hidden_size = 2048;
-        let num_heads = 32;
-        let num_kv_heads = 8;
-        let kv_dim = num_kv_heads * (hidden_size / num_heads); // 8 * 64 = 512
-
-        println!("\n=== GQA Test Setup ===");
-        println!("hidden_size: {}", hidden_size);
-        println!("num_heads: {}", num_heads);
-        println!("num_kv_heads: {}", num_kv_heads);
-        println!("kv_dim: {}", kv_dim);
-
-        // Create proper weight shapes
-        let q_weight = Array2::eye(hidden_size); // [2048, 2048]
-        let k_weight = Array2::eye(hidden_size).slice(s![.., 0..kv_dim]).to_owned(); // [2048, 512]
-        let v_weight = Array2::eye(hidden_size).slice(s![.., 0..kv_dim]).to_owned(); // [2048, 512]
-        let o_weight = Array2::eye(hidden_size); // [2048, 2048]
-
-        println!("Q weight shape: {:?}", q_weight.shape());
-        println!("K weight shape: {:?}", k_weight.shape());
-        println!("V weight shape: {:?}", v_weight.shape());
-        println!("O weight shape: {:?}", o_weight.shape());
-
-        let attention = MultiHeadAttention::new(
-            hidden_size,
-            num_heads,
-            q_weight,
-            Array1::zeros(0),
-            k_weight,
-            Array1::zeros(0),
-            v_weight,
-            Array1::zeros(0),
-            o_weight,
-            Array1::zeros(0),
-            Some(num_kv_heads),
-        );
-
-        println!("Attention created successfully");
-        println!("  num_heads: {}", attention.num_heads);
-        println!("  num_kv_heads: {}", attention.num_kv_heads);
-        println!("  head_dim: {}", attention.head_dim);
-
-        let batch_size = 1;
-        let seq_len = 10;
-        let input = Array3::ones((batch_size, seq_len, hidden_size));
-        let mask = Array2::ones((batch_size, seq_len));
-
-        println!("\nCalling attend...");
-        let result = attention.forward(&input, None, Some(&mask), None);
-
-        match result {
-            Ok(output) => {
-                println!("✓ Attend succeeded!");
-                println!("  Output shape: {:?}", output.shape());
-                assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
-            }
-            Err(e) => {
-                println!("✗ Attend failed: {:?}", e);
-                panic!("GQA attention failed: {:?}", e);
-            }
-        }
-    }
     #[test]
     fn test_repeat_kv_gqa() {
         use ndarray::{Array4, s};
@@ -950,10 +714,13 @@ mod tests {
         let mask = Array2::ones((batch_size, seq_len));
 
         // ✅ Use forward() which handles projection
-        let result = attention.forward(&input, None, Some(&mask), None);
+        let result = attention.forward_with_cache(&
+            input, 
+            None, Some(&mask),false, None, None);
 
         assert!(result.is_ok(), "GQA attention should not fail");
-        let output = result.unwrap();
+        let (output, _, _) = result.unwrap();
+        
         assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
 
         println!("✓ GQA attention shapes test passed");
@@ -1085,5 +852,40 @@ mod tests {
             "Outputs should differ due to RoPE position encoding, diff={}",
             diff
         );
+    }
+    #[test]
+    fn test_apply_causal_mask_no_offset() {
+        let mut scores = Array4::<f32>::zeros((1, 1, 4, 4));
+        let masked = apply_causal_mask(scores, 0).unwrap();
+
+        assert_eq!(masked[[0, 0, 0, 1]], MASK_VALUE);
+        assert_eq!(masked[[0, 0, 1, 2]], MASK_VALUE);
+        assert_eq!(masked[[0, 0, 2, 3]], MASK_VALUE);
+        assert_eq!(masked[[0, 0, 1, 1]], 0.0);
+    }
+
+    #[test]
+    fn test_apply_causal_mask_with_offset() {
+        // Simulates generating the 3rd token (index 2) when 2 tokens are in cache
+        let mut scores = Array4::<f32>::zeros((1, 1, 1, 3)); // Query len=1, Key len=3
+        let masked = apply_causal_mask(scores, 2).unwrap(); // cache_len = 2
+
+        // Query at pos 2 can attend to keys at pos 0, 1, 2.
+        assert_eq!(masked[[0, 0, 0, 0]], 0.0);
+        assert_eq!(masked[[0, 0, 0, 1]], 0.0);
+        assert_eq!(masked[[0, 0, 0, 2]], 0.0);
+    }
+
+    #[test]
+    fn test_apply_padding_mask() {
+        let mut scores = Array4::<f32>::zeros((1, 2, 2, 4)); // b, h, q, k
+        let mask = Array2::from_shape_vec((1, 4), vec![1.0, 1.0, 0.0, 0.0]).unwrap();
+        let masked = apply_padding_mask(scores, &mask).unwrap();
+
+        // The last two key positions should be masked for all queries and heads
+        assert_eq!(masked[[0, 0, 0, 2]], MASK_VALUE);
+        assert_eq!(masked[[0, 0, 1, 3]], MASK_VALUE);
+        assert_eq!(masked[[0, 1, 0, 2]], MASK_VALUE);
+        assert_eq!(masked[[0, 0, 0, 1]], 0.0);
     }
 }

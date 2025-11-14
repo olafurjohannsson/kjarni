@@ -263,13 +263,13 @@ pub trait LanguageModel: TransformerModel {
     /// Tokenize text into token IDs
     ///
     /// Returns Array2<f32> with shape [1, seq_len]
-    fn tokenize(&self, text: &str) -> Result<Array2<f32>> {
+    fn tokenize(&self, text: &str) -> Result<Array2<u32>> {
         let encoding = self
             .tokenizer()
             .encode(text, true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        let ids: Vec<f32> = encoding.get_ids().iter().map(|&id| id as f32).collect();
+        let ids= encoding.get_ids().to_vec();
 
         let seq_len = ids.len();
         Ok(Array2::from_shape_vec((1, seq_len), ids)?)
@@ -278,7 +278,7 @@ pub trait LanguageModel: TransformerModel {
     /// Tokenize batch of texts (with padding to max length)
     ///
     /// Returns Array2<f32> with shape [batch_size, max_seq_len]
-    fn tokenize_batch(&self, texts: &[&str]) -> Result<Array2<f32>> {
+    fn tokenize_batch(&self, texts: &[&str]) -> Result<Array2<u32>> {
         if texts.is_empty() {
             return Err(anyhow!("Cannot tokenize empty batch"));
         }
@@ -297,14 +297,14 @@ pub trait LanguageModel: TransformerModel {
         }
         // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
         // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime
-        let pad_id = self.pad_token_id().unwrap_or(0) as f32;
+        let pad_id = self.pad_token_id().unwrap_or(0);
         let batch_size = texts.len();
 
         let mut batch = Array2::from_elem((batch_size, max_len), pad_id);
 
         for (i, encoding) in encodings.iter().enumerate() {
             for (j, &token_id) in encoding.get_ids().iter().enumerate() {
-                batch[[i, j]] = token_id as f32;
+                batch[[i, j]] = token_id;
             }
         }
 
@@ -330,7 +330,7 @@ pub trait LanguageModel: TransformerModel {
 #[async_trait]
 pub trait EncoderLanguageModel: LanguageModel {
     /// Get the encoder backend
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput>;
+    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput>;
 
     /// Get hidden states for input text
     async fn get_hidden_states(&self, text: &str) -> Result<Array3<f32>> {
@@ -351,7 +351,7 @@ pub trait EncoderLanguageModel: LanguageModel {
         let input_ids = self.tokenize_batch(texts)?;
 
         // Create an attention mask that ignores padding tokens
-        let pad_id = self.pad_token_id().unwrap_or(0) as f32;
+        let pad_id = self.pad_token_id().unwrap_or(0);
         let attention_mask = input_ids.mapv(|id| if id == pad_id { 0.0 } else { 1.0 });
 
         let hidden_states = self
@@ -456,10 +456,10 @@ pub trait EncoderLanguageModel: LanguageModel {
 #[async_trait]
 pub trait EncoderDecoderLanguageModel: LanguageModel {
     /// Returns a reference to the model's encoder component.
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput>;
+    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput>;
 
     /// Returns a reference to the model's decoder component.
-    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<f32>, Output = DecoderOutput>;
+    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput>;
 
     /// Projects the final hidden states from the decoder to vocabulary logits.
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
@@ -482,7 +482,7 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 #[async_trait]
 pub trait DecoderLanguageModel: LanguageModel {
     /// Get the decoder backend
-    fn decoder(&self) -> &dyn Decoder<Input = Array2<f32>, Output = DecoderOutput>;
+    fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput>;
 
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;

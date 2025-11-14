@@ -21,10 +21,6 @@ pub struct EncoderLayer {
     pub self_attn: MultiHeadAttention,
     pub self_attn_layer_norm: LayerNorm,
 
-    // Cross-Attention Components (only for encoder-decoder models)
-    pub cross_attn: Option<MultiHeadAttention>,
-    pub cross_attn_layer_norm: Option<LayerNorm>,
-
     // Feed-Forward Components (always present)
     pub feedforward: FeedForward,
     pub ffn_layer_norm: LayerNorm,
@@ -33,38 +29,32 @@ pub struct EncoderLayer {
 impl EncoderLayer {
     /// Forward pass for an encoder or decoder-only layer with KV caching.
 
-    pub fn forward_with_cache(
+    pub fn forward(
         &self,
         mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
         config: &dyn TransformerConfig,
-        layer_idx: usize,
-        cache: Option<&mut CpuKVCache>,
     ) -> Result<Array3<f32>> {
         let is_prenorm = config.is_prenorm();
         let is_causal = config.is_causal();
-        println!(
-            "EncoderLayer prenorm: {} - causal: {}",
-            is_prenorm, is_causal
-        );
         if is_prenorm {
             let residual_1 = hidden.clone();
             let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
 
-            let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
+            // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
 
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &ln1_out,
                 None,
                 Some(attention_mask),
                 is_causal,
-                cached_kv,
+                None,
                 None,
             )?;
 
-            if let Some(c) = cache {
-                c.update(layer_idx, &new_k, &new_v)?;
-            }
+            // if let Some(c) = cache {
+            //     c.update(layer_idx, &new_k, &new_v)?;
+            // }
 
             let attn_block_output = residual_1 + attn_out;
             let residual_2 = attn_block_output.clone();
@@ -78,114 +68,173 @@ impl EncoderLayer {
             hidden = block_output;
         } else {
             let residual = hidden.clone();
-            let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
+            // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &hidden,
                 None,
                 Some(attention_mask),
                 is_causal,
-                cached_kv,
+                None,
                 None,
             )?;
 
-            if let Some(cache) = cache {
-                cache.update(layer_idx, &new_k, &new_v)?;
-            }
-
             hidden = residual + attn_out;
             hidden = self.self_attn_layer_norm.forward_3d(&hidden);
-
+            println!(
+                "    [EncoderLayer] After Self-Attn + Norm, Mean: {:.8}",
+                hidden.mean().unwrap()
+            );
             let residual = hidden.clone();
             let ffn_out = self.feedforward.forward(&hidden)?;
+            println!(
+                "    [EncoderLayer] After FFN (pre-Add/Norm), Mean: {:.8}",
+                ffn_out.mean().unwrap()
+            );
             hidden = residual + ffn_out;
             hidden = self.ffn_layer_norm.forward_3d(&hidden);
+            println!(
+                "    [EncoderLayer] After FFN + Norm (Final), Mean: {:.8}",
+                hidden.mean().unwrap()
+            );
         }
-
         Ok(hidden)
     }
+}
 
-    pub fn forward_cross_attention(
-        &self,
-        hidden_states: &Array3<f32>,
-        encoder_hidden_states: &Array3<f32>,
-        self_attention_mask: Option<&Array2<f32>>,
-        cross_attention_mask: Option<&Array2<f32>>,
-        past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
-    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // This is a standard post-layernorm decoder layer (like BART)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::attention::MultiHeadAttention;
+    use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::normalization::LayerNorm;
+    use ndarray::{Array1, Array2, Array3};
 
-        // --- 1. Self-Attention Block ---
-
-        let owned_kv: Option<(Array3<f32>, Array3<f32>)> =
-            past_kv.as_ref().map(|(k, v)| (k.to_owned(), v.to_owned()));
-
-        let cached_kv: Option<(&Array3<f32>, &Array3<f32>)> =
-            owned_kv.as_ref().map(|(k, v)| (k, v));
-
-        let residual = hidden_states.clone();
-        let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache_2(
-            hidden_states,
-            None, // Key/Value source is the same as query for self-attention
-            self_attention_mask,
-            true, // Causal mask for self-attention
-            cached_kv,
-        )?;
-        let mut hidden_states = residual + attn_output;
-        hidden_states = self.self_attn_layer_norm.forward_3d(&hidden_states);
-
-        println!(
-            "[FWD_X_ATTN] After Self-Attn + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
-
-        // --- 2. Cross-Attention Block (REPLACED LOGIC) ---
-        let residual = hidden_states.clone();
-        let cross_attn = self.cross_attn.as_ref().unwrap();
-
-        // This block now mirrors the OLD code by calling the high-level `forward_with_cache`
-        // instead of implementing the logic manually.
-        let (cross_attn_output, _, _) = cross_attn.forward_with_cache_2(
-            &hidden_states,              // Query source
-            Some(encoder_hidden_states), // Key/Value source
-            cross_attention_mask,
-            false, // Not causal
-            None,  // No KV cache for cross-attention
-        )?;
-
-        hidden_states = residual + cross_attn_output;
-        hidden_states = self
-            .cross_attn_layer_norm
-            .as_ref()
-            .unwrap()
-            .forward_3d(&hidden_states);
-
-        println!(
-            "[FWD_X_ATTN] After Cross-Attn + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
-
-        // --- 3. Feed-Forward Block ---
-        let residual = hidden_states.clone();
-        let ffn_output = self.feedforward.forward(&hidden_states)?;
-        hidden_states = residual + ffn_output;
-        hidden_states = self.ffn_layer_norm.forward_3d(&hidden_states);
-
-        println!(
-            "[FWD_X_ATTN] After FFN + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
-
-        // Return the final hidden state and the NEW self-attention K/V pair to be cached.
-        Ok((hidden_states, (new_k, new_v)))
+    // A mock config for testing purposes.
+    struct TestConfig {
+        is_prenorm: bool,
     }
-    
-    /// Original forward without cache (for compatibility with encoders).
-    pub fn forward(
-        &self,
-        hidden: Array3<f32>,
-        attention_mask: &Array2<f32>,
-        config: &dyn TransformerConfig,
-    ) -> Result<Array3<f32>> {
-        self.forward_with_cache(hidden, attention_mask, config, 0, None)
+    impl TransformerConfig for TestConfig {
+        fn is_prenorm(&self) -> bool {
+            self.is_prenorm
+        }
+        fn is_causal(&self) -> bool {
+            false
+        }
+        // Unused methods
+        fn hidden_size(&self) -> usize {
+            unimplemented!()
+        }
+        fn num_attention_heads(&self) -> usize {
+            unimplemented!()
+        }
+        fn num_hidden_layers(&self) -> usize {
+            unimplemented!()
+        }
+        fn layer_norm_eps(&self) -> f32 {
+            unimplemented!()
+        }
+    }
+
+    fn create_mock_encoder_layer(
+        hidden_size: usize,
+        intermediate_size: usize,
+        num_heads: usize,
+    ) -> EncoderLayer {
+        let q_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
+            if i == j { 1.1 } else { (i + j) as f32 * 0.001 }
+        });
+        let o_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
+            if i == j { 0.9 } else { (i + j) as f32 * -0.001 }
+        });
+        let fc1_weight = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+            if i == j { 1.05 } else { 0.001 }
+        });
+        let fc2_weight = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+            if i == j { 0.95 } else { -0.001 }
+        });
+
+        let self_attn = MultiHeadAttention::new(
+            hidden_size,
+            num_heads,
+            q_weight.clone(),
+            Array1::from_elem(hidden_size, 0.1),
+            q_weight.clone(),
+            Array1::zeros(hidden_size),
+            q_weight.clone(),
+            Array1::zeros(hidden_size),
+            o_weight.clone(),
+            Array1::zeros(hidden_size),
+            None,
+        );
+        let self_attn_layer_norm =
+            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
+
+        let feedforward = FeedForward::Standard(StdFeedForward::new(
+            fc1_weight,
+            Array1::zeros(intermediate_size),
+            fc2_weight,
+            Array1::zeros(hidden_size),
+            crate::activations::Activation::Gelu,
+        ));
+        let ffn_layer_norm =
+            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
+
+        EncoderLayer {
+            self_attn,
+            self_attn_layer_norm,
+            feedforward,
+            ffn_layer_norm,
+        }
+    }
+
+    #[test]
+    fn test_encoder_layer_forward_postnorm() -> Result<()> {
+        let (batch_size, seq_len, hidden_size, intermediate_size, num_heads) = (2, 10, 64, 128, 4);
+        let layer = create_mock_encoder_layer(hidden_size, intermediate_size, num_heads);
+        let config = TestConfig { is_prenorm: false };
+
+        let hidden_states = Array3::<f32>::ones((batch_size, seq_len, hidden_size));
+        let attention_mask = Array2::<f32>::ones((batch_size, seq_len));
+
+        let output = layer.forward(hidden_states.clone(), &attention_mask, &config)?;
+
+        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
+        assert!(!output.iter().any(|&x| x.is_nan()), "Output contains NaNs");
+
+        // CORRECT ASSERTION for post-norm: The mean should be very close to 0.
+        assert!(
+            output.mean().unwrap().abs() < 1e-6,
+            "Post-norm output mean should be near zero"
+        );
+        // The standard deviation should be very close to 1.
+        assert!(
+            (output.std(0.0) - 1.0).abs() < 1e-5,
+            "Post-norm output std dev should be near one"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encoder_layer_forward_prenorm() -> Result<()> {
+        let (batch_size, seq_len, hidden_size, intermediate_size, num_heads) = (2, 10, 64, 128, 4);
+        let layer = create_mock_encoder_layer(hidden_size, intermediate_size, num_heads);
+        let config = TestConfig { is_prenorm: true };
+
+        let hidden_states = Array3::<f32>::ones((batch_size, seq_len, hidden_size));
+        let attention_mask = Array2::<f32>::ones((batch_size, seq_len));
+
+        let output = layer.forward(hidden_states.clone(), &attention_mask, &config)?;
+
+        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
+        assert!(!output.iter().any(|&x| x.is_nan()), "Output contains NaNs");
+
+        // CORRECT ASSERTION for pre-norm: The final operation is an addition, so the mean will NOT be zero.
+        assert!(
+            output.mean().unwrap().abs() > 0.1,
+            "Pre-norm output mean should not be zero"
+        );
+
+        Ok(())
     }
 }

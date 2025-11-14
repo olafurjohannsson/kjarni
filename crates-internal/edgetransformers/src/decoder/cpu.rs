@@ -293,7 +293,7 @@ impl TransformerModel for CpuTransformerDecoder {
 
 #[async_trait]
 impl Decoder for CpuTransformerDecoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = DecoderOutput;
 
     async fn forward(
@@ -432,7 +432,7 @@ impl CpuTransformerDecoder {
     /// For models with RoPE (LLaMA):
     ///   - Only returns word embeddings (RoPE is applied in attention layer)
     ///   - position_offset is still tracked for RoPE in attention
-    fn embed_with_offset(&self, input_ids: &Array2<f32>, position_offset: usize) -> Array3<f32> {
+    fn embed_with_offset(&self, input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.config.hidden_size();
 

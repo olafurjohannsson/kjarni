@@ -186,7 +186,7 @@ impl LanguageModel for LlamaModel {
 
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {
-    fn decoder(&self) -> &dyn Decoder<Input = Array2<f32>, Output = DecoderOutput> {
+    fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput> {
         &self.decoder
     }
     fn lm_head(&self) -> &Array2<f32> {

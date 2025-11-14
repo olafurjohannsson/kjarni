@@ -159,7 +159,7 @@ impl GpuTransformerDecoder {
 
     fn perform_cpu_embedding(
         &self,
-        input_ids: &Array2<f32>,
+        input_ids: &Array2<u32>,
         position_offset: usize,
     ) -> Result<Array3<f32>> {
         let (batch_size, seq_len) = input_ids.dim();
@@ -199,7 +199,7 @@ impl TransformerModel for GpuTransformerDecoder {
 
 #[async_trait]
 impl Decoder for GpuTransformerDecoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = DecoderOutput;
 
     async fn forward(

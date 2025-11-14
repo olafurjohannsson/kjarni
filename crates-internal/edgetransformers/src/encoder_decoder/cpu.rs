@@ -10,6 +10,7 @@ use crate::traits::{
 use crate::weights::ModelWeights;
 use crate::{
     Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer,
     feedforward::StdFeedForward, normalization::LayerNorm,
 };
 use anyhow::Result;
@@ -21,7 +22,7 @@ use std::sync::Arc;
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct CpuTransformerEncoderDecoder {
     encoder: TransformerEncoder,
-    decoder_layers: Vec<EncoderLayer>,
+    decoder_layers: Vec<DecoderCrossAttentionLayer>,
     decoder_embeddings: Embeddings,
     decoder_embed_layer_norm: LayerNorm,
     config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
@@ -130,11 +131,11 @@ impl CpuTransformerEncoderDecoder {
                 config.layer_norm_eps(),
             );
 
-            decoder_layers.push(EncoderLayer {
+            decoder_layers.push(DecoderCrossAttentionLayer {
                 self_attn,
                 self_attn_layer_norm,
-                cross_attn: Some(cross_attn),
-                cross_attn_layer_norm: Some(cross_attn_layer_norm),
+                cross_attn: cross_attn,
+                cross_attn_layer_norm: cross_attn_layer_norm,
                 feedforward,
                 ffn_layer_norm,
             });
@@ -155,7 +156,7 @@ impl CpuTransformerEncoderDecoder {
 
     fn embed_decoder_with_offset(
         &self,
-        input_ids: &Array2<f32>,
+        input_ids: &Array2<u32>,
         position_offset: usize,
     ) -> Array3<f32> {
         let (_batch_size, seq_len) = input_ids.dim();
@@ -182,7 +183,7 @@ impl CpuTransformerEncoderDecoder {
 
 #[async_trait]
 impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = DecoderOutput;
 
     async fn forward<'a>(
@@ -215,9 +216,8 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
 
             
-            // The EncoderLayer's forward method should be adapted or a new one created
-            // that handles cross-attention. Let's assume you have a method like this:
-            let (new_hidden, (new_k, new_v)) = layer.forward_cross_attention(
+            // Cross attention decoding
+            let (new_hidden, (new_k, new_v)) = layer.forward(
                 &hidden_states,
                 encoder_hidden_states,
                 decoder_attention_mask,

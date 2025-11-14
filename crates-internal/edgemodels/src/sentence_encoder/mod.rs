@@ -286,7 +286,7 @@ impl LanguageModel for SentenceEncoder {
 // Implement encoder language model trait
 #[async_trait]
 impl EncoderLanguageModel for SentenceEncoder {
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput> {
+    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
         &self.encoder
     }
 }

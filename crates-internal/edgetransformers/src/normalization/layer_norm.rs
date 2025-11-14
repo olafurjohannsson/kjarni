@@ -11,6 +11,7 @@ pub struct LayerNorm {
 
 impl LayerNorm {
     pub fn new(weight: Array1<f32>, bias: Array1<f32>, eps: f32) -> Self {
+        println!("LayerNormEps: {}", eps);
         Self { weight, bias, eps }
     }
 
@@ -19,7 +20,7 @@ impl LayerNorm {
         // 1. Calculate the mean and variance along the last axis (the feature dimension).
         //    `keep_dims` is false, so these will be 2D arrays.
         let mean = hidden.mean_axis(Axis(2)).unwrap();
-        let variance = hidden.var_axis(Axis(2), 0.0);
+        let variance = hidden.var_axis(Axis(2), 1.0);
 
         // 2. Expand the dimensions of the mean and variance so they can be broadcast
         //    for subtraction and division. Shape goes from [batch, seq] to [batch, seq, 1].

@@ -190,8 +190,7 @@ async fn test_full_forward_pass_parity() -> Result<()> {
     let max_len = 32;
     let tolerance = 1e-3;
 
-    let input_ids = Array::random((batch_size, prompt_len), Uniform::new(0., 50256.))
-        .mapv(|v: f32| v.floor() as f32);
+    let input_ids: Array2<u32> = Array::random((batch_size, prompt_len), Uniform::new(0, 50256));
 
     // --- 2. Act & Assert: Priming Pass (cache = None) ---
     println!("\n--- Testing Priming Pass Parity ---");
@@ -248,7 +247,7 @@ async fn test_full_forward_pass_parity() -> Result<()> {
         .await?;
 
     // Prepare inputs for a single new token
-    let next_token_id = Array2::from_elem((batch_size, 1), 500.0f32);
+    let next_token_id = Array2::from_elem((batch_size, 1), 500);
     let current_len = prompt_len;
     full_attention_mask[[0, current_len]] = 1.0;
 

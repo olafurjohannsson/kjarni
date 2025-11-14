@@ -92,7 +92,7 @@ impl TransformerModel for TransformerEncoder {
 /// Implements the `Encoder` trait for the generic encoder, delegating to the backend.
 #[async_trait]
 impl Encoder for TransformerEncoder {
-    type Input = Array2<f32>;
+    type Input = Array2<u32>;
     type Output = EncoderOutput;
 
     async fn forward(

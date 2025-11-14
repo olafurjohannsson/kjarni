@@ -2,10 +2,10 @@ use crate::attention::MultiHeadAttention;
 
 use crate::feedforward::FeedForward;
 use crate::normalization::Normalization;
-
+use crate::utils::linear_algebra::matmul_3d_2d;
 use crate::rope::RoPE;
 use anyhow::Result;
-use ndarray::{Array2, Array3, Axis};
+use ndarray::{Array2, Array3, Axis, s};
 use std::sync::Arc;
 
 /// Represents a single layer for a decoder-only transformer model (e.g., GPT-2).
@@ -45,67 +45,32 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // let residual = hidden_states.clone();
-        // let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
-        // let (new_k, new_v) = self.self_attn.project_kv(&ln1_out);
-        
+        println!("prenorm");
+        let residual = hidden_states.clone();
 
-        // let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
-        //     (
-        //         // ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
-        //         // ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
-        //         ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
-        //         ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
-        //         // (past_k.to_owned(), past_v.to_owned())
-        //     )
-        // } else {
-        //     (new_k.clone(), new_v.clone())
-        // };
-        // let attn_out = self.self_attn.attend(
-        //     &ln1_out,
-        //     &full_k,
-        //     &full_v,
-        //     Some(attention_mask),
-        //     true, // is_causal is always true for a DecoderLayer
-        //     position_offset,
-        //     self.rope.as_deref(),
-        // )?;
+        // 1. Normalize the input. This is the input to the Q, K, and V projections.
+        let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
 
-        // // First residual connection.
-        // let attn_block_output = residual + attn_out;
-        // let residual = attn_block_output.clone();
-        // let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
-        // let ffn_out = self.feedforward.forward(&ln2_out)?;
-        // let final_output = residual + ffn_out;
-        // Ok((final_output, (new_k, new_v)))
-            let residual = hidden_states.clone();
-    
-    // 1. Normalize the input. This is the input to the Q, K, and V projections.
-    let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
+        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
+            &ln1_out, // The query source is the normalized hidden state
+            None,     // For self-attention, key_value source is the same
+            Some(attention_mask),
+            true, // is_causal is always true for a DecoderLayer
+            past_kv,
+            self.rope.as_deref(),
+        )?;
 
-    // 2. ✅ UNIFIED LOGIC: Always call `forward_with_cache`.
-    // This function now correctly handles everything: projections, RoPE, and caching logic.
-    // It works for BOTH the prefill step (past_kv=None) and generation steps.
-    let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-        &ln1_out, // The query source is the normalized hidden state
-        None,     // For self-attention, key_value source is the same
-        Some(attention_mask),
-        true, // is_causal is always true for a DecoderLayer
-        past_kv,
-        self.rope.as_deref(),
-    )?;
+        // 3. First residual connection.
+        let attn_block_output = residual + attn_out;
 
-    // 3. First residual connection.
-    let attn_block_output = residual + attn_out;
+        // 4. FFN block (this part is correct)
+        let residual = attn_block_output.clone();
+        let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
+        let ffn_out = self.feedforward.forward(&ln2_out)?;
+        let final_output = residual + ffn_out;
 
-    // 4. FFN block (this part is correct)
-    let residual = attn_block_output.clone();
-    let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
-    let ffn_out = self.feedforward.forward(&ln2_out)?;
-    let final_output = residual + ffn_out;
-
-    // 5. Return the final output and the new K/V pair to be cached by the caller.
-    Ok((final_output, (new_k, new_v)))
+        // 5. Return the final output and the new K/V pair to be cached by the caller.
+        Ok((final_output, (new_k, new_v)))
     }
     fn forward_postnorm(
         &self,
@@ -114,37 +79,88 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // Attention block: Attn → Add → Norm
+        println!("postnorm");
+        let residual = hidden_states.clone();
+        let batch_size = hidden_states.shape()[0];
+        let cache_len = position_offset; // Use the provided offset
+
+        // === 1. Manually perform ALL preparation steps ===
+
+        // 1a. Project Q, K, and V from the raw hidden_states
+        let mut q_proj = matmul_3d_2d(hidden_states, &self.self_attn.q_weight);
+        if !self.self_attn.q_bias.is_empty() {
+            q_proj += &self.self_attn.q_bias;
+        }
         let (new_k, new_v) = self.self_attn.project_kv(hidden_states);
 
-        let (full_k, full_v) = if let Some((past_k, past_v)) = past_kv {
-            (
-                ndarray::concatenate(Axis(1), &[past_k.view(), new_k.view()])?,
-                ndarray::concatenate(Axis(1), &[past_v.view(), new_v.view()])?,
-            )
+        // 1b. Apply RoPE to the new Q and K
+        let (rotated_q, rotated_k) = if let Some(r) = self.rope.as_deref() {
+            r.apply_3d(
+                &q_proj,
+                &new_k,
+                self.self_attn.num_heads,
+                self.self_attn.num_kv_heads,
+                cache_len,
+            )?
         } else {
-            (new_k.clone(), new_v.clone())
+            (q_proj, new_k.clone())
         };
 
-        let attn_out = self.self_attn.attend(
-            hidden_states,
+        // 1c. Concatenate with cache (YOUR IMPLEMENTATION)
+        let (full_k, full_v) = if let Some((cached_k, cached_v)) = past_kv {
+            let new_len = rotated_k.shape()[1];
+            let full_len = cache_len + new_len;
+            let hidden_size = rotated_k.shape()[2];
+
+            let mut temp_full_k = Array3::zeros((batch_size, full_len, hidden_size));
+            temp_full_k
+                .slice_mut(s![.., 0..cache_len, ..])
+                .assign(&cached_k);
+            temp_full_k
+                .slice_mut(s![.., cache_len..full_len, ..])
+                .assign(&rotated_k);
+
+            let mut temp_full_v = Array3::zeros((batch_size, full_len, hidden_size));
+            temp_full_v
+                .slice_mut(s![.., 0..cache_len, ..])
+                .assign(&cached_v);
+            temp_full_v
+                .slice_mut(s![.., cache_len..full_len, ..])
+                .assign(&new_v);
+
+            (temp_full_k, temp_full_v)
+        } else {
+            (rotated_k.clone(), new_v.clone())
+        };
+
+        // === 2. Call the core attend function ===
+        let context = self.self_attn.attend(
+            &rotated_q,
             &full_k,
             &full_v,
             Some(attention_mask),
             true,
-            position_offset,
-            self.rope.as_deref(),
+            cache_len,
         )?;
 
-        let hidden = hidden_states + &attn_out;
+        // === 3. Perform the final output projection ===
+        let attn_out = if !self.self_attn.output_bias.is_empty() {
+            matmul_3d_2d(&context, &self.self_attn.output_weight) + &self.self_attn.output_bias
+        } else {
+            matmul_3d_2d(&context, &self.self_attn.output_weight)
+        };
+
+        // === 4. Add & Norm ===
+        let hidden = residual + attn_out;
         let hidden = self.self_attn_layer_norm.forward(&hidden);
 
-        // FFN block: FFN → Add → Norm
+        // FFN block
+        let residual = hidden.clone();
         let ffn_out = self.feedforward.forward(&hidden)?;
-        let hidden = &hidden + &ffn_out;
+        let hidden = residual + ffn_out;
         let output = self.ffn_layer_norm.forward(&hidden);
 
-        Ok((output, (new_k, new_v)))
+        Ok((output, (rotated_k, new_v)))
     }
 }
 

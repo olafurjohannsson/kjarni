@@ -165,17 +165,17 @@ impl<C> EncoderDecoderLanguageModel for Seq2SeqModel<C>
 where
     C: EncoderDecoderArchitecture + Send + Sync + for<'de> serde::Deserialize<'de> + BartLikeConfig,
 {
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<f32>, Output = EncoderOutput> {
+    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
         self.model.encoder()
     }
-fn lm_head(&self) -> &Array2<f32> {
+    fn lm_head(&self) -> &Array2<f32> {
         &self.lm_head
     }
 
     fn final_logits_bias(&self) -> Option<&Array1<f32>> {
         self.final_logits_bias.as_ref()
     }
-    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<f32>, Output = DecoderOutput> {
+    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput> {
         self.model.decoder()
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
@@ -186,7 +186,7 @@ fn lm_head(&self) -> &Array2<f32> {
                 max_length: summary_params.max_length,
                 min_length: summary_params.min_length,
                 no_repeat_ngram_size: summary_params.no_repeat_ngram_size,
-                repetition_penalty: 1.0, // Default this, as it's not in the BART config
+                repetition_penalty: 1.0, // For some reason it has to default to this to achieve parity
                 max_new_tokens: None,
                 add_bos_token: false, // BART handles this via decoder_start_token_id
                 strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
@@ -203,7 +203,7 @@ fn lm_head(&self) -> &Array2<f32> {
             max_length: self.config.max_position_embeddings(), // Use model's own limit
             min_length: 0,
             no_repeat_ngram_size: 0,
-            repetition_penalty: 1.0,
+            repetition_penalty: 1.1,
             max_new_tokens: None,
             add_bos_token: false,
             strategy: DecodingStrategy::BeamSearch(BeamSearchParams {
