@@ -37,7 +37,7 @@ impl CpuTransformerDecoder {
         debug!("[CPU Decoder] RoPE: {}", rope.is_some());
 
         // Load embedding weights with optional position embeddings
-        let (word_w, pos_w) = config.get_embedding_weight_names();
+        let (word_w, pos_w, _) = config.get_embedding_weight_names();
 
         debug!("[CPU Decoder] Loading embeddings...");
         debug!("    Word embeddings: {}", word_w);
@@ -200,7 +200,7 @@ impl CpuTransformerDecoder {
                 intermediate_bias,
                 output_weight,
                 output_bias,
-                crate::activations::Activation::Gelu,
+                config.activation_function(),
             ))
         };
         // Load normalization layers

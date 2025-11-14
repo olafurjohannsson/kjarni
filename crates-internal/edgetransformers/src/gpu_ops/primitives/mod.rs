@@ -7,3 +7,4 @@ pub mod matmul;
 pub mod bmm;
 pub mod layout;
 pub mod scale;
+pub mod lookup;

@@ -45,7 +45,7 @@ impl GpuTransformerDecoder {
         let slicer = GpuSlice::new(&context);
 
         // Load CPU-side embeddings
-        let (word_w, pos_w) = config.get_embedding_weight_names();
+        let (word_w, pos_w, _) = config.get_embedding_weight_names();
         let word_embeddings = weights.get_array2(word_w)?;
         let position_embeddings = weights.get_array2(pos_w)?;
 

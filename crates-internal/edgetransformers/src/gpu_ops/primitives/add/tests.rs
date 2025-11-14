@@ -1,8 +1,8 @@
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{Kernel, GpuTensor};
+use crate::gpu_ops::{GpuTensor, Kernel};
 use anyhow::Result;
-use ndarray::{Array, Array3, Ix3};
+use ndarray::{Array, Array3, arr3, arr2, Ix3};
 use std::sync::Arc;
 
 // --- You will need these helper functions in your test module ---
@@ -30,13 +30,89 @@ async fn assert_tensors_are_close(
 
     if !close {
         println!("Mismatch in tensor '{}'", label);
-        println!("CPU tensor (shape {:?}): \n{:?}", cpu_tensor.shape(), cpu_tensor);
-        println!("GPU tensor (shape {:?}): \n{:?}", gpu_as_cpu.shape(), gpu_as_cpu);
-        panic!("Tensor '{}' is not close enough to its GPU counterpart.", label);
+        println!(
+            "CPU tensor (shape {:?}): \n{:?}",
+            cpu_tensor.shape(),
+            cpu_tensor
+        );
+        println!(
+            "GPU tensor (shape {:?}): \n{:?}",
+            gpu_as_cpu.shape(),
+            gpu_as_cpu
+        );
+        panic!(
+            "Tensor '{}' is not close enough to its GPU counterpart.",
+            label
+        );
     }
 }
 
-// --- The Actual Test ---
+// Helper for float comparison
+fn assert_arrays_are_close_3d(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
+    assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
+    for (val_a, val_b) in a.iter().zip(b.iter()) {
+        assert!(
+            (val_a - val_b).abs() < epsilon,
+            "Values differ: {} vs {}",
+            val_a,
+            val_b
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_gpu_add_broadcast_offset() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await);
+
+    // 1. Setup CPU data
+    // `a` is the hidden state: [batch=2, seq=3, hidden=2]
+    let a_cpu = Array3::from_elem((2, 3, 2), 1.0);
+    // `b` is the positional embedding table: [max_pos=10, hidden=2]
+    let b_cpu = Array::from_shape_fn((10, 2), |(i, j)| (i as f32 * 1.0) + (j as f32 * 0.1));
+    let b_row_offset = 2;
+
+    // 2. Setup GPU tensors
+    let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
+    let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
+    let vec: Vec<usize> = a_cpu.shape().iter().map(|&d| d as usize).collect();
+    let output_gpu = GpuTensor::zeros(
+        &context,
+        vec,
+        crate::gpu_ops::DType::F32,
+        "f32",
+    )?;
+
+    // 3. Execute kernel
+    let add_kernel = GpuAdd::new(&context);
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    add_kernel.encode_broadcast_offset(&mut encoder, &a_gpu, &b_gpu, b_row_offset, &output_gpu);
+    context.queue.submit(Some(encoder.finish()));
+    
+    // Ensure GPU work completes
+    let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
+
+    // 4. Verification
+    let output_cpu = output_gpu.to_ndarray_3d().await?;
+
+    // Manually compute expected output: output[i,j,k] = a[i,j,k] + b[j + offset, k]
+    let expected_output = arr3(&[
+        // Batch item 0
+        [
+            [1.0 + 2.0, 1.0 + 2.1], // seq 0 adds pos 2
+            [1.0 + 3.0, 1.0 + 3.1], // seq 1 adds pos 3
+            [1.0 + 4.0, 1.0 + 4.1],
+        ], // seq 2 adds pos 4
+        // Batch item 1 (same logic)
+        [
+            [1.0 + 2.0, 1.0 + 2.1],
+            [1.0 + 3.0, 1.0 + 3.1],
+            [1.0 + 4.0, 1.0 + 4.1],
+        ],
+    ]);
+
+    assert_arrays_are_close_3d(&output_cpu, &expected_output, 1e-6);
+    Ok(())
+}
 
 #[tokio::test]
 async fn test_gpu_add_parity() -> Result<()> {
@@ -50,7 +126,12 @@ async fn test_gpu_add_parity() -> Result<()> {
 
     let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
     let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
-    let output_gpu = GpuTensor::uninitialized(&context, vec![shape.0, shape.1, shape.2], a_gpu.dtype(), "Add Output");
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        vec![shape.0, shape.1, shape.2],
+        a_gpu.dtype(),
+        "Add Output",
+    );
 
     // 2. CPU Ground Truth
     let expected_cpu = &a_cpu + &b_cpu;

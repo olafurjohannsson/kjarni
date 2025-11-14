@@ -19,7 +19,7 @@ pub enum Activation {
 
 pub fn apply_activation(hidden: &mut Array3<f32>, activation: Activation) {
     match activation {
-        Activation::Gelu => gelu(hidden),
+        Activation::Gelu => gelu2(hidden),
         Activation::GeluNew => gelu(hidden),
         Activation::Relu => relu(hidden),
         Activation::Swish => swish(hidden),
@@ -34,13 +34,14 @@ use libm::erff;
 /// This is the default implementation in PyTorch and is used by models like BART.
 #[inline(always)]
 pub fn gelu2(x: &mut Array3<f32>) {
-    // This scaling factor is 1.0 / sqrt(2.0)
-    const SCALING_FACTOR: f32 = 0.7071067811865475;
+    return gelu(x);
+    // // This scaling factor is 1.0 / sqrt(2.0)
+    // const SCALING_FACTOR: f32 = 0.7071067811865475;
 
-    // The mathematical formula is: 0.5 * x * (1.0 + erf(x / sqrt(2.0)))
-    // We implement this by multiplying by the pre-calculated scaling factor.
-    // `erff` is the single-precision (f32) version of the error function from the libm crate.
-    x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SCALING_FACTOR)));
+    // // The mathematical formula is: 0.5 * x * (1.0 + erf(x / sqrt(2.0)))
+    // // We implement this by multiplying by the pre-calculated scaling factor.
+    // // `erff` is the single-precision (f32) version of the error function from the libm crate.
+    // x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SCALING_FACTOR)));
 }
 
 /// Apply GELU activation in-place

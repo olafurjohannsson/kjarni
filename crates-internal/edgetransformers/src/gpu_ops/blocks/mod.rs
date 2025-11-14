@@ -9,3 +9,4 @@ pub mod decoder;
 pub mod layer_norm;
 pub mod rms_norm;
 pub mod rope;
+pub mod embeddings;

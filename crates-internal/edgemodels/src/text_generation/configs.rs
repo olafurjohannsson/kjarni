@@ -7,7 +7,7 @@ use edgetransformers::traits::{
 };
 use serde::Deserialize;
 use std::any::Any;
-
+use edgetransformers::activations::Activation;
 // This config is for GPT-2 style models like DistilGPT2, GPT-2, etc.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Gpt2Config {
@@ -61,6 +61,9 @@ impl LanguageModelConfig for Gpt2Config {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
@@ -85,16 +88,23 @@ impl LanguageModelConfig for Gpt2Config {
     fn pad_token_id(&self) -> Option<u32> {
         Some(50256)
     }
+     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+        if self.is_distil() {
+            ("transformer.wte.weight", "transformer.wpe.weight", None)
+        } else {
+            ("wte.weight", "wpe.weight", None)
+        }
+    }
 }
 
 impl DecoderArchitecture for Gpt2Config {
-    fn get_embedding_weight_names(&self) -> (&str, &str) {
-        if self.is_distil() {
-            ("transformer.wte.weight", "transformer.wpe.weight")
-        } else {
-            ("wte.weight", "wpe.weight")
-        }
-    }
+    // fn get_embedding_weight_names(&self) -> (&str, &str) {
+    //     if self.is_distil() {
+    //         ("transformer.wte.weight", "transformer.wpe.weight")
+    //     } else {
+    //         ("wte.weight", "wpe.weight")
+    //     }
+    // }
     // fn as_any(&self) -> &dyn Any {
     //     self // Simply return a reference to self as a `&dyn Any`
     // }
@@ -179,7 +189,7 @@ mod tests {
         assert!(!config.is_distil());
         assert_eq!(config.hidden_size(), 768);
 
-        let (embed, pos_embed) = config.get_embedding_weight_names();
+        let (embed, pos_embed, _) = config.get_embedding_weight_names();
         assert_eq!(embed, "wte.weight");
         assert_eq!(pos_embed, "wpe.weight");
 
@@ -199,7 +209,7 @@ mod tests {
         assert!(config.is_distil());
         assert_eq!(config.num_hidden_layers(), 6);
 
-        let (embed, pos_embed) = config.get_embedding_weight_names();
+        let (embed, pos_embed, _) = config.get_embedding_weight_names();
         assert_eq!(embed, "transformer.wte.weight");
         assert_eq!(pos_embed, "transformer.wpe.weight");
 

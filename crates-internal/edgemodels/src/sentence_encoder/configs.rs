@@ -7,7 +7,7 @@ use edgetransformers::traits::{
 };
 use std::any::Any;
 use serde::Deserialize;
-
+use edgetransformers::activations::Activation;
 /// Configuration for MiniLM models (sentence-transformers/all-MiniLM-L6-v2)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMConfig {
@@ -47,6 +47,16 @@ impl LanguageModelConfig for MiniLMConfig {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
+     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+        (
+            "embeddings.word_embeddings.weight",
+            "embeddings.position_embeddings.weight",
+            Some("embeddings.token_type_embeddings.weight"),
+        )
+    }
 }
 
 impl TransformerConfig for MiniLMConfig {
@@ -73,16 +83,18 @@ impl TransformerConfig for MiniLMConfig {
     fn is_prenorm(&self) -> bool {
         false // BERT-style is post-norm
     }
+     
+    
 }
 
 impl EncoderArchitecture for MiniLMConfig {
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "embeddings.word_embeddings.weight",
-            "embeddings.position_embeddings.weight",
-            Some("embeddings.token_type_embeddings.weight"),
-        )
-    }
+    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    //     (
+    //         "embeddings.word_embeddings.weight",
+    //         "embeddings.position_embeddings.weight",
+    //         Some("embeddings.token_type_embeddings.weight"),
+    //     )
+    // }
 
     fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
         ("embeddings.LayerNorm.weight", "embeddings.LayerNorm.bias")
@@ -180,16 +192,26 @@ impl LanguageModelConfig for MPNetConfig {
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
-}
-
-impl EncoderArchitecture for MPNetConfig {
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
+      fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "embeddings.word_embeddings.weight",
             "embeddings.position_embeddings.weight",
             Some("embeddings.token_type_embeddings.weight"), // MPNet doesn't use this but we return it
         )
     }
+}
+
+impl EncoderArchitecture for MPNetConfig {
+    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    //     (
+    //         "embeddings.word_embeddings.weight",
+    //         "embeddings.position_embeddings.weight",
+    //         Some("embeddings.token_type_embeddings.weight"), // MPNet doesn't use this but we return it
+    //     )
+    // }
 
     fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
         ("embeddings.LayerNorm.weight", "embeddings.LayerNorm.bias")
@@ -287,16 +309,26 @@ impl LanguageModelConfig for DistilBERTConfig {
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
-}
-
-impl EncoderArchitecture for DistilBERTConfig {
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
+       fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "distilbert.embeddings.word_embeddings.weight",
             "distilbert.embeddings.position_embeddings.weight",
             None, // DistilBERT doesn't have token_type_embeddings
         )
     }
+}
+
+impl EncoderArchitecture for DistilBERTConfig {
+    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    //     (
+    //         "distilbert.embeddings.word_embeddings.weight",
+    //         "distilbert.embeddings.position_embeddings.weight",
+    //         None, // DistilBERT doesn't have token_type_embeddings
+    //     )
+    // }
 
     fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
         (

@@ -4,6 +4,8 @@ use edgetransformers::traits::{
 };
 use serde::Deserialize;
 use std::any::Any;
+use edgetransformers::activations::Activation;
+
 fn default_layer_norm_eps() -> f32 {
     1e-5
 }
@@ -91,6 +93,9 @@ impl LanguageModelConfig for BartConfig {
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
     }
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
     fn intermediate_size(&self) -> usize {
         self.encoder_ffn_dim
     } // Use encoder's as default
@@ -120,6 +125,15 @@ impl LanguageModelConfig for BartConfig {
     } 
     fn model_type(&self) -> Option<String> {
         Some(self.model_type.clone())
+    }
+    fn position_embedding_offset(&self) -> usize {
+        2
+    }
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+        ("model.shared.weight", "model.encoder.embed_positions.weight", None)
+    }
+    fn scale_embeddings(&self) -> bool {
+        self.scale_embedding 
     }
     
 }
@@ -194,10 +208,11 @@ impl EncoderDecoderArchitecture for BartConfig {
     }
 
     // --- Decoder Methods ---
-    fn get_decoder_embedding_names(&self) -> (&str, &str) {
+    fn get_decoder_embedding_names(&self) -> (&str, &str, Option<&str>) {
         (
             "model.shared.weight",
             "model.decoder.embed_positions.weight",
+            None,
         )
     }
     fn get_decoder_embedding_ln_names(&self) -> (&str, &str) {
@@ -343,7 +358,7 @@ mod tests {
         );
 
         // --- Decoder ---
-        let (embed, pos_embed) = config.get_decoder_embedding_names();
+        let (embed, pos_embed, _) = config.get_decoder_embedding_names();
         assert_eq!(embed, "model.shared.weight");
         assert_eq!(pos_embed, "model.decoder.embed_positions.weight");
 

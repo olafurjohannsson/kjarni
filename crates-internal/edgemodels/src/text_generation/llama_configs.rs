@@ -8,6 +8,7 @@ use edgetransformers::traits::{
 };
 use serde::{Deserialize, Serialize};
 use std::any::Any;
+use edgetransformers::activations::Activation;
 
 /// Configuration for LLaMA models
 ///
@@ -220,6 +221,13 @@ impl LanguageModelConfig for LlamaConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+        (
+            "model.embed_tokens.weight",
+            "", // No position embeddings (uses RoPE instead)
+            None,
+        )
+    }
 fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
@@ -230,7 +238,9 @@ fn as_any(&self) -> &dyn Any {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
-
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
     fn transpose_ffn_weights(&self) -> bool {
         true // LLaMA uses same convention as other transformers
     }
@@ -279,12 +289,12 @@ impl TransformerConfig for LlamaConfig {
 }
 
 impl DecoderArchitecture for LlamaConfig {
-    fn get_embedding_weight_names(&self) -> (&str, &str) {
-        (
-            "model.embed_tokens.weight",
-            "", // No position embeddings (uses RoPE instead)
-        )
-    }
+    // fn get_embedding_weight_names(&self) -> (&str, &str) {
+    //     (
+    //         "model.embed_tokens.weight",
+    //         "", // No position embeddings (uses RoPE instead)
+    //     )
+    // }
     // fn as_any(&self) -> &dyn Any {
     //     self // Simply return a reference to self as a `&dyn Any`
     // }
@@ -382,7 +392,7 @@ mod tests {
     fn test_weight_names() {
         let config = LlamaConfig::llama_3_2_1b();
 
-        let (embed, pos_embed) = config.get_embedding_weight_names();
+        let (embed, pos_embed, _) = config.get_embedding_weight_names();
         assert_eq!(embed, "model.embed_tokens.weight");
         assert_eq!(pos_embed, ""); // No position embeddings
 

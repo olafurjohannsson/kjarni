@@ -2,6 +2,8 @@
 
 use ndarray::{Array2, Array3, Axis, s};
 
+use crate::gpu_ops::primitives::scale;
+
 /// Configuration for embedding layers
 pub struct EmbeddingConfig {
     pub vocab_size: usize,
@@ -70,6 +72,8 @@ impl Embeddings {
         &self,
         input_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<f32>>,
+        position_offset: usize,
+        scale_embeddings: bool,
     ) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
         let hidden_size = self.word_embeddings.shape()[1];
@@ -130,10 +134,21 @@ impl Embeddings {
             }
         }
 
-        // Position embeddings (only if present - not used by LLaMA/RoPE models)
         if let Some(ref pos_emb) = self.position_embeddings {
-            let pos_embeddings = pos_emb.slice(s![0..seq_len, ..]);
-            hidden += &pos_embeddings;
+            let start_idx = position_offset;
+            let end_idx = position_offset + seq_len;
+
+            // Check if the required slice is out of bounds.
+            let max_position = pos_emb.shape()[0];
+            if end_idx > max_position {
+                panic!(
+                    "Sequence length {} with offset {} exceeds max position embeddings {}.",
+                    seq_len, position_offset, max_position
+                );
+            }
+
+            let pos_embeddings_to_add = pos_emb.slice(s![start_idx..end_idx, ..]);
+            hidden += &pos_embeddings_to_add;
         }
 
         // Token type embeddings (only if present)
@@ -194,7 +209,11 @@ impl Embeddings {
                 hidden += &type_embeddings;
             }
         }
-
+        if scale_embeddings {
+            let hidden_size: f32 = hidden_size as f32;
+            let scale_factor: f32 = hidden_size.sqrt();
+            hidden *= scale_factor;
+        }
         hidden
     }
 }
@@ -202,7 +221,149 @@ impl Embeddings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array2;
+    use super::*;
+    use crate::gpu_context::{WgpuContext};
+    use crate::gpu_ops::GpuTensor;
+    use crate::gpu_ops::blocks::attention::TempStorage;
+    use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+    use crate::traits::{LanguageModelConfig, TransformerConfig}; // Make sure traits are in scope
+    use anyhow::Result;
+    use std::path::Path;
+    use ndarray::{Array2, arr2};
+    use std::sync::Arc;
+
+    // --- Mock Config for testing ---
+    struct TestConfig {
+        pos_offset: usize,
+        scale_embed: bool,
+    }
+    impl TransformerConfig for TestConfig {
+        fn hidden_size(&self) -> usize {
+            64
+        }
+        fn num_attention_heads(&self) -> usize {
+            8
+        }
+        fn num_hidden_layers(&self) -> usize {
+            2
+        }
+        fn layer_norm_eps(&self) -> f32 {
+            1e-5
+        }
+        fn is_causal(&self) -> bool {
+            false
+        }
+        fn is_prenorm(&self) -> bool {
+            false
+        }
+    }
+    impl LanguageModelConfig for TestConfig {
+        fn vocab_size(&self) -> usize {
+            100
+        }
+        fn max_position_embeddings(&self) -> usize {
+            512
+        }
+        fn intermediate_size(&self) -> usize {
+            256
+        }
+        fn position_embedding_offset(&self) -> usize {
+            self.pos_offset
+        }
+        fn scale_embeddings(&self) -> bool {
+            self.scale_embed
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn activation_function(&self) -> crate::activations::Activation {
+            crate::activations::Activation::Gelu
+        }
+        // Dummy names, not used in this test
+        fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+            ("w", "p", Some("t"))
+        }
+    }
+
+    // Helper for float comparison
+    fn assert_tensors_are_close(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
+        assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
+        for (val_a, val_b) in a.iter().zip(b.iter()) {
+            assert!(
+                (val_a - val_b).abs() < epsilon,
+                "Values differ: {} vs {}",
+                val_a,
+                val_b
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
+        // --- 1. Setup Common Data and Config ---
+        let context = Arc::new(WgpuContext::new().await);
+        let config = TestConfig {
+            pos_offset: 2,
+            scale_embed: true,
+        }; // Test BART-like settings
+
+        // Create mock weights on CPU
+        let word_emb_cpu = Array2::from_shape_fn((100, 64), |(i, j)| (i + j) as f32 * 0.1);
+        let pos_emb_cpu = Array2::from_shape_fn((512, 64), |(i, j)| (i + j) as f32 * 0.01);
+        let type_emb_cpu = Array2::from_shape_fn((2, 64), |(i, j)| (i + j) as f32 * 1.0);
+
+        // Create mock inputs on CPU
+        let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
+        let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
+
+        // --- 2. Run CPU Path (Expected Result) ---
+        let cpu_embeddings = Embeddings::new(
+            word_emb_cpu.clone(),
+            pos_emb_cpu.clone(),
+            Some(type_emb_cpu.clone()),
+        );
+        let expected_output = cpu_embeddings.forward(
+            &input_ids_cpu,
+            Some(&token_type_ids_cpu.mapv(|x| x as f32)), // CPU version expects f32 type ids
+            config.position_embedding_offset(),
+            config.scale_embeddings(),
+        );
+
+        // --- 3. Run GPU Path (Actual Result) ---
+        // Mock ModelWeights for GpuEmbeddingWeights constructor
+        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+        let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
+        // weights.add("w", word_emb_cpu);
+        // weights.add("p", pos_emb_cpu);
+        // weights.add("t", type_emb_cpu);
+
+        let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
+        let gpu_embeddings = GpuEmbeddings::new(&context)?;
+
+        // Upload inputs
+        let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
+        let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
+        let mut temp = TempStorage::new(context.clone());
+
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let output_gpu = gpu_embeddings.encode(
+            &mut encoder,
+            &gpu_embedding_weights,
+            &input_ids_gpu,
+            Some(&token_type_ids_gpu),
+            &config,
+            &mut temp,
+        )?;
+        context.queue.submit(Some(encoder.finish()));
+        
+
+        let actual_output = output_gpu.to_ndarray_3d().await?;
+
+        // --- 4. Verification ---
+        assert_tensors_are_close(&expected_output, &actual_output, 1e-4);
+
+        Ok(())
+    }
 
     #[test]
     fn test_embeddings_with_position() {
@@ -213,7 +374,7 @@ mod tests {
         let embeddings = Embeddings::new(word_emb, pos_emb, None);
 
         let input_ids = Array2::zeros((2, 10));
-        let output = embeddings.forward(&input_ids, None);
+        let output = embeddings.forward(&input_ids, None, 0, false);
 
         assert_eq!(output.shape(), &[2, 10, 64]);
     }
@@ -226,7 +387,7 @@ mod tests {
         let embeddings = Embeddings::new_without_position(word_emb, None);
 
         let input_ids = Array2::zeros((2, 10));
-        let output = embeddings.forward(&input_ids, None);
+        let output = embeddings.forward(&input_ids, None, 0, false);
 
         assert_eq!(output.shape(), &[2, 10, 64]);
         // Should work without position embeddings
@@ -242,7 +403,7 @@ mod tests {
 
         let input_ids = Array2::zeros((2, 10));
         let token_type_ids = Array2::zeros((2, 10));
-        let output = embeddings.forward(&input_ids, Some(&token_type_ids));
+        let output = embeddings.forward(&input_ids, Some(&token_type_ids), 0, false);
 
         assert_eq!(output.shape(), &[2, 10, 64]);
     }
@@ -256,7 +417,7 @@ mod tests {
         let embeddings = Embeddings::new(word_emb, pos_emb, None);
 
         let input_ids = Array2::zeros((2, 20)); // 20 tokens - too long!
-        let _ = embeddings.forward(&input_ids, None);
+        let _ = embeddings.forward(&input_ids, None, 0, false);
     }
 
     #[test]
@@ -267,7 +428,7 @@ mod tests {
         let embeddings = Embeddings::new_without_position(word_emb, None);
 
         let input_ids = Array2::zeros((2, 1000)); // Very long sequence
-        let output = embeddings.forward(&input_ids, None);
+        let output = embeddings.forward(&input_ids, None, 0, false);
 
         assert_eq!(output.shape(), &[2, 1000, 64]);
         // Should work fine - RoPE handles position in attention layer
@@ -284,6 +445,6 @@ mod tests {
         let mut input_ids = Array2::zeros((2, 10));
         input_ids[[0, 0]] = 150 as u32; // Out of vocab range [0, 100)
 
-        let _ = embeddings.forward(&input_ids, None);
+        let _ = embeddings.forward(&input_ids, None, 0, false);
     }
 }

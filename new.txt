@@ -1,4 +1,0 @@
-✓ model.safetensors already exists, skipping download
-✓ tokenizer.json already exists, skipping download
-✓ config.json already exists, skipping download
-LayerNormEps: 0.00001

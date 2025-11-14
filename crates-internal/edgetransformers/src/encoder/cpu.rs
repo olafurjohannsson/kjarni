@@ -54,7 +54,53 @@ impl CpuTransformerEncoder {
         for i in 0..config.num_hidden_layers() {
             let attn_names = config.get_attention_names(i);
             let ffn_names = config.get_feed_forward_names(i);
+            // --- ADD THIS BLOCK FOR WEIGHT DEBUGGING ---
+            if i == 0 {
+                println!("\n--- RUST WEIGHTS (ENCODER LAYER 0) ---");
+                // Self-Attention Weights
+                let q_w = weights.get_array2(&attn_names.q_weight)?;
+                let k_w = weights.get_array2(&attn_names.k_weight)?;
+                let v_w = weights.get_array2(&attn_names.v_weight)?;
+                let out_w = weights.get_array2(&attn_names.output_weight)?;
+                println!(
+                    "[WEIGHTS L0] Self-Attn Q Weight Mean: {:.8}",
+                    q_w.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn K Weight Mean: {:.8}",
+                    k_w.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn V Weight Mean: {:.8}",
+                    v_w.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn Out Weight Mean: {:.8}",
+                    out_w.mean().unwrap()
+                );
 
+                // Self-Attention Biases
+                let q_b = weights.get_array1(&attn_names.q_bias)?;
+                let k_b = weights.get_array1(&attn_names.k_bias)?;
+                let v_b = weights.get_array1(&attn_names.v_bias)?;
+                let out_b = weights.get_array1(&attn_names.output_bias)?;
+                println!(
+                    "[WEIGHTS L0] Self-Attn Q Bias Mean:   {:.8}",
+                    q_b.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn K Bias Mean:   {:.8}",
+                    k_b.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn V Bias Mean:   {:.8}",
+                    v_b.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] Self-Attn Out Bias Mean:   {:.8}",
+                    out_b.mean().unwrap()
+                );
+            }
             let transpose_attn = config.transpose_attention_weights();
 
             // Helper closure to prepare weights, mirroring the GPU implementation
@@ -86,7 +132,17 @@ impl CpuTransformerEncoder {
 
             let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
             let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
-
+            if i == 0 {
+                println!(
+                    "[WEIGHTS L0] FFN FC1 Weight Mean (raw): {:.8}",
+                    raw_intermediate_w.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] FFN FC2 Weight Mean (raw): {:.8}",
+                    raw_output_w.mean().unwrap()
+                );
+            }
+            // --
             // The loader is now responsible for handling the transpose convention.
             // It prepares the weights into the [in, out] format that CpuFeedForward expects.
             let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
@@ -103,14 +159,33 @@ impl CpuTransformerEncoder {
             } else {
                 raw_output_w
             };
-
+            let fc1_bias = weights.get_array1(&ffn_names.intermediate_bias)?;
+            let fc2_bias = weights.get_array1(&ffn_names.output_bias)?;
+            if i == 0 {
+                println!(
+                    "[WEIGHTS L0] FFN FC1 Weight Mean (final): {:.8}",
+                    fc1_weight_for_constructor.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] FFN FC2 Weight Mean (final): {:.8}",
+                    fc2_weight_for_constructor.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] FFN FC1 Bias Mean:         {:.8}",
+                    fc1_bias.mean().unwrap()
+                );
+                println!(
+                    "[WEIGHTS L0] FFN FC2 Bias Mean:         {:.8}",
+                    fc2_bias.mean().unwrap()
+                );
+            }
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feed_forward = FeedForward::Standard(StdFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
-                crate::activations::Activation::Gelu, // TODO: should also come from config
+                config.activation_function(),
             ));
 
             // The original BERT has two layer norms per block.
@@ -166,7 +241,12 @@ impl Encoder for CpuTransformerEncoder {
         token_type_ids: Option<&Array2<f32>>,
     ) -> Result<Self::Output> {
         // Embed inputs
-        let mut hidden_states = self.embeddings.forward(input_ids, token_type_ids);
+        let mut hidden_states = self.embeddings.forward(
+            input_ids,
+            token_type_ids,
+            self.config.position_embedding_offset(),
+            self.config.scale_embeddings(),
+        );
 
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);

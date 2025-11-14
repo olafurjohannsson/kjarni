@@ -59,7 +59,7 @@ impl MultiHeadAttention {
             num_kv_heads,
         }
     }
-  
+
     pub fn project_kv(&self, key_value_source: &Array3<f32>) -> (Array3<f32>, Array3<f32>) {
         // K projection
         let new_k = if self.k_bias.len() > 0 {
@@ -113,7 +113,6 @@ impl MultiHeadAttention {
             );
         }
 
-
         // 2. Reshape Q, K, V to [batch, num_heads, seq, head_dim]
         let mut q_reshaped = q
             .to_owned()
@@ -165,7 +164,6 @@ impl MultiHeadAttention {
             .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
             .to_owned();
 
-        
         Ok(context_reshaped)
     }
 
@@ -431,7 +429,6 @@ mod tests {
         assert_eq!(v.shape(), &[1, 10, 32]);
         Ok(())
     }
-   
 
     #[test]
     fn test_attention_with_cache() {
@@ -519,17 +516,11 @@ mod tests {
 
         let input = Array3::zeros((batch_size, seq_len, hidden_size));
         let mask = Array2::ones((batch_size, seq_len));
-        
+
         let q_proj = matmul_3d_2d(&input, &attention.q_weight); // Add bias if exists
         let (k_states, v_states) = attention.project_kv(&input);
 
-        let result = attention.attend(
-            &q_proj,
-            &k_states,
-            &v_states,
-            Some(&mask),
-            false,
-            0);
+        let result = attention.attend(&q_proj, &k_states, &v_states, Some(&mask), false, 0);
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -570,23 +561,16 @@ mod tests {
 
         let input = Array3::zeros((batch_size, seq_len, hidden_size));
         let mask = Array2::ones((batch_size, seq_len));
-        
+
         let q_proj = matmul_3d_2d(&input, &attention.q_weight); // Add bias if exists
         let (k_states, v_states) = attention.project_kv(&input);
 
-        let result = attention.attend(
-            &q_proj,
-            &k_states,
-            &v_states,
-            Some(&mask),
-            false,
-            0);
+        let result = attention.attend(&q_proj, &k_states, &v_states, Some(&mask), false, 0);
         assert!(result.is_ok());
 
         let output = result.unwrap();
         assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
     }
-
 
     #[test]
     fn test_attention_with_cache_and_rope() {
@@ -642,7 +626,6 @@ mod tests {
         assert_eq!(new_k.shape(), &[batch_size, seq_len, hidden_size]);
         assert_eq!(new_v.shape(), &[batch_size, seq_len, hidden_size]);
     }
-
 
     #[test]
     fn test_repeat_kv_gqa() {
@@ -714,13 +697,11 @@ mod tests {
         let mask = Array2::ones((batch_size, seq_len));
 
         // ✅ Use forward() which handles projection
-        let result = attention.forward_with_cache(&
-            input, 
-            None, Some(&mask),false, None, None);
+        let result = attention.forward_with_cache(&input, None, Some(&mask), false, None, None);
 
         assert!(result.is_ok(), "GQA attention should not fail");
         let (output, _, _) = result.unwrap();
-        
+
         assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
 
         println!("✓ GQA attention shapes test passed");

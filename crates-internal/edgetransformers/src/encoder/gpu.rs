@@ -9,6 +9,7 @@ use crate::gpu_ops::blocks::encoder::GpuEncoderLayer; // The new layer we just b
 use crate::gpu_ops::blocks::attention::{GpuAttentionWeights, TempStorage};
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
 
@@ -19,6 +20,9 @@ pub struct GpuTransformerEncoder {
     word_embeddings: Array2<f32>,
     position_embeddings: Array2<f32>,
     token_type_embeddings: Array2<f32>,
+
+    embedding_weights: GpuEmbeddingWeights,
+    embeddings: GpuEmbeddings,
 
     // GPU-side components
     embedding_layer_norm: GpuLayerNorm,
@@ -46,6 +50,9 @@ impl GpuTransformerEncoder {
         } else {
             Array2::zeros((0, 0)) // Placeholder for models without token types
         };
+
+        let embedding_weights: GpuEmbeddingWeights = GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
+        let embeddings: GpuEmbeddings = GpuEmbeddings::new(&context)?;
 
         // --- Load and create embedding LayerNorm components ---
         let (norm_w_name, norm_b_name) = config.get_embedding_layer_norm_names();
@@ -124,6 +131,8 @@ impl GpuTransformerEncoder {
             word_embeddings,
             position_embeddings,
             token_type_embeddings,
+            embedding_weights,
+            embeddings,
             embedding_layer_norm,
             embedding_ln_weights,
             layers,
@@ -145,7 +154,7 @@ impl GpuTransformerEncoder {
             self.position_embeddings.clone(),
             Some(self.token_type_embeddings.clone()),
         );
-        Ok(cpu_embedding_layer.forward(input_ids, token_type_ids))
+        Ok(cpu_embedding_layer.forward(input_ids, token_type_ids, self.config.position_embedding_offset(), self.config.scale_embeddings()))
     }
 }
 
@@ -168,6 +177,26 @@ impl Encoder for GpuTransformerEncoder {
         // --- 1. Setup ---
         let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Encoder Forward") });
         let mut temp = TempStorage::new(self.context.clone());
+
+        // let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input_ids)?;
+        // let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
+        
+        // // Handle optional token_type_ids upload
+        // let token_type_ids_gpu = if let Some(ids) = token_type_ids {
+        //     Some(GpuTensor::from_ndarray(&self.context, ids)?)
+        // } else {
+        //     None
+        // };
+
+        // // --- 3. Perform Embeddings ENTIRELY ON GPU ---
+        // let mut hidden_states = self.embeddings.encode(
+        //     &mut encoder,
+        //     &self.embedding_weights,
+        //     &input_ids_gpu,
+        //     token_type_ids_gpu.as_ref(), // Pass as Option<&GpuTensor>
+        //     self.config.as_ref(),
+        //     &mut temp,
+        // )?;
 
         // --- 2. Embeddings (CPU) & Upload ---
         let initial_embeddings_cpu = self.perform_cpu_embedding(input_ids, token_type_ids)?;

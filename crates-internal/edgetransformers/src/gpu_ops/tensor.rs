@@ -14,7 +14,40 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
     F32,
+    F16,
+    BF16,
+    U32,
+    I8,
+    Q8_0,
+    Q8_1,
+    Q4_0,
+    Q4_1,
+    Q2_0,
+    Q2_1,
     // Add other types like F16, Q8_0, etc., as you implement them
+}
+impl DType {
+    pub fn size_of(&self) -> usize {
+        match self {
+            DType::F32 => std::mem::size_of::<f32>(),
+            DType::U32 => std::mem::size_of::<u32>(),
+            DType::I8 => std::mem::size_of::<i8>(),
+            // TODO: Add sizes for other dtypes as they are implemented.
+            // For now, panic if the size is not defined.
+            _ => unimplemented!("Size for dtype {:?} is not defined", self),
+        }
+    }
+}
+
+pub trait GpuDType: bytemuck::Pod {
+    const DTYPE: DType;
+}
+
+impl GpuDType for f32 {
+    const DTYPE: DType = DType::F32;
+}
+impl GpuDType for u32 {
+    const DTYPE: DType = DType::U32;
 }
 
 /// A GPU-backed tensor that bundles a wgpu::Buffer with its shape and data type.
@@ -46,7 +79,7 @@ impl GpuTensor {
         dtype: DType,
         context: Arc<WgpuContext>,
     ) -> Self {
-        let expected_size = shape.iter().product::<usize>() * std::mem::size_of::<f32>(); // Adjust this for other dtypes later
+        let expected_size = shape.iter().product::<usize>() * dtype.size_of();
         assert_eq!(
             buffer.size() as usize,
             expected_size,
@@ -58,6 +91,45 @@ impl GpuTensor {
             dtype,
             context,
         }
+    }
+
+    /// Creates a new GpuTensor initialized with zeros.
+    ///
+    /// # Arguments
+    /// * `context` - The WGPU context.
+    /// * `shape` - The desired shape of the tensor.
+    /// * `dtype` - The data type of the tensor elements.
+    /// * `label` - A descriptive label for debugging.
+    ///
+    /// # Returns
+    /// A new `GpuTensor` filled with zeros.
+    pub fn zeros(
+        context: &Arc<WgpuContext>,
+        shape: Vec<usize>,
+        dtype: DType,
+        label: &str,
+    ) -> Result<Self> {
+        let num_elements = shape.iter().product::<usize>();
+        let size_in_bytes = num_elements * dtype.size_of();
+
+        // Create a zero-filled vector on the CPU.
+        let zeros_data = vec![0u8; size_in_bytes];
+
+        // Create a GPU buffer and immediately initialize it with the zero data.
+        let buffer = context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: &zeros_data,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            });
+
+        Ok(Self {
+            buffer: Arc::new(buffer),
+            shape,
+            dtype,
+            context: context.clone(),
+        })
     }
     pub fn dims2(&self) -> (usize, usize) {
         assert_eq!(self.rank(), 2, "Tensor is not rank 2");
@@ -142,7 +214,7 @@ impl GpuTensor {
         dtype: DType,
         label: &str,
     ) -> Self {
-        let size = (shape.iter().product::<usize>() * std::mem::size_of::<f32>()) as u64; // Adjust for dtype
+        let size = (shape.iter().product::<usize>() * dtype.size_of()) as u64;
         let buffer = context.device.create_buffer(&BufferDescriptor {
             label: Some(label),
             size,
@@ -249,7 +321,7 @@ impl GpuTensor {
     /// This is the primary way to get data from the CPU onto the GPU.
     pub fn from_ndarray<A, D>(context: &Arc<WgpuContext>, arr: &Array<A, D>) -> Result<Self>
     where
-        A: bytemuck::Pod,
+        A: GpuDType,
         D: Dimension,
     {
         let shape = arr.shape().to_vec();
@@ -268,14 +340,14 @@ impl GpuTensor {
         Ok(Self {
             buffer: Arc::new(buffer),
             shape,
-            dtype: DType::F32, // Assuming F32 for now
+            dtype: A::DTYPE,
             context: context.clone(),
         })
     }
 
     pub async fn to_ndarray_2d<A>(&self) -> Result<Array2<A>>
     where
-        A: bytemuck::Pod + Copy,
+        A: GpuDType + Copy,
     {
         anyhow::ensure!(self.rank() == 2, "Tensor rank is not 2");
         let raw_data = self.read_raw_data().await?;
@@ -289,7 +361,7 @@ impl GpuTensor {
     /// Asynchronously reads the GpuTensor's data back to the CPU as an Array3.
     pub async fn to_ndarray_3d<A>(&self) -> Result<Array3<A>>
     where
-        A: bytemuck::Pod + Copy,
+        A: GpuDType + Copy,
     {
         anyhow::ensure!(self.rank() == 3, "Tensor rank is not 3");
         let raw_data = self.read_raw_data().await?;
@@ -300,10 +372,10 @@ impl GpuTensor {
         )?)
     }
 
-        /// Asynchronously reads the GpuTensor's data back to the CPU as an Array3.
+    /// Asynchronously reads the GpuTensor's data back to the CPU as an Array3.
     pub async fn to_ndarray_4d<A>(&self) -> Result<Array4<A>>
     where
-        A: bytemuck::Pod + Copy,
+        A: GpuDType + Copy,
     {
         anyhow::ensure!(self.rank() == 4, "Tensor rank is not 4");
         let raw_data = self.read_raw_data().await?;
@@ -397,5 +469,21 @@ impl GpuTensor {
     }
     pub fn num_elements(&self) -> usize {
         self.shape.iter().product()
+    }
+    pub fn dtype_as_str(&self) -> &str {
+        match self.dtype {
+            DType::F32 => "f32",
+            DType::U32 => "u32",
+            DType::I8 => "i8",
+            DType::F16 => "f16",
+            DType::BF16 => "bf16",
+            DType::Q8_0 => "q8_0",
+            DType::Q8_1 => "q8_1",
+            DType::Q4_0 => "q4_0",
+            DType::Q4_1 => "q4_1",
+            DType::Q2_0 => "q2_0",
+            DType::Q2_1 => "q2_1",
+            _ => "unknown",
+        }
     }
 }

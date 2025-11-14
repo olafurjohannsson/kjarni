@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
 use std::sync::Arc;
+use crate::activations::Activation;
 
 /// Supported computation backends.
 ///
@@ -177,6 +178,8 @@ pub trait LanguageModelConfig: TransformerConfig {
     /// Size of the vocabulary
     fn vocab_size(&self) -> usize;
 
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>);
+
     /// Maximum sequence length (position embeddings)
     fn max_position_embeddings(&self) -> usize;
 
@@ -232,6 +235,22 @@ pub trait LanguageModelConfig: TransformerConfig {
         false
     }
     fn as_any(&self) -> &dyn Any;
+
+    fn activation_function(&self) -> Activation;
+
+    /// The offset to use for positional embeddings.
+    ///
+    /// Most models use an offset of 0. BART is a notable exception, using an offset of 2.
+    fn position_embedding_offset(&self) -> usize {
+        0 // Default to 0 for standard models like BERT
+    }
+
+    /// Whether to scale the word + position embeddings by sqrt(hidden_size).
+    ///
+    /// This is a specific quirk used by some models, like the original facebook/bart-large.
+    fn scale_embeddings(&self) -> bool {
+        false // Default to false
+    }
 }
 
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
@@ -242,7 +261,7 @@ pub trait LanguageModelConfig: TransformerConfig {
 /// `safetensors` weight file.
 pub trait EncoderArchitecture: LanguageModelConfig {
     /// Returns the tensor names for the word, position, and token type embeddings.
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>); // RoBERTa has no token_type_embeddings
+    //fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>); // RoBERTa has no token_type_embeddings
 
     /// Returns the tensor names for the LayerNorm applied after the embedding layer.
     fn get_embedding_layer_norm_names(&self) -> (&str, &str);
@@ -260,7 +279,7 @@ pub trait EncoderArchitecture: LanguageModelConfig {
 /// autoregressive language models by providing the necessary weight tensor names.
 pub trait DecoderArchitecture: LanguageModelConfig {
     /// Returns the tensor names for the word and position embeddings.
-    fn get_embedding_weight_names(&self) -> (&str, &str);
+    //fn get_embedding_weight_names(&self) -> (&str, &str);
     /// Returns the tensor names for the final LayerNorm before the LM head.
     fn get_final_layer_norm_names(&self) -> (&str, &str);
     /// Returns the name of the language modeling head weight tensor, which projects to the vocabulary.
@@ -375,7 +394,7 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
     fn get_encoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 
     // --- Decoder Methods ---
-    fn get_decoder_embedding_names(&self) -> (&str, &str);
+    fn get_decoder_embedding_names(&self) -> (&str, &str, Option<&str>);
     fn get_decoder_embedding_ln_names(&self) -> (&str, &str);
     fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
     fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;

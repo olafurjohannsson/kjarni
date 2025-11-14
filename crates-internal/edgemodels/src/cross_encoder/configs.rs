@@ -7,7 +7,7 @@ use edgetransformers::traits::{
 };
 use std::any::Any;
 use serde::Deserialize;
-
+use edgetransformers::activations::Activation;
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMCrossEncoderConfig {
@@ -50,6 +50,16 @@ impl LanguageModelConfig for MiniLMCrossEncoderConfig {
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
+    fn activation_function(&self) -> Activation {
+        Activation::GeluNew
+    }
+     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+        (
+            "bert.embeddings.word_embeddings.weight",
+            "bert.embeddings.position_embeddings.weight",
+            Some("bert.embeddings.token_type_embeddings.weight"),
+        )
+    }
 }
 
 impl TransformerConfig for MiniLMCrossEncoderConfig {
@@ -79,13 +89,13 @@ impl TransformerConfig for MiniLMCrossEncoderConfig {
 }
 
 impl EncoderArchitecture for MiniLMCrossEncoderConfig {
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "bert.embeddings.word_embeddings.weight",
-            "bert.embeddings.position_embeddings.weight",
-            Some("bert.embeddings.token_type_embeddings.weight"),
-        )
-    }
+    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    //     (
+    //         "bert.embeddings.word_embeddings.weight",
+    //         "bert.embeddings.position_embeddings.weight",
+    //         Some("bert.embeddings.token_type_embeddings.weight"),
+    //     )
+    // }
 
     fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
         (

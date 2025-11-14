@@ -1,3 +1,4 @@
+use crate::activations::Activation;
 use crate::encoder::TransformerEncoder;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, Encoder, EncoderDecoderArchitecture,
@@ -9,8 +10,8 @@ use crate::traits::{
 };
 use crate::weights::ModelWeights;
 use crate::{
-    Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
-    decoder_cross_attn_layer::DecoderCrossAttentionLayer,
+    Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer, encoder_layer::EncoderLayer,
     feedforward::StdFeedForward, normalization::LayerNorm,
 };
 use anyhow::Result;
@@ -36,10 +37,9 @@ impl CpuTransformerEncoderDecoder {
         let encoder_config_adapter = Arc::new(EncoderConfigAdapter(config.clone()));
         let decoder_config_adapter = Arc::new(DecoderConfigAdapter(config.clone()));
 
-        
         let encoder = TransformerEncoder::new(weights, encoder_config_adapter, Device::Cpu, None)?;
 
-        let (word_w, pos_w) = config.get_decoder_embedding_names();
+        let (word_w, pos_w, _) = config.get_decoder_embedding_names();
         let decoder_embeddings = Embeddings::new(
             weights.get_array2(word_w)?,
             weights.get_array2(pos_w)?,
@@ -117,12 +117,13 @@ impl CpuTransformerEncoderDecoder {
             };
 
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
+
             let feedforward = FeedForward::Standard(StdFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,
                 weights.get_array1(&ffn_names.output_bias)?,
-                crate::activations::Activation::Gelu,
+                config.activation_function(),
             ));
 
             let ffn_layer_norm = LayerNorm::new(
@@ -162,12 +163,19 @@ impl CpuTransformerEncoderDecoder {
         let (_batch_size, seq_len) = input_ids.dim();
         let mut hidden_states = self.decoder_embeddings.forward_word_only(input_ids);
 
-        // --- FIX START ---
         if let Some(ref pos_embeddings) = self.decoder_embeddings.position_embeddings {
-            // BART has a learned offset of 2 for its position embeddings.
-            let start_idx = position_offset + 2;
+            let model_offset = self.config.position_embedding_offset();
+            let start_idx = position_offset + model_offset;
             let end_idx = start_idx + seq_len;
 
+            let max_position = pos_embeddings.shape()[0];
+            if end_idx > max_position {
+                panic!(
+                    "Sequence length {} with offset {} exceeds max position embeddings {}.",
+                    seq_len, position_offset, max_position
+                );
+            }
+            //
             // Get the slice of position embeddings we need for the current tokens
             let pos_embeddings_to_add = pos_embeddings.slice(s![start_idx..end_idx, ..]);
 
@@ -175,8 +183,6 @@ impl CpuTransformerEncoderDecoder {
             // We need to reshape the slice to be broadcastable for the addition
             hidden_states += &pos_embeddings_to_add;
         }
-        // --- FIX END ---
-        println!("[OLD] Decoder Embeddings Mean (after pos): {}", hidden_states.mean().unwrap());
         hidden_states
     }
 }
@@ -194,8 +200,6 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        // --- FIX START ---
-
         // The generator now provides the position offset.
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
@@ -215,7 +219,6 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 .and_then(|cache| cache.get(layer_idx));
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
 
-            
             // Cross attention decoding
             let (new_hidden, (new_k, new_v)) = layer.forward(
                 &hidden_states,
@@ -296,16 +299,22 @@ impl LanguageModelConfig for EncoderConfigAdapter {
     fn transpose_attention_weights(&self) -> bool {
         // self.0.transpose_attention_weights()
         false // TODO: this flag is  inverted, we actually WANT to transpose in seq2seq
-                // TODO: also consider moving this value to BartConfig
+        // TODO: also consider moving this value to BartConfig
     }
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
-}
-impl EncoderArchitecture for EncoderConfigAdapter {
+    fn activation_function(&self) -> Activation {
+        self.0.activation_function()
+    }
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         self.0.get_encoder_embedding_names()
     }
+}
+impl EncoderArchitecture for EncoderConfigAdapter {
+    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    //     self.0.get_encoder_embedding_names()
+    // }
     fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
         self.0.get_encoder_embedding_ln_names()
     }
@@ -356,11 +365,18 @@ impl LanguageModelConfig for DecoderConfigAdapter {
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
-}
-impl DecoderArchitecture for DecoderConfigAdapter {
-    fn get_embedding_weight_names(&self) -> (&str, &str) {
+    fn activation_function(&self) -> Activation {
+        self.0.activation_function()
+    }
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         self.0.get_decoder_embedding_names()
     }
+}
+impl DecoderArchitecture for DecoderConfigAdapter {
+    // fn get_embedding_weight_names(&self) -> (&str, &str) {
+    //     self.0.get_decoder_embedding_names()
+    // }
+    
     // fn as_any(&self) -> &dyn Any {
     //     self // Simply return a reference to self as a `&dyn Any`
     // }

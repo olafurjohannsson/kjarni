@@ -163,6 +163,8 @@ mod tests {
         let cross_attn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
 
+        
+
         let feedforward = FeedForward::Standard(StdFeedForward::new(
             fc1_weight,
             Array1::zeros(intermediate_size),

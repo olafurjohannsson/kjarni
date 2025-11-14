@@ -32,7 +32,7 @@ def main():
     # This mirrors the Rust `GenerationConfig` struct.
     # ==================================================================
     prompt = "The field of Artificial Intelligence has seen a lot of progress"
-    max_new_tokens = 5
+    max_new_tokens = 100
     repetition_penalty = 1.1
     
     # Get special token IDs from the tokenizer

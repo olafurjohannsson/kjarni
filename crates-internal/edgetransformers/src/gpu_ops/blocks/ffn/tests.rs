@@ -258,7 +258,7 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
         cpu_fc1_b.clone(),
         fc2_w_prepared.clone(),
         cpu_fc2_b.clone(),
-        crate::activations::Activation::Gelu,
+        crate::activations::Activation::GeluNew,
     );
 
     // --- GPU PATH ---

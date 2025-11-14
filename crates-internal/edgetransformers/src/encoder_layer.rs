@@ -41,8 +41,6 @@ impl EncoderLayer {
             let residual_1 = hidden.clone();
             let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
 
-            // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
-
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &ln1_out,
                 None,
@@ -51,11 +49,6 @@ impl EncoderLayer {
                 None,
                 None,
             )?;
-
-            // if let Some(c) = cache {
-            //     c.update(layer_idx, &new_k, &new_v)?;
-            // }
-
             let attn_block_output = residual_1 + attn_out;
             let residual_2 = attn_block_output.clone();
             let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
@@ -68,7 +61,6 @@ impl EncoderLayer {
             hidden = block_output;
         } else {
             let residual = hidden.clone();
-            // let cached_kv = cache.as_ref().and_then(|c| c.get(layer_idx));
             let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
                 &hidden,
                 None,
@@ -77,25 +69,12 @@ impl EncoderLayer {
                 None,
                 None,
             )?;
-
             hidden = residual + attn_out;
             hidden = self.self_attn_layer_norm.forward_3d(&hidden);
-            println!(
-                "    [EncoderLayer] After Self-Attn + Norm, Mean: {:.8}",
-                hidden.mean().unwrap()
-            );
             let residual = hidden.clone();
             let ffn_out = self.feedforward.forward(&hidden)?;
-            println!(
-                "    [EncoderLayer] After FFN (pre-Add/Norm), Mean: {:.8}",
-                ffn_out.mean().unwrap()
-            );
             hidden = residual + ffn_out;
             hidden = self.ffn_layer_norm.forward_3d(&hidden);
-            println!(
-                "    [EncoderLayer] After FFN + Norm (Final), Mean: {:.8}",
-                hidden.mean().unwrap()
-            );
         }
         Ok(hidden)
     }
@@ -174,7 +153,7 @@ mod tests {
             Array1::zeros(intermediate_size),
             fc2_weight,
             Array1::zeros(hidden_size),
-            crate::activations::Activation::Gelu,
+            crate::activations::Activation::GeluNew,
         ));
         let ffn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);

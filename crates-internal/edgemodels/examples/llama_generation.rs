@@ -16,23 +16,23 @@ async fn get_test_context() -> Arc<WgpuContext> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = get_test_context().await;
-    let gpt2_model = Gpt2Model::from_registry(
-        ModelType::DistilGpt2,
-        None, // Use default cache dir
-        Device::Cpu,
-        None, //Some(ctx), // No WGPU context needed for CPU
-    )
-    .await?;
+    // let ctx = get_test_context().await;
+    // let gpt2_model = Gpt2Model::from_registry(
+    //     ModelType::DistilGpt2,
+    //     None, // Use default cache dir
+    //     Device::Cpu,
+    //     None, //Some(ctx), // No WGPU context needed for CPU
+    // )
+    // .await?;
 
     // // 2. Create the generic Generator, handing it the model.
     // let generator = Generator::new(Box::new(gpt2_model));
 
     // 3. Configure the generation parameters.
     let config: GenerationConfig = GenerationConfig {
-        max_new_tokens: Some(50),
+        max_new_tokens: Some(100),
         strategy: DecodingStrategy::Greedy,
-        repetition_penalty: 1.0,
+        repetition_penalty: 1.1,
         ..Default::default()
     };
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";;

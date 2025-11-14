@@ -45,7 +45,6 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        println!("prenorm");
         let residual = hidden_states.clone();
 
         // 1. Normalize the input. This is the input to the Q, K, and V projections.
@@ -79,7 +78,6 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        println!("postnorm");
         let residual = hidden_states.clone();
         let batch_size = hidden_states.shape()[0];
         let cache_len = position_offset; // Use the provided offset
