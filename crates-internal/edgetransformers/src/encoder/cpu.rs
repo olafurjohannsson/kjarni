@@ -62,23 +62,6 @@ impl CpuTransformerEncoder {
                 let k_w = weights.get_array2(&attn_names.k_weight)?;
                 let v_w = weights.get_array2(&attn_names.v_weight)?;
                 let out_w = weights.get_array2(&attn_names.output_weight)?;
-                println!(
-                    "[WEIGHTS L0] Self-Attn Q Weight Mean: {:.8}",
-                    q_w.mean().unwrap()
-                );
-                println!(
-                    "[WEIGHTS L0] Self-Attn K Weight Mean: {:.8}",
-                    k_w.mean().unwrap()
-                );
-                println!(
-                    "[WEIGHTS L0] Self-Attn V Weight Mean: {:.8}",
-                    v_w.mean().unwrap()
-                );
-                println!(
-                    "[WEIGHTS L0] Self-Attn Out Weight Mean: {:.8}",
-                    out_w.mean().unwrap()
-                );
-
                 // Self-Attention Biases
                 let q_b = weights.get_array1(&attn_names.q_bias)?;
                 let k_b = weights.get_array1(&attn_names.k_bias)?;
@@ -238,7 +221,7 @@ impl Encoder for CpuTransformerEncoder {
         &self,
         input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Self::Output> {
         // Embed inputs
         let mut hidden_states = self.embeddings.forward(
@@ -250,18 +233,10 @@ impl Encoder for CpuTransformerEncoder {
 
         // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-        println!(
-            "[ENCODER] After Embeddings + Norm, Mean: {:.8}",
-            hidden_states.mean().unwrap()
-        );
+
         // Transformer layers
         for (i, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
-            println!(
-                "[ENCODER] Layer {} Final Output Mean: {:.8}",
-                i,
-                hidden_states.mean().unwrap()
-            );
         }
 
         Ok(EncoderOutput {
@@ -272,7 +247,7 @@ impl Encoder for CpuTransformerEncoder {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Array3<f32>> {
         let output = self.forward(input, attention_mask, token_type_ids).await?;
         Ok(output.last_hidden_state)

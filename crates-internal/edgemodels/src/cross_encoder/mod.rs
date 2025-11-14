@@ -234,7 +234,7 @@ impl CrossEncoder {
 
         let mut batch_input_ids = Array2::<u32>::zeros((batch_size, max_len));
         let mut batch_attention_mask = Array2::<f32>::zeros((batch_size, max_len));
-        let mut batch_token_type_ids = Array2::<f32>::zeros((batch_size, max_len)); // The crucial tensor
+        let mut batch_token_type_ids = Array2::<u32>::zeros((batch_size, max_len)); // The crucial tensor
 
         for (i, encoding) in encodings.iter().enumerate() {
             for (j, &id) in encoding.get_ids().iter().enumerate() {
@@ -245,7 +245,7 @@ impl CrossEncoder {
             }
             // This loop is the fix
             for (j, &type_id) in encoding.get_type_ids().iter().enumerate() {
-                batch_token_type_ids[[i, j]] = type_id as f32;
+                batch_token_type_ids[[i, j]] = type_id;
             }
         }
 

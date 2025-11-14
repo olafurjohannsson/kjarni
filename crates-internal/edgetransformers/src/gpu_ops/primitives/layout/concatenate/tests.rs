@@ -18,7 +18,7 @@ async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Ar
 
 #[tokio::test]
 async fn test_gpu_concatenate_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let concat_kernel = GpuConcatenate::new(&context);
 
     // --- 1. SETUP ---

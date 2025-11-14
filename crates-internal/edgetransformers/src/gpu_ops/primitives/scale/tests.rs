@@ -10,7 +10,7 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {

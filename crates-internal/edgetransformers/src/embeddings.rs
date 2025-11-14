@@ -1,8 +1,8 @@
 //! Embedding layers for transformers
 
-use ndarray::{Array2, Array3, Axis, s};
-
 use crate::gpu_ops::primitives::scale;
+use ndarray::parallel::prelude::*;
+use ndarray::{Array2, Array3, Axis, s};
 
 /// Configuration for embedding layers
 pub struct EmbeddingConfig {
@@ -71,7 +71,7 @@ impl Embeddings {
     pub fn forward(
         &self,
         input_ids: &Array2<u32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
         position_offset: usize,
         scale_embeddings: bool,
     ) -> Array3<f32> {
@@ -92,35 +92,13 @@ impl Embeddings {
 
         let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
 
-        // Word embeddings (parallelized on non-WASM)
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            use ndarray::parallel::prelude::*;
-            hidden
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .zip(input_ids.axis_iter(Axis(0)))
-                .for_each(|(mut hidden_slice, ids)| {
-                    for (j, &token_id) in ids.iter().enumerate() {
-                        let token_id = token_id as usize;
-                        // Bounds check
-                        if token_id >= vocab_size {
-                            panic!(
-                                "Token ID {} is out of vocabulary range [0, {})",
-                                token_id, vocab_size
-                            );
-                        }
-                        let word_emb = self.word_embeddings.row(token_id);
-                        hidden_slice.slice_mut(s![j, ..]).assign(&word_emb);
-                    }
-                });
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            for i in 0..batch_size {
-                for j in 0..seq_len {
-                    let token_id = input_ids[[i, j]] as usize;
+        hidden
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .zip(input_ids.axis_iter(Axis(0)))
+            .for_each(|(mut hidden_slice, ids)| {
+                for (j, &token_id) in ids.iter().enumerate() {
+                    let token_id = token_id as usize;
                     // Bounds check
                     if token_id >= vocab_size {
                         panic!(
@@ -129,10 +107,9 @@ impl Embeddings {
                         );
                     }
                     let word_emb = self.word_embeddings.row(token_id);
-                    hidden.slice_mut(s![i, j, ..]).assign(&word_emb);
+                    hidden_slice.slice_mut(s![j, ..]).assign(&word_emb);
                 }
-            }
-        }
+            });
 
         if let Some(ref pos_emb) = self.position_embeddings {
             let start_idx = position_offset;
@@ -160,36 +137,13 @@ impl Embeddings {
             }
 
             if let Some(type_ids) = token_type_ids {
-                // Specific token type IDs provided
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    use ndarray::parallel::prelude::*;
-                    hidden
-                        .axis_iter_mut(Axis(0))
-                        .into_par_iter()
-                        .zip(type_ids.axis_iter(Axis(0)))
-                        .for_each(|(mut hidden_slice, type_ids_row)| {
-                            for (j, &type_id) in type_ids_row.iter().enumerate() {
-                                let type_id = type_id as usize;
-                                // Bounds check
-                                if type_id >= type_vocab_size {
-                                    panic!(
-                                        "Token type ID {} is out of range [0, {})",
-                                        type_id, type_vocab_size
-                                    );
-                                }
-                                let type_emb = token_type_emb.row(type_id);
-                                let mut slice = hidden_slice.slice_mut(s![j, ..]);
-                                slice += &type_emb;
-                            }
-                        });
-                }
-
-                #[cfg(target_arch = "wasm32")]
-                {
-                    for i in 0..batch_size {
-                        for j in 0..seq_len {
-                            let type_id = type_ids[[i, j]] as usize;
+                hidden
+                    .axis_iter_mut(Axis(0))
+                    .into_par_iter()
+                    .zip(type_ids.axis_iter(Axis(0)))
+                    .for_each(|(mut hidden_slice, type_ids_row)| {
+                        for (j, &type_id) in type_ids_row.iter().enumerate() {
+                            let type_id = type_id as usize;
                             // Bounds check
                             if type_id >= type_vocab_size {
                                 panic!(
@@ -198,11 +152,10 @@ impl Embeddings {
                                 );
                             }
                             let type_emb = token_type_emb.row(type_id);
-                            let mut slice = hidden.slice_mut(s![i, j, ..]);
+                            let mut slice = hidden_slice.slice_mut(s![j, ..]);
                             slice += &type_emb;
                         }
-                    }
-                }
+                    });
             } else {
                 // Default to type 0 for all positions
                 let type_embeddings = token_type_emb.row(0);
@@ -222,14 +175,14 @@ impl Embeddings {
 mod tests {
     use super::*;
     use super::*;
-    use crate::gpu_context::{WgpuContext};
+    use crate::gpu_context::WgpuContext;
     use crate::gpu_ops::GpuTensor;
     use crate::gpu_ops::blocks::attention::TempStorage;
     use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
     use crate::traits::{LanguageModelConfig, TransformerConfig}; // Make sure traits are in scope
     use anyhow::Result;
-    use std::path::Path;
     use ndarray::{Array2, arr2};
+    use std::path::Path;
     use std::sync::Arc;
 
     // --- Mock Config for testing ---
@@ -239,16 +192,16 @@ mod tests {
     }
     impl TransformerConfig for TestConfig {
         fn hidden_size(&self) -> usize {
-            64
+            384
         }
         fn num_attention_heads(&self) -> usize {
-            8
+            12
         }
         fn num_hidden_layers(&self) -> usize {
-            2
+            6
         }
         fn layer_norm_eps(&self) -> f32 {
-            1e-5
+            1e-12
         }
         fn is_causal(&self) -> bool {
             false
@@ -259,13 +212,13 @@ mod tests {
     }
     impl LanguageModelConfig for TestConfig {
         fn vocab_size(&self) -> usize {
-            100
+            30522
         }
         fn max_position_embeddings(&self) -> usize {
             512
         }
         fn intermediate_size(&self) -> usize {
-            256
+            1536
         }
         fn position_embedding_offset(&self) -> usize {
             self.pos_offset
@@ -281,7 +234,11 @@ mod tests {
         }
         // Dummy names, not used in this test
         fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-            ("w", "p", Some("t"))
+            (
+                "embeddings.word_embeddings.weight",
+                "embeddings.position_embeddings.weight",
+                Some("embeddings.token_type_embeddings.weight"),
+            )
         }
     }
 
@@ -301,41 +258,37 @@ mod tests {
     #[tokio::test]
     async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
         // --- 1. Setup Common Data and Config ---
-        let context = Arc::new(WgpuContext::new().await);
+        let context = Arc::new(WgpuContext::new().await?);
         let config = TestConfig {
-            pos_offset: 2,
-            scale_embed: true,
+            pos_offset: 0,
+            scale_embed: false,
         }; // Test BART-like settings
-
-        // Create mock weights on CPU
-        let word_emb_cpu = Array2::from_shape_fn((100, 64), |(i, j)| (i + j) as f32 * 0.1);
-        let pos_emb_cpu = Array2::from_shape_fn((512, 64), |(i, j)| (i + j) as f32 * 0.01);
-        let type_emb_cpu = Array2::from_shape_fn((2, 64), |(i, j)| (i + j) as f32 * 1.0);
 
         // Create mock inputs on CPU
         let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
         let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
 
+        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+
         // --- 2. Run CPU Path (Expected Result) ---
+        let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
+        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
+        let token_type_embeddings = match type_w {
+            Some(name) => Some(weights.get_array2(name)?), // Load if present
+            None => None,
+        };
+
         let cpu_embeddings = Embeddings::new(
-            word_emb_cpu.clone(),
-            pos_emb_cpu.clone(),
-            Some(type_emb_cpu.clone()),
+            weights.get_array2(word_w)?,
+            weights.get_array2(pos_w)?,
+            token_type_embeddings,
         );
         let expected_output = cpu_embeddings.forward(
             &input_ids_cpu,
-            Some(&token_type_ids_cpu.mapv(|x| x as f32)), // CPU version expects f32 type ids
+            Some(&token_type_ids_cpu.mapv(|x| x as u32)), // CPU version expects f32 type ids
             config.position_embedding_offset(),
             config.scale_embeddings(),
         );
-
-        // --- 3. Run GPU Path (Actual Result) ---
-        // Mock ModelWeights for GpuEmbeddingWeights constructor
-        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
-        let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
-        // weights.add("w", word_emb_cpu);
-        // weights.add("p", pos_emb_cpu);
-        // weights.add("t", type_emb_cpu);
 
         let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
         let gpu_embeddings = GpuEmbeddings::new(&context)?;
@@ -355,7 +308,6 @@ mod tests {
             &mut temp,
         )?;
         context.queue.submit(Some(encoder.finish()));
-        
 
         let actual_output = output_gpu.to_ndarray_3d().await?;
 
@@ -364,7 +316,65 @@ mod tests {
 
         Ok(())
     }
+    #[tokio::test]
+    async fn test_gpu_vs_cpu_embeddings_parity_no_token_type_ids() -> Result<()> {
+        // --- 1. Setup Common Data and Config ---
+        let context = Arc::new(WgpuContext::new().await?);
+        let config = TestConfig {
+            pos_offset: 0,
+            scale_embed: false,
+        }; // Test BART-like settings
 
+        // Create mock inputs on CPU
+        let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
+
+        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+
+        // --- 2. Run CPU Path (Expected Result) ---
+        let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
+        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
+        let token_type_embeddings = match type_w {
+            Some(name) => Some(weights.get_array2(name)?), // Load if present
+            None => None,
+        };
+
+        let cpu_embeddings = Embeddings::new(
+            weights.get_array2(word_w)?,
+            weights.get_array2(pos_w)?,
+            token_type_embeddings,
+        );
+        let expected_output = cpu_embeddings.forward(
+            &input_ids_cpu,
+            None,
+            config.position_embedding_offset(),
+            config.scale_embeddings(),
+        );
+
+        let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
+        let gpu_embeddings = GpuEmbeddings::new(&context)?;
+
+        // Upload inputs
+        let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
+        let mut temp = TempStorage::new(context.clone());
+
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let output_gpu = gpu_embeddings.encode(
+            &mut encoder,
+            &gpu_embedding_weights,
+            &input_ids_gpu,
+            None,
+            &config,
+            &mut temp,
+        )?;
+        context.queue.submit(Some(encoder.finish()));
+
+        let actual_output = output_gpu.to_ndarray_3d().await?;
+
+        // --- 4. Verification ---
+        assert_tensors_are_close(&expected_output, &actual_output, 1e-4);
+
+        Ok(())
+    }
     #[test]
     fn test_embeddings_with_position() {
         // GPT-2 / BERT style

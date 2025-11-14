@@ -79,7 +79,7 @@ pub trait Encoder: TransformerModel {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Self::Output>;
 
     /// Get raw hidden states
@@ -89,7 +89,7 @@ pub trait Encoder: TransformerModel {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Array3<f32>>;
 }
 

@@ -344,7 +344,7 @@ mod tests {
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config).await?;
 
-        let ctx = Arc::new(WgpuContext::new().await);
+        let ctx = Arc::new(WgpuContext::new().await?);
         let gpt2_model_2 =
             Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx)).await?;
         let generator_2 = Generator::new(Box::new(gpt2_model_2));

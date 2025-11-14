@@ -73,7 +73,7 @@ async fn assert_tensors_are_close(
 #[tokio::test]
 async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
     // --- 1. Arrange ---
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let (rows, hidden_size) = (128, 256); // (batch*seq_len), hidden_size
     let intermediate_size = 512;
     

@@ -11,7 +11,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 #[tokio::main]

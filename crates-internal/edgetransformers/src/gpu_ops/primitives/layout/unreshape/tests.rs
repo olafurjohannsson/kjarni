@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 // Helper to get a test context.
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 // Helper to read a 3D GPU tensor back to the CPU for comparison.

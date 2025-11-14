@@ -64,7 +64,7 @@ fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
     );
 }
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 #[tokio::test]
@@ -325,7 +325,7 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
 
 // #[tokio::test] TODO: revisit
 // async fn test_gpu_ffn_parity_encode() -> Result<()> {
-//     let context = Arc::new(WgpuContext::new().await);
+//     let context = Arc::new(WgpuContext::new().await?);
 
 //     // --- 1. Setup ---
 //     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
@@ -384,7 +384,7 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let activation = Activation::Gelu; // Activation doesn't matter for FC2
 
     // --- 1. Setup ---
@@ -456,7 +456,7 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let activation = Activation::Gelu;
 
     // --- 1. Setup ---

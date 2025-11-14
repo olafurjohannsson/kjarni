@@ -12,7 +12,7 @@ use anyhow::Result;
 use wgpu::util::DeviceExt;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 /// Tests that the `run_gpu_reshape` and `run_gpu_unreshape` kernels are inverse operations.

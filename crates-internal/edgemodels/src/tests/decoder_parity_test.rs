@@ -129,7 +129,7 @@ async fn test_full_text_generation_parity() -> Result<()> {
     println!("\n[2/2] Generating text with GPU backend...");
 
     // Create a WgpuContext and a TextGenerator for the GPU.
-    let context = Arc::new(edgetransformers::WgpuContext::new().await);
+    let context = Arc::new(edgetransformers::WgpuContext::new().await?);
     let gpu_generator =
         Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context)).await?;
 
@@ -176,7 +176,7 @@ async fn test_full_forward_pass_parity() -> Result<()> {
     let mut config1 = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
     config1.set_model_type("distilgpt2".to_string());
     let config: Arc<dyn DecoderArchitecture + Send + Sync> = Arc::new(config1);
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let cpu_decoder =
         TransformerDecoder::Cpu(CpuTransformerDecoder::new(&weights, config.clone(), None)?);
     let gpu_decoder = TransformerDecoder::Gpu(GpuTransformerDecoder::new(

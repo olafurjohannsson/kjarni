@@ -47,22 +47,16 @@ impl CpuKVCache {
     pub fn reorder(&mut self, indices: &[usize]) {
         let mut reordered_layers = self.layers.clone();
 
-        // Create parallel iterators for both source and destination
         let source_iter = self.layers.par_iter();
-        let dest_iter = reordered_layers.par_iter_mut();
+        let dest_iter = reordered_layers.par_iter_mut(); // todo: not used?
 
-        // Zip them together and execute the parallel copy
         source_iter.zip(reordered_layers.par_iter_mut()).for_each(
             |((k_cache, v_cache), (k_reordered, v_reordered))| {
                 for (dest_idx, &source_idx) in indices.iter().enumerate() {
-                    // Select the whole slice for the source batch item
                     let source_k_slice = k_cache.slice(s![source_idx, .., ..]);
-                    // Select the mutable slice for the destination batch item
                     let mut dest_k_slice = k_reordered.slice_mut(s![dest_idx, .., ..]);
-                    // Assign the data
                     dest_k_slice.assign(&source_k_slice);
 
-                    // Repeat for the value cache
                     let source_v_slice = v_cache.slice(s![source_idx, .., ..]);
                     let mut dest_v_slice = v_reordered.slice_mut(s![dest_idx, .., ..]);
                     dest_v_slice.assign(&source_v_slice);
@@ -76,10 +70,6 @@ impl CpuKVCache {
         &self.layers
     }
 
-    /// Appends the new key and value tensors to the cache for a specific layer.
-    ///
-    /// This is a highly efficient operation that copies the new data into a
-    /// slice of the pre-allocated buffer without triggering any new heap allocations.
     pub fn update(
         &mut self,
         layer_idx: usize,
@@ -101,9 +91,6 @@ impl CpuKVCache {
     }
 
     pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<f32>, ArrayView3<f32>)> {
-        // if self.current_len == 0 {
-        //     return None;
-        // }
         if layer_idx >= self.layers.len() {
             return None;
         }
@@ -129,22 +116,15 @@ impl Cache for CpuKVCache {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-     fn set_seq_length(&mut self, len: usize) {
+    fn set_seq_length(&mut self, len: usize) {
         self.current_len = len;
     }
     fn get_seq_length(&self) -> usize {
         self.current_len
     }
     fn clear(&mut self) {
-        // Clearing the cache is now a very cheap operation.
-        // We just reset the length counter. The data in the buffers becomes
-        // garbage and will be overwritten on the next run.
         self.current_len = 0;
     }
-    /// Increments the internal length counter.
-    ///
-    /// This should be called once per generation step by the orchestrator (e.g., `TextGenerator`)
-    /// after all layers have been updated for that step.
     fn increment_len(&mut self, new_tokens_len: usize) {
         self.current_len += new_tokens_len;
     }

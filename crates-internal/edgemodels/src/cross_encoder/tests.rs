@@ -19,7 +19,7 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
     let cpu_encoder =
         CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
             .await?;
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = CrossEncoder::from_registry(
         ModelType::MiniLML6V2CrossEncoder,
         None,
@@ -77,7 +77,7 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
         u, expected_indices,
         "CPU rerank order does not match Torch!"
     );
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = CrossEncoder::from_registry(
         ModelType::MiniLML6V2CrossEncoder,
         None,

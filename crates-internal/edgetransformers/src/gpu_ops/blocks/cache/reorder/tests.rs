@@ -15,7 +15,7 @@ async fn read_gpu_tensor(tensor: &GpuTensor) -> Result<Array4<f32>> {
 
 #[tokio::test]
 async fn test_gpu_reorder_cache_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let reorder_kernel = GpuReorderCache::new(&context);
 
     // --- 1. SETUP ---

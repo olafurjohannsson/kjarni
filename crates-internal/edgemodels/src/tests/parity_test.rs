@@ -117,7 +117,7 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
     println!("Initializing GPU encoder...");
-    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
     // Test with single sentence
@@ -161,7 +161,7 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
     println!("Initializing GPU encoder...");
-    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
     // Test with batch of sentences
@@ -201,7 +201,7 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
 
     // Initialize both encoders
     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
-    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
     // Test with varied length sentences
@@ -239,7 +239,7 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
 
     // Initialize both encoders
     let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
-    let gpu_context = Arc::new(WgpuContext::new().await);
+    let gpu_context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
 
     // Create large batch (32 sentences)

@@ -22,7 +22,7 @@ async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Ar
 /// It compares the GPU slice output against the ground truth from ndarray's slice.
 #[tokio::test]
 async fn test_gpu_slice_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let slice_kernel = GpuSlice::new(&context);
 
     // 1. --- SETUP ---

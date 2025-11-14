@@ -20,7 +20,7 @@ fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
     );
 }
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 #[tokio::test]

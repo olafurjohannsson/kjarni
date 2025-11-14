@@ -15,7 +15,7 @@ mod common;
 use common::{read_gpu_tensor_to_vec};
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 // Helper to compare two ndarray arrays for near-equality.
@@ -30,7 +30,7 @@ fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
 }
 #[tokio::test]
 async fn test_gpu_lookup() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
 
     // 1. Setup CPU data
     // A small embedding table: [vocab_size=4, hidden_size=3]

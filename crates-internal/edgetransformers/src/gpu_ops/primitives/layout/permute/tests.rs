@@ -17,7 +17,7 @@ use wgpu::util::DeviceExt;
 
 
 async fn get_test_context() -> Arc<crate::WgpuContext> {
-    Arc::new(crate::WgpuContext::new().await)
+    Arc::new(crate::WgpuContext::new().await.unwrap())
 }
 
 

@@ -114,7 +114,7 @@ fn create_gpu_attention(
 
 #[tokio::test]
 async fn test_attention_encoder_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let (b, s, h, n) = (1, 4, 16, 4); // Batch, SeqLen, HiddenSize, NumHeads
 
     // 1. Setup CPU and GPU versions with identical weights
@@ -161,7 +161,7 @@ async fn test_attention_encoder_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_attention_decoder_generation_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let (b, h, n) = (1, 16, 4); // Batch, HiddenSize, NumHeads
     let head_dim = h / n;
     let prompt_len = 3;

@@ -62,7 +62,7 @@ fn assert_arrays_are_close_3d(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
 
 #[tokio::test]
 async fn test_gpu_add_broadcast_offset() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
 
     // 1. Setup CPU data
     // `a` is the hidden state: [batch=2, seq=3, hidden=2]
@@ -116,7 +116,7 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_add_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let gpu_add = GpuAdd::new(&context);
 
     // 1. Setup: Create two tensors on the CPU and GPU

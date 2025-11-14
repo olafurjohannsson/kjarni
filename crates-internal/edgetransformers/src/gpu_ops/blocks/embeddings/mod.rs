@@ -81,6 +81,7 @@ pub struct GpuEmbeddings {
     lookup: GpuLookup,
     add: GpuAdd,
     scale: GpuScale,
+    context: Arc<WgpuContext>,
 }
 
 impl GpuEmbeddings {
@@ -93,6 +94,7 @@ impl GpuEmbeddings {
             lookup: GpuLookup::new(context),
             add: GpuAdd::new(context),
             scale: GpuScale::new(context),
+            context: context.clone(),
         })
     }
 
@@ -134,19 +136,30 @@ impl GpuEmbeddings {
         }
 
         // 3. Add Token Type Embeddings (using composition)
-        if let (Some(token_type_embeddings), Some(type_ids)) =
-            (&weights.token_type_embeddings, token_type_ids)
-        {
-            // Step 3a: Look up the vectors for the token types
+        if let Some(token_type_embeddings) = &weights.token_type_embeddings {
+            // Step 3a: Create the tensor of token type vectors to add.
             let token_type_vectors = temp.get(hidden_states.shape().to_vec());
-            self.lookup.encode(
-                encoder,
-                token_type_embeddings,
-                type_ids,
-                &token_type_vectors,
-            );
 
-            // Step 3b: Use the standard element-wise add
+            if let Some(type_ids) = token_type_ids {
+                self.lookup.encode(
+                    encoder,
+                    token_type_embeddings,
+                    type_ids,
+                    &token_type_vectors,
+                );
+            } else {
+                // No IDs provided. Create a temporary [batch, seq] tensor of zeros and use that for the lookup to get the type 0 embedding everywhere.
+                let zeros_cpu = ndarray::Array2::<u32>::zeros((batch_size, seq_len));
+                let zeros_gpu = GpuTensor::from_ndarray(&self.context, &zeros_cpu)?;
+                self.lookup.encode(
+                    encoder,
+                    token_type_embeddings,
+                    &zeros_gpu,
+                    &token_type_vectors,
+                );
+            }
+
+            // Step 3b: Add the resulting vectors to the hidden states.
             let type_add_out = temp.get(hidden_states.shape().to_vec());
             self.add.encode_elementwise(
                 encoder,

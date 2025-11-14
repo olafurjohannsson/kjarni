@@ -14,7 +14,7 @@ mod common;
 use common::{read_gpu_tensor_to_vec};
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await)
+    Arc::new(WgpuContext::new().await.unwrap())
 }
 
 

@@ -17,7 +17,7 @@ const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
 async fn test_torch_sentence_encoder_golden_values() -> Result<()> {
     let cpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
             .await?;
@@ -57,7 +57,7 @@ async fn test_torch_sentence_encoder_golden_values() -> Result<()> {
 async fn test_torch_sentence_encoder_cls_golden_values() -> Result<()> {
     let cpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let gpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
             .await?;

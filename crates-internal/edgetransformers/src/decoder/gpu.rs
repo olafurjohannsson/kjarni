@@ -1,9 +1,10 @@
-use crate::cache::{CpuKVCache, GpuKVCache};
+use crate::cache::GpuKVCache;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::attention::TempStorage;
 use crate::gpu_ops::blocks::decoder::GpuPreNormDecoderLayer;
+use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
@@ -12,7 +13,6 @@ use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, 
 use crate::weights::ModelWeights;
 use anyhow::Result;
 use async_trait::async_trait;
-use log::{debug, info};
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 
@@ -21,6 +21,9 @@ pub struct GpuTransformerDecoder {
     // CPU-side embeddings
     word_embeddings: Array2<f32>,
     position_embeddings: Array2<f32>,
+
+    embedding_weights: GpuEmbeddingWeights, // Holds GPU tensors
+    embeddings: GpuEmbeddings,              // Holds the kernels
 
     // GPU-side weight buffers
     layers: Vec<GpuPreNormDecoderLayer>,
@@ -34,6 +37,8 @@ pub struct GpuTransformerDecoder {
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
 
     context: Arc<WgpuContext>,
+
+    cpu_embeddings: crate::Embeddings,
 }
 
 impl GpuTransformerDecoder {
@@ -48,6 +53,13 @@ impl GpuTransformerDecoder {
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
         let word_embeddings = weights.get_array2(word_w)?;
         let position_embeddings = weights.get_array2(pos_w)?;
+
+        let cpu_embeddings =
+            crate::Embeddings::new(word_embeddings.clone(), position_embeddings.clone(), None);
+
+        let embedding_weights: GpuEmbeddingWeights =
+            GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
+        let embeddings: GpuEmbeddings = GpuEmbeddings::new(&context)?;
 
         let (norm_w_name, norm_b_name) = config.get_final_layer_norm_names();
         let final_ln_gamma_cpu = weights.get_array1(norm_w_name)?;
@@ -148,43 +160,16 @@ impl GpuTransformerDecoder {
         Ok(Self {
             word_embeddings,
             position_embeddings,
+            embedding_weights,
+            embeddings,
             layers,
             final_layer_norm,
             final_ln_weights,
             slicer,
             config: config.clone(),
             context,
+            cpu_embeddings,
         })
-    }
-
-    fn perform_cpu_embedding(
-        &self,
-        input_ids: &Array2<u32>,
-        position_offset: usize,
-    ) -> Result<Array3<f32>> {
-        let (batch_size, seq_len) = input_ids.dim();
-        let hidden_size = self.config.hidden_size();
-        let mut cpu_hidden_states = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
-
-        // Word embeddings
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                if token_id < self.word_embeddings.shape()[0] {
-                    cpu_hidden_states
-                        .slice_mut(s![i, j, ..])
-                        .assign(&self.word_embeddings.row(token_id));
-                }
-            }
-        }
-
-        // Position embeddings (offset by cache position for incremental decoding)
-        let pos_start = position_offset;
-        let pos_end = position_offset + seq_len;
-        let pos_embeddings_to_add = self.position_embeddings.slice(s![pos_start..pos_end, ..]);
-        cpu_hidden_states += &pos_embeddings_to_add;
-
-        Ok(cpu_hidden_states)
     }
 }
 
@@ -217,13 +202,26 @@ impl Decoder for GpuTransformerDecoder {
         let mut temp = TempStorage::new(self.context.clone());
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input.shape()[1];
-        debug!(
-            "[GPU Decoder] Forward pass started. position_offset: {}",
-            position_offset
+
+        let initial_embeddings_cpu = self.cpu_embeddings.forward(
+            input,
+            None,
+            position_offset,
+            self.config.scale_embeddings(),
         );
 
-        let initial_embeddings_cpu = self.perform_cpu_embedding(input, position_offset)?;
         let mut hidden_states = GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
+        // let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
+
+        // let mut hidden_states = self.embeddings.encode(
+        //     &mut encoder,
+        //     &self.embedding_weights,
+        //     &input_ids_gpu,
+        //     None, // <-- Pass None for token_type_ids
+        //     self.config.as_ref(), // Your config should ensure scale_embeddings() is false
+        //     &mut temp,
+        // )?;
+
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
 
         let mut gpu_cache = cache.and_then(|c| c.as_any_mut().downcast_mut::<GpuKVCache>());
@@ -269,9 +267,7 @@ impl Decoder for GpuTransformerDecoder {
         input: &Self::Input,
         attention_mask: &Array2<f32>,
     ) -> Result<Array3<f32>> {
-        // Forward without cache
         let output = self.forward(input, attention_mask, None).await?;
         Ok(output.last_hidden_state)
     }
 }
-

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = Arc::new(WgpuContext::new().await);
+    let ctx = Arc::new(WgpuContext::new().await?);
     // Load cross-encoder
     let cross_encoder = CrossEncoder::from_registry(
         ModelType::MiniLML6V2CrossEncoder,

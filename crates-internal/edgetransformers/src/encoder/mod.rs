@@ -99,7 +99,7 @@ impl Encoder for TransformerEncoder {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Self::Output> {
         match self {
             Self::Cpu(model) => model.forward(input, attention_mask, token_type_ids).await,
@@ -110,7 +110,7 @@ impl Encoder for TransformerEncoder {
         &self,
         input: &Self::Input,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Array3<f32>> {
         match self {
             Self::Cpu(model) => {

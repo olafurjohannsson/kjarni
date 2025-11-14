@@ -21,7 +21,7 @@ async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Ar
 #[tokio::test]
 async fn test_cache_symmetry() -> Result<()> {
     println!("\n--- Testing CPU/GPU KV Cache Symmetry ---");
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
 
     // 1. SETUP: Define shared parameters and instantiate both caches.
     let (num_layers, batch_size, max_len, hidden_size) = (1, 1, 8, 16);
@@ -216,7 +216,7 @@ fn test_cache_multiple_layers() {
 #[tokio::test]
 async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
     // --- 1. Arrange ---
-    let context = Arc::new(WgpuContext::new().await);
+    let context = Arc::new(WgpuContext::new().await?);
     let num_layers = 2;
     let batch_size = 1;
     let num_heads = 4;
