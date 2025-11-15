@@ -41,8 +41,9 @@ impl GpuTransformerEncoder {
 
         let cpu_embeddings = crate::Embeddings::new(
             word_embeddings.clone(),
-            position_embeddings.clone(),
+            Some(position_embeddings.clone()),
             Some(token_type_embeddings.clone()),
+            None,
         );
 
         let embedding_weights: GpuEmbeddingWeights = GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;

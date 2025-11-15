@@ -59,10 +59,6 @@ impl Seq2SeqGenerator {
             .map_err(|e| anyhow!(e))?;
         let attention_mask = Array2::ones((1, encoding.len()));
         let encoder_output = self.encode_input(input_text).await?;
-        println!(
-            "[NEW] Encoder Attention Mask Shape: {:?}",
-            attention_mask.dim()
-        );
         self.generate_from_encoding(&encoder_output, &attention_mask, config)
             .await
     }
@@ -73,7 +69,6 @@ impl Seq2SeqGenerator {
             .tokenizer()
             .encode(text, true)
             .map_err(|e| anyhow!(e))?;
-        println!("[NEW] Token IDs: {:?}", encoding.get_ids());
 
         let input_ids = Array2::from_shape_vec(
             (1, encoding.len()),
@@ -87,14 +82,7 @@ impl Seq2SeqGenerator {
             .encoder()
             .forward(&input_ids, &attention_mask, None)
             .await?;
-        println!(
-            "[NEW] Encoder Output Mean: {}",
-            encoder_output.last_hidden_state.mean().unwrap()
-        );
-        println!(
-            "[NEW] Encoder Output Std Dev: {}",
-            encoder_output.last_hidden_state.std(0.0)
-        );
+
         Ok(encoder_output)
     }
     pub async fn generate_from_encoding(
@@ -124,11 +112,7 @@ impl Seq2SeqGenerator {
             cache: initial_cache,
         }];
         let mut completed_beams: Vec<BeamHypothesis> = Vec::new();
-        println!(
-            "MaxLength: {} MaxNewTokens: {}",
-            config.max_length,
-            config.max_new_tokens.unwrap_or(0)
-        );
+
         // Main Generation Loop
         for step in 0..config.max_length {
             if beams.is_empty() {
@@ -136,8 +120,6 @@ impl Seq2SeqGenerator {
             }
             let mut all_new_candidates: Vec<BeamHypothesis> = Vec::new();
 
-            // This loop uses the correct "clone-first" strategy.
-            print!("Total beams! {}", beams.len());
             // for hypo in beams.drain(..) {
             for hypo in &beams {
                 let last_token = *hypo.tokens.last().unwrap();
@@ -146,22 +128,6 @@ impl Seq2SeqGenerator {
 
                 // 1. Clone the cache *before* it gets mutated.
                 let mut current_cache = hypo.cache.clone_box();
-
-                // --- DEBUG PRINTS START ---
-                println!("\n--- Step {} ---", step);
-                println!("[Step {}] Decoder Input Token ID: {}", step, last_token);
-                println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
-                println!(
-                    "[Step {}] Decoder Attention Mask Shape: {:?}",
-                    step,
-                    decoder_attention_mask.dim()
-                );
-                println!(
-                    "[Step {}] Cache Length Before Forward: {}",
-                    step,
-                    current_cache.get_seq_length()
-                );
-                // --- DEBUG PRINTS END ---
 
                 // 2. Pass the mutable clone to the forward pass.
                 let decoder_output = self
@@ -175,21 +141,7 @@ impl Seq2SeqGenerator {
                         Some(current_cache.as_mut()),
                     )
                     .await?;
-                // --- NEW DETAILED LOGGING ---
-                println!("\n--- Step {} ---", step);
-                println!("[Step {}] Current Sequence: {:?}", step, &hypo.tokens);
-                {
-                    // Slicing produces a 1D view, so we can index it directly with usize.
-                    let hidden_state_slice = decoder_output.last_hidden_state.slice(s![0, 0, ..]);
-                    println!(
-                        "[Step {}] Hidden State [0]:   {:.8}",
-                        step, hidden_state_slice[0usize]
-                    );
-                    println!(
-                        "[Step {}] Hidden State [100]: {:.8}",
-                        step, hidden_state_slice[100usize]
-                    );
-                }
+
 
                 // 3. Project to logits (this now correctly includes the bias).
                 // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
@@ -216,75 +168,10 @@ impl Seq2SeqGenerator {
                 if let Some(bias) = self.model.final_logits_bias() {
                     logits += bias;
                 }
-                if step == 0 {
-                    // Only print this detailed log for the first step
-                    println!("\n--- DEBUG: RUST LOGITS (STEP 0) ---");
-                    println!("Logits Array Shape: {:?}", logits.dim());
-                    println!("Logits Mean: {:.8}", logits.mean().unwrap());
-                    println!("Logits Std Dev: {:.8}", logits.std(0.0));
-                    println!("Logits[0]:     {:.8}", logits[0]);
-                    println!("Logits[100]:   {:.8}", logits[100]);
-                    // Add this one for extra certainty
-                    println!("Logits[1000]:  {:.8}", logits[1000]);
 
-                    // Find and print the argmax to compare with Python's top token
-                    let top_token_id = logits
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                        .map(|(index, _)| index)
-                        .unwrap();
-                    println!("Top token predicted at Step 0: ID={}", top_token_id);
-                    println!("------------------------------------");
-                }
-                // --- REVERTED LOGITS LOGIC END ---
-
-                // --- DEBUG PRINTS START ---
-                let hidden_state_slice = decoder_output.last_hidden_state.slice(s![0, 0, ..]);
-                println!(
-                    "[Step {}] Decoder Hidden State Mean: {:.8}, Std Dev: {:.8}",
-                    step,
-                    hidden_state_slice.mean().unwrap(),
-                    hidden_state_slice.std(0.0)
-                );
-                println!(
-                    "[Step {}] Logits (pre-penalty) Mean: {:.8}, Std Dev: {:.8}",
-                    step,
-                    logits.mean().unwrap(),
-                    logits.std(0.0)
-                );
-                // --- DEBUG PRINTS END ---
-                {
-                    println!(
-                        "[Step {}] Logits (pre-penalty) [0]:     {:.8}",
-                        step, logits[0]
-                    );
-                    println!(
-                        "[Step {}] Logits (pre-penalty) [100]:   {:.8}",
-                        step, logits[100]
-                    );
-                }
-                // 4. ✅ APPLY ALL PENALTIES from your working code.
                 logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
                 logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
 
-                {
-                    println!(
-                        "[Step {}] Logits (post-penalty) [0]:     {:.8}",
-                        step, logits[0]
-                    );
-                    println!(
-                        "[Step {}] Logits (post-penalty) [100]:   {:.8}",
-                        step, logits[100]
-                    );
-                }
-
-                println!(
-                    "[Step {}] Logits (post-penalty) Mean: {:.8}, Std Dev: {:.8}",
-                    step,
-                    logits.mean().unwrap(),
-                    logits.std(0.0)
-                );
                 let log_probs = log_softmax_1d(&logits);
                 // let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
                 let mut top_candidates: Vec<(u32, f32)> = log_probs
@@ -294,15 +181,7 @@ impl Seq2SeqGenerator {
                     .collect();
                 top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
                 top_candidates.truncate(beam_params.num_beams);
-                // --- DEBUG PRINTS START ---
-                // Since num_beams=1 (greedy), there will only be one candidate.
-                for (token_id, log_prob) in top_candidates.clone() {
-                    println!(
-                        "[Step {}] Top Candidate Token ID: {} (LogProb: {:.8})",
-                        step, token_id, log_prob
-                    );
-                }
-                // --- DEBUG PRINTS END ---
+
                 // 5. Create new hypotheses, each getting a clone of the *updated* cache.
                 for (token_id, token_log_prob) in top_candidates {
                     let mut new_tokens = hypo.tokens.clone();
@@ -334,21 +213,10 @@ impl Seq2SeqGenerator {
                 }
             }
             if beam_params.early_stopping && completed_beams.len() >= beam_params.num_beams {
-                println!("Early stoppin! ");
                 break;
             }
         }
-        println!(
-            "early stop: {} num beams: {} total beams {}",
-            beam_params.early_stopping,
-            beam_params.num_beams,
-            beams.len()
-        );
-        println!(
-            "config.repetition_penalty: {} no_repeat_ngram_size: {}",
-            config.repetition_penalty, config.no_repeat_ngram_size
-        );
-        // --- 4. FINALIZE AND DECODE (Identical to your working code) ---
+
         let final_hypotheses = if completed_beams.is_empty() {
             // If no beams reached EOS, use the active (unfinished) beams as candidates.
             beams

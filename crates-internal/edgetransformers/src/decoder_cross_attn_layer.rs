@@ -37,16 +37,6 @@ impl DecoderCrossAttentionLayer {
         cross_attention_mask: Option<&Array2<f32>>,
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // This is a standard post-layernorm decoder layer (like BART)
-
-        // --- 1. Self-Attention Block ---
-
-        let owned_kv: Option<(Array3<f32>, Array3<f32>)> =
-            past_kv.as_ref().map(|(k, v)| (k.to_owned(), v.to_owned()));
-
-        let cached_kv: Option<(&Array3<f32>, &Array3<f32>)> =
-            owned_kv.as_ref().map(|(k, v)| (k, v));
-
         let residual = hidden_states.clone();
         let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache(
             hidden_states,
@@ -60,12 +50,6 @@ impl DecoderCrossAttentionLayer {
         let mut hidden_states = residual + attn_output;
         hidden_states = self.self_attn_layer_norm.forward_3d(&hidden_states);
 
-        println!(
-            "[FWD_X_ATTN] After Self-Attn + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
-
-        // --- 2. Cross-Attention Block (REPLACED LOGIC) ---
         let residual = hidden_states.clone();
         
 
@@ -84,21 +68,11 @@ impl DecoderCrossAttentionLayer {
             .cross_attn_layer_norm
             .forward_3d(&hidden_states);
 
-        println!(
-            "[FWD_X_ATTN] After Cross-Attn + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
-
         // --- 3. Feed-Forward Block ---
         let residual = hidden_states.clone();
         let ffn_output = self.feedforward.forward(&hidden_states)?;
         hidden_states = residual + ffn_output;
         hidden_states = self.ffn_layer_norm.forward_3d(&hidden_states);
-
-        println!(
-            "[FWD_X_ATTN] After FFN + Norm, Mean: {}",
-            hidden_states.mean().unwrap()
-        );
 
         // Return the final hidden state and the NEW self-attention K/V pair to be cached.
         Ok((hidden_states, (new_k, new_v)))

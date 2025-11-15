@@ -44,11 +44,8 @@ impl GpuTransformerEncoderDecoder {
             None,
         )?;
 
-        // This is a placeholder. In reality, you'd build a GPU-specific decoder stack here
-        // similar to the manual construction in `cpu.rs`.
         Ok(Self {
             encoder,
-            // decoder, // Placeholder
             config,
             context,
         })
@@ -68,9 +65,6 @@ impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
         decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        // The orchestration logic will be the same as the CPU.
-        // 1. Run encoder pass on GPU.
-        // 2. Run decoder pass with cross-attention using a new `GpuCrossAttentionPipeline`.
         todo!("Implement GPU pipeline for cross-attention decoding.");
     }
 }

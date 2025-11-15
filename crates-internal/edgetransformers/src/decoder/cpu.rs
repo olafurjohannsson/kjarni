@@ -29,18 +29,8 @@ impl CpuTransformerDecoder {
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
         rope: Option<Arc<RoPE>>,
     ) -> Result<Self> {
-        debug!("Building CpuTransformerDecoder...");
-        debug!("[CPU Decoder] Layers: {}", config.num_hidden_layers());
-        debug!("[CPU Decoder] Hidden size: {}", config.hidden_size());
-        debug!("[CPU Decoder] Attention heads: {}", config.num_attention_heads());
-        debug!("[CPU Decoder] Pre-norm: {}", config.is_prenorm());
-        debug!("[CPU Decoder] RoPE: {}", rope.is_some());
-
-        // Load embedding weights with optional position embeddings
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
-
-        debug!("[CPU Decoder] Loading embeddings...");
-        debug!("    Word embeddings: {}", word_w);
+        let model_offset = config.position_embedding_offset();
 
         let word_embeddings = weights.get_array2(word_w)?;
         let position_embeddings = if !pos_w.is_empty() {
@@ -51,12 +41,8 @@ impl CpuTransformerDecoder {
             None
         };
 
-        let embeddings = if let Some(pos_emb) = position_embeddings {
-            Embeddings::new(word_embeddings, pos_emb, None)
-        } else {
-            // For models without position embeddings (LLaMA with RoPE)
-            Embeddings::new_without_position(word_embeddings, None)
-        };
+        let embeddings = Embeddings::new(word_embeddings, position_embeddings, None, 
+            Some(model_offset as u32));
 
         // Get final layer norm
         let (norm_w, norm_b) = config.get_final_layer_norm_names();

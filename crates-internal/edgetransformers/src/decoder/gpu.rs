@@ -20,7 +20,7 @@ use std::sync::Arc;
 pub struct GpuTransformerDecoder {
     // CPU-side embeddings
     word_embeddings: Array2<f32>,
-    position_embeddings: Array2<f32>,
+    position_embeddings_cpu: Option<Array2<f32>>,
 
     embedding_weights: GpuEmbeddingWeights, // Holds GPU tensors
     embeddings: GpuEmbeddings,              // Holds the kernels
@@ -32,7 +32,6 @@ pub struct GpuTransformerDecoder {
     final_layer_norm: GpuLayerNorm,
     final_ln_weights: GpuLayerNormWeights,
 
-    slicer: GpuSlice,
 
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
 
@@ -47,15 +46,18 @@ impl GpuTransformerDecoder {
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
         context: Arc<WgpuContext>,
     ) -> Result<Self> {
-        let slicer = GpuSlice::new(&context);
 
         // Load CPU-side embeddings
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
         let word_embeddings = weights.get_array2(word_w)?;
-        let position_embeddings = weights.get_array2(pos_w)?;
+        let position_embeddings_cpu = if !pos_w.is_empty() {
+            Some(weights.get_array2(pos_w)?)
+        } else {
+            None
+        };
 
         let cpu_embeddings =
-            crate::Embeddings::new(word_embeddings.clone(), position_embeddings.clone(), None);
+            crate::Embeddings::new(word_embeddings.clone(), position_embeddings_cpu.clone(), None, None);
 
         let embedding_weights: GpuEmbeddingWeights =
             GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
@@ -159,13 +161,12 @@ impl GpuTransformerDecoder {
 
         Ok(Self {
             word_embeddings,
-            position_embeddings,
+            position_embeddings_cpu,
             embedding_weights,
             embeddings,
             layers,
             final_layer_norm,
             final_ln_weights,
-            slicer,
             config: config.clone(),
             context,
             cpu_embeddings,
@@ -209,18 +210,20 @@ impl Decoder for GpuTransformerDecoder {
             position_offset,
             self.config.scale_embeddings(),
         );
-
         let mut hidden_states = GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
+
         // let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
 
         // let mut hidden_states = self.embeddings.encode(
         //     &mut encoder,
         //     &self.embedding_weights,
         //     &input_ids_gpu,
-        //     None, // <-- Pass None for token_type_ids
-        //     self.config.as_ref(), // Your config should ensure scale_embeddings() is false
+        //     None,
+        //     self.config.as_ref(),
         //     &mut temp,
         // )?;
+
+
 
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
 

@@ -11,7 +11,6 @@ pub struct LayerNorm {
 
 impl LayerNorm {
     pub fn new(weight: Array1<f32>, bias: Array1<f32>, eps: f32) -> Self {
-        println!("LayerNormEps: {}", eps);
         Self { weight, bias, eps }
     }
 

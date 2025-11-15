@@ -17,31 +17,24 @@ pub struct Embeddings {
     pub word_embeddings: Array2<f32>,
     pub position_embeddings: Option<Array2<f32>>,
     pub token_type_embeddings: Option<Array2<f32>>,
+    pub extra_pos_embeddings: Option<u32>,
 }
 
 impl Embeddings {
     pub fn new(
         word_embeddings: Array2<f32>,
-        position_embeddings: Array2<f32>,
+        position_embeddings: Option<Array2<f32>>,
         token_type_embeddings: Option<Array2<f32>>,
+        extra_pos_embeddings: Option<u32>,
     ) -> Self {
         Self {
             word_embeddings,
-            position_embeddings: Some(position_embeddings),
+            position_embeddings,
             token_type_embeddings,
+            extra_pos_embeddings,
         }
     }
-    /// Create embeddings without position embeddings (for RoPE-based models)
-    pub fn new_without_position(
-        word_embeddings: Array2<f32>,
-        token_type_embeddings: Option<Array2<f32>>,
-    ) -> Self {
-        Self {
-            word_embeddings,
-            position_embeddings: None,
-            token_type_embeddings,
-        }
-    }
+
     /// Embed input tokens without adding positional or token_type embeddings.
     pub fn forward_word_only(&self, input_ids: &Array2<u32>) -> Array3<f32> {
         let (batch_size, seq_len) = input_ids.dim();
@@ -50,20 +43,24 @@ impl Embeddings {
 
         let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
 
-        // This can be parallelized in the future if needed
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                if token_id >= vocab_size {
-                    panic!(
-                        "Token ID {} is out of vocabulary range [0, {})",
-                        token_id, vocab_size
-                    );
+        hidden
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .zip(input_ids.axis_iter(Axis(0)))
+            .for_each(|(mut hidden_slice, ids)| {
+                for (j, &token_id) in ids.iter().enumerate() {
+                    let token_id = token_id as usize;
+                    // Bounds check
+                    if token_id >= vocab_size {
+                        panic!(
+                            "Token ID {} is out of vocabulary range [0, {})",
+                            token_id, vocab_size
+                        );
+                    }
+                    let word_emb = self.word_embeddings.row(token_id);
+                    hidden_slice.slice_mut(s![j, ..]).assign(&word_emb);
                 }
-                let word_emb = self.word_embeddings.row(token_id);
-                hidden.slice_mut(s![i, j, ..]).assign(&word_emb);
-            }
-        }
+            });
         hidden
     }
 
@@ -111,7 +108,13 @@ impl Embeddings {
                 }
             });
 
+
         if let Some(ref pos_emb) = self.position_embeddings {
+            // let start_idx = if self.extra_pos_embeddings.is_some() {
+            //     position_offset + self.extra_pos_embeddings.unwrap() as usize
+            // } else {
+            //     position_offset
+            // };
             let start_idx = position_offset;
             let end_idx = position_offset + seq_len;
 
@@ -280,8 +283,9 @@ mod tests {
 
         let cpu_embeddings = Embeddings::new(
             weights.get_array2(word_w)?,
-            weights.get_array2(pos_w)?,
+            Some(weights.get_array2(pos_w)?),
             token_type_embeddings,
+            None,
         );
         let expected_output = cpu_embeddings.forward(
             &input_ids_cpu,
@@ -340,8 +344,9 @@ mod tests {
 
         let cpu_embeddings = Embeddings::new(
             weights.get_array2(word_w)?,
-            weights.get_array2(pos_w)?,
+            Some(weights.get_array2(pos_w)?),
             token_type_embeddings,
+            None,
         );
         let expected_output = cpu_embeddings.forward(
             &input_ids_cpu,
@@ -381,7 +386,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
 
-        let embeddings = Embeddings::new(word_emb, pos_emb, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
 
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -394,7 +399,7 @@ mod tests {
         // LLaMA / RoPE style
         let word_emb = Array2::ones((100, 64));
 
-        let embeddings = Embeddings::new_without_position(word_emb, None);
+        let embeddings = Embeddings::new(word_emb, None, None, None);
 
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -409,7 +414,7 @@ mod tests {
         let pos_emb = Array2::ones((512, 64));
         let token_type_emb = Array2::ones((2, 64));
 
-        let embeddings = Embeddings::new(word_emb, pos_emb, Some(token_type_emb));
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), Some(token_type_emb), None);
 
         let input_ids = Array2::zeros((2, 10));
         let token_type_ids = Array2::zeros((2, 10));
@@ -424,7 +429,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((10, 64)); // Only 10 positions
 
-        let embeddings = Embeddings::new(word_emb, pos_emb, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
 
         let input_ids = Array2::zeros((2, 20)); // 20 tokens - too long!
         let _ = embeddings.forward(&input_ids, None, 0, false);
@@ -435,7 +440,7 @@ mod tests {
         // LLaMA without position embeddings can handle any length
         let word_emb = Array2::ones((100, 64));
 
-        let embeddings = Embeddings::new_without_position(word_emb, None);
+        let embeddings = Embeddings::new(word_emb, None, None, None);
 
         let input_ids = Array2::zeros((2, 1000)); // Very long sequence
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -450,7 +455,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
 
-        let embeddings = Embeddings::new(word_emb, pos_emb, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
 
         let mut input_ids = Array2::zeros((2, 10));
         input_ids[[0, 0]] = 150 as u32; // Out of vocab range [0, 100)
