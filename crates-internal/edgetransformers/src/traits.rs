@@ -16,6 +16,8 @@ use std::sync::Arc;
 /// device for all its computations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Device {
+    /// Let Kjarni decide on which to use
+    // Auto,
     /// Execute computations on the CPU.
     Cpu,
     /// Execute computations on the GPU via WGPU.

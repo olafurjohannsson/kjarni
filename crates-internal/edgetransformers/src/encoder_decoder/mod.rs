@@ -118,4 +118,11 @@ impl TransformerModel for TransformerEncoderDecoder {
             Self::Gpu(model) => model.device(),
         }
     }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        // Match on self and delegate directly to the inner model's context method.
+        match self {
+            Self::Cpu(model) => model.context(), // Correctly returns None
+            Self::Gpu(model) => model.context(), // Correctly returns Some(context)
+        }
+    }
 }

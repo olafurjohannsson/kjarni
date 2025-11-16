@@ -122,6 +122,39 @@ impl GpuEmbeddings {
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
 
         // 2. Add Positional Embeddings (with offset)
+        // if let Some(pos_embeddings) = &weights.position_embeddings {
+        //     // 2a. Calculate the final offset.
+        //     let final_offset = position_offset + config.extra_pos_embeddings();
+        //
+        //     // 2b. Create the positional IDs on the CPU.
+        //     // This is efficient because seq_len is usually small (1 during generation).
+        //     let pos_ids_cpu: Vec<u32> = (0..seq_len as u32)
+        //         .map(|i| final_offset as u32 + i)
+        //         .collect();
+        //     let pos_ids_ndarray = ndarray::Array2::from_shape_vec((1, seq_len), pos_ids_cpu)?;
+        //
+        //     // 2c. Upload the positional IDs to the GPU.
+        //     let pos_ids_gpu = GpuTensor::from_ndarray(&self.context, &pos_ids_ndarray)?;
+        //
+        //     // 2d. Perform a standard lookup to get the positional embedding vectors.
+        //     let pos_embedding_vectors = temp.get(hidden_states.shape().to_vec());
+        //     self.lookup.encode(
+        //         encoder,
+        //         pos_embeddings,
+        //         &pos_ids_gpu,
+        //         &pos_embedding_vectors,
+        //     );
+        //
+        //     // 2e. Perform a standard element-wise add.
+        //     let pos_add_out = temp.get(hidden_states.shape().to_vec());
+        //     self.add.encode_elementwise(
+        //         encoder,
+        //         &hidden_states,
+        //         &pos_embedding_vectors,
+        //         &pos_add_out,
+        //     );
+        //     hidden_states = pos_add_out;
+        // }
         if let Some(pos_embeddings) = &weights.position_embeddings {
             let pos_add_out = temp.get(hidden_states.shape().to_vec());
             // GPT-style models often have a fixed offset (e.g., 2 for BART) in their

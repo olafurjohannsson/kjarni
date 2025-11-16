@@ -16,6 +16,8 @@ async fn main() -> Result<()> {
     let any_model = AnySeq2SeqModel::from_registry(
         ModelType::DistilBartCnn, 
         None,
+        // Device::Cpu,
+        // None,
         Device::Wgpu,
         Some(ctx),
     )

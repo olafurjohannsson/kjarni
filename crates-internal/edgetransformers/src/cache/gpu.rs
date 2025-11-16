@@ -40,12 +40,15 @@ impl GpuKVCache {
         if capacity == 0 {
             return Err(anyhow!("Cache capacity cannot be zero."));
         }
-
+        println!("[GpuKVCache] Starting new()... batch={}, heads={}, capacity={}", batch_size, num_heads, capacity);
         let cache_shape = vec![batch_size, num_heads, capacity, head_dim];
         let mut k_tensors = Vec::with_capacity(num_layers);
         let mut v_tensors = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
+            println!("[GpuKVCache] Allocating tensor for layer {}", i);
+
+
             k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
@@ -58,6 +61,7 @@ impl GpuKVCache {
                 crate::gpu_ops::DType::F32,
                 &format!("Layer {} V-Cache", i),
             ));
+            println!("[GpuKVCache] Layer {} allocated.", i);
         }
 
         Ok(Self {
@@ -96,7 +100,7 @@ impl GpuKVCache {
 
         Ok(())
     }
-    
+
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
         if layer_idx >= self.k_tensors.len() {
@@ -118,7 +122,18 @@ impl Cache for GpuKVCache {
         self.seq_length
     }
     fn clone_box(&self) -> Box<dyn Cache> {
-        unimplemented!()
+        // This creates a new GpuKVCache struct on the heap.
+        // It clones the Vecs (which clones the GpuTensors inside).
+        // If GpuTensor is an Arc wrapper, this is a cheap reference count bump.
+        // The `seq_length` is copied by value.
+        // The `update_kernel` is also cheaply cloned (if it wraps an Arc).
+        let new_cache = GpuKVCache {
+            k_tensors: self.k_tensors.clone(),
+            v_tensors: self.v_tensors.clone(),
+            seq_length: self.seq_length,
+            update_kernel: self.update_kernel.clone(), // Assuming GpuUpdateCache is Clone
+        };
+        Box::new(new_cache)
     }
     fn clear(&mut self) {
         self.seq_length = 0;
@@ -127,7 +142,7 @@ impl Cache for GpuKVCache {
     fn as_any(&self) -> &dyn Any {
         self
     }
- fn set_seq_length(&mut self, len: usize) {
+    fn set_seq_length(&mut self, len: usize) {
         self.seq_length = len;
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {

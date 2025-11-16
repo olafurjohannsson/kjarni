@@ -262,23 +262,37 @@ impl GpuCrossAttentionDecoderLayer {
         decoder_attn_mask: &GpuTensor,
         encoder_attn_mask: Option<&GpuTensor>, // GPU version of the mask
         cached_kv: Option<(&GpuTensor, &GpuTensor)>,
+        cache_len: usize,
         temp: &mut TempStorage,
     ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
         // Returns (final_output, new_k_for_cache, new_v_for_cache)
+        // --- ADD THIS BLOCK ---
+        println!("--- GpuCrossAttentionDecoderLayer::forward ---");
+        println!("  > decoder_hidden_states shape: {:?}", decoder_hidden_states.shape());
+        println!("  > encoder_hidden_states shape: {:?}", encoder_hidden_states.shape());
+        // --- END BLOCK ---
+        println!(
+            "!!! RUNNING LATEST GpuCrossAttentionDecoderLayer::forward. Decoder mask shape: {:?}",
+            decoder_attn_mask.shape()
+        );
+        if encoder_attn_mask.is_some() {
+            println!(
+                "!!! RUNNING LATEST GpuCrossAttentionDecoderLayer::forward. Encoder mask shape: {:?}",
+                encoder_attn_mask.unwrap().shape()
+            );
+        }
 
         // --- 1. Self-Attention Block (Post-Norm) ---
         let residual = decoder_hidden_states;
-        let (self_attn_output, new_k, new_v) = self.self_attn.forward_with_cache(
+        let (self_attn_output, new_k, new_v) = self.self_attn.forward_seq2seq(
             encoder,
-            residual, // Input is the raw hidden state
-            None,     // K/V source is the same as Q for self-attention
+            residual, // The 3D input
             &self.self_attn_weights,
-            Some(decoder_attn_mask),
-            true, // Self-attention in a decoder is always causal
+            decoder_attn_mask,
             cached_kv,
-            None, // No RoPE in models like BART/T5
+            cache_len,
             temp,
-        );
+        )?;
         let hidden_states_after_add1 = temp.get(residual.shape().to_vec());
         self.add.encode(
             encoder,
@@ -375,7 +389,7 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
 
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
-
+        let total_len = position_offset + seq_len;
         // --- 1. Transfer all CPU inputs to GPU Tensors ---
         let encoder_hidden_states_gpu =
             GpuTensor::from_ndarray::<f32, _>(&self.context, encoder_hidden_states)?;
@@ -426,6 +440,7 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
         for (i, layer) in self.layers.iter().enumerate() {
             let cached_kv = gpu_cache.as_ref().and_then(|c| c.get(i));
             let cached_kv_refs = cached_kv.as_ref().map(|(k, v)| (k, v));
+
             let (output, new_k, new_v) = layer.forward(
                 &mut encoder,
                 &hidden_states,
@@ -433,6 +448,7 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
                 &decoder_attn_mask_gpu,
                 encoder_attn_mask_gpu.as_ref(),
                 cached_kv_refs,
+                position_offset,
                 &mut temp,
             )?;
             hidden_states = output;
@@ -449,7 +465,7 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
         let last_hidden_state_cpu = hidden_states.to_ndarray_3d().await?;
 
         if let Some(cache) = gpu_cache {
-            cache.increment_len(seq_len);
+            cache.set_seq_length(total_len);
         }
 
         Ok(DecoderOutput {

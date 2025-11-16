@@ -148,13 +148,40 @@ impl<C: EncoderDecoderArchitecture + Send + Sync> LanguageModel for Seq2SeqModel
     }
 
     fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
-        // This logic is now correctly encapsulated in the model.
-        Ok(Box::new(CpuKVCache::new(
-            self.config.num_decoder_layers(),
-            batch_size,
-            max_len,
-            self.config.hidden_size(),
-        )))
+        println!("Inside new cache!");
+        // Use the device() method from the TransformerModel trait to decide which cache to create.
+        match self.model.device() {
+            // Assuming `self.model` holds the actual EncoderDecoder
+            Device::Cpu => {
+                println!("Cpu");
+                let head_dim = self.config.hidden_size() / self.config.num_attention_heads();
+                Ok(Box::new(CpuKVCache::new(
+                    self.config.num_decoder_layers(),
+                    batch_size,
+                    max_len,
+                    self.config.hidden_size(),
+                )))
+            }
+            Device::Wgpu => {
+                println!("Gpu");
+                // Get the context from the model.
+                let context = self
+                    .model
+                    .context()
+                    .ok_or_else(|| anyhow!("GPU context not available for GPU model"))?;
+                println!("context");
+                let head_dim = self.config.hidden_size() / self.config.num_attention_heads();
+                println!("head dim {}", head_dim);
+                Ok(Box::new(GpuKVCache::new(
+                    &context,
+                    self.config.num_decoder_layers(),
+                    batch_size,
+                    self.config.num_attention_heads(),
+                    head_dim,
+                    max_len,
+                )?))
+            }
+        }
     }
 }
 
@@ -252,9 +279,9 @@ where
 
 mod tests {
     use super::*;
+    use edgetransformers::TransformerConfig;
     use edgetransformers::models::base::{DecodingStrategy, EncoderDecoderLanguageModel};
     use edgetransformers::prelude::LanguageModel;
-    use edgetransformers::TransformerConfig;
 
     /// Helper function to load the DistilBART model for testing,
     /// reducing code duplication in the tests below.

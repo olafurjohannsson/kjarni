@@ -13,6 +13,8 @@ struct AddBroadcastOffsetUniforms {
     b_row_offset: u32,
     seq_len: u32,
     hidden_size: u32,
+    b_stride_0: u32, // <-- ADD THIS: Stride for the first dimension of b (rows)
+    _padding: [u32; 3], // <-- ADD THIS: Ensure alignment
 }
 
 #[repr(C)]
@@ -150,6 +152,8 @@ impl GpuAdd {
             b_row_offset: b_row_offset as u32,
             seq_len: a_shape[1] as u32,
             hidden_size: a_shape[2] as u32,
+            b_stride_0: b_shape[1] as u32,
+            _padding: [0; 3],
         };
         let uniform_buffer =
             self.context

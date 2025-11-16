@@ -82,4 +82,7 @@ impl TransformerModel for GpuTransformerEncoderDecoder {
     fn device(&self) -> Device {
         Device::Wgpu
     }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        Some(self.context.clone())
+    }
 }

@@ -19,6 +19,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
+use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 
 /// A simple memory pool for managing temporary, intermediate GPU tensors.
 pub struct TempStorage {
@@ -183,6 +184,7 @@ pub struct GpuAttention {
     permute: GpuPermute,
     repeat_kv: GpuRepeatKV,
     gpu_concatenate: GpuConcatenate,
+    slice_kernel: GpuSlice,
     num_heads: u32,
     num_kv_heads: u32,
     scale_factor: f32,
@@ -210,6 +212,7 @@ impl GpuAttention {
             permute: GpuPermute::new(context),
             repeat_kv: GpuRepeatKV::new(context),
             gpu_concatenate: GpuConcatenate::new(context),
+            slice_kernel: GpuSlice::new(context),
             num_heads,
             num_kv_heads,
             scale_factor,
@@ -471,7 +474,102 @@ impl GpuAttention {
         );
         output
     }
+    pub fn forward_seq2seq(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor, // The 3D input from the previous layer [B, S_q, H]
+        weights: &GpuAttentionWeights,
+        attention_mask: &GpuTensor, // The full attention mask [B, S_total]
+        cached_kv: Option<(&GpuTensor, &GpuTensor)>, // The 4D cache [B, H, S_cache, D]
+        cache_len: usize,
+        temp: &mut TempStorage,
+    ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> { // Returns (output, new_k_3d, new_v_3d)
 
+        let (batch_size, query_len, _hidden_size) = query.dims3();
+        // let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[2]);
+        println!("!!! INSIDE forward_seq2seq. Query shape: {:?}", query.shape());
+        println!("cache_len {}", cache_len);
+        // === 1. Project Q, K, V (produces 3D tensors) ===
+        // For self-attention, Q, K, and V are all projected from the same input `query`.
+        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
+        let k_proj = self.project(encoder, query, &weights.k_weight, &weights.k_bias, temp);
+        let v_proj = self.project(encoder, query, &weights.v_weight, &weights.v_bias, temp);
+        // Note: No RoPE for Seq2Seq models like BART.
+
+        // === 2. Prepare Tensors for Attention (Split Heads) ===
+        let q_heads = self.split_heads(encoder, &q_proj, temp); // [B, H, S_q, D]
+        let k_heads_new = self.split_heads(encoder, &k_proj, temp); // [B, H, S_new, D]
+        let v_heads_new = self.split_heads(encoder, &v_proj, temp); // [B, H, S_new, D]
+
+        // === 3. Concatenate with cache (4D + 4D) ===
+        let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
+            // Only concatenate if the cache is not empty
+            if cache_len > 0 {
+                let (b, h, _, d) = k_heads_new.dims4();
+                let full_len = cache_len + query_len;
+
+                let slice_shape = &[b, h, cache_len, d];
+                let slice_offset = &[0, 0, 0, 0];
+                let valid_cache_k = cached_k.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
+                let valid_cache_v = cached_v.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
+
+                let full_k_tensor = temp.get(vec![b, h, full_len, d]);
+                let full_v_tensor = temp.get(vec![b, h, full_len, d]);
+
+                self.gpu_concatenate.encode(encoder, &[&valid_cache_k, &k_heads_new], &full_k_tensor, 2);
+                self.gpu_concatenate.encode(encoder, &[&valid_cache_v, &v_heads_new], &full_v_tensor, 2);
+
+                (full_k_tensor, full_v_tensor)
+            } else {
+                // Cache exists but is logically empty, so just use the new K/V
+                (k_heads_new, v_heads_new)
+            }
+        } else {
+            // No cache exists (prefill step)
+            (k_heads_new, v_heads_new)
+        };
+
+        // === 4. Perform Attention Calculation ===
+        // `full_k` and `full_v` are now guaranteed to be the complete 4D KV history.
+        let k_transposed = full_k.permute(encoder, &self.permute, &[0, 1, 3, 2]);
+        let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, temp);
+        let expected_scores_shape = vec![
+            q_heads.shape()[0],
+            q_heads.shape()[1],
+            q_heads.shape()[2],
+            k_transposed.shape()[3],
+        ];
+        assert_eq!(scores.shape(), &expected_scores_shape, "Scores tensor has unexpected shape!");
+        println!(
+            "!!! INSIDE forward_seq2seq. Scores shape: {:?}, Mask shape: {:?}",
+            scores.shape(),
+            attention_mask.shape()
+        );
+        // Apply combined causal and padding mask.
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            true, // Self-attention is always causal
+            cache_len as u32,
+        );
+
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+        let context = self.bmm_4d(encoder, &scores, &full_v, temp);
+
+        // === 5. Final Projection ===
+        let context_merged = self.merge_heads(encoder, &context, temp);
+        let output = self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            temp,
+        );
+
+        // Return the final 3D output, and the NEW 3D K/V tensors for the cache manager.
+        Ok((output, k_proj, v_proj))
+    }
     ///
     /// This function is now a stateless calculator. It assumes the caller (e.g., a TransformerLayer
     /// or a test) has already updated the KV cache with the results from the previous step.

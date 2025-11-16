@@ -76,13 +76,13 @@ impl Seq2SeqGenerator {
         )?;
 
         let attention_mask = Array2::ones(input_ids.dim());
-
+        println!("Encoding input ids");
         let encoder_output: EncoderOutput = self
             .model
             .encoder()
             .forward(&input_ids, &attention_mask, None)
             .await?;
-
+        println!("after Encoding input ids");
         Ok(encoder_output)
     }
     pub async fn generate_from_encoding(
@@ -105,7 +105,9 @@ impl Seq2SeqGenerator {
         let decoder_start_token_id = 2;
 
         // Initialize Beams with an empty cache for each.
+        println!("New cache!");
         let initial_cache = self.model.new_cache(batch_size, config.max_length)?;
+        println!("after New cache!");
         let mut beams = vec![BeamHypothesis {
             tokens: vec![decoder_start_token_id],
             score: 0.0,
@@ -127,10 +129,9 @@ impl Seq2SeqGenerator {
                 // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
                 let cache_len = hypo.cache.get_seq_length();
                 let total_decoder_len = cache_len + 1;
+                println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
                 let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
-                // 1. Clone the cache *before* it gets mutated.
                 let mut current_cache = hypo.cache.clone_box();
-
                 // 2. Pass the mutable clone to the forward pass.
                 let decoder_output = self
                     .model
@@ -144,6 +145,18 @@ impl Seq2SeqGenerator {
                     )
                     .await?;
 
+                // --- START DEBUGGING CODE ---
+                if step < 3 { // Only print for the first few steps
+                    // Get a slice of the last_hidden_state tensor
+                    let state_slice = decoder_output.last_hidden_state.slice(s![0, 0, 0..8]);
+                    println!(
+                        "[Step {}] Cache Length: {}, Last Hidden State (first 8 values): {:?}",
+                        step,
+                        current_cache.get_seq_length(), // Print the length *after* the forward pass
+                        state_slice.to_vec()
+                    );
+                }
+                // --- END DEBUGGING CODE ---
 
                 // 3. Project to logits (this now correctly includes the bias).
                 // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
@@ -197,7 +210,6 @@ impl Seq2SeqGenerator {
                 }
             }
 
-            // --- 3. PRUNE AND MANAGE BEAMS (Identical to your working code) ---
             all_new_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
             beams.clear();
 
@@ -206,7 +218,6 @@ impl Seq2SeqGenerator {
                     if candidate.tokens.len() >= config.min_length {
                         completed_beams.push(candidate);
                     }
-                    // Don't add to active beams if it's too short
                 } else {
                     beams.push(candidate);
                 }

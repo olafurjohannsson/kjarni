@@ -26,6 +26,7 @@ struct UpdateCacheUniforms {
 /// This kernel reads from `[B, S_new, H*D]` tensors and writes the data into
 /// the `[B, H, S_total, D]` cache tensors at the correct offset, performing the
 /// "split heads" transformation in a single, fused operation.
+#[derive(Clone)]
 pub struct GpuUpdateCache {
     pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
