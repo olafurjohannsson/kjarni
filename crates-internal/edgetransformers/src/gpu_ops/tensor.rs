@@ -92,7 +92,23 @@ impl GpuTensor {
             context,
         }
     }
+    pub fn permute_axes(&self, axes: &[usize]) -> GpuTensor {
+        assert_eq!(axes.len(), self.rank(), "Permutation axes must match tensor rank");
 
+        let mut new_shape = vec![0; self.rank()];
+        for (i, &axis) in axes.iter().enumerate() {
+            new_shape[i] = self.shape[axis];
+        }
+
+        // For view-only permutation (when data doesn't need actual reordering)
+        // This works for simple transposes where we can adjust strides
+        GpuTensor {
+            buffer: self.buffer.clone(),
+            shape: new_shape,
+            dtype: self.dtype,
+            context: self.context.clone(),
+        }
+    }
     /// Creates a new GpuTensor initialized with zeros.
     ///
     /// # Arguments
@@ -386,26 +402,6 @@ impl GpuTensor {
         )?)
     }
 
-    // pub async fn read_raw_data(&self) -> Result<Vec<u8>> {
-    //     let buffer_slice = self.buffer.slice(..);
-
-    //     let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
-    //     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-    //         let _ = tx.send(result);
-    //     });
-
-    //     self.context
-    //         .device
-    //         .poll(wgpu::PollType::wait_indefinitely());
-    //     rx.receive()
-    //         .await
-    //         .ok_or(anyhow!("GPU readback channel closed"))??;
-
-    //     let data = buffer_slice.get_mapped_range().to_vec();
-    //     self.buffer.unmap();
-
-    //     Ok(data)
-    // }
     pub async fn read_raw_data(&self) -> Result<Vec<u8>> {
         let device = &self.context.device;
         let queue = &self.context.queue;
@@ -485,5 +481,110 @@ impl GpuTensor {
             DType::Q2_1 => "q2_1",
             _ => "unknown",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array3;
+
+    async fn setup_context() -> Arc<WgpuContext> {
+        Arc::new(WgpuContext::new().await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_tensor_creation() {
+        let ctx = setup_context().await;
+        let shape = vec![2, 3, 4];
+        let tensor = GpuTensor::zeros(&ctx, shape.clone(), DType::F32, "test").unwrap();
+
+        assert_eq!(tensor.shape(), &[2, 3, 4]);
+        assert_eq!(tensor.rank(), 3);
+        assert_eq!(tensor.num_elements(), 24);
+    }
+
+    #[tokio::test]
+    async fn test_from_ndarray() {
+        let ctx = setup_context().await;
+        let arr = Array3::<f32>::ones((2, 3, 4));
+        let tensor = GpuTensor::from_ndarray(&ctx, &arr).unwrap();
+
+        assert_eq!(tensor.shape(), &[2, 3, 4]);
+
+        let result = tensor.to_ndarray_3d::<f32>().await.unwrap();
+        assert_eq!(result, arr);
+    }
+
+    #[tokio::test]
+    async fn test_view_operations() {
+        let ctx = setup_context().await;
+        let tensor = GpuTensor::zeros(&ctx, vec![2, 3, 4], DType::F32, "test").unwrap();
+
+        // Test view
+        let viewed = tensor.view(vec![6, 4]);
+        assert_eq!(viewed.shape(), &[6, 4]);
+        assert_eq!(viewed.num_elements(), 24);
+    }
+
+    #[tokio::test]
+    async fn test_view_4d_to_3d() {
+        let ctx = setup_context().await;
+        let tensor = GpuTensor::zeros(&ctx, vec![2, 4, 8, 64], DType::F32, "test").unwrap();
+
+        let viewed = tensor.view_as_3d(8, 8, 64).unwrap();
+        assert_eq!(viewed.shape(), &[8, 8, 64]);
+    }
+
+    #[tokio::test]
+    async fn test_view_3d_to_4d() {
+        let ctx = setup_context().await;
+        let tensor = GpuTensor::zeros(&ctx, vec![8, 10, 64], DType::F32, "test").unwrap();
+
+        let viewed = tensor.view_as_4d(2, 4, 10, 64).unwrap();
+        assert_eq!(viewed.shape(), &[2, 4, 10, 64]);
+    }
+
+    #[tokio::test]
+    async fn test_dims_helpers() {
+        let ctx = setup_context().await;
+
+        let t2d = GpuTensor::zeros(&ctx, vec![5, 10], DType::F32, "test").unwrap();
+        assert_eq!(t2d.dims2(), (5, 10));
+
+        let t3d = GpuTensor::zeros(&ctx, vec![2, 3, 4], DType::F32, "test").unwrap();
+        assert_eq!(t3d.dims3(), (2, 3, 4));
+
+        let t4d = GpuTensor::zeros(&ctx, vec![1, 2, 3, 4], DType::F32, "test").unwrap();
+        assert_eq!(t4d.dims4(), (1, 2, 3, 4));
+    }
+
+    #[tokio::test]
+    async fn test_roundtrip_cpu_gpu() {
+        let ctx = setup_context().await;
+        let original =
+            Array3::<f32>::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as f32);
+
+        let gpu_tensor = GpuTensor::from_ndarray(&ctx, &original).unwrap();
+        let result = gpu_tensor.to_ndarray_3d::<f32>().await.unwrap();
+
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Cannot view tensor")]
+    async fn test_invalid_view() {
+        let ctx = setup_context().await;
+        let tensor = GpuTensor::zeros(&ctx, vec![2, 3, 4], DType::F32, "test").unwrap();
+
+        // Wrong number of elements
+        tensor.view(vec![2, 3, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_dtype_size() {
+        assert_eq!(DType::F32.size_of(), 4);
+        assert_eq!(DType::U32.size_of(), 4);
+        assert_eq!(DType::I8.size_of(), 1);
     }
 }

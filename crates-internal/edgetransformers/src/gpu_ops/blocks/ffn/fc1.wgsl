@@ -14,6 +14,9 @@ struct FfnUniforms {
 // fn gelu(x: f32) -> f32 {
 //     return 0.5 * x * (1.0 + tanh(0.7978845608 * (x + 0.044715 * pow(x, 3.0))));
 // }
+
+// TODO: NEED TO ADD GELU AND GELU_NEW
+
 const SQRT_2_OVER_PI: f32 = 0.7978845608;
 const GELU_COEFF: f32 = 0.044715;
 

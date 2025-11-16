@@ -137,17 +137,12 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
     println!("  Norm: {:.6}", gpu_norm);
     println!("  First 10: {:?}", &gpu_embedding[..10]);
 
-    // Compare by wrapping single embeddings in a slice to match the assert function's expected type
     assert_embeddings_close(&[cpu_embedding], &[gpu_embedding], 1e-3, "Single sentence");
-
-    println!("\n✅ Single sentence test passed!\n");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_cpu_gpu_parity_batch() -> Result<()> {
-    println!("\n=== CPU vs GPU Parity Test: Batch ===\n");
-
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
     let cache_dir = dirs::cache_dir()
         .unwrap()
@@ -180,10 +175,7 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
     let gpu_embeddings = gpu_encoder.encode_batch(sentences).await?;
     println!("GPU batch encoded: {} sentences", gpu_embeddings.len());
 
-    // Compare
     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Batch");
-
-    println!("\n✅ Batch test passed!\n");
     Ok(())
 }
 
@@ -220,8 +212,6 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
 
     // Compare
     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Varied lengths");
-
-    println!("\n✅ Varied length test passed!\n");
     Ok(())
 }
 
@@ -258,15 +248,9 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
     }
     let sentence_refs: Vec<&str> = sentences.iter().map(|s| s.as_str()).collect();
 
-    println!("\n--- Encoding large batch ({} sentences) on CPU ---", sentences.len());
     let cpu_embeddings = cpu_encoder.encode_batch(&sentence_refs).await?;
-
-    println!("\n--- Encoding large batch ({} sentences) on GPU ---", sentences.len());
     let gpu_embeddings = gpu_encoder.encode_batch(&sentence_refs).await?;
 
-    // Compare
     assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Large batch");
-
-    println!("\n✅ Large batch test passed!\n");
     Ok(())
 }

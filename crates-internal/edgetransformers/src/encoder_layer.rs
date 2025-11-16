@@ -27,55 +27,72 @@ pub struct EncoderLayer {
 }
 
 impl EncoderLayer {
-    /// Forward pass for an encoder or decoder-only layer with KV caching.
-
     pub fn forward(
         &self,
         mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
         config: &dyn TransformerConfig,
     ) -> Result<Array3<f32>> {
-        let is_prenorm = config.is_prenorm();
-        let is_causal = config.is_causal();
-        if is_prenorm {
-            let residual_1 = hidden.clone();
-            let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
 
-            let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-                &ln1_out,
-                None,
-                Some(attention_mask),
-                is_causal,
-                None,
-                None,
-            )?;
-            let attn_block_output = residual_1 + attn_out;
-            let residual_2 = attn_block_output.clone();
-            let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
-            let ln2_out = self
-                .ffn_layer_norm
-                .forward_3d(&attn_block_output_contiguous);
-            let ffn_out = self.feedforward.forward(&ln2_out)?;
-            let block_output = residual_2.as_standard_layout().to_owned()
-                + ffn_out.as_standard_layout().to_owned();
-            hidden = block_output;
+        let hidden = if config.is_prenorm() {
+            self.forward_prenorm(hidden, attention_mask, config)
         } else {
-            let residual = hidden.clone();
-            let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-                &hidden,
-                None,
-                Some(attention_mask),
-                is_causal,
-                None,
-                None,
-            )?;
-            hidden = residual + attn_out;
-            hidden = self.self_attn_layer_norm.forward_3d(&hidden);
-            let residual = hidden.clone();
-            let ffn_out = self.feedforward.forward(&hidden)?;
-            hidden = residual + ffn_out;
-            hidden = self.ffn_layer_norm.forward_3d(&hidden);
-        }
+            self.forward_postnorm(hidden, attention_mask, config)
+        };
+
+        hidden
+    }
+    pub fn forward_prenorm(
+        &self,
+        mut hidden: Array3<f32>,
+        attention_mask: &Array2<f32>,
+        config: &dyn TransformerConfig,
+    ) -> Result<Array3<f32>> {
+        let residual_1 = hidden.clone();
+        let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
+
+        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
+            &ln1_out,
+            None,
+            Some(attention_mask),
+            config.is_causal(),
+            None,
+            None,
+        )?;
+        let attn_block_output = residual_1 + attn_out;
+        let residual_2 = attn_block_output.clone();
+        let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
+        let ln2_out = self
+            .ffn_layer_norm
+            .forward_3d(&attn_block_output_contiguous);
+        let ffn_out = self.feedforward.forward(&ln2_out)?;
+        let block_output = residual_2.as_standard_layout().to_owned()
+            + ffn_out.as_standard_layout().to_owned();
+        hidden = block_output;
+        Ok(hidden)
+    }
+    pub fn forward_postnorm(
+        &self,
+        mut hidden: Array3<f32>,
+        attention_mask: &Array2<f32>,
+        config: &dyn TransformerConfig,
+    ) -> Result<Array3<f32>> {
+        let residual = hidden.clone();
+        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
+            &hidden,
+            None,
+            Some(attention_mask),
+            config.is_causal(),
+            None,
+            None,
+        )?;
+        hidden = residual + attn_out;
+        hidden = self.self_attn_layer_norm.forward_3d(&hidden);
+        let residual = hidden.clone();
+        let ffn_out = self.feedforward.forward(&hidden)?;
+        hidden = residual + ffn_out;
+        hidden = self.ffn_layer_norm.forward_3d(&hidden);
+
         Ok(hidden)
     }
 }

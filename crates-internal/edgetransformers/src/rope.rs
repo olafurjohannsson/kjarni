@@ -158,7 +158,7 @@ impl RoPE {
         // No return value is needed as `x` was modified directly.
     }
     /// This is the correct "Rotate Half" implementation.
-    fn rotate_4d(&self, x: &Array4<f32>, position_offset: usize) -> Array4<f32> {
+    pub fn rotate_4d(&self, x: &Array4<f32>, position_offset: usize) -> Array4<f32> {
         let mut rotated = x.to_owned();
         let (batch, num_heads, seq_len, head_dim) = rotated.dim();
         let half_dim = head_dim / 2;
@@ -222,8 +222,6 @@ impl RoPE {
         let q_reshaped = q
             .to_shape((batch, seq_len, num_q_heads, self.head_dim))
             .map_err(|e| anyhow::anyhow!("Failed to reshape Q in RoPE: {}", e))?; // Return proper error
-
-        // ✅ Reshape K correctly using num_kv_heads
         let k_reshaped = k
             .to_shape((batch, seq_len, num_kv_heads, self.head_dim))
             .map_err(|e| anyhow::anyhow!("Failed to reshape K in RoPE: {}", e))?;
@@ -657,8 +655,6 @@ mod tests {
     fn test_rope_frequencies() {
         let head_dim = 64;
         let rope = RoPE::new(head_dim, 128, 10000.0);
-
-        // ✅ Cache shape now correctly matches full head_dim
         assert_eq!(rope.cos_cache.shape(), &[128, head_dim]);
         assert_eq!(rope.sin_cache.shape(), &[128, head_dim]);
 
@@ -731,12 +727,7 @@ mod tests {
         q[[0, 0, 0, 3]] = 4.0;
 
         let k = q.clone();
-
-        // ✅ Use position 1, not 0
         let (q_rot, _) = rope.apply_4d(&q, &k, 1);
-
-        println!("Original Q: {:?}", q.slice(s![0, 0, 0, ..]));
-        println!("Rotated Q (pos=1):  {:?}", q_rot.slice(s![0, 0, 0, ..]));
 
         let changed = (q[[0, 0, 0, 0]] - q_rot[[0, 0, 0, 0]]).abs() > 1e-6;
         assert!(changed, "RoPE should modify values at position 1");
@@ -782,8 +773,6 @@ mod tests {
         let sin_5_0 = rope.sin_cache[[5, 0]];
 
         println!("cos[5,0]: {}, sin[5,0]: {}", cos_5_0, sin_5_0);
-
-        // --- ✅ Calculate expectation using the CORRECT `rotate_half` logic ---
         // Formula for q_rot[i] = q[i] * cos[i] + (-q[i + half_dim]) * sin[i]
         // Formula for q_rot[i + half_dim] = q[i + half_dim] * cos[i] + q[i] * sin[i]
 

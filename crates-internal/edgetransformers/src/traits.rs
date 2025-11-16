@@ -2,13 +2,13 @@
 //!
 
 use crate::WgpuContext;
+use crate::activations::Activation;
 pub use crate::cache::Cache;
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
 use std::sync::Arc;
-use crate::activations::Activation;
 
 /// Supported computation backends.
 ///
@@ -98,7 +98,7 @@ pub trait Encoder: TransformerModel {
 /// A decoder is typically used for autoregressive generation, where it predicts
 /// one token at a time. It uses a causal attention mask to ensure that a given
 /// position can only attend to previous positions.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Decoder: TransformerModel {
     type Input;
     type Output;
@@ -134,7 +134,7 @@ pub trait Decoder: TransformerModel {
 ///
 /// This type of decoder attends to two sources: its own previously generated tokens
 /// (self-attention) and the output of an encoder (cross-attention).
-#[async_trait]
+#[async_trait(?Send)]
 pub trait CrossAttentionDecoder: TransformerModel {
     type Input;
     type Output;
@@ -168,6 +168,9 @@ pub trait TransformerConfig: Send + Sync {
     fn is_causal(&self) -> bool;
     ///
     fn is_prenorm(&self) -> bool;
+    fn extra_pos_embeddings(&self) -> usize {
+        0
+    }
 }
 
 /// Language model configuration (extends TransformerConfig)
@@ -191,19 +194,16 @@ pub trait LanguageModelConfig: TransformerConfig {
     fn num_key_value_heads(&self) -> usize {
         self.num_attention_heads()
     }
-    
+
     /// The total dimensionality of the key/value projections.
     fn kv_dim(&self) -> usize {
         let head_dim = self.hidden_size() / self.num_attention_heads();
         self.num_key_value_heads() * head_dim
     }
 
-    fn extra_pos_embeddings(&self) -> Option<u32> {
-        None
-    }
     fn is_encoder_decoder(&self) -> Option<bool> {
         None
-    } 
+    }
     fn model_type(&self) -> Option<String> {
         None
     }
@@ -237,13 +237,6 @@ pub trait LanguageModelConfig: TransformerConfig {
     fn as_any(&self) -> &dyn Any;
 
     fn activation_function(&self) -> Activation;
-
-    /// The offset to use for positional embeddings.
-    ///
-    /// Most models use an offset of 0. BART is a notable exception, using an offset of 2.
-    fn position_embedding_offset(&self) -> usize {
-        0 // Default to 0 for standard models like BERT
-    }
 
     /// Whether to scale the word + position embeddings by sqrt(hidden_size).
     ///

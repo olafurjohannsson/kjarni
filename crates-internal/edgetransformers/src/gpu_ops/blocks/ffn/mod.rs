@@ -174,6 +174,25 @@ impl GpuFeedForward {
         // Return the final output tensor.
         output
     }
+    pub fn encode_2(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        input: &GpuTensor,
+        weights: &GpuFeedForwardWeights,
+        temp: &mut crate::gpu_ops::blocks::attention::TempStorage,
+        output: &GpuTensor,
+    ) {
+        // Get a temporary tensor for the intermediate result.
+        let intermediate_shape = vec![
+            input.shape()[0],
+            input.shape()[1],
+            weights.fc1_weight.shape()[1], // The intermediate hidden size
+        ];
+        let intermediate = temp.get(intermediate_shape);
+        // Run the two passes.
+        self.run_fc1(encoder, weights, input, &intermediate);
+        self.run_fc2(encoder, weights, &intermediate, &output);
+    }
     /// Encodes the complete FFN forward pass into the command encoder.
     pub fn forward(
         &self,

@@ -25,15 +25,8 @@ async fn main() -> Result<()> {
     //
     let generator = Seq2SeqGenerator::new(Box::new(model));
 
-    // ✅ This is now the clean, correct way to get the config
     let mut generation_config = generator.model.get_default_generation_config();
     generation_config.max_new_tokens = Some(40);
-    // generation_config.repetition_penalty = 1.1;
-    // generation_config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams{
-    //     num_beams: 4,
-    //     length_penalty: 2.0,
-    //     early_stopping: true,
-    // });
 
     let article = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, \
     type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without \

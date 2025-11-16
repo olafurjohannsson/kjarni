@@ -1,18 +1,11 @@
+
 use crate::cross_encoder::CrossEncoder;
-use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
-use edgetransformers::encoder::TransformerEncoder;
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::models::ModelType;
-use edgetransformers::models::{EncoderLanguageModel, LanguageModel};
 use edgetransformers::traits::Device;
-use edgetransformers::traits::Encoder;
-use ndarray::Array2;
 use std::sync::Arc;
 use tokio;
-
-const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
-
 
 #[tokio::test]
 async fn test_torch_cross_encoder_predict() -> Result<()> {
@@ -32,11 +25,11 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
         .await?;
 
     let torch_value = 3.1776933670043945;
-    assert!((cpu_score - torch_value).abs() < TOLERANCE);
+    assert!((cpu_score - torch_value).abs() < 1e-3);
     let gpu_score = gpu_encoder
         .predict("i love edgeGPT", "edgeGPT is a new model inference library")
         .await?;
-    assert!((cpu_score - gpu_score).abs() < TOLERANCE);
+    assert!((cpu_score - gpu_score).abs() < 1e-3);
     Ok(())
 }
 #[tokio::test]

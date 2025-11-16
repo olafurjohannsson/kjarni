@@ -2,7 +2,7 @@ use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 #[cfg(test)]
 mod tests;

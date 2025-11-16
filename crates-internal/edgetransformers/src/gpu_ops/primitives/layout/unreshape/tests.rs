@@ -1,7 +1,7 @@
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{GpuTensor, primitives::layout::unreshape::GpuUnreshape};
 use anyhow::Result;
-use ndarray::{Array, Array3, Array4, Axis, Ix3};
+use ndarray::{Array, Array3, Array4};
 use std::sync::Arc;
 
 // Helper to get a test context.
@@ -42,8 +42,6 @@ async fn test_unreshape() -> Result<()> {
         .as_standard_layout()
         .to_owned()
         .into_shape((b, s, hidden_size))?; // [B, S, H*D]
-
-    // 3. ACT: Run the GPU kernel
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![b, s, hidden_size],
@@ -53,11 +51,7 @@ async fn test_unreshape() -> Result<()> {
     let mut encoder = context.device.create_command_encoder(&Default::default());
     gpu_unreshape.encode(&mut encoder, &gpu_input, &gpu_output);
     context.queue.submit(Some(encoder.finish()));
-
-    // 4. ASSERT: Compare the results
     let gpu_result = read_gpu_tensor_3d(&gpu_output).await?;
-
     assert_eq!(cpu_ground_truth.as_slice(), gpu_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }

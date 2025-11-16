@@ -23,6 +23,7 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 use crate::rope::RoPE;
 use log::{debug, info};
+use crate::gpu_ops::blocks::rope::GpuRoPE;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///
@@ -61,6 +62,7 @@ impl TransformerDecoder {
                     weights,
                     config.clone(),
                     ctx,
+                    rope.as_deref(),
                 )?))
             }
         }
@@ -84,7 +86,7 @@ impl TransformerModel for TransformerDecoder {
 }
 
 /// Implements the `Decoder` trait for the generic decoder, delegating to the backend.
-#[async_trait]
+#[async_trait(?Send)]
 impl Decoder for TransformerDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;

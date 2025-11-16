@@ -479,7 +479,7 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 /// Trait for decoder-only language models (GPT-2, GPT-3, Llama, etc.)
 ///
 /// These models generate text autoregressively.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait DecoderLanguageModel: LanguageModel {
     /// Get the decoder backend
     fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput>;

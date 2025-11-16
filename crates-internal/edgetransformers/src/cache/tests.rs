@@ -132,7 +132,6 @@ async fn test_cache_symmetry() -> Result<()> {
         "Final V-cache states do not match!"
     );
 
-    println!("✅ CPU and GPU KV Caches passed symmetry test!");
     Ok(())
 }
 

@@ -20,6 +20,7 @@ use ndarray::{Array2, Array3, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+use edgetransformers::gpu_ops::blocks::rope::GpuRoPE;
 
 /// A model container for LLaMA and its variants.
 ///
@@ -99,6 +100,7 @@ impl LlamaModel {
             config.rope_theta,
             config.rope_scaling.as_ref(),
         ));
+        // GpuRoPE::new(context, )
 
         // The generic TransformerDecoder will be built using the LlamaConfig.
         let decoder = TransformerDecoder::new(
@@ -140,7 +142,7 @@ impl LanguageModel for LlamaModel {
                 self.num_layers(),
                 batch_size,
                 max_len,
-                self.config().kv_dim(), // ✅ Correctly use kv_dim for Llama
+                self.config().kv_dim(),
             )),
             Device::Wgpu => {
                 let context = self

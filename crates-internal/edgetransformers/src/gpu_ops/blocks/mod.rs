@@ -1,12 +1,81 @@
-
-
 pub mod attention;
+pub mod cache;
+pub mod decoder;
+pub mod embeddings;
+pub mod encoder;
 pub mod ffn;
 pub mod ffn_swiglu;
-pub mod cache;
-pub mod encoder;
-pub mod decoder;
 pub mod layer_norm;
 pub mod rms_norm;
 pub mod rope;
-pub mod embeddings;
+
+use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::blocks::attention::TempStorage;
+
+
+use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
+
+pub use ffn::{GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd};
+pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
+
+pub enum GpuNormalizationWeights {
+    LayerNorm(GpuLayerNormWeights),
+    RMSNorm(GpuRMSNormWeights),
+}
+
+pub enum GpuNormalization {
+    LayerNorm(GpuLayerNorm),
+    RMSNorm(GpuRMSNorm),
+}
+
+impl GpuNormalization {
+    pub fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        weights: &GpuNormalizationWeights,
+        input: &GpuTensor,
+        output: &GpuTensor,
+    ) {
+        match (self, weights) {
+            (Self::LayerNorm(ln), GpuNormalizationWeights::LayerNorm(w)) => {
+                ln.encode(encoder, w, input, output)
+            }
+            (Self::RMSNorm(rms), GpuNormalizationWeights::RMSNorm(w)) => {
+                rms.encode(encoder, w, input, output)
+            }
+            _ => panic!("Normalization type mismatch"),
+        }
+    }
+}
+
+pub enum GpuFeedForwardWeights {
+    Standard(GpuFeedForwardWeightsStd),
+    SwiGLU(GpuSwiGLUFFNWeights),
+}
+
+pub enum GpuFeedForward {
+    Standard(GpuFeedForwardStd),
+    SwiGLU(GpuSwiGLUFFN),
+}
+
+impl GpuFeedForward {
+    pub fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        weights: &GpuFeedForwardWeights,
+        input: &GpuTensor,
+        output: &GpuTensor,
+        temp: &mut TempStorage,
+    ) {
+        match (self, weights) {
+            (Self::Standard(ffn), GpuFeedForwardWeights::Standard(w)) => {
+                ffn.encode_2(encoder, input, w, temp, output)
+            }
+            (Self::SwiGLU(swi), GpuFeedForwardWeights::SwiGLU(w)) => {
+                swi.encode(encoder, w, input, output, temp)
+            }
+            _ => panic!("FFN type mismatch"),
+        }
+    }
+}

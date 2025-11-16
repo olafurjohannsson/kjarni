@@ -84,6 +84,9 @@ impl TransformerConfig for BartConfig {
     fn is_prenorm(&self) -> bool {
         false
     } // BART is post-norm
+    fn extra_pos_embeddings(&self) -> usize {
+        2
+    }
 }
 
 impl LanguageModelConfig for BartConfig {
@@ -117,18 +120,14 @@ impl LanguageModelConfig for BartConfig {
     fn pad_token_id(&self) -> Option<u32> {
         Some(self.pad_token_id)
     }
-    fn extra_pos_embeddings(&self) -> Option<u32> {
-        Some(self.extra_pos_embeddings)
-    }
     fn is_encoder_decoder(&self) -> Option<bool> {
         Some(self.is_encoder_decoder)
-    } 
+    }
+
     fn model_type(&self) -> Option<String> {
         Some(self.model_type.clone())
     }
-    fn position_embedding_offset(&self) -> usize {
-        2
-    }
+
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         ("model.shared.weight", "model.encoder.embed_positions.weight", None)
     }

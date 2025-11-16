@@ -20,7 +20,6 @@ async fn get_test_context() -> Arc<WgpuContext> {
     Arc::new(WgpuContext::new().await.unwrap())
 }
 
-// Macro to handle the shape conversion cleanly
 macro_rules! shape_4d {
     ($shape_vec:expr) => {
         [$shape_vec[0], $shape_vec[1], $shape_vec[2], $shape_vec[3]]

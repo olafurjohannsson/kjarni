@@ -10,6 +10,7 @@ pub mod attention;
 pub mod cache;
 pub mod decoder;
 pub mod embeddings;
+pub mod adaptive_embeddings;
 pub mod encoder;
 pub mod encoder_decoder;
 pub mod feedforward;

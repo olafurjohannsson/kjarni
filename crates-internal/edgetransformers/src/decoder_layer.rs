@@ -161,7 +161,6 @@ impl DecoderLayer {
         Ok((output, (rotated_k, new_v)))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

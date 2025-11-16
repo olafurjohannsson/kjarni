@@ -8,7 +8,7 @@
 //! # Architecture
 //!
 //! 1.  **`GpuEmbeddingWeights` struct:** A container for the embedding tables (word,
-//!     position, token type) that have been pre-loaded onto the GPU. Its constructor
+//!     position, token type) that have been preloaded onto the GPU. Its constructor
 //!     is the gatekeeper for ensuring weights are present.
 //! 2.  **`GpuEmbeddings` struct:** The main public-facing struct. It owns the compiled
 //!     GPU kernels required for the embedding process (lookup, add, scale).
@@ -129,7 +129,7 @@ impl GpuEmbeddings {
                 encoder,
                 &hidden_states,
                 pos_embeddings,
-                config.position_embedding_offset(),
+                config.extra_pos_embeddings(),
                 &pos_add_out,
             );
             hidden_states = pos_add_out;

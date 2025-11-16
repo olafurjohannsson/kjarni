@@ -17,7 +17,6 @@ pub struct Embeddings {
     pub word_embeddings: Array2<f32>,
     pub position_embeddings: Option<Array2<f32>>,
     pub token_type_embeddings: Option<Array2<f32>>,
-    pub extra_pos_embeddings: Option<u32>,
 }
 
 impl Embeddings {
@@ -25,13 +24,11 @@ impl Embeddings {
         word_embeddings: Array2<f32>,
         position_embeddings: Option<Array2<f32>>,
         token_type_embeddings: Option<Array2<f32>>,
-        extra_pos_embeddings: Option<u32>,
     ) -> Self {
         Self {
             word_embeddings,
             position_embeddings,
             token_type_embeddings,
-            extra_pos_embeddings,
         }
     }
 
@@ -110,11 +107,6 @@ impl Embeddings {
 
 
         if let Some(ref pos_emb) = self.position_embeddings {
-            // let start_idx = if self.extra_pos_embeddings.is_some() {
-            //     position_offset + self.extra_pos_embeddings.unwrap() as usize
-            // } else {
-            //     position_offset
-            // };
             let start_idx = position_offset;
             let end_idx = position_offset + seq_len;
 
@@ -190,7 +182,7 @@ mod tests {
 
     // --- Mock Config for testing ---
     struct TestConfig {
-        pos_offset: usize,
+        extra_pos_embeddings: usize,
         scale_embed: bool,
     }
     impl TransformerConfig for TestConfig {
@@ -212,6 +204,7 @@ mod tests {
         fn is_prenorm(&self) -> bool {
             false
         }
+        fn extra_pos_embeddings(&self) -> usize { 0 }
     }
     impl LanguageModelConfig for TestConfig {
         fn vocab_size(&self) -> usize {
@@ -222,9 +215,6 @@ mod tests {
         }
         fn intermediate_size(&self) -> usize {
             1536
-        }
-        fn position_embedding_offset(&self) -> usize {
-            self.pos_offset
         }
         fn scale_embeddings(&self) -> bool {
             self.scale_embed
@@ -263,7 +253,7 @@ mod tests {
         // --- 1. Setup Common Data and Config ---
         let context = Arc::new(WgpuContext::new().await?);
         let config = TestConfig {
-            pos_offset: 0,
+            extra_pos_embeddings: 0,
             scale_embed: false,
         }; // Test BART-like settings
 
@@ -285,12 +275,11 @@ mod tests {
             weights.get_array2(word_w)?,
             Some(weights.get_array2(pos_w)?),
             token_type_embeddings,
-            None,
         );
         let expected_output = cpu_embeddings.forward(
             &input_ids_cpu,
             Some(&token_type_ids_cpu.mapv(|x| x as u32)), // CPU version expects f32 type ids
-            config.position_embedding_offset(),
+            config.extra_pos_embeddings(),
             config.scale_embeddings(),
         );
 
@@ -325,7 +314,7 @@ mod tests {
         // --- 1. Setup Common Data and Config ---
         let context = Arc::new(WgpuContext::new().await?);
         let config = TestConfig {
-            pos_offset: 0,
+            extra_pos_embeddings: 0,
             scale_embed: false,
         }; // Test BART-like settings
 
@@ -346,12 +335,11 @@ mod tests {
             weights.get_array2(word_w)?,
             Some(weights.get_array2(pos_w)?),
             token_type_embeddings,
-            None,
         );
         let expected_output = cpu_embeddings.forward(
             &input_ids_cpu,
             None,
-            config.position_embedding_offset(),
+            config.extra_pos_embeddings(),
             config.scale_embeddings(),
         );
 
@@ -386,7 +374,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
 
-        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
 
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -399,7 +387,7 @@ mod tests {
         // LLaMA / RoPE style
         let word_emb = Array2::ones((100, 64));
 
-        let embeddings = Embeddings::new(word_emb, None, None, None);
+        let embeddings = Embeddings::new(word_emb, None, None);
 
         let input_ids = Array2::zeros((2, 10));
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -414,7 +402,7 @@ mod tests {
         let pos_emb = Array2::ones((512, 64));
         let token_type_emb = Array2::ones((2, 64));
 
-        let embeddings = Embeddings::new(word_emb, Some(pos_emb), Some(token_type_emb), None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), Some(token_type_emb));
 
         let input_ids = Array2::zeros((2, 10));
         let token_type_ids = Array2::zeros((2, 10));
@@ -429,7 +417,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((10, 64)); // Only 10 positions
 
-        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
 
         let input_ids = Array2::zeros((2, 20)); // 20 tokens - too long!
         let _ = embeddings.forward(&input_ids, None, 0, false);
@@ -440,7 +428,7 @@ mod tests {
         // LLaMA without position embeddings can handle any length
         let word_emb = Array2::ones((100, 64));
 
-        let embeddings = Embeddings::new(word_emb, None, None, None);
+        let embeddings = Embeddings::new(word_emb, None, None);
 
         let input_ids = Array2::zeros((2, 1000)); // Very long sequence
         let output = embeddings.forward(&input_ids, None, 0, false);
@@ -455,7 +443,7 @@ mod tests {
         let word_emb = Array2::ones((100, 64));
         let pos_emb = Array2::ones((512, 64));
 
-        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None, None);
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
 
         let mut input_ids = Array2::zeros((2, 10));
         input_ids[[0, 0]] = 150 as u32; // Out of vocab range [0, 100)

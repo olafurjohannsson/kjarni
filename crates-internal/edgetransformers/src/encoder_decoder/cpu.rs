@@ -1,8 +1,7 @@
 use crate::activations::Activation;
 use crate::encoder::TransformerEncoder;
 use crate::traits::{
-    CrossAttentionDecoder, DecoderOutput, Device, Encoder, EncoderDecoderArchitecture,
-    EncoderOutput as EncoderOutputTrait, TransformerModel,
+    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
 };
 use crate::traits::{
     DecoderArchitecture, EncoderArchitecture, LanguageModelConfig, LayerAttentionNames,
@@ -11,8 +10,8 @@ use crate::traits::{
 use crate::weights::ModelWeights;
 use crate::{
     Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention,
-    decoder_cross_attn_layer::DecoderCrossAttentionLayer, encoder_layer::EncoderLayer,
-    feedforward::StdFeedForward, normalization::LayerNorm,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward,
+    normalization::LayerNorm,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -21,7 +20,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
-pub struct CpuTransformerEncoderDecoder {
+pub struct CpuTransformerEncoderDecoder{
     encoder: TransformerEncoder,
     decoder_layers: Vec<DecoderCrossAttentionLayer>,
     decoder_embeddings: Embeddings,
@@ -44,7 +43,6 @@ impl CpuTransformerEncoderDecoder {
             weights.get_array2(word_w)?,
             Some(weights.get_array2(pos_w)?),
             None,
-            config.extra_pos_embeddings(),
         );
 
         let (embed_norm_w, embed_norm_b) = config.get_decoder_embedding_ln_names();
@@ -188,7 +186,7 @@ impl CpuTransformerEncoderDecoder {
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;
@@ -205,8 +203,8 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
         let total_len = position_offset + seq_len;
-        
-        // self.decoder_embeddings.forward(decoder_input_ids, 
+
+        // self.decoder_embeddings.forward(decoder_input_ids,
         // 1. Embed the decoder input tokens and apply layer norm.
         let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
@@ -283,6 +281,9 @@ impl TransformerConfig for EncoderConfigAdapter {
     }
     fn is_prenorm(&self) -> bool {
         self.0.is_prenorm()
+    }
+    fn extra_pos_embeddings(&self) -> usize {
+        self.0.extra_pos_embeddings()
     }
 }
 impl LanguageModelConfig for EncoderConfigAdapter {
@@ -378,7 +379,7 @@ impl DecoderArchitecture for DecoderConfigAdapter {
     // fn get_embedding_weight_names(&self) -> (&str, &str) {
     //     self.0.get_decoder_embedding_names()
     // }
-    
+
     // fn as_any(&self) -> &dyn Any {
     //     self // Simply return a reference to self as a `&dyn Any`
     // }

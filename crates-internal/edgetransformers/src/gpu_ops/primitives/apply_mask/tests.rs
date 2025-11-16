@@ -27,8 +27,6 @@ fn generate_expected_scores(
     position_offset: u32,
 ) -> Result<Array4<f32>> {
     let mut current_scores = scores.clone();
-
-    // Call the REAL production functions
     if is_causal {
         current_scores = apply_causal_mask(current_scores, position_offset as usize)?;
     }
@@ -38,7 +36,6 @@ fn generate_expected_scores(
 }
 #[tokio::test]
 async fn test_mask_encoder_case() -> Result<()> {
-    println!("\n--- Testing GpuApplyMask (Encoder) ---");
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
 
@@ -60,13 +57,11 @@ async fn test_mask_encoder_case() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((b, h, s, s), gpu_result_vec)?;
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_mask_decoder_prompt_case() -> Result<()> {
-    println!("\n--- Testing GpuApplyMask (Decoder Prompt) ---");
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
 
@@ -87,13 +82,11 @@ async fn test_mask_decoder_prompt_case() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((b, h, s, s), gpu_result_vec)?;
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_mask_decoder_generation_case() -> Result<()> {
-    println!("\n--- Testing GpuApplyMask (Decoder Generation) ---");
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
 
@@ -128,13 +121,11 @@ async fn test_mask_decoder_generation_case() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
-    println!("\n--- Testing GpuApplyMask (Decoder Edge Case: Offset 0) ---");
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
 
@@ -167,13 +158,11 @@ async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_mask_decoder_generation_batched() -> Result<()> {
-    println!("\n--- Testing GpuApplyMask (Decoder Batched Generation) ---");
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
 
@@ -207,13 +196,11 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((b, h, query_len, cache_capacity), gpu_result_vec)?;
 
     assert_eq!(gpu_result.as_slice(), expected_result.as_slice());
-    println!("✅ Passed!");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
-    // --- 1. Arrange ---
     let context = get_test_context().await;
     let apply_mask_kernel = GpuApplyMask::new(&context);
 
@@ -223,10 +210,7 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     let key_stride = 8; // Physical max_len
     let position_offset = 2; // We are generating tokens 2, 3, 4, 5
     let logical_key_len = position_offset + query_len; // 6
-
-    // Create a scores tensor full of 1.0s
     let scores_cpu = Array4::<f32>::ones((batch_size, num_heads, query_len, key_stride));
-    // Create a padding mask that is all ones (no padding)
     let mask_cpu = Array2::<f32>::ones((batch_size, key_stride));
 
     let scores_gpu = GpuTensor::from_ndarray(&context, &scores_cpu)?;
@@ -234,8 +218,6 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     let mut encoder = context
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-
-    // --- 2. Act ---
     apply_mask_kernel.encode(
         &mut encoder,
         &scores_gpu,
@@ -245,21 +227,14 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     );
     context.queue.submit(Some(encoder.finish()));
     let result_gpu: Array4<f32> = scores_gpu.to_ndarray_4d().await?;
-
-    // --- 3. Assert ---
-    // Create the expected result on the CPU
     let mut expected_cpu = scores_cpu.clone();
     
 
     for q_pos in 0..query_len {
         for k_pos in 0..key_stride {
             let absolute_query_pos = position_offset + q_pos;
-
-            // Condition 1: Key is outside the logical length (garbage)
             let is_garbage = k_pos >= logical_key_len;
-            // Condition 2: Key is in the future (causal)
             let is_future = k_pos > absolute_query_pos;
-
             if is_garbage || is_future {
                 expected_cpu[[0, 0, q_pos, k_pos]] = -1e9f32;
             }

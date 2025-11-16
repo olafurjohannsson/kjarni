@@ -10,15 +10,9 @@ use common::{read_gpu_tensor_to_vec};
 use ndarray::{Array, Array2, Array4, Axis};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
-
+use common::get_test_context;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-
-
-
-async fn get_test_context() -> Arc<crate::WgpuContext> {
-    Arc::new(crate::WgpuContext::new().await.unwrap())
-}
 
 
 // Generic helper to compare arrays of any dimension
@@ -59,7 +53,6 @@ async fn test_permute_2d_transpose() -> Result<()> {
     let gpu_result = Array2::from_shape_vec((shape[0], shape[1]), gpu_vec)?;
     
     assert_all_close(&gpu_result, &cpu_result, 1e-6);
-    println!("✅ Passed!");
     Ok(())
 }
 
@@ -97,7 +90,6 @@ async fn test_permute_4d_attention_reshape() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), gpu_vec)?;
     
     assert_all_close(&gpu_result, &cpu_result.as_standard_layout().to_owned(), 1e-6);
-    println!("✅ Passed!");
     Ok(())
 }
 
@@ -135,6 +127,5 @@ async fn test_permute_4d_attention_k_transpose() -> Result<()> {
     let gpu_result = Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), gpu_vec)?;
     
     assert_all_close(&gpu_result, &cpu_result.as_standard_layout().to_owned(), 1e-6);
-    println!("✅ Passed!");
     Ok(())
 }

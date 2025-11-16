@@ -1,5 +1,6 @@
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::rope::RoPE;
 use anyhow::Result;
 use ndarray::Array2;
 use std::sync::Arc;
@@ -21,89 +22,119 @@ struct RoPEUniforms {
 }
 
 /// A GPU kernel for applying Rotary Position Embeddings (RoPE).
-/// This is an in-place operation on the Q and K tensors.
 pub struct GpuRoPE {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     context: Arc<WgpuContext>,
-    // Precomputed frequency tables, stored on the GPU for fast access.
     cos_cache: GpuTensor,
     sin_cache: GpuTensor,
 }
 
 impl GpuRoPE {
-    pub fn new(context: &Arc<WgpuContext>, cos_cache_cpu: &Array2<f32>, sin_cache_cpu: &Array2<f32>) -> Result<Self> {
+    pub fn from_cpu_rope(context: &Arc<WgpuContext>, cpu_rope: &RoPE) -> Result<Self> {
+        Self::new(context, &cpu_rope.cos_cache, &cpu_rope.sin_cache)
+    }
+
+    pub fn new(
+        context: &Arc<WgpuContext>,
+        cos_cache_cpu: &Array2<f32>,
+        sin_cache_cpu: &Array2<f32>,
+    ) -> Result<Self> {
+        // --- Compile the single-tensor WGSL shader ---
         let shader = context
             .device
-            .create_shader_module(wgpu::include_wgsl!("./rope.wgsl"));
+            .create_shader_module(wgpu::include_wgsl!("./rope_single.wgsl"));
 
-        // Upload the precomputed tables to the GPU
-        let cos_cache = GpuTensor::from_ndarray(context, cos_cache_cpu)?;
-        let sin_cache = GpuTensor::from_ndarray(context, sin_cache_cpu)?;
-
+        // --- Create the BindGroupLayout for the single-tensor version ---
         let bind_group_layout =
             context
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("RoPE Bind Group Layout"),
+                    label: Some("RoPE Single Tensor Bind Group Layout"),
                     entries: &[
-                        // Uniforms
+                        // Binding 0: Uniforms
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
                             count: None,
                         },
-                        // Q tensor (read_write)
+                        // Binding 1: Input Tensor (read-only)
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
                             count: None,
                         },
-                        // K tensor (read_write)
+                        // Binding 2: Cosine cache (read-only)
                         wgpu::BindGroupLayoutEntry {
                             binding: 2,
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
                             count: None,
                         },
-                        // Cosine cache (read_only)
+                        // Binding 3: Sine cache (read-only)
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
                             count: None,
                         },
-                        // Sine cache (read_only)
+                        // Binding 4: Output Tensor (writeable)
                         wgpu::BindGroupLayoutEntry {
                             binding: 4,
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
                             count: None,
                         },
                     ],
                 });
 
+        // --- Create the Pipeline Layout ---
         let pipeline_layout =
             context
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("RoPE Pipeline Layout"),
+                    label: Some("RoPE Single Tensor Pipeline Layout"),
                     bind_group_layouts: &[&bind_group_layout],
                     push_constant_ranges: &[],
                 });
 
+        // --- Create the Compute Pipeline ---
         let pipeline = context
             .device
             .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("RoPE Pipeline"),
+                label: Some("RoPE Single Tensor Pipeline"),
                 layout: Some(&pipeline_layout),
                 module: &shader,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
                 cache: None,
             });
+
+        // --- Upload caches to GPU ---
+        let cos_cache = GpuTensor::from_ndarray::<f32, _>(context, cos_cache_cpu)?;
+        let sin_cache = GpuTensor::from_ndarray::<f32, _>(context, sin_cache_cpu)?;
 
         Ok(Self {
             pipeline,
@@ -114,16 +145,20 @@ impl GpuRoPE {
         })
     }
 
-    /// Encodes the RoPE operation. This is an IN-PLACE modification of Q and K.
+    /// Encodes the RoPE operation for a SINGLE tensor. This is an OUT-OF-PLACE operation.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        q: &GpuTensor, // The Query tensor to modify [B, H, S, D]
-        k: &GpuTensor, // The Key tensor to modify   [B, H, S, D]
+        tensor_in: &GpuTensor,
+        tensor_out: &GpuTensor,
         position_offset: usize,
     ) {
-        let (batch_size, num_heads, seq_len, head_dim) = q.dims4();
-        assert_eq!(k.shape(), q.shape(), "Q and K must have the same shape for RoPE");
+        let (batch_size, num_heads, seq_len, head_dim) = tensor_in.dims4();
+        assert_eq!(
+            tensor_out.shape(),
+            tensor_in.shape(),
+            "Input and output tensors must have the same shape for RoPE"
+        );
 
         let uniforms = RoPEUniforms {
             batch_size: batch_size as u32,
@@ -152,10 +187,10 @@ impl GpuRoPE {
                 layout: &self.bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: q.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: k.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: self.cos_cache.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: self.sin_cache.buffer().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: tensor_in.buffer().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: self.cos_cache.buffer().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: self.sin_cache.buffer().as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: tensor_out.buffer().as_entire_binding() },
                 ],
             });
 
@@ -165,8 +200,7 @@ impl GpuRoPE {
         });
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
-        
-        // Dispatch one thread per dimension pair per sequence element per head per batch item.
+
         let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
         let workgroups_y = seq_len as u32;
         let workgroups_z = (batch_size * num_heads) as u32;

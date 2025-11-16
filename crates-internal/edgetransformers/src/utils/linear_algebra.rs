@@ -5,9 +5,6 @@ use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
 #[cfg(not(target_arch = "wasm32"))]
 use ndarray::parallel::prelude::*;
 
-
-
-
 /// Batched matrix multiplication: [batch, m, k] x [k, n] -> [batch, m, n]
 #[inline(always)]
 pub fn matmul_3d_2d(a: &Array3<f32>, b: &Array2<f32>) -> Array3<f32> {
@@ -24,34 +21,21 @@ pub fn matmul_3d_2d(a: &Array3<f32>, b: &Array2<f32>) -> Array3<f32> {
 
     let mut c = Array3::<f32>::zeros((batch, m, n));
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if batch <= 4 {
-            // Small batches: sequential
-            Zip::from(c.axis_iter_mut(Axis(0)))
-                .and(a_cont.axis_iter(Axis(0)))
-                .for_each(|mut c_slice, a_slice| {
-                    c_slice.assign(&a_slice.dot(&b_cont));
-                });
-        } else {
-            // Large batches: parallel
-            Zip::from(c.axis_iter_mut(Axis(0)))
-                .and(a_cont.axis_iter(Axis(0)))
-                .par_for_each(|mut c_slice, a_slice| {
-                    c_slice.assign(&a_slice.dot(&b_cont));
-                });
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
+    if batch <= 4 {
+        // Small batches: sequential
         Zip::from(c.axis_iter_mut(Axis(0)))
             .and(a_cont.axis_iter(Axis(0)))
             .for_each(|mut c_slice, a_slice| {
                 c_slice.assign(&a_slice.dot(&b_cont));
             });
+    } else {
+        // Large batches: parallel
+        Zip::from(c.axis_iter_mut(Axis(0)))
+            .and(a_cont.axis_iter(Axis(0)))
+            .par_for_each(|mut c_slice, a_slice| {
+                c_slice.assign(&a_slice.dot(&b_cont));
+            });
     }
-
     c
 }
 
@@ -80,33 +64,19 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     let total_batches = batch * heads;
     let mut output_3d = Array3::<f32>::zeros((total_batches, seq1, seq2));
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if total_batches <= 8 {
-            Zip::from(output_3d.axis_iter_mut(Axis(0)))
-                .and(a_3d.axis_iter(Axis(0)))
-                .and(b_3d.axis_iter(Axis(0)))
-                .for_each(|mut c_slice, a_slice, b_slice| {
-                    let result = a_slice.dot(&b_slice);
-                    c_slice.assign(&result);
-                });
-        } else {
-            Zip::from(output_3d.axis_iter_mut(Axis(0)))
-                .and(a_3d.axis_iter(Axis(0)))
-                .and(b_3d.axis_iter(Axis(0)))
-                .par_for_each(|mut c_slice, a_slice, b_slice| {
-                    let result = a_slice.dot(&b_slice);
-                    c_slice.assign(&result);
-                });
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
+    if total_batches <= 8 {
         Zip::from(output_3d.axis_iter_mut(Axis(0)))
             .and(a_3d.axis_iter(Axis(0)))
             .and(b_3d.axis_iter(Axis(0)))
             .for_each(|mut c_slice, a_slice, b_slice| {
+                let result = a_slice.dot(&b_slice);
+                c_slice.assign(&result);
+            });
+    } else {
+        Zip::from(output_3d.axis_iter_mut(Axis(0)))
+            .and(a_3d.axis_iter(Axis(0)))
+            .and(b_3d.axis_iter(Axis(0)))
+            .par_for_each(|mut c_slice, a_slice, b_slice| {
                 let result = a_slice.dot(&b_slice);
                 c_slice.assign(&result);
             });

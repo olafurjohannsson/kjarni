@@ -14,8 +14,10 @@ authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/olafurjohannsson/edgegpt"
-keywords = ["ai", "llm", "transformer", "bert", "gpt", "wgpu"]
+keywords = ["ai", "llm", "transformer", "bert", "gpt"]
 categories = ["science", "text-processing"]
+
+
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -27,12 +29,15 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
 tokenizers = { version = "0.22.1", default-features = false, features = ["onig"] }
 once_cell = "1.19"
 
+
+
 # GPU / Numerics
 wgpu = "27.0.1"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
-ndarray = { version = "0.16.1", features = ["rayon"] } # Base features
+ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] } # Base features
 
+matrixmultiply = "0.3.10"
 # Other shared deps
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 async-trait = "0.1.89"
@@ -48,3 +53,8 @@ futures-util = "0.3.31"
 futures-core = "0.3.0"
 async-stream = "0.3.6"
 libm = "0.2.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

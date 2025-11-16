@@ -280,6 +280,19 @@ fn repeat_kv(kv: &Array4<f32>, num_groups: usize) -> Result<Array4<f32>> {
             }
         }
     }
+    // let mut repeated = Array4::zeros((batch, num_heads, seq_len, head_dim));
+    //
+    // for b in 0..batch {
+    //     for kv_head in 0..num_kv_heads {
+    //         // Repeat this KV head num_groups times
+    //         for g in 0..num_groups {
+    //             let q_head = kv_head * num_groups + g;
+    //             repeated
+    //                 .slice_mut(s![b, q_head, .., ..])
+    //                 .assign(&kv.slice(s![b, kv_head, .., ..]));
+    //         }
+    //     }
+    // }
 
     Ok(repeated)
 }

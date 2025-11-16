@@ -34,5 +34,7 @@ rand_distr ={ workspace = true}
 log = { workspace = true }
 ndarray-rand = { workspace = true }
 libm = { workspace = true }
+matrixmultiply = { workspace = true }
+
 [dev-dependencies]
 env_logger = "0.10"

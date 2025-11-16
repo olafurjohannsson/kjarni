@@ -52,7 +52,7 @@ impl GpuTransformerEncoderDecoder {
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;

@@ -1,6 +1,8 @@
+use crate::WgpuContext;
 use crate::cache::CpuKVCache;
 use crate::decoder_layer::DecoderLayer;
 use crate::feedforward::SwiGluFeedForward;
+use crate::gpu_ops::tensor;
 use crate::rope::RoPE;
 use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
 use crate::weights::ModelWeights;
@@ -13,7 +15,6 @@ use async_trait::async_trait;
 use log::{debug, info};
 use ndarray::{Array1, Array2, Array3, Axis, s};
 use std::sync::Arc;
-
 /// The CPU backend implementation for the generic `TransformerDecoder`.
 pub struct CpuTransformerDecoder {
     embeddings: Embeddings,
@@ -30,7 +31,6 @@ impl CpuTransformerDecoder {
         rope: Option<Arc<RoPE>>,
     ) -> Result<Self> {
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
-        let model_offset = config.position_embedding_offset();
 
         let word_embeddings = weights.get_array2(word_w)?;
         let position_embeddings = if !pos_w.is_empty() {
@@ -41,8 +41,7 @@ impl CpuTransformerDecoder {
             None
         };
 
-        let embeddings = Embeddings::new(word_embeddings, position_embeddings, None, 
-            Some(model_offset as u32));
+        let embeddings = Embeddings::new(word_embeddings, position_embeddings, None);
 
         // Get final layer norm
         let (norm_w, norm_b) = config.get_final_layer_norm_names();
@@ -75,7 +74,6 @@ impl CpuTransformerDecoder {
         })
     }
 
-    /// Build a single decoder layer (works for both GPT-2 and LLaMA)
     fn build_layer(
         weights: &ModelWeights,
         config: &dyn DecoderArchitecture,
@@ -124,10 +122,8 @@ impl CpuTransformerDecoder {
 
                 let q_bias =
                     Self::load_optional_bias(weights, &layer_attn_names.q_bias, hidden_size)?;
-                let k_bias =
-                    Self::load_optional_bias(weights, &layer_attn_names.k_bias, kv_dim)?;
-                let v_bias =
-                    Self::load_optional_bias(weights, &layer_attn_names.v_bias, kv_dim)?;
+                let k_bias = Self::load_optional_bias(weights, &layer_attn_names.k_bias, kv_dim)?;
+                let v_bias = Self::load_optional_bias(weights, &layer_attn_names.v_bias, kv_dim)?;
                 let o_bias =
                     Self::load_optional_bias(weights, &layer_attn_names.output_bias, hidden_size)?;
 
@@ -135,7 +131,7 @@ impl CpuTransformerDecoder {
                     q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
                 )
             };
-        
+
         let attention = MultiHeadAttention::new(
             hidden_size,
             config.num_attention_heads(),
@@ -149,7 +145,7 @@ impl CpuTransformerDecoder {
             o_bias,
             Some(config.num_key_value_heads()),
         );
-        
+
         // Load FFN (standard or SwiGLU)
         let feed_forward = if let Some(gate_weight_name) = &ffn_names.gate_weight {
             // SwiGLU (LLaMA)
@@ -226,7 +222,7 @@ impl CpuTransformerDecoder {
             feedforward: feed_forward,
             ffn_layer_norm,
             is_prenorm: config.is_prenorm(),
-            rope: rope,
+            rope,
         })
     }
 
@@ -277,7 +273,7 @@ impl TransformerModel for CpuTransformerDecoder {
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl Decoder for CpuTransformerDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;
@@ -295,56 +291,25 @@ impl Decoder for CpuTransformerDecoder {
             position_offset
         );
 
-        let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
-        debug!(
-            "[CPU Decoder] Initial hidden_states shape: {:?}",
-            hidden_states.shape()
+        // let mut hidden_states = self.embed_with_offset(input_ids, position_offset);
+        let mut hidden_states = self.embeddings.forward(
+            input_ids,
+            None,
+            position_offset,
+            self.config.scale_embeddings(),
         );
-        debug!(
-            "[CPU Decoder] Attention mask shape: {:?}",
-            attention_mask.shape()
-        );
+        if position_offset == 0 {
+            print_cpu_tensor(&hidden_states, "Layer 0 Input (hidden_states)");
+        }
 
-        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
+        let cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
         let mut new_key_values = Vec::with_capacity(self.layers.len());
-
-        info!(
-            "[CPU Decoder] Executing {} decoder layers...",
-            self.layers.len()
-        );
         for (layer_idx, layer) in self.layers.iter().enumerate() {
-            debug!("[CPU Decoder] --- Layer {} ---", layer_idx);
-
-            // Retrieve the past K/V state for THIS specific layer from the cache.
             let past_kv_owned = cpu_cache_opt
                 .as_ref()
                 .and_then(|cache| cache.get(layer_idx));
 
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
-
-            // --- STRATEGIC LOGGING ---
-            debug!(
-                "[CPU Decoder] Layer {} input hidden_states shape: {:?}",
-                layer_idx,
-                hidden_states.shape()
-            );
-            if let Some((k, v)) = past_kv_views {
-                debug!(
-                    "[CPU Decoder] Layer {} past_k shape for forward: {:?}",
-                    layer_idx,
-                    k.shape()
-                );
-                debug!(
-                    "[CPU Decoder] Layer {} past_v shape for forward: {:?}",
-                    layer_idx,
-                    v.shape()
-                );
-            } else {
-                debug!(
-                    "[CPU Decoder] Layer {} past_kv is None (priming pass).",
-                    layer_idx
-                );
-            }
 
             let (new_hidden_states, (new_k, new_v)) = layer.forward(
                 &hidden_states,
@@ -353,35 +318,12 @@ impl Decoder for CpuTransformerDecoder {
                 past_kv_views,
             )?;
 
-            debug!(
-                "[CPU Decoder] Layer {} output hidden_states shape: {:?}",
-                layer_idx,
-                new_hidden_states.shape()
-            );
-            debug!(
-                "[CPU Decoder] Layer {} new_k shape: {:?}",
-                layer_idx,
-                new_k.shape()
-            );
-            debug!(
-                "[CPU Decoder] Layer {} new_v shape: {:?}",
-                layer_idx,
-                new_v.shape()
-            );
-
             hidden_states = new_hidden_states;
             new_key_values.push((new_k, new_v));
         }
 
-        // --- 4. Final Layer Normalization ---
-        info!("[CPU Decoder] Applying final layer normalization...");
         hidden_states = self.final_layer_norm.forward(&hidden_states);
-        debug!(
-            "[CPU Decoder] Final hidden_states shape after LN: {:?}",
-            hidden_states.shape()
-        );
 
-        // --- 5. Cache Update Step ---
         if let Some(cache) = cpu_cache_opt {
             for (layer_idx, (k, v)) in new_key_values.into_iter().enumerate() {
                 cache.update(layer_idx, &k, &v)?;
@@ -424,7 +366,12 @@ impl CpuTransformerDecoder {
 
         // Convert input_ids to a flattened slice of usize for indexing
         // The .as_slice() method is only available on contiguous arrays, which is the default.
-        let indices_slice = input_ids.as_slice().unwrap().iter().map(|&x| x as usize).collect::<Vec<_>>();
+        let indices_slice = input_ids
+            .as_slice()
+            .unwrap()
+            .iter()
+            .map(|&x| x as usize)
+            .collect::<Vec<_>>();
 
         // Chain the operations to correctly infer the final 3D type.
         let mut hidden_states = self
@@ -434,7 +381,6 @@ impl CpuTransformerDecoder {
             .into_shape_with_order((batch_size, seq_len, hidden_size)) // reshape into 3D
             .unwrap()
             .to_owned(); // Convert the view from into_shape into an owned array
-
 
         // Position embeddings with offset (only if present - GPT-2 has them, LLaMA doesn't)
         if let Some(ref pos_embeddings) = self.embeddings.position_embeddings {
@@ -452,4 +398,22 @@ impl CpuTransformerDecoder {
 
         hidden_states
     }
+}
+fn print_cpu_tensor(tensor: &Array3<f32>, label: &str) {
+    println!("\n--- CPU Tensor: {} ---", label);
+    println!("Shape: {:?}", tensor.shape());
+    let flat = tensor.as_slice().unwrap();
+    let num_elements = flat.len();
+    let sample_size = 8;
+    if num_elements <= sample_size * 2 {
+        println!("Data: {:?}", flat);
+    } else {
+        println!("Data (first {}): {:?}", sample_size, &flat[..sample_size]);
+        println!(
+            "Data (last {}):  {:?}",
+            sample_size,
+            &flat[num_elements - sample_size..]
+        );
+    }
+    println!("--- End CPU Tensor: {} ---\n", label);
 }

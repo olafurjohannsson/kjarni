@@ -1,7 +1,6 @@
 use crate::seq2seq::bart_configs::{BartConfig, BartLikeConfig};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use edgetransformers::TransformerConfig;
 use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
 use edgetransformers::models::base::EncoderDecoderLanguageModel;
 use edgetransformers::models::download_model_files;
@@ -15,8 +14,7 @@ use edgetransformers::traits::{
     LanguageModelConfig, TransformerModel,
 };
 use edgetransformers::weights::ModelWeights;
-use ndarray::{Array1, Array2, Array3, s};
-use std::ops::AddAssign;
+use ndarray::{Array1, Array2, Array3};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -256,6 +254,7 @@ mod tests {
     use super::*;
     use edgetransformers::models::base::{DecodingStrategy, EncoderDecoderLanguageModel};
     use edgetransformers::prelude::LanguageModel;
+    use edgetransformers::TransformerConfig;
 
     /// Helper function to load the DistilBART model for testing,
     /// reducing code duplication in the tests below.
@@ -324,7 +323,7 @@ mod tests {
         assert_eq!(config.eos_token_id(), Some(2));
         assert_eq!(config.bos_token_id(), Some(0));
         assert_eq!(config.pad_token_id(), Some(1));
-        assert_eq!(config.extra_pos_embeddings(), Some(2));
+        assert_eq!(config.extra_pos_embeddings(), 2);
         assert_eq!(config.is_encoder_decoder(), Some(true));
         assert_eq!(config.model_type(), Some("bart".to_string()));
 

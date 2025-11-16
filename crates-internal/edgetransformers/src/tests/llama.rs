@@ -86,7 +86,6 @@ async fn test_full_llama_decoder_parity() -> Result<()> {
     // --- 3. Assert ---
     // assert_tensors_approx_equal(&cpu_output.last_hidden_state, &gpu_output.last_hidden_state, tolerance).await;
 
-    println!("✅ Full Llama decoder parity test is structured and ready for GPU implementation.");
     Ok(())
 }
 
@@ -162,8 +161,7 @@ mod tests {
         // --- 4. Assert ---
         // For now, this test serves as a structural guide. You'll fill in the GPU execution part.
         // assert_tensors_are_close_3d(&expected_cpu, &output_gpu, "GQA Output", 1e-4).await;
-        
-        println!("✅ GpuAttention GQA test structure is ready.");
+
         Ok(())
     }
 }

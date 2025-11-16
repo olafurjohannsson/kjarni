@@ -71,7 +71,7 @@ impl TransformerEncoderDecoder {
 }
 
 // Implement the main forward pass via the CrossAttentionDecoder trait
-#[async_trait]
+#[async_trait(?Send)]
 impl CrossAttentionDecoder for TransformerEncoderDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;

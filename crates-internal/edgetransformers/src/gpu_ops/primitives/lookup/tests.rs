@@ -12,22 +12,7 @@ use crate::gpu_ops::DType;
 #[path = "../../../tests/common.rs"]
 mod common;
 
-use common::{read_gpu_tensor_to_vec};
 
-async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
-}
-
-// Helper to compare two ndarray arrays for near-equality.
-fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
-    let diff = (a - b).mapv(f32::abs);
-    let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
-    assert!(
-        max_diff < tolerance,
-        "Arrays are not close. Max difference: {}",
-        max_diff
-    );
-}
 #[tokio::test]
 async fn test_gpu_lookup() -> Result<()> {
     let context = Arc::new(WgpuContext::new().await?);

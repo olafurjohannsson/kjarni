@@ -45,8 +45,8 @@ impl CpuTransformerEncoder {
             weights.get_array2(word_w)?,
             position_embeddings,
             token_type_embeddings,
-            config.extra_pos_embeddings(),
         );
+        
 
         let (norm_w, norm_b) = config.get_embedding_layer_norm_names();
         let embeddings_layer_norm = LayerNorm::new(
@@ -90,15 +90,9 @@ impl CpuTransformerEncoder {
             let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
             let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
 
-            // --
-            // The loader is now responsible for handling the transpose convention.
-            // It prepares the weights into the [in, out] format that CpuFeedForward expects.
             let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
-                // The raw weight from a BERT-style model is [out, in].
-                // We must transpose it to [in, out] for our standard block.
                 raw_intermediate_w.t().as_standard_layout().to_owned()
             } else {
-                // The raw weight is already [in, out]. Use it as is.
                 raw_intermediate_w
             };
 
@@ -107,10 +101,7 @@ impl CpuTransformerEncoder {
             } else {
                 raw_output_w
             };
-            let fc1_bias = weights.get_array1(&ffn_names.intermediate_bias)?;
-            let fc2_bias = weights.get_array1(&ffn_names.output_bias)?;
 
-            // Now, call the simple "dumb" constructor with the correctly prepared weights.
             let feed_forward = FeedForward::Standard(StdFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
@@ -119,7 +110,6 @@ impl CpuTransformerEncoder {
                 config.activation_function(),
             ));
 
-            // The original BERT has two layer norms per block.
             let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&attn_names.norm_weight)?,
                 weights.get_array1(&attn_names.norm_bias)?,
@@ -171,19 +161,14 @@ impl Encoder for CpuTransformerEncoder {
         attention_mask: &Array2<f32>,
         token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Self::Output> {
-        // Embed inputs
         let mut hidden_states = self.embeddings.forward(
             input_ids,
             token_type_ids,
-            2, //self.config.position_embedding_offset(),
+            self.config.extra_pos_embeddings(),
             self.config.scale_embeddings(),
         );
-
-        // Apply embeddings layer norm
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-
-        // Transformer layers
-        for (i, layer) in self.layers.iter().enumerate() {
+        for layer in &self.layers {
             hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
         }
 

@@ -12,6 +12,7 @@ use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
+use crate::Embeddings;
 
 pub struct GpuTransformerEncoder {
     embedding_weights: GpuEmbeddingWeights,
@@ -21,7 +22,7 @@ pub struct GpuTransformerEncoder {
     layers: Vec<GpuEncoderLayer>,
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
     context: Arc<WgpuContext>,
-    cpu_embeddings: crate::Embeddings,
+    cpu_embeddings: Embeddings,
 }
 
 impl GpuTransformerEncoder {
@@ -39,11 +40,10 @@ impl GpuTransformerEncoder {
             Array2::zeros((0, 0)) // Placeholder for models without token types
         };
 
-        let cpu_embeddings = crate::Embeddings::new(
+        let cpu_embeddings = Embeddings::new(
             word_embeddings.clone(),
             Some(position_embeddings.clone()),
             Some(token_type_embeddings.clone()),
-            None,
         );
 
         let embedding_weights: GpuEmbeddingWeights = GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;

@@ -66,7 +66,6 @@ impl SwiGluFeedForward {
         let gate_out = matmul_3d_2d(hidden, &self.gate_weight);
         let up_out = matmul_3d_2d(hidden, &self.up_weight);
 
-        // 2. ✅ CORRECTED: Apply SwiGLU activation in a vectorized way
         let activated = silu_3d(&gate_out) * up_out;
 
         // 3. Down projection
@@ -79,7 +78,6 @@ impl SwiGluFeedForward {
         let gate_out = hidden.dot(&self.gate_weight);
         let up_out = hidden.dot(&self.up_weight);
 
-        // 2. ✅ CORRECTED: Apply SwiGLU activation in a vectorized way
         let activated = silu_2d(&gate_out) * up_out;
 
         // 3. Down projection

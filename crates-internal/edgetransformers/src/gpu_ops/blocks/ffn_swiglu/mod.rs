@@ -3,7 +3,6 @@ use crate::gpu_ops::{GpuTensor};
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use anyhow::Result;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use crate::gpu_ops::Kernel;
 
 mod tests;

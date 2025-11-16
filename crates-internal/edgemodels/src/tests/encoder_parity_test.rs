@@ -158,18 +158,18 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
         println!("Difference: {:.6}", (cpu_sim - gpu_sim).abs());
 
         if (cpu_sim - gpu_sim).abs() > 0.01 {
-            println!("❌ Similarity mismatch!");
+            println!("Similarity mismatch!");
             all_pass = false;
         } else {
-            println!("✅ Similarities match");
+            println!("Similarities match");
         }
     }
 
     if all_pass {
-        println!("✅ ALL TESTS PASSED");
+        println!("ALL TESTS PASSED");
         Ok(())
     } else {
-        println!("❌ SOME TESTS FAILED");
+        println!("SOME TESTS FAILED");
 
         Err(anyhow::anyhow!("CPU-GPU parity test failed"))
     }
@@ -197,10 +197,10 @@ async fn test_simple_input() -> Result<()> {
     let pass = compare_vectors("Simple input embedding", &cpu_emb, &gpu_emb, TOLERANCE);
 
     if pass {
-        println!("\n✅ Simple input test PASSED");
+        println!("\nSimple input test PASSED");
         Ok(())
     } else {
-        println!("\n❌ Simple input test FAILED");
+        println!("\nSimple input test FAILED");
         Err(anyhow::anyhow!("Simple input test failed"))
     }
 }
@@ -254,10 +254,10 @@ async fn test_identical_sentences() -> Result<()> {
     );
 
     if pass1 && pass2 {
-        println!("\n✅ Identical sentences test PASSED");
+        println!("\nIdentical sentences test PASSED");
         Ok(())
     } else {
-        println!("\n❌ Identical sentences test FAILED");
+        println!("\nIdentical sentences test FAILED");
         Err(anyhow::anyhow!("Identical sentences test failed"))
     }
 }
