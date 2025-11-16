@@ -364,11 +364,25 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, temp);
 
         // Apply masks
-        if let Some(mask) = attention_mask {
-            self.apply_mask.encode(encoder, &scores, mask, false, 0);
-        }
-        if is_causal {
-            self.apply_mask.encode(encoder, &scores, &scores, true, cache_len as u32);
+        // if let Some(mask) = attention_mask {
+        //     self.apply_mask.encode(encoder, &scores, mask, false, 0);
+        // }
+        // if is_causal {
+        //     self.apply_mask.encode(encoder, &scores, &scores, true, cache_len as u32);
+        // }
+        if is_causal || attention_mask.is_some() {
+            // If a specific padding mask is provided, use it.
+            // Otherwise, for a purely causal mask, we can just pass the scores tensor
+            // as a dummy, since the kernel only needs its shape to know the key_stride.
+            let padding_mask = attention_mask.unwrap_or(&scores);
+
+            self.apply_mask.encode(
+                encoder,
+                &scores,
+                padding_mask,
+                is_causal,
+                cache_len as u32,
+            );
         }
 
         // Softmax

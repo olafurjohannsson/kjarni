@@ -124,8 +124,10 @@ impl Seq2SeqGenerator {
             for hypo in &beams {
                 let last_token = *hypo.tokens.last().unwrap();
                 let decoder_input_ids = Array2::from_elem((1, 1), last_token);
-                let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
-
+                // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
+                let cache_len = hypo.cache.get_seq_length();
+                let total_decoder_len = cache_len + 1;
+                let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
                 // 1. Clone the cache *before* it gets mutated.
                 let mut current_cache = hypo.cache.clone_box();
 

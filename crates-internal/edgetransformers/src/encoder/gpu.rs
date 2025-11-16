@@ -169,6 +169,7 @@ impl Encoder for GpuTransformerEncoder {
             &self.embedding_weights,
             &input_ids_gpu,
             token_type_ids_gpu.as_ref(), // Pass as Option<&GpuTensor>
+            0, // encoder doesnt need a dynamic position offset
             self.config.as_ref(),
             &mut temp,
         )?;

@@ -204,7 +204,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         let seq_len = decoder_input_ids.shape()[1];
         let total_len = position_offset + seq_len;
 
-        // self.decoder_embeddings.forward(decoder_input_ids,
+        // self.decoder_embeddings.forward(decoder_input_ids
         // 1. Embed the decoder input tokens and apply layer norm.
         let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);

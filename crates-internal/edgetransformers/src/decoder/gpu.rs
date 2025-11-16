@@ -376,24 +376,25 @@ impl Decoder for GpuTransformerDecoder {
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input.shape()[1];
 
-        let initial_embeddings_cpu = self.cpu_embeddings.forward(
-            input,
+        // let initial_embeddings_cpu = self.cpu_embeddings.forward(
+        //     input,
+        //     None,
+        //     position_offset,
+        //     self.config.scale_embeddings(),
+        // );
+        // let mut hidden_states = GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
+
+        let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
+
+        let mut hidden_states = self.embeddings.encode(
+            &mut encoder,
+            &self.embedding_weights,
+            &input_ids_gpu,
             None,
             position_offset,
-            self.config.scale_embeddings(),
-        );
-        let mut hidden_states = GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
-
-        // let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
-
-        // let mut hidden_states = self.embeddings.encode(
-        //     &mut encoder,
-        //     &self.embedding_weights,
-        //     &input_ids_gpu,
-        //     None,
-        //     self.config.as_ref(),
-        //     &mut temp,
-        // )?;
+            self.config.as_ref(),
+            &mut temp,
+        )?;
 
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
 

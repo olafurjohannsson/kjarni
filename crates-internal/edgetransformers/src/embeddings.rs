@@ -297,6 +297,7 @@ mod tests {
             &gpu_embedding_weights,
             &input_ids_gpu,
             Some(&token_type_ids_gpu),
+            0,
             &config,
             &mut temp,
         )?;
@@ -356,6 +357,7 @@ mod tests {
             &gpu_embedding_weights,
             &input_ids_gpu,
             None,
+            0,
             &config,
             &mut temp,
         )?;

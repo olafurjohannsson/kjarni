@@ -8,6 +8,7 @@ pub mod ffn_swiglu;
 pub mod layer_norm;
 pub mod rms_norm;
 pub mod rope;
+pub mod decoder_cross_attention;
 
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::attention::TempStorage;

@@ -56,7 +56,7 @@ impl TransformerEncoderDecoder {
     pub fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
         match self {
             Self::Cpu(model) => model.encoder(),
-            Self::Gpu(_) => todo!("GPU encoder not implemented"),
+            Self::Gpu(model) => model.encoder()
         }
     }
 
@@ -65,7 +65,7 @@ impl TransformerEncoderDecoder {
     ) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput> {
         match self {
             Self::Cpu(model) => model, // The CpuTransformerEncoderDecoder itself implements the trait
-            Self::Gpu(_) => todo!("GPU decoder not implemented"),
+            Self::Gpu(model) => model,
         }
     }
 }

@@ -1,18 +1,23 @@
+use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use edgemodels::generation::seq2seq::Seq2SeqGenerator; // Your new generator
 use edgemodels::seq2seq::{AnySeq2SeqModel, BartConfig, Seq2SeqModel, TaskSpecificParams};
 use edgetransformers::models::base::GenerationConfig;
-use edgetransformers::{Device, ModelType};
+use edgetransformers::{Device, ModelType, WgpuContext};
 use edgemodels::generation::{DecodingStrategy};
 use edgetransformers::models::base::{BeamSearchParams};
-
+async fn get_test_context() -> Arc<WgpuContext> {
+    Arc::new(WgpuContext::new().await.unwrap())
+}
 #[tokio::main]
 async fn main() -> Result<()> {
+    let ctx = get_test_context().await;
+
     let any_model = AnySeq2SeqModel::from_registry(
         ModelType::DistilBartCnn, 
         None,
-        Device::Cpu,
-        None,
+        Device::Wgpu,
+        Some(ctx),
     )
     .await?;
     let model = match any_model {

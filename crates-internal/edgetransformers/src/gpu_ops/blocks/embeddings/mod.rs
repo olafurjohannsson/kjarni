@@ -108,6 +108,7 @@ impl GpuEmbeddings {
         weights: &GpuEmbeddingWeights,
         input_ids: &GpuTensor,              // u32 tensor
         token_type_ids: Option<&GpuTensor>, // u32 tensor
+        position_offset: usize,
         config: &dyn LanguageModelConfig,
         temp: &mut TempStorage,
     ) -> Result<GpuTensor> {
@@ -123,13 +124,15 @@ impl GpuEmbeddings {
         // 2. Add Positional Embeddings (with offset)
         if let Some(pos_embeddings) = &weights.position_embeddings {
             let pos_add_out = temp.get(hidden_states.shape().to_vec());
-
+            // GPT-style models often have a fixed offset (e.g., 2 for BART) in their
+            // position embedding table that needs to be added to the dynamic offset.
+            let final_offset = position_offset + config.extra_pos_embeddings();
             // Call the new, specific method
             self.add.encode_broadcast_offset(
                 encoder,
                 &hidden_states,
                 pos_embeddings,
-                config.extra_pos_embeddings(),
+                final_offset,
                 &pos_add_out,
             );
             hidden_states = pos_add_out;
