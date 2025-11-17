@@ -450,6 +450,51 @@ impl GpuAttention {
 
         self.project(encoder, &context_merged, &weights.output_weight, &weights.output_bias, temp)
     }
+    pub fn forward_cross(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor,           // Decoder hidden states
+        key_value: &GpuTensor,       // Encoder hidden states
+        weights: &GpuAttentionWeights,
+        attention_mask: Option<&GpuTensor>,
+        temp: &mut TempStorage,
+    ) -> GpuTensor {
+        // 1. Project Q from decoder state, K and V from encoder state.
+        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
+        let k_proj = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, temp);
+        let v_proj = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, temp);
+
+        // 2. Split heads for Q, K, V.
+        let q_heads = self.split_heads(encoder, &q_proj, temp); // [B, H, S_q, D]
+        let k_heads = self.split_heads(encoder, &k_proj, temp); // [B, H, S_kv, D]
+        let v_heads = self.split_heads(encoder, &v_proj, temp); // [B, H, S_kv, D]
+
+        // 3. Perform attention.
+        let k_transposed = k_heads.permute(encoder, &self.permute, &[0, 1, 3, 2]);
+        let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, temp);
+
+        // 4. Apply mask if it exists.
+        if let Some(mask) = attention_mask {
+            // This uses your existing apply_padding_mask helper, which is correct.
+            self.apply_padding_mask(encoder, &scores, mask, temp);
+        }
+
+        // 5. Softmax.
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+
+        // 6. Compute context.
+        let context = self.bmm_4d(encoder, &scores, &v_heads, temp);
+
+        // 7. Merge heads and final projection.
+        let context_merged = self.merge_heads(encoder, &context, temp);
+        self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            temp,
+        )
+    }
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -487,8 +532,8 @@ impl GpuAttention {
 
         let (batch_size, query_len, _hidden_size) = query.dims3();
         // let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[2]);
-        println!("!!! INSIDE forward_seq2seq. Query shape: {:?}", query.shape());
-        println!("cache_len {}", cache_len);
+        // println!("!!! INSIDE forward_seq2seq. Query shape: {:?}", query.shape());
+        // println!("cache_len {}", cache_len);
         // === 1. Project Q, K, V (produces 3D tensors) ===
         // For self-attention, Q, K, and V are all projected from the same input `query`.
         let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, temp);
@@ -540,11 +585,11 @@ impl GpuAttention {
             k_transposed.shape()[3],
         ];
         assert_eq!(scores.shape(), &expected_scores_shape, "Scores tensor has unexpected shape!");
-        println!(
-            "!!! INSIDE forward_seq2seq. Scores shape: {:?}, Mask shape: {:?}",
-            scores.shape(),
-            attention_mask.shape()
-        );
+        // println!(
+        //     "!!! INSIDE forward_seq2seq. Scores shape: {:?}, Mask shape: {:?}",
+        //     scores.shape(),
+        //     attention_mask.shape()
+        // );
         // Apply combined causal and padding mask.
         self.apply_mask.encode(
             encoder,

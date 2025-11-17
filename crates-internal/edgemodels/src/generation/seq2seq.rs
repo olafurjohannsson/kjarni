@@ -74,15 +74,16 @@ impl Seq2SeqGenerator {
             (1, encoding.len()),
             encoding.get_ids().iter().map(|&id| id).collect(),
         )?;
-
+        println!("input ids: {:?}", input_ids);
         let attention_mask = Array2::ones(input_ids.dim());
-        println!("Encoding input ids");
+        // println!("Encoding input ids");
         let encoder_output: EncoderOutput = self
             .model
             .encoder()
             .forward(&input_ids, &attention_mask, None)
             .await?;
-        println!("after Encoding input ids");
+        println!("encoder: {:?}", encoder_output.last_hidden_state);
+        // println!("after Encoding input ids");
         Ok(encoder_output)
     }
     pub async fn generate_from_encoding(
@@ -105,9 +106,9 @@ impl Seq2SeqGenerator {
         let decoder_start_token_id = 2;
 
         // Initialize Beams with an empty cache for each.
-        println!("New cache!");
+        // println!("New cache!");
         let initial_cache = self.model.new_cache(batch_size, config.max_length)?;
-        println!("after New cache!");
+        // println!("after New cache!");
         let mut beams = vec![BeamHypothesis {
             tokens: vec![decoder_start_token_id],
             score: 0.0,
@@ -129,7 +130,7 @@ impl Seq2SeqGenerator {
                 // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
                 let cache_len = hypo.cache.get_seq_length();
                 let total_decoder_len = cache_len + 1;
-                println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
+                // println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
                 let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
                 let mut current_cache = hypo.cache.clone_box();
                 // 2. Pass the mutable clone to the forward pass.
