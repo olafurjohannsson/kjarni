@@ -13,7 +13,7 @@ use crate::traits::{
 use crate::utils::create_full_attention_mask;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, s};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -503,7 +503,9 @@ pub trait DecoderLanguageModel: LanguageModel {
             .get_hidden_states(&input_ids, &attention_mask)
             .await
     }
-
+    fn get_default_generation_config(&self) -> GenerationConfig {
+        GenerationConfig::default() // Default implementation
+    }
     /// Get raw logits for input text
     ///
     /// Useful for:

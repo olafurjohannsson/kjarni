@@ -28,20 +28,16 @@ async fn test_unreshape() -> Result<()> {
 
     let (b, s, h, d) = (2, 7, 4, 5); // Batch, SeqLen, NumHeads, HeadDim
     let hidden_size = h * d;
-
-    // 1. ARRANGE: Create a 4D input tensor, simulating the state after attention.
     let cpu_input = Array4::from_shape_fn((b, h, s, d), |(i, j, k, l)| {
         (i * 1000 + j * 100 + k * 10 + l) as f32
     });
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-
-    // 2. ARRANGE: Compute the CPU ground truth. This is the inverse of the reshape logic.
     let cpu_ground_truth = cpu_input
         .to_owned()
         .permuted_axes([0, 2, 1, 3]) // [B, S, H, D]
         .as_standard_layout()
         .to_owned()
-        .into_shape((b, s, hidden_size))?; // [B, S, H*D]
+        .into_shape_with_order((b, s, hidden_size))?; // [B, S, H*D]
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![b, s, hidden_size],

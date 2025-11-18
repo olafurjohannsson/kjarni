@@ -3,7 +3,7 @@
 use crate::gpu_ops::primitives::scale;
 use ndarray::parallel::prelude::*;
 use ndarray::{Array2, Array3, Axis, s};
-
+use tokio::sync::Mutex;
 /// Configuration for embedding layers
 pub struct EmbeddingConfig {
     pub vocab_size: usize,
@@ -248,74 +248,88 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
-        // --- 1. Setup Common Data and Config ---
-        let context = Arc::new(WgpuContext::new().await?);
-        let config = TestConfig {
-            extra_pos_embeddings: 0,
-            scale_embed: false,
-        }; // Test BART-like settings
+async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
+    // --- 1. Setup Common Data and Config ---
+    let context = Arc::new(WgpuContext::new().await?);
+    let config = TestConfig {
+        extra_pos_embeddings: 2,
+        scale_embed: false,
+    };
 
-        // Create mock inputs on CPU
-        let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
-        let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
+    // Create mock inputs on CPU
+    let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
+    let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
 
-        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+    // Keep the hardcoded path for now as requested
+    let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+    let weights = crate::weights::ModelWeights::new(Path::new(p))?;
 
-        // --- 2. Run CPU Path (Expected Result) ---
-        let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
-        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
-        let token_type_embeddings = match type_w {
-            Some(name) => Some(weights.get_array2(name)?), // Load if present
-            None => None,
-        };
+    // --- 2. Run CPU Path (Expected Result) ---
+    let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
+    let token_type_embeddings = if let Some(name) = type_w {
+        Some(weights.get_array2(name)?)
+    } else {
+        None
+    };
 
-        let cpu_embeddings = Embeddings::new(
-            weights.get_array2(word_w)?,
-            Some(weights.get_array2(pos_w)?),
-            token_type_embeddings,
-        );
-        let expected_output = cpu_embeddings.forward(
-            &input_ids_cpu,
-            Some(&token_type_ids_cpu.mapv(|x| x as u32)), // CPU version expects f32 type ids
-            config.extra_pos_embeddings(),
-            config.scale_embeddings(),
-        );
+    let cpu_embeddings = Embeddings::new(
+        weights.get_array2(word_w)?,
+        Some(weights.get_array2(pos_w)?),
+        token_type_embeddings,
+    );
+    let expected_output = cpu_embeddings.forward(
+        &input_ids_cpu,
+        Some(&token_type_ids_cpu),
+        config.extra_pos_embeddings(),
+        config.scale_embeddings(),
+    );
 
-        let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
-        let gpu_embeddings = GpuEmbeddings::new(&context)?;
+    // --- 3. Setup GPU Modules and Inputs ---
+    let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
+    let gpu_embeddings = GpuEmbeddings::new(&context)?;
 
-        // Upload inputs
-        let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-        let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
-        let mut pool = GpuTensorPool::new(context.clone());
-        let mut frame = GpuFrameContext::new(&context, &mut pool);
+    // Upload inputs
+    let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
+    let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
+    
+    // --- START CORRECTION ---
 
+    // 1. Create the encoder and pool directly for the test.
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut pool = GpuTensorPool::new(context.clone());
 
-        let mut encoder = context.device.create_command_encoder(&Default::default());
-        let output_gpu = gpu_embeddings.encode(
-            &mut encoder,
-            &gpu_embedding_weights,
-            &input_ids_gpu,
-            Some(&token_type_ids_gpu),
-            0,
-            &config,
-            &mut frame.pool(),
-        )?;
+    // 2. Call the encode function with the raw &mut encoder and &mut pool.
+    let output_gpu = gpu_embeddings.encode(
+        &mut encoder,
+        &gpu_embedding_weights,
+        &input_ids_gpu,
+        Some(&token_type_ids_gpu),
+        0, // position_offset
+        &config,
+        &mut pool,
+    )?;
 
-        frame.finish();
+    // 3. Submit the work and advance the pool's frame.
+    context.queue.submit(Some(encoder.finish()));
+    pool.next_frame();
 
-        let actual_output = output_gpu.to_ndarray_3d().await?;
+    // --- END CORRECTION ---
 
-        assert_tensors_are_close(&expected_output, &actual_output, 1e-4);
-        Ok(())
-    }
+    // --- 4. Verify Results ---
+    let actual_output = output_gpu.to_ndarray_3d().await?;
+
+    // Using a slightly more relaxed tolerance for embeddings is often wise,
+    // as it involves multiple additions which can accumulate small errors.
+    assert_tensors_are_close(&expected_output, &actual_output, 1e-5);
+    
+    Ok(())
+}
     #[tokio::test]
     async fn test_gpu_vs_cpu_embeddings_parity_no_token_type_ids() -> Result<()> {
         // --- 1. Setup Common Data and Config ---
         let context = Arc::new(WgpuContext::new().await?);
         let config = TestConfig {
-            extra_pos_embeddings: 0,
+            extra_pos_embeddings: 2,
             scale_embed: false,
         }; // Test BART-like settings
 
@@ -359,9 +373,10 @@ mod tests {
             None,
             0,
             &config,
-            pool,
+            &mut pool,
         )?;
         context.queue.submit(Some(encoder.finish()));
+        pool.next_frame();
 
         let actual_output = output_gpu.to_ndarray_3d().await?;
 

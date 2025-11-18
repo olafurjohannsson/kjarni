@@ -16,6 +16,12 @@ pub struct EdgeGPTHandle {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+pub struct EdgeGPTIndex {
+    _private: [u8; 0],
+}
+
+
 /// Error codes
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -85,9 +91,11 @@ pub unsafe extern "C" fn edge_gpt_encode(
         Err(_) => return EdgeGPTError::InvalidUtf8,
     };
     
-    let result = ctx.runtime.block_on(async {
-        ctx.edge_gpt.encode(&text_str).await
-    });
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.runtime.block_on(async {
+            ctx.edge_gpt.encode(&text_str).await
+        })
+    }));
     
     match result {
         Ok(embedding) => {
@@ -98,6 +106,72 @@ pub unsafe extern "C" fn edge_gpt_encode(
             EdgeGPTError::Success
         }
         Err(_) => EdgeGPTError::InferenceError,
+    }
+}
+
+/// Generate text continuation
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_generate(
+    handle: *mut EdgeGPTHandle,
+    prompt: *const c_char,
+    out_text: *mut *mut c_char,
+) -> EdgeGPTError {
+    if handle.is_null() || prompt.is_null() || out_text.is_null() {
+        return EdgeGPTError::NullPointer;
+    }
+
+    let ctx = &*(handle as *const EdgeGPTContext);
+    let prompt_str = match std::panic::catch_unwind(|| c_to_string(prompt)) {
+        Ok(s) => s,
+        Err(_) => return EdgeGPTError::InvalidUtf8,
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.runtime.block_on(async {
+            ctx.edge_gpt.generate(&prompt_str).await
+        })
+    }));
+
+    match result {
+        Ok(Ok(text)) => {
+            *out_text = string_to_c(text);
+            EdgeGPTError::Success
+        }
+        Ok(Err(_)) => EdgeGPTError::InferenceError,
+        Err(_) => EdgeGPTError::RuntimeError,
+    }
+}
+
+/// Summarize text
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_summarize(
+    handle: *mut EdgeGPTHandle,
+    text: *const c_char,
+    out_summary: *mut *mut c_char,
+) -> EdgeGPTError {
+    if handle.is_null() || text.is_null() || out_summary.is_null() {
+        return EdgeGPTError::NullPointer;
+    }
+
+    let ctx = &*(handle as *const EdgeGPTContext);
+    let text_str = match std::panic::catch_unwind(|| c_to_string(text)) {
+        Ok(s) => s,
+        Err(_) => return EdgeGPTError::InvalidUtf8,
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.runtime.block_on(async {
+            ctx.edge_gpt.summarize(&text_str).await
+        })
+    }));
+
+    match result {
+        Ok(Ok(summary)) => {
+            *out_summary = string_to_c(summary);
+            EdgeGPTError::Success
+        }
+        Ok(Err(_)) => EdgeGPTError::InferenceError,
+        Err(_) => EdgeGPTError::RuntimeError,
     }
 }
 
@@ -269,6 +343,148 @@ pub unsafe extern "C" fn edge_gpt_rerank(
         }
         Err(_) => EdgeGPTError::InferenceError,
     }
+}
+
+/// Build a search index from documents
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_build_index(
+    handle: *mut EdgeGPTHandle,
+    documents: *const *const c_char,
+    num_docs: usize,
+    out_index: *mut *mut EdgeGPTIndex,
+) -> EdgeGPTError {
+    if handle.is_null() || documents.is_null() || out_index.is_null() {
+        return EdgeGPTError::NullPointer;
+    }
+
+    let ctx = &*(handle as *const EdgeGPTContext);
+    
+    // Convert C strings
+    let mut doc_vec = Vec::with_capacity(num_docs);
+    for i in 0..num_docs {
+        let ptr = *documents.add(i);
+        if ptr.is_null() { return EdgeGPTError::NullPointer; }
+        match std::panic::catch_unwind(|| c_to_string(ptr)) {
+            Ok(s) => doc_vec.push(s),
+            Err(_) => return EdgeGPTError::InvalidUtf8,
+        }
+    }
+    let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.runtime.block_on(async {
+            ctx.edge_gpt.build_index(&doc_refs).await
+        })
+    }));
+
+    match result {
+        Ok(Ok(index)) => {
+            let index_box = Box::new(index);
+            *out_index = Box::into_raw(index_box) as *mut EdgeGPTIndex;
+            EdgeGPTError::Success
+        }
+        Ok(Err(_)) => EdgeGPTError::InferenceError,
+        Err(_) => EdgeGPTError::RuntimeError,
+    }
+}
+
+/// Search the index
+/// Returns a JSON string of results (simplest way to pass complex structs over FFI)
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_search(
+    handle: *mut EdgeGPTHandle,
+    index_handle: *mut EdgeGPTIndex,
+    query: *const c_char,
+    limit: usize,
+    out_json_results: *mut *mut c_char,
+) -> EdgeGPTError {
+    if handle.is_null() || index_handle.is_null() || query.is_null() || out_json_results.is_null() {
+        return EdgeGPTError::NullPointer;
+    }
+
+    let ctx = &*(handle as *const EdgeGPTContext);
+    let index = &*(index_handle as *const SearchIndex);
+    
+    let query_str = match std::panic::catch_unwind(|| c_to_string(query)) {
+        Ok(s) => s,
+        Err(_) => return EdgeGPTError::InvalidUtf8,
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.runtime.block_on(async {
+            ctx.edge_gpt.search(index, &query_str, limit).await
+        })
+    }));
+
+    match result {
+        Ok(Ok(results)) => {
+            // Serialize results to JSON for easy consumption in C#/Go
+            let json = serde_json::to_string(&results).unwrap_or_default();
+            *out_json_results = string_to_c(json);
+            EdgeGPTError::Success
+        }
+        Ok(Err(_)) => EdgeGPTError::InferenceError,
+        Err(_) => EdgeGPTError::RuntimeError,
+    }
+}
+
+/// Free the index
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_free_index(index_handle: *mut EdgeGPTIndex) {
+    if !index_handle.is_null() {
+        let _ = Box::from_raw(index_handle as *mut SearchIndex);
+    }
+}
+
+/// Save index to disk
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_save_index(
+    index_handle: *mut EdgeGPTIndex,
+    path: *const c_char,
+) -> EdgeGPTError {
+    let index = &*(index_handle as *const SearchIndex);
+    let path_str = c_to_string(path);
+    
+    // Serialize to JSON and write
+    match index.save_json() {
+        Ok(json) => {
+            if std::fs::write(path_str, json).is_ok() {
+                EdgeGPTError::Success
+            } else {
+                EdgeGPTError::RuntimeError // IO Error
+            }
+        }
+        Err(_) => EdgeGPTError::RuntimeError,
+    }
+}
+
+/// Load index from disk
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_load_index(
+    path: *const c_char,
+    out_index: *mut *mut EdgeGPTIndex,
+) -> EdgeGPTError {
+    let path_str = c_to_string(path);
+    
+    match std::fs::read_to_string(path_str) {
+        Ok(json) => {
+            match SearchIndex::load_json(&json) {
+                Ok(index) => {
+                    let index_box = Box::new(index);
+                    *out_index = Box::into_raw(index_box) as *mut EdgeGPTIndex;
+                    EdgeGPTError::Success
+                }
+                Err(_) => EdgeGPTError::InferenceError, // Parse error
+            }
+        }
+        Err(_) => EdgeGPTError::RuntimeError, // IO Error
+    }
+}
+
+/// Free a string returned by generate/summarize
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_free_string(s: *mut c_char) {
+    free_c_string(s);
 }
 
 /// Free a float array allocated by edge_gpt_encode

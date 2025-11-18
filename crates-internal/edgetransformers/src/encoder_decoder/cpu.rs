@@ -153,37 +153,6 @@ impl CpuTransformerEncoderDecoder {
     pub fn encoder(&self) -> &TransformerEncoder {
         &self.encoder
     }
-
-    fn embed_decoder_with_offset(
-        &self,
-        input_ids: &Array2<u32>,
-        position_offset: usize,
-    ) -> Array3<f32> {
-        let (_batch_size, seq_len) = input_ids.dim();
-        let mut hidden_states = self.decoder_embeddings.forward_word_only(input_ids);
-
-        if let Some(ref pos_embeddings) = self.decoder_embeddings.position_embeddings {
-            let model_offset = 2; //self.config.position_embedding_offset();
-            let start_idx = position_offset + model_offset;
-            let end_idx = start_idx + seq_len;
-
-            let max_position = pos_embeddings.shape()[0];
-            if end_idx > max_position {
-                panic!(
-                    "Sequence length {} with offset {} exceeds max position embeddings {}.",
-                    seq_len, position_offset, max_position
-                );
-            }
-            //
-            // Get the slice of position embeddings we need for the current tokens
-            let pos_embeddings_to_add = pos_embeddings.slice(s![start_idx..end_idx, ..]);
-
-            // Add the position embeddings to the word embeddings
-            // We need to reshape the slice to be broadcastable for the addition
-            hidden_states += &pos_embeddings_to_add;
-        }
-        hidden_states
-    }
 }
 
 #[async_trait(?Send)]
@@ -213,7 +182,6 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
             self.config.scale_embeddings(),
         );
         // 1. Embed the decoder input tokens and apply layer norm.
-        // let mut hidden_states = self.embed_decoder_with_offset(decoder_input_ids, position_offset);
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
 
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());

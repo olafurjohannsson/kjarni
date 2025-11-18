@@ -20,7 +20,7 @@ async fn test_reshape_q_v_path() -> Result<()> {
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let cpu_ground_truth = cpu_input
         .to_owned()
-        .into_shape((b, s, h, d))? // [B, S, H, D]
+        .into_shape_with_order((b, s, h, d))? // [B, S, H, D]
         .permuted_axes([0, 2, 1, 3]) // [B, H, S, D]
         .as_standard_layout()
         .to_owned();
@@ -51,13 +51,13 @@ async fn test_reshape_k_transpose_path() -> Result<()> {
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let cpu_ground_truth = cpu_input
         .to_owned()
-        .into_shape((b, s, h, d))? // [B, S, H, D]
+        .into_shape_with_order((b, s, h, d))? // [B, S, H, D]
         .permuted_axes([0, 2, 3, 1]) // [B, H, D, S]
         .as_standard_layout()
         .to_owned();
     let gpu_output = GpuTensor::uninitialized(
         &context,
-        vec![b, h, d, s], // Note the output shape is different
+        vec![b, h, d, s], 
         crate::gpu_ops::DType::F32,
         "Reshape Output K^T",
     );

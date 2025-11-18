@@ -45,6 +45,7 @@ impl GpuApplyMask {
         mask: &GpuTensor,   // The [B, S_k_padded] mask tensor
         is_causal: bool,
         position_offset: u32,
+        logical_key_len: u32,
     ) {
         let scores_shape = scores.shape();
         let mask_shape = mask.shape();
@@ -57,7 +58,9 @@ impl GpuApplyMask {
         // Sanity check
         assert_eq!(key_stride, mask_shape[1] as u32, "Mask and Score physical widths must match");
 
-        let logical_key_len = position_offset + query_len;
+        // let logical_key_len = position_offset + query_len;
+        // self-attention = position_offset + query_len
+        // cross-attention encoder_sequence_lngth
 
         let uniforms = Uniforms {
             batch_size,

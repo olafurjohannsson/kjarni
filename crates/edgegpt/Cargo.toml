@@ -17,6 +17,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 edgetransformers = { path = "../../crates-internal/edgetransformers" }
 edgemodels = { path = "../../crates-internal/edgemodels" }
+edgesearch = { path = "../../crates-internal/edgesearch" }
+edgerag = { path = "../../crates-internal/edgerag" }
 anyhow = { workspace = true }
 once_cell = { workspace = true }
 tokio = { workspace = true }

@@ -1,12 +1,11 @@
 use crate::Embeddings;
-use crate::adaptive_embeddings::{EmbeddingSelector};
+use crate::activations::Activation;
+use crate::adaptive_embeddings::EmbeddingSelector;
 use crate::cache::GpuKVCache;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::gpu_ops::{GpuTensorPool, GpuFrameContext, GpuTensor};
 use crate::gpu_ops::blocks::decoder::GpuPreNormDecoderLayer;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
-use crate::activations::Activation;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::blocks::rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
@@ -14,6 +13,7 @@ use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
     GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
+use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::rope::RoPE;
 use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
 use crate::weights::ModelWeights;
@@ -21,7 +21,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3, s};
 use std::sync::Arc;
-
+use tokio::sync::Mutex;
 /// The GPU backend for a generic Transformer Decoder.
 pub struct GpuTransformerDecoder {
     // CPU-side embeddings
@@ -48,7 +48,7 @@ pub struct GpuTransformerDecoder {
 
     gpu_rope: Option<GpuRoPE>,
 
-    gpu_tensor_pool: GpuTensorPool,
+    pool: Mutex<GpuTensorPool>,
 }
 
 impl GpuTransformerDecoder {
@@ -130,7 +130,7 @@ impl GpuTransformerDecoder {
             cpu_embeddings,
             embedding_selector,
             gpu_rope,
-            gpu_tensor_pool: GpuTensorPool::new(context),
+            pool: Mutex::new(GpuTensorPool::new(context)),
         })
     }
 
@@ -214,9 +214,9 @@ impl GpuTransformerDecoder {
             // LLaMA uses RMSNorm, so there is no bias.
             (
                 GpuNormalization::RMSNorm(GpuRMSNorm::new(&context, config.layer_norm_eps())),
-                GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
-                    GpuTensor::from_ndarray(&context, &gamma)?,
-                )?),
+                GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(GpuTensor::from_ndarray(
+                    &context, &gamma,
+                )?)?),
             )
         };
 
@@ -252,14 +252,12 @@ impl GpuTransformerDecoder {
                 output_w
             };
 
-            let weights_gpu = GpuFeedForwardWeightsStd::new(
-                GpuTensor::from_ndarray(&context, &fc1_w)?,
-                GpuTensor::from_ndarray(
-                    &context,
-                    &weights.get_array1(&ffn_names.intermediate_bias)?,
-                )?,
-                GpuTensor::from_ndarray(&context, &fc2_w)?,
-                GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.output_bias)?)?,
+            let weights_gpu = GpuFeedForwardWeightsStd::from_ndarrays(
+                &context,
+                &fc1_w,
+                &weights.get_array1(&ffn_names.intermediate_bias)?,
+                &fc2_w,
+                &weights.get_array1(&ffn_names.output_bias)?,
             )?;
             println!("Activation!: {:?}", config.activation_function());
             (
@@ -335,6 +333,7 @@ impl Decoder for GpuTransformerDecoder {
     ) -> Result<Self::Output> {
         let pool_guard = self.pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+        let (encoder, pool) = frame.resources();
 
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input.shape()[1];
@@ -350,13 +349,13 @@ impl Decoder for GpuTransformerDecoder {
         let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
 
         let mut hidden_states = self.embeddings.encode(
-            &mut encoder,
+            encoder,
             &self.embedding_weights,
             &input_ids_gpu,
             None,
             position_offset,
             self.config.as_ref(),
-            &mut temp,
+            pool,
         )?;
 
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
@@ -366,35 +365,35 @@ impl Decoder for GpuTransformerDecoder {
         for (i, layer) in self.layers.iter().enumerate() {
             if self.gpu_rope.is_none() {
                 let (output, _) = layer.forward_gpt2(
-                    &mut encoder,
+                    encoder,
                     &hidden_states,
                     &attention_mask_gpu,
                     i,
                     position_offset,
                     gpu_cache.as_deref_mut(),
-                    &mut temp,
+                    pool,
                     self.gpu_rope.as_ref(),
                 )?;
                 hidden_states = output;
             } else {
-                let (output, _) = layer.forward_llama(
-                    &mut encoder,
-                    &hidden_states,
-                    &attention_mask_gpu,
-                    i,
-                    position_offset,
-                    gpu_cache.as_deref_mut(),
-                    &mut temp,
-                    self.gpu_rope.as_ref(),
-                ).await?;
+                let (output, _) = layer
+                    .forward_llama(
+                        encoder,
+                        &hidden_states,
+                        &attention_mask_gpu,
+                        i,
+                        position_offset,
+                        gpu_cache.as_deref_mut(),
+                        pool,
+                        self.gpu_rope.as_ref(),
+                    )
+                    .await?;
                 hidden_states = output;
             }
-
-
         }
-        let final_ln_output = temp.get(hidden_states.shape().to_vec());
+        let final_ln_output = pool.get(hidden_states.shape().to_vec());
         self.final_layer_norm.encode(
-            &mut encoder,
+            encoder,
             &self.final_ln_weights,
             &hidden_states,
             &final_ln_output,

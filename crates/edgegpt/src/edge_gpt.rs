@@ -8,6 +8,10 @@ use edgetransformers::models::ModelType;
 use edgetransformers::prelude::*;
 use std::sync::Arc;
 
+// Import Search/RAG components
+use edgesearch::{SearchIndex, types::SearchResult};
+use edgerag::{TextSplitter, SplitterConfig};
+
 /// Main EdgeGPT interface
 pub struct EdgeGPT {
     pub(crate) models: Arc<ModelManager>,
@@ -15,6 +19,8 @@ pub struct EdgeGPT {
     pub(crate) context: Option<Arc<WgpuContext>>,
     pub(crate) sentence_model_type: ModelType,
     pub(crate) cross_encoder_model_type: ModelType,
+    pub(crate) generator_model_type: ModelType, // Default: Llama3_2_1B or DistilGPT2
+    pub(crate) seq2seq_model_type: ModelType,   // Default: DistilBartCnn
     pub(crate) cache_dir: Option<String>,
 }
 
@@ -34,6 +40,49 @@ impl EdgeGPT {
     /// Create a builder for custom configuration
     pub fn builder() -> EdgeGPTBuilder {
         EdgeGPTBuilder::new()
+    }
+
+    // ========================================================================
+    // Text Generation (Chat / Completion)
+    // ========================================================================
+
+    /// Generate text continuation from a prompt
+    pub async fn generate(&self, prompt: &str) -> Result<String> {
+        self.models.get_or_load_text_generator(
+            self.generator_model_type,
+            self.cache_dir.as_deref(),
+            self.device,
+            self.context.clone()
+        ).await?;
+        
+        let guard = self.models.text_generator.lock().await;
+        let generator = guard.as_ref().unwrap();
+        
+        // Use default config from the model
+        let config = generator.model.get_default_generation_config();
+        generator.generate(prompt, &config).await
+    }
+
+    /// Summarize a long text
+    pub async fn summarize(&self, text: &str) -> Result<String> {
+        self.models.get_or_load_seq2seq_generator(
+            self.seq2seq_model_type,
+            self.cache_dir.as_deref(),
+            self.device,
+            self.context.clone()
+        ).await?;
+
+        let guard = self.models.seq2seq_generator.lock().await;
+        let generator = guard.as_ref().unwrap();
+        
+        let config = generator.model.get_default_generation_config();
+        generator.generate(text, &config).await
+    }
+
+    /// Translate text (Alias for summarize/generate on translation models)
+    pub async fn translate(&self, text: &str) -> Result<String> {
+        // For now, translation uses the same Seq2Seq pipeline
+        self.summarize(text).await
     }
 
     // ========================================================================
@@ -146,6 +195,52 @@ impl EdgeGPT {
         encoder.rerank_top_k(query, documents, k).await
     }
 
+
+    // ========================================================================
+    // Index & Search 
+    // ========================================================================
+
+    /// Split text into chunks suitable for indexing
+    pub fn split_text(&self, text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+        let config = SplitterConfig {
+            chunk_size,
+            chunk_overlap: overlap,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        splitter.split(text)
+    }
+
+    /// Build a Search Index from a list of documents.
+    /// This automatically computes embeddings using the loaded Sentence Encoder.
+    pub async fn build_index(&self, documents: &[&str]) -> Result<SearchIndex> {
+        // Ensure encoder is loaded
+        self.preload_sentence_encoder().await?;
+        
+        // Compute embeddings
+        let embeddings = self.encode_batch(documents).await?;
+        
+        // Convert to owned strings for the index
+        let docs_owned: Vec<String> = documents.iter().map(|s| s.to_string()).collect();
+        let metadata = vec![HashMap::new(); docs_owned.len()];
+
+        // Create the index
+        SearchIndex::build(docs_owned, embeddings, metadata)
+    }
+
+    /// Search an index using Hybrid Search (BM25 + Vector).
+    /// This automatically computes the query embedding.
+    pub async fn search(&self, index: &SearchIndex, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        // Ensure encoder is loaded
+        self.preload_sentence_encoder().await?;
+        
+        // Compute query embedding
+        let query_emb = self.encode(query).await?;
+        
+        // Perform Hybrid Search
+        Ok(index.search_hybrid(query, &query_emb, limit))
+    }
+
     // ========================================================================
     // Model Management
     // ========================================================================
@@ -199,6 +294,24 @@ impl EdgeGPT {
                 self.context.clone(),
             )
             .await
+    }
+
+    async fn ensure_generator_loaded(&self) -> Result<()> {
+        self.models.get_or_load_text_generator(
+            self.generator_model_type,
+            self.cache_dir.as_deref(),
+            self.device,
+            self.context.clone()
+        ).await
+    }
+
+    async fn ensure_seq2seq_loaded(&self) -> Result<()> {
+        self.models.get_or_load_seq2seq_generator(
+            self.seq2seq_model_type,
+            self.cache_dir.as_deref(),
+            self.device,
+            self.context.clone()
+        ).await
     }
 }
 

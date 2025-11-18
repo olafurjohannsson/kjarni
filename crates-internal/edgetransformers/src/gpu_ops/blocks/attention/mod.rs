@@ -258,7 +258,10 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, q_heads, &k_transposed, pool);
 
         // Apply causal mask
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, position_offset as u32);
+        let logical_key_len = scores.shape()[2] + position_offset;
+        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
+            position_offset as u32,
+            logical_key_len as u32);
 
         // Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -378,13 +381,14 @@ impl GpuAttention {
             // Otherwise, for a purely causal mask, we can just pass the scores tensor
             // as a dummy, since the kernel only needs its shape to know the key_stride.
             let padding_mask = attention_mask.unwrap_or(&scores);
-
+            let logical_key_len = scores.shape()[2] + cache_len;
             self.apply_mask.encode(
                 encoder,
                 &scores,
                 padding_mask,
                 is_causal,
                 cache_len as u32,
+                logical_key_len as u32,
             );
         }
 
@@ -442,7 +446,10 @@ impl GpuAttention {
         let k_transposed = k_expanded.permute(encoder, &self.permute, &[0, 1, 3, 2]);
         let scores = self.bmm_4d(encoder, q_heads, &k_transposed, pool);
 
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, position_offset as u32);
+        let logical_key_len = scores.shape()[2] + position_offset;
+        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
+            position_offset as u32,
+            logical_key_len as u32);
         self.softmax.encode(encoder, &scores, self.scale_factor);
 
         let context = self.bmm_4d(encoder, &scores, &v_expanded, pool);
@@ -476,7 +483,9 @@ impl GpuAttention {
         // 4. Apply mask if it exists.
         if let Some(mask) = attention_mask {
             // This uses your existing apply_padding_mask helper, which is correct.
-            self.apply_padding_mask(encoder, &scores, mask, pool);
+            let position_offset = 0 as u32;
+            let logical_key_len = key_value.shape()[1] as u32;
+            self.apply_padding_mask(encoder, &scores, mask, pool, position_offset, logical_key_len);
         }
 
         // 5. Softmax.
@@ -591,12 +600,14 @@ impl GpuAttention {
         //     attention_mask.shape()
         // );
         // Apply combined causal and padding mask.
+        let logical_key_len = scores.shape()[2] + cache_len;
         self.apply_mask.encode(
             encoder,
             &scores,
             attention_mask,
             true, // Self-attention is always causal
             cache_len as u32,
+            logical_key_len as u32,
         );
 
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -707,7 +718,10 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, &q_for_attn, &k_t, pool);
 
         // 3b. Apply mask
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, position_offset as u32);
+        let logical_key_len = scores.shape()[2] + position_offset;
+        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
+            position_offset as u32,
+            logical_key_len as u32);
 
         // 3c. Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -761,12 +775,14 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, &q_split, &k_transposed, pool);
 
         // === 4. Apply Masks & Softmax ===
+        let logical_key_len = scores.shape()[2] + position_offset;
         self.apply_mask.encode(
             encoder,
             &scores,
             attention_mask,
             is_causal,
             position_offset as u32,
+            logical_key_len as u32,
         );
         self.softmax.encode(encoder, &scores, self.scale_factor);
         let attention_weights = scores;
@@ -880,8 +896,10 @@ impl GpuAttention {
         scores: &GpuTensor,  // [B, H, S_q, S_k]
         mask: &GpuTensor,     // [B, S_k]
         pool: &mut GpuTensorPool,
+        position_offset: u32,
+        logical_key_len: u32,
     ) {
         // The apply_mask kernel should handle broadcasting
-        self.apply_mask.encode(encoder, scores, mask, false, 0);
+        self.apply_mask.encode(encoder, scores, mask, false, position_offset, logical_key_len);
     }
 }

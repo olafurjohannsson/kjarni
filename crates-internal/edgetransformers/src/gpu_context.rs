@@ -89,33 +89,25 @@ impl WgpuContext {
         })
     }
 
-    fn calculate_memory_info(adapter: &Adapter, config: &GpuConfig) -> Result<GpuMemoryInfo> {
-        let limits = adapter.limits();
+fn calculate_memory_info(adapter: &Adapter, config: &GpuConfig) -> Result<GpuMemoryInfo> {
+    let limits = adapter.limits();
+    let available_memory = Self::query_gpu_memory(adapter);
+    let kv_cache_reservation = config.kv_cache_memory_mb * 1_048_576;
 
-        // Get actual GPU memory if available (platform-specific)
-        let available_memory = Self::query_gpu_memory(adapter);
+    // --- START CORRECTION ---
+    // The max_buffer_size should reflect the hardware's actual capability.
+    // Do not reduce it based on an application-level budget.
+    let max_buffer_size = limits.max_buffer_size;
+    // --- END CORRECTION ---
 
-        // Conservative estimate: reserve memory for KV cache
-        let kv_cache_reservation = config.kv_cache_memory_mb * 1_048_576;
-
-        // Calculate safe buffer limits
-        let max_buffer_size = if let Some(mem) = available_memory {
-            // Use 80% of available memory minus KV cache reservation
-            ((mem as f64 * 0.8) as u64)
-                .saturating_sub(kv_cache_reservation)
-                .min(limits.max_buffer_size)
-        } else {
-            limits.max_buffer_size
-        };
-
-        Ok(GpuMemoryInfo {
-            max_buffer_size,
-            max_texture_dimension_2d: limits.max_texture_dimension_2d,
-            max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
-            available_memory,
-            reserved_for_kv_cache: kv_cache_reservation,
-        })
-    }
+    Ok(GpuMemoryInfo {
+        max_buffer_size,
+        max_texture_dimension_2d: limits.max_texture_dimension_2d,
+        max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
+        available_memory,
+        reserved_for_kv_cache: kv_cache_reservation,
+    })
+}
 
     #[cfg(target_os = "windows")]
     fn query_gpu_memory(adapter: &Adapter) -> Option<u64> {

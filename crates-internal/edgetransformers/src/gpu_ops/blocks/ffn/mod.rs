@@ -31,11 +31,12 @@
 use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::{GpuFrameContext, GpuTensorPool};
 use anyhow::{Result, anyhow};
+use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
-use crate::gpu_ops::{GpuTensorPool, GpuFrameContext};
 #[cfg(test)]
 mod tests;
 
@@ -69,37 +70,24 @@ impl GpuFeedForwardWeights {
     /// This is the new "gatekeeper" for weight integrity. It will panic if the
     /// provided tensors have mismatched or incorrect dimensions.
     pub fn new(
-        fc1_weight: GpuTensor,
+        fc1_weight: GpuTensor, // Expects transposed [intermediate_size, hidden_size]
         fc1_bias: GpuTensor,
-        fc2_weight: GpuTensor,
+        fc2_weight: GpuTensor, // Expects transposed [hidden_size, intermediate_size]
         fc2_bias: GpuTensor,
     ) -> Result<Self> {
-        // --- ALL THE ASSERTIONS ARE MOVED HERE ---
         assert_eq!(fc1_weight.rank(), 2, "FC1 weight must be 2D");
         assert_eq!(fc2_weight.rank(), 2, "FC2 weight must be 2D");
         assert_eq!(fc1_bias.rank(), 1, "FC1 bias must be 1D");
         assert_eq!(fc2_bias.rank(), 1, "FC2 bias must be 1D");
 
-        // Checks FC1: output dimension of weight must match bias size.
-        assert_eq!(
-            fc1_weight.shape()[1],
-            fc1_bias.shape()[0],
-            "FC1 weight's [in,OUT] must match bias [OUT]"
-        );
+        // For FC1, transposed shape is [out, in] -> [intermediate_size, hidden_size].
+        assert_eq!(fc1_weight.shape()[0], fc1_bias.shape()[0]);
 
-        // Checks FC2: output dimension of weight must match bias size.
-        assert_eq!(
-            fc2_weight.shape()[1],
-            fc2_bias.shape()[0],
-            "FC2 weight's [in,OUT] must match bias [OUT]"
-        );
+        // For FC2, transposed shape is [out, in] -> [hidden_size, intermediate_size].
+        assert_eq!(fc2_weight.shape()[0], fc2_bias.shape()[0]);
 
-        // Checks connection: FC1 output dimension must match FC2 input dimension.
-        assert_eq!(
-            fc1_weight.shape()[1],
-            fc2_weight.shape()[0],
-            "FC1's out_features must match FC2's in_features"
-        );
+        // Connection check: The intermediate_size must match.
+        assert_eq!(fc1_weight.shape()[0], fc2_weight.shape()[1]);
 
         Ok(Self {
             fc1_weight,
@@ -107,6 +95,32 @@ impl GpuFeedForwardWeights {
             fc2_weight,
             fc2_bias,
         })
+    }
+
+    /// Creates a new `GpuFeedForwardWeights` container from CPU ndarrays.
+    /// This is the recommended "smart" constructor.
+    pub fn from_ndarrays(
+        context: &Arc<WgpuContext>,
+        fc1_w_cpu: &Array2<f32>,
+        fc1_b_cpu: &Array1<f32>,
+        fc2_w_cpu: &Array2<f32>,
+        fc2_b_cpu: &Array1<f32>,
+    ) -> Result<Self> {
+        assert_eq!(fc1_w_cpu.shape()[1], fc1_b_cpu.shape()[0]);
+        assert_eq!(fc2_w_cpu.shape()[1], fc2_b_cpu.shape()[0]);
+        assert_eq!(fc1_w_cpu.shape()[1], fc2_w_cpu.shape()[0]);
+
+        let fc1_weight_transposed = GpuTensor::from_ndarray(context, &fc1_w_cpu.t().to_owned())?;
+        let fc2_weight_transposed = GpuTensor::from_ndarray(context, &fc2_w_cpu.t().to_owned())?;
+        let fc1_bias = GpuTensor::from_ndarray(context, fc1_b_cpu)?;
+        let fc2_bias = GpuTensor::from_ndarray(context, fc2_b_cpu)?;
+
+        Self::new(
+            fc1_weight_transposed,
+            fc1_bias,
+            fc2_weight_transposed,
+            fc2_bias,
+        )
     }
 }
 
@@ -118,25 +132,15 @@ pub struct GpuFeedForward {
 
 impl GpuFeedForward {
     /// Creates a new `GpuFeedForward` block from pre-prepared weights.
-    ///
-    /// # INVARIANT
-    ///
-    /// The weight tensors provided to this constructor **MUST** be in the standard
-    /// **[in_features, out_features]** layout. This is because the internal fused
-    /// kernels are written to expect this format for compatibility with the CPU path.
-    ///
-    /// # Arguments
-    /// * `context` - The shared WGPU context.
-    /// * `activation` - The activation function to use.
     pub fn new(context: &Arc<WgpuContext>, activation: Activation) -> Result<Self> {
-        match activation {
-            Activation::Gelu => (), // Supported
-            _ => {
-                return Err(anyhow!(
-                    "GpuFeedForward's fused kernel currently only supports GELU."
-                ));
-            }
-        }
+        // match activation {
+        //     Activation::Gelu => (), // Supported
+        //     _ => {
+        //         return Err(anyhow!(
+        //             "GpuFeedForward's fused kernel currently only supports GELU."
+        //         ));
+        //     }
+        // }
 
         let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context);
         let (fc2_pipeline, fc2_layout) = compile_fc2_pipeline(context);
@@ -149,6 +153,7 @@ impl GpuFeedForward {
             context: context.clone(),
         })
     }
+
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -157,10 +162,11 @@ impl GpuFeedForward {
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         // Get a temporary tensor for the intermediate result.
+        let intermediate_size = weights.fc1_bias.shape()[0];
         let intermediate_shape = vec![
             input.shape()[0],
             input.shape()[1],
-            weights.fc1_weight.shape()[1], // The intermediate hidden size
+            intermediate_size,
         ];
         let intermediate = pool.get(intermediate_shape);
 
@@ -169,11 +175,13 @@ impl GpuFeedForward {
 
         // Run the two passes.
         self.run_fc1(encoder, weights, input, &intermediate);
+
         self.run_fc2(encoder, weights, &intermediate, &output);
 
         // Return the final output tensor.
         output
     }
+
     pub fn encode_2(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -183,10 +191,11 @@ impl GpuFeedForward {
         output: &GpuTensor,
     ) {
         // Get a temporary tensor for the intermediate result.
+        let intermediate_size = weights.fc1_bias.shape()[0];
         let intermediate_shape = vec![
             input.shape()[0],
             input.shape()[1],
-            weights.fc1_weight.shape()[1], // The intermediate hidden size
+            intermediate_size,
         ];
         let intermediate = pool.get(intermediate_shape);
         // Run the two passes.
@@ -215,9 +224,10 @@ impl GpuFeedForward {
         output: &GpuTensor,
     ) {
         let input_shape = input.shape();
+        let output_shape = output.shape();
         let rows = (input_shape[0] * input_shape[1]) as u32;
         let hidden_size = input_shape[2] as u32;
-        let intermediate_size = weights.fc1_weight.shape()[1] as u32;
+        let intermediate_size = output_shape[2] as u32;
 
         let uniforms = FfnUniforms {
             m: rows,
@@ -287,7 +297,9 @@ impl GpuFeedForward {
         let input_shape = input.shape();
         let rows = (input_shape[0] * input_shape[1]) as u32;
         let intermediate_size = input_shape[2] as u32;
-        let hidden_size = weights.fc2_weight.shape()[1] as u32;
+        // let hidden_size = weights.fc2_weight.shape()[1] as u32;
+        let output_shape = output.shape();
+        let hidden_size = output_shape[2] as u32;
 
         let uniforms = FfnUniforms {
             m: rows,

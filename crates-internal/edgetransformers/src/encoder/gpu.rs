@@ -5,15 +5,15 @@ use std::sync::Arc;
 
 use crate::Embeddings;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
-use crate::gpu_ops::blocks::attention::{GpuAttentionWeights};
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
-
+use tokio::sync::Mutex;
 
 pub struct GpuTransformerEncoder {
     embedding_weights: GpuEmbeddingWeights,
@@ -24,7 +24,7 @@ pub struct GpuTransformerEncoder {
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
     context: Arc<WgpuContext>,
     cpu_embeddings: Embeddings,
-    pool: GpuTensorPool,
+    pool: Mutex<GpuTensorPool>,
 }
 
 impl GpuTransformerEncoder {
@@ -96,26 +96,29 @@ impl GpuTransformerEncoder {
             )?;
 
             let intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
-            let fc1_w_cpu = if config.transpose_ffn_weights() {
+            let output_w = weights.get_array2(&ffn_names.output_weight)?;
+
+            let fc1_w_normalized = if config.transpose_ffn_weights() {
                 intermediate_w.t().as_standard_layout().to_owned()
             } else {
                 intermediate_w
             };
-            let output_w = weights.get_array2(&ffn_names.output_weight)?;
-            let fc2_w_cpu = if config.transpose_ffn_weights() {
+            let fc2_w_normalized = if config.transpose_ffn_weights() {
                 output_w.t().as_standard_layout().to_owned()
             } else {
                 output_w
             };
+            let fc1_b_cpu = weights.get_array1(&ffn_names.intermediate_bias)?;
+            let fc2_b_cpu = weights.get_array1(&ffn_names.output_bias)?;
 
-            let ff_weights = GpuFeedForwardWeights::new(
-                GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
-                GpuTensor::from_ndarray(
-                    &context,
-                    &weights.get_array1(&ffn_names.intermediate_bias)?,
-                )?,
-                GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
-                GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.output_bias)?)?,
+            // 4. Call the smart constructor with the now-guaranteed-standard arrays.
+            //    The smart constructor will then handle the internal GPU-specific transposition.
+            let ff_weights = GpuFeedForwardWeights::from_ndarrays(
+                &context,
+                &fc1_w_normalized,
+                &fc1_b_cpu,
+                &fc2_w_normalized,
+                &fc2_b_cpu,
             )?;
 
             let ffn_ln_weights = GpuLayerNormWeights::new(
@@ -142,7 +145,7 @@ impl GpuTransformerEncoder {
             config,
             context: context.clone(),
             cpu_embeddings,
-            pool: GpuTensorPool::new(context),
+            pool: Mutex::new(GpuTensorPool::new(context)),
         })
     }
 
@@ -165,7 +168,7 @@ impl Encoder for GpuTransformerEncoder {
     type Input = Array2<u32>;
     type Output = EncoderOutput;
 
-async fn forward(
+    async fn forward(
         &self,
         input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
@@ -173,8 +176,10 @@ async fn forward(
     ) -> Result<Self::Output> {
         let pool_guard = self.pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+        let (encoder, pool) = frame.resources();
+
         let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input_ids)?;
-        
+
         // Handle optional token_type_ids upload
         let token_type_ids_gpu = if let Some(ids) = token_type_ids {
             Some(GpuTensor::from_ndarray(&self.context, ids)?)
@@ -183,37 +188,44 @@ async fn forward(
         };
 
         let mut hidden_states = self.embeddings.encode(
-            &mut encoder,
+            encoder,
             &self.embedding_weights,
             &input_ids_gpu,
             token_type_ids_gpu.as_ref(), // Pass as Option<&GpuTensor>
-            0, // encoder doesnt need a dynamic position offset
+            0,                           // encoder doesnt need a dynamic position offset
             self.config.as_ref(),
-            &mut temp,
+            pool,
         )?;
 
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
 
         if !self.config.is_prenorm() {
-            let ln_output = temp.get(hidden_states.shape().to_vec());
-            self.embedding_layer_norm.encode(&mut encoder, &self.embedding_ln_weights, &hidden_states, &ln_output);
+            let ln_output = pool.get(hidden_states.shape().to_vec());
+            self.embedding_layer_norm.encode(
+                encoder,
+                &self.embedding_ln_weights,
+                &hidden_states,
+                &ln_output,
+            );
             hidden_states = ln_output;
         }
 
         for layer in self.layers.iter() {
             hidden_states = layer.forward(
-                &mut encoder,
+                encoder,
                 &hidden_states,
                 &attention_mask_gpu,
                 self.config.as_ref(),
-                &mut temp,
+                pool,
             )?;
         }
 
         frame.finish();
         let last_hidden_state_cpu = hidden_states.to_ndarray_3d().await?;
 
-        Ok(EncoderOutput { last_hidden_state: last_hidden_state_cpu })
+        Ok(EncoderOutput {
+            last_hidden_state: last_hidden_state_cpu,
+        })
     }
 
     async fn get_hidden_states(

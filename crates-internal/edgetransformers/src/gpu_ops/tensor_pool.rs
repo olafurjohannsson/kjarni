@@ -77,49 +77,33 @@ impl GpuTensorPool {
     }
 
     /// Searches the pool for an idle buffer that can be reused.
-    fn try_reuse_from_pool(&self, needed_size: usize, shape: Vec<usize>) -> Option<GpuTensor> {
-        // Try for an exact size match first.
+    fn try_reuse_from_pool(&mut self, needed_size: usize, shape: Vec<usize>) -> Option<GpuTensor> {
+        // --- START FIX ---
+        // Only try for an exact size match.
         if let Some(buffers) = self.buffer_pool.get(&needed_size) {
-            if let Some(tensor) = buffers
+            // Find the first buffer in this size bucket that is not currently in use.
+            if let Some(tensor_to_reuse) = buffers
                 .iter()
                 .find(|t| !self.current_frame_ids.contains(&t.buffer_id()))
             {
                 #[cfg(debug_assertions)]
-                { /* self.stats is mutable, can't modify here */ }
-                return Some(if tensor.shape() == shape.as_slice() {
-                    tensor.clone()
+                {
+                    self.stats.reuses += 1;
+                }
+
+                // Since num_elements is guaranteed to be the same, we can safely view or clone.
+                // Return a clone or a view of the tensor. The pool retains ownership of the original.
+                return Some(if tensor_to_reuse.shape() == shape.as_slice() {
+                    tensor_to_reuse.clone()
                 } else {
-                    tensor.view(shape)
+                    tensor_to_reuse.view(shape)
                 });
             }
         }
 
-        // If no exact match, search for a larger buffer.
-        let mut candidates: Vec<_> = self
-            .buffer_pool
-            .iter()
-            .filter(|(size, buffers)| {
-                **size >= needed_size
-                    && buffers
-                        .iter()
-                        .any(|t| !self.current_frame_ids.contains(&t.buffer_id()))
-            })
-            .collect();
-
-        candidates.sort_by_key(|(size, _)| **size);
-
-        if let Some((_size, buffers)) = candidates.first() {
-            if let Some(tensor) = buffers
-                .iter()
-                .find(|t| !self.current_frame_ids.contains(&t.buffer_id()))
-            {
-                #[cfg(debug_assertions)]
-                { /* self.stats is mutable, can't modify here */ }
-                return Some(tensor.view(shape));
-            }
-        }
-
+        // If no exact size match was found and available, return None to force a new allocation.
         None
+        // --- END FIX ---
     }
 
     /// Creates a new tensor, stores it in the pool, and returns it.

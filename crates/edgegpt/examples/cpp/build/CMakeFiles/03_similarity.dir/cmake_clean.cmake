@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/03_similarity.dir/link.d"
   "03_similarity"
   "03_similarity.pdb"
   "CMakeFiles/03_similarity.dir/03_similarity.cpp.o"

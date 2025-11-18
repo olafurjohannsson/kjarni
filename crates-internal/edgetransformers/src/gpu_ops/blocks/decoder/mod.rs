@@ -77,7 +77,7 @@ impl GpuPreNormDecoderLayer {
         layer_idx: usize,
         position_offset: usize,
         gpu_cache: Option<&mut GpuKVCache>,
-        temp: &mut TempStorage,
+        temp: &mut GpuTensorPool,
         rope: Option<&GpuRoPE>,
     ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
         // --- 1. Pre-Norm ---

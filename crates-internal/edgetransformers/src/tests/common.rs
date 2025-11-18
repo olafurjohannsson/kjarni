@@ -19,7 +19,7 @@ pub async fn read_gpu_tensor_4d(tensor: &GpuTensor) -> Result<Array4<f32>> {
         data_slice.to_vec(),
     )?)
 }
-pub async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
+pub async fn read_gpu_tensor<D: Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
     let rank = tensor.rank();
     let shape = tensor.shape().to_vec();
     let raw_data = tensor.read_raw_data().await?;

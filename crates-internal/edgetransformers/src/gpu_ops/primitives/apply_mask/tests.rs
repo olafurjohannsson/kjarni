@@ -48,7 +48,8 @@ async fn test_mask_encoder_case() -> Result<()> {
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, false, 0);
+    let logical_key_len = gpu_scores.shape()[2] as u32;
+    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, false, 0, logical_key_len);
     context.queue.submit(std::iter::once(encoder.finish()));
 
     let expected_result = generate_expected_scores(&cpu_scores, &cpu_mask, false, 0)?;
@@ -73,7 +74,8 @@ async fn test_mask_decoder_prompt_case() -> Result<()> {
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, true, 0);
+    let logical_key_len = gpu_scores.shape()[2] as u32;
+    kernel.encode(&mut encoder, &gpu_scores, &gpu_mask, true, 0, logical_key_len);
     context.queue.submit(std::iter::once(encoder.finish()));
 
     let expected_result = generate_expected_scores(&cpu_scores, &cpu_mask, true, 0)?;
@@ -105,12 +107,15 @@ async fn test_mask_decoder_generation_case() -> Result<()> {
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
+    let logical_key_len = gpu_scores.shape()[2] as u32;
+    let e = logical_key_len + position_offset as u32;
     kernel.encode(
         &mut encoder,
         &gpu_scores,
         &gpu_mask,
         true,
         position_offset as u32,
+        e,
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -141,7 +146,8 @@ async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
 
     let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
-
+    let logical_key_len = gpu_scores.shape()[2] as u32;
+    let e = logical_key_len + position_offset as u32;
     let mut encoder = context.device.create_command_encoder(&Default::default());
     kernel.encode(
         &mut encoder,
@@ -149,6 +155,7 @@ async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
         &gpu_mask,
         true,
         position_offset as u32,
+        e,
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -179,7 +186,8 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
 
     let gpu_scores = GpuTensor::from_ndarray(&context, &cpu_scores)?;
     let gpu_mask = GpuTensor::from_ndarray(&context, &cpu_mask)?;
-
+    let logical_key_len = gpu_scores.shape()[2] as u32;
+    let e = logical_key_len + position_offset as u32;
     let mut encoder = context.device.create_command_encoder(&Default::default());
     kernel.encode(
         &mut encoder,
@@ -187,6 +195,7 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
         &gpu_mask,
         true,
         position_offset as u32,
+        e
     );
     context.queue.submit(std::iter::once(encoder.finish()));
 
@@ -209,7 +218,7 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     let query_len = 4;
     let key_stride = 8; // Physical max_len
     let position_offset = 2; // We are generating tokens 2, 3, 4, 5
-    let logical_key_len = position_offset + query_len; // 6
+    
     let scores_cpu = Array4::<f32>::ones((batch_size, num_heads, query_len, key_stride));
     let mask_cpu = Array2::<f32>::ones((batch_size, key_stride));
 
@@ -218,12 +227,15 @@ async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     let mut encoder = context
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    
+    let logical_key_len = position_offset + query_len + scores_gpu.shape()[2]; // 6
     apply_mask_kernel.encode(
         &mut encoder,
         &scores_gpu,
         &mask_gpu,
         true, // is_causal
         position_offset as u32,
+        logical_key_len as u32,
     );
     context.queue.submit(Some(encoder.finish()));
     let result_gpu: Array4<f32> = scores_gpu.to_ndarray_4d().await?;

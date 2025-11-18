@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/01_sentence_encoding.dir/link.d"
   "01_sentence_encoding"
   "01_sentence_encoding.pdb"
   "CMakeFiles/01_sentence_encoding.dir/01_sentence_encoding.cpp.o"

@@ -2,7 +2,8 @@
 members = [
     "crates/edgegpt",          
     "crates-internal/edgetransformers", 
-    "crates-internal/edgesearch",      
+    "crates-internal/edgesearch",     
+    "crates-internal/edgerag", 
     "crates-internal/edgemodels",      
 ]
 

@@ -286,8 +286,9 @@ mod tests {
     /// Helper function to load the DistilBART model for testing,
     /// reducing code duplication in the tests below.
     async fn load_distilbart_for_test() -> Result<Seq2SeqModel<BartConfig>> {
+        let context = Arc::new(WgpuContext::new().await?);
         let any_model =
-            AnySeq2SeqModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None)
+            AnySeq2SeqModel::from_registry(ModelType::DistilBartCnn, None, Device::Wgpu, Some(context))
                 .await?;
 
         match any_model {
@@ -388,4 +389,50 @@ mod tests {
 
         Ok(())
     }
+    // #[tokio::test]
+    // async fn test_distilbart_gpu_generation_parity() -> Result<()> {
+    //     // 1. Setup Context
+    //     let context = Arc::new(WgpuContext::new().await?);
+
+    //     // 2. Load Model on GPU
+    //     let any_model = AnySeq2SeqModel::from_registry(
+    //         ModelType::DistilBartCnn,
+    //         None,
+    //         Device::Wgpu,
+    //         Some(context.clone()),
+    //     ).await?;
+
+    //     let model = match any_model {
+    //         AnySeq2SeqModel::Bart(m) => m,
+    //     };
+
+    //     // 3. Create Generator
+    //     let generator = crate::generation::seq2seq::Seq2SeqGenerator::new(Box::new(model));
+
+    //     // 4. Define Input and Config
+    //     let article = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, \
+    //     type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without \
+    //     using a garbage collector.";
+        
+    //     // Use Greedy for deterministic comparison
+    //     let mut config = generator.model.get_default_generation_config();
+    //     config.strategy = DecodingStrategy::Greedy; 
+    //     config.max_new_tokens = Some(20);
+    //     config.repetition_penalty = 1.0; // Disable penalty to match raw model output
+    //     config.no_repeat_ngram_size = 0; // Disable ngram blocking
+
+    //     // 5. Generate
+    //     let summary = generator.generate(article, &config).await?;
+    //     println!("GPU Summary: {}", summary);
+
+    //     // 6. Assert
+    //     // The expected output should match what you got on CPU with the same config.
+    //     // Based on your previous logs, CPU produced a good summary.
+    //     // If GPU produces "CNN CNN...", this test will fail (or we can assert against expected string).
+        
+    //     assert!(!summary.contains("CNN CNN"), "Model is hallucinating repetition");
+    //     assert!(summary.contains("Rust"), "Summary should mention the subject");
+
+    //     Ok(())
+    // }
 }

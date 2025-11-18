@@ -3,14 +3,14 @@ mod common;
 
 use super::*;
 use crate::feedforward::StdFeedForward as CpuFeedForward;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext, DType};
+use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor, GpuTensorPool};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
 use ndarray::{Array, Array1, Array2, Array3, Ix3};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 
-use crate::tests::common::{assert_tensors_are_close, assert_all_close, get_test_context};
+use crate::tests::common::{assert_all_close, assert_tensors_are_close, get_test_context};
 
 #[tokio::test]
 async fn test_fc1_kernel_parity() -> Result<()> {
@@ -34,17 +34,21 @@ async fn test_fc1_kernel_parity() -> Result<()> {
     cpu_ffn_partial.apply_activation(&mut cpu_result);
 
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-    let gpu_fc1_w = GpuTensor::from_ndarray(&context, &cpu_fc1_w)?;
-    let gpu_fc1_b = GpuTensor::from_ndarray(&context, &cpu_fc1_b)?;
 
-    let dummy_fc2_w = GpuTensor::uninitialized(
+    let dummy_fc2_w_cpu = Array2::<f32>::zeros((intermediate_size, hidden_size));
+    let dummy_fc2_b_cpu = Array1::<f32>::zeros(hidden_size);
+
+    // 2. Use the single "smart" constructor to create the weights struct.
+    //    This function correctly transposes the real `cpu_fc1_w` and the dummy `dummy_fc2_w_cpu`
+    //    before creating the final GpuTensors.
+    let weights = GpuFeedForwardWeights::from_ndarrays(
         &context,
-        vec![intermediate_size, hidden_size],
-        DType::F32,
-        "dummy_w2",
-    );
-    let dummy_fc2_b = GpuTensor::uninitialized(&context, vec![hidden_size], DType::F32, "dummy_b2");
-    let weights = GpuFeedForwardWeights::new(gpu_fc1_w, gpu_fc1_b, dummy_fc2_w, dummy_fc2_b)?;
+        &cpu_fc1_w,
+        &cpu_fc1_b,
+        &dummy_fc2_w_cpu,
+        &dummy_fc2_b_cpu,
+    )?;
+
     let gpu_ffn_partial = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
     let gpu_intermediate = GpuTensor::uninitialized(
         &context,
@@ -87,25 +91,22 @@ async fn test_fc2_kernel_parity() -> Result<()> {
     let cpu_result = cpu_ffn.fc2(&cpu_input)?;
 
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
-    let gpu_fc2_w = GpuTensor::from_ndarray(&context, &raw_fc2_w)?; // NO .t()
-    let gpu_fc2_b = GpuTensor::from_ndarray(&context, &cpu_fc2_b)?;
 
-    let weights = GpuFeedForwardWeights::new(
-        GpuTensor::uninitialized(
-            &context,
-            vec![hidden_size, intermediate_size],
-            DType::F32,
-            "dummy_w",
-        ),
-        GpuTensor::uninitialized(&context, vec![intermediate_size], DType::F32, "dummy_b"),
-        gpu_fc2_w, // The real [in, out] weight
-        gpu_fc2_b,
-    )?;
+    let dummy_fc1_w_cpu = Array2::<f32>::zeros((hidden_size, intermediate_size));
+    let dummy_fc1_b_cpu = Array1::<f32>::zeros(intermediate_size);
 
-    let gpu_ffn_partial = GpuFeedForward::new(
+    // 2. Use the single "smart" constructor to create the weights struct.
+    //    This function correctly transposes the real `raw_fc2_w` and the dummy `dummy_fc1_w_cpu`
+    //    before creating the final GpuTensors.
+    let weights = GpuFeedForwardWeights::from_ndarrays(
         &context,
-        crate::activations::Activation::Gelu,
+        &dummy_fc1_w_cpu,
+        &dummy_fc1_b_cpu,
+        &raw_fc2_w,
+        &cpu_fc2_b,
     )?;
+
+    let gpu_ffn_partial = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![batch_size, seq_len, hidden_size],
@@ -162,11 +163,14 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
         crate::activations::Activation::GeluNew,
     );
 
-    let gpu_fc1_w = GpuTensor::from_ndarray(&context, &fc1_w_prepared)?;
-    let gpu_fc2_w = GpuTensor::from_ndarray(&context, &fc2_w_prepared)?;
-    let gpu_fc1_b = GpuTensor::from_ndarray(&context, &cpu_fc1_b)?;
-    let gpu_fc2_b = GpuTensor::from_ndarray(&context, &cpu_fc2_b)?;
-    let weights = GpuFeedForwardWeights::new(gpu_fc1_w, gpu_fc1_b, gpu_fc2_w, gpu_fc2_b)?;
+    let weights = GpuFeedForwardWeights::from_ndarrays(
+        &context,
+        &fc1_w_prepared,
+        &cpu_fc1_b,
+        &fc2_w_prepared,
+        &cpu_fc2_b,
+    )?;
+
     let gpu_ffn = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
     let cpu_input = Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
@@ -214,12 +218,81 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_ffn_parity_encode() -> Result<()> {
+    // --- SETUP (Unchanged) ---
     let context = Arc::new(WgpuContext::new().await?);
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::Gelu;
-    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| (i + j) as f32 * 0.01);
+
+    // Create CPU and GPU modules with identical weights
+    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+        (i + j) as f32 * 0.01
+    })
+    .as_standard_layout()
+    .to_owned();
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
-    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| (i + j) as f32 * -0.01);
+    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+        (i + j) as f32 * -0.01
+    })
+    .as_standard_layout()
+    .to_owned();
+    let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
+
+    let cpu_ffn = CpuFeedForward::new(
+        fc1_w_cpu.clone(),
+        fc1_b_cpu.clone(),
+        fc2_w_cpu.clone(),
+        fc2_b_cpu.clone(),
+        activation,
+    );
+    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
+        &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
+    )?;
+
+    // Create identical inputs
+    let input_cpu = Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
+    let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
+
+    // --- RUN CPU REFERENCE ---
+    let expected_cpu = cpu_ffn.forward(&input_cpu)?;
+
+    // --- START CORRECTION ---
+
+    // 1. Create the encoder and pool directly for the test.
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut pool = GpuTensorPool::new(context.clone());
+
+    // 2. Call the encode function with the raw &mut encoder and &mut pool.
+    let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut pool);
+    context.queue.submit(Some(encoder.finish()));
+    pool.next_frame();
+    
+    assert_tensors_are_close_relative(
+        &expected_cpu,
+        &output_gpu,
+        "FFN FC2 Fused Output",
+        1e-4, // Relative tolerance: 0.01%
+        1e-5, // Absolute tolerance
+    );
+
+    Ok(())
+}
+#[tokio::test]
+async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
+    let context = Arc::new(WgpuContext::new().await?);
+    let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
+    let activation = Activation::GeluNew;
+    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+        (i + j) as f32 * 0.01
+    })
+    .as_standard_layout()
+    .to_owned();
+    let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
+    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+        (i + j) as f32 * -0.01
+    })
+    .as_standard_layout()
+    .to_owned();
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
     let cpu_ffn = CpuFeedForward::new(
         fc1_w_cpu.clone(),
@@ -229,29 +302,188 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
         activation,
     );
     let gpu_ffn = GpuFeedForward::new(&context, activation)?;
-    let gpu_weights = GpuFeedForwardWeights::new(
-        GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &fc1_b_cpu)?,
-        GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &fc2_b_cpu)?,
+    let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
+        &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
     let input_cpu = Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
-    let expected_cpu = cpu_ffn.forward(&input_cpu)?;
+    let mut expected_cpu_output = cpu_ffn.fc1(&input_cpu)?;
+    cpu_ffn.apply_activation(&mut expected_cpu_output);
     let mut encoder = context.device.create_command_encoder(&Default::default());
-
-    let mut pool = GpuTensorPool::new(context.clone());
-    let mut frame = GpuFrameContext::new(&context, &mut pool);
-    
-    let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, frame.pool());
+    let intermediate_shape = expected_cpu_output.shape().to_vec();
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        intermediate_shape,
+        DType::F32,
+        "FC1 Isolated Test Output",
+    );
+    gpu_ffn.run_fc1(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
-
-    frame.finish();
-
-    assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN End-to-End Output", 1e-1).await; // TODO FIND OUT WHY 1e-2 doesnt work
+    assert_tensors_are_close(
+        &expected_cpu_output,
+        &output_gpu,
+        "FFN FC1 Fused Output",
+        1e-4,
+    )
+    .await;
     Ok(())
 }
 
+#[tokio::test]
+async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
+    // --- SETUP (Identical to the previous tests) ---
+    let context = Arc::new(WgpuContext::new().await?);
+    let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
+    let activation = Activation::Gelu;
+
+    // Create CPU and GPU modules with identical weights
+    let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+        (i + j) as f32 * 0.01
+    })
+    .as_standard_layout()
+    .to_owned();
+    let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
+    let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+        (i + j) as f32 * -0.01
+    })
+    .as_standard_layout()
+    .to_owned();
+    let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
+
+    let cpu_ffn = CpuFeedForward::new(
+        fc1_w_cpu.clone(),
+        fc1_b_cpu.clone(),
+        fc2_w_cpu.clone(),
+        fc2_b_cpu.clone(),
+        activation,
+    );
+    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let fc2_w_gpu_transposed = GpuTensor::from_ndarray(&context, &fc2_w_cpu.t().to_owned())?;
+
+    let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
+        &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
+    )?;
+
+    // --- CREATE A CONSISTENT INPUT FOR FC2 ---
+    // 1. Create a random initial input.
+    let initial_input_cpu =
+        Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
+    // 2. Pass it through the CPU's fc1 and activation to get a realistic intermediate tensor.
+    //    This tensor will be the input for both the CPU and GPU fc2 operations.
+    let mut intermediate_input_cpu = cpu_ffn.fc1(&initial_input_cpu)?;
+    cpu_ffn.apply_activation(&mut intermediate_input_cpu);
+    // 3. Upload this consistent input to the GPU.
+    let intermediate_input_gpu = GpuTensor::from_ndarray(&context, &intermediate_input_cpu)?;
+
+    // --- RUN CPU REFERENCE (FC2 only) ---
+    // Run the fc2 method on the intermediate CPU tensor.
+    let expected_cpu_output = cpu_ffn.fc2(&intermediate_input_cpu)?;
+
+    // --- RUN GPU KERNEL (FC2 only) ---
+    // 1. Create the encoder and a destination tensor for the GPU output.
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let final_output_shape = expected_cpu_output.shape().to_vec();
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        final_output_shape,
+        DType::F32,
+        "FC2 Isolated Test Output",
+    );
+
+    // 2. Call the isolated run_fc2 function.
+    gpu_ffn.run_fc2(
+        &mut encoder,
+        &gpu_weights,
+        &intermediate_input_gpu,
+        &output_gpu,
+    );
+
+    // 3. Submit the work to the GPU.
+    context.queue.submit(Some(encoder.finish()));
+
+    assert_tensors_are_close_relative(
+        &expected_cpu_output,
+        &output_gpu,
+        "FFN FC2 Fused Output",
+        1e-4, // Relative tolerance: 0.01%
+        1e-5, // Absolute tolerance
+    )
+    .await;
+
+    Ok(())
+}
+pub async fn assert_tensors_are_close_relative(
+    cpu_tensor: &Array3<f32>,
+    gpu_tensor: &GpuTensor,
+    tensor_name: &str,
+    relative_tolerance: f32,
+    absolute_tolerance: f32,
+) {
+    // 1. Get the GPU data back to the CPU. This is the only async part.
+    let gpu_tensor_cpu = gpu_tensor
+        .to_ndarray_3d::<f32>()
+        .await
+        .expect("Failed to read GPU tensor back to CPU for comparison");
+
+    // 2. Sanity check that the shapes are identical.
+    assert_eq!(
+        cpu_tensor.shape(),
+        gpu_tensor_cpu.shape(),
+        "Tensor '{}' shape mismatch. CPU: {:?}, GPU: {:?}",
+        tensor_name,
+        cpu_tensor.shape(),
+        gpu_tensor_cpu.shape()
+    );
+
+    // 3. Find the element with the largest absolute difference to create a useful error message.
+    let mut max_abs_diff = 0.0;
+    let mut worst_cpu_val = 0.0;
+    let mut worst_gpu_val = 0.0;
+    let mut worst_index = (0, 0, 0);
+
+    let shape = cpu_tensor.shape();
+    let (dim0, dim1, dim2) = (shape[0], shape[1], shape[2]);
+
+    for i in 0..dim0 {
+        for j in 0..dim1 {
+            for k in 0..dim2 {
+                let cpu_val = cpu_tensor[[i, j, k]];
+                let gpu_val = gpu_tensor_cpu[[i, j, k]];
+                let abs_diff = (cpu_val - gpu_val).abs();
+
+                if abs_diff > max_abs_diff {
+                    max_abs_diff = abs_diff;
+                    worst_cpu_val = cpu_val;
+                    worst_gpu_val = gpu_val;
+                    worst_index = (i, j, k);
+                }
+            }
+        }
+    }
+
+    // 4. Calculate the allowed tolerance for the single worst element.
+    let allowed_diff = absolute_tolerance + (relative_tolerance * worst_cpu_val.abs());
+
+    // 5. Perform the final check and panic with a detailed message if it fails.
+    if max_abs_diff > allowed_diff {
+        panic!(
+            "\n\nTensor '{}' is not close enough to its GPU counterpart.\n\
+             Worst failure at index {:?}:\n\
+             - CPU Value:      {}\n\
+             - GPU Value:      {}\n\
+             - Absolute Diff:  {}  (> Allowed Diff)\n\
+             - Allowed Diff:   {} (abs_tol: {} + rel_tol: {} * |CPU|)\n\n",
+            tensor_name,
+            worst_index,
+            worst_cpu_val,
+            worst_gpu_val,
+            max_abs_diff,
+            allowed_diff,
+            absolute_tolerance,
+            relative_tolerance
+        );
+    }
+}
 #[tokio::test]
 async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
     let context = Arc::new(WgpuContext::new().await?);
@@ -262,24 +494,15 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
     });
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
     let gpu_ffn = GpuFeedForward::new(&context, activation)?;
-    let dummy_fc1_w = GpuTensor::uninitialized(
-        &context,
-        vec![hidden_size, intermediate_size],
-        crate::gpu_ops::DType::F32,
-        "dummy",
-    );
-    let dummy_fc1_b = GpuTensor::uninitialized(
-        &context,
-        vec![intermediate_size],
-        crate::gpu_ops::DType::F32,
-        "dummy",
-    );
-    let gpu_weights = GpuFeedForwardWeights::new(
-        dummy_fc1_w,
-        dummy_fc1_b,
-        GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &fc2_b_cpu)?,
+    let fc1_w_cpu = Array2::<f32>::zeros((hidden_size, intermediate_size));
+    let fc1_b_cpu = Array1::<f32>::zeros(intermediate_size);
+
+    // 2. Use the new "smart" constructor to create the weights struct.
+    //    This single function call handles all transpositions and GpuTensor conversions internally.
+    let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
+        &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
+
     let input_cpu = Array3::from_shape_fn((batch_size, seq_len, intermediate_size), |(i, j, k)| {
         (i + j + k) as f32 * 0.1
     });
@@ -315,23 +538,17 @@ async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
     });
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
     let gpu_ffn = GpuFeedForward::new(&context, activation)?;
-    let dummy_fc2_w = GpuTensor::uninitialized(
+    let dummy_fc2_w_cpu = Array2::<f32>::zeros((intermediate_size, hidden_size));
+    let dummy_fc2_b_cpu = Array1::<f32>::zeros(hidden_size);
+
+    // 2. Use the new "smart" constructor to create the weights struct.
+    //    This single function call handles all transpositions and GpuTensor conversions internally.
+    let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context,
-        vec![intermediate_size, hidden_size],
-        crate::gpu_ops::DType::F32,
-        "dummy",
-    );
-    let dummy_fc2_b = GpuTensor::uninitialized(
-        &context,
-        vec![hidden_size],
-        crate::gpu_ops::DType::F32,
-        "dummy",
-    );
-    let gpu_weights = GpuFeedForwardWeights::new(
-        GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &fc1_b_cpu)?,
-        dummy_fc2_w,
-        dummy_fc2_b,
+        &fc1_w_cpu,
+        &fc1_b_cpu,
+        &dummy_fc2_w_cpu,
+        &dummy_fc2_b_cpu,
     )?;
     let input_cpu = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(i, j, k)| {
         (i + j + k) as f32 * 0.1

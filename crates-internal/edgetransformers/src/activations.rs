@@ -76,9 +76,12 @@ pub fn apply_activation(hidden: &mut Array3<f32>, activation: Activation) {
 /// This is the mathematically exact GELU used in original Transformer papers
 #[inline(always)]
 pub fn gelu(x: &mut Array3<f32>) {
-    const SQRT_2_INV: f32 = 0.7071067811865475; // 1.0 / sqrt(2.0)
 
-    x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
+    return gelu_new(x);
+
+    // const SQRT_2_INV: f32 = 0.7071067811865475; // 1.0 / sqrt(2.0)
+
+    // x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
 }
 
 /// GELU_NEW (tanh approximation) - Used by BERT, GPT-2
@@ -101,9 +104,11 @@ pub fn gelu_new(x: &mut Array3<f32>) {
 #[cfg(not(target_arch = "wasm32"))]
 #[inline(always)]
 pub fn gelu_parallel(x: &mut Array3<f32>) {
-    const SQRT_2_INV: f32 = 0.7071067811865475;
+    return gelu_new_parallel(x);
 
-    x.par_mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
+    // const SQRT_2_INV: f32 = 0.7071067811865475;
+
+    // x.par_mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

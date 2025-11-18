@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/04_semantic_search.dir/link.d"
   "04_semantic_search"
   "04_semantic_search.pdb"
   "CMakeFiles/04_semantic_search.dir/04_semantic_search.cpp.o"

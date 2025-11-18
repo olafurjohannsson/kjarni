@@ -114,7 +114,7 @@ async fn test_attention_encoder_parity() -> Result<()> {
         false,
         None,
         0,
-        frame.pool(),
+        frame.pool,
     );
     context.queue.submit(Some(encoder.finish()));
     frame.finish();

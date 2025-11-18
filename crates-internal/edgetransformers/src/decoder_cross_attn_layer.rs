@@ -11,7 +11,7 @@ pub use crate::{
     weights::ModelWeights,
 };
 use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, ArrayView3, Axis};
+use ndarray::{Array2, Array3, ArrayView3, Axis, s};
 
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,
@@ -50,7 +50,9 @@ impl DecoderCrossAttentionLayer {
 
         // Step 3: Feed-Forward
         hidden_states = self.feed_forward_block(&hidden_states)?;
-
+        if hidden_states.shape()[0] > 0 && hidden_states.shape()[1] > 0 {
+             println!("[CPU Layer Output] First 8: {:?}", hidden_states.slice(s![0, 0, 0..8]).to_vec());
+        }
         Ok((hidden_states, (new_k, new_v)))
         // let residual = hidden_states.clone();
         // let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache(

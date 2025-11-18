@@ -14,7 +14,8 @@ use tokio::sync::Mutex;
 pub(crate) struct ModelManager {
     pub cross_encoder: Mutex<Option<CrossEncoder>>,
     pub sentence_encoder: Mutex<Option<SentenceEncoder>>,
-    // Future: text generator, etc.
+    pub text_generator: Mutex<Option<Generator>>,
+    pub seq2seq_generator: Mutex<Option<Seq2SeqGenerator>>,
 }
 
 impl ModelManager {
@@ -67,6 +68,57 @@ impl ModelManager {
         Ok(())
     }
 
+    pub async fn get_or_load_text_generator(
+        &self,
+        model_type: ModelType,
+        cache_dir: Option<&str>,
+        device: Device,
+        context: Option<Arc<WgpuContext>>,
+    ) -> Result<()> {
+        let mut guard = self.text_generator.lock().await;
+        if guard.is_some() { return Ok(()); }
+
+        let dir = Self::resolve_cache_dir(cache_dir)?;
+        
+        // Factory logic for Decoder-only models
+        let model: Box<dyn DecoderLanguageModel> = match model_type {
+            ModelType::Llama3_2_1B => {
+                Box::new(LlamaModel::from_registry(model_type, Some(dir), device, context).await?)
+            }
+            ModelType::Gpt2 | ModelType::DistilGpt2 | ModelType::Gpt2Medium | ModelType::Gpt2Large | ModelType::Gpt2XL => {
+                Box::new(Gpt2Model::from_registry(model_type, Some(dir), device, context).await?)
+            }
+            _ => return Err(anyhow!("Unsupported text generation model: {:?}", model_type)),
+        };
+
+        *guard = Some(Generator::new(model));
+        Ok(())
+    }
+
+    pub async fn get_or_load_seq2seq_generator(
+        &self,
+        model_type: ModelType,
+        cache_dir: Option<&str>,
+        device: Device,
+        context: Option<Arc<WgpuContext>>,
+    ) -> Result<()> {
+        let mut guard = self.seq2seq_generator.lock().await;
+        if guard.is_some() { return Ok(()); }
+
+        let dir = Self::resolve_cache_dir(cache_dir)?;
+
+        // Factory logic for Seq2Seq models
+        let any_model = AnySeq2SeqModel::from_registry(model_type, Some(dir), device, context).await?;
+        
+        // Unwrap the specific model type (currently only BART supported)
+        let model: Box<dyn EncoderDecoderLanguageModel> = match any_model {
+            AnySeq2SeqModel::Bart(m) => Box::new(m),
+        };
+
+        *guard = Some(Seq2SeqGenerator::new(model));
+        Ok(())
+    }
+
     /// Unload sentence encoder to free memory
     pub async fn unload_sentence_encoder(&self) {
         *self.sentence_encoder.lock().await = None;
@@ -77,9 +129,22 @@ impl ModelManager {
         *self.cross_encoder.lock().await = None;
     }
 
-    /// Unload all models
+    pub async fn unload_text_generator(&self) { *self.text_generator.lock().await = None; }
+    pub async fn unload_seq2seq_generator(&self) { *self.seq2seq_generator.lock().await = None; }
+
     pub async fn unload_all(&self) {
         self.unload_sentence_encoder().await;
         self.unload_cross_encoder().await;
+        self.unload_text_generator().await;
+        self.unload_seq2seq_generator().await;
+    }
+
+
+    fn resolve_cache_dir(cache_dir: Option<&str>) -> Result<PathBuf> {
+        if let Some(d) = cache_dir {
+            Ok(PathBuf::from(d))
+        } else {
+            Ok(dirs::cache_dir().ok_or(anyhow!("No cache dir"))?.join("edgetransformers"))
+        }
     }
 }

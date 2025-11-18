@@ -8,7 +8,7 @@ use crate::gpu_ops::blocks::{
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
 };
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext, Kernel};
+use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{
     CrossAttentionDecoder as CrossAttentionDecoderTrait, DecoderOutput, Device,
     EncoderDecoderArchitecture, TransformerModel,
@@ -16,8 +16,8 @@ use crate::traits::{
 use crate::weights::ModelWeights;
 use anyhow::Result;
 use async_trait::async_trait;
-use ndarray::{Array2, Array3};
-use std::sync::{Arc};
+use ndarray::{Array2, Array3, s};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // This is just a data container, like the CPU version.
@@ -187,17 +187,12 @@ impl GpuCrossAttentionDecoder {
                     output_w
                 };
 
-                let weights_gpu = GpuFeedForwardWeightsStd::new(
-                    GpuTensor::from_ndarray::<f32, _>(context, &fc1_w)?,
-                    GpuTensor::from_ndarray::<f32, _>(
-                        context,
-                        &weights.get_array1(&ffn_names.intermediate_bias)?,
-                    )?,
-                    GpuTensor::from_ndarray::<f32, _>(context, &fc2_w)?,
-                    GpuTensor::from_ndarray::<f32, _>(
-                        context,
-                        &weights.get_array1(&ffn_names.output_bias)?,
-                    )?,
+                let weights_gpu = GpuFeedForwardWeightsStd::from_ndarrays(
+                    &context,
+                    &fc1_w,
+                    &weights.get_array1(&ffn_names.intermediate_bias)?,
+                    &fc2_w,
+                    &weights.get_array1(&ffn_names.output_bias)?,
                 )?;
                 (
                     GpuFeedForward::Standard(GpuFeedForwardStd::new(
@@ -342,6 +337,28 @@ impl TransformerModel for GpuCrossAttentionDecoder {
         Some(self.context.clone())
     }
 }
+
+use crate::Embeddings; // Ensure this is imported
+use crate::normalization::LayerNorm; // Ensure this is imported
+
+// Helper for the debug assertion (if not already available in this scope)
+fn assert_all_close_debug(cpu: &Array3<f32>, gpu: &Array3<f32>, rtol: f32, atol: f32, name: &str) {
+    let diff = cpu - gpu;
+    let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| a.max(*b));
+    let max_val = cpu.mapv(|x| x.abs()).fold(0.0f32, |a, b| a.max(*b));
+    
+    if max_diff > atol + rtol * max_val {
+        println!("[DEBUG FAIL] {} mismatch!", name);
+        println!("  Max Diff: {}", max_diff);
+        println!("  CPU First 5: {:?}", cpu.slice(s![0, 0, 0..5]).to_vec());
+        println!("  GPU First 5: {:?}", gpu.slice(s![0, 0, 0..5]).to_vec());
+        panic!("{} mismatch", name);
+    } else {
+        println!("[DEBUG PASS] {} matches. Max diff: {}", name, max_diff);
+    }
+}
+
+
 #[async_trait(?Send)]
 impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
     type Input = Array2<u32>;
@@ -355,13 +372,14 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
         decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        let pool_guard = self.pool.lock().await;
+        let mut pool_guard = self.pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+        let (mut encoder, mut pool) = frame.resources();
 
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = decoder_input_ids.shape()[1];
         let total_len = position_offset + seq_len;
-        
+
         let encoder_hidden_states_gpu =
             GpuTensor::from_ndarray::<f32, _>(&self.context, encoder_hidden_states)?;
 
@@ -386,18 +404,17 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
         // handles this. For the GPU, the `embeddings.encode` would need to support this offset.
         // Assuming it does for now.
         let mut hidden_states = self.embeddings.encode(
-            &mut encoder,
+            encoder,
             &self.embedding_weights,
             &input_ids_gpu,
             None,
             position_offset,
             self.config.as_ref(),
-            frame.pool(),
+            pool,
         )?;
-
-        let hidden_states_after_norm = frame.pool().get(hidden_states.shape().to_vec());
+        let hidden_states_after_norm = pool.get(hidden_states.shape().to_vec());
         self.embed_layer_norm.encode(
-            &mut encoder,
+            encoder,
             &self.embed_ln_weights,
             &hidden_states,
             &hidden_states_after_norm,
@@ -413,20 +430,20 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
             let cached_kv_refs = cached_kv.as_ref().map(|(k, v)| (k, v));
 
             let (output, new_k, new_v) = layer.forward(
-                &mut encoder,
+                encoder,
                 &hidden_states,
                 &encoder_hidden_states_gpu,
                 &decoder_attn_mask_gpu,
                 encoder_attn_mask_gpu.as_ref(),
                 cached_kv_refs,
                 position_offset,
-                frame.pool(),
+                pool,
             )?;
             hidden_states = output;
 
             // Update the self-attention cache for the next generation step
             if let Some(cache) = gpu_cache.as_deref_mut() {
-                cache.update(&mut encoder, i, &new_k, &new_v, position_offset)?;
+                cache.update(encoder, i, &new_k, &new_v, position_offset)?;
             }
         }
 
@@ -444,7 +461,6 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,7 +476,12 @@ mod tests {
 
     fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
         if a.shape() != b.shape() {
-            panic!("[{}] Shape mismatch: {:?} vs {:?}", context, a.shape(), b.shape());
+            panic!(
+                "[{}] Shape mismatch: {:?} vs {:?}",
+                context,
+                a.shape(),
+                b.shape()
+            );
         }
 
         let mut max_abs_diff = 0.0;
@@ -482,7 +503,8 @@ mod tests {
                 );
             }
 
-            if b_val.abs() > 1e-8 { // Avoid division by zero
+            if b_val.abs() > 1e-8 {
+                // Avoid division by zero
                 let rel_diff = abs_diff / b_val.abs();
                 if rel_diff > max_rel_diff {
                     max_rel_diff = rel_diff;
@@ -599,15 +621,24 @@ mod tests {
 
         // Feed-Forward weights
         let ff_weights = if let CpuFf::Standard(ff) = &cpu_layer.feedforward {
-            GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::new(
-                GpuTensor::from_ndarray(context, &ff.dense1_weight)?,
-                GpuTensor::from_ndarray(context, &ff.dense1_bias)?,
-                GpuTensor::from_ndarray(context, &ff.dense2_weight)?,
-                GpuTensor::from_ndarray(context, &ff.dense2_bias)?,
-            )?)
-        } else {
-            panic!("Expected standard feedforward layer");
-        };
+    // --- START MODIFICATION ---
+
+    // Use the "smart" constructor which takes the CPU ndarrays directly
+    // and handles all internal transpositions and conversions.
+    let weights_std = GpuFeedForwardWeightsStd::from_ndarrays(
+        context,
+        &ff.dense1_weight,
+        &ff.dense1_bias,
+        &ff.dense2_weight,
+        &ff.dense2_bias,
+    )?;
+
+    GpuFeedForwardWeights::Standard(weights_std)
+
+    // --- END MODIFICATION ---
+} else {
+    panic!("Expected standard feedforward layer");
+};
         let ffn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
             GpuTensor::from_ndarray(context, &cpu_layer.ffn_layer_norm.weight)?,
             GpuTensor::from_ndarray(context, &cpu_layer.ffn_layer_norm.bias)?,
@@ -661,31 +692,38 @@ mod tests {
         )?;
 
         // 5. RUN GPU FORWARD PASS
+        // --- START CORRECTION ---
+        // Create the encoder and pool directly. No FrameContext, no Mutex.
+        let mut encoder = context.device.create_command_encoder(&Default::default());
         let mut pool = GpuTensorPool::new(context.clone());
-        let mut frame = GpuFrameContext::new(&context, &mut pool);
 
         let gpu_decoder_hs = GpuTensor::from_ndarray(&context, &cpu_decoder_hs)?;
         let gpu_encoder_hs = GpuTensor::from_ndarray(&context, &cpu_encoder_hs)?;
         let gpu_decoder_mask = GpuTensor::from_ndarray(&context, &cpu_decoder_mask)?;
         let gpu_encoder_mask = GpuTensor::from_ndarray(&context, &cpu_encoder_mask)?;
 
+        // Pass the raw &mut encoder and &mut pool, which is what the layer expects.
         let (gpu_output_t, gpu_k_t, gpu_v_t) = gpu_layer.forward(
-            frame.encoder(),
+            &mut encoder,
             &gpu_decoder_hs,
             &gpu_encoder_hs,
             &gpu_decoder_mask,
             Some(&gpu_encoder_mask),
             None, // No cache
             0,    // Cache len is 0
-            frame.pool(),
+            &mut pool,
         )?;
 
-        frame.finish();
+        // Submit the work and advance the pool frame.
+        context.queue.submit(Some(encoder.finish()));
+        pool.next_frame();
+        // --- END CORRECTION ---
 
         let gpu_output = gpu_output_t.to_ndarray_3d().await?;
         let gpu_k = gpu_k_t.to_ndarray_3d().await?;
         let gpu_v = gpu_v_t.to_ndarray_3d().await?;
 
+        // 6. COMPARE RESULTS
         let rtol = 1e-3;
         let atol = 1e-4;
         assert_all_close(&cpu_output, &gpu_output, rtol, atol, "Final Output");
@@ -693,6 +731,180 @@ mod tests {
         assert_all_close(&cpu_v, &gpu_v, rtol, atol, "New V Value");
 
         println!("✅ GPU and CPU decoder layer outputs are consistent!");
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_layer_subcomponent_parity() -> Result<()> {
+        // 1. SETUP
+        let context = Arc::new(WgpuContext::new().await?);
+        let (batch, dec_len, enc_len, hidden, inter, heads) = (1, 1, 93, 1024, 4096, 16);
+
+        // 2. CREATE MODULES (Identical Weights)
+        let cpu_layer = create_mock_cpu_layer(hidden, inter, heads);
+        let gpu_layer =
+            create_gpu_layer_from_cpu(&context, &cpu_layer, hidden as u32, heads as u32)?;
+
+        // 3. CREATE INPUTS
+        // Use random inputs to ensure we aren't hitting "lucky" zeros
+        let cpu_hidden = Array::random((batch, dec_len, hidden), Uniform::new(-1.0, 1.0));
+        let cpu_encoder_hs = Array::random((batch, enc_len, hidden), Uniform::new(-1.0, 1.0));
+        
+        // Masks (Standard generation case: 1x1 decoder mask, 1x93 encoder mask)
+        let cpu_dec_mask = Array2::ones((batch, dec_len));
+        let cpu_enc_mask = Array2::ones((batch, enc_len));
+
+        // Upload to GPU
+        let gpu_hidden = GpuTensor::from_ndarray(&context, &cpu_hidden)?;
+        let gpu_encoder_hs = GpuTensor::from_ndarray(&context, &cpu_encoder_hs)?;
+        let gpu_dec_mask = GpuTensor::from_ndarray(&context, &cpu_dec_mask)?;
+        let gpu_enc_mask = GpuTensor::from_ndarray(&context, &cpu_enc_mask)?;
+
+        // Resources
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
+
+        // ========================================================================
+        // STEP 1: SELF-ATTENTION BLOCK PARITY
+        // ========================================================================
+        println!("--- Testing Self-Attention Block ---");
+        
+        // CPU Execution
+        let (cpu_sa_out, (cpu_k, cpu_v)) = cpu_layer.self_attention_block(
+            &cpu_hidden,
+            Some(&cpu_dec_mask),
+            None // No cache for this test
+        )?;
+
+        // GPU Execution
+        // We have to manually call the sub-components because `gpu_layer.forward` does it all.
+        // 1. Self Attn
+        let (gpu_sa_attn_out, gpu_k, gpu_v) = gpu_layer.self_attn.forward_seq2seq(
+            &mut encoder,
+            &gpu_hidden,
+            &gpu_layer.self_attn_weights,
+            &gpu_dec_mask,
+            None, // No cache
+            0,    // Cache len
+            &mut pool,
+        )?;
+        
+        // 2. Add (Residual)
+        let gpu_sa_add = pool.get(gpu_hidden.shape().to_vec());
+        gpu_layer.add.encode(&mut encoder, &[&gpu_hidden, &gpu_sa_attn_out], &gpu_sa_add);
+        
+        // 3. Norm
+        let gpu_sa_out = pool.get(gpu_sa_add.shape().to_vec());
+        gpu_layer.self_attn_norm.encode(
+            &mut encoder, 
+            &gpu_layer.self_attn_norm_weights, 
+            &gpu_sa_add, 
+            &gpu_sa_out
+        );
+
+        // Submit & Compare Step 1
+        context.queue.submit(Some(encoder.finish()));
+        let gpu_sa_out_cpu = gpu_sa_out.to_ndarray_3d().await?;
+        
+        assert_all_close(&cpu_sa_out, &gpu_sa_out_cpu, 1e-3, 1e-4, "Self-Attention Block");
+        println!("✅ Self-Attention Matches");
+
+        // ========================================================================
+        // STEP 2: CROSS-ATTENTION BLOCK PARITY
+        // ========================================================================
+        println!("--- Testing Cross-Attention Block ---");
+        
+        // IMPORTANT: Use the *CPU* output from Step 1 as input to Step 2.
+        // This isolates the error to this specific block.
+        let input_for_step_2 = cpu_sa_out.clone(); 
+        let gpu_input_for_step_2 = GpuTensor::from_ndarray(&context, &input_for_step_2)?;
+        
+        encoder = context.device.create_command_encoder(&Default::default());
+        pool.next_frame(); // Reset pool for cleanliness
+
+        // CPU Execution
+        let cpu_ca_out = cpu_layer.cross_attention_block(
+            &input_for_step_2,
+            &cpu_encoder_hs,
+            Some(&cpu_enc_mask)
+        )?;
+
+        // GPU Execution
+        // 1. Cross Attn
+        let gpu_ca_attn_out = gpu_layer.cross_attn.forward_cross(
+            &mut encoder,
+            &gpu_input_for_step_2, // Query
+            &gpu_encoder_hs,       // Key/Value
+            &gpu_layer.cross_attn_weights,
+            Some(&gpu_enc_mask),
+            &mut pool
+        );
+
+        // 2. Add (Residual)
+        let gpu_ca_add = pool.get(gpu_input_for_step_2.shape().to_vec());
+        gpu_layer.add.encode(&mut encoder, &[&gpu_input_for_step_2, &gpu_ca_attn_out], &gpu_ca_add);
+
+        // 3. Norm
+        let gpu_ca_out = pool.get(gpu_ca_add.shape().to_vec());
+        gpu_layer.cross_attn_norm.encode(
+            &mut encoder,
+            &gpu_layer.cross_attn_norm_weights,
+            &gpu_ca_add,
+            &gpu_ca_out
+        );
+
+        // Submit & Compare Step 2
+        context.queue.submit(Some(encoder.finish()));
+        let gpu_ca_out_cpu = gpu_ca_out.to_ndarray_3d().await?;
+
+        assert_all_close(&cpu_ca_out, &gpu_ca_out_cpu, 1e-3, 1e-4, "Cross-Attention Block");
+        println!("✅ Cross-Attention Matches");
+
+        // ========================================================================
+        // STEP 3: FEED-FORWARD BLOCK PARITY
+        // ========================================================================
+        println!("--- Testing Feed-Forward Block ---");
+
+        // Use CPU output from Step 2
+        let input_for_step_3 = cpu_ca_out.clone();
+        let gpu_input_for_step_3 = GpuTensor::from_ndarray(&context, &input_for_step_3)?;
+
+        encoder = context.device.create_command_encoder(&Default::default());
+        pool.next_frame();
+
+        // CPU Execution
+        let cpu_ffn_out = cpu_layer.feed_forward_block(&input_for_step_3)?;
+
+        // GPU Execution
+        // 1. FFN
+        let gpu_ffn_inner_out = pool.get(gpu_input_for_step_3.shape().to_vec());
+        gpu_layer.feedforward.encode(
+            &mut encoder,
+            &gpu_layer.ff_weights,
+            &gpu_input_for_step_3,
+            &gpu_ffn_inner_out,
+            &mut pool
+        );
+
+        // 2. Add (Residual)
+        let gpu_ffn_add = pool.get(gpu_input_for_step_3.shape().to_vec());
+        gpu_layer.add.encode(&mut encoder, &[&gpu_input_for_step_3, &gpu_ffn_inner_out], &gpu_ffn_add);
+
+        // 3. Norm
+        let gpu_ffn_out = pool.get(gpu_ffn_add.shape().to_vec());
+        gpu_layer.ffn_norm.encode(
+            &mut encoder,
+            &gpu_layer.ffn_norm_weights,
+            &gpu_ffn_add,
+            &gpu_ffn_out
+        );
+
+        // Submit & Compare Step 3
+        context.queue.submit(Some(encoder.finish()));
+        let gpu_ffn_out_cpu = gpu_ffn_out.to_ndarray_3d().await?;
+
+        assert_all_close(&cpu_ffn_out, &gpu_ffn_out_cpu, 1e-3, 1e-4, "Feed-Forward Block");
+        println!("✅ Feed-Forward Matches");
+
         Ok(())
     }
     // #[tokio::test]
