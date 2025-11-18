@@ -1,4 +1,5 @@
 //! Simple text splitting utilities
+use std::collections::HashMap;
 
 /// Configuration for text splitting
 #[derive(Debug, Clone)]
@@ -112,16 +113,17 @@ impl TextSplitter {
         text: &str,
         base_metadata: HashMap<String, String>,
     ) -> Vec<(String, HashMap<String, String>)> {
-        let chunks = self.split(text);
-        chunks
-            .into_iter()
-            .enumerate()
-            .map(|(i, chunk)| {
-                let mut metadata = base_metadata.clone();
-                metadata.insert("chunk_index".to_string(), i.to_string());
-                metadata.insert("total_chunks".to_string(), chunks.len().to_string());
-                (chunk, metadata)
-            })
-            .collect()
+        unimplemented!()
+        // let chunks = self.split(text);
+        // chunks
+        //     .into_iter()
+        //     .enumerate()
+        //     .map(|(i, chunk)| {
+        //         let mut metadata = base_metadata.clone();
+        //         metadata.insert("chunk_index".to_string(), i.to_string());
+        //         metadata.insert("total_chunks".to_string(), chunks.len().to_string());
+        //         (chunk, metadata)
+        //     })
+        //     .collect()
     }
 }

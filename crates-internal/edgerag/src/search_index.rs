@@ -1,6 +1,6 @@
 //! Unified search index combining BM25 and vector search
 
-use crate::{bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore};
+use edgesearch::{bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,28 +31,29 @@ impl SearchIndex {
         embeddings: Vec<Vec<f32>>,
         metadata: Vec<HashMap<String, String>>,
     ) -> Result<Self> {
-        if documents.len() != embeddings.len() {
-            return Err(anyhow::anyhow!(
-                "Documents and embeddings length mismatch: {} vs {}",
-                documents.len(),
-                embeddings.len()
-            ));
-        }
+        unimplemented!()
+        // if documents.len() != embeddings.len() {
+        //     return Err(anyhow::anyhow!(
+        //         "Documents and embeddings length mismatch: {} vs {}",
+        //         documents.len(),
+        //         embeddings.len()
+        //     ));
+        // }
 
-        // Build BM25 index
-        let doc_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
-        let mut bm25 = Bm25Index::new();
-        bm25.build(&doc_refs);
+        // // Build BM25 index
+        // let doc_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
+        // let mut bm25 = Bm25Index::new();
+        // bm25.build(&doc_refs);
 
-        // Build vector store
-        let vectors = VectorStore::new(embeddings)?;
+        // // Build vector store
+        // let vectors = VectorStore::new(embeddings)?;
 
-        Ok(Self {
-            bm25,
-            vectors,
-            documents,
-            metadata,
-        })
+        // Ok(Self {
+        //     bm25,
+        //     vectors,
+        //     documents,
+        //     metadata,
+        // })
     }
 
     /// Search using BM25 only
@@ -86,21 +87,22 @@ impl SearchIndex {
         results: Vec<(usize, f32)>,
         search_type: &str,
     ) -> Vec<SearchResult> {
-        results
-            .into_iter()
-            .filter_map(|(idx, score)| {
-                if idx < self.documents.len() {
-                    Some(SearchResult {
-                        score,
-                        chunk_id: format!("doc_{}", idx),
-                        text: self.documents[idx].clone(),
-                        metadata: self.metadata.get(idx).cloned().unwrap_or_default(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
+        unimplemented!()
+        // results
+        //     .into_iter()
+        //     .filter_map(|(idx, score)| {
+        //         if idx < self.documents.len() {
+        //             Some(SearchResult {
+        //                 score,
+        //                 chunk_id: format!("doc_{}", idx),
+        //                 text: self.documents[idx].clone(),
+        //                 metadata: self.metadata.get(idx).cloned().unwrap_or_default(),
+        //             })
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect()
     }
 
     /// Get number of indexed documents

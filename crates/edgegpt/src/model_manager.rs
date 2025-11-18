@@ -1,9 +1,13 @@
 //! Internal model manager for lazy loading
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use edgemodels::cross_encoder::CrossEncoder;
 use edgemodels::sentence_encoder::SentenceEncoder;
+use edgemodels::seq2seq::{Seq2SeqModel, AnySeq2SeqModel};
+use edgemodels::generation::{Generator, seq2seq::Seq2SeqGenerator};
+use edgemodels::text_generation::{Gpt2Model, LlamaModel};
 use edgetransformers::models::ModelType;
+use edgetransformers::models::base::{EncoderDecoderLanguageModel, DecoderLanguageModel, EncoderLanguageModel};
 use edgetransformers::prelude::*;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;

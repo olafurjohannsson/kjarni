@@ -1,6 +1,6 @@
-mod search_index;
-mod splitter;
+pub mod search_index;
+pub mod splitter;
 
 
-use search_index::SearchIndex;
-use splitter::TextSplitter;
+pub use search_index::SearchIndex;
+pub use splitter::TextSplitter;

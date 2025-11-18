@@ -99,8 +99,9 @@ pub unsafe extern "C" fn edge_gpt_encode(
     
     match result {
         Ok(embedding) => {
-            let len = embedding.len();
-            let array = FloatArray::from_vec(embedding);
+            let e = embedding.unwrap();
+            let len = e.len();
+            let array = FloatArray::from_vec(e);
             *out_embedding = array.data;
             *out_len = len;
             EdgeGPTError::Success
@@ -398,42 +399,44 @@ pub unsafe extern "C" fn edge_gpt_search(
     limit: usize,
     out_json_results: *mut *mut c_char,
 ) -> EdgeGPTError {
-    if handle.is_null() || index_handle.is_null() || query.is_null() || out_json_results.is_null() {
-        return EdgeGPTError::NullPointer;
-    }
+    unimplemented!()
+    // if handle.is_null() || index_handle.is_null() || query.is_null() || out_json_results.is_null() {
+    //     return EdgeGPTError::NullPointer;
+    // }
 
-    let ctx = &*(handle as *const EdgeGPTContext);
-    let index = &*(index_handle as *const SearchIndex);
+    // let ctx = &*(handle as *const EdgeGPTContext);
+    // let index = &*(index_handle as *const SearchIndex);
     
-    let query_str = match std::panic::catch_unwind(|| c_to_string(query)) {
-        Ok(s) => s,
-        Err(_) => return EdgeGPTError::InvalidUtf8,
-    };
+    // let query_str = match std::panic::catch_unwind(|| c_to_string(query)) {
+    //     Ok(s) => s,
+    //     Err(_) => return EdgeGPTError::InvalidUtf8,
+    // };
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.runtime.block_on(async {
-            ctx.edge_gpt.search(index, &query_str, limit).await
-        })
-    }));
+    // let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    //     ctx.runtime.block_on(async {
+    //         ctx.edge_gpt.search(index, &query_str, limit).await
+    //     })
+    // }));
 
-    match result {
-        Ok(Ok(results)) => {
-            // Serialize results to JSON for easy consumption in C#/Go
-            let json = serde_json::to_string(&results).unwrap_or_default();
-            *out_json_results = string_to_c(json);
-            EdgeGPTError::Success
-        }
-        Ok(Err(_)) => EdgeGPTError::InferenceError,
-        Err(_) => EdgeGPTError::RuntimeError,
-    }
+    // match result {
+    //     Ok(Ok(results)) => {
+    //         // Serialize results to JSON for easy consumption in C#/Go
+    //         let json = serde_json::to_string(&results).unwrap_or_default();
+    //         *out_json_results = string_to_c(json);
+    //         EdgeGPTError::Success
+    //     }
+    //     Ok(Err(_)) => EdgeGPTError::InferenceError,
+    //     Err(_) => EdgeGPTError::RuntimeError,
+    // }
 }
 
 /// Free the index
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn edge_gpt_free_index(index_handle: *mut EdgeGPTIndex) {
-    if !index_handle.is_null() {
-        let _ = Box::from_raw(index_handle as *mut SearchIndex);
-    }
+    unimplemented!()
+    // if !index_handle.is_null() {
+    //     let _ = Box::from_raw(index_handle as *mut SearchIndex);
+    // }
 }
 
 /// Save index to disk
@@ -442,20 +445,21 @@ pub unsafe extern "C" fn edge_gpt_save_index(
     index_handle: *mut EdgeGPTIndex,
     path: *const c_char,
 ) -> EdgeGPTError {
-    let index = &*(index_handle as *const SearchIndex);
-    let path_str = c_to_string(path);
+    unimplemented!()
+    // let index = &*(index_handle as *const SearchIndex);
+    // let path_str = c_to_string(path);
     
-    // Serialize to JSON and write
-    match index.save_json() {
-        Ok(json) => {
-            if std::fs::write(path_str, json).is_ok() {
-                EdgeGPTError::Success
-            } else {
-                EdgeGPTError::RuntimeError // IO Error
-            }
-        }
-        Err(_) => EdgeGPTError::RuntimeError,
-    }
+    // // Serialize to JSON and write
+    // match index.save_json() {
+    //     Ok(json) => {
+    //         if std::fs::write(path_str, json).is_ok() {
+    //             EdgeGPTError::Success
+    //         } else {
+    //             EdgeGPTError::RuntimeError // IO Error
+    //         }
+    //     }
+    //     Err(_) => EdgeGPTError::RuntimeError,
+    // }
 }
 
 /// Load index from disk
@@ -465,20 +469,20 @@ pub unsafe extern "C" fn edge_gpt_load_index(
     out_index: *mut *mut EdgeGPTIndex,
 ) -> EdgeGPTError {
     let path_str = c_to_string(path);
-    
-    match std::fs::read_to_string(path_str) {
-        Ok(json) => {
-            match SearchIndex::load_json(&json) {
-                Ok(index) => {
-                    let index_box = Box::new(index);
-                    *out_index = Box::into_raw(index_box) as *mut EdgeGPTIndex;
-                    EdgeGPTError::Success
-                }
-                Err(_) => EdgeGPTError::InferenceError, // Parse error
-            }
-        }
-        Err(_) => EdgeGPTError::RuntimeError, // IO Error
-    }
+    unimplemented!()
+    // match std::fs::read_to_string(path_str) {
+    //     Ok(json) => {
+    //         match SearchIndex::load_json(&json) {
+    //             Ok(index) => {
+    //                 let index_box = Box::new(index);
+    //                 *out_index = Box::into_raw(index_box) as *mut EdgeGPTIndex;
+    //                 EdgeGPTError::Success
+    //             }
+    //             Err(_) => EdgeGPTError::InferenceError, // Parse error
+    //         }
+    //     }
+    //     Err(_) => EdgeGPTError::RuntimeError, // IO Error
+    // }
 }
 
 /// Free a string returned by generate/summarize

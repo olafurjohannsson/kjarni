@@ -7,10 +7,11 @@ use anyhow::Result;
 use edgetransformers::models::ModelType;
 use edgetransformers::prelude::*;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 // Import Search/RAG components
-use edgesearch::{SearchIndex, types::SearchResult};
-use edgerag::{TextSplitter, SplitterConfig};
+use edgesearch::*;
+use edgerag::*;
 
 /// Main EdgeGPT interface
 pub struct EdgeGPT {
@@ -33,6 +34,9 @@ impl EdgeGPT {
             context,
             sentence_model_type: ModelType::MiniLML6V2,
             cross_encoder_model_type: ModelType::MiniLML6V2CrossEncoder,
+            seq2seq_model_type: ModelType::DistilBartCnn,
+            generator_model_type: ModelType::DistilGpt2,
+
             cache_dir: None,
         }
     }
@@ -202,13 +206,14 @@ impl EdgeGPT {
 
     /// Split text into chunks suitable for indexing
     pub fn split_text(&self, text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
-        let config = SplitterConfig {
-            chunk_size,
-            chunk_overlap: overlap,
-            ..Default::default()
-        };
-        let splitter = TextSplitter::new(config);
-        splitter.split(text)
+        unimplemented!()
+        // let config = SplitterConfig {
+        //     chunk_size,
+        //     chunk_overlap: overlap,
+        //     ..Default::default()
+        // };
+        // let splitter = TextSplitter::new(config);
+        // splitter.split(text)
     }
 
     /// Build a Search Index from a list of documents.
@@ -321,6 +326,8 @@ pub struct EdgeGPTBuilder {
     context: Option<Arc<WgpuContext>>,
     sentence_model: ModelType,
     cross_encoder_model: ModelType,
+    seq2seq_model: ModelType,
+    generator_model: ModelType,
     cache_dir: Option<String>,
 }
 
@@ -331,6 +338,8 @@ impl EdgeGPTBuilder {
             context: None,
             sentence_model: ModelType::MiniLML6V2,
             cross_encoder_model: ModelType::MiniLML6V2CrossEncoder,
+            generator_model: ModelType::DistilGpt2,
+            seq2seq_model: ModelType::DistilBartCnn,
             cache_dir: None,
         }
     }
@@ -354,6 +363,16 @@ impl EdgeGPTBuilder {
         self.cross_encoder_model = model;
         self
     }
+    
+    pub fn generator_model(mut self, model: ModelType) -> Self {
+        self.generator_model = model;
+        self
+    }
+
+    pub fn seq2seq_model(mut self, model: ModelType) -> Self {
+        self.seq2seq_model = model;
+        self
+    }
 
     pub fn cache_dir(mut self, dir: impl Into<String>) -> Self {
         self.cache_dir = Some(dir.into());
@@ -367,6 +386,8 @@ impl EdgeGPTBuilder {
             context: self.context,
             sentence_model_type: self.sentence_model,
             cross_encoder_model_type: self.cross_encoder_model,
+            seq2seq_model_type: self.seq2seq_model,
+            generator_model_type: self.generator_model,
             cache_dir: self.cache_dir,
         }
     }

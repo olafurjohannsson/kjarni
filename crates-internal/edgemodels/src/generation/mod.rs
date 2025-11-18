@@ -35,7 +35,7 @@ pub struct StreamedToken {
 
 /// A generic, model-agnostic text generator for autoregressive decoding.
 pub struct Generator {
-    model: Box<dyn DecoderLanguageModel>,
+    pub model: Box<dyn DecoderLanguageModel>,
 }
 
 impl Generator {

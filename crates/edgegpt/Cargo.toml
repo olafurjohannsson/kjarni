@@ -22,6 +22,8 @@ edgerag = { path = "../../crates-internal/edgerag" }
 anyhow = { workspace = true }
 once_cell = { workspace = true }
 tokio = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }
 pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 
 [features]

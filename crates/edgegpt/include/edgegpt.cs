@@ -34,6 +34,9 @@ namespace EdgeGpt
         private static extern IntPtr edge_gpt_new_cpu();
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr edge_gpt_new_gpu();
+
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void edge_gpt_free(IntPtr handle);
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -73,6 +76,20 @@ namespace EdgeGpt
         );
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int edge_gpt_generate(
+            IntPtr handle,
+            string prompt,
+            out IntPtr outText
+        );
+
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int edge_gpt_summarize(
+            IntPtr handle,
+            string text,
+            out IntPtr outSummary
+        );
+
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void edge_gpt_free_float_array(IntPtr data, UIntPtr len);
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -86,13 +103,33 @@ namespace EdgeGpt
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         private static extern void edge_gpt_free_usize_array(IntPtr data, UIntPtr len);
 
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void edge_gpt_free_string(IntPtr s);
+
         // ========== Construction / Destruction ==========
 
-        public EdgeGpt()
+        /// <summary>
+        /// Initialize EdgeGPT on CPU (Default)
+        /// </summary>
+        public EdgeGpt() : this("cpu") { }
+
+        /// <summary>
+        /// Initialize EdgeGPT on specified device ("cpu" or "gpu")
+        /// </summary>
+        public EdgeGpt(string device)
         {
-            _handle = edge_gpt_new_cpu();
-            if (_handle == IntPtr.Zero)
-                throw new EdgeGptException("Failed to create EdgeGPT instance");
+            if (device.ToLower() == "gpu")
+            {
+                _handle = edge_gpt_new_gpu();
+                if (_handle == IntPtr.Zero)
+                    throw new EdgeGptException("Failed to create EdgeGPT instance (GPU). Check WGPU support.");
+            }
+            else
+            {
+                _handle = edge_gpt_new_cpu();
+                if (_handle == IntPtr.Zero)
+                    throw new EdgeGptException("Failed to create EdgeGPT instance (CPU)");
+            }
         }
 
         public void Dispose()
@@ -232,6 +269,28 @@ namespace EdgeGpt
                 foreach (IntPtr p in docPtrs)
                     Marshal.FreeHGlobal(p);
             }
+        }
+
+        // ========== Generation ==========
+
+        public string Generate(string prompt)
+        {
+            int err = edge_gpt_generate(_handle, prompt, out IntPtr outPtr);
+            CheckError(err, "generate");
+
+            string result = Marshal.PtrToStringAnsi(outPtr);
+            edge_gpt_free_string(outPtr);
+            return result;
+        }
+
+        public string Summarize(string text)
+        {
+            int err = edge_gpt_summarize(_handle, text, out IntPtr outPtr);
+            CheckError(err, "summarize");
+
+            string result = Marshal.PtrToStringAnsi(outPtr);
+            edge_gpt_free_string(outPtr);
+            return result;
         }
     }
 }

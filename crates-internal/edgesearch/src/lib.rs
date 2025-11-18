@@ -1,12 +1,12 @@
-mod types;
-mod vector;
-mod bm25;
-mod hybrid;
+pub mod types;
+pub mod vector;
+pub mod bm25;
+pub mod hybrid;
 
 use wasm_bindgen::prelude::*;
 pub use types::{Chunk, SearchResult, SearchType};
-use vector::VectorStore;
-use bm25::Bm25Index;
+pub use vector::VectorStore;
+pub use bm25::Bm25Index;
 
 #[wasm_bindgen]
 pub struct EdgeRAG {

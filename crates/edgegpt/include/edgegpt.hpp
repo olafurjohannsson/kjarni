@@ -47,6 +47,21 @@ namespace edgegpt
             }
         }
 
+        /// Create EdgeGPT instance specifying device ("cpu" or "gpu")
+        explicit EdgeGPT(const std::string& device) {
+            if (device == "gpu") {
+                handle_ = edge_gpt_new_gpu();
+                if (handle_ == nullptr) {
+                    throw EdgeGPTException("Failed to create EdgeGPT instance (GPU). Check WGPU support.");
+                }
+            } else {
+                handle_ = edge_gpt_new_cpu();
+                if (handle_ == nullptr) {
+                    throw EdgeGPTException("Failed to create EdgeGPT instance (CPU)");
+                }
+            }
+        }
+
         /// Destructor
         ~EdgeGPT()
         {
@@ -175,6 +190,29 @@ namespace edgegpt
             edge_gpt_free_usize_array(indices_ptr, documents.size());
             edge_gpt_free_float_array(scores_ptr, documents.size());
 
+            return result;
+        }
+        /// Generate text continuation (Llama/GPT)
+        std::string generate(const std::string &prompt)
+        {
+            char *out_ptr = nullptr;
+            auto err = edge_gpt_generate(handle_, prompt.c_str(), &out_ptr);
+            check_error(err, "generate");
+
+            std::string result(out_ptr);
+            edge_gpt_free_string(out_ptr);
+            return result;
+        }
+
+        /// Summarize text (BART/T5)
+        std::string summarize(const std::string &text)
+        {
+            char *out_ptr = nullptr;
+            auto err = edge_gpt_summarize(handle_, text.c_str(), &out_ptr);
+            check_error(err, "summarize");
+
+            std::string result(out_ptr);
+            edge_gpt_free_string(out_ptr);
             return result;
         }
     };
