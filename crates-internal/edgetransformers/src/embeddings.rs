@@ -171,8 +171,7 @@ mod tests {
     use super::*;
     use super::*;
     use crate::gpu_context::WgpuContext;
-    use crate::gpu_ops::GpuTensor;
-    use crate::gpu_ops::blocks::attention::TempStorage;
+    use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
     use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
     use crate::traits::{LanguageModelConfig, TransformerConfig}; // Make sure traits are in scope
     use anyhow::Result;
@@ -289,7 +288,9 @@ mod tests {
         // Upload inputs
         let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
         let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
-        let mut temp = TempStorage::new(context.clone());
+        let mut pool = GpuTensorPool::new(context.clone());
+        let mut frame = GpuFrameContext::new(&context, &mut pool);
+
 
         let mut encoder = context.device.create_command_encoder(&Default::default());
         let output_gpu = gpu_embeddings.encode(
@@ -299,15 +300,14 @@ mod tests {
             Some(&token_type_ids_gpu),
             0,
             &config,
-            &mut temp,
+            &mut frame.pool(),
         )?;
-        context.queue.submit(Some(encoder.finish()));
+
+        frame.finish();
 
         let actual_output = output_gpu.to_ndarray_3d().await?;
 
-        // --- 4. Verification ---
         assert_tensors_are_close(&expected_output, &actual_output, 1e-4);
-
         Ok(())
     }
     #[tokio::test]
@@ -349,7 +349,7 @@ mod tests {
 
         // Upload inputs
         let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-        let mut temp = TempStorage::new(context.clone());
+        let mut pool = GpuTensorPool::new(context.clone());
 
         let mut encoder = context.device.create_command_encoder(&Default::default());
         let output_gpu = gpu_embeddings.encode(
@@ -359,7 +359,7 @@ mod tests {
             None,
             0,
             &config,
-            &mut temp,
+            pool,
         )?;
         context.queue.submit(Some(encoder.finish()));
 

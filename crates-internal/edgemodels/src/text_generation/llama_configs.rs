@@ -1,6 +1,7 @@
 use std::arch::x86_64::_MM_SET_ROUNDING_MODE;
 
 use anyhow::Result;
+use edgetransformers::activations::Activation;
 use edgetransformers::models::base::RopeScalingConfig;
 use edgetransformers::traits::{
     DecoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerDecoderAttentionNames,
@@ -8,7 +9,6 @@ use edgetransformers::traits::{
 };
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use edgetransformers::activations::Activation;
 
 /// Configuration for LLaMA models
 ///
@@ -66,6 +66,9 @@ pub struct LlamaConfig {
     pub pad_token_id: Option<u32>,
 
     pub rope_scaling: Option<RopeScalingConfig>,
+
+    #[serde(alias = "hidden_act")]
+    pub activation_function: Option<String>,
 }
 
 // Default values for optional fields (LLaMA-3.2 1B defaults)
@@ -120,6 +123,7 @@ impl LlamaConfig {
             eos_token_id: 128001,
             pad_token_id: None,
             rope_scaling: None,
+            activation_function: Some("silu".to_string()),
         }
     }
 
@@ -140,6 +144,7 @@ impl LlamaConfig {
             eos_token_id: 128001,
             pad_token_id: None,
             rope_scaling: None,
+            activation_function: Some("silu".to_string()),
         }
     }
 
@@ -160,6 +165,7 @@ impl LlamaConfig {
             eos_token_id: 128001,
             pad_token_id: None,
             rope_scaling: None,
+            activation_function: Some("silu".to_string()),
         }
     }
 
@@ -180,6 +186,7 @@ impl LlamaConfig {
             eos_token_id: 2,
             pad_token_id: Some(0),
             rope_scaling: None,
+            activation_function: Some("silu".to_string()),
         }
     }
     pub fn kv_dim(&self) -> usize {
@@ -228,7 +235,7 @@ impl LanguageModelConfig for LlamaConfig {
             None,
         )
     }
-fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
     fn max_position_embeddings(&self) -> usize {
@@ -239,7 +246,10 @@ fn as_any(&self) -> &dyn Any {
         self.vocab_size
     }
     fn activation_function(&self) -> Activation {
-        Activation::GeluNew
+        self.activation_function
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Activation::SilU) // LLaMA default
     }
     fn transpose_ffn_weights(&self) -> bool {
         true // LLaMA uses same convention as other transformers

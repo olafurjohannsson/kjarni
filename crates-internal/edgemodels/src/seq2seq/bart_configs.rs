@@ -60,6 +60,9 @@ pub struct BartConfig {
     pub pad_token_id: u32,
     pub decoder_start_token_id: u32,
 
+    #[serde(alias = "hidden_act", alias = "activation_function")]
+    pub activation_function: Option<String>,
+
     pub extra_pos_embeddings: u32,
     pub is_encoder_decoder: bool,
     pub model_type: String,
@@ -97,7 +100,10 @@ impl LanguageModelConfig for BartConfig {
         self.max_position_embeddings
     }
     fn activation_function(&self) -> Activation {
-        Activation::GeluNew
+        self.activation_function
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Activation::Gelu) // BART default
     }
     fn intermediate_size(&self) -> usize {
         self.encoder_ffn_dim

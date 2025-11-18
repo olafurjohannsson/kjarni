@@ -10,8 +10,7 @@ pub mod rms_norm;
 pub mod rope;
 pub mod decoder_cross_attention;
 
-use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::attention::TempStorage;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
 
 
 use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
@@ -67,14 +66,14 @@ impl GpuFeedForward {
         weights: &GpuFeedForwardWeights,
         input: &GpuTensor,
         output: &GpuTensor,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
     ) {
         match (self, weights) {
             (Self::Standard(ffn), GpuFeedForwardWeights::Standard(w)) => {
-                ffn.encode_2(encoder, input, w, temp, output)
+                ffn.encode_2(encoder, input, w, pool, output)
             }
             (Self::SwiGLU(swi), GpuFeedForwardWeights::SwiGLU(w)) => {
-                swi.encode(encoder, w, input, output, temp)
+                swi.encode(encoder, w, input, output, pool)
             }
             _ => panic!("FFN type mismatch"),
         }

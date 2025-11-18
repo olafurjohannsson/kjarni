@@ -6,7 +6,19 @@
 @group(0) @binding(2) var<storage, read_write> c_out: array<f32>;
 
 // SiLU activation function: x * sigmoid(x)
+fn relu(x: f32) -> f32 {
+    return max(x, 0.0);
+}
+
 fn silu(x: f32) -> f32 {
+    // Matching CPU implementation
+    if (x <= -20.0) { return 0.0; }
+    if (x >= 20.0) { return x; }
+    return x / (1.0 + exp(-x));
+}
+
+// Fast version for GPU (can skip branches)
+fn silu_fast(x: f32) -> f32 {
     return x / (1.0 + exp(-x));
 }
 

@@ -1,104 +1,40 @@
 use crate::GpuKVCache;
-use crate::activations;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::Kernel;
-use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::gpu_ops::blocks::attention::{GpuAttention, TempStorage};
-// use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::traits::CrossAttentionDecoder;
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerConfig, TransformerModel,
+    Cache, Decoder, DecoderArchitecture, TransformerConfig, TransformerModel,
 };
 use anyhow::Result;
 use std::sync::Arc;
-use wgpu::CommandEncoder;
 
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
+    GpuFeedForward, GpuFeedForwardWeights,
     GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-
-// pub use crate::gpu_ops::blocks::ffn::{GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd};
 mod tests;
 
-/// Represents a single layer for a decoder-only transformer model (e.g., GPT-2) on the GPU.
-///
-/// This struct holds the GPU-accelerated components (attention, layer norms, feed-forward)
-/// for one layer. It is designed to be a simple container of these components.
-///
-/// The actual forward pass orchestration is handled by the top-level `GpuTransformerDecoder`
-/// to allow for efficient batching of GPU commands. For example, the decoder can perform
-/// all `project_kv` operations for all layers, then all cache updates, then all `attend`
-/// operations, minimizing kernel dispatch overhead.
 pub struct GpuPreNormDecoderLayer {
-    // The self-attention block, containing kernels for matmul, softmax, etc.
     pub self_attn: GpuAttention,
     pub self_attn_weights: GpuAttentionWeights,
-    // The layer normalization applied before the self-attention block.
-    // pub self_attn_layer_norm: GpuLayerNorm,
-    // pub self_attn_ln_weights: GpuLayerNormWeights,
     pub self_attn_norm: GpuNormalization,
     pub self_attn_norm_weights: GpuNormalizationWeights,
-
-    // The feed-forward block.
     pub feedforward: GpuFeedForward,
     pub ff_weights: GpuFeedForwardWeights,
-
-    // The layer normalization applied before the feed-forward block.
     pub ffn_norm: GpuNormalization,
     pub ffn_norm_weights: GpuNormalizationWeights,
-    // pub ffn_layer_norm: GpuLayerNorm,
-    // pub ffn_ln_weights: GpuLayerNormWeights,
     add: GpuAdd,
     concat: GpuConcatenate,
     config: Arc<dyn DecoderArchitecture + Send + Sync>,
 }
-async fn log_gpu_tensor(tensor: &GpuTensor, label: &str) {
-    // This uses YOUR OWN robust readback function!
-    match tensor.to_ndarray_3d::<f32>().await {
-        Ok(arr) => {
-            let flat = arr.as_slice().unwrap();
-            let sample_size = 8;
-            let data_sample = if flat.len() <= sample_size * 2 {
-                format!("{:?}", flat)
-            } else {
-                format!("first {:?}, last {:?}", &flat[..sample_size], &flat[flat.len() - sample_size..])
-            };
-            log::debug!("[GPU] {}: shape={:?}, data=[{}]", label, arr.shape(), data_sample);
-        },
-        // Fallback for 2D tensors like the FFN intermediate
-        Err(_) => match tensor.to_ndarray_2d::<f32>().await {
-            Ok(arr) => {
-                let flat = arr.as_slice().unwrap();
-                let sample_size = 8;
-                let data_sample = if flat.len() <= sample_size * 2 { format!("{:?}", flat) } else { format!("first {:?}, last {:?}", &flat[..sample_size], &flat[flat.len() - sample_size..]) };
-                log::debug!("[GPU] {}: shape={:?}, data=[{}]", label, arr.shape(), data_sample);
-            },
-            Err(e) => log::error!("[GPU] Failed to read tensor '{}': {}", label, e),
-        }
-    }
-}
+
 impl GpuPreNormDecoderLayer {
-    /// Creates a new GPU-based decoder layer.
-    ///
-    /// This function initializes the GPU kernels for each component and moves the
-    /// weights to the GPU.
-    ///
-    /// # Arguments
-    /// * `context`: The shared WGPU context.
-    /// * `self_attn_weights`: The weights for the self-attention mechanism.
-    /// * `self_attn_ln_weights`: The weights for the pre-attention layer norm.
-    /// * `ff_weights`: The weights for the feed-forward network.
-    /// * `ffn_ln_weights`: The weights for the pre-feed-forward layer norm.
-    /// * `hidden_size`: The dimensionality of the model.
-    /// * `num_heads`: The number of attention heads.
-    /// * `intermediate_size`: The dimensionality of the feed-forward layer's intermediate state.
+
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
@@ -285,13 +221,13 @@ impl GpuPreNormDecoderLayer {
         layer_idx: usize,
         position_offset: usize,
         gpu_cache: Option<&mut GpuKVCache>,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
         rope: Option<&GpuRoPE>,
     ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
-        // --- 1. First Sub-layer: Self-Attention (Pre-Norm) ---
+        // Self-Attention (Pre-Norm)
         let residual = hidden_states;
 
-        let ln1_out = temp.get(hidden_states.shape().to_vec());
+        let ln1_out = pool.get(hidden_states.shape().to_vec());
         self.self_attn_norm.encode(
             encoder,
             &self.self_attn_norm_weights,
@@ -305,7 +241,7 @@ impl GpuPreNormDecoderLayer {
             &ln1_out,
             &self.self_attn_weights,
             position_offset,
-            temp,
+            pool,
             rope,
         );
 
@@ -325,14 +261,14 @@ impl GpuPreNormDecoderLayer {
                 attention_mask,
                 &self.self_attn_weights,
                 position_offset,
-                temp,
+                pool,
                 rope,
             )
         } else {
             // Priming pass: no cache, use standard attend
             // Split heads for new K/V
-            let new_k_split = self.self_attn.split_heads(encoder, &new_k, temp);
-            let new_v_split = self.self_attn.split_heads(encoder, &new_v, temp);
+            let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
+            let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
 
             self.self_attn.attend(
                 encoder,
@@ -342,21 +278,21 @@ impl GpuPreNormDecoderLayer {
                 true, // is_causal
                 (&new_k_split, &new_v_split),
                 position_offset,
-                temp,
+                pool,
             )
         };
-        let attn_block_output = temp.get(hidden_states.shape().to_vec());
+        let attn_block_output = pool.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);
 
-        // --- 2. Second Sub-layer: Feed-Forward Network (Pre-Norm) ---
+        // Second Sub-layer: Feed-Forward Network (Pre-Norm)
         let residual_2 = &attn_block_output;
 
-        let ln2_out = temp.get(residual_2.shape().to_vec());
+        let ln2_out = pool.get(residual_2.shape().to_vec());
         self.ffn_norm
             .encode(encoder, &self.ffn_norm_weights, residual_2, &ln2_out);
 
-        let ffn_out = temp.get(ln2_out.shape().to_vec());
+        let ffn_out = pool.get(ln2_out.shape().to_vec());
 
         // 2. Call encode with the correct 5 arguments in the correct order.
         self.feedforward.encode(
@@ -364,10 +300,10 @@ impl GpuPreNormDecoderLayer {
             &self.ff_weights, // weights
             &ln2_out,         // input
             &ffn_out,         // output
-            temp,
+            pool,
         );
 
-        let final_output = temp.get(residual_2.shape().to_vec());
+        let final_output = pool.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &final_output);
 

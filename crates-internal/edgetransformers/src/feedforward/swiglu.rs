@@ -9,6 +9,7 @@
 //! - down_proj: [intermediate_size, hidden_size]
 
 use crate::utils::linear_algebra::matmul_3d_2d;
+use crate::activations::{silu_generic as silu, silu_parallel, PARALLEL_THRESHOLD};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
@@ -63,10 +64,12 @@ impl SwiGluFeedForward {
     /// Forward pass for 3D input [batch, seq_len, hidden_size]
     pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         // 1. Gate and Up projections
-        let gate_out = matmul_3d_2d(hidden, &self.gate_weight);
+        let mut gate_out = matmul_3d_2d(hidden, &self.gate_weight);
         let up_out = matmul_3d_2d(hidden, &self.up_weight);
 
-        let activated = silu_3d(&gate_out) * up_out;
+        silu(&mut gate_out);
+
+        let activated = gate_out * up_out;
 
         // 3. Down projection
         Ok(matmul_3d_2d(&activated, &self.down_weight))
@@ -75,53 +78,22 @@ impl SwiGluFeedForward {
     /// Forward pass for 2D input [batch, hidden_size]
     pub fn forward_2d(&self, hidden: &Array2<f32>) -> Array2<f32> {
         // 1. Gate and up projections
-        let gate_out = hidden.dot(&self.gate_weight);
+        let mut gate_out = hidden.dot(&self.gate_weight);
         let up_out = hidden.dot(&self.up_weight);
 
-        let activated = silu_2d(&gate_out) * up_out;
+        silu(&mut gate_out);
+
+        let activated = gate_out * up_out;
 
         // 3. Down projection
         activated.dot(&self.down_weight)
     }
 }
 
-/// SiLU (Swish) activation function: x * sigmoid(x)
-///
-/// Also known as Swish, this is used in the gate projection of SwiGLU.
-/// Formula: SiLU(x) = x / (1 + exp(-x))
-#[inline]
-pub fn silu(x: f32) -> f32 {
-    x / (1.0 + (-x).exp())
-}
-
-/// Vectorized SiLU for Array3
-pub fn silu_3d(x: &Array3<f32>) -> Array3<f32> {
-    x.mapv(silu)
-}
-
-/// Vectorized SiLU for Array2
-pub fn silu_2d(x: &Array2<f32>) -> Array2<f32> {
-    x.mapv(silu)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::{Array2, Array3};
-
-    #[test]
-    fn test_silu_activation() {
-        // Test SiLU function
-        assert!((silu(0.0) - 0.0).abs() < 1e-6);
-        assert!((silu(1.0) - 0.7311).abs() < 1e-3); // 1 * sigmoid(1) ≈ 0.7311
-        assert!((silu(-1.0) - (-0.2689)).abs() < 1e-3); // -1 * sigmoid(-1) ≈ -0.2689
-
-        // SiLU should be close to x for large positive x
-        assert!((silu(10.0) - 10.0).abs() < 0.01);
-
-        // SiLU should be close to 0 for large negative x
-        assert!(silu(-10.0).abs() < 0.01);
-    }
 
     #[test]
     fn test_swiglu_ffn_shapes() -> Result<()> {

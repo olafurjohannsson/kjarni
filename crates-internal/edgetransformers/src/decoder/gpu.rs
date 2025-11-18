@@ -1,16 +1,11 @@
 use crate::Embeddings;
-use crate::adaptive_embeddings::{EmbeddingMode, EmbeddingSelector};
+use crate::adaptive_embeddings::{EmbeddingSelector};
 use crate::cache::GpuKVCache;
-use crate::decoder_layer::DecoderLayer;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::gpu_ops::blocks::attention::TempStorage;
+use crate::gpu_ops::{GpuTensorPool, GpuFrameContext, GpuTensor};
 use crate::gpu_ops::blocks::decoder::GpuPreNormDecoderLayer;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
-// use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::activations::Activation;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::blocks::rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
@@ -52,6 +47,8 @@ pub struct GpuTransformerDecoder {
     embedding_selector: EmbeddingSelector,
 
     gpu_rope: Option<GpuRoPE>,
+
+    gpu_tensor_pool: GpuTensorPool,
 }
 
 impl GpuTransformerDecoder {
@@ -61,13 +58,10 @@ impl GpuTransformerDecoder {
         context: Arc<WgpuContext>,
         rope: Option<&RoPE>,
     ) -> Result<Self> {
-        // --- STEP 1: Create the object that will be owned by the struct ---
-        // This `gpu_rope` is local to the `new` function.
         let gpu_rope = rope
             .map(|r| GpuRoPE::from_cpu_rope(&context, r))
             .transpose()?;
 
-        // --- STEP 2: Load all other necessary components ---
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
         let word_embeddings = weights.get_array2(word_w)?;
         let position_embeddings_cpu = if !pos_w.is_empty() {
@@ -111,7 +105,6 @@ impl GpuTransformerDecoder {
             }
         };
 
-        // --- STEP 3: Build Layers directly inside `new`'s loop ---
         let mut layers = Vec::with_capacity(config.num_hidden_layers());
         for i in 0..config.num_hidden_layers() {
             let decoder_layer = Self::build_layer(
@@ -124,9 +117,6 @@ impl GpuTransformerDecoder {
             layers.push(decoder_layer);
         }
 
-        // --- STEP 4: Construct and return the final struct ---
-        // We MOVE ownership of `gpu_rope` and `layers` into the struct together.
-        // The compiler can now prove the borrow is valid for the lifetime of the struct.
         Ok(Self {
             word_embeddings,
             position_embeddings_cpu,
@@ -136,10 +126,11 @@ impl GpuTransformerDecoder {
             final_layer_norm,
             final_ln_weights,
             config: config.clone(),
-            context,
+            context: context.clone(),
             cpu_embeddings,
             embedding_selector,
             gpu_rope,
+            gpu_tensor_pool: GpuTensorPool::new(context),
         })
     }
 
@@ -155,7 +146,6 @@ impl GpuTransformerDecoder {
         let hidden_size = config.hidden_size();
         let kv_dim = config.kv_dim();
 
-        // --- CHANGED: Handle both combined and separate QKV weights ---
         let (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias) =
             if !attn_names.qkv_weight.is_empty() {
                 // GPT-2 style: Combined QKV
@@ -196,9 +186,6 @@ impl GpuTransformerDecoder {
                 )
             };
 
-        // let attn_output_w = weights.get_array2(&attn_names.output_weight)?;
-        // let attn_output_b = weights.get_array1(&attn_names.output_bias)?;
-
         let self_attn_weights = GpuAttentionWeights::new(
             GpuTensor::from_ndarray(&context, &q_weight)?,
             GpuTensor::from_ndarray(&context, &q_bias)?,
@@ -210,7 +197,6 @@ impl GpuTransformerDecoder {
             GpuTensor::from_ndarray(&context, &o_bias)?,
         )?;
 
-        // === 2. ATTENTION NORM (detect LayerNorm vs RMSNorm) ===
         let (self_attn_norm, self_attn_norm_weights) = if !attn_names.qkv_weight.is_empty() {
             // GPT-2 Path: Use the top-level `attn_names`
             let gamma = weights.get_array1(&attn_names.norm_weight)?;
@@ -223,7 +209,6 @@ impl GpuTransformerDecoder {
                 )?),
             )
         } else {
-            // LLaMA Path: Use the layer-specific `layer_attn_names`
             let layer_attn_names = config.get_layer_attention_names(i);
             let gamma = weights.get_array1(&layer_attn_names.norm_weight)?;
             // LLaMA uses RMSNorm, so there is no bias.
@@ -235,7 +220,6 @@ impl GpuTransformerDecoder {
             )
         };
 
-        // === 3. FFN (detect Standard vs SwiGLU) ===
         let (feedforward, ff_weights) = if let Some(gate_weight_name) = &ffn_names.gate_weight {
             // SwiGLU (LLaMA)
             let gate_w = weights.get_linear_weight(gate_weight_name)?;
@@ -287,7 +271,6 @@ impl GpuTransformerDecoder {
             )
         };
 
-        // === 4. FFN NORM (detect LayerNorm vs RMSNorm) ===
         let (ffn_norm, ffn_norm_weights) = {
             let gamma = weights.get_array1(&ffn_names.norm_weight)?;
 
@@ -339,22 +322,6 @@ impl TransformerModel for GpuTransformerDecoder {
         Some(self.context.clone())
     }
 }
-async fn log_gpu_tensor(tensor: &GpuTensor, label: &str) {
-    // Use your existing, correct readback logic!
-    match tensor.to_ndarray_3d::<f32>().await {
-        Ok(arr) => {
-            let flat = arr.as_slice().unwrap();
-            let sample_size = 8;
-            let data_sample = if flat.len() <= sample_size * 2 {
-                format!("{:?}", flat)
-            } else {
-                format!("first {:?}, last {:?}", &flat[..sample_size], &flat[flat.len() - sample_size..])
-            };
-            log::debug!("[GPU] {}: shape={:?}, data=[{}]", label, arr.shape(), data_sample);
-        },
-        Err(e) => log::error!("[GPU] Failed to read tensor '{}': {}", label, e),
-    }
-}
 #[async_trait(?Send)]
 impl Decoder for GpuTransformerDecoder {
     type Input = Array2<u32>;
@@ -366,13 +333,9 @@ impl Decoder for GpuTransformerDecoder {
         attention_mask: &Array2<f32>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Decoder Forward"),
-                });
-        let mut temp = TempStorage::new(self.context.clone());
+        let pool_guard = self.pool.lock().await;
+        let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input.shape()[1];
 
@@ -438,8 +401,7 @@ impl Decoder for GpuTransformerDecoder {
         );
         hidden_states = final_ln_output;
 
-        temp.reclaim();
-        self.context.queue.submit(Some(encoder.finish()));
+        frame.finish();
         let last_hidden_state_cpu = hidden_states.to_ndarray_3d().await?;
 
         if let Some(cache) = gpu_cache {

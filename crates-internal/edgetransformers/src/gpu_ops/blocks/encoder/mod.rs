@@ -3,12 +3,12 @@ use std::sync::Arc;
 use wgpu::CommandEncoder;
 
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights, TempStorage};
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::gpu_ops::{GpuTensor, Kernel, GpuTensorPool};
 use crate::traits::{EncoderArchitecture, LanguageModelConfig, TransformerConfig};
 use crate::{EncoderLanguageModel, activations};
 
@@ -66,12 +66,12 @@ impl GpuEncoderLayer {
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
         config: &dyn TransformerConfig,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         if config.is_prenorm() {
-            self.forward_prenorm(encoder, hidden_states, attention_mask, temp)
+            self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
         } else {
-            self.forward_postnorm(encoder, hidden_states, attention_mask, temp)
+            self.forward_postnorm(encoder, hidden_states, attention_mask, pool)
         }
     }
 
@@ -80,11 +80,11 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
 
-        let ln1_out = temp.get(hidden_states.shape().to_vec());
+        let ln1_out = pool.get(hidden_states.shape().to_vec());
         self.self_attn_layer_norm.encode(
             encoder,
             &self.self_attn_ln_weights,
@@ -94,9 +94,9 @@ impl GpuEncoderLayer {
 
         let (new_k, new_v) =
             self.self_attn
-                .project_kv(encoder, &ln1_out, &self.self_attn_weights, 0, temp, None);
-        let new_k_split = self.self_attn.split_heads(encoder, &new_k, temp);
-        let new_v_split = self.self_attn.split_heads(encoder, &new_v, temp);
+                .project_kv(encoder, &ln1_out, &self.self_attn_weights, 0, pool, None);
+        let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
+        let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
 
         let attn_out = self.self_attn.attend(
             encoder,
@@ -106,24 +106,24 @@ impl GpuEncoderLayer {
             false,                        // is_causal is false for encoders
             (&new_k_split, &new_v_split), // K and V are from the input itself
             0,                            // No position offset
-            temp,
+            pool,
         );
 
-        let attn_block_output = temp.get(hidden_states.shape().to_vec());
+        let attn_block_output = pool.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);
 
         let residual_2 = &attn_block_output;
 
-        let ln2_out = temp.get(residual_2.shape().to_vec());
+        let ln2_out = pool.get(residual_2.shape().to_vec());
         self.ffn_layer_norm
             .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
 
         let ffn_out = self
             .feedforward
-            .encode(encoder, &ln2_out, &self.ff_weights, temp);
+            .encode(encoder, &ln2_out, &self.ff_weights, pool);
 
-        let final_output = temp.get(residual_2.shape().to_vec());
+        let final_output = pool.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &final_output);
 
@@ -136,15 +136,15 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
 
         let (new_k, new_v) =
             self.self_attn
-                .project_kv(encoder, hidden_states, &self.self_attn_weights, 0, temp, None);
-        let new_k_split = self.self_attn.split_heads(encoder, &new_k, temp);
-        let new_v_split = self.self_attn.split_heads(encoder, &new_v, temp);
+                .project_kv(encoder, hidden_states, &self.self_attn_weights, 0, pool, None);
+        let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
+        let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
 
         let attn_out = self.self_attn.attend(
             encoder,
@@ -154,13 +154,13 @@ impl GpuEncoderLayer {
             false, // is_causal
             (&new_k_split, &new_v_split),
             0,
-            temp,
+            pool,
         );
 
-        let add_1_out = temp.get(hidden_states.shape().to_vec());
+        let add_1_out = pool.get(hidden_states.shape().to_vec());
         self.add.encode(encoder, &[residual, &attn_out], &add_1_out);
 
-        let attn_block_output = temp.get(hidden_states.shape().to_vec());
+        let attn_block_output = pool.get(hidden_states.shape().to_vec());
         self.self_attn_layer_norm.encode(
             encoder,
             &self.self_attn_ln_weights,
@@ -172,13 +172,13 @@ impl GpuEncoderLayer {
 
         let ffn_out = self
             .feedforward
-            .encode(encoder, residual_2, &self.ff_weights, temp);
+            .encode(encoder, residual_2, &self.ff_weights, pool);
 
-        let add_2_out = temp.get(residual_2.shape().to_vec());
+        let add_2_out = pool.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
 
-        let final_output = temp.get(residual_2.shape().to_vec());
+        let final_output = pool.get(residual_2.shape().to_vec());
         self.ffn_layer_norm
             .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
 

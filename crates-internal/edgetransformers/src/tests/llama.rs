@@ -154,7 +154,7 @@ mod tests {
         // TODO: You will need a GpuAttention orchestrator function that applies RoPE, GQA, etc.
         // This test assumes a high-level `forward` on GpuAttention that handles this.
         let mut encoder = context.device.create_command_encoder(&Default::default());
-        let mut temp = TempStorage::new(context.clone());
+        let mut temp = GpuTensorPool::new(context.clone());
         // gpu_attention.full_forward(&mut encoder, &input_gpu, &weights_gpu, &mask_gpu, &gpu_rope, position_offset, &output_gpu, &mut temp);
         // NOTE: The above line is a placeholder for how you might orchestrate the GPU call.
 

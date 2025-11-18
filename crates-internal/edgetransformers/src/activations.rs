@@ -1,90 +1,122 @@
 //! Activation functions for transformers
 
-use ndarray::{Array3, Array4, Axis};
-
-#[cfg(not(target_arch = "wasm32"))]
+use libm::{erff, expf, tanhf};
 use ndarray::parallel::prelude::*;
+use ndarray::{Array2, Array3, Array4, Axis};
+use ndarray::{ArrayBase, Data, DataMut};
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
-const SQRT_2_OVER_PI: f32 = 0.7978845608_f32;
-const GELU_COEFF: f32 = 0.044715_f32;
+pub const PARALLEL_THRESHOLD: usize = 16_384; // 16K elements
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Activation {
+    #[serde(alias = "gelu")]
     Gelu,
+    #[serde(alias = "gelu_new")]
     GeluNew,
+    #[serde(alias = "relu")]
     Relu,
+    #[serde(alias = "silu", alias = "swish")]
+    SilU,
+    #[serde(alias = "tanh")]
     Tanh,
-    Swish, // Also known as SiLU
+}
+
+impl FromStr for Activation {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "gelu" => Ok(Activation::GeluNew),
+            "gelu_new" | "gelu_fast" => Ok(Activation::GeluNew),
+            "relu" => Ok(Activation::Relu),
+            "silu" | "swish" => Ok(Activation::SilU),
+            "tanh" => Ok(Activation::Tanh),
+            _ => Err(format!("Unknown activation function: {}", s)),
+        }
+    }
+}
+
+impl Default for Activation {
+    fn default() -> Self {
+        Activation::GeluNew // Most common in modern models
+    }
 }
 
 pub fn apply_activation(hidden: &mut Array3<f32>, activation: Activation) {
-    match activation {
-        Activation::Gelu => gelu2(hidden),
-        Activation::GeluNew => gelu(hidden),
-        Activation::Relu => relu(hidden),
-        Activation::Swish => swish(hidden),
-        Activation::Tanh => hidden.mapv_inplace(|x| x.tanh()),
-        // TODO: verify
+    let num_elements = hidden.len();
+    let use_parallel = num_elements >= PARALLEL_THRESHOLD;
+
+    match (activation, use_parallel) {
+        (Activation::Gelu, true) => gelu_parallel(hidden),
+        (Activation::Gelu, false) => gelu(hidden),
+
+        (Activation::GeluNew, true) => gelu_new_parallel(hidden),
+        (Activation::GeluNew, false) => gelu_new(hidden),
+
+        (Activation::Relu, true) => relu_parallel(hidden),
+        (Activation::Relu, false) => relu(hidden),
+
+        (Activation::SilU, true) => silu_parallel(hidden),
+        (Activation::SilU, false) => silu_generic(hidden),
+
+        (Activation::Tanh, _) => {
+            // Tanh is very fast, rarely worth parallelizing
+            hidden.mapv_inplace(|x| x.tanh())
+        }
     }
 }
-
-use libm::erff;
 
 /// The standard GELU activation function, using the error function (erf).
 /// This is the default implementation in PyTorch and is used by models like BART.
-#[inline(always)]
-pub fn gelu2(x: &mut Array3<f32>) {
-    return gelu(x);
-    // // This scaling factor is 1.0 / sqrt(2.0)
-    // const SCALING_FACTOR: f32 = 0.7071067811865475;
-
-    // // The mathematical formula is: 0.5 * x * (1.0 + erf(x / sqrt(2.0)))
-    // // We implement this by multiplying by the pre-calculated scaling factor.
-    // // `erff` is the single-precision (f32) version of the error function from the libm crate.
-    // x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SCALING_FACTOR)));
-}
-
-/// Apply GELU activation in-place
+/// GELU (exact) - Uses error function
+/// Formula: 0.5 * x * (1 + erf(x / sqrt(2)))
+/// This is the mathematically exact GELU used in original Transformer papers
 #[inline(always)]
 pub fn gelu(x: &mut Array3<f32>) {
-    let scaling_factor = (2.0f32).sqrt() / 2.0;
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // x.par_mapv_inplace(|val| {
-        //     let val_squared = val * val;
-        //     let val_cubed = val_squared * val;
-        //     let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val_cubed);
-        //     val * 0.5 * (1.0 + inner.tanh())
-        // });
-        const SQRT_2_OVER_PI: f32 = 0.7978845608_f32;
-        const GELU_COEFF: f32 = 0.044715_f32;
+    const SQRT_2_INV: f32 = 0.7071067811865475; // 1.0 / sqrt(2.0)
 
-        // This implementation now runs on ALL targets (wasm and native).
-        x.mapv_inplace(|val| {
-            let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val.powi(3));
-            0.5 * val * (1.0 + inner.tanh())
-        });
-        // const SCALING_FACTOR: f32 = 0.7071067811865475;
+    x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
+}
 
-        // // The formula used by PyTorch's default GELU is:
-        // // 0.5 * x * (1 + erf(x / sqrt(2)))
-        // // which is equivalent to:
-        // // 0.5 * x * (1 + erf(x * SCALING_FACTOR))
-        // // Note: erff is the single-precision (f32) version of the error function.
+/// GELU_NEW (tanh approximation) - Used by BERT, GPT-2
+/// Formula: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+/// Faster approximation with <0.1% error vs exact GELU
+#[inline(always)]
+pub fn gelu_new(x: &mut Array3<f32>) {
+    const SQRT_2_OVER_PI: f32 = 0.7978845608;
+    const GELU_COEFF: f32 = 0.044715;
 
-        // // This code works for both wasm and native builds.
-        // x.mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SCALING_FACTOR)));
-    }
+    x.mapv_inplace(|val| {
+        // Compute x^3 using multiplication (faster than powi)
+        let val_cubed = val * val * val;
+        let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val_cubed);
+        0.5 * val * (1.0 + tanhf(inner))
+    });
+}
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        x.mapv_inplace(|val| {
-            let val_squared = val * val;
-            let val_cubed = val_squared * val;
-            let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val_cubed);
-            val * 0.5 * (1.0 + inner.tanh())
-        });
-    }
+/// Parallel versions (use when array is large, e.g., >10k elements)
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+pub fn gelu_parallel(x: &mut Array3<f32>) {
+    const SQRT_2_INV: f32 = 0.7071067811865475;
+
+    x.par_mapv_inplace(|val| 0.5 * val * (1.0 + erff(val * SQRT_2_INV)));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+pub fn gelu_new_parallel(x: &mut Array3<f32>) {
+    const SQRT_2_OVER_PI: f32 = 0.7978845608;
+    const GELU_COEFF: f32 = 0.044715;
+
+    x.par_mapv_inplace(|val| {
+        let val_cubed = val * val * val;
+        let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val_cubed);
+        0.5 * val * (1.0 + tanhf(inner))
+    });
 }
 
 /// Compute softmax over the last dimension of a 4D tensor
@@ -105,12 +137,91 @@ pub fn softmax(scores: &Array4<f32>) -> Array4<f32> {
     result
 }
 
-/// Apply ReLU activation
+/// Generic SiLU that works for any array dimension
+#[inline(always)]
+pub fn silu_generic<S, D>(x: &mut ArrayBase<S, D>)
+where
+    S: DataMut<Elem = f32>,
+    D: ndarray::Dimension,
+{
+    x.mapv_inplace(|val| {
+        if val <= -20.0 {
+            0.0
+        } else if val >= 20.0 {
+            val
+        } else {
+            val / (1.0 + expf(-val))
+        }
+    });
+}
+
+/// Generic fast SiLU
+#[inline(always)]
+pub fn silu_fast_generic<S, D>(x: &mut ArrayBase<S, D>)
+where
+    S: DataMut<Elem = f32>,
+    D: ndarray::Dimension,
+{
+    x.mapv_inplace(|val| val / (1.0 + expf(-val)));
+}
+
+/// Parallel version
+#[inline(always)]
+pub fn silu_parallel_generic<S, D>(x: &mut ArrayBase<S, D>)
+where
+    S: DataMut<Elem = f32>,
+    D: ndarray::Dimension,
+{
+    x.par_mapv_inplace(|val| {
+        if val <= -20.0 {
+            0.0
+        } else if val >= 20.0 {
+            val
+        } else {
+            val / (1.0 + expf(-val))
+        }
+    });
+}
+
+// Now you can call:
+// silu_generic(&mut array2);
+// silu_generic(&mut array3);
+// silu_generic(&mut array1); // etc.
+
+/// Fast SiLU without stability checks (for well-normalized inputs)
+/// Use this if your inputs are in [-10, 10] range
+#[inline(always)]
+pub fn silu_fast(x: &mut Array3<f32>) {
+    x.mapv_inplace(|val| val / (1.0 + expf(-val)));
+}
+
+/// ReLU activation (in-place)
+/// Formula: max(0, x)
+#[inline(always)]
 pub fn relu(x: &mut Array3<f32>) {
     x.mapv_inplace(|val| val.max(0.0));
 }
 
-/// Apply Swish/SiLU activation
-pub fn swish(x: &mut Array3<f32>) {
-    x.mapv_inplace(|val| val * (1.0 / (1.0 + (-val).exp())));
+/// Parallel versions (use for arrays >16K elements)
+#[inline(always)]
+pub fn relu_parallel(x: &mut Array3<f32>) {
+    x.par_mapv_inplace(|val| val.max(0.0));
+}
+
+#[inline(always)]
+pub fn silu_parallel(x: &mut Array3<f32>) {
+    x.par_mapv_inplace(|val| {
+        if val <= -20.0 {
+            0.0
+        } else if val >= 20.0 {
+            val
+        } else {
+            val / (1.0 + expf(-val))
+        }
+    });
+}
+
+#[inline(always)]
+pub fn silu_fast_parallel(x: &mut Array3<f32>) {
+    x.par_mapv_inplace(|val| val / (1.0 + expf(-val)));
 }

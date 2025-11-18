@@ -1,5 +1,5 @@
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use anyhow::Result;
 use std::sync::Arc;
@@ -84,7 +84,7 @@ impl GpuSwiGLUFFN {
         weights: &GpuSwiGLUFFNWeights,
         input: &GpuTensor, // Assumes a 2D tensor [rows, hidden_size]
         output: &GpuTensor,
-        temp: &mut super::attention::TempStorage,
+        pool: &mut GpuTensorPool,
     ) {
         let rank = input.rank();
         assert_eq!(rank, 2, "Input tensor for GpuSwiGLUFFN must be 2D");
@@ -92,15 +92,15 @@ impl GpuSwiGLUFFN {
         let intermediate_size = weights.up_proj.shape()[1];
 
         // 1. Gate projection: input @ gate_proj
-        let gate_result = temp.get(vec![rows, intermediate_size]);
+        let gate_result = pool.get(vec![rows, intermediate_size]);
         self.matmul.encode(encoder, &[input, &weights.gate_proj], &gate_result);
 
         // 2. Up projection: input @ up_proj
-        let up_result = temp.get(vec![rows, intermediate_size]);
+        let up_result = pool.get(vec![rows, intermediate_size]);
         self.matmul.encode(encoder, &[input, &weights.up_proj], &up_result);
 
         // 3. Fused SiLU and element-wise multiply: SiLU(gate_result) * up_result
-        let intermediate_activated = temp.get(vec![rows, intermediate_size]);
+        let intermediate_activated = pool.get(vec![rows, intermediate_size]);
         self.encode_elementwise(encoder, &gate_result, &up_result, &intermediate_activated);
 
         // 4. Down projection: intermediate_activated @ down_proj

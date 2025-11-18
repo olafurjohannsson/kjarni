@@ -18,6 +18,9 @@ pub struct Gpt2Config {
     pub n_head: usize,  // number of attention heads
     pub layer_norm_epsilon: f32,
 
+    #[serde(alias = "activation_function")]
+    pub activation_function: Option<String>,
+
     #[serde(default = "default_model_type")]
     pub model_type: String,
 }
@@ -61,9 +64,6 @@ impl LanguageModelConfig for Gpt2Config {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
-    fn activation_function(&self) -> Activation {
-        Activation::GeluNew
-    }
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
@@ -94,6 +94,12 @@ impl LanguageModelConfig for Gpt2Config {
         } else {
             ("wte.weight", "wpe.weight", None)
         }
+    }
+    fn activation_function(&self) -> Activation {
+        self.activation_function
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Activation::GeluNew) // GPT-2 default
     }
 }
 

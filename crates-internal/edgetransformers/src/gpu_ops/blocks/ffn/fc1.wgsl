@@ -11,33 +11,25 @@ struct FfnUniforms {
 @group(0) @binding(3) var<storage, read> input: array<f32>;
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
-// fn gelu(x: f32) -> f32 {
-//     return 0.5 * x * (1.0 + tanh(0.7978845608 * (x + 0.044715 * pow(x, 3.0))));
-// }
 
-// TODO: NEED TO ADD GELU AND GELU_NEW
-
-const SQRT_2_OVER_PI: f32 = 0.7978845608;
-const GELU_COEFF: f32 = 0.044715;
-
-fn gelu_tanh_approx(x: f32) -> f32 {
-    let inner = SQRT_2_OVER_PI * (x + GELU_COEFF * pow(x, 3.0));
-    return tanh(inner);
+// GELU (exact)
+fn gelu_2(x: f32) -> f32 {
+    let SQRT_2_INV: f32 = 0.7071067811865475;
+    // Note: WGSL doesn't have erf, need to approximate or use a precomputed LUT
+    // For now, use tanh approximation which is close
+    let t = x * SQRT_2_INV;
+    let erf_approx = tanh(1.41421356 * t); // Rough approximation
+    return 0.5 * x * (1.0 + erf_approx);
 }
 
+// GELU_NEW (tanh approximation) - RECOMMENDED
 fn gelu(x: f32) -> f32 {
-    // For large positive x, tanh(inner) is ~1.0, so gelu(x) -> x
-    // For large negative x, tanh(inner) is ~-1.0, so gelu(x) -> 0
-    // We can use the library `tanh` in the central region and clamp outside of it
-    // to avoid potential hardware implementation differences at the extremes.
-    // A value of 4.0 is a reasonable cutoff where tanh is very close to +/-1.
-    if (x > 4.0) {
-        return x;
-    }
-    if (x < -4.0) {
-        return 0.0;
-    }
-    return 0.5 * x * (1.0 + gelu_tanh_approx(x));
+    let SQRT_2_OVER_PI: f32 = 0.7978845608;
+    let GELU_COEFF: f32 = 0.044715;
+
+    let x_cubed = x * x * x;
+    let inner = SQRT_2_OVER_PI * (x + GELU_COEFF * x_cubed);
+    return 0.5 * x * (1.0 + tanh(inner));
 }
 
 @compute @workgroup_size(512, 1, 1)

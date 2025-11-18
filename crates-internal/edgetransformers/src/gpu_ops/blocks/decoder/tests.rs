@@ -1,6 +1,6 @@
 use super::*;
 use crate::Device::Cpu;
-use crate::activations::Activation::{Gelu, Swish};
+use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder_layer::DecoderLayer;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
@@ -11,7 +11,7 @@ use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
     GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor};
 use crate::normalization::{Normalization, RMSNorm};
 use crate::rope::RoPE as CpuRoPE; // Import your CPU implementation
 use anyhow::Result;
@@ -78,7 +78,7 @@ impl LanguageModelConfig for TestLlamaConfig {
         self
     }
     fn activation_function(&self) -> crate::activations::Activation {
-        crate::activations::Activation::Swish
+        crate::activations::Activation::SilU
     }
 }
 
@@ -285,11 +285,8 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
     let cpu_rope_instance = CpuRoPE::new(head_dim, 1024, 10000.0);
     let gpu_rope_instance = GpuRoPE::from_cpu_rope(&context, &cpu_rope_instance)?;
 
-    // --- Run the Debuggable Forward Pass ---
-    // MODIFIED: No longer create an encoder here
-    let mut temp = TempStorage::new(context.clone());
+    let mut pool = GpuTensorPool::new(context.clone());
 
-    // MODIFIED: Pass context instead of encoder
     let _ = forward_llama_with_debug(
         &context,
         &gpu_layer,
@@ -299,7 +296,7 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
         &attention_mask_gpu,
         &attention_mask_cpu,
         position_offset,
-        &mut temp,
+        &mut pool,
         Some(&gpu_rope_instance),
     )
     .await?;
@@ -311,21 +308,21 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
     Ok(())
 }
 pub async fn forward_llama_with_debug(
-    // MODIFIED: Takes context directly, manages its own encoder
     context: &Arc<WgpuContext>,
     gpu_layer: &GpuPreNormDecoderLayer,
-    cpu_layer: &DecoderLayer, // Pass the CPU layer for comparison
+    cpu_layer: &DecoderLayer,
     hidden_states_gpu: &GpuTensor,
-    hidden_states_cpu: &Array3<f32>, // Pass the initial CPU hidden states
+    hidden_states_cpu: &Array3<f32>,
     attention_mask_gpu: &GpuTensor,
-    attention_mask_cpu: &Array2<f32>, // Pass the CPU attention mask
+    attention_mask_cpu: &Array2<f32>,
     position_offset: usize,
-    temp: &mut TempStorage,
+    pool: &mut GpuTensorPool,
     rope: Option<&GpuRoPE>,
 ) -> Result<GpuTensor> {
-    let tolerance = 1e-4; // Set a reasonable tolerance for float comparisons
+    let tolerance = 1e-4;
+    let mut frame = GpuFrameContext::new(context, pool);
 
-    // --- Ground Truth CPU Calculation ---
+    // ========== CPU REFERENCE COMPUTATION ==========
     let cpu_residual_1 = hidden_states_cpu.clone();
     let cpu_ln1_out = cpu_layer.self_attn_layer_norm.forward(&cpu_residual_1);
     let (cpu_attn_out, _, _) = cpu_layer.self_attn.forward_with_cache(
@@ -342,145 +339,140 @@ pub async fn forward_llama_with_debug(
     let cpu_ffn_out = cpu_layer.feedforward.forward(&cpu_ln2_out)?;
     let cpu_final_output = &cpu_residual_2 + &cpu_ffn_out;
 
-    // --- GPU Path with Intermediate Checks ---
-    // MODIFIED: Create the encoder inside the function
-    let mut encoder = context.device.create_command_encoder(&Default::default());
-
-    // --- 1. Pre-Norm ---
-    log::debug!("--- Step 1: Pre-Attention Norm ---");
-    let residual_gpu = hidden_states_gpu;
-    let ln1_out_gpu = temp.get(hidden_states_gpu.shape().to_vec());
-    gpu_layer.self_attn_norm.encode(
-        &mut encoder,
-        &gpu_layer.self_attn_norm_weights,
-        residual_gpu,
-        &ln1_out_gpu,
-    );
-    context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-    encoder = context.device.create_command_encoder(&Default::default());
+    // ========== GPU STEP 1: LAYER NORM ==========
+    let ln1_out_gpu = {
+        let (encoder, pool) = frame.split();
+        let ln1_out_gpu = pool.get(hidden_states_gpu.shape().to_vec());
+        gpu_layer.self_attn_norm.encode(
+            encoder,
+            &gpu_layer.self_attn_norm_weights,
+            hidden_states_gpu,
+            &ln1_out_gpu,
+        );
+        ln1_out_gpu
+    };
+    frame.submit_and_continue();
     assert_tensors_are_close(&cpu_ln1_out, &ln1_out_gpu, "ln1_out", tolerance).await;
-    log::info!("✓ Step 1: Pre-Attention Norm output matches CPU.");
 
-    // --- 2. Attention Block ---
-    log::debug!("--- Step 2: Attention Block ---");
-    let q_proj = gpu_layer.self_attn.project(
-        &mut encoder,
-        &ln1_out_gpu,
-        &gpu_layer.self_attn_weights.q_weight,
-        &gpu_layer.self_attn_weights.q_bias,
-        temp,
-    );
-    let k_proj = gpu_layer.self_attn.project(
-        &mut encoder,
-        &ln1_out_gpu,
-        &gpu_layer.self_attn_weights.k_weight,
-        &gpu_layer.self_attn_weights.k_bias,
-        temp,
-    );
-    let v_proj = gpu_layer.self_attn.project(
-        &mut encoder,
-        &ln1_out_gpu,
-        &gpu_layer.self_attn_weights.v_weight,
-        &gpu_layer.self_attn_weights.v_bias,
-        temp,
-    );
-    let q_split = gpu_layer.self_attn.split_heads(&mut encoder, &q_proj, temp);
-    let k_split = gpu_layer.self_attn.split_heads(&mut encoder, &k_proj, temp);
-    let v_split = gpu_layer.self_attn.split_heads(&mut encoder, &v_proj, temp);
-    let q_rotated = temp.get(q_split.shape().to_vec());
-    let k_rotated = temp.get(k_split.shape().to_vec());
-    rope.unwrap().encode(&mut encoder, &q_split, &q_rotated, position_offset);
-    rope.unwrap().encode(&mut encoder, &k_split, &k_rotated, position_offset);
-    let attn_out_gpu = gpu_layer.self_attn.llama_attention(
-        &mut encoder,
-        &q_rotated,
-        &k_rotated,
-        &v_split,
-        attention_mask_gpu,
-        position_offset,
-        temp,
-        &gpu_layer.self_attn_weights,
-    );
-    context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-    encoder = context.device.create_command_encoder(&Default::default());
+    // ========== GPU STEP 2: ATTENTION ==========
+    let attn_out_gpu = {
+        let (encoder, pool) = frame.split();
+
+        let q_proj = gpu_layer.self_attn.project(
+            encoder,
+            &ln1_out_gpu,
+            &gpu_layer.self_attn_weights.q_weight,
+            &gpu_layer.self_attn_weights.q_bias,
+            pool,
+        );
+        let k_proj = gpu_layer.self_attn.project(
+            encoder,
+            &ln1_out_gpu,
+            &gpu_layer.self_attn_weights.k_weight,
+            &gpu_layer.self_attn_weights.k_bias,
+            pool,
+        );
+        let v_proj = gpu_layer.self_attn.project(
+            encoder,
+            &ln1_out_gpu,
+            &gpu_layer.self_attn_weights.v_weight,
+            &gpu_layer.self_attn_weights.v_bias,
+            pool,
+        );
+
+        let q_split = gpu_layer.self_attn.split_heads(encoder, &q_proj, pool);
+        let k_split = gpu_layer.self_attn.split_heads(encoder, &k_proj, pool);
+        let v_split = gpu_layer.self_attn.split_heads(encoder, &v_proj, pool);
+
+        let q_rotated = pool.get(q_split.shape().to_vec());
+        let k_rotated = pool.get(k_split.shape().to_vec());
+        rope.unwrap().encode(encoder, &q_split, &q_rotated, position_offset);
+        rope.unwrap().encode(encoder, &k_split, &k_rotated, position_offset);
+
+        gpu_layer.self_attn.llama_attention(
+            encoder,
+            &q_rotated,
+            &k_rotated,
+            &v_split,
+            attention_mask_gpu,
+            position_offset,
+            pool,
+            &gpu_layer.self_attn_weights,
+        )
+    };
+    frame.submit_and_continue();
     assert_tensors_are_close(&cpu_attn_out, &attn_out_gpu, "attn_out", tolerance).await;
-    log::info!("✓ Step 2: Attention output matches CPU.");
 
-    // --- 3. First Residual Connection ---
-    log::debug!("--- Step 3: First Residual Connection ---");
-    let attn_block_output_gpu = temp.get(hidden_states_gpu.shape().to_vec());
-    gpu_layer.add.encode(
-        &mut encoder,
-        &[residual_gpu, &attn_out_gpu],
-        &attn_block_output_gpu,
-    );
-    context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-    encoder = context.device.create_command_encoder(&Default::default());
+    // ========== GPU STEP 3: FIRST RESIDUAL ==========
+    let attn_block_output_gpu = {
+        let (encoder, pool) = frame.split();
+        let attn_block_output_gpu = pool.get(hidden_states_gpu.shape().to_vec());
+        gpu_layer.add.encode(
+            encoder,
+            &[hidden_states_gpu, &attn_out_gpu],
+            &attn_block_output_gpu,
+        );
+        attn_block_output_gpu
+    };
+    frame.submit_and_continue();
     assert_tensors_are_close(
         &cpu_attn_block_output,
         &attn_block_output_gpu,
         "attn_block_output",
         tolerance,
-    )
-    .await;
-    log::info!("✓ Step 3: First residual connection output matches CPU.");
+    ).await;
 
-    // --- 4. Pre-FFN Norm ---
-    log::debug!("--- Step 4: Pre-FFN Norm ---");
-    let residual_2_gpu = &attn_block_output_gpu;
-    let ln2_out_gpu = temp.get(residual_2_gpu.shape().to_vec());
-    gpu_layer.ffn_norm.encode(
-        &mut encoder,
-        &gpu_layer.ffn_norm_weights,
-        residual_2_gpu,
-        &ln2_out_gpu,
-    );
-    context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-    encoder = context.device.create_command_encoder(&Default::default());
+    // ========== GPU STEP 4: FFN LAYER NORM ==========
+    let ln2_out_gpu = {
+        let (encoder, pool) = frame.split();
+        let ln2_out_gpu = pool.get(attn_block_output_gpu.shape().to_vec());
+        gpu_layer.ffn_norm.encode(
+            encoder,
+            &gpu_layer.ffn_norm_weights,
+            &attn_block_output_gpu,
+            &ln2_out_gpu,
+        );
+        ln2_out_gpu
+    };
+    frame.submit_and_continue();
     assert_tensors_are_close(&cpu_ln2_out, &ln2_out_gpu, "ln2_out", tolerance).await;
-    log::info!("✓ Step 4: Pre-FFN Norm output matches CPU.");
 
-    // --- 5. FFN ---
-    log::debug!("--- Step 5: FFN Block ---");
-    let (b, s, h) = ln2_out_gpu.dims3();
-    let ln2_out_2d_gpu = ln2_out_gpu.view(vec![b * s, h]);
-    let ffn_out_2d_gpu = temp.get(vec![b * s, h]);
-    gpu_layer.feedforward.encode(
-        &mut encoder,
-        &gpu_layer.ff_weights,
-        &ln2_out_2d_gpu,
-        &ffn_out_2d_gpu,
-        temp,
-    );
-    let ffn_out_gpu = ffn_out_2d_gpu.view(vec![b, s, h]);
-    context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-    encoder = context.device.create_command_encoder(&Default::default());
+    // ========== GPU STEP 5: FFN ==========
+    let ffn_out_gpu = {
+        let (encoder, pool) = frame.split();
+        let (b, s, h) = ln2_out_gpu.dims3();
+        let ln2_out_2d_gpu = ln2_out_gpu.view(vec![b * s, h]);
+        let ffn_out_2d_gpu = pool.get(vec![b * s, h]);
+        gpu_layer.feedforward.encode(
+            encoder,
+            &gpu_layer.ff_weights,
+            &ln2_out_2d_gpu,
+            &ffn_out_2d_gpu,
+            pool,
+        );
+        ffn_out_2d_gpu.view(vec![b, s, h])
+    };
+    frame.submit_and_continue();
     assert_tensors_are_close(&cpu_ffn_out, &ffn_out_gpu, "ffn_out", tolerance).await;
-    log::info!("✓ Step 5: FFN output matches CPU.");
 
-    // --- 6. Second Residual Connection ---
-    log::debug!("--- Step 6: Second Residual Connection ---");
-    let final_output_gpu = temp.get(residual_2_gpu.shape().to_vec());
-    gpu_layer.add.encode(
-        &mut encoder,
-        &[residual_2_gpu, &ffn_out_gpu],
-        &final_output_gpu,
-    );
-    context.queue.submit(Some(encoder.finish()));
-    // No need to create a new encoder after the last step
+    // ========== GPU STEP 6: SECOND RESIDUAL ==========
+    let final_output_gpu = {
+        let (encoder, pool) = frame.split();
+        let final_output_gpu = pool.get(attn_block_output_gpu.shape().to_vec());
+        gpu_layer.add.encode(
+            encoder,
+            &[&attn_block_output_gpu, &ffn_out_gpu],
+            &final_output_gpu,
+        );
+        final_output_gpu
+    };
+    frame.finish();
     assert_tensors_are_close(
         &cpu_final_output,
         &final_output_gpu,
         "final_output",
         tolerance,
-    )
-    .await;
-    log::info!("✓ Step 6: Final layer output matches CPU.");
+    ).await;
 
     Ok(final_output_gpu)
 }

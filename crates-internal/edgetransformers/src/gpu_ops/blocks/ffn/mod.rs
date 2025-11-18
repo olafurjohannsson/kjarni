@@ -35,7 +35,7 @@ use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
-
+use crate::gpu_ops::{GpuTensorPool, GpuFrameContext};
 #[cfg(test)]
 mod tests;
 
@@ -154,7 +154,7 @@ impl GpuFeedForward {
         encoder: &mut wgpu::CommandEncoder,
         input: &GpuTensor,
         weights: &GpuFeedForwardWeights,
-        temp: &mut crate::gpu_ops::blocks::attention::TempStorage,
+        pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         // Get a temporary tensor for the intermediate result.
         let intermediate_shape = vec![
@@ -162,10 +162,10 @@ impl GpuFeedForward {
             input.shape()[1],
             weights.fc1_weight.shape()[1], // The intermediate hidden size
         ];
-        let intermediate = temp.get(intermediate_shape);
+        let intermediate = pool.get(intermediate_shape);
 
         // Get the final output tensor.
-        let output = temp.get(input.shape().to_vec());
+        let output = pool.get(input.shape().to_vec());
 
         // Run the two passes.
         self.run_fc1(encoder, weights, input, &intermediate);
@@ -179,7 +179,7 @@ impl GpuFeedForward {
         encoder: &mut wgpu::CommandEncoder,
         input: &GpuTensor,
         weights: &GpuFeedForwardWeights,
-        temp: &mut crate::gpu_ops::blocks::attention::TempStorage,
+        pool: &mut GpuTensorPool,
         output: &GpuTensor,
     ) {
         // Get a temporary tensor for the intermediate result.
@@ -188,7 +188,7 @@ impl GpuFeedForward {
             input.shape()[1],
             weights.fc1_weight.shape()[1], // The intermediate hidden size
         ];
-        let intermediate = temp.get(intermediate_shape);
+        let intermediate = pool.get(intermediate_shape);
         // Run the two passes.
         self.run_fc1(encoder, weights, input, &intermediate);
         self.run_fc2(encoder, weights, &intermediate, &output);

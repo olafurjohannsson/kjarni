@@ -4,7 +4,7 @@ use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::cache::GpuUpdateCache;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::{
-    DType, GpuTensor,
+    DType, GpuTensor, GpuTensorPool, GpuFrameContext,
     blocks::attention::attention::{GpuAttention, GpuAttentionWeights, TempStorage},
 };
 use anyhow::Result;
@@ -102,7 +102,9 @@ async fn test_attention_encoder_parity() -> Result<()> {
         cpu_attn.forward_with_cache(&input_cpu, None, Some(&mask_cpu), false, None, None)?;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut temp = TempStorage::new(context.clone());
+    let mut pool = GpuTensorPool::new(context.clone());
+    let mut frame = GpuFrameContext::new(&context, &mut pool);
+
     let (gpu_output, gpu_new_k, gpu_new_v) = gpu_attn.forward(
         &mut encoder,
         &input_gpu,
@@ -112,10 +114,10 @@ async fn test_attention_encoder_parity() -> Result<()> {
         false,
         None,
         0,
-        &mut temp,
+        frame.pool(),
     );
     context.queue.submit(Some(encoder.finish()));
-    temp.reclaim();
+    frame.finish();
 
     // 5. Compare results
     assert_tensors_are_close(&cpu_output, &gpu_output, "Encoder Output", 1e-4).await;
@@ -168,8 +170,8 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
 
     let mut gpu_cache = GpuKVCache::new(&context, 1, b, n, head_dim, max_len)?;
     let gpu_slicer = GpuSlice::new(&context);
-    let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut temp = TempStorage::new(context.clone());
+    let pool_guard = self.pool.lock().await;
+    let mut frame = GpuFrameContext::new(&self.context, pool_guard);
     let (prompt_k_gpu, prompt_v_gpu) =
         gpu_attn.project_kv(&mut encoder, &prompt_gpu, &gpu_weights, &mut temp);
     gpu_cache.update(&mut encoder, 0, &prompt_k_gpu, &prompt_v_gpu)?;
@@ -204,8 +206,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
         prompt_len,
         &mut temp,
     );
-    context.queue.submit(Some(encoder.finish()));
-    temp.reclaim();
+    frame.finish();
 
     assert_tensors_are_close(&cpu_output, &gpu_output, "Decoder Output", 1e-4).await;
     assert_tensors_are_close(&cpu_new_k, &gpu_new_k, "Decoder New K", 1e-4).await;

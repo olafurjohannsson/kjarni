@@ -1,18 +1,19 @@
-use anyhow::{Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
-use crate::gpu_ops::GpuTensor;
+use crate::Embeddings;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::encoder::GpuEncoderLayer; 
-use crate::gpu_ops::blocks::attention::{GpuAttentionWeights, TempStorage};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
+use crate::gpu_ops::blocks::attention::{GpuAttentionWeights};
+use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
-use crate::Embeddings;
+
 
 pub struct GpuTransformerEncoder {
     embedding_weights: GpuEmbeddingWeights,
@@ -23,6 +24,7 @@ pub struct GpuTransformerEncoder {
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
     context: Arc<WgpuContext>,
     cpu_embeddings: Embeddings,
+    pool: GpuTensorPool,
 }
 
 impl GpuTransformerEncoder {
@@ -46,7 +48,8 @@ impl GpuTransformerEncoder {
             Some(token_type_embeddings.clone()),
         );
 
-        let embedding_weights: GpuEmbeddingWeights = GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
+        let embedding_weights: GpuEmbeddingWeights =
+            GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
         let embeddings: GpuEmbeddings = GpuEmbeddings::new(&context)?;
 
         // --- Load and create embedding LayerNorm components ---
@@ -86,20 +89,31 @@ impl GpuTransformerEncoder {
                 GpuTensor::from_ndarray(&context, &prep_attn_w(&attn_names.output_weight)?)?,
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&attn_names.output_bias)?)?,
             )?;
-            
+
             let self_attn_ln_weights = GpuLayerNormWeights::new(
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&attn_names.norm_weight)?)?,
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&attn_names.norm_bias)?)?,
             )?;
-            
+
             let intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
-            let fc1_w_cpu = if config.transpose_ffn_weights() { intermediate_w.t().as_standard_layout().to_owned() } else { intermediate_w };
+            let fc1_w_cpu = if config.transpose_ffn_weights() {
+                intermediate_w.t().as_standard_layout().to_owned()
+            } else {
+                intermediate_w
+            };
             let output_w = weights.get_array2(&ffn_names.output_weight)?;
-            let fc2_w_cpu = if config.transpose_ffn_weights() { output_w.t().as_standard_layout().to_owned() } else { output_w };
-            
+            let fc2_w_cpu = if config.transpose_ffn_weights() {
+                output_w.t().as_standard_layout().to_owned()
+            } else {
+                output_w
+            };
+
             let ff_weights = GpuFeedForwardWeights::new(
                 GpuTensor::from_ndarray(&context, &fc1_w_cpu)?,
-                GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.intermediate_bias)?)?,
+                GpuTensor::from_ndarray(
+                    &context,
+                    &weights.get_array1(&ffn_names.intermediate_bias)?,
+                )?,
                 GpuTensor::from_ndarray(&context, &fc2_w_cpu)?,
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.output_bias)?)?,
             )?;
@@ -108,7 +122,7 @@ impl GpuTransformerEncoder {
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_weight)?)?,
                 GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_bias)?)?,
             )?;
-            
+
             layers.push(GpuEncoderLayer::new(
                 &context,
                 self_attn_weights,
@@ -126,20 +140,24 @@ impl GpuTransformerEncoder {
             embedding_ln_weights,
             layers,
             config,
-            context,
-            cpu_embeddings
+            context: context.clone(),
+            cpu_embeddings,
+            pool: GpuTensorPool::new(context),
         })
     }
 
     pub fn config(&self) -> &Arc<dyn EncoderArchitecture + Send + Sync> {
         &self.config
     }
-
 }
 
 impl TransformerModel for GpuTransformerEncoder {
-    fn device(&self) -> Device { Device::Wgpu }
-    fn context(&self) -> Option<Arc<WgpuContext>> { Some(self.context.clone()) }
+    fn device(&self) -> Device {
+        Device::Wgpu
+    }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        Some(self.context.clone())
+    }
 }
 
 #[async_trait]
@@ -147,14 +165,14 @@ impl Encoder for GpuTransformerEncoder {
     type Input = Array2<u32>;
     type Output = EncoderOutput;
 
-    async fn forward(
+async fn forward(
         &self,
         input_ids: &Self::Input,
         attention_mask: &Array2<f32>,
         token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Self::Output> {
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Encoder Forward") });
-        let mut temp = TempStorage::new(self.context.clone());
+        let pool_guard = self.pool.lock().await;
+        let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input_ids)?;
         
         // Handle optional token_type_ids upload
@@ -192,8 +210,7 @@ impl Encoder for GpuTransformerEncoder {
             )?;
         }
 
-        temp.reclaim();
-        self.context.queue.submit(Some(encoder.finish()));
+        frame.finish();
         let last_hidden_state_cpu = hidden_states.to_ndarray_3d().await?;
 
         Ok(EncoderOutput { last_hidden_state: last_hidden_state_cpu })

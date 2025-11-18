@@ -1,13 +1,13 @@
 //! Model-specific configurations for sentence encoders
 
 use anyhow::Result;
+use edgetransformers::activations::Activation;
 use edgetransformers::traits::{
     EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
     TransformerConfig,
 };
-use std::any::Any;
 use serde::Deserialize;
-use edgetransformers::activations::Activation;
+use std::any::Any;
 /// Configuration for MiniLM models (sentence-transformers/all-MiniLM-L6-v2)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMConfig {
@@ -15,7 +15,8 @@ pub struct MiniLMConfig {
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub intermediate_size: usize,
-    pub hidden_act: String,
+    #[serde(alias = "hidden_act", alias = "activation_function")]
+    pub activation_function: Option<String>,
     pub max_position_embeddings: usize,
     pub type_vocab_size: usize,
     pub vocab_size: usize,
@@ -48,9 +49,12 @@ impl LanguageModelConfig for MiniLMConfig {
         self.vocab_size
     }
     fn activation_function(&self) -> Activation {
-        Activation::GeluNew
+        self.activation_function
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Activation::Gelu)
     }
-     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "embeddings.word_embeddings.weight",
             "embeddings.position_embeddings.weight",
@@ -83,8 +87,6 @@ impl TransformerConfig for MiniLMConfig {
     fn is_prenorm(&self) -> bool {
         false // BERT-style is post-norm
     }
-     
-    
 }
 
 impl EncoderArchitecture for MiniLMConfig {
@@ -195,7 +197,7 @@ impl LanguageModelConfig for MPNetConfig {
     fn activation_function(&self) -> Activation {
         Activation::GeluNew
     }
-      fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "embeddings.word_embeddings.weight",
             "embeddings.position_embeddings.weight",
@@ -312,7 +314,7 @@ impl LanguageModelConfig for DistilBERTConfig {
     fn activation_function(&self) -> Activation {
         Activation::GeluNew
     }
-       fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "distilbert.embeddings.word_embeddings.weight",
             "distilbert.embeddings.position_embeddings.weight",

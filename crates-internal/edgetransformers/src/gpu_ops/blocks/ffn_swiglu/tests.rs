@@ -1,8 +1,7 @@
 use super::*; // Imports GpuSwiGLUFFN, GpuSwiGLUFFNWeights
 use crate::feedforward::SwiGluFeedForward as CpuSwiGLUFFN; // Import your CPU implementation
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::attention::TempStorage;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
 use anyhow::Result;
 use ndarray::{Array};
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
@@ -36,7 +35,7 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
     let cpu_swiglu = CpuSwiGLUFFN::new(gate_w_cpu.clone(), up_w_cpu.clone(), down_w_cpu.clone());
     let expected_cpu = cpu_swiglu.forward_2d(&input_cpu);
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut temp = TempStorage::new(context.clone());
+    let mut temp = GpuTensorPool::new(context.clone());
     gpu_swiglu.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu, &mut temp);
     context.queue.submit(Some(encoder.finish()));
     assert_tensors_are_close(&expected_cpu, &output_gpu, "SwiGLU FFN Output", 1e-2).await;

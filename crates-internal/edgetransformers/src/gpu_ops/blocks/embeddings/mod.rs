@@ -25,8 +25,7 @@
 //! The `GpuEmbeddings` struct is stateless and simply orchestrates the kernels.
 
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::attention::TempStorage;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::lookup::GpuLookup;
 use crate::gpu_ops::primitives::scale::GpuScale;
@@ -110,14 +109,14 @@ impl GpuEmbeddings {
         token_type_ids: Option<&GpuTensor>, // u32 tensor
         position_offset: usize,
         config: &dyn LanguageModelConfig,
-        temp: &mut TempStorage,
+        pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let batch_size = input_ids.shape()[0];
         let seq_len = input_ids.shape()[1];
         let hidden_size = config.hidden_size();
 
         // 1. Word Embedding Lookup
-        let mut hidden_states = temp.get(vec![batch_size, seq_len, hidden_size]);
+        let mut hidden_states = pool.get(vec![batch_size, seq_len, hidden_size]);
         self.lookup
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
 
@@ -156,7 +155,7 @@ impl GpuEmbeddings {
         //     hidden_states = pos_add_out;
         // }
         if let Some(pos_embeddings) = &weights.position_embeddings {
-            let pos_add_out = temp.get(hidden_states.shape().to_vec());
+            let pos_add_out = pool.get(hidden_states.shape().to_vec());
             // GPT-style models often have a fixed offset (e.g., 2 for BART) in their
             // position embedding table that needs to be added to the dynamic offset.
             let final_offset = position_offset + config.extra_pos_embeddings();
@@ -174,7 +173,7 @@ impl GpuEmbeddings {
         // 3. Add Token Type Embeddings (using composition)
         if let Some(token_type_embeddings) = &weights.token_type_embeddings {
             // Step 3a: Create the tensor of token type vectors to add.
-            let token_type_vectors = temp.get(hidden_states.shape().to_vec());
+            let token_type_vectors = pool.get(hidden_states.shape().to_vec());
 
             if let Some(type_ids) = token_type_ids {
                 self.lookup.encode(
@@ -196,7 +195,7 @@ impl GpuEmbeddings {
             }
 
             // Step 3b: Add the resulting vectors to the hidden states.
-            let type_add_out = temp.get(hidden_states.shape().to_vec());
+            let type_add_out = pool.get(hidden_states.shape().to_vec());
             self.add.encode_elementwise(
                 encoder,
                 &hidden_states,
@@ -209,7 +208,7 @@ impl GpuEmbeddings {
         // 4. Apply Scaling
         if config.scale_embeddings() {
             let scale_factor = (hidden_size as f32).sqrt();
-            let scale_out = temp.get(hidden_states.shape().to_vec());
+            let scale_out = pool.get(hidden_states.shape().to_vec());
 
             // Call the new, correct method
             self.scale.encode_out_of_place(

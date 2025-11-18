@@ -3,8 +3,7 @@ mod common;
 
 use super::*;
 use crate::feedforward::StdFeedForward as CpuFeedForward;
-use crate::gpu_ops::blocks::attention::TempStorage;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext, DType};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
 use ndarray::{Array, Array1, Array2, Array3, Ix3};
@@ -240,11 +239,15 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
     let expected_cpu = cpu_ffn.forward(&input_cpu)?;
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut temp = TempStorage::new(context.clone());
+
+    let mut pool = GpuTensorPool::new(context.clone());
+    let mut frame = GpuFrameContext::new(&context, &mut pool);
     
-    let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut temp);
+    let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, frame.pool());
     context.queue.submit(Some(encoder.finish()));
-    temp.reclaim();
+
+    frame.finish();
+
     assert_tensors_are_close(&expected_cpu, &output_gpu, "FFN End-to-End Output", 1e-1).await; // TODO FIND OUT WHY 1e-2 doesnt work
     Ok(())
 }
