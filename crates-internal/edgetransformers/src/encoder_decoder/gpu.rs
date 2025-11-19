@@ -11,6 +11,7 @@ use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::decoder_cross_attention::{
     GpuCrossAttentionDecoder, GpuCrossAttentionDecoderLayer,
 };
+use std::any::Any;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture,
     EncoderOutput as EncoderOutputTrait, TransformerModel,
@@ -20,12 +21,15 @@ use crate::weights::ModelWeights; // Import adapters from the cpu module
 /// The GPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct GpuTransformerEncoderDecoder {
     encoder: TransformerEncoder, // this supports CPU/GPU by dispatch
-    decoder: GpuCrossAttentionDecoder,
+    pub decoder: GpuCrossAttentionDecoder,
     config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
     context: Arc<WgpuContext>,
 }
 
 impl GpuTransformerEncoderDecoder {
+     pub fn decoder(&self) -> &GpuCrossAttentionDecoder {
+        &self.decoder
+    }
     pub fn new(
         weights: &ModelWeights,
         config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
@@ -41,7 +45,7 @@ impl GpuTransformerEncoderDecoder {
             Device::Wgpu,
             Some(context.clone()),
         )?;
-        let decoder = GpuCrossAttentionDecoder::new(&context, weights, config.clone())?;
+        let decoder = GpuCrossAttentionDecoder::new(&context, weights, decoder_config_adapter)?;
 
         Ok(Self {
             encoder,
@@ -84,5 +88,8 @@ impl TransformerModel for GpuTransformerEncoderDecoder {
     }
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
+    }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

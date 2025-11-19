@@ -62,6 +62,11 @@ impl LanguageModelConfig for TestLlamaConfig {
     fn vocab_size(&self) -> usize {
         32000
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        // For a decoder-only model, the "start token" for generation
+        // is the Beginning-Of-Sequence token.
+        self.bos_token_id().unwrap()
+    }
     fn max_position_embeddings(&self) -> usize {
         2048
     }

@@ -319,6 +319,9 @@ impl TransformerModel for GpuTransformerDecoder {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 #[async_trait(?Send)]
 impl Decoder for GpuTransformerDecoder {

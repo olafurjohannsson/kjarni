@@ -64,6 +64,9 @@ impl LanguageModelConfig for Gpt2Config {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        self.bos_token_id().unwrap()
+    }
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }

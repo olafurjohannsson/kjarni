@@ -56,6 +56,22 @@ pub unsafe extern "C" fn edge_gpt_new_cpu() -> *mut EdgeGPTHandle {
     Box::into_raw(ctx) as *mut EdgeGPTHandle
 }
 
+/// Create a new EdgeGPT instance for CPU
+///
+/// # Safety
+/// The returned handle must be freed with `edge_gpt_free()`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn edge_gpt_new_gpu() -> *mut EdgeGPTHandle {
+    let runtime = match Runtime::new() {
+        Ok(rt) => rt,
+        Err(_) => return ptr::null_mut(),
+    };
+    let edge_gpt = EdgeGPT::new(Device::Wgpu, None);
+    
+    let ctx = Box::new(EdgeGPTContext { edge_gpt, runtime });
+    Box::into_raw(ctx) as *mut EdgeGPTHandle
+}
+
 /// Free an EdgeGPT instance
 ///
 /// # Safety

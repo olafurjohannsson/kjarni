@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let any_model = AnySeq2SeqModel::from_registry(
         ModelType::DistilBartCnn, 
         None,
-        //  Device::Cpu,
+        // Device::Cpu,
         // None,
         Device::Wgpu,
         Some(ctx),
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     //
     //
     let generator = Seq2SeqGenerator::new(Box::new(model));
-
+// Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
     let mut generation_config = generator.model.get_default_generation_config();
     generation_config.max_new_tokens = Some(40);
 

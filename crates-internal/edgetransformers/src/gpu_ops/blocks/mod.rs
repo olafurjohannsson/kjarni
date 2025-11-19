@@ -18,6 +18,7 @@ use rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
 
 pub use ffn::{GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd};
 pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
+pub use decoder_cross_attention::GpuCrossAttentionDecoder;
 
 pub enum GpuNormalizationWeights {
     LayerNorm(GpuLayerNormWeights),

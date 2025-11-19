@@ -33,6 +33,9 @@ impl LanguageModelConfig for MiniLMConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        0
+    }    
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }
@@ -179,6 +182,9 @@ impl LanguageModelConfig for MPNetConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        0
+    }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
     }
@@ -295,6 +301,9 @@ impl TransformerConfig for DistilBERTConfig {
 impl LanguageModelConfig for DistilBERTConfig {
     fn intermediate_size(&self) -> usize {
         self.hidden_dim
+    }
+    fn decoder_start_token_id(&self) -> u32 {
+        0
     }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings

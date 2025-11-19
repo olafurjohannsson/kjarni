@@ -18,7 +18,7 @@ use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, Lang
 use edgetransformers::weights::ModelWeights;
 use edgetransformers::models::base::{EncodingConfig, PoolingStrategy};
 mod configs;
-mod tests;
+
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
 
 /// Sentence encoder for semantic similarity tasks
@@ -296,4 +296,10 @@ impl TransformerModel for SentenceEncoder {
     fn device(&self) -> Device {
         self.encoder.device()
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
+
+#[cfg(test)]
+mod tests;

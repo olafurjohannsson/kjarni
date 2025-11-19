@@ -8,7 +8,7 @@ use wgpu::CommandEncoder;
 pub struct GpuFrameContext<'a> {
     pub encoder: CommandEncoder,
     pub pool_guard: MutexGuard<'a, GpuTensorPool>,
-    context: &'a Arc<WgpuContext>,
+    pub context: &'a Arc<WgpuContext>,
     submitted: bool,
 }
 

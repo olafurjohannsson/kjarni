@@ -35,6 +35,7 @@ pub trait TransformerModel: Send + Sync {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         None // Default implementation for CPU models
     }
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// A marker trait for model configuration structs (e.g., `BertConfig`, `GptConfig`).
@@ -150,6 +151,8 @@ pub trait CrossAttentionDecoder: TransformerModel {
         decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output>;
+
+    // fn as_any(&self) -> &dyn Any;
 }
 
 /// A trait providing high-level configuration shared by all transformer models.
@@ -239,13 +242,34 @@ pub trait LanguageModelConfig: TransformerConfig {
     fn as_any(&self) -> &dyn Any;
 
     fn activation_function(&self) -> Activation;
-
+    fn decoder_start_token_id(&self) -> u32;
     /// Whether to scale the word + position embeddings by sqrt(hidden_size).
     ///
     /// This is a specific quirk used by some models, like the original facebook/bart-large.
     fn scale_embeddings(&self) -> bool {
         false // Default to false
     }
+}
+
+/// Describes the architectural specifics of a Decoder that uses cross-attention (e.g., BART, T5).
+///
+/// This trait provides the blueprint for building the decoder part of an encoder-decoder model,
+/// specifying the tensor names for self-attention, cross-attention, and feed-forward blocks.
+pub trait CrossAttentionDecoderArchitecture: LanguageModelConfig {
+    /// The number of layers in the decoder stack.
+    fn num_decoder_layers(&self) -> usize;
+
+    /// The tensor names for the LayerNorm applied after the decoder's embedding layer.
+    fn get_decoder_embedding_ln_names(&self) -> (&str, &str);
+    
+    /// The names for the self-attention component of a specific decoder layer.
+    fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
+
+    /// The names for the cross-attention component of a specific decoder layer.
+    fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
+
+    /// The names for the feed-forward component of a specific decoder layer.
+    fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 }
 
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
@@ -397,6 +421,5 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
 
     // fn eos_token_id(&self) -> u32;
 
-    /// Returns the token ID that should begin the decoder's generation sequence.
-    fn decoder_start_token_id(&self) -> u32;
+    // fn decoder_start_token_id(&self) -> u32;
 }

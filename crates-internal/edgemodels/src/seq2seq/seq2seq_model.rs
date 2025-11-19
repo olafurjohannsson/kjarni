@@ -14,7 +14,7 @@ use edgetransformers::traits::{
     LanguageModelConfig, TransformerModel,
 };
 use edgetransformers::weights::ModelWeights;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -133,6 +133,9 @@ where
 impl<C: EncoderDecoderArchitecture + Send + Sync> TransformerModel for Seq2SeqModel<C> {
     fn device(&self) -> Device {
         self.model.device()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self // Simply return a reference to self as a `&dyn Any`
     }
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.model.context()
@@ -282,7 +285,106 @@ mod tests {
     use edgetransformers::TransformerConfig;
     use edgetransformers::models::base::{DecodingStrategy, EncoderDecoderLanguageModel};
     use edgetransformers::prelude::LanguageModel;
+    // Make sure to adjust these `use` paths to match your project structure
+    use edgetransformers::attention::MultiHeadAttention as CpuMha;
+    use edgetransformers::decoder_cross_attn_layer::DecoderCrossAttentionLayer as CpuDecoderLayer;
+    use edgetransformers::feedforward::{FeedForward as CpuFf, StdFeedForward as CpuStdFf};
+    use edgetransformers::normalization::LayerNorm as CpuLayerNorm;
+    use edgetransformers::encoder_decoder::{GpuTransformerEncoderDecoder, CpuTransformerEncoderDecoder};
+    use edgetransformers::traits::{EncoderDecoderArchitecture, CrossAttentionDecoder as CrossAttentionDecoderTrait};
+    use edgetransformers::gpu_ops::GpuTensorPool;
+    use edgetransformers::gpu_ops::GpuTensor;
+    use edgetransformers::gpu_ops::GpuFrameContext;
+    use tokio::sync::Mutex;
+    use edgetransformers::gpu_ops::blocks::GpuCrossAttentionDecoder;
+    use ndarray::{Array, Array1, Array2, Array3};
+    use ndarray_rand::RandomExt;
+    use ndarray_rand::rand_distr::Uniform;
+    
+    fn assert_all_close_2d(a: &Array2<f32>, b: &Array2<f32>, rtol: f32, atol: f32, context: &str) {
+        if a.shape() != b.shape() {
+            panic!(
+                "[{}] Shape mismatch: {:?} vs {:?}",
+                context,
+                a.shape(),
+                b.shape()
+            );
+        }
 
+        let mut max_abs_diff = 0.0;
+        let mut max_rel_diff = 0.0;
+
+        for (a_val, b_val) in a.iter().zip(b.iter()) {
+            let abs_diff = (a_val - b_val).abs();
+            if abs_diff > max_abs_diff {
+                max_abs_diff = abs_diff;
+            }
+
+            // The check: absolute difference must be within the combined tolerance
+            let tolerance = atol + rtol * b_val.abs();
+            if abs_diff > tolerance {
+                panic!(
+                    "[{}] Arrays are not close. Failed at values a={}, b={}. \
+                 Absolute difference {} is greater than tolerance {}",
+                    context, a_val, b_val, abs_diff, tolerance
+                );
+            }
+
+            if b_val.abs() > 1e-8 {
+                // Avoid division by zero
+                let rel_diff = abs_diff / b_val.abs();
+                if rel_diff > max_rel_diff {
+                    max_rel_diff = rel_diff;
+                }
+            }
+        }
+        println!(
+            "[{}] Check passed. Max absolute difference: {:.6e}, Max relative difference: {:.6e}",
+            context, max_abs_diff, max_rel_diff
+        );
+    }
+    fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
+        if a.shape() != b.shape() {
+            panic!(
+                "[{}] Shape mismatch: {:?} vs {:?}",
+                context,
+                a.shape(),
+                b.shape()
+            );
+        }
+
+        let mut max_abs_diff = 0.0;
+        let mut max_rel_diff = 0.0;
+
+        for (a_val, b_val) in a.iter().zip(b.iter()) {
+            let abs_diff = (a_val - b_val).abs();
+            if abs_diff > max_abs_diff {
+                max_abs_diff = abs_diff;
+            }
+
+            // The check: absolute difference must be within the combined tolerance
+            let tolerance = atol + rtol * b_val.abs();
+            if abs_diff > tolerance {
+                panic!(
+                    "[{}] Arrays are not close. Failed at values a={}, b={}. \
+                 Absolute difference {} is greater than tolerance {}",
+                    context, a_val, b_val, abs_diff, tolerance
+                );
+            }
+
+            if b_val.abs() > 1e-8 {
+                // Avoid division by zero
+                let rel_diff = abs_diff / b_val.abs();
+                if rel_diff > max_rel_diff {
+                    max_rel_diff = rel_diff;
+                }
+            }
+        }
+        println!(
+            "[{}] Check passed. Max absolute difference: {:.6e}, Max relative difference: {:.6e}",
+            context, max_abs_diff, max_rel_diff
+        );
+    }
     /// Helper function to load the DistilBART model for testing,
     /// reducing code duplication in the tests below.
     async fn load_distilbart_for_test() -> Result<Seq2SeqModel<BartConfig>> {
@@ -435,4 +537,173 @@ mod tests {
 
     //     Ok(())
     // }
+    use std::any::Any; // Needed for downcasting
+use edgetransformers::traits::{TransformerModel, CrossAttentionDecoder};
+    #[tokio::test]
+    async fn test_embedding_no_layer_norm() -> Result<()> {
+        // 1. SETUP: Load the real model for both CPU and GPU
+        let context = Arc::new(WgpuContext::new().await?);
+        let model_type = ModelType::DistilBartCnn; // Or your desired model
+
+        // --- Load and Downcast CPU Model ---
+        let cpu_model_any = AnySeq2SeqModel::from_registry(model_type, None, Device::Cpu, None).await?;
+        let cpu_model = if let AnySeq2SeqModel::Bart(m) = cpu_model_any { m } else { panic!("Expected BART model"); };
+        // Downcast the `Box<dyn CrossAttentionDecoder>` to its concrete type to access its fields
+        let cpu_decoder = cpu_model.decoder().as_any().downcast_ref::<CpuTransformerEncoderDecoder>().expect("Failed to downcast CPU decoder");
+
+        // --- Load and Downcast GPU Model ---
+        let gpu_model_any = AnySeq2SeqModel::from_registry(model_type, None, Device::Wgpu, Some(context.clone())).await?;
+        let gpu_model = if let AnySeq2SeqModel::Bart(m) = gpu_model_any { m } else { panic!("Expected BART model"); };
+        // Downcast the `Box<dyn CrossAttentionDecoder>` to its concrete type
+        let gpu_decoder = gpu_model.decoder().as_any().downcast_ref::<GpuCrossAttentionDecoder>().expect("Failed to downcast to GpuCrossAttentionDecoder");
+        // Step 2: Now that we have the concrete "Car", we can access its "Engine".
+        let cpu_pos_embeddings = cpu_decoder.decoder_embeddings.position_embeddings.as_ref().unwrap();
+
+        // 2. Get the GPU positional embeddings
+        let gpu_pos_embeddings_tensor = gpu_decoder.embedding_weights().position_embeddings.as_ref().unwrap();
+
+        // 3. Copy the GPU tensor back to the CPU for comparison
+        let gpu_pos_embeddings_ndarray = gpu_pos_embeddings_tensor.to_ndarray_2d().await?;
+
+        // 4. Print and compare
+        println!("[CPU] Positional Embeddings: {:?}", cpu_pos_embeddings.slice(s![0..4, 0..8]));
+        println!("[GPU] Positional Embeddings: {:?}", gpu_pos_embeddings_ndarray.slice(s![0..4, 0..8]));
+
+        // You can add an assertion here as well
+        assert_all_close_2d(cpu_pos_embeddings, &gpu_pos_embeddings_ndarray, 1e-6, 1e-6, "Positional Embeddings");
+        
+        let config = gpu_decoder.config.clone();
+        println!("--- Testing Embedding Stage Consistency ---");
+
+        // 2. CREATE IDENTICAL INPUTS
+        let batch_size = 1;
+        let seq_len = 1;
+        let position_offset = 0;
+        let decoder_start_token_id = config.decoder_start_token_id();
+        assert_eq!(decoder_start_token_id, 2, "invalid start token id");
+        let cpu_input_ids = Array2::from_elem((batch_size, seq_len), decoder_start_token_id as u32);
+
+        // 3. RUN CPU PATH (using the downcasted concrete type)
+        let cpu_output = cpu_decoder.decoder_embeddings.forward(
+            &cpu_input_ids,
+            None,
+            position_offset + config.extra_pos_embeddings(),
+            config.scale_embeddings(),
+        );
+
+        // 4. RUN GPU PATH
+        let gpu_output = {
+            let pool = Mutex::new(GpuTensorPool::new(context.clone()));
+            let pool_guard = pool.lock().await;
+            let mut frame = GpuFrameContext::new(&context, pool_guard);
+            let (encoder, pool) = frame.resources();
+
+            let gpu_input_ids = GpuTensor::from_ndarray(&context, &cpu_input_ids)?;
+            
+            let gpu_after_embed = gpu_decoder.embeddings.encode(
+                encoder,
+                &gpu_decoder.embedding_weights,
+                &gpu_input_ids,
+                None,
+                position_offset,
+                config.as_ref(),
+                pool,
+            )?;
+
+            frame.finish();
+            gpu_after_embed.to_ndarray_3d().await?
+        };
+
+        // 5. COMPARE RESULTS
+        println!("[CPU] Embedding Stage Output: {:?}", cpu_output.slice(s![0, 0, 0..8]));
+        println!("[GPU] Embedding Stage Output: {:?}", gpu_output.slice(s![0, 0, 0..8]));
+
+        let rtol = 1e-4;
+        let atol = 1e-5;
+        assert_all_close(&cpu_output, &gpu_output, rtol, atol, "Embedding Stage Output");
+
+        println!("✅ Embedding stage is consistent!");
+
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_embedding_stage_consistency_2() -> Result<()> {
+        // 1. SETUP: Load the real model for both CPU and GPU
+        let context = Arc::new(WgpuContext::new().await?);
+        let model_type = ModelType::DistilBartCnn; // Or your desired model
+
+        // --- Load and Downcast CPU Model ---
+        let cpu_model_any = AnySeq2SeqModel::from_registry(model_type, None, Device::Cpu, None).await?;
+        let cpu_model = if let AnySeq2SeqModel::Bart(m) = cpu_model_any { m } else { panic!("Expected BART model"); };
+        // Downcast the `Box<dyn CrossAttentionDecoder>` to its concrete type to access its fields
+        let cpu_decoder = cpu_model.decoder().as_any().downcast_ref::<CpuTransformerEncoderDecoder>().expect("Failed to downcast CPU decoder");
+
+        // --- Load and Downcast GPU Model ---
+        let gpu_model_any = AnySeq2SeqModel::from_registry(model_type, None, Device::Wgpu, Some(context.clone())).await?;
+        let gpu_model = if let AnySeq2SeqModel::Bart(m) = gpu_model_any { m } else { panic!("Expected BART model"); };
+        // Downcast the `Box<dyn CrossAttentionDecoder>` to its concrete type
+        let gpu_decoder = gpu_model.decoder().as_any().downcast_ref::<GpuCrossAttentionDecoder>().expect("Failed to downcast to GpuCrossAttentionDecoder");
+        // Step 2: Now that we have the concrete "Car", we can access its "Engine".
+        
+        
+        let config = gpu_decoder.config.clone();
+        println!("--- Testing Embedding Stage Consistency ---");
+
+        // 2. CREATE IDENTICAL INPUTS
+        let batch_size = 1;
+        let seq_len = 1;
+        let position_offset = 0;
+        let decoder_start_token_id = config.decoder_start_token_id();
+        assert_eq!(decoder_start_token_id, 2, "invalid start token id");
+        let cpu_input_ids = Array2::from_elem((batch_size, seq_len), decoder_start_token_id as u32);
+
+        // 3. RUN CPU PATH (using the downcasted concrete type)
+        let cpu_after_embed = cpu_decoder.decoder_embeddings.forward(
+            &cpu_input_ids,
+            None,
+            position_offset + config.extra_pos_embeddings(),
+            config.scale_embeddings(),
+        );
+        let cpu_output = cpu_decoder.decoder_embed_layer_norm.forward_3d(&cpu_after_embed);
+
+        // 4. RUN GPU PATH
+        let gpu_output = {
+            let pool = Mutex::new(GpuTensorPool::new(context.clone()));
+            let pool_guard = pool.lock().await;
+            let mut frame = GpuFrameContext::new(&context, pool_guard);
+            let (encoder, pool) = frame.resources();
+
+            let gpu_input_ids = GpuTensor::from_ndarray(&context, &cpu_input_ids)?;
+            
+            let gpu_after_embed = gpu_decoder.embeddings.encode(
+                encoder,
+                &gpu_decoder.embedding_weights,
+                &gpu_input_ids,
+                None,
+                position_offset,
+                config.as_ref(),
+                pool,
+            )?;
+            
+            let gpu_output_t = pool.get(gpu_after_embed.shape().to_vec());
+            gpu_decoder.embed_layer_norm.encode(encoder, &gpu_decoder.embed_ln_weights, &gpu_after_embed, &gpu_output_t);
+
+            frame.finish();
+            gpu_output_t.to_ndarray_3d().await?
+        };
+
+        // 5. COMPARE RESULTS
+        println!("[CPU] Embedding Stage Output: {:?}", cpu_output.slice(s![0, 0, 0..8]));
+        println!("[GPU] Embedding Stage Output: {:?}", gpu_output.slice(s![0, 0, 0..8]));
+
+        let rtol = 1e-4;
+        let atol = 1e-5;
+        assert_all_close(&cpu_output, &gpu_output, rtol, atol, "Embedding Stage Output");
+
+        println!("✅ Embedding stage is consistent!");
+
+        Ok(())
+    }
 }
+
+

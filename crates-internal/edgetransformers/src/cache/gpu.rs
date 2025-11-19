@@ -77,7 +77,7 @@ impl GpuKVCache {
     /// This method is the architectural equivalent of `CpuKVCache::update`. It uses a
     /// specialized kernel to perform a fused "split-heads and copy" operation.
     pub fn update(
-        &self,
+        &mut self,
         encoder: &mut CommandEncoder,
         layer_idx: usize,
         new_k: &GpuTensor,
@@ -94,7 +94,7 @@ impl GpuKVCache {
         }
         let cache_k = &self.k_tensors[layer_idx];
         let cache_v = &self.v_tensors[layer_idx];
-
+        // let position_offset = self.seq_length;
         self.update_kernel
             .encode(encoder, new_k, new_v, cache_k, cache_v, position_offset); //self.seq_length);
 

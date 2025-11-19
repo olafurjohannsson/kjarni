@@ -5,7 +5,7 @@ use crate::traits::{
 };
 use crate::traits::{
     DecoderArchitecture, EncoderArchitecture, LanguageModelConfig, LayerAttentionNames,
-    LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
+    LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig, CrossAttentionDecoderArchitecture
 };
 use crate::weights::ModelWeights;
 use crate::{
@@ -23,8 +23,8 @@ use std::sync::Arc;
 pub struct CpuTransformerEncoderDecoder {
     encoder: TransformerEncoder,
     decoder_layers: Vec<DecoderCrossAttentionLayer>,
-    decoder_embeddings: Embeddings,
-    decoder_embed_layer_norm: LayerNorm,
+    pub decoder_embeddings: Embeddings,
+    pub decoder_embed_layer_norm: LayerNorm,
     config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
 }
 
@@ -206,7 +206,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
             hidden_states = new_hidden;
             new_key_values.push((new_k, new_v));
         }
-
+        
         // 3. Update the cache *after* all layers have been processed.
         if let Some(cache) = cpu_cache_opt {
             for (layer_idx, (k, v)) in new_key_values.into_iter().enumerate() {
@@ -227,6 +227,9 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
 impl TransformerModel for CpuTransformerEncoderDecoder {
     fn device(&self) -> Device {
         Device::Cpu
+    }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -264,6 +267,9 @@ impl TransformerConfig for EncoderConfigAdapter {
 impl LanguageModelConfig for EncoderConfigAdapter {
     fn vocab_size(&self) -> usize {
         self.0.vocab_size()
+    }
+    fn decoder_start_token_id(&self) -> u32 {
+        self.0.decoder_start_token_id()
     }
     fn max_position_embeddings(&self) -> usize {
         self.0.max_position_embeddings()
@@ -328,6 +334,9 @@ impl LanguageModelConfig for DecoderConfigAdapter {
     fn vocab_size(&self) -> usize {
         self.0.vocab_size()
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        self.0.decoder_start_token_id()
+    }
     fn max_position_embeddings(&self) -> usize {
         self.0.max_position_embeddings()
     }
@@ -348,6 +357,27 @@ impl LanguageModelConfig for DecoderConfigAdapter {
     }
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         self.0.get_decoder_embedding_names()
+    }
+}
+impl CrossAttentionDecoderArchitecture for DecoderConfigAdapter {
+    fn num_decoder_layers(&self) -> usize {
+        self.0.num_decoder_layers()
+    }
+
+    fn get_decoder_embedding_ln_names(&self) -> (&str, &str) {
+        self.0.get_decoder_embedding_ln_names()
+    }
+
+    fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames {
+        self.0.get_decoder_self_attention_names(layer_index)
+    }
+
+    fn get_decoder_cross_attention_names(&self, layer_index: usize) -> LayerAttentionNames {
+        self.0.get_decoder_cross_attention_names(layer_index)
+    }
+
+    fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames {
+        self.0.get_decoder_feed_forward_names(layer_index)
     }
 }
 impl DecoderArchitecture for DecoderConfigAdapter {

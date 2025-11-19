@@ -228,6 +228,11 @@ impl LanguageModelConfig for LlamaConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        // For a decoder-only model, the "start token" for generation
+        // is the Beginning-Of-Sequence token.
+        self.bos_token_id()
+    }
     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "model.embed_tokens.weight",

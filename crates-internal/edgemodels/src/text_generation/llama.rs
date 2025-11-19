@@ -133,6 +133,9 @@ impl TransformerModel for LlamaModel {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.decoder.context()
     }
+ fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl LanguageModel for LlamaModel {

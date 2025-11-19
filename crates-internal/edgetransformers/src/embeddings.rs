@@ -104,7 +104,11 @@ impl Embeddings {
                     hidden_slice.slice_mut(s![j, ..]).assign(&word_emb);
                 }
             });
-
+// --- START CPU DEBUG LOG ---
+        if position_offset >= 2 { // A simple check to only log during the decoder pass
+             println!("[CPU] [Decoder] Word Embeddings ONLY: shape={:?}, data={:?}", hidden.shape(), hidden.slice(s![0, 0, 0..8]));
+        }
+        // --- END CPU DEBUG LOG ---
 
         if let Some(ref pos_emb) = self.position_embeddings {
             let start_idx = position_offset;
@@ -121,6 +125,11 @@ impl Embeddings {
 
             let pos_embeddings_to_add = pos_emb.slice(s![start_idx..end_idx, ..]);
             hidden += &pos_embeddings_to_add;
+            // --- START NEW CPU DEBUG LOG ---
+            if position_offset >= 2 {
+                println!("[CPU] [Decoder] After Positional Add: shape={:?}, data={:?}", hidden.shape(), hidden.slice(s![0, 0, 0..8]));
+            }
+            // --- END NEW CPU DEBUG LOG ---
         }
 
         // Token type embeddings (only if present)
@@ -208,6 +217,9 @@ mod tests {
     impl LanguageModelConfig for TestConfig {
         fn vocab_size(&self) -> usize {
             30522
+        }
+        fn decoder_start_token_id(&self) -> u32 {
+            0
         }
         fn max_position_embeddings(&self) -> usize {
             512

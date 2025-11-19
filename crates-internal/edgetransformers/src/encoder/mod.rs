@@ -87,6 +87,9 @@ impl TransformerModel for TransformerEncoder {
             Self::Gpu(model) => model.device(),
         }
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Implements the `Encoder` trait for the generic encoder, delegating to the backend.

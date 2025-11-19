@@ -96,6 +96,9 @@ impl LanguageModelConfig for BartConfig {
     fn vocab_size(&self) -> usize {
         self.vocab_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        2
+    }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
     }
@@ -158,9 +161,9 @@ impl EncoderDecoderArchitecture for BartConfig {
     // fn eos_token_id(&self) -> u32 {
     //     self.eos_token_id
     // }
-    fn decoder_start_token_id(&self) -> u32 {
-        self.decoder_start_token_id
-    }
+    // fn decoder_start_token_id(&self) -> u32 {
+    //     self.decoder_start_token_id
+    // }
 
     fn num_encoder_layers(&self) -> usize {
         self.encoder_layers

@@ -419,6 +419,9 @@ impl TransformerModel for CrossEncoder {
     fn device(&self) -> Device {
         self.encoder.device()
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl LanguageModel for CrossEncoder {

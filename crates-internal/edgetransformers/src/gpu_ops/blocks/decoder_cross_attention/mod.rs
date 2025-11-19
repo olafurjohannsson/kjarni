@@ -11,7 +11,7 @@ use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{
     CrossAttentionDecoder as CrossAttentionDecoderTrait, DecoderOutput, Device,
-    EncoderDecoderArchitecture, TransformerModel,
+    EncoderDecoderArchitecture, TransformerModel, LanguageModelConfig, CrossAttentionDecoderArchitecture
 };
 use crate::weights::ModelWeights;
 use anyhow::Result;
@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::any::Any;
 
 // This is just a data container, like the CPU version.
 pub struct GpuCrossAttentionDecoderLayer {
@@ -45,15 +46,21 @@ pub struct GpuCrossAttentionDecoder {
     pub embed_layer_norm: GpuNormalization,
     pub embed_ln_weights: GpuNormalizationWeights,
     pub context: Arc<WgpuContext>,
-    pub config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
+    pub config: Arc<dyn CrossAttentionDecoderArchitecture + Send + Sync>,
     pub pool: Mutex<GpuTensorPool>,
 }
 
 impl GpuCrossAttentionDecoder {
+    fn as_any(&self) -> &dyn Any {
+        self // Simply return a reference to self as a `&dyn Any`
+    }
+    pub fn embedding_weights(&self) -> &GpuEmbeddingWeights {
+        &self.embedding_weights
+    }
     pub fn new(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
-        config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,
+        config: Arc<dyn CrossAttentionDecoderArchitecture + Send + Sync>,
     ) -> Result<Self> {
         let hidden_size = config.hidden_size() as u32;
         let num_heads = config.num_attention_heads() as u32;
@@ -332,7 +339,9 @@ impl TransformerModel for GpuCrossAttentionDecoder {
     fn device(&self) -> Device {
         Device::Wgpu
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
     }
@@ -363,6 +372,7 @@ fn assert_all_close_debug(cpu: &Array3<f32>, gpu: &Array3<f32>, rtol: f32, atol:
 impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
     type Input = Array2<u32>;
     type Output = DecoderOutput;
+    
 
     async fn forward<'a>(
         &self,
@@ -372,6 +382,7 @@ impl CrossAttentionDecoderTrait for GpuCrossAttentionDecoder {
         decoder_attention_mask: Option<&'a Array2<f32>>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
+        
         let mut pool_guard = self.pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         let (mut encoder, mut pool) = frame.resources();

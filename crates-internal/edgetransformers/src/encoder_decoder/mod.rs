@@ -14,7 +14,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
-
+use std::any::Any;
 use crate::gpu_context::WgpuContext;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, EncoderOutput,
@@ -22,8 +22,8 @@ use crate::traits::{
 };
 use crate::weights::ModelWeights;
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
-use cpu::CpuTransformerEncoderDecoder;
-use gpu::GpuTransformerEncoderDecoder;
+pub use cpu::CpuTransformerEncoderDecoder;
+pub use gpu::GpuTransformerEncoderDecoder;
 use crate::Encoder;
 
 /// A generic, backend-agnostic transformer encoder-decoder stack.
@@ -65,7 +65,7 @@ impl TransformerEncoderDecoder {
     ) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput> {
         match self {
             Self::Cpu(model) => model, // The CpuTransformerEncoderDecoder itself implements the trait
-            Self::Gpu(model) => model,
+            Self::Gpu(model) => model.decoder(),
         }
     }
 }
@@ -117,6 +117,9 @@ impl TransformerModel for TransformerEncoderDecoder {
             Self::Cpu(model) => model.device(),
             Self::Gpu(model) => model.device(),
         }
+    }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
     fn context(&self) -> Option<Arc<WgpuContext>> {
         // Match on self and delegate directly to the inner model's context method.

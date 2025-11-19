@@ -271,6 +271,9 @@ impl TransformerModel for CpuTransformerDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[async_trait(?Send)]

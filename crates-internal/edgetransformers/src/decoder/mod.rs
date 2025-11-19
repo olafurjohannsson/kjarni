@@ -83,6 +83,9 @@ impl TransformerModel for TransformerDecoder {
             Self::Gpu(model) => model.context(),
         }
     }
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Implements the `Decoder` trait for the generic decoder, delegating to the backend.

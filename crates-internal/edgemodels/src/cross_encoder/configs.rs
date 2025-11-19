@@ -38,6 +38,9 @@ impl LanguageModelConfig for MiniLMCrossEncoderConfig {
     fn intermediate_size(&self) -> usize {
         self.intermediate_size
     }
+    fn decoder_start_token_id(&self) -> u32 {
+        0
+    }
     fn max_position_embeddings(&self) -> usize {
         self.max_position_embeddings
     }
