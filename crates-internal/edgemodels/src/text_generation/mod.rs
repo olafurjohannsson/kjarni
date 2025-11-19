@@ -11,7 +11,6 @@ use edgetransformers::prelude::*;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
 use edgetransformers::models::base::DecodingStrategy;
 use edgetransformers::weights::ModelWeights;
-use log::{debug, info};
 use ndarray::{Array2, Array3, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

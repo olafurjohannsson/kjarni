@@ -2,9 +2,9 @@
 
 mod cpu;
 mod gpu;
+mod gpu_beam;
 
-mod tests;
-
+pub use gpu_beam::GpuBeamKVCache;
 pub use cpu::CpuKVCache;
 pub use gpu::GpuKVCache;
 
@@ -33,3 +33,6 @@ pub trait Cache: Send + Sync {
     fn clone_box(&self) -> Box<dyn Cache>;
 
 }
+
+#[cfg(test)]
+mod tests;

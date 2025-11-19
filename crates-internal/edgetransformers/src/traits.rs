@@ -1,9 +1,9 @@
 //! Core model traits and data structures for transformer architectures.
 //!
 
-use crate::WgpuContext;
 use crate::activations::Activation;
 pub use crate::cache::Cache;
+use crate::WgpuContext;
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
@@ -23,6 +23,27 @@ pub enum Device {
     /// Execute computations on the GPU via WGPU.
     Wgpu,
 }
+
+// #[async_trait(?Send)]
+// trait GenerationBackend {
+//     type Cache: Cache; // The specific cache type (Cpu or Gpu)
+//     type Tensor;      // The specific tensor type (ndarray or GpuTensor)
+//
+//     // Operation 1: The main forward pass
+//     async fn forward(
+//         &self,
+//         decoder: &dyn CrossAttentionDecoder<...>, // Pass the decoder
+//         tokens: &Self::Tensor,
+//         encoder_state: &Self::Tensor,
+//         cache: &mut Self::Cache,
+//     ) -> Result<Array3<f32>>; // Always returns ndarray for logits on CPU
+//
+//     // Operation 2: Prepare inputs for the next loop
+//     fn prepare_next_tokens(&self, tokens: Vec<u32>) -> Result<Self::Tensor>;
+//
+//     // Operation 3: Reorder the cache for beam search
+//     fn reorder_cache(&self, cache: &mut Self::Cache, indices: &[usize]) -> Result<()>;
+// }
 
 /// A base marker trait for all models in the library.
 ///
@@ -139,16 +160,18 @@ pub trait Decoder: TransformerModel {
 /// (self-attention) and the output of an encoder (cross-attention).
 #[async_trait(?Send)]
 pub trait CrossAttentionDecoder: TransformerModel {
-    type Input;
+    type TokenInput;
+    type EncoderStateInput;
+    type MaskInput;
     type Output;
 
     /// Asynchronously performs a forward pass through the full encoder-decoder stack.
     async fn forward<'a>(
         &self,
-        decoder_input_ids: &Self::Input,
-        encoder_hidden_states: &'a Array3<f32>,
-        encoder_attention_mask: Option<&'a Array2<f32>>,
-        decoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_input_ids: &Self::TokenInput,
+        encoder_hidden_states: &'a Self::EncoderStateInput,
+        encoder_attention_mask: Option<&'a Self::MaskInput>,
+        decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output>;
 
@@ -261,7 +284,7 @@ pub trait CrossAttentionDecoderArchitecture: LanguageModelConfig {
 
     /// The tensor names for the LayerNorm applied after the decoder's embedding layer.
     fn get_decoder_embedding_ln_names(&self) -> (&str, &str);
-    
+
     /// The names for the self-attention component of a specific decoder layer.
     fn get_decoder_self_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
 

@@ -1,7 +1,6 @@
 //! Multi-head attention implementation with KV caching support
 
 use crate::activations::softmax;
-use crate::gpu_ops::primitives::matmul;
 use crate::rope::RoPE;
 use crate::utils::MASK_VALUE;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
@@ -359,8 +358,7 @@ pub fn apply_causal_mask(mut scores: Array4<f32>, cache_len: usize) -> Result<Ar
 
     Ok(scores)
 }
-//rust.old: Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . Rust was influenced by languages like C++, Haskell, and Erlang .
-//pyth.tst: Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-mod tests;
+
 
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -116,3 +116,7 @@ impl GpuRepeatKV {
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
+
+
+#[cfg(test)]
+mod tests;

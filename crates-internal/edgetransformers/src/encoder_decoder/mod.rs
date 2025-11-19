@@ -10,21 +10,23 @@
 mod cpu;
 mod gpu;
 
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use ndarray::{Array2, Array3};
-use std::sync::Arc;
-use std::any::Any;
 use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::blocks::GpuCrossAttentionDecoder;
+use crate::models::base::EncoderDecoderLanguageModel;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, EncoderOutput,
     TransformerModel,
 };
 use crate::weights::ModelWeights;
+use crate::Encoder;
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 pub use cpu::CpuTransformerEncoderDecoder;
 pub use gpu::GpuTransformerEncoderDecoder;
-use crate::Encoder;
+use ndarray::{Array2, Array3};
+use std::any::Any;
+use std::sync::Arc;
 
 /// A generic, backend-agnostic transformer encoder-decoder stack.
 pub enum TransformerEncoderDecoder {
@@ -53,19 +55,32 @@ impl TransformerEncoderDecoder {
             }
         }
     }
-    pub fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
+    pub fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput> {
         match self {
             Self::Cpu(model) => model.encoder(),
             Self::Gpu(model) => model.encoder()
         }
     }
 
+    pub fn gpu_decoder(&self) -> Option<&GpuCrossAttentionDecoder> {
+        match self {
+            Self::Cpu(_) => None, // It's not a GPU model, so return None.
+            Self::Gpu(model) => Some(model.decoder()), // Return the concrete GPU decoder.
+        }
+    }
+
     pub fn decoder(
         &self,
-    ) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput> {
+    ) -> &dyn CrossAttentionDecoder<
+        TokenInput=Array2<u32>,
+        EncoderStateInput=Array3<f32>,
+        MaskInput=Array2<f32>,
+        Output=DecoderOutput> {
         match self {
             Self::Cpu(model) => model, // The CpuTransformerEncoderDecoder itself implements the trait
-            Self::Gpu(model) => model.decoder(),
+            Self::Gpu(model) => {
+                panic!("Invalid type")
+            }
         }
     }
 }
@@ -73,15 +88,17 @@ impl TransformerEncoderDecoder {
 // Implement the main forward pass via the CrossAttentionDecoder trait
 #[async_trait(?Send)]
 impl CrossAttentionDecoder for TransformerEncoderDecoder {
-    type Input = Array2<u32>;
+    type TokenInput = Array2<u32>;
+    type EncoderStateInput = Array3<f32>;
+    type MaskInput = Array2<f32>;
     type Output = DecoderOutput;
 
     async fn forward<'a>(
         &self,
-        decoder_input_ids: &Self::Input,
-        encoder_hidden_states: &'a Array3<f32>,
-        encoder_attention_mask: Option<&'a Array2<f32>>,
-        decoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_input_ids: &Self::TokenInput,
+        encoder_hidden_states: &'a Self::EncoderStateInput,
+        encoder_attention_mask: Option<&'a Self::MaskInput>,
+        decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
         match self {
@@ -97,15 +114,16 @@ impl CrossAttentionDecoder for TransformerEncoderDecoder {
                     .await
             }
             Self::Gpu(model) => {
-                model
-                    .forward(
-                        decoder_input_ids,
-                        encoder_hidden_states,
-                        encoder_attention_mask,
-                        decoder_attention_mask,
-                        cache,
-                    )
-                    .await
+                unimplemented!()
+                // model
+                //     .forward(
+                //         decoder_input_ids,
+                //         encoder_hidden_states,
+                //         encoder_attention_mask,
+                //         decoder_attention_mask,
+                //         cache,
+                //     )
+                //     .await
             }
         }
     }
@@ -118,7 +136,7 @@ impl TransformerModel for TransformerEncoderDecoder {
             Self::Gpu(model) => model.device(),
         }
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn context(&self) -> Option<Arc<WgpuContext>> {

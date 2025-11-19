@@ -155,7 +155,7 @@ impl LanguageModel for Gpt2Model {
     fn pad_token_id(&self) -> Option<u32> {
         Some(50256)
     }
-    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(&self, batch_size: usize, max_len: usize, _num_beams: usize) -> Result<Box<dyn Cache>> {
         Ok(match self.device() {
             Device::Cpu => Box::new(CpuKVCache::new(
                 self.num_layers(),

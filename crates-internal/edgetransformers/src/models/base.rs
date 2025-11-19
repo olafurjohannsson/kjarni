@@ -3,20 +3,19 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
-use crate::Cache;
-use crate::cache::CpuKVCache;
+use crate::gpu_ops::GpuTensor;
 use crate::pooling::mean_pool;
 use crate::traits::{
     CrossAttentionDecoder, Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig,
     TransformerModel,
 };
 use crate::utils::create_full_attention_mask;
-use anyhow::{Result, anyhow};
+use crate::Cache;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array1, Array2, Array3, s};
+use ndarray::{Array1, Array2, Array3};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 #[derive(Clone, Debug)]
@@ -187,7 +186,7 @@ impl Default for GenerationConfig {
 pub struct BeamHypothesis {
     pub tokens: Vec<u32>,
     pub score: f32,
-    pub cache: Box<dyn Cache>,
+    // pub cache: Box<dyn Cache>,
 }
 
 /// Base trait for all language models - provides tokenization
@@ -206,7 +205,7 @@ pub trait LanguageModel: TransformerModel {
     ///
     /// The model implementation is responsible for choosing the correct cache type
     /// (CPU/GPU) and initializing it with the correct dimensions.
-    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>>;
+    fn new_cache(&self, batch_size: usize, max_len: usize, num_beams: usize) -> Result<Box<dyn Cache>>;
 
     /// Maximum sequence length the model can handle
     fn max_length(&self) -> usize {
@@ -269,7 +268,7 @@ pub trait LanguageModel: TransformerModel {
             .encode(text, true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-        let ids= encoding.get_ids().to_vec();
+        let ids = encoding.get_ids().to_vec();
 
         let seq_len = ids.len();
         Ok(Array2::from_shape_vec((1, seq_len), ids)?)
@@ -330,7 +329,7 @@ pub trait LanguageModel: TransformerModel {
 #[async_trait]
 pub trait EncoderLanguageModel: LanguageModel {
     /// Get the encoder backend
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput>;
+    fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput>;
 
     /// Get hidden states for input text
     async fn get_hidden_states(&self, text: &str) -> Result<Array3<f32>> {
@@ -456,10 +455,21 @@ pub trait EncoderLanguageModel: LanguageModel {
 #[async_trait]
 pub trait EncoderDecoderLanguageModel: LanguageModel {
     /// Returns a reference to the model's encoder component.
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput>;
+    fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput>;
 
     /// Returns a reference to the model's decoder component.
-    fn decoder(&self) -> &dyn CrossAttentionDecoder<Input = Array2<u32>, Output = DecoderOutput>;
+    fn decoder(&self) -> &dyn CrossAttentionDecoder<
+        TokenInput=Array2<u32>,
+        EncoderStateInput=Array3<f32>,
+        MaskInput=Array2<f32>,
+        Output=DecoderOutput>;
+
+    fn gpu_decoder(&self) -> &dyn CrossAttentionDecoder<
+        TokenInput=GpuTensor,
+        EncoderStateInput=GpuTensor,
+        MaskInput=GpuTensor,
+        Output=DecoderOutput>;
+
 
     /// Projects the final hidden states from the decoder to vocabulary logits.
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
@@ -482,7 +492,7 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 #[async_trait(?Send)]
 pub trait DecoderLanguageModel: LanguageModel {
     /// Get the decoder backend
-    fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput>;
+    fn decoder(&self) -> &dyn Decoder<Input=Array2<u32>, Output=DecoderOutput>;
 
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;

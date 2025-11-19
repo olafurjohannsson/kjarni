@@ -4,7 +4,6 @@ use wgpu::util::DeviceExt;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{DType, GpuTensor, Kernel};
 
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -375,3 +374,6 @@ fn compile_broadcast_offset_pipeline(
         });
     (pipeline, bind_group_layout)
 }
+
+#[cfg(test)]
+mod tests;

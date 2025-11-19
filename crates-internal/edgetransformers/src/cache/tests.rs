@@ -278,3 +278,77 @@ async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
     println!("✓ GPU cache update and readback test passed.");
     Ok(())
 }
+
+#[tokio::test]
+async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
+    println!("\n--- Testing GPU Cache State Management Across Steps ---");
+    // --- 1. Arrange ---
+    let context = Arc::new(WgpuContext::new().await?);
+    let (num_layers, batch_size, num_heads, head_dim, capacity) = (1, 1, 2, 4, 10);
+    let layer_idx = 0;
+
+    // This is the cache object that persists across the generation loop.
+    let mut gpu_cache = GpuKVCache::new(
+        &context, num_layers, batch_size, num_heads, head_dim, capacity,
+    )?;
+
+    // --- 2. Act: Step 1 (e.g., Processing a 3-token prompt) ---
+    {
+        println!("--- Simulating Step 1 (Prompt Processing) ---");
+        let prompt_len = 3;
+        let new_k_cpu_1 = Array3::from_elem((batch_size, prompt_len, num_heads * head_dim), 1.0);
+        let new_k_gpu_1 = GpuTensor::from_ndarray(&context, &new_k_cpu_1)?;
+        let new_v_gpu_1 = GpuTensor::from_ndarray(&context, &new_k_cpu_1)?; // Using same data for simplicity
+
+        // The logic from the start of a `forward` call
+        let position_offset = gpu_cache.get_seq_length();
+        assert_eq!(position_offset, 0, "Initial position_offset should be 0");
+
+        // The logic from inside the `forward` loop
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        gpu_cache.update(&mut encoder, layer_idx, &new_k_gpu_1, &new_v_gpu_1, position_offset)?;
+        context.queue.submit(Some(encoder.finish()));
+
+        // The logic from the end of a `forward` call
+        gpu_cache.set_seq_length(position_offset + prompt_len);
+        assert_eq!(gpu_cache.get_seq_length(), 3, "Length after step 1 should be 3");
+    }
+
+    // --- 3. Act: Step 2 (e.g., Generating 1 new token) ---
+    {
+        println!("--- Simulating Step 2 (Token Generation) ---");
+        let gen_len = 1;
+        let new_k_cpu_2 = Array3::from_elem((batch_size, gen_len, num_heads * head_dim), 99.0);
+        let new_k_gpu_2 = GpuTensor::from_ndarray(&context, &new_k_cpu_2)?;
+        let new_v_gpu_2 = GpuTensor::from_ndarray(&context, &new_k_cpu_2)?;
+
+        // Logic from the start of the *next* `forward` call
+        let position_offset = gpu_cache.get_seq_length();
+        assert_eq!(position_offset, 3, "Position_offset for step 2 should be 3");
+
+        // Logic from inside the `forward` loop
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        gpu_cache.update(&mut encoder, layer_idx, &new_k_gpu_2, &new_v_gpu_2, position_offset)?;
+        context.queue.submit(Some(encoder.finish()));
+
+        // Logic from the end of the `forward` call
+        gpu_cache.set_seq_length(position_offset + gen_len);
+        assert_eq!(gpu_cache.get_seq_length(), 4, "Final length should be 4");
+    }
+
+    // --- 4. Assert ---
+    println!("--- Verifying Final Cache State ---");
+    let (k_cache_gpu, _) = gpu_cache.get(layer_idx).unwrap();
+    let k_cache_cpu: Array4<f32> = read_gpu_tensor(&k_cache_gpu).await?;
+
+    // Check the data from the first update
+    let slice1 = k_cache_cpu.slice(s![0, 0, 0..3, ..]);
+    assert!(slice1.iter().all(|&x| x == 1.0), "Data from step 1 is incorrect or was overwritten");
+
+    // CRITICAL: Check the data from the second update
+    let slice2 = k_cache_cpu.slice(s![0, 0, 3..4, ..]);
+    assert!(slice2.iter().all(|&x| x == 99.0), "Data from step 2 was not written to the correct offset");
+    
+    println!("✓ GPU cache stateful update test passed.");
+    Ok(())
+}

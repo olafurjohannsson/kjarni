@@ -91,14 +91,13 @@ async fn test_full_llama_decoder_parity() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Imports GpuAttention, GpuAttentionWeights
+    use super::*;
     use crate::attention::MultiHeadAttention as CpuAttention; // Import CPU impl
     use crate::rope::RoPE as CpuRoPE;
     use crate::gpu_ops::blocks::rope::GpuRoPE;
     use ndarray::{Array3, Array4, Ix4};
     use ndarray_rand::{rand_distr::Uniform, RandomExt};
     use anyhow::Result;
-    // ... include assert_tensors_are_close helper for 4D tensors ...
 
     #[tokio::test]
     async fn test_gpu_gqa_parity_with_rope() -> Result<()> {

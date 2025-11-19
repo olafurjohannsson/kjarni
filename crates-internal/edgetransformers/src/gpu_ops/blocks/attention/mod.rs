@@ -1,4 +1,4 @@
-mod fused;
+// mod fused;
 
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};

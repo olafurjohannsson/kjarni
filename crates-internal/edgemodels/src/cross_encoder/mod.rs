@@ -17,7 +17,6 @@ use edgetransformers::traits::{Encoder, EncoderArchitecture, LanguageModelConfig
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
-mod tests;
 pub use configs::MiniLMCrossEncoderConfig;
 
 /// Cross-encoder for computing relevance scores between text pairs
@@ -425,7 +424,7 @@ fn as_any(&self) -> &dyn std::any::Any {
 }
 
 impl LanguageModel for CrossEncoder {
-    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(&self, _batch_size: usize, _max_len: usize, _num_beams: usize) -> Result<Box<dyn Cache>> {
         panic!("Cross Encoder does not support KV Cache");
     }
     fn config(&self) -> &dyn LanguageModelConfig {
@@ -436,3 +435,5 @@ impl LanguageModel for CrossEncoder {
         &self.tokenizer
     }
 }
+#[cfg(test)]
+mod tests;

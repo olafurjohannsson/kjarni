@@ -6,8 +6,6 @@ use ndarray::Array2;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-mod tests;
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct RoPEUniforms {
@@ -207,3 +205,6 @@ impl GpuRoPE {
         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
     }
 }
+
+#[cfg(test)]
+mod tests;

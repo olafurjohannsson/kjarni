@@ -86,7 +86,7 @@ impl Generator {
             config.max_length
         };
         let mut full_attention_mask = Array2::zeros((batch_size, max_len));
-        let mut cache = self.model.new_cache(batch_size, max_len)?;
+        let mut cache = self.model.new_cache(batch_size, max_len, 0)?;
 
         let eos_token_id = self.model.eos_token_id();
         let model = &self.model;

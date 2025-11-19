@@ -4,8 +4,6 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
-#[cfg(test)]
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -174,3 +172,6 @@ fn compile_softmax_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGrou
     });
     (pipeline, bind_group_layout)
 }
+
+#[cfg(test)]
+mod tests;

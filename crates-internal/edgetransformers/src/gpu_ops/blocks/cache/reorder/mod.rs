@@ -3,7 +3,6 @@ use crate::gpu_ops::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -13,7 +12,7 @@ struct ReorderUniforms {
     seq_len: u32,
     head_dim: u32,
 }
-
+#[derive(Clone)]
 pub struct GpuReorderCache {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -161,3 +160,7 @@ impl GpuReorderCache {
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
+
+
+#[cfg(test)]
+mod tests;

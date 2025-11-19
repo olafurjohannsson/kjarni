@@ -131,6 +131,31 @@ impl GpuTensor {
         self.id
     }
 
+    /// Creates a new GpuTensor with an identical shape and a full copy of the data.
+    /// This is a deep copy on the GPU.
+    pub fn deep_clone(&self, label: &str) -> Self {
+        let new_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: self.buffer.size(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("GpuTensor::clone encoder"),
+        });
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buffer, 0, self.buffer.size());
+        self.context.queue.submit(Some(encoder.finish()));
+
+        GpuTensor {
+            id: self.id,
+            buffer: Arc::new(new_buffer),
+            shape: self.shape.clone(),
+            dtype: self.dtype,
+            context: self.context.clone(),
+        }
+    }
+
     /// Creates a view with different axis permutation (metadata only)
     pub fn permute_axes(&self, axes: &[usize]) -> GpuTensor {
         assert_eq!(axes.len(), self.rank(), "Permutation axes must match tensor rank");

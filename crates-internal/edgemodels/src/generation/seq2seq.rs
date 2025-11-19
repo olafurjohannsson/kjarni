@@ -1,11 +1,13 @@
-use crate::generation2::{apply_no_repeat_ngram, apply_repetition_penalty};
-use anyhow::{Result, anyhow};
-use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
-use edgetransformers::models::base::EncoderDecoderLanguageModel; // Or wherever you put the trait
+use anyhow::{anyhow, Result};
+use edgetransformers::cache::GpuBeamKVCache;
+use edgetransformers::gpu_ops::GpuTensor;
+use edgetransformers::models::base::EncoderDecoderLanguageModel;
+// Or wherever you put the trait
 use edgetransformers::models::base::{BeamHypothesis, DecodingStrategy, GenerationConfig};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
-use ndarray::{Array1, Array2, s};
+use ndarray::s;
+use ndarray::{Array1, Array2};
 
 /// Selects the top `k` tokens and their log probabilities from a log probability distribution.
 ///
@@ -74,18 +76,129 @@ impl Seq2SeqGenerator {
             (1, encoding.len()),
             encoding.get_ids().iter().map(|&id| id).collect(),
         )?;
-        println!("input ids: {:?}", input_ids);
+
         let attention_mask = Array2::ones(input_ids.dim());
-        // println!("Encoding input ids");
         let encoder_output: EncoderOutput = self
             .model
             .encoder()
             .forward(&input_ids, &attention_mask, None)
             .await?;
         println!("encoder: {:?}", encoder_output.last_hidden_state);
-        // println!("after Encoding input ids");
+
         Ok(encoder_output)
     }
+
+    // Main Generation Loop
+    // for step in 0..config.max_length {
+    //     if beams.is_empty() {
+    //         break;
+    //     }
+    //     let mut all_new_candidates: Vec<BeamHypothesis> = Vec::new();
+    //
+    //     // for hypo in beams.drain(..) {
+    //     for hypo in &beams {
+    //         println!(
+    //             "[BEAM START] Step: {}, Hypo Length: {}, Cache Length BEFORE clone: {}",
+    //             step,
+    //             hypo.tokens.len(),
+    //             hypo.cache.get_seq_length()
+    //         );
+    //         let last_token = *hypo.tokens.last().unwrap();
+    //         let decoder_input_ids = Array2::from_elem((1, 1), last_token);
+    //         // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
+    //         let cache_len = hypo.cache.get_seq_length();
+    //         let total_decoder_len = cache_len + 1;
+    //         // println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
+    //         let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
+    //         let mut current_cache = hypo.cache.clone_box();
+    //
+    //
+    //         // 2. Pass the mutable clone to the forward pass.
+    //         let decoder_output = self
+    //             .model
+    //             .decoder()
+    //             .forward(
+    //                 &decoder_input_ids,
+    //                 &encoder_output.last_hidden_state,
+    //                 Some(&encoder_attention_mask),
+    //                 Some(&decoder_attention_mask),
+    //                 Some(current_cache.as_mut()),
+    //             )
+    //             .await?;
+    //
+    //
+    //         // 3. Project to logits (this now correctly includes the bias).
+    //         // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
+    //         // let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
+    //         // if let Some(bias) = &self.final_logits_bias {
+    //         //     logits += bias;
+    //         // }
+    //
+    //         // let logits_3d = self
+    //         //     .model
+    //         //     .project_to_logits(&decoder_output.last_hidden_state)?;
+    //         // let mut logits = logits_3d.slice(s![0, 0, ..]).to_owned();
+    //
+    //         // --- REVERTED LOGITS LOGIC START ---
+    //         // This is the logic from your OLD, working code.
+    //
+    //         // 1. Get the hidden state for the very last token. This is a 1D view.
+    //         let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
+    //
+    //         // 2. Perform matrix-vector multiplication: [vocab, hidden] @ [hidden] -> [vocab]
+    //         let mut logits: Array1<f32> = self.model.lm_head().dot(&last_hidden_state);
+    //
+    //         // 3. Add the bias if it exists.
+    //         if let Some(bias) = self.model.final_logits_bias() {
+    //             logits += bias;
+    //         }
+    //
+    //         logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
+    //         logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
+    //
+    //         let log_probs = log_softmax_1d(&logits);
+    //         // let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
+    //         let mut top_candidates: Vec<(u32, f32)> = log_probs
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(id, &lp)| (id as u32, lp))
+    //             .collect();
+    //         top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    //         top_candidates.truncate(beam_params.num_beams);
+    //
+    //         // 5. Create new hypotheses, each getting a clone of the *updated* cache.
+    //         for (token_id, token_log_prob) in top_candidates {
+    //             let mut new_tokens = hypo.tokens.clone();
+    //             new_tokens.push(token_id);
+    //
+    //             all_new_candidates.push(BeamHypothesis {
+    //                 tokens: new_tokens,
+    //                 score: hypo.score + token_log_prob,
+    //                 cache: current_cache.clone_box(),
+    //             });
+    //         }
+    //     }
+    //
+    //     all_new_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    //     beams.clear();
+    //
+    //     for candidate in all_new_candidates {
+    //         if candidate.tokens.last() == Some(&eos_token_id) {
+    //             if candidate.tokens.len() >= config.min_length {
+    //                 completed_beams.push(candidate);
+    //             }
+    //         } else {
+    //             beams.push(candidate);
+    //         }
+    //         if beams.len() == beam_params.num_beams {
+    //             break;
+    //         }
+    //     }
+    //     if beam_params.early_stopping && completed_beams.len() >= beam_params.num_beams {
+    //         break;
+    //     }
+    // }
+
     pub async fn generate_from_encoding(
         &self,
         encoder_output: &EncoderOutput,
@@ -102,134 +215,100 @@ impl Seq2SeqGenerator {
             }
         };
         let batch_size = encoder_output.last_hidden_state.shape()[0];
+        assert_eq!(
+            batch_size, 1,
+            "Beam search is currently only supported for batch_size=1"
+        );
+
         let eos_token_id = 2;
         let decoder_start_token_id = 2;
+        let context = self.model.context().unwrap(); // Assuming GPU, safe to unwrap
+        let (mut cache, num_beams) = {
+            match &config.strategy {
+                DecodingStrategy::BeamSearch(params) => (
+                    self.model
+                        .new_cache(batch_size, config.max_length, params.num_beams)?,
+                    params.num_beams,
+                ),
+                DecodingStrategy::Greedy => {
+                    (self.model.new_cache(batch_size, config.max_length, 0)?, 0)
+                }
+                DecodingStrategy::Sample(params) => {
+                    (self.model.new_cache(batch_size, config.max_length, 0)?, 0)
+                }
+            }
+        };
+        let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
+        let mut current_tokens = Array2::from_elem((num_beams, 1), decoder_start_token_id);
 
-        // Initialize Beams with an empty cache for each.
-        // println!("New cache!");
-        let initial_cache = self.model.new_cache(batch_size, config.max_length)?;
-        // println!("after New cache!");
-        let mut beams = vec![BeamHypothesis {
+        let mut beams = (0..num_beams).map(|i| BeamHypothesis {
             tokens: vec![decoder_start_token_id],
-            score: 0.0,
-            cache: initial_cache,
-        }];
+            // First beam starts with score 0, others are effectively -inf
+            score: if i == 0 { 0.0 } else { f32::NEG_INFINITY },
+            // cache: cache.clone_box(), // This is now a cheap clone
+        }).collect::<Vec<_>>();
+
+        // 3. Expand the encoder output to match the number of beams
+        let expanded_encoder_output = encoder_output.last_hidden_state.broadcast((num_beams, encoder_output.last_hidden_state.shape()[1], encoder_output.last_hidden_state.shape()[2])).unwrap().to_owned();
+        let expanded_encoder_mask = encoder_attention_mask.broadcast((num_beams, encoder_attention_mask.shape()[1])).unwrap().to_owned();
+
         let mut completed_beams: Vec<BeamHypothesis> = Vec::new();
+        let mut current_tokens_gpu = GpuTensor::from_ndarray(&context, &current_tokens)?;
+        let expanded_encoder_output_gpu = GpuTensor::from_ndarray(&context, &expanded_encoder_output)?;
+        let expanded_encoder_mask_gpu = GpuTensor::from_ndarray(&context, &expanded_encoder_mask)?;
 
-        // Main Generation Loop
         for step in 0..config.max_length {
-            if beams.is_empty() {
-                break;
-            }
-            let mut all_new_candidates: Vec<BeamHypothesis> = Vec::new();
+            let decoder_attention_mask_cpu: Array2<f32> = Array2::ones((num_beams, gpu_cache.get_seq_length() + 1));
+            let decoder_attention_mask_gpu = GpuTensor::from_ndarray(&context, &decoder_attention_mask_cpu)?;
 
-            // for hypo in beams.drain(..) {
-            for hypo in &beams {
-                let last_token = *hypo.tokens.last().unwrap();
-                let decoder_input_ids = Array2::from_elem((1, 1), last_token);
-                // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
-                let cache_len = hypo.cache.get_seq_length();
-                let total_decoder_len = cache_len + 1;
-                // println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
-                let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
-                let mut current_cache = hypo.cache.clone_box();
-                // 2. Pass the mutable clone to the forward pass.
-                let decoder_output = self
-                    .model
-                    .decoder()
-                    .forward(
-                        &decoder_input_ids,
-                        &encoder_output.last_hidden_state,
-                        Some(&encoder_attention_mask),
-                        Some(&decoder_attention_mask),
-                        Some(current_cache.as_mut()),
-                    )
-                    .await?;
+            let decoder_output = self.model.gpu_decoder().forward(
+                &current_tokens_gpu, // Pass the GpuTensor
+                &expanded_encoder_output_gpu, // Pass the GpuTensor
+                Some(&expanded_encoder_mask_gpu), // Pass the GpuTensor
+                Some(&decoder_attention_mask_gpu), // Pass the GpuTensor
+                Some(gpu_cache),
+            ).await?;
 
-                // --- START DEBUGGING CODE ---
-                if step < 3 { // Only print for the first few steps
-                    // Get a slice of the last_hidden_state tensor
-                    let state_slice = decoder_output.last_hidden_state.slice(s![0, 0, 0..8]);
-                    println!(
-                        "[Step {}] Cache Length: {}, Last Hidden State (first 8 values): {:?}",
-                        step,
-                        current_cache.get_seq_length(), // Print the length *after* the forward pass
-                        state_slice.to_vec()
-                    );
-                }
-                // --- END DEBUGGING CODE ---
-
-                // 3. Project to logits (this now correctly includes the bias).
-                // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-                // let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
-                // if let Some(bias) = &self.final_logits_bias {
-                //     logits += bias;
-                // }
-
-                // let logits_3d = self
-                //     .model
-                //     .project_to_logits(&decoder_output.last_hidden_state)?;
-                // let mut logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-
-                // --- REVERTED LOGITS LOGIC START ---
-                // This is the logic from your OLD, working code.
-
-                // 1. Get the hidden state for the very last token. This is a 1D view.
-                let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-
-                // 2. Perform matrix-vector multiplication: [vocab, hidden] @ [hidden] -> [vocab]
-                let mut logits: Array1<f32> = self.model.lm_head().dot(&last_hidden_state);
-
-                // 3. Add the bias if it exists.
-                if let Some(bias) = self.model.final_logits_bias() {
-                    logits += bias;
-                }
-
-                logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
-                logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
-
-                let log_probs = log_softmax_1d(&logits);
-                // let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
-                let mut top_candidates: Vec<(u32, f32)> = log_probs
-                    .iter()
-                    .enumerate()
-                    .map(|(id, &lp)| (id as u32, lp))
-                    .collect();
-                top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                top_candidates.truncate(beam_params.num_beams);
-
-                // 5. Create new hypotheses, each getting a clone of the *updated* cache.
-                for (token_id, token_log_prob) in top_candidates {
-                    let mut new_tokens = hypo.tokens.clone();
-                    new_tokens.push(token_id);
-
-                    all_new_candidates.push(BeamHypothesis {
-                        tokens: new_tokens,
-                        score: hypo.score + token_log_prob,
-                        cache: current_cache.clone_box(),
-                    });
-                }
-            }
-
-            all_new_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
-            beams.clear();
-
-            for candidate in all_new_candidates {
-                if candidate.tokens.last() == Some(&eos_token_id) {
-                    if candidate.tokens.len() >= config.min_length {
-                        completed_beams.push(candidate);
+            // --- GATHER AND SCORE ---
+            let last_hidden_state = decoder_output.last_hidden_state.slice(s![.., -1, ..]); // Shape: [num_beams, hidden_size]
+            let logits_2d = { // Shape: [num_beams, vocab_size]
+                let mut logits_2d = Array2::zeros((num_beams, self.model.config().vocab_size()));
+                for i in 0..num_beams {
+                    let mut logits_row = self.model.lm_head().dot(&last_hidden_state.row(i));
+                    if let Some(bias) = self.model.final_logits_bias() {
+                        logits_row += bias;
                     }
-                } else {
-                    beams.push(candidate);
+                    logits_2d.row_mut(i).assign(&logits_row);
                 }
-                if beams.len() == beam_params.num_beams {
-                    break;
-                }
-            }
-            if beam_params.early_stopping && completed_beams.len() >= beam_params.num_beams {
-                break;
-            }
+                logits_2d
+            };
+            let (next_tokens_vec, reorder_indices_vec, updated_beams) = find_best_beams_and_get_indices(
+                logits_2d,
+                &beams,
+                config,
+                num_beams);
+
+            // --- REORDER CACHE ---
+            let reorder_indices_gpu = GpuTensor::from_ndarray(&context, &Array1::from(reorder_indices_vec.iter().map(|&i| i as u32).collect::<Vec<_>>()))?;
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            gpu_cache.reorder(&mut encoder, &reorder_indices_gpu);
+            context.queue.submit(Some(encoder.finish()));
+
+            // --- UPDATE STATE FOR NEXT LOOP ---
+            beams = updated_beams;
+            // current_tokens = Array2::from_shape_vec((num_beams, 1), next_tokens_vec)?;
+
+            // Create the CPU ndarray for the next tokens
+            let next_tokens_cpu = Array2::from_shape_vec((num_beams, 1), next_tokens_vec)?;
+            // Upload it to the *same* GpuTensor variable for the next loop iteration.
+            current_tokens_gpu = GpuTensor::from_ndarray(&context, &next_tokens_cpu)?
+
+            // Check for completion (simplified)
+            // if beams.iter().all(|b| *b.tokens.last().unwrap() == eos_token_id) {
+            //     break;
+            // }
         }
+
 
         let final_hypotheses = if completed_beams.is_empty() {
             // If no beams reached EOS, use the active (unfinished) beams as candidates.
@@ -269,54 +348,54 @@ impl Seq2SeqGenerator {
     }
 }
 
-// fn find_best_beams_and_get_indices(
-//     logits_2d: Array2<f32>, // Shape: [num_beams, vocab_size]
-//     current_beams: &[BeamHypothesis],
-//     config: &GenerationConfig,
-// ) -> (Vec<u32>, Vec<usize>, Vec<BeamHypothesis>) {
-//     let num_beams = config.num_beams;
-//     let mut candidates: Vec<(f32, usize, u32)> = Vec::with_capacity(num_beams * num_beams);
+fn find_best_beams_and_get_indices(
+    logits_2d: Array2<f32>, // Shape: [num_beams, vocab_size]
+    current_beams: &[BeamHypothesis],
+    config: &GenerationConfig,
+    num_beams: usize,
+) -> (Vec<u32>, Vec<usize>, Vec<BeamHypothesis>) {
+    let mut candidates: Vec<(f32, usize, u32)> = Vec::with_capacity(num_beams * num_beams);
 
-//     // 1. Gather all possible next hypotheses
-//     for (beam_idx, (beam, logits_for_beam)) in
-//         current_beams.iter().zip(logits_2d.rows()).enumerate()
-//     {
-//         let log_probs = log_softmax_1d(&logits_for_beam.to_owned());
-//         let top_k = get_top_k_from_log_probs(&log_probs, num_beams);
+    // 1. Gather all possible next hypotheses
+    for (beam_idx, (beam, logits_for_beam)) in
+        current_beams.iter().zip(logits_2d.rows()).enumerate()
+    {
+        let log_probs = log_softmax_1d(&logits_for_beam.to_owned());
+        let top_k = get_top_k_from_log_probs(&log_probs, num_beams);
 
-//         for (token_id, token_log_prob) in top_k {
-//             let new_score = beam.score + token_log_prob;
-//             candidates.push((new_score, beam_idx, token_id));
-//         }
-//     }
+        for (token_id, token_log_prob) in top_k {
+            let new_score = beam.score + token_log_prob;
+            candidates.push((new_score, beam_idx, token_id));
+        }
+    }
 
-//     // 2. Sort all candidates by score
-//     candidates.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    // 2. Sort all candidates by score
+    candidates.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
-//     // 3. Select the top `num_beams` candidates to form the new beams
-//     let top_candidates = &candidates[..num_beams];
+    // 3. Select the top `num_beams` candidates to form the new beams
+    let top_candidates = &candidates[..num_beams];
 
-//     let mut next_tokens = Vec::with_capacity(num_beams);
-//     let mut reorder_indices = Vec::with_capacity(num_beams);
-//     let mut updated_beams = Vec::with_capacity(num_beams);
+    let mut next_tokens = Vec::with_capacity(num_beams);
+    let mut reorder_indices = Vec::with_capacity(num_beams);
+    let mut updated_beams = Vec::with_capacity(num_beams);
 
-//     for &(new_score, source_beam_idx, new_token_id) in top_candidates {
-//         let mut new_tokens = current_beams[source_beam_idx].tokens.clone();
-//         new_tokens.push(new_token_id);
+    for &(new_score, source_beam_idx, new_token_id) in top_candidates {
+        let mut new_tokens = current_beams[source_beam_idx].tokens.clone();
+        new_tokens.push(new_token_id);
 
-//         next_tokens.push(new_token_id);
-//         reorder_indices.push(source_beam_idx);
+        next_tokens.push(new_token_id);
+        reorder_indices.push(source_beam_idx);
 
-//         // The cache is no longer stored in the hypothesis for this strategy
-//         updated_beams.push(BeamHypothesis {
-//             tokens: new_tokens,
-//             score: new_score,
-//             cache: None,
-//         });
-//     }
+        // The cache is no longer stored in the hypothesis for this strategy
+        updated_beams.push(BeamHypothesis {
+            tokens: new_tokens,
+            score: new_score,
+            // cache: None,
+        });
+    }
 
-//     (next_tokens, reorder_indices, updated_beams)
-// }
+    (next_tokens, reorder_indices, updated_beams)
+}
 
 // pub fn log_softmax_1d(array: &Array1<f32>) -> Array1<f32> {
 //     let max_val = array.fold(f32::NEG_INFINITY, |acc, &x| acc.max(x));

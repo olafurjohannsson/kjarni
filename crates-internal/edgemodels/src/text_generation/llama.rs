@@ -139,7 +139,7 @@ impl TransformerModel for LlamaModel {
 }
 
 impl LanguageModel for LlamaModel {
-    fn new_cache(&self, batch_size: usize, max_len: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(&self, batch_size: usize, max_len: usize, _num_beams: usize) -> Result<Box<dyn Cache>> {
         Ok(match self.device() {
             Device::Cpu => Box::new(CpuKVCache::new(
                 self.num_layers(),

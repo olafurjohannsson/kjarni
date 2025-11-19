@@ -22,8 +22,6 @@ pub use gpu::GpuTransformerDecoder;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 use crate::rope::RoPE;
-use log::{debug, info};
-use crate::gpu_ops::blocks::rope::GpuRoPE;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///

@@ -4,7 +4,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -188,3 +187,6 @@ impl GpuRMSNorm {
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
+
+#[cfg(test)]
+mod tests;

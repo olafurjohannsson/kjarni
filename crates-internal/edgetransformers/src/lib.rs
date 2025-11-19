@@ -21,7 +21,6 @@ pub mod models;
 pub mod pooling;
 pub mod traits;
 pub mod utils;
-pub mod tests;
 pub mod weights;
 pub mod decoder_cross_attn_layer;
 pub mod decoder_layer;
@@ -56,3 +55,6 @@ pub mod prelude {
     pub use crate::models::{DecoderLanguageModel, EncoderLanguageModel, LanguageModel};
     pub use crate::traits::{Decoder, Device, Encoder, TransformerModel};
 }
+
+#[cfg(test)]
+pub mod tests;

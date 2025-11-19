@@ -270,6 +270,7 @@ impl EncoderDecoderArchitecture for BartConfig {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

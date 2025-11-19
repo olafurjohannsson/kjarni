@@ -4,7 +4,6 @@ use wgpu::util::DeviceExt;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -227,3 +226,6 @@ impl GpuConcatenate {
         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z as u32);
     }
 }
+
+#[cfg(test)]
+mod tests;

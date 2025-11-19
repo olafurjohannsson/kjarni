@@ -37,8 +37,7 @@ use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
-#[cfg(test)]
-mod tests;
+
 
 /// Uniform struct passed to both FC1 and FC2 shaders.
 #[repr(C)]
@@ -524,3 +523,6 @@ fn compile_fc2_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLay
 
     (pipeline, bind_group_layout)
 }
+
+#[cfg(test)]
+mod tests;

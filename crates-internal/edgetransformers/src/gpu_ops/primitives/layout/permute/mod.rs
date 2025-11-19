@@ -4,8 +4,6 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
 
-// #[cfg(test)]
-// mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

@@ -3,7 +3,7 @@ use crate::gpu_ops::{DType, GpuTensor};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use anyhow::Result;
-mod tests;
+
 // Simplified for now, this would be part of a larger Kernel trait
 pub struct GpuSlice {
     pipeline: wgpu::ComputePipeline,
@@ -189,3 +189,7 @@ impl GpuSlice {
         compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
     }
 }
+
+
+#[cfg(test)]
+mod tests;

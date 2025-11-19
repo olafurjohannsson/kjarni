@@ -9,8 +9,6 @@ use wgpu::util::DeviceExt;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 
-#[cfg(test)]
-mod tests;
 
 /// Uniforms to pass shape and size metadata to the lookup shader.
 #[repr(C)]
@@ -141,3 +139,6 @@ fn compile_lookup_pipeline(context: &WgpuContext) -> (wgpu::ComputePipeline, wgp
     });
     (pipeline, bind_group_layout)
 }
+
+#[cfg(test)]
+mod tests;

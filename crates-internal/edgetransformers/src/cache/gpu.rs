@@ -77,7 +77,7 @@ impl GpuKVCache {
     /// This method is the architectural equivalent of `CpuKVCache::update`. It uses a
     /// specialized kernel to perform a fused "split-heads and copy" operation.
     pub fn update(
-        &mut self,
+        & self,
         encoder: &mut CommandEncoder,
         layer_idx: usize,
         new_k: &GpuTensor,
@@ -100,7 +100,36 @@ impl GpuKVCache {
 
         Ok(())
     }
+    pub fn update_seq2seq(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        layer_idx: usize,
+        new_k: &GpuTensor,
+        new_v: &GpuTensor,
+    ) -> Result<()> {
+    if layer_idx >= self.k_tensors.len() {
+                anyhow::bail!("Layer index {} out of bounds", layer_idx);
+            }
+            if new_k.rank() != 3 || new_v.rank() != 3 {
+                return Err(anyhow::anyhow!(
+                    "Input tensors for cache update must be rank 3"
+                ));
+            }
+        let cache_k = &self.k_tensors[layer_idx];
+        let cache_v = &self.v_tensors[layer_idx];
 
+        // The kernel needs the offset *before* this update.
+        let position_offset = self.seq_length;
+
+        self.update_kernel
+            .encode(encoder, new_k, new_v, cache_k, cache_v, position_offset);
+
+        // After scheduling the GPU write, update the struct's own CPU-side state.
+        let new_tokens_len = new_k.shape()[1];
+        self.seq_length += new_tokens_len;
+
+        Ok(())
+    }
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
         if layer_idx >= self.k_tensors.len() {
@@ -127,11 +156,26 @@ impl Cache for GpuKVCache {
         // If GpuTensor is an Arc wrapper, this is a cheap reference count bump.
         // The `seq_length` is copied by value.
         // The `update_kernel` is also cheaply cloned (if it wraps an Arc).
+        // let new_cache = GpuKVCache {
+        //     k_tensors: self.k_tensors.clone(),
+        //     v_tensors: self.v_tensors.clone(),
+        //     seq_length: self.seq_length,
+        //     update_kernel: self.update_kernel.clone(), // Assuming GpuUpdateCache is Clone
+        // };
+        // Box::new(new_cache)
+        let new_k_tensors = self.k_tensors.iter().enumerate().map(|(i, t)| {
+            t.deep_clone(&format!("Cloned Layer {} K-Cache", i))
+        }).collect();
+
+        let new_v_tensors = self.v_tensors.iter().enumerate().map(|(i, t)| {
+            t.deep_clone(&format!("Cloned Layer {} V-Cache", i))
+        }).collect();
+
         let new_cache = GpuKVCache {
-            k_tensors: self.k_tensors.clone(),
-            v_tensors: self.v_tensors.clone(),
+            k_tensors: new_k_tensors,
+            v_tensors: new_v_tensors,
             seq_length: self.seq_length,
-            update_kernel: self.update_kernel.clone(), // Assuming GpuUpdateCache is Clone
+            update_kernel: self.update_kernel.clone(),
         };
         Box::new(new_cache)
     }

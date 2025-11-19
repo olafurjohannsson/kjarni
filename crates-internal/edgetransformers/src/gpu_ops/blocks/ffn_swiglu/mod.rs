@@ -5,8 +5,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use crate::gpu_ops::Kernel;
 
-mod tests;
-
 /// Holds the weight tensors for the GpuSwiGLUFFN operation.
 pub struct GpuSwiGLUFFNWeights {
     pub(crate) gate_proj: GpuTensor,
@@ -132,3 +130,6 @@ impl GpuSwiGLUFFN {
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
+
+#[cfg(test)]
+mod tests;

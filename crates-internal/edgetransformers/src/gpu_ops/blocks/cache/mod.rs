@@ -6,8 +6,6 @@ use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
 pub mod reorder;
 
-#[cfg(test)]
-mod tests;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -201,3 +199,7 @@ fn compile_update_cache_pipeline(context: &WgpuContext) -> (ComputePipeline, Bin
     });
     (pipeline, bind_group_layout)
 }
+
+
+#[cfg(test)]
+mod tests;

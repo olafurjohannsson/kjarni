@@ -4,8 +4,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
-#[cfg(test)]
-mod tests;
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -258,3 +257,7 @@ fn compile_in_place_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGro
     });
     (pipeline, bind_group_layout)
 }
+
+
+#[cfg(test)]
+mod tests;

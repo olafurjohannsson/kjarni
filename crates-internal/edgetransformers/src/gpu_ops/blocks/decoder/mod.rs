@@ -17,7 +17,6 @@ use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights,
     GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-mod tests;
 
 pub struct GpuPreNormDecoderLayer {
     pub self_attn: GpuAttention,
@@ -311,3 +310,6 @@ impl GpuPreNormDecoderLayer {
         Ok((final_output, (new_k, new_v)))
     }
 }
+
+#[cfg(test)]
+mod tests;

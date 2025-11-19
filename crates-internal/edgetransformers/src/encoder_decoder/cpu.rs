@@ -4,18 +4,18 @@ use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
 };
 use crate::traits::{
-    DecoderArchitecture, EncoderArchitecture, LanguageModelConfig, LayerAttentionNames,
-    LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig, CrossAttentionDecoderArchitecture
+    CrossAttentionDecoderArchitecture, DecoderArchitecture, EncoderArchitecture, LanguageModelConfig,
+    LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
 use crate::weights::ModelWeights;
 use crate::{
-    Cache, CpuKVCache, Embeddings, FeedForward, MultiHeadAttention,
-    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward,
-    normalization::LayerNorm,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward, normalization::LayerNorm, Cache, CpuKVCache,
+    Embeddings, FeedForward,
+    MultiHeadAttention,
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, Axis, s};
+use ndarray::{Array2, Array3};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -157,15 +157,17 @@ impl CpuTransformerEncoderDecoder {
 
 #[async_trait(?Send)]
 impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
-    type Input = Array2<u32>;
+    type TokenInput = Array2<u32>;
+    type EncoderStateInput = Array3<f32>;
+    type MaskInput = Array2<f32>;
     type Output = DecoderOutput;
 
     async fn forward<'a>(
         &self,
-        decoder_input_ids: &Self::Input,
-        encoder_hidden_states: &'a Array3<f32>,
-        encoder_attention_mask: Option<&'a Array2<f32>>,
-        decoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_input_ids: &Self::TokenInput,
+        encoder_hidden_states: &'a Self::EncoderStateInput,
+        encoder_attention_mask: Option<&'a Self::MaskInput>,
+        decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
         // The generator now provides the position offset.
@@ -206,7 +208,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
             hidden_states = new_hidden;
             new_key_values.push((new_k, new_v));
         }
-        
+
         // 3. Update the cache *after* all layers have been processed.
         if let Some(cache) = cpu_cache_opt {
             for (layer_idx, (k, v)) in new_key_values.into_iter().enumerate() {
@@ -228,7 +230,7 @@ impl TransformerModel for CpuTransformerEncoderDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

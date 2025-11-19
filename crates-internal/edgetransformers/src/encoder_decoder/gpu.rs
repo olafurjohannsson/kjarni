@@ -1,22 +1,19 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
-use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use super::cpu::{DecoderConfigAdapter, EncoderConfigAdapter};
-use crate::Cache;
-use crate::decoder::TransformerDecoder;
 use crate::encoder::TransformerEncoder;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::decoder_cross_attention::{
-    GpuCrossAttentionDecoder, GpuCrossAttentionDecoderLayer,
-};
-use std::any::Any;
+use crate::gpu_ops::blocks::decoder_cross_attention::GpuCrossAttentionDecoder;
+use crate::gpu_ops::GpuTensor;
 use crate::traits::{
-    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture,
-    EncoderOutput as EncoderOutputTrait, TransformerModel,
+    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture
+    , TransformerModel,
 };
-use crate::weights::ModelWeights; // Import adapters from the cpu module
+use crate::weights::ModelWeights;
+use crate::Cache;
+// Import adapters from the cpu module
 
 /// The GPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct GpuTransformerEncoderDecoder {
@@ -27,7 +24,7 @@ pub struct GpuTransformerEncoderDecoder {
 }
 
 impl GpuTransformerEncoderDecoder {
-     pub fn decoder(&self) -> &GpuCrossAttentionDecoder {
+    pub fn decoder(&self) -> &GpuCrossAttentionDecoder {
         &self.decoder
     }
     pub fn new(
@@ -61,15 +58,17 @@ impl GpuTransformerEncoderDecoder {
 
 #[async_trait(?Send)]
 impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
-    type Input = Array2<u32>;
+    type TokenInput = GpuTensor;
+    type EncoderStateInput = GpuTensor;
+    type MaskInput = GpuTensor;
     type Output = DecoderOutput;
 
     async fn forward<'a>(
         &self,
-        decoder_input_ids: &Self::Input,
-        encoder_hidden_states: &'a Array3<f32>,
-        encoder_attention_mask: Option<&'a Array2<f32>>,
-        decoder_attention_mask: Option<&'a Array2<f32>>,
+        decoder_input_ids: &Self::TokenInput,
+        encoder_hidden_states: &'a Self::EncoderStateInput,
+        encoder_attention_mask: Option<&'a Self::MaskInput>,
+        decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Self::Output> {
         self.decoder.forward(
@@ -89,7 +88,7 @@ impl TransformerModel for GpuTransformerEncoderDecoder {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
