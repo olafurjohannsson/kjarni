@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use edgetransformers::cache::GpuBeamKVCache;
 use edgetransformers::gpu_ops::GpuTensor;
 use edgetransformers::models::base::EncoderDecoderLanguageModel;
@@ -8,6 +8,7 @@ use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
 use ndarray::s;
 use ndarray::{Array1, Array2};
+use std::collections::{HashMap, HashSet};
 
 /// Selects the top `k` tokens and their log probabilities from a log probability distribution.
 ///
@@ -88,117 +89,6 @@ impl Seq2SeqGenerator {
         Ok(encoder_output)
     }
 
-    // Main Generation Loop
-    // for step in 0..config.max_length {
-    //     if beams.is_empty() {
-    //         break;
-    //     }
-    //     let mut all_new_candidates: Vec<BeamHypothesis> = Vec::new();
-    //
-    //     // for hypo in beams.drain(..) {
-    //     for hypo in &beams {
-    //         println!(
-    //             "[BEAM START] Step: {}, Hypo Length: {}, Cache Length BEFORE clone: {}",
-    //             step,
-    //             hypo.tokens.len(),
-    //             hypo.cache.get_seq_length()
-    //         );
-    //         let last_token = *hypo.tokens.last().unwrap();
-    //         let decoder_input_ids = Array2::from_elem((1, 1), last_token);
-    //         // let decoder_attention_mask = Array2::ones((batch_size, hypo.tokens.len()));
-    //         let cache_len = hypo.cache.get_seq_length();
-    //         let total_decoder_len = cache_len + 1;
-    //         // println!("[Generator] Step: {}, Cache Len: {}, Creating mask for total length: {}", step, cache_len, total_decoder_len);
-    //         let decoder_attention_mask = Array2::ones((batch_size, total_decoder_len));
-    //         let mut current_cache = hypo.cache.clone_box();
-    //
-    //
-    //         // 2. Pass the mutable clone to the forward pass.
-    //         let decoder_output = self
-    //             .model
-    //             .decoder()
-    //             .forward(
-    //                 &decoder_input_ids,
-    //                 &encoder_output.last_hidden_state,
-    //                 Some(&encoder_attention_mask),
-    //                 Some(&decoder_attention_mask),
-    //                 Some(current_cache.as_mut()),
-    //             )
-    //             .await?;
-    //
-    //
-    //         // 3. Project to logits (this now correctly includes the bias).
-    //         // let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-    //         // let mut logits: Array1<f32> = self.lm_head.dot(&last_hidden_state);
-    //         // if let Some(bias) = &self.final_logits_bias {
-    //         //     logits += bias;
-    //         // }
-    //
-    //         // let logits_3d = self
-    //         //     .model
-    //         //     .project_to_logits(&decoder_output.last_hidden_state)?;
-    //         // let mut logits = logits_3d.slice(s![0, 0, ..]).to_owned();
-    //
-    //         // --- REVERTED LOGITS LOGIC START ---
-    //         // This is the logic from your OLD, working code.
-    //
-    //         // 1. Get the hidden state for the very last token. This is a 1D view.
-    //         let last_hidden_state = decoder_output.last_hidden_state.slice(s![0, -1, ..]);
-    //
-    //         // 2. Perform matrix-vector multiplication: [vocab, hidden] @ [hidden] -> [vocab]
-    //         let mut logits: Array1<f32> = self.model.lm_head().dot(&last_hidden_state);
-    //
-    //         // 3. Add the bias if it exists.
-    //         if let Some(bias) = self.model.final_logits_bias() {
-    //             logits += bias;
-    //         }
-    //
-    //         logits = apply_repetition_penalty(logits, &hypo.tokens, config.repetition_penalty);
-    //         logits = apply_no_repeat_ngram(logits, &hypo.tokens, config.no_repeat_ngram_size);
-    //
-    //         let log_probs = log_softmax_1d(&logits);
-    //         // let top_candidates = get_top_k_from_log_probs(&log_probs, config.num_beams);
-    //         let mut top_candidates: Vec<(u32, f32)> = log_probs
-    //             .iter()
-    //             .enumerate()
-    //             .map(|(id, &lp)| (id as u32, lp))
-    //             .collect();
-    //         top_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    //         top_candidates.truncate(beam_params.num_beams);
-    //
-    //         // 5. Create new hypotheses, each getting a clone of the *updated* cache.
-    //         for (token_id, token_log_prob) in top_candidates {
-    //             let mut new_tokens = hypo.tokens.clone();
-    //             new_tokens.push(token_id);
-    //
-    //             all_new_candidates.push(BeamHypothesis {
-    //                 tokens: new_tokens,
-    //                 score: hypo.score + token_log_prob,
-    //                 cache: current_cache.clone_box(),
-    //             });
-    //         }
-    //     }
-    //
-    //     all_new_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
-    //     beams.clear();
-    //
-    //     for candidate in all_new_candidates {
-    //         if candidate.tokens.last() == Some(&eos_token_id) {
-    //             if candidate.tokens.len() >= config.min_length {
-    //                 completed_beams.push(candidate);
-    //             }
-    //         } else {
-    //             beams.push(candidate);
-    //         }
-    //         if beams.len() == beam_params.num_beams {
-    //             break;
-    //         }
-    //     }
-    //     if beam_params.early_stopping && completed_beams.len() >= beam_params.num_beams {
-    //         break;
-    //     }
-    // }
-
     pub async fn generate_from_encoding(
         &self,
         encoder_output: &EncoderOutput,
@@ -207,13 +97,13 @@ impl Seq2SeqGenerator {
     ) -> Result<String> {
         let beam_params = match &config.strategy {
             DecodingStrategy::BeamSearch(params) => params,
-            // If the user passes a Greedy or Sample config, we return a helpful error.
             _ => {
                 return Err(anyhow!(
                     "Seq2SeqGenerator only supports the BeamSearch strategy."
                 ));
             }
         };
+
         let batch_size = encoder_output.last_hidden_state.shape()[0];
         assert_eq!(
             batch_size, 1,
@@ -222,7 +112,8 @@ impl Seq2SeqGenerator {
 
         let eos_token_id = 2;
         let decoder_start_token_id = 2;
-        let context = self.model.context().unwrap(); // Assuming GPU, safe to unwrap
+        let context = self.model.context().unwrap();
+
         let (mut cache, num_beams) = {
             match &config.strategy {
                 DecodingStrategy::BeamSearch(params) => (
@@ -238,83 +129,150 @@ impl Seq2SeqGenerator {
                 }
             }
         };
+
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
         let mut current_tokens = Array2::from_elem((num_beams, 1), decoder_start_token_id);
 
-        let mut beams = (0..num_beams).map(|i| BeamHypothesis {
-            tokens: vec![decoder_start_token_id],
-            // First beam starts with score 0, others are effectively -inf
-            score: if i == 0 { 0.0 } else { f32::NEG_INFINITY },
-            // cache: cache.clone_box(), // This is now a cheap clone
-        }).collect::<Vec<_>>();
+        let mut beams: Vec<BeamHypothesis> = (0..num_beams)
+            .map(|i| BeamHypothesis {
+                tokens: vec![decoder_start_token_id],
+                score: if i == 0 { 0.0 } else { f32::NEG_INFINITY },
+            })
+            .collect();
 
-        // 3. Expand the encoder output to match the number of beams
-        let expanded_encoder_output = encoder_output.last_hidden_state.broadcast((num_beams, encoder_output.last_hidden_state.shape()[1], encoder_output.last_hidden_state.shape()[2])).unwrap().to_owned();
-        let expanded_encoder_mask = encoder_attention_mask.broadcast((num_beams, encoder_attention_mask.shape()[1])).unwrap().to_owned();
+        // Expand the encoder output to match the number of beams
+        let expanded_encoder_output = encoder_output
+            .last_hidden_state
+            .broadcast((
+                num_beams,
+                encoder_output.last_hidden_state.shape()[1],
+                encoder_output.last_hidden_state.shape()[2],
+            ))
+            .unwrap()
+            .to_owned();
+        let expanded_encoder_mask = encoder_attention_mask
+            .broadcast((num_beams, encoder_attention_mask.shape()[1]))
+            .unwrap()
+            .to_owned();
 
         let mut completed_beams: Vec<BeamHypothesis> = Vec::new();
         let mut current_tokens_gpu = GpuTensor::from_ndarray(&context, &current_tokens)?;
-        let expanded_encoder_output_gpu = GpuTensor::from_ndarray(&context, &expanded_encoder_output)?;
+        let expanded_encoder_output_gpu =
+            GpuTensor::from_ndarray(&context, &expanded_encoder_output)?;
         let expanded_encoder_mask_gpu = GpuTensor::from_ndarray(&context, &expanded_encoder_mask)?;
 
         for step in 0..config.max_length {
-            let decoder_attention_mask_cpu: Array2<f32> = Array2::ones((num_beams, gpu_cache.get_seq_length() + 1));
-            let decoder_attention_mask_gpu = GpuTensor::from_ndarray(&context, &decoder_attention_mask_cpu)?;
+            let decoder_attention_mask_cpu: Array2<f32> =
+                Array2::ones((num_beams, gpu_cache.get_seq_length() + 1));
+            let decoder_attention_mask_gpu =
+                GpuTensor::from_ndarray(&context, &decoder_attention_mask_cpu)?;
 
-            let decoder_output = self.model.gpu_decoder().forward(
-                &current_tokens_gpu, // Pass the GpuTensor
-                &expanded_encoder_output_gpu, // Pass the GpuTensor
-                Some(&expanded_encoder_mask_gpu), // Pass the GpuTensor
-                Some(&decoder_attention_mask_gpu), // Pass the GpuTensor
-                Some(gpu_cache),
-            ).await?;
+            let decoder_output = self
+                .model
+                .gpu_decoder()
+                .forward(
+                    &current_tokens_gpu,
+                    &expanded_encoder_output_gpu,
+                    Some(&expanded_encoder_mask_gpu),
+                    Some(&decoder_attention_mask_gpu),
+                    Some(gpu_cache),
+                )
+                .await?;
 
             // --- GATHER AND SCORE ---
             let last_hidden_state = decoder_output.last_hidden_state.slice(s![.., -1, ..]); // Shape: [num_beams, hidden_size]
-            let logits_2d = { // Shape: [num_beams, vocab_size]
-                let mut logits_2d = Array2::zeros((num_beams, self.model.config().vocab_size()));
-                for i in 0..num_beams {
-                    let mut logits_row = self.model.lm_head().dot(&last_hidden_state.row(i));
-                    if let Some(bias) = self.model.final_logits_bias() {
-                        logits_row += bias;
-                    }
-                    logits_2d.row_mut(i).assign(&logits_row);
-                }
-                logits_2d
-            };
-            let (next_tokens_vec, reorder_indices_vec, updated_beams) = find_best_beams_and_get_indices(
-                logits_2d,
-                &beams,
-                config,
-                num_beams);
 
-            // --- REORDER CACHE ---
-            let reorder_indices_gpu = GpuTensor::from_ndarray(&context, &Array1::from(reorder_indices_vec.iter().map(|&i| i as u32).collect::<Vec<_>>()))?;
+            // Apply LM head and penalties per beam
+            let mut logits_2d = Array2::zeros((num_beams, self.model.config().vocab_size()));
+            for i in 0..num_beams {
+                let mut logits_row = self.model.lm_head().dot(&last_hidden_state.row(i));
+                if let Some(bias) = self.model.final_logits_bias() {
+                    logits_row += bias;
+                }
+
+                // Apply repetition penalty
+                logits_row = apply_repetition_penalty(
+                    logits_row,
+                    &beams[i].tokens,
+                    config.repetition_penalty,
+                );
+
+                // Apply n-gram blocking
+                logits_row = apply_no_repeat_ngram(
+                    logits_row,
+                    &beams[i].tokens,
+                    config.no_repeat_ngram_size,
+                );
+
+                logits_2d.row_mut(i).assign(&logits_row);
+            }
+
+            let (next_tokens_vec, reorder_indices_vec, updated_beams) =
+                find_best_beams_and_get_indices(logits_2d, &beams, config, num_beams);
+
+            // First reorder with CURRENT seq_length
+            let reorder_indices_gpu = GpuTensor::from_ndarray(
+                &context,
+                &Array1::from(
+                    reorder_indices_vec
+                        .iter()
+                        .map(|&i| i as u32)
+                        .collect::<Vec<_>>(),
+                ),
+            )?;
+
             let mut encoder = context.device.create_command_encoder(&Default::default());
             gpu_cache.reorder(&mut encoder, &reorder_indices_gpu);
             context.queue.submit(Some(encoder.finish()));
 
-            // --- UPDATE STATE FOR NEXT LOOP ---
-            beams = updated_beams;
-            // current_tokens = Array2::from_shape_vec((num_beams, 1), next_tokens_vec)?;
+            // THEN increment the cache length AFTER reordering
+            gpu_cache.increment_len(1);
 
-            // Create the CPU ndarray for the next tokens
-            let next_tokens_cpu = Array2::from_shape_vec((num_beams, 1), next_tokens_vec)?;
-            // Upload it to the *same* GpuTensor variable for the next loop iteration.
-            current_tokens_gpu = GpuTensor::from_ndarray(&context, &next_tokens_cpu)?
+            // After filtering completed beams:
+            println!("Beam scores: {:?}", beams.iter().map(|b| b.score).collect::<Vec<_>>());
+            beams.clear();
+            for candidate in updated_beams {
+                if candidate.tokens.last() == Some(&eos_token_id) {
+                    if candidate.tokens.len() >= config.min_length {
+                        completed_beams.push(candidate);
+                    }
+                } else {
+                    beams.push(candidate);
+                }
 
-            // Check for completion (simplified)
-            // if beams.iter().all(|b| *b.tokens.last().unwrap() == eos_token_id) {
-            //     break;
-            // }
+                if beams.len() + completed_beams.len() >= num_beams {
+                    break;
+                }
+            }
+
+            // Pad beams if we have fewer than num_beams
+            while beams.len() < num_beams {
+                // Add dummy beams with very low scores
+                beams.push(BeamHypothesis {
+                    tokens: vec![decoder_start_token_id],
+                    score: f32::NEG_INFINITY,
+                });
+            }
+
+            // Now safe to create the tensor
+            let active_tokens: Vec<u32> = beams
+                .iter()
+                .map(|b| *b.tokens.last().unwrap_or(&decoder_start_token_id))
+                .collect();
+            let next_tokens_cpu = Array2::from_shape_vec((num_beams, 1), active_tokens)?;
+            current_tokens_gpu = GpuTensor::from_ndarray(&context, &next_tokens_cpu)?;
+
+            println!(
+                "Step {}: cache_len={}, beams={:?}",
+                step,
+                gpu_cache.get_seq_length(),
+                beams.iter().map(|b| &b.tokens).collect::<Vec<_>>()
+            );
         }
 
-
         let final_hypotheses = if completed_beams.is_empty() {
-            // If no beams reached EOS, use the active (unfinished) beams as candidates.
             beams
         } else {
-            // Otherwise, only consider the beams that properly finished.
             completed_beams
         };
 
@@ -393,6 +351,8 @@ fn find_best_beams_and_get_indices(
             // cache: None,
         });
     }
+    
+    println!("Top candidates: {:?}", candidates.iter().take(10).collect::<Vec<_>>());
 
     (next_tokens, reorder_indices, updated_beams)
 }
@@ -408,4 +368,72 @@ pub fn log_softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
     let scaled_logits = logits - max_val;
     let exp_sum = scaled_logits.mapv(f32::exp).sum();
     scaled_logits - exp_sum.ln()
+}
+
+pub fn apply_repetition_penalty(
+    mut logits: Array1<f32>,
+    generated_ids: &[u32],
+    penalty: f32,
+) -> Array1<f32> {
+    if penalty == 1.0 {
+        return logits;
+    }
+    for &id in generated_ids {
+        let idx = id as usize;
+        if logits[idx] < 0.0 {
+            logits[idx] *= penalty;
+        } else {
+            logits[idx] /= penalty;
+        }
+    }
+    logits
+}
+
+/// Efficient no-repeat n-gram blocking for generation.
+///
+/// This prevents generating any n-gram that has already appeared in the sequence.
+/// Adapted from HuggingFace’s implementation logic.
+///
+/// # Arguments
+/// * `logits` — the next-token logits (modified in place)
+/// * `tokens` — sequence of already generated tokens
+/// * `ngram_size` — size of the n-gram window
+///
+/// # Returns
+/// Modified logits with -inf applied to blocked tokens.
+pub fn apply_no_repeat_ngram(
+    mut logits: Array1<f32>,
+    tokens: &[u32],
+    ngram_size: usize,
+) -> Array1<f32> {
+    if ngram_size == 0 || tokens.len() < ngram_size {
+        return logits;
+    }
+
+    // Map from ngram_prefix → set of next tokens that follow that prefix.
+    let mut ngram_map: HashMap<Vec<u32>, HashSet<u32>> = HashMap::new();
+
+    // Build the prefix map efficiently.
+    for window in tokens.windows(ngram_size) {
+        let prefix = &window[..ngram_size - 1];
+        let next_token = window[ngram_size - 1];
+        ngram_map
+            .entry(prefix.to_vec())
+            .or_default()
+            .insert(next_token);
+    }
+
+    // The prefix of the last (n-1) tokens
+    let current_prefix = &tokens[tokens.len() - (ngram_size - 1)..];
+
+    // If we’ve seen this prefix before, block all tokens that previously followed it
+    if let Some(blocked_tokens) = ngram_map.get(current_prefix) {
+        for &t in blocked_tokens {
+            if (t as usize) < logits.len() {
+                logits[t as usize] = f32::NEG_INFINITY;
+            }
+        }
+    }
+
+    logits
 }

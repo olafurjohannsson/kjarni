@@ -10,6 +10,7 @@ use ndarray::{Array1, Array2, s};
 use rand::Rng;
 
 pub mod seq2seq;
+pub mod seq2seq2;
 
 pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
 

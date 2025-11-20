@@ -2,7 +2,7 @@ use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{DType, GpuTensor};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-
+use log::info;
 #[cfg(debug_assertions)]
 #[derive(Default, Debug)]
 struct AllocationStats {
@@ -142,7 +142,7 @@ impl GpuTensorPool {
                 } else {
                     0.0
                 };
-                println!(
+                info!(
                     "[GpuTensorPool] Frame stats - Gets: {}, Reuses: {} ({:.1}%), Allocations: {}. Pool total: {}",
                     self.stats.gets,
                     self.stats.reuses,

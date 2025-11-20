@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 /// The CPU backend implementation for a generic `TransformerEncoderDecoder`.
 pub struct CpuTransformerEncoderDecoder {
-    encoder: TransformerEncoder,
-    decoder_layers: Vec<DecoderCrossAttentionLayer>,
+    pub encoder: TransformerEncoder,
+    pub decoder_layers: Vec<DecoderCrossAttentionLayer>,
     pub decoder_embeddings: Embeddings,
     pub decoder_embed_layer_norm: LayerNorm,
     config: Arc<dyn EncoderDecoderArchitecture + Send + Sync>,

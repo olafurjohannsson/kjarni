@@ -73,14 +73,14 @@ impl TempStorage {
 
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
-    pub(crate) q_weight: GpuTensor,
-    pub(crate) q_bias: GpuTensor,
-    pub(crate) k_weight: GpuTensor,
-    pub(crate) k_bias: GpuTensor,
-    pub(crate) v_weight: GpuTensor,
-    pub(crate) v_bias: GpuTensor,
-    pub(crate) output_weight: GpuTensor,
-    pub(crate) output_bias: GpuTensor,
+    pub q_weight: GpuTensor, // (crate)
+    pub q_bias: GpuTensor, // (crate)
+    pub k_weight: GpuTensor, // (crate)
+    pub k_bias: GpuTensor, // (crate)
+    pub v_weight: GpuTensor, // (crate)
+    pub v_bias: GpuTensor, // (crate)
+    pub output_weight: GpuTensor, // (crate)
+    pub output_bias: GpuTensor, // (crate)
 }
 
 impl GpuAttentionWeights {
@@ -174,21 +174,21 @@ impl GpuAttentionWeights {
 }
 
 pub struct GpuAttention {
-    matmul: GpuMatMul,
-    bmm: GpuBatchedMatMul,
-    add_bias: GpuAddBias,
-    reshape: GpuReshape,
-    unreshape: GpuUnreshape,
-    apply_mask: GpuApplyMask,
-    softmax: GpuSoftmax,
-    permute: GpuPermute,
-    repeat_kv: GpuRepeatKV,
-    gpu_concatenate: GpuConcatenate,
-    slice_kernel: GpuSlice,
-    num_heads: u32,
-    num_kv_heads: u32,
-    scale_factor: f32,
-    head_dim: u32
+    pub matmul: GpuMatMul,
+    pub bmm: GpuBatchedMatMul,
+    pub add_bias: GpuAddBias,
+    pub reshape: GpuReshape,
+    pub unreshape: GpuUnreshape,
+    pub apply_mask: GpuApplyMask,
+    pub softmax: GpuSoftmax,
+    pub permute: GpuPermute,
+    pub repeat_kv: GpuRepeatKV,
+    pub gpu_concatenate: GpuConcatenate,
+    pub slice_kernel: GpuSlice,
+    pub num_heads: u32,
+    pub num_kv_heads: u32,
+    pub scale_factor: f32,
+    pub head_dim: u32
 }
 
 impl GpuAttention {
@@ -368,7 +368,7 @@ impl GpuAttention {
         // Attention scores
         let k_transposed = k_expanded.permute(encoder, &self.permute, &[0, 1, 3, 2]);
         let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, pool);
-
+        
         // Apply masks
         // if let Some(mask) = attention_mask {
         //     self.apply_mask.encode(encoder, &scores, mask, false, 0);
@@ -587,6 +587,10 @@ impl GpuAttention {
         // `full_k` and `full_v` are now guaranteed to be the complete 4D KV history.
         let k_transposed = full_k.permute(encoder, &self.permute, &[0, 1, 3, 2]);
         let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, pool);
+
+        // Add debug readback (only for debugging - remove in production):
+
+
         let expected_scores_shape = vec![
             q_heads.shape()[0],
             q_heads.shape()[1],
@@ -871,7 +875,7 @@ impl GpuAttention {
     }
 
     /// A helper for the `view -> bmm -> view` pattern needed for 4D attention.
-    fn bmm_4d(
+    pub fn bmm_4d(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         a: &GpuTensor, // [B, H, M, K]

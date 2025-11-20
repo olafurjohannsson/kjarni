@@ -36,6 +36,7 @@ ndarray-rand = { workspace = true }
 futures-util = { workspace = true }
 futures-core = { workspace = true }
 async-stream = { workspace = true }
+bytemuck = { workspace = true }
 lru = "0.12.3"
 
 

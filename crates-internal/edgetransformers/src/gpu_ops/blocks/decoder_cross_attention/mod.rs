@@ -265,6 +265,7 @@ impl GpuCrossAttentionDecoderLayer {
         pool: &mut GpuTensorPool,
     ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
         let residual = decoder_hidden_states;
+
         let (self_attn_output, new_k, new_v) = self.self_attn.forward_seq2seq(
             encoder,
             residual,
@@ -377,6 +378,8 @@ impl CrossAttentionDecoder for GpuCrossAttentionDecoder {
 
     async fn forward<'a>(
         &self,
+        // encoder: &mut wgpu::CommandEncoder,
+        // pool: &mut GpuTensorPool,
         decoder_input_ids: &Self::TokenInput,
         encoder_hidden_states: &'a Self::EncoderStateInput,
         encoder_attention_mask: Option<&'a Self::MaskInput>,
@@ -444,7 +447,8 @@ impl CrossAttentionDecoder for GpuCrossAttentionDecoder {
 
         if let Some(cache) = gpu_cache {
             // cache.set_seq_length(total_len);
-            cache.increment_len(1);
+            // cache.increment_len(1);
+            // gpu_cache.increment_len(1);
         }
 
         frame.finish();
@@ -903,157 +907,4 @@ mod tests {
 
         Ok(())
     }
-    // #[tokio::test]
-    // async fn test_step1_self_attention_consistency() -> Result<()> {
-    //     // 1. SETUP
-    //     let context = Arc::new(WgpuContext::new().await?);
-    //     let (batch, dec_len, hidden, inter, heads) = (1, 1, 1024, 4096, 16);
-
-    //     // 2. CREATE MODULES
-    //     let cpu_layer = create_mock_cpu_layer(hidden, inter, heads);
-    //     let gpu_layer =
-    //         create_gpu_layer_from_cpu(&context, &cpu_layer, hidden as u32, heads as u32)?;
-
-    //     // 3. CREATE INPUTS
-    //     let cpu_decoder_hs = Array::random((batch, dec_len, hidden), Uniform::new(-1.0, 1.0));
-    //     let cpu_decoder_mask = Array2::ones((batch, dec_len));
-
-    //     // 4. RUN CPU BLOCK
-    //     let (cpu_output, (cpu_k, cpu_v)) =
-    //         cpu_layer.self_attention_block(&cpu_decoder_hs, Some(&cpu_decoder_mask), None)?;
-
-    //     // 5. RUN GPU BLOCK
-    //     let mut encoder = context.device.create_command_encoder(&Default::default());
-    //     let mut temp = TempStorage::new(context.clone());
-    //     let gpu_decoder_hs = GpuTensor::from_ndarray(&context, &cpu_decoder_hs)?;
-    //     let gpu_decoder_mask = GpuTensor::from_ndarray(&context, &cpu_decoder_mask)?;
-
-    //     let (gpu_output_t, gpu_k_t, gpu_v_t) = gpu_layer.self_attention_block(
-    //         &mut encoder,
-    //         &gpu_decoder_hs,
-    //         &gpu_decoder_mask,
-    //         None,
-    //         0,
-    //         &mut temp,
-    //     )?;
-
-    //     context.queue.submit(Some(encoder.finish()));
-    //     let gpu_output = gpu_output_t.to_ndarray_3d().await?;
-    //     let gpu_k = gpu_k_t.to_ndarray_3d().await?;
-    //     let gpu_v = gpu_v_t.to_ndarray_3d().await?;
-
-    //     // 6. COMPARE
-    //     let tolerance = 1e-4;
-    //     let rtol = 1e-3;
-    //     let atol = 1e-4;
-    //     assert_all_close(&cpu_output, &gpu_output, rtol, atol, "Self-Attn Output");
-    //     assert_all_close(&cpu_k, &gpu_k, rtol, atol, "Self-Attn K Value");
-    //     assert_all_close(&cpu_v, &gpu_v, rtol, atol, "Self-Attn V Value");
-
-    //     println!("✅ Step 1 (Self-Attention) is consistent!");
-
-    //     temp.clear();
-    //     Ok(())
-    // }
-
-    // #[tokio::test]
-    // async fn test_step1_and_step2_consistency() -> Result<()> {
-    //     // 1. SETUP
-    //     let context = Arc::new(WgpuContext::new().await?);
-    //     let (batch, dec_len, enc_len, hidden, inter, heads) = (1, 1, 93, 1024, 4096, 16);
-
-    //     // 2. CREATE MODULES
-    //     let cpu_layer = create_mock_cpu_layer(hidden, inter, heads);
-    //     let gpu_layer =
-    //         create_gpu_layer_from_cpu(&context, &cpu_layer, hidden as u32, heads as u32)?;
-
-    //     // 3. CREATE INPUTS
-    //     let cpu_decoder_hs = Array::random((batch, dec_len, hidden), Uniform::new(-1.0, 1.0));
-    //     let cpu_encoder_hs = Array::random((batch, enc_len, hidden), Uniform::new(-1.0, 1.0));
-    //     let cpu_decoder_mask = Array2::ones((batch, dec_len));
-    //     let cpu_encoder_mask = Array2::ones((batch, enc_len));
-
-    //     // 4. RUN CPU BLOCKS
-    //     let (cpu_after_step1, _) =
-    //         cpu_layer.self_attention_block(&cpu_decoder_hs, Some(&cpu_decoder_mask), None)?;
-    //     let cpu_output = cpu_layer.cross_attention_block(
-    //         &cpu_after_step1,
-    //         &cpu_encoder_hs,
-    //         Some(&cpu_encoder_mask),
-    //     )?;
-
-    //     // 5. RUN GPU BLOCKS
-    //     let mut encoder = context.device.create_command_encoder(&Default::default());
-    //     let mut temp = TempStorage::new(context.clone());
-    //     let gpu_decoder_hs = GpuTensor::from_ndarray(&context, &cpu_decoder_hs)?;
-    //     let gpu_encoder_hs = GpuTensor::from_ndarray(&context, &cpu_encoder_hs)?;
-    //     let gpu_decoder_mask = GpuTensor::from_ndarray(&context, &cpu_decoder_mask)?;
-    //     let gpu_encoder_mask = GpuTensor::from_ndarray(&context, &cpu_encoder_mask)?;
-
-    //     let (gpu_after_step1, _, _) = gpu_layer.self_attention_block(
-    //         &mut encoder,
-    //         &gpu_decoder_hs,
-    //         &gpu_decoder_mask,
-    //         None,
-    //         0,
-    //         &mut temp,
-    //     )?;
-    //     let gpu_output_t = gpu_layer.cross_attention_block(
-    //         &mut encoder,
-    //         &gpu_after_step1,
-    //         &gpu_encoder_hs,
-    //         Some(&gpu_encoder_mask),
-    //         &mut temp,
-    //     )?;
-
-    //     context.queue.submit(Some(encoder.finish()));
-    //     let gpu_output = gpu_output_t.to_ndarray_3d().await?;
-
-    //     // 6. COMPARE
-    //     let tolerance = 1e-4;
-    //     let rtol = 1e-3;
-    //     let atol = 1e-4;
-    //     assert_all_close(&cpu_output, &gpu_output, rtol, atol, "Cross-Attn Output");
-
-    //     println!("✅ Step 1 + Step 2 (Cross-Attention) are consistent!");
-    //     temp.clear();
-    //     Ok(())
-    // }
-    // #[tokio::test]
-    // async fn test_step3_feed_forward_consistency() -> Result<()> {
-    //     // 1. SETUP
-    //     let context = Arc::new(WgpuContext::new().await?);
-    //     let (batch, dec_len, hidden, inter, heads) = (1, 1, 1024, 4096, 16);
-
-    //     // 2. CREATE MODULES with identical weights
-    //     let cpu_layer = create_mock_cpu_layer(hidden, inter, heads);
-    //     let gpu_layer =
-    //         create_gpu_layer_from_cpu(&context, &cpu_layer, hidden as u32, heads as u32)?;
-
-    //     // 3. CREATE IDENTICAL RANDOM INPUTS
-    //     let cpu_hs = Array::random((batch, dec_len, hidden), Uniform::new(-1.0, 1.0));
-
-    //     // 4. RUN CPU BLOCK
-    //     let cpu_output = cpu_layer.feed_forward_block(&cpu_hs)?;
-
-    //     // 5. RUN GPU BLOCK
-    //     let mut encoder = context.device.create_command_encoder(&Default::default());
-    //     let mut temp = TempStorage::new(context.clone());
-    //     let gpu_hs = GpuTensor::from_ndarray(&context, &cpu_hs)?;
-
-    //     let gpu_output_t = gpu_layer.feed_forward_block(&mut encoder, &gpu_hs, &mut temp)?;
-
-    //     context.queue.submit(Some(encoder.finish()));
-    //     let gpu_output = gpu_output_t.to_ndarray_3d().await?;
-
-    //     // 6. COMPARE
-    //     let tolerance = 1e-4;
-    //     let rtol = 1e-3;
-    //     let atol = 1e-4;
-    //     assert_all_close(&cpu_output, &gpu_output, rtol, atol, "FFN Output");
-
-    //     println!("✅ Step 3 (Feed-Forward) is consistent!");
-    //     temp.clear();
-    //     Ok(())
-    // }
 }
