@@ -189,6 +189,44 @@ pub struct BeamHypothesis {
     // pub cache: Box<dyn Cache>,
 }
 
+// A struct to hold all the inputs for a single generation step.
+// This keeps the `forward` signature clean.
+pub struct StepInput<'a, T> {
+    pub tokens: &'a T,
+    pub encoder_state: Option<&'a T>, // Optional for decoder-only models
+    pub attention_mask: &'a T,
+}
+
+#[async_trait(?Send)]
+pub trait GenerationBackend: Send + Sync {
+    type Cache: Cache;
+    type Tensor;
+
+    /// Runs the initial encoder pass.
+    async fn encode(&self, model: &dyn LanguageModel, tokens: &[u32]) -> Result<Self::Tensor>; // Returns the native tensor type
+
+    /// Runs one decoder forward pass.
+    async fn forward(
+        &self,
+        model: &dyn LanguageModel,
+        inputs: StepInput<Self::Tensor>,
+        cache: &mut Self::Cache,
+    ) -> Result<Array3<f32>>;
+
+    /// Converts a Vec of token IDs into the backend's native tensor format.
+    fn prepare_tokens(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor>;
+
+    /// Prepares the initial encoder output for the generation loop.
+    /// For CPU, this is a no-op. For GPU, it uploads to a GpuTensor.
+    fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor>;
+
+    /// Prepares the attention mask for a given step.
+    fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor>;
+
+    /// Reorders the cache for beam search.
+    fn reorder_cache(&self, cache: &mut Self::Cache, indices: &[usize]) -> Result<()>;
+}
+
 /// Base trait for all language models - provides tokenization
 ///
 /// This is implemented by encoder-only (BERT), decoder-only (GPT),
@@ -205,7 +243,12 @@ pub trait LanguageModel: TransformerModel {
     ///
     /// The model implementation is responsible for choosing the correct cache type
     /// (CPU/GPU) and initializing it with the correct dimensions.
-    fn new_cache(&self, batch_size: usize, max_len: usize, num_beams: usize) -> Result<Box<dyn Cache>>;
+    fn new_cache(
+        &self,
+        batch_size: usize,
+        max_len: usize,
+        num_beams: usize,
+    ) -> Result<Box<dyn Cache>>;
 
     /// Maximum sequence length the model can handle
     fn max_length(&self) -> usize {
@@ -458,18 +501,23 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
     fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput>;
 
     /// Returns a reference to the model's decoder component.
-    fn decoder(&self) -> &dyn CrossAttentionDecoder<
+    fn decoder(
+        &self,
+    ) -> &dyn CrossAttentionDecoder<
         TokenInput=Array2<u32>,
         EncoderStateInput=Array3<f32>,
         MaskInput=Array2<f32>,
-        Output=DecoderOutput>;
+        Output=DecoderOutput,
+    >;
 
-    fn gpu_decoder(&self) -> &dyn CrossAttentionDecoder<
+    fn gpu_decoder(
+        &self,
+    ) -> &dyn CrossAttentionDecoder<
         TokenInput=GpuTensor,
         EncoderStateInput=GpuTensor,
         MaskInput=GpuTensor,
-        Output=DecoderOutput>;
-
+        Output=DecoderOutput,
+    >;
 
     /// Projects the final hidden states from the decoder to vocabulary logits.
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;

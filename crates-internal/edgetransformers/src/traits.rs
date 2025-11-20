@@ -24,26 +24,6 @@ pub enum Device {
     Wgpu,
 }
 
-// #[async_trait(?Send)]
-// trait GenerationBackend {
-//     type Cache: Cache; // The specific cache type (Cpu or Gpu)
-//     type Tensor;      // The specific tensor type (ndarray or GpuTensor)
-//
-//     // Operation 1: The main forward pass
-//     async fn forward(
-//         &self,
-//         decoder: &dyn CrossAttentionDecoder<...>, // Pass the decoder
-//         tokens: &Self::Tensor,
-//         encoder_state: &Self::Tensor,
-//         cache: &mut Self::Cache,
-//     ) -> Result<Array3<f32>>; // Always returns ndarray for logits on CPU
-//
-//     // Operation 2: Prepare inputs for the next loop
-//     fn prepare_next_tokens(&self, tokens: Vec<u32>) -> Result<Self::Tensor>;
-//
-//     // Operation 3: Reorder the cache for beam search
-//     fn reorder_cache(&self, cache: &mut Self::Cache, indices: &[usize]) -> Result<()>;
-// }
 
 /// A base marker trait for all models in the library.
 ///
