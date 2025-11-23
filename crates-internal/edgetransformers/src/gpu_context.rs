@@ -1,6 +1,11 @@
-// gpu_context.rs
-use anyhow::{Result, anyhow};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::GpuTensorPool;
+use anyhow::{anyhow, Result};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tokio::sync::Mutex;
 use wgpu::{
     Adapter, DeviceDescriptor, Features, Instance, InstanceDescriptor, Limits, PowerPreference,
     RequestAdapterOptions,
@@ -19,13 +24,13 @@ impl GpuMemoryInfo {
     /// Print a human-readable summary of GPU memory
     pub fn print_summary(&self) {
         println!("\n=== GPU Memory Info ===");
-        
+
         if let Some(available) = self.available_memory {
             println!("Available VRAM:     {:.2} GB", available as f64 / 1_073_741_824.0);
         } else {
             println!("Available VRAM:     Unknown (could not query)");
         }
-        
+
         println!("Max Buffer Size:    {:.2} GB", self.max_buffer_size as f64 / 1_073_741_824.0);
         println!("Max Binding Size:   {:.2} GB", self.max_storage_buffer_binding_size as f64 / 1_073_741_824.0);
         println!("KV Cache Reserved:  {:.2} GB", self.reserved_for_kv_cache as f64 / 1_073_741_824.0);
@@ -34,19 +39,25 @@ impl GpuMemoryInfo {
 }
 
 pub struct WgpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub adapter: Adapter, // Add this so we can inspect it later
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub adapter: Adapter,
     pub memory_info: GpuMemoryInfo,
     allocated_memory: AtomicUsize,
+
+    // Lazy-initialized shared pool (best performance!)
+    inference_pool: OnceLock<Arc<Mutex<GpuTensorPool>>>,
+
+    poll_stop: Arc<AtomicBool>,
+    poll_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl WgpuContext {
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> Result<Arc<Self>> {
         Self::with_config(GpuConfig::default()).await
     }
 
-    pub async fn with_config(config: GpuConfig) -> Result<Self> {
+    pub async fn with_config(config: GpuConfig) -> Result<Arc<Self>> {
         let instance = Instance::new(&InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: wgpu::InstanceFlags::empty(),
@@ -80,10 +91,10 @@ impl WgpuContext {
 
         // Calculate memory requirements
         let memory_info = Self::calculate_memory_info(&adapter, &config)?;
-        
+
         // Print detailed memory info
         memory_info.print_summary();
-        
+
         // Check if we have enough memory for the config
         if let Some(available) = memory_info.available_memory {
             let required_min = config.kv_cache_memory_mb * 1_048_576;
@@ -129,14 +140,43 @@ impl WgpuContext {
             memory_info.max_buffer_size as f32 / 1_073_741_824.0,
             memory_info.max_storage_buffer_binding_size as f32 / 1_073_741_824.0
         );
-        
-        Ok(Self {
-            device,
-            queue,
+        let device_arc = Arc::new(device);
+        let queue_arc = Arc::new(queue);
+
+        // Start polling thread
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let device_clone = device_arc.clone();
+        let thread_stop = stop_flag.clone();
+
+        let handle = std::thread::Builder::new()
+            .name("wgpu-poller".into())
+            .spawn(move || {
+                log::debug!("WGPU polling thread started");
+                while !thread_stop.load(Ordering::Relaxed) {
+                    device_clone.poll(wgpu::PollType::Poll);
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+                log::debug!("WGPU polling thread stopped");
+            })?;
+
+        Ok(Arc::new(Self {
+            device: device_arc,
+            queue: queue_arc,
             adapter,
             memory_info,
             allocated_memory: AtomicUsize::new(0),
-        })
+            inference_pool: OnceLock::new(),  // Empty initially
+            poll_stop: stop_flag,
+            poll_handle: Some(handle),
+        }))
+    }
+    pub fn get_inference_pool(self: &Arc<Self>) -> Arc<Mutex<GpuTensorPool>> {
+        self.inference_pool
+            .get_or_init(|| {
+                log::debug!("Creating shared inference pool");
+                Arc::new(Mutex::new(GpuTensorPool::new(self.clone())))
+            })
+            .clone()
     }
 
     fn calculate_memory_info(adapter: &Adapter, config: &GpuConfig) -> Result<GpuMemoryInfo> {
@@ -146,7 +186,7 @@ impl WgpuContext {
 
         log::debug!("Adapter limits:");
         log::debug!("  max_buffer_size: {:.2} GB", limits.max_buffer_size as f64 / 1_073_741_824.0);
-        log::debug!("  max_storage_buffer_binding_size: {:.2} GB", 
+        log::debug!("  max_storage_buffer_binding_size: {:.2} GB",
                     limits.max_storage_buffer_binding_size as f64 / 1_073_741_824.0);
 
         if let Some(available) = available_memory {
@@ -197,7 +237,7 @@ impl WgpuContext {
                                 video_memory_info.CurrentUsage as f64 / 1_073_741_824.0,
                                 video_memory_info.AvailableForReservation as f64 / 1_073_741_824.0
                             );
-                            
+
                             // Return the budget (total available memory)
                             if video_memory_info.Budget > 0 {
                                 return Some(video_memory_info.Budget);
@@ -318,10 +358,10 @@ impl WgpuContext {
     pub fn print_memory_usage(&self) {
         let allocated = self.get_allocated_memory();
         println!("\n=== GPU Memory Usage ===");
-        println!("Currently allocated: {:.2} MB ({:.2} GB)", 
+        println!("Currently allocated: {:.2} MB ({:.2} GB)",
                  allocated as f64 / 1_048_576.0,
                  allocated as f64 / 1_073_741_824.0);
-        
+
         if let Some(available) = self.memory_info.available_memory {
             let percent = (allocated as f64 / available as f64) * 100.0;
             println!("Usage: {:.1}% of available VRAM", percent);
@@ -343,6 +383,16 @@ impl Default for GpuConfig {
             kv_cache_memory_mb: 1024, // Reduced from 2048 to 1GB for 4GB cards
             prefer_texture_embeddings: true,
             min_batch_size_for_gpu: 128,
+        }
+    }
+}
+
+impl Drop for WgpuContext {
+    fn drop(&mut self) {
+        log::debug!("Stopping WGPU polling thread");
+        self.poll_stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.poll_handle.take() {
+            let _ = handle.join();
         }
     }
 }

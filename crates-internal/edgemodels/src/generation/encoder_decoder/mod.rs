@@ -8,4 +8,5 @@ mod traits;
 pub use generator::Seq2SeqGenerator;
 pub use traits::{GenerationBackend, StepInput, HasShape};
 pub use gpu_backend::GpuBackend;
+pub use cpu_backend::CpuBackend;
 pub use beams::{BeamHypothesis, find_best_beams_and_get_indices, run_beam_search};

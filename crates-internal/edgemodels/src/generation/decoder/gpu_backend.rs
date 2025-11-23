@@ -1,20 +1,19 @@
 use crate::generation::generator::DecoderGenerationBackend;
 use anyhow::Result;
 use async_trait::async_trait;
-use edgetransformers::WgpuContext;
-use edgetransformers::cache::{Cache, CpuKVCache, GpuKVCache};
-use edgetransformers::gpu_ops::Kernel;
+use edgetransformers::cache::{Cache, GpuKVCache};
 use edgetransformers::gpu_ops::primitives::bmm::GpuBatchedMatMul;
-use edgetransformers::gpu_ops::primitives::layout::slice::GpuSlice;
-use edgetransformers::gpu_ops::primitives::matmul::GpuMatMul;
-use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use edgetransformers::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
-use edgetransformers::models::DecoderLanguageModel;
+use edgetransformers::gpu_ops::Kernel;
+use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
-use log::debug;
-use ndarray::{Array1, Array2, s};
+use edgetransformers::models::DecoderLanguageModel;
+use edgetransformers::WgpuContext;
+use ndarray::{s, Array1, Array2};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 use wgpu::CommandEncoder;
 
 /// Projects hidden states to vocabulary logits on the GPU using a batched matmul.
@@ -22,25 +21,17 @@ pub fn project_to_vocab_gpu(
     context: &Arc<WgpuContext>,
     encoder: &mut CommandEncoder,
     hidden_states: &GpuTensor,
-    lm_head_weights_transposed: &GpuTensor, // <-- Expects the transposed weights
+    lm_head_weights_transposed: &GpuTensor,
     pool: &mut GpuTensorPool,
 ) -> Result<GpuTensor> {
-    // hidden_states:      [Batch, SeqLen, HiddenDim]
-    // lm_head_weights_T:  [HiddenDim, VocabSize]
-
     let batch_size = hidden_states.shape()[0];
     let seq_len = hidden_states.shape()[1];
     let vocab_size = lm_head_weights_transposed.shape()[1];
 
-    // Allocate the output tensor for the logits
     let output_shape = vec![batch_size, seq_len, vocab_size];
     let logits_output = pool.get(output_shape);
 
-    // Instantiate your batched matmul kernel
     let bmm_kernel = GpuBatchedMatMul::new(context);
-
-    // Encode the operation. Your kernel correctly handles broadcasting the 2D
-    // lm_head_weights_transposed tensor across the batch dimension of hidden_states.
     bmm_kernel.encode(
         encoder,
         &[hidden_states, lm_head_weights_transposed],
@@ -52,29 +43,65 @@ pub fn project_to_vocab_gpu(
 
 pub struct GpuDecoderBackend {
     context: Arc<WgpuContext>,
-    pool: Arc<Mutex<GpuTensorPool>>,
-    // A reusable 1x1 tensor for single-token decoding, avoiding reallocation.
     token_tensor: GpuTensor,
-    slice_kernel: GpuSlice,
     last_token_slicer: GpuLastTokenSlice,
+
+    // Ring buffer for async readback (triple buffering)
+    staging_buffers: Mutex<Option<Vec<wgpu::Buffer>>>,
+    buffer_size: Mutex<Option<usize>>,
+    current_buffer_idx: AtomicUsize,
 }
 
 impl GpuDecoderBackend {
-    pub fn new(context: Arc<WgpuContext>, pool: Arc<Mutex<GpuTensorPool>>) -> Result<Self> {
+    pub fn new(context: Arc<WgpuContext>) -> Result<Self> {
         let token_ndarray = Array2::<u32>::zeros((1, 1));
-        let token_tensor = GpuTensor::from_ndarray(&context.clone(), &token_ndarray)?;
-        let c = context.clone();
+        let token_tensor = GpuTensor::from_ndarray(&context, &token_ndarray)?;
+
         Ok(Self {
-            context,
-            pool,
+            context: context.clone(),
             token_tensor,
-            slice_kernel: GpuSlice::new(&c),
-            last_token_slicer: GpuLastTokenSlice::new(&c)
+            last_token_slicer: GpuLastTokenSlice::new(&context),
+            staging_buffers: Mutex::new(None),
+            buffer_size: Mutex::new(None),
+            current_buffer_idx: AtomicUsize::new(0),
         })
     }
 
+    /// Ensure staging buffers exist and match the required size
+    fn ensure_staging_buffers(&self, required_size_bytes: usize) -> Result<()> {
+        let mut buffers_guard = self.staging_buffers.lock().unwrap();
+        let mut size_guard = self.buffer_size.lock().unwrap();
+
+        let needs_creation = match (*size_guard, buffers_guard.as_ref()) {
+            (None, None) => true,
+            (Some(size), Some(_)) if size != required_size_bytes => {
+                log::debug!("Recreating staging buffers: {} -> {} bytes", size, required_size_bytes);
+                true
+            }
+            _ => false,
+        };
+
+        if needs_creation {
+            let new_buffers: Vec<_> = (0..3)
+                .map(|i| {
+                    self.context.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("Staging Buffer {} ({}KB)", i, required_size_bytes / 1024)),
+                        size: required_size_bytes as u64,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                })
+                .collect();
+
+            *buffers_guard = Some(new_buffers);
+            *size_guard = Some(required_size_bytes);
+            log::debug!("Created 3 staging buffers of {}KB each", required_size_bytes / 1024);
+        }
+
+        Ok(())
+    }
+
     /// Internal helper to run a forward pass and project to logits.
-    /// This is the core logic shared by prefill and decode_one.
     async fn forward_and_project<'a>(
         &'a self,
         model: &'a dyn DecoderLanguageModel,
@@ -86,22 +113,23 @@ impl GpuDecoderBackend {
         let gpu_lm_head_transposed = model.gpu_lm_head_transposed()?;
         let mut gpu_cache = cache.as_any_mut().downcast_mut::<GpuKVCache>().unwrap();
 
-        let pool_guard = self.pool.lock().await;
+        // Use shared pool from context!
+        let pool = self.context.get_inference_pool();
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         let (encoder, pool) = frame.resources();
 
         let position_offset = gpu_cache.get_seq_length();
 
-        // --- FIX 1: CREATE AND USE THE ATTENTION MASK ---
+        // Create attention mask
         let attention_mask = {
-            // Assumes your GpuKVCache can expose its max capacity.
             let max_len = gpu_cache.max_seq_len();
             let mut mask_cpu = Array2::zeros((1, max_len));
             mask_cpu.slice_mut(s![.., 0..seq_len]).fill(1.0);
             GpuTensor::from_ndarray(&self.context, &mask_cpu)?
         };
-        let decoder_fwd_start = std::time::Instant::now();
-        // 1. Run the decoder forward pass
+
+        // 1. Forward pass
         let hidden_states = gpu_decoder
             .forward(
                 encoder,
@@ -113,12 +141,8 @@ impl GpuDecoderBackend {
                 None,
             )
             .await?;
-        log::info!(
-            "    └─ Decoder forward pass: {:?}",
-            decoder_fwd_start.elapsed()
-        );
-        // 2. Project to logits on the GPU
-        let projection_start = std::time::Instant::now();
+
+        // 2. Project to logits
         let logits_gpu = project_to_vocab_gpu(
             &self.context,
             encoder,
@@ -126,37 +150,68 @@ impl GpuDecoderBackend {
             gpu_lm_head_transposed,
             pool,
         )?;
-        log::info!(
-            "    └─ Projection to vocab: {:?}",
-            projection_start.elapsed()
-        );
-        // --- FIX 2: CORRECTLY SLICE THE LOGITS TENSOR ---
-        let output_seq_len = logits_gpu.shape()[1];
+
+        // 3. Slice to last token on GPU
         let batch_size = logits_gpu.shape()[0];
         let vocab_size = logits_gpu.shape()[2];
         let last_token_logits = pool.get(vec![batch_size, vocab_size]);
-        // Use your slice kernel to get the logits for the last token only
-        // let logits_slice = logits_gpu.slice(
-        //     encoder,
-        //     &self.slice_kernel,
-        //     &[0, output_seq_len - 1, 0], // Offset: [batch, last_token, start_of_vocab]
-        //     &[1, 1, vocab_size],         // Shape: [1, 1, vocab_size]
-        // )?;
 
         self.last_token_slicer.encode(encoder, &logits_gpu, &last_token_logits);
 
+        // 4. Setup ring buffer for this vocab size
+        let buffer_size_bytes = vocab_size * std::mem::size_of::<f32>();
+        self.ensure_staging_buffers(buffer_size_bytes)?;
+
+        // 5. Copy to NEXT staging buffer in ring
+        let buffer_idx = self.current_buffer_idx.fetch_add(1, Ordering::Relaxed) % 3;
+
+        // Clone the Arc (cheap!) so we can use buffers without holding the lock
+        let buffers_arc = {
+            let guard = self.staging_buffers.lock().unwrap();
+            guard.as_ref().unwrap().clone()  // Clone the Arc, not the buffers!
+        };
+
+        // Copy to staging buffer (no lock needed, we have Arc)
+        encoder.copy_buffer_to_buffer(
+            last_token_logits.buffer(),
+            0,
+            &buffers_arc[buffer_idx],
+            0,
+            buffer_size_bytes as u64,
+        );
+
         frame.finish();
 
-        // 3. Copy the small slice back to the CPU
-        // let logits_cpu = logits_slice.to_ndarray_1d().await?;
+        // 6. Read from PREVIOUS buffer (lag=1, GPU is working ahead!)
+        let read_idx = if buffer_idx == 0 {
+            if self.current_buffer_idx.load(Ordering::Relaxed) == 1 {
+                0  // First iteration
+            } else {
+                2  // Wrapped around
+            }
+        } else {
+            buffer_idx - 1
+        };
 
-        let copy_start = std::time::Instant::now();
-        // let logits_3d_cpu: ndarray::Array3<f32> = logits_gpu.to_ndarray_3d().await?;
-        
-        let logits_cpu_2d = last_token_logits.to_ndarray_2d().await?;
-        let logits_cpu = logits_cpu_2d.slice(s![0, ..]).to_owned();
-        log::info!("    └─ GPU->CPU copy: {:?}", copy_start.elapsed());
-        // let logits_cpu = logits_3d_cpu.slice(s![0, -1, ..]).to_owned();
+        // Use buffers_arc directly - no lock needed!
+        let read_buffer = &buffers_arc[read_idx];
+        let slice = read_buffer.slice(..);
+
+        let (tx, rx) = futures::channel::oneshot::channel();
+
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+
+        // Background polling makes this instant!
+        rx.await??;
+
+        // Zero-copy read with bytemuck
+        let data = slice.get_mapped_range();
+        let logits_cpu: Array1<f32> = bytemuck::cast_slice(&data).to_vec().into();
+
+        drop(data);
+        read_buffer.unmap();
 
         gpu_cache.increment_len(input_tensor.shape()[1]);
 
@@ -174,17 +229,16 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
     }
 
     fn new_token_tensor(&self) -> Result<Self::Tensor> {
-        // Pre-allocate a 1x1 buffer on the GPU that we will reuse
         let token_ndarray = Array2::<u32>::zeros((1, 1));
         GpuTensor::from_ndarray(&self.context, &token_ndarray)
     }
 
     fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_token_id: u32) -> Result<()> {
-        // The optimization: write the new token ID into the existing GPU buffer.
-        // This is extremely fast compared to creating a new ndarray and copying it.
-        let nti = &[new_token_id];
-        let bytes: &[u8] = bytemuck::cast_slice(nti);
-        self.context.queue.write_buffer(tensor.buffer(), 0, bytes);
+        self.context.queue.write_buffer(
+            tensor.buffer(),
+            0,
+            bytemuck::cast_slice(&[new_token_id]),
+        );
         Ok(())
     }
 
@@ -201,31 +255,20 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
         seq_len: usize,
         cache: &'a mut dyn Cache,
     ) -> Result<Array1<f32>> {
-        // Update the reusable token tensor
+        // Update reusable token tensor
         self.context.queue.write_buffer(
             self.token_tensor.buffer(),
             0,
             bytemuck::cast_slice(&[token_id]),
         );
 
-        let project_start = std::time::Instant::now();
-
-        // FIX: Adjust mask length based on autoregressive mode
+        // Adjust mask length based on autoregressive mode
         let mask_len = match model.autoregressive_loop() {
             AutoregressiveLoop::Pipelined => seq_len,
-            AutoregressiveLoop::Legacy => seq_len + 1, // <-- Add this!
+            AutoregressiveLoop::Legacy => seq_len + 1,
         };
 
-        let o = self
-            .forward_and_project(model, &self.token_tensor, mask_len, cache)
-            .await;
-
-        log::info!(
-            "  └─ forward_and_project total: {:?}",
-            project_start.elapsed()
-        );
-
-        o
+        self.forward_and_project(model, &self.token_tensor, mask_len, cache).await
     }
 
     async fn prefill<'a>(
@@ -247,11 +290,10 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                     let ndarray = Array2::from_shape_vec((1, prompt_len), initial_tokens.to_vec())?;
                     GpuTensor::from_ndarray(&self.context, &ndarray)?
                 };
-                self.forward_and_project(model, &prompt_tensor, prompt_len, cache)
-                    .await
+                self.forward_and_project(model, &prompt_tensor, prompt_len, cache).await
             }
             AutoregressiveLoop::Legacy => {
-                // GPT-2: Batch process + reprocess last (matches CPU backend)
+                // GPT-2: Batch process + reprocess last
 
                 // Step 1: Process ALL tokens at once to fill cache
                 let prompt_tensor = {
@@ -260,17 +302,10 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                 };
 
                 // Run forward but don't return these logits
-                let _ = self
-                    .forward_and_project(model, &prompt_tensor, prompt_len, cache)
-                    .await?;
-                // Cache now has all prompt tokens
+                let _ = self.forward_and_project(model, &prompt_tensor, prompt_len, cache).await?;
 
-                // Step 2: Reprocess the LAST prompt token to get its logits
-                // This matches OLD generator behavior and CPU backend
+                // Step 2: Reprocess the LAST prompt token
                 let last_token = initial_tokens[prompt_len - 1];
-
-                // Update reusable token tensor
-
                 self.context.queue.write_buffer(
                     self.token_tensor.buffer(),
                     0,
@@ -278,8 +313,7 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                 );
 
                 // Forward pass with mask = prompt_len + 1
-                self.forward_and_project(model, &self.token_tensor, prompt_len + 1, cache)
-                    .await
+                self.forward_and_project(model, &self.token_tensor, prompt_len + 1, cache).await
             }
         }
     }

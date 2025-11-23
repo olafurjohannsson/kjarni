@@ -1,32 +1,86 @@
+use crate::generation::decoder::{CpuDecoderBackend, GpuDecoderBackend};
+use crate::generation::generator::DecoderGenerationBackend;
 use anyhow::{anyhow, Result};
+//
 use async_stream::try_stream;
+use edgetransformers::cache::Cache;
+use edgetransformers::models::DecoderLanguageModel;
+use edgetransformers::prelude::*;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
 use log::{debug, error};
 use ndarray::Array1;
-use rand::Rng;
+use std::sync::Arc;
 
-use edgetransformers::models::DecoderLanguageModel;
-use edgetransformers::prelude::*;
-
-// use super::{DecoderGenerationBackend, StreamedToken, TokenType}; // Assuming backend trait is in the same module
-
+use crate::generation::common::sampling::{
+    apply_repetition_penalty, sample_token, GenerationConfig,
+};
 use crate::generation::common::{StreamedToken, TokenType};
-use crate::generation::common::sampling::{GenerationConfig, apply_repetition_penalty, sample_token};
-use crate::generation::generator::DecoderGenerationBackend;
 
-
-/// A generic, model-agnostic text generator for autoregressive decoding.
-/// It is generic over a `DecoderGenerationBackend` to support different hardware.
-pub struct Generator<B: DecoderGenerationBackend> {
-    pub model: Box<dyn DecoderLanguageModel>,
-    pub backend: B,
+pub enum AnyDecoderBackend {
+    Cpu(CpuDecoderBackend),
+    Gpu(GpuDecoderBackend),
 }
 
-impl<B: DecoderGenerationBackend> Generator<B> {
-    /// Creates a new Generator with a specific model and backend.
-    pub fn new(model: Box<dyn DecoderLanguageModel>, backend: B) -> Self {
-        Self { model, backend }
+impl AnyDecoderBackend {
+    /// Prefill phase - process initial prompt tokens
+    pub async fn prefill<'a>(
+        &'a self,
+        model: &'a dyn DecoderLanguageModel,
+        initial_tokens: &[u32],
+        cache: &'a mut dyn Cache,
+    ) -> Result<Array1<f32>> {
+        match self {
+            AnyDecoderBackend::Cpu(backend) => {
+                backend.prefill(model, initial_tokens, cache).await
+            }
+            AnyDecoderBackend::Gpu(backend) => {
+                backend.prefill(model, initial_tokens, cache).await
+            }
+        }
+    }
+
+    /// Decode one token at a time during generation
+    pub async fn decode_one<'a>(
+        &'a self,
+        model: &'a dyn DecoderLanguageModel,
+        token_id: u32,
+        seq_len: usize,
+        cache: &'a mut dyn Cache,
+    ) -> Result<Array1<f32>> {
+        match self {
+            AnyDecoderBackend::Cpu(backend) => {
+                backend.decode_one(model, token_id, seq_len, cache).await
+            }
+            AnyDecoderBackend::Gpu(backend) => {
+                backend.decode_one(model, token_id, seq_len, cache).await
+            }
+        }
+    }
+}
+
+/// Text generator for autoregressive decoding
+pub struct Generator {
+    pub model: Box<dyn DecoderLanguageModel>,
+    backend: AnyDecoderBackend,
+}
+
+impl Generator {
+    pub fn new(model: Box<dyn DecoderLanguageModel>) -> Result<Self> {
+        let backend = match model.device() {
+            Device::Cpu => {
+                AnyDecoderBackend::Cpu(CpuDecoderBackend)
+            }
+            Device::Wgpu => {
+                let context = model.context()
+                    .ok_or_else(|| anyhow!("GPU model missing WgpuContext"))?;
+
+                // Clean! Uses shared pool from context
+                AnyDecoderBackend::Gpu(GpuDecoderBackend::new(context)?)
+            }
+        };
+
+        Ok(Self { model, backend })
     }
 
     /// Generates a complete string of text, collecting all streamed tokens.
@@ -42,7 +96,7 @@ impl<B: DecoderGenerationBackend> Generator<B> {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         debug!("Prompt: {}", prompt);
         let tokenizer = self.model.tokenizer();
         let mut tokens = tokenizer
@@ -69,21 +123,22 @@ impl<B: DecoderGenerationBackend> Generator<B> {
         } else {
             config.max_length
         };
+
         let cache_capacity = match self.model.autoregressive_loop() {
             edgetransformers::models::base::AutoregressiveLoop::Legacy => max_len + 1,
             edgetransformers::models::base::AutoregressiveLoop::Pipelined => max_len,
         };
+
         // Create a cache sized for the full generation length
         let mut cache = self.model.new_cache(1, cache_capacity, 0)?;
         let prefill_start = std::time::Instant::now();
 
         // --- PREFILL / PRIMING PHASE ---
         // The backend handles the Pipelined vs. Legacy logic internally.
-        let mut next_token_logits = self.backend.prefill(
-            self.model.as_ref(),
-            &tokens,
-            cache.as_mut(),
-        ).await?;
+        let mut next_token_logits = self
+            .backend
+            .prefill(self.model.as_ref(), &tokens, cache.as_mut())
+            .await?;
 
         log::info!("Prefill phase took: {:?}", prefill_start.elapsed());
 
@@ -110,7 +165,11 @@ impl<B: DecoderGenerationBackend> Generator<B> {
                 }
 
                 // Sample the next token from the logits provided by the backend
-                let processed_logits = apply_repetition_penalty(next_token_logits.clone(), &tokens, config.repetition_penalty);
+                let processed_logits = apply_repetition_penalty(
+                    next_token_logits.clone(),
+                    &tokens,
+                    config.repetition_penalty
+                );
                 let next_token = sample_token(processed_logits, &config.strategy)?;
 
                 tokens.push(next_token);
@@ -128,6 +187,7 @@ impl<B: DecoderGenerationBackend> Generator<B> {
                     id: next_token,
                     token_type: TokenType::Generated,
                 };
+
                 let decode_start = std::time::Instant::now();
                 // Get the logits for the *next* iteration from the backend
                 next_token_logits = self.backend.decode_one(

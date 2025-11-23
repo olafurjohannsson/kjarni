@@ -1,26 +1,26 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use bytemuck;
 use edgetransformers::cache::{Cache, GpuBeamKVCache};
 use edgetransformers::gpu_context::WgpuContext;
-use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
-use edgetransformers::models::base::{
-     DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
-};
+use edgetransformers::gpu_ops::GpuTensor;
+use edgetransformers::models::base::EncoderDecoderLanguageModel;
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
-use ndarray::{s, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-use crate::generation::encoder_decoder::{
-    GenerationBackend,
-    StepInput
-};
+use crate::generation::encoder_decoder::{GenerationBackend, StepInput};
 
 pub struct GpuBackend {
     pub context: Arc<WgpuContext>,
-    pub pool: Arc<Mutex<GpuTensorPool>>,
+    // Removed pool - use shared pool from context!
+}
+
+impl GpuBackend {
+    pub fn new(context: Arc<WgpuContext>) -> Result<Self> {
+        Ok(Self { context })
+    }
 }
 
 #[async_trait(?Send)]
@@ -34,10 +34,10 @@ impl GenerationBackend for GpuBackend {
         inputs: StepInput<'a, Self::Tensor>,
         cache: &'a mut dyn Cache,
     ) -> Result<Array3<f32>> {
-        // let mut pool_guard: MutexGuard<GpuTensorPool> = self.pool.lock().await;
-        // let mut frame: GpuFrameContext = GpuFrameContext::new(&self.context, pool_guard);
-        //
-        // /// Extraxt Command Encoder and encapsulated pool
+        // If you need the pool for GPU operations, get it from context:
+        // let pool = self.context.get_inference_pool();
+        // let pool_guard = pool.lock().await;
+        // let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         // let (encoder, pool) = frame.resources();
 
         let gpu_decoder = model.gpu_decoder();
@@ -51,7 +51,6 @@ impl GenerationBackend for GpuBackend {
             )
             .await?;
 
-        // frame.finish();
         Ok(decoder_output.last_hidden_state)
     }
 

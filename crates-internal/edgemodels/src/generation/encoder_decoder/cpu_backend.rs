@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytemuck;
-use edgetransformers::cache::{Cache, GpuBeamKVCache};
+use edgetransformers::cache::{Cache, CpuBeamKVCache};
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use edgetransformers::models::base::{
@@ -15,18 +15,38 @@ use tokio::sync::Mutex;
 
 use crate::generation::encoder_decoder::{
     GenerationBackend,
-    StepInput
+    StepInput,
+    GpuBackend,
+    HasShape,
+    run_beam_search,
+    find_best_beams_and_get_indices
 };
 
-pub struct GpuBackend {
-    pub context: Arc<WgpuContext>,
-    pub pool: Arc<Mutex<GpuTensorPool>>,
+/// An enum to wrap different ndarray tensor types to satisfy the GenerationBackend trait,
+/// which requires a single associated `Tensor` type.
+#[derive(Debug)]
+pub enum CpuTensor {
+    U32(Array2<u32>),
+    F32_2D(Array2<f32>),
+    F32_3D(Array3<f32>),
 }
 
+impl HasShape for CpuTensor {
+    fn shape(&self) -> &[usize] {
+        match self {
+            CpuTensor::U32(a) => a.shape(),
+            CpuTensor::F32_2D(a) => a.shape(),
+            CpuTensor::F32_3D(a) => a.shape(),
+        }
+    }
+}
+
+pub struct CpuBackend;
+
 #[async_trait(?Send)]
-impl GenerationBackend for GpuBackend {
-    type Cache = GpuBeamKVCache;
-    type Tensor = GpuTensor;
+impl GenerationBackend for CpuBackend {
+    type Cache = CpuBeamKVCache;
+    type Tensor = CpuTensor;
 
     async fn forward<'a>(
         &'a self,
@@ -34,61 +54,66 @@ impl GenerationBackend for GpuBackend {
         inputs: StepInput<'a, Self::Tensor>,
         cache: &'a mut dyn Cache,
     ) -> Result<Array3<f32>> {
-        // let mut pool_guard: MutexGuard<GpuTensorPool> = self.pool.lock().await;
-        // let mut frame: GpuFrameContext = GpuFrameContext::new(&self.context, pool_guard);
-        //
-        // /// Extraxt Command Encoder and encapsulated pool
-        // let (encoder, pool) = frame.resources();
+        // 1. Downcast the generic inputs to concrete ndarray types
+        let tokens = match inputs.tokens {
+            CpuTensor::U32(t) => t,
+            _ => return Err(anyhow!("Invalid tensor type for tokens, expected U32")),
+        };
+        let encoder_state = match inputs.encoder_state.unwrap() {
+            CpuTensor::F32_3D(s) => s,
+            _ => return Err(anyhow!("Invalid tensor type for encoder_state, expected F32_3D")),
+        };
+        let attention_mask = match inputs.attention_mask {
+            CpuTensor::F32_2D(m) => m,
+            _ => return Err(anyhow!("Invalid tensor type for attention_mask, expected F32_2D")),
+        };
 
-        let gpu_decoder = model.gpu_decoder();
-        let decoder_output = gpu_decoder
-            .forward(
-                inputs.tokens,
-                inputs.encoder_state.unwrap(),
-                None,
-                Some(inputs.attention_mask),
-                Some(cache),
-            )
+        // 2. Call the model's CPU decoder
+        let decoder_output = model
+            .decoder()
+            .forward(tokens, encoder_state, None, Some(attention_mask), Some(cache))
             .await?;
 
-        // frame.finish();
         Ok(decoder_output.last_hidden_state)
     }
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor> {
-        let tokens_ndarray =
-            Array2::from_shape_vec((num_beams, tokens.len() / num_beams), tokens.to_vec())?;
-        GpuTensor::from_ndarray(&self.context, &tokens_ndarray)
+        let seq_len = if num_beams > 0 { tokens.len() / num_beams } else { 0 };
+        let tokens_ndarray = Array2::from_shape_vec((num_beams, seq_len), tokens.to_vec())?;
+        Ok(CpuTensor::U32(tokens_ndarray))
     }
 
     fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_tokens: &[u32]) -> Result<()> {
-        let new_tokens_bytes: &[u8] = bytemuck::cast_slice(new_tokens);
-        self.context
-            .queue
-            .write_buffer(tensor.buffer(), 0, new_tokens_bytes);
+        let current_tensor = match tensor {
+            CpuTensor::U32(t) => t,
+            _ => return Err(anyhow!("Invalid tensor type for update_token_tensor, expected U32")),
+        };
+        // The new tokens represent the next single token for each beam.
+        let new_tokens_ndarray =
+            Array2::from_shape_vec((new_tokens.len(), 1), new_tokens.to_vec())?;
+        *current_tensor = new_tokens_ndarray;
         Ok(())
     }
 
     fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor> {
-        GpuTensor::from_ndarray(&self.context, &encoder_output.last_hidden_state)
+        // The encoder output is already on the CPU, just clone and wrap it.
+        Ok(CpuTensor::F32_3D(encoder_output.last_hidden_state.clone()))
     }
 
     fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor> {
-        let mask_cpu: Array2<f32> = Array2::ones((num_beams, seq_len));
-        GpuTensor::from_ndarray(&self.context, &mask_cpu)
+        let mask: Array2<f32> = Array2::ones((num_beams, seq_len));
+        Ok(CpuTensor::F32_2D(mask))
     }
 
     fn reorder_cache(&self, cache: &mut dyn Cache, indices: &[usize]) -> Result<()> {
-        let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
-        let indices_ndarray = Array1::from_vec(indices.iter().map(|&i| i as u32).collect());
-        let indices_gpu = GpuTensor::from_ndarray(&self.context, &indices_ndarray)?;
+        let cpu_cache = cache
+            .as_any_mut()
+            .downcast_mut::<CpuBeamKVCache>() // <-- Change this to CpuBeamKVCache
+            .ok_or_else(|| anyhow!("Failed to downcast to CpuBeamKVCache for reordering"))?;
 
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&Default::default());
-        gpu_cache.reorder(&mut encoder, &indices_gpu);
-        self.context.queue.submit(Some(encoder.finish()));
+        // This is now a simple, efficient call.
+        cpu_cache.reorder(indices);
+
         Ok(())
     }
 }
