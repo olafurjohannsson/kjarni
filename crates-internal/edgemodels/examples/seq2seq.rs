@@ -1,7 +1,11 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
-use edgemodels::generation::seq2seq::Seq2SeqGenerator; // Your new generator
-use edgemodels::generation::seq2seq2::Seq2SeqGenerator as Seq2SeqGeneratorNew; // Your new generator
+
+// use edgemodels::generation::seq2seq::Seq2SeqGenerator; // Your new generator
+// use edgemodels::generation::seq2seq2::Seq2SeqGenerator as Seq2SeqGeneratorNew; // Your new generator
+use edgemodels::generation::encoder_decoder::Seq2SeqGenerator;
+// use edgemodels::generation::seq2seq::Seq2SeqGenerator as Seq2SeqGeneratorOld;
+
 use edgemodels::seq2seq::{AnySeq2SeqModel, BartConfig, Seq2SeqModel, TaskSpecificParams};
 use edgetransformers::models::base::GenerationConfig;
 use edgetransformers::{Device, ModelType, WgpuContext};
@@ -18,8 +22,8 @@ async fn main() -> Result<()> {
     let any_model = AnySeq2SeqModel::from_registry(
         ModelType::DistilBartCnn, 
         None,
-        Device::Wgpu,
-        Some(ctx),
+        Device::Cpu,
+        None, //Some(ctx),
     )
     .await?;
     
@@ -27,7 +31,7 @@ async fn main() -> Result<()> {
         AnySeq2SeqModel::Bart(m) => m,
     };
 
-    let generator = Seq2SeqGeneratorNew::new(Box::new(model));
+    let generator = Seq2SeqGenerator::new(Box::new(model));
 
     // Get default config
     let mut generation_config = generator.model.get_default_generation_config();

@@ -3,6 +3,7 @@ use crate::encoder::TransformerEncoder;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
 };
+use crate::cache::CpuBeamKVCache;
 use crate::traits::{
     CrossAttentionDecoderArchitecture, DecoderArchitecture, EncoderArchitecture, LanguageModelConfig,
     LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
@@ -186,7 +187,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         // 1. Embed the decoder input tokens and apply layer norm.
         hidden_states = self.decoder_embed_layer_norm.forward_3d(&hidden_states);
 
-        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
+        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuBeamKVCache>());
         let mut new_key_values = Vec::with_capacity(self.decoder_layers.len());
 
         // 2. Iterate through the decoder layers.
@@ -215,7 +216,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 cache.update(layer_idx, &k, &v)?;
             }
             // cache.increment_len(seq_len);
-            cache.set_seq_length(total_len);
+            // cache.set_seq_length(total_len);
         }
 
         Ok(DecoderOutput {

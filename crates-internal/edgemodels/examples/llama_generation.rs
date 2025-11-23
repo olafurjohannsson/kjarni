@@ -1,8 +1,8 @@
 // In your main application or examples folder
 
 use edgemodels::generation::Generator;
-use edgemodels::text_generation::Gpt2Model; // The new, refactored struct
-use edgemodels::text_generation::LlamaModel;
+
+use edgemodels::models::llama::model::LlamaModel;
 // use edgemodels::text_generation::TextGenerator;
 use edgetransformers::WgpuContext;
 use edgetransformers::models::base::{DecodingStrategy, GenerationConfig};

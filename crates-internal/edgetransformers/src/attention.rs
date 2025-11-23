@@ -165,7 +165,68 @@ impl MultiHeadAttention {
 
         Ok(context_reshaped)
     }
+/// Performs self-attention for a decoder layer, handling the KV cache.
+    ///
+    /// This is a specialized version of `forward` for decoder self-attention blocks.
+    /// It projects Q, K, and V from the same `hidden_states` input, concatenates the
+    /// new K/V with the cached K/V, performs causal attention, and returns the
+    /// attention output along with the new K/V states to be appended to the cache.
+    ///
+    /// # Arguments
+    /// * `hidden_states`: The input from the previous layer. Shape: `[batch, seq_len, hidden_size]`.
+    /// * `attention_mask`: Padding mask. Shape: `[batch, total_seq_len]`.
+    /// * `cached_kv`: A tuple of `(key_cache, value_cache)` from previous steps.
+    ///
+    /// # Returns
+    /// A tuple of `(attention_output, new_key_state, new_value_state)`.
+    pub fn forward_self_attn(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: Option<&Array2<f32>>,
+        cached_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
+    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        // 1. Project Q, K, V from the input hidden_states
+        let q_proj = matmul_3d_2d(hidden_states, &self.q_weight) + &self.q_bias;
+        let new_k = matmul_3d_2d(hidden_states, &self.k_weight) + &self.k_bias;
+        let new_v = matmul_3d_2d(hidden_states, &self.v_weight) + &self.v_bias;
 
+        // 2. Combine new K/V with the cached K/V from previous steps
+        let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
+            // --- THE FIX IS HERE ---
+            // After concatenating, we force the result into a standard, contiguous
+            // memory layout. This resolves the `IncompatibleLayout` error.
+            let full_k = ndarray::concatenate![Axis(1), cached_k, new_k.view()]
+                .as_standard_layout()
+                .to_owned();
+            let full_v = ndarray::concatenate![Axis(1), cached_v, new_v.view()]
+                .as_standard_layout()
+                .to_owned();
+            // --- END FIX ---
+            (full_k, full_v)
+        } else {
+            // If no cache, the full K/V is just the new K/V (which is already contiguous)
+            (new_k.clone(), new_v.clone())
+        };
+
+        // 3. Determine the position offset for the causal mask
+        let position_offset = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
+
+        // 4. Compute attention using the now-contiguous full K/V history
+        let context_reshaped = self.attend(
+            &q_proj,
+            &full_k,
+            &full_v,
+            attention_mask,
+            true, // Self-attention in a decoder is always causal
+            position_offset,
+        )?;
+
+        // 5. Final output projection
+        let output = matmul_3d_2d(&context_reshaped, &self.output_weight) + &self.output_bias;
+
+        // 6. Return the output and the *new* K/V states
+        Ok((output, new_k, new_v))
+    }
     pub fn forward_with_cache(
         &self,
         query: &Array3<f32>,

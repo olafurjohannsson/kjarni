@@ -6,11 +6,14 @@
 //! The actual text generation is handled by the generic `Generator` struct,
 //! which can operate on any model that implements the `DecoderLanguageModel` trait.
 
-use crate::text_generation::configs::Gpt2Config;
+use crate::models::gpt2::config::Gpt2Config;
+use crate::models::gpt2::gpu_decoder::Gpt2GpuDecoder;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
-use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy};
+use edgetransformers::gpu_ops::GpuTensor;
+use edgetransformers::models::base::AutoregressiveLoop;
+use edgetransformers::models::base::GpuDecoder;
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
@@ -26,12 +29,14 @@ use tokenizers::Tokenizer;
 /// This struct holds the model's components (decoder, tokenizer, config) but
 /// delegates the actual text generation task to the `Generator`.
 pub struct Gpt2Model {
-    decoder: TransformerDecoder,
+    decoder: Option<TransformerDecoder>,
+    gpu_decoder: Option<Gpt2GpuDecoder>,
     tokenizer: Tokenizer,
     config: Arc<Gpt2Config>,
-    /// The language modeling head, transposed for efficient projection.
-    /// Shape: `[hidden_size, vocab_size]`.
     lm_head: Array2<f32>,
+    gpu_lm_head_transposed: Option<GpuTensor>,
+    device: Device,
+    context: Option<Arc<WgpuContext>>,
 }
 
 impl Gpt2Model {
@@ -96,21 +101,13 @@ impl Gpt2Model {
             Arc::new(cfg)
         };
 
-        // The underlying generic decoder, which can be CPU or GPU based.
-        let decoder = TransformerDecoder::new(&weights, config_arc.clone(), device, context, None)?;
-
         // GPT-2 shares weights between embeddings and the final layer.
         // We load them and transpose for the matmul in the projection step.
         let lm_head = weights
             .get_array2(config_arc.get_lm_head_name())?
             .t()
             .to_owned();
-        println!(
-            "[NEW MODEL LOADING] LM Head Mean: {}",
-            lm_head.mean().unwrap()
-        );
-        println!("[NEW MODEL LOADING] LM Head Std Dev: {}", lm_head.std(0.0));
-        // Downcast the Arc back to the concrete Gpt2Config type for storage.
+
         let config = config_arc
             .as_any()
             .downcast_ref::<Gpt2Config>()
@@ -118,26 +115,66 @@ impl Gpt2Model {
             .map(Arc::new)
             .ok_or_else(|| anyhow!("Failed to downcast config to Gpt2Config"))?;
 
-        Ok(Self {
-            decoder,
-            tokenizer,
-            config,
-            lm_head,
-        })
+        // Split CPU/GPU paths
+        match device {
+            Device::Cpu => {
+                log::info!("Building CPU decoder...");
+                let decoder = TransformerDecoder::new(
+                    &weights, config_arc, device, None, None, // No RoPE for GPT-2
+                )?;
+
+                Ok(Self {
+                    decoder: Some(decoder),
+                    gpu_decoder: None,
+                    tokenizer,
+                    config,
+                    lm_head,
+                    gpu_lm_head_transposed: None,
+                    device,
+                    context: None,
+                })
+            }
+            Device::Wgpu => {
+                log::info!("Building GPU decoder...");
+                let ctx = context.ok_or_else(|| anyhow!("GPU device requires context"))?;
+
+                ctx.print_memory_usage();
+
+                let gpu_decoder = Gpt2GpuDecoder::new(&ctx, &weights, config.clone())?;
+
+                // lm_head already transposed
+                let gpu_lm_head_transposed =
+                    Some(GpuTensor::from_ndarray(&ctx, &lm_head)?);
+
+                log::info!("✓ GPU model loaded successfully");
+                ctx.print_memory_usage();
+
+                Ok(Self {
+                    decoder: None,
+                    gpu_decoder: Some(gpu_decoder),
+                    tokenizer,
+                    config,
+                    lm_head,
+                    gpu_lm_head_transposed,
+                    device,
+                    context: Some(ctx),
+                })
+            }
+        }
     }
 }
-
 // --- Trait Implementations ---
 // These implementations make `Gpt2Model` compatible with the generic `Generator`.
 
 impl TransformerModel for Gpt2Model {
     fn device(&self) -> Device {
-        self.decoder.device()
+        self.device
     }
     fn context(&self) -> Option<Arc<WgpuContext>> {
-        self.decoder.context()
+        let ctx = self.context.clone();
+        ctx
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -155,7 +192,12 @@ impl LanguageModel for Gpt2Model {
     fn pad_token_id(&self) -> Option<u32> {
         Some(50256)
     }
-    fn new_cache(&self, batch_size: usize, max_len: usize, _num_beams: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(
+        &self,
+        batch_size: usize,
+        max_len: usize,
+        _num_beams: usize,
+    ) -> Result<Box<dyn Cache>> {
         Ok(match self.device() {
             Device::Cpu => Box::new(CpuKVCache::new(
                 self.num_layers(),
@@ -184,13 +226,27 @@ impl LanguageModel for Gpt2Model {
 #[async_trait]
 impl DecoderLanguageModel for Gpt2Model {
     fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput> {
-        &self.decoder
+        self.decoder
+            .as_ref()
+            .expect("CPU decoder not initialized - use Device::Cpu")
     }
     fn lm_head(&self) -> &Array2<f32> {
         &self.lm_head
     }
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Legacy
+    }
+    fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
+        self.gpu_decoder
+            .as_ref()
+            .map(|d| d as &(dyn GpuDecoder + Send + Sync))
+            .ok_or_else(|| anyhow!("Not a GPU model - use Device::Wgpu"))
+    }
+
+    fn gpu_lm_head_transposed(&self) -> Result<&GpuTensor> {
+        self.gpu_lm_head_transposed
+            .as_ref()
+            .ok_or_else(|| anyhow!("Not a GPU model"))
     }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         assert_eq!(

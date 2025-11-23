@@ -3,7 +3,8 @@ use edgetransformers::cache::GpuBeamKVCache;
 use edgetransformers::gpu_ops::GpuTensor;
 use edgetransformers::models::base::EncoderDecoderLanguageModel;
 // Or wherever you put the trait
-use edgetransformers::models::base::{BeamHypothesis, DecodingStrategy, GenerationConfig};
+use edgetransformers::models::base::{DecodingStrategy, GenerationConfig};
+use crate::generation::encoder_decoder::BeamHypothesis;
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
 use ndarray::s;

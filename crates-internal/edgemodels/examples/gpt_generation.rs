@@ -1,7 +1,7 @@
 // In your main application or examples folder
 
 use edgemodels::generation::Generator;
-use edgemodels::text_generation::Gpt2Model; // The new, refactored struct
+use edgemodels::models::gpt2::Gpt2Model; // The new, refactored struct
 // use edgemodels::text_generation::LLamaModel2;
 // use edgemodels::text_generation::TextGenerator; 
 use edgetransformers::WgpuContext;
@@ -20,8 +20,8 @@ async fn main() -> anyhow::Result<()> {
     let gpt2_model = Gpt2Model::from_registry(
         ModelType::DistilGpt2,
         None, // Use default cache dir
-        Device::Wgpu,
-        Some(ctx), // No WGPU context needed for CPU
+        Device::Cpu,
+        None, //Some(ctx), // No WGPU context needed for CPU
     )
     .await?;
 

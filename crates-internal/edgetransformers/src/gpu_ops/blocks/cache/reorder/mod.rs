@@ -158,3 +158,6 @@ impl GpuReorderCache {
         pass.dispatch_workgroups(wg_x, wg_y, wg_z);
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -4,8 +4,11 @@ use anyhow::{anyhow, Result};
 use edgemodels::cross_encoder::CrossEncoder;
 use edgemodels::sentence_encoder::SentenceEncoder;
 use edgemodels::seq2seq::{Seq2SeqModel, AnySeq2SeqModel};
-use edgemodels::generation::{Generator, seq2seq::Seq2SeqGenerator};
-use edgemodels::text_generation::{Gpt2Model, LlamaModel};
+use edgemodels::generation::{Generator, encoder_decoder::Seq2SeqGenerator};
+use edgemodels::models::{
+    gpt2::Gpt2Model,
+    llama::model::LlamaModel
+};
 use edgetransformers::models::ModelType;
 use edgetransformers::models::base::{EncoderDecoderLanguageModel, DecoderLanguageModel, EncoderLanguageModel};
 use edgetransformers::prelude::*;

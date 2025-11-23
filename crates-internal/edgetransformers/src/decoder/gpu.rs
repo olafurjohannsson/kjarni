@@ -319,7 +319,7 @@ impl TransformerModel for GpuTransformerDecoder {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -341,25 +341,32 @@ impl Decoder for GpuTransformerDecoder {
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
         let seq_len = input.shape()[1];
 
-        // let initial_embeddings_cpu = self.cpu_embeddings.forward(
-        //     input,
-        //     None,
-        //     position_offset,
-        //     self.config.scale_embeddings(),
-        // );
-        // let mut hidden_states = GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
+        let use_cpu_embeddings = false;
 
-        let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
+        let mut hidden_states = if use_cpu_embeddings {
+            let initial_embeddings_cpu = self.cpu_embeddings.forward(
+                input,
+                None,
+                position_offset,
+                self.config.scale_embeddings(),
+            );
+            let hidden_states =
+                GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?;
+            hidden_states
+        } else {
+            let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input)?;
 
-        let mut hidden_states = self.embeddings.encode(
-            encoder,
-            &self.embedding_weights,
-            &input_ids_gpu,
-            None,
-            position_offset,
-            self.config.as_ref(),
-            pool,
-        )?;
+            let hidden_states = self.embeddings.encode(
+                encoder,
+                &self.embedding_weights,
+                &input_ids_gpu,
+                None,
+                position_offset,
+                self.config.as_ref(),
+                pool,
+            )?;
+            hidden_states
+        };
 
         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
 

@@ -54,6 +54,7 @@ futures-util = "0.3.31"
 futures-core = "0.3.0"
 async-stream = "0.3.6"
 libm = "0.2.0"
+gguf-rs = "0.1.4"
 
 [profile.release]
 opt-level = 3

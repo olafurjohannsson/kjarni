@@ -3,8 +3,9 @@
 mod cpu;
 mod gpu;
 mod gpu_beam;
-
+mod cpu_beam;
 pub use gpu_beam::GpuBeamKVCache;
+pub use cpu_beam::CpuBeamKVCache;
 pub use cpu::CpuKVCache;
 pub use gpu::GpuKVCache;
 

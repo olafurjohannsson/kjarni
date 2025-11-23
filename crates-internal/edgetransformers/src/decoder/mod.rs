@@ -10,6 +10,7 @@
 
 mod cpu;
 mod gpu;
+mod traits;
 
 use crate::gpu_context::WgpuContext;
 use crate::traits::{Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
@@ -22,6 +23,7 @@ pub use gpu::GpuTransformerDecoder;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 use crate::rope::RoPE;
+pub use traits::DecoderGenerationBackend;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///

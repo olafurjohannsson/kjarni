@@ -28,6 +28,7 @@ pub struct DecoderCrossAttentionLayer {
     pub ffn_layer_norm: LayerNorm,
 }
 
+
 impl DecoderCrossAttentionLayer {
     pub fn forward(
         &self,
@@ -37,18 +38,18 @@ impl DecoderCrossAttentionLayer {
         cross_attention_mask: Option<&Array2<f32>>,
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // Step 1: Self-Attention
+        //  Self-Attention
         let (mut hidden_states, (new_k, new_v)) =
             self.self_attention_block(hidden_states, self_attention_mask, past_kv)?;
 
-        // Step 2: Cross-Attention
+        // Cross-Attention
         hidden_states = self.cross_attention_block(
             &hidden_states,
             encoder_hidden_states,
             cross_attention_mask,
         )?;
 
-        // Step 3: Feed-Forward
+        // Feed-Forward
         hidden_states = self.feed_forward_block(&hidden_states)?;
         Ok((hidden_states, (new_k, new_v)))
     }
@@ -58,26 +59,14 @@ impl DecoderCrossAttentionLayer {
         self_attention_mask: Option<&Array2<f32>>,
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        println!("\n--- [CPU] Self-Attention Block ---");
-        println!("[CPU] [Self-Attn] Input            : shape={:?}, data={:?}", hidden_states.shape(), hidden_states.slice(s![0, 0, 0..8]));
-        
         let residual = hidden_states.clone();
-        let (attn_output, new_k, new_v) = self.self_attn.forward_with_cache(
+        let (attn_output, new_k, new_v) = self.self_attn.forward_self_attn(
             hidden_states,
-            None,
             self_attention_mask,
-            true,
             past_kv,
-            None,
         )?;
-        println!("[CPU] [Self-Attn] Sub-layer Output   : shape={:?}, data={:?}", attn_output.shape(), attn_output.slice(s![0, 0, 0..8]));
-
         let hidden_states_after_add = residual + attn_output;
-        println!("[CPU] [Self-Attn] After Add        : shape={:?}, data={:?}", hidden_states_after_add.shape(), hidden_states_after_add.slice(s![0, 0, 0..8]));
-        
         let final_output = self.self_attn_layer_norm.forward_3d(&hidden_states_after_add);
-        println!("[CPU] [Self-Attn] Final Output (Norm): shape={:?}, data={:?}", final_output.shape(), final_output.slice(s![0, 0, 0..8]));
-        
         Ok((final_output, (new_k, new_v)))
     }
 
@@ -87,9 +76,6 @@ impl DecoderCrossAttentionLayer {
         encoder_hidden_states: &Array3<f32>,
         cross_attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
-        println!("\n--- [CPU] Cross-Attention Block ---");
-        println!("[CPU] [Cross-Attn] Input           : shape={:?}, data={:?}", hidden_states.shape(), hidden_states.slice(s![0, 0, 0..8]));
-
         let residual = hidden_states.clone();
         let (cross_attn_output, _, _) = self.cross_attn.forward_with_cache(
             hidden_states,
@@ -99,31 +85,16 @@ impl DecoderCrossAttentionLayer {
             None,
             None,
         )?;
-        println!("[CPU] [Cross-Attn] Sub-layer Output  : shape={:?}, data={:?}", cross_attn_output.shape(), cross_attn_output.slice(s![0, 0, 0..8]));
-
         let hidden_states_after_add = residual + cross_attn_output;
-        println!("[CPU] [Cross-Attn] After Add       : shape={:?}, data={:?}", hidden_states_after_add.shape(), hidden_states_after_add.slice(s![0, 0, 0..8]));
-
         let final_output = self.cross_attn_layer_norm.forward_3d(&hidden_states_after_add);
-        println!("[CPU] [Cross-Attn] Final Output (Norm): shape={:?}, data={:?}", final_output.shape(), final_output.slice(s![0, 0, 0..8]));
-        
         Ok(final_output)
     }
 
     pub fn feed_forward_block(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        println!("\n--- [CPU] Feed-Forward Block ---");
-        println!("[CPU] [FFN] Input            : shape={:?}, data={:?}", hidden_states.shape(), hidden_states.slice(s![0, 0, 0..8]));
-
         let residual = hidden_states.clone();
         let ffn_output = self.feedforward.forward(hidden_states)?;
-        println!("[CPU] [FFN] Sub-layer Output   : shape={:?}, data={:?}", ffn_output.shape(), ffn_output.slice(s![0, 0, 0..8]));
-
         let hidden_states_after_add = residual + ffn_output;
-        println!("[CPU] [FFN] After Add        : shape={:?}, data={:?}", hidden_states_after_add.shape(), hidden_states_after_add.slice(s![0, 0, 0..8]));
-
         let final_output = self.ffn_layer_norm.forward_3d(&hidden_states_after_add);
-        println!("[CPU] [FFN] Final Output (Norm): shape={:?}, data={:?}", final_output.shape(), final_output.slice(s![0, 0, 0..8]));
-        
         Ok(final_output)
     }
 }

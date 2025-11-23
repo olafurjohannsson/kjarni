@@ -1,4 +1,4 @@
-use crate::text_generation::{Gpt2Config, Gpt2Model};
+use crate::models::gpt2::{Gpt2Config, Gpt2Model};
 use crate::generation::Generator;
 use anyhow::Result;
 use edgetransformers::cache::{CpuKVCache, GpuKVCache};

@@ -2,7 +2,7 @@ use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate roo
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::{Result, anyhow};
-use ndarray::{Array, Array2, Array3, Array4, Dimension};
+use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
 use std::fmt;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -400,6 +400,18 @@ impl GpuTensor {
         Ok(dst_tensor)
     }
 
+    pub async fn to_ndarray_1d<A>(&self) -> Result<Array1<A>>
+    where
+        A: GpuDType + Copy,
+    {
+        anyhow::ensure!(self.rank() == 1, "Tensor rank is not 1");
+        let raw_data = self.read_raw_data().await?;
+        let data_slice: &[A] = bytemuck::cast_slice(&raw_data);
+        Ok(Array1::from_shape_vec(
+            (self.shape[0]),
+            data_slice.to_vec(),
+        )?)
+    }
 
 
     pub async fn to_ndarray_2d<A>(&self) -> Result<Array2<A>>
@@ -475,6 +487,7 @@ impl GpuTensor {
 
         // This is a critical step to ensure the submission is processed.
         device.poll(wgpu::PollType::wait_indefinitely());
+        // device.poll(wgpu::PollType::wai);
 
         // Wait for the map_async callback to complete
         rx.receive()

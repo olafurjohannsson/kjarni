@@ -140,6 +140,18 @@ impl GpuKVCache {
         Some((cache_k.clone(), cache_v.clone()))
     }
 
+    pub fn get_seq_length(&self) -> usize {
+        self.seq_length
+    }
+pub fn max_seq_len(&self) -> usize {
+        // The cache is consistent, so we can check the shape of the first k_tensor.
+        // The shape is [Batch, Heads, Capacity, HeadDim]. We want the 3rd dimension (index 2).
+        if self.k_tensors.is_empty() {
+            0
+        } else {
+            self.k_tensors[0].shape()[2]
+        }
+    }
     /// Increments the internal length counter after a generation step.
     pub fn increment_len(&mut self, new_tokens_len: usize) {
         self.seq_length += new_tokens_len;

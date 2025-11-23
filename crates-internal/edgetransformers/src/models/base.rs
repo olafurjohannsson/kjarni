@@ -183,11 +183,7 @@ impl Default for GenerationConfig {
         }
     }
 }
-pub struct BeamHypothesis {
-    pub tokens: Vec<u32>,
-    pub score: f32,
-    // pub cache: Box<dyn Cache>,
-}
+
 
 // A struct to hold all the inputs for a single generation step.
 // This keeps the `forward` signature clean.
@@ -534,6 +530,22 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
     fn final_logits_bias(&self) -> Option<&Array1<f32>>;
 }
 
+#[async_trait(?Send)]
+pub trait GpuDecoder: Send + Sync {
+    /// Performs a forward pass on the GPU.
+    async fn forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder, // <-- Pass in the encoder
+        pool: &mut crate::gpu_ops::GpuTensorPool,    // <-- Pass in the pool
+        input_ids: &GpuTensor,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        cache: Option<&mut crate::cache::GpuKVCache>,
+        encoder_hidden_states: Option<&GpuTensor>, 
+    ) -> Result<GpuTensor>; // Returns the final hidden states as a GpuTensor
+}
+
+
 /// Trait for decoder-only language models (GPT-2, GPT-3, Llama, etc.)
 ///
 /// These models generate text autoregressively.
@@ -541,6 +553,23 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 pub trait DecoderLanguageModel: LanguageModel {
     /// Get the decoder backend
     fn decoder(&self) -> &dyn Decoder<Input=Array2<u32>, Output=DecoderOutput>;
+
+
+/// Get the GPU-native decoder.
+    /// Returns an error if the model was not loaded with GPU support.
+fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
+        Err(anyhow::anyhow!("This model does not have a GPU decoder implementation."))
+    }
+
+    /// Get the GPU tensor for the LM head weights.
+    /// Returns an error if the model was not loaded with GPU support.
+    fn gpu_lm_head(&self) -> Result<&GpuTensor> {
+        Err(anyhow!("This model does not have GPU LM head weights."))
+    }
+    /// Get the PRE-TRANSPOSED GPU tensor for the LM head weights.
+    fn gpu_lm_head_transposed(&self) -> Result<&GpuTensor> {
+        Err(anyhow!("This model does not have transposed GPU LM head weights."))
+    }
 
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;

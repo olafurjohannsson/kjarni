@@ -343,13 +343,7 @@ pub async fn forward_llama_with_debug(
     let cpu_ln2_out = cpu_layer.ffn_layer_norm.forward(&cpu_residual_2);
     let cpu_ffn_out = cpu_layer.feedforward.forward(&cpu_ln2_out)?;
     let cpu_final_output = &cpu_residual_2 + &cpu_ffn_out;
-
-    // --- GPU Path with Intermediate Checks ---
-    // MODIFIED: Create the encoder inside the function
     let mut encoder = context.device.create_command_encoder(&Default::default());
-
-    // --- 1. Pre-Norm ---
-    log::debug!("--- Step 1: Pre-Attention Norm ---");
     let residual_gpu = hidden_states_gpu;
     let ln1_out_gpu = temp.get(hidden_states_gpu.shape().to_vec());
     gpu_layer.self_attn_norm.encode(
@@ -362,10 +356,6 @@ pub async fn forward_llama_with_debug(
     context.device.poll(wgpu::PollType::wait_indefinitely());
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_ln1_out, &ln1_out_gpu, "ln1_out", tolerance).await;
-    log::info!("✓ Step 1: Pre-Attention Norm output matches CPU.");
-
-    // --- 2. Attention Block ---
-    log::debug!("--- Step 2: Attention Block ---");
     let q_proj = gpu_layer.self_attn.project(
         &mut encoder,
         &ln1_out_gpu,
@@ -410,10 +400,6 @@ pub async fn forward_llama_with_debug(
     context.device.poll(wgpu::PollType::wait_indefinitely());
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_attn_out, &attn_out_gpu, "attn_out", tolerance).await;
-    log::info!("✓ Step 2: Attention output matches CPU.");
-
-    // --- 3. First Residual Connection ---
-    log::debug!("--- Step 3: First Residual Connection ---");
     let attn_block_output_gpu = temp.get(hidden_states_gpu.shape().to_vec());
     gpu_layer.add.encode(
         &mut encoder,
@@ -430,10 +416,6 @@ pub async fn forward_llama_with_debug(
         tolerance,
     )
     .await;
-    log::info!("✓ Step 3: First residual connection output matches CPU.");
-
-    // --- 4. Pre-FFN Norm ---
-    log::debug!("--- Step 4: Pre-FFN Norm ---");
     let residual_2_gpu = &attn_block_output_gpu;
     let ln2_out_gpu = temp.get(residual_2_gpu.shape().to_vec());
     gpu_layer.ffn_norm.encode(

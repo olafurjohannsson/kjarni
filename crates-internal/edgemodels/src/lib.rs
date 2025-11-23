@@ -5,10 +5,10 @@
 pub mod tokenizer;
 pub mod seq2seq;
 
-pub mod text_generation;
 pub mod sentence_encoder;
 pub mod cross_encoder;
-mod generation2;
+pub mod models;
+pub mod memory_estimate;
 pub mod generation;
 
 pub use sentence_encoder::SentenceEncoder;

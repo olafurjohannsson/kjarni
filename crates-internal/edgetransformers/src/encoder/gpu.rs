@@ -241,3 +241,5 @@ impl Encoder for GpuTransformerEncoder {
         Ok(output.last_hidden_state)
     }
 }
+
+

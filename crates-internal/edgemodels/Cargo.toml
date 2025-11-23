@@ -37,6 +37,8 @@ futures-util = { workspace = true }
 futures-core = { workspace = true }
 async-stream = { workspace = true }
 bytemuck = { workspace = true }
+wgpu = { workspace = true }
+gguf-rs = { workspace = true }
 lru = "0.12.3"
 
 
