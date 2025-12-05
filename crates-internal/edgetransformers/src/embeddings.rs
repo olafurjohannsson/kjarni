@@ -253,7 +253,7 @@ mod tests {
     #[tokio::test]
 async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
     // --- 1. Setup Common Data and Config ---
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let config = TestConfig {
         extra_pos_embeddings: 2,
         scale_embed: false,
@@ -330,7 +330,7 @@ async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
     #[tokio::test]
     async fn test_gpu_vs_cpu_embeddings_parity_no_token_type_ids() -> Result<()> {
         // --- 1. Setup Common Data and Config ---
-        let context = Arc::new(WgpuContext::new().await?);
+        let context = WgpuContext::new().await?;
         let config = TestConfig {
             extra_pos_embeddings: 2,
             scale_embed: false,

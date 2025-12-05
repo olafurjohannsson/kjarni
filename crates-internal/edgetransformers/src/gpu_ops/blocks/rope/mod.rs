@@ -191,18 +191,26 @@ impl GpuRoPE {
                     wgpu::BindGroupEntry { binding: 4, resource: tensor_out.buffer().as_entire_binding() },
                 ],
             });
+        self.context.profiler.profile(encoder, "RoPE Rotation", |pass| {
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("RoPE Pass"),
-            timestamp_writes: None,
+            let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
+            let workgroups_y = seq_len as u32;
+            let workgroups_z = (batch_size * num_heads) as u32;
+            pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
         });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        //     label: Some("RoPE Pass"),
+        //     timestamp_writes: None,
+        // });
+        // compute_pass.set_pipeline(&self.pipeline);
+        // compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
-        let workgroups_y = seq_len as u32;
-        let workgroups_z = (batch_size * num_heads) as u32;
-        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+        // let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
+        // let workgroups_y = seq_len as u32;
+        // let workgroups_z = (batch_size * num_heads) as u32;
+        // compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
     }
 }
 

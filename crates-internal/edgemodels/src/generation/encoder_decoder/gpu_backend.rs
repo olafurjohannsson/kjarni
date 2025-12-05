@@ -48,6 +48,7 @@ impl GenerationBackend for GpuBackend {
                 None,
                 Some(inputs.attention_mask),
                 Some(cache),
+                None,
             )
             .await?;
 
@@ -68,7 +69,7 @@ impl GenerationBackend for GpuBackend {
         Ok(())
     }
 
-    fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor> {
+    fn prepare_encoder_state(&self, _model: &dyn EncoderDecoderLanguageModel, encoder_output: &EncoderOutput) -> Result<Self::Tensor> {
         GpuTensor::from_ndarray(&self.context, &encoder_output.last_hidden_state)
     }
 

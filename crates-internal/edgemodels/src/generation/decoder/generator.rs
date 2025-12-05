@@ -1,6 +1,7 @@
 use crate::generation::decoder::{CpuDecoderBackend, GpuDecoderBackend};
-use crate::generation::generator::DecoderGenerationBackend;
-use anyhow::{anyhow, Result};
+// use crate::generation::generator::DecoderGenerationBackend;
+use edgetransformers::decoder::DecoderGenerationBackend;
+use anyhow::{Result, anyhow};
 //
 use async_stream::try_stream;
 use edgetransformers::cache::Cache;
@@ -13,7 +14,7 @@ use ndarray::Array1;
 use std::sync::Arc;
 
 use crate::generation::common::sampling::{
-    apply_repetition_penalty, sample_token, GenerationConfig,
+    GenerationConfig, apply_repetition_penalty, sample_token,
 };
 use crate::generation::common::{StreamedToken, TokenType};
 
@@ -31,12 +32,8 @@ impl AnyDecoderBackend {
         cache: &'a mut dyn Cache,
     ) -> Result<Array1<f32>> {
         match self {
-            AnyDecoderBackend::Cpu(backend) => {
-                backend.prefill(model, initial_tokens, cache).await
-            }
-            AnyDecoderBackend::Gpu(backend) => {
-                backend.prefill(model, initial_tokens, cache).await
-            }
+            AnyDecoderBackend::Cpu(backend) => backend.prefill(model, initial_tokens, cache).await,
+            AnyDecoderBackend::Gpu(backend) => backend.prefill(model, initial_tokens, cache).await,
         }
     }
 
@@ -68,15 +65,14 @@ pub struct Generator {
 impl Generator {
     pub fn new(model: Box<dyn DecoderLanguageModel>) -> Result<Self> {
         let backend = match model.device() {
-            Device::Cpu => {
-                AnyDecoderBackend::Cpu(CpuDecoderBackend)
-            }
+            Device::Cpu => AnyDecoderBackend::Cpu(CpuDecoderBackend),
             Device::Wgpu => {
-                let context = model.context()
+                let context = model
+                    .context()
                     .ok_or_else(|| anyhow!("GPU model missing WgpuContext"))?;
 
                 // Clean! Uses shared pool from context
-                AnyDecoderBackend::Gpu(GpuDecoderBackend::new(context)?)
+                AnyDecoderBackend::Gpu(GpuDecoderBackend::new(context, model.as_ref())?)
             }
         };
 
@@ -96,7 +92,7 @@ impl Generator {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
         debug!("Prompt: {}", prompt);
         let tokenizer = self.model.tokenizer();
         let mut tokens = tokenizer
@@ -156,14 +152,17 @@ impl Generator {
                     token_type: TokenType::Prompt,
                 };
             }
-
+            let mut total_decode_time = std::time::Duration::new(0, 0);
+            let mut tokens_generated = 0;
+            let start_time = std::time::Instant::now();
             // --- 2. Generation Loop ---
             for i in 0..config.max_new_tokens.unwrap_or(config.max_length) {
+
                 if tokens.len() >= max_len {
-                    debug!("Reached max length ({})", max_len);
+                    log::info!("Reached max length ({})", max_len);
                     break;
                 }
-
+                log::info!("Sampling");
                 // Sample the next token from the logits provided by the backend
                 let processed_logits = apply_repetition_penalty(
                     next_token_logits.clone(),
@@ -176,7 +175,7 @@ impl Generator {
 
                 // Stop if the End-Of-Sentence (EOS) token is generated
                 if Some(next_token) == self.model.eos_token_id() {
-                    debug!("EOS token generated, stopping.");
+                    log::info!("EOS token generated, stopping.");
                     break;
                 }
 
@@ -187,8 +186,13 @@ impl Generator {
                     id: next_token,
                     token_type: TokenType::Generated,
                 };
+                if tokens.len() >= max_len {
+                    log::info!("Hit max length after token, not fetching next logits");
+                    break;
+                }
 
-                let decode_start = std::time::Instant::now();
+                let t0 = std::time::Instant::now();
+                log::info!("Starting decode_one");
                 // Get the logits for the *next* iteration from the backend
                 next_token_logits = self.backend.decode_one(
                     self.model.as_ref(),
@@ -196,8 +200,20 @@ impl Generator {
                     tokens.len(),
                     cache.as_mut(),
                 ).await?;
-                debug!("[Token {}] decode_one took: {:?}", i + 1, decode_start.elapsed());
+                let dt = t0.elapsed();
+                total_decode_time += dt;
+                tokens_generated += 1;
+
+                // Log every token (or every 10)
+                log::info!(
+                    "Token #{}: {:.2} ms | Current Speed: {:.2} t/s | Avg Speed: {:.2} t/s",
+                    i + 1,
+                    dt.as_secs_f64() * 1000.0,
+                    1.0 / dt.as_secs_f64(),
+                    tokens_generated as f64 / total_decode_time.as_secs_f64()
+                );
             }
+            log::info!("Loop done");
         })
     }
 }

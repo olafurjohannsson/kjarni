@@ -90,10 +90,10 @@ impl ModelManager {
         // Factory logic for Decoder-only models
         let model: Box<dyn DecoderLanguageModel> = match model_type {
             ModelType::Llama3_2_1B => {
-                Box::new(LlamaModel::from_registry(model_type, Some(dir), device, context).await?)
+                Box::new(LlamaModel::from_registry(model_type, Some(dir), device, context, None).await?)
             }
             ModelType::Gpt2 | ModelType::DistilGpt2 | ModelType::Gpt2Medium | ModelType::Gpt2Large | ModelType::Gpt2XL => {
-                Box::new(Gpt2Model::from_registry(model_type, Some(dir), device, context).await?)
+                Box::new(Gpt2Model::from_registry(model_type, Some(dir), device, context, None).await?)
             }
             _ => return Err(anyhow!("Unsupported text generation model: {:?}", model_type)),
         };
@@ -121,8 +121,9 @@ impl ModelManager {
         let model: Box<dyn EncoderDecoderLanguageModel> = match any_model {
             AnySeq2SeqModel::Bart(m) => Box::new(m),
         };
+        let generator = Seq2SeqGenerator::new(model)?;
 
-        *guard = Some(Seq2SeqGenerator::new(model));
+        *guard = Some(generator);
         Ok(())
     }
 

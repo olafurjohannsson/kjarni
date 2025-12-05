@@ -17,7 +17,7 @@ use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 
 macro_rules! shape_4d {

@@ -14,7 +14,7 @@ mod common;
 use common::{assert_all_close_4d, read_gpu_tensor_to_vec};
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 
 /// Helper function to run a single BMM test case.

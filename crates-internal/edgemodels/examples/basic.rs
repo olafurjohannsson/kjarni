@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
 
     let model = SentenceEncoder::from_registry(
         ModelType::MiniLML6V2,

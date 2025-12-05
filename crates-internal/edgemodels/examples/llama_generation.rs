@@ -11,7 +11,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 
 #[tokio::main]
@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     //     LlamaModel::from_registry(ModelType::Llama3_2_1B, None, Device::Cpu, None).await?;
     let llama_model =
         LlamaModel::from_registry(ModelType::Llama3_2_1B, None,
-                                  Device::Wgpu, Some(ctx)).await?;
+                                  Device::Wgpu, Some(ctx), None).await?;
 
     let llama_generator = Generator::new(Box::new(llama_model));
     println!("LLama gen: "); // The field of Artificial Intelligence has seen a lot of progress in the last few years. The field of AI is now being used in

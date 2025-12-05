@@ -94,68 +94,73 @@ impl GpuAttentionWeights {
         output_weight: GpuTensor,
         output_bias: GpuTensor,
     ) -> Result<Self> {
-        // --- Assert Q dimensions ---
+        // --- FIXED: Use logical dimensions for layout-agnostic checks ---
+        
+        // Q
         assert_eq!(q_weight.rank(), 2, "Q weight must be 2D");
         assert_eq!(q_bias.rank(), 1, "Q bias must be 1D");
+        let (q_in, q_out) = q_weight.linear_layer_dims();
         assert_eq!(
-            q_weight.shape()[1],
+            q_out,
             q_bias.shape()[0],
             "Q weight's output dim must match its bias size"
         );
 
-        // --- Assert K dimensions (GQA-aware) ---
+        // K
         assert_eq!(k_weight.rank(), 2, "K weight must be 2D");
         assert_eq!(k_bias.rank(), 1, "K bias must be 1D");
+        let (k_in, k_out) = k_weight.linear_layer_dims();
         assert_eq!(
-            k_weight.shape()[1],
+            k_out,
             k_bias.shape()[0],
             "K weight's output dim must match its bias size"
         );
 
-        // --- Assert V dimensions (GQA-aware) ---
+        // V
         assert_eq!(v_weight.rank(), 2, "V weight must be 2D");
         assert_eq!(v_bias.rank(), 1, "V bias must be 1D");
+        let (v_in, v_out) = v_weight.linear_layer_dims();
         assert_eq!(
-            v_weight.shape()[1],
+            v_out,
             v_bias.shape()[0],
             "V weight's output dim must match its bias size"
         );
 
-        // --- Assert Output dimensions ---
+        // Output
         assert_eq!(output_weight.rank(), 2, "Output weight must be 2D");
         assert_eq!(output_bias.rank(), 1, "Output bias must be 1D");
+        let (o_in, o_out) = output_weight.linear_layer_dims();
         assert_eq!(
-            output_weight.shape()[1],
+            o_out,
             output_bias.shape()[0],
             "Output weight's output dim must match its bias size"
         );
 
-        // --- Assert consistency between weights ---
+        // --- Consistency Checks ---
+        // Hidden size is defined by Q input dimension
+        let hidden_size = q_in;
 
-        // Input hidden dimension must be consistent across all input projections.
-        let hidden_size = q_weight.shape()[0];
         assert_eq!(
-            k_weight.shape()[0],
+            k_in,
             hidden_size,
             "K weight input dim must match Q weight input dim"
         );
         assert_eq!(
-            v_weight.shape()[0],
+            v_in,
             hidden_size,
             "V weight input dim must match Q weight input dim"
         );
 
-        // Output projection's input dimension must match the Q projection's output dimension.
-        // In MHA, this is hidden_size. In GQA, it's still hidden_size because V heads are concatenated.
+        // Output projection input must match Q projection output
         assert_eq!(
-            output_weight.shape()[0],
-            q_weight.shape()[1],
+            o_in,
+            q_out,
             "Output projection input dim must match Q projection output dim"
         );
 
-        // Output projection's output dimension must match the original hidden size.
+        // Output projection output must match original hidden size
         assert_eq!(
-            output_weight.shape()[1],
+            o_out,
             hidden_size,
             "Output projection output dim must match the model's hidden size"
         );
@@ -816,8 +821,10 @@ impl GpuAttention {
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         let (b, s, h) = input.dims3();
-        let out_features = weight.shape()[1];
-
+        
+        // --- FIXED: Use logical output features based on DType ---
+        let (_, out_features) = weight.linear_layer_dims(); 
+        
         // Flatten for matmul
         let input_2d = input.view(vec![b * s, h]);
         let proj_2d = pool.get(vec![b * s, out_features]);

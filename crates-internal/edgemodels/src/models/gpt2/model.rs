@@ -12,6 +12,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::gpu_ops::GpuTensor;
+use edgetransformers::linear_layer::LinearLayer;
 use edgetransformers::models::base::AutoregressiveLoop;
 use edgetransformers::models::base::GpuDecoder;
 use edgetransformers::models::download_model_files;
@@ -23,7 +24,7 @@ use ndarray::{Array2, Array3};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-
+use edgetransformers::models::base::DecoderLoadConfig;
 /// A model container for GPT-2 and its variants (e.g., DistilGPT2).
 ///
 /// This struct holds the model's components (decoder, tokenizer, config) but
@@ -33,7 +34,8 @@ pub struct Gpt2Model {
     gpu_decoder: Option<Gpt2GpuDecoder>,
     tokenizer: Tokenizer,
     config: Arc<Gpt2Config>,
-    lm_head: Array2<f32>,
+    // lm_head: Array2<f32>,
+    lm_head: LinearLayer,
     gpu_lm_head_transposed: Option<GpuTensor>,
     device: Device,
     context: Option<Arc<WgpuContext>>,
@@ -60,6 +62,7 @@ impl Gpt2Model {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        decoder_config: Option<DecoderLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!("Unsupported GPT-2 model type: {:?}", model_type));
@@ -76,7 +79,7 @@ impl Gpt2Model {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         download_model_files(&model_dir, &model_type.info().paths).await?;
-        Self::from_pretrained(&model_dir, model_type, device, context)
+        Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 
     /// Creates a `Gpt2Model` from a local directory containing the model files.
@@ -85,6 +88,7 @@ impl Gpt2Model {
         model_type: ModelType,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        decoder_config: Option<DecoderLoadConfig>,
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
         let tokenizer =
@@ -103,10 +107,15 @@ impl Gpt2Model {
 
         // GPT-2 shares weights between embeddings and the final layer.
         // We load them and transpose for the matmul in the projection step.
-        let lm_head = weights
-            .get_array2(config_arc.get_lm_head_name())?
-            .t()
-            .to_owned();
+        // let lm_head = weights
+        //     .get_array2(config_arc.get_lm_head_name())?
+        //     .t()
+        //     .to_owned();
+        let lm_head = LinearLayer::from_weights(
+            &weights, 
+            config_arc.get_lm_head_name(), 
+            decoder_config.unwrap_or_default().target_dtype
+        )?;
 
         let config = config_arc
             .as_any()
@@ -120,7 +129,7 @@ impl Gpt2Model {
             Device::Cpu => {
                 log::info!("Building CPU decoder...");
                 let decoder = TransformerDecoder::new(
-                    &weights, config_arc, device, None, None, // No RoPE for GPT-2
+                    &weights, config_arc, device, None, None, None, // No RoPE for GPT-2
                 )?;
 
                 Ok(Self {
@@ -140,11 +149,13 @@ impl Gpt2Model {
 
                 ctx.print_memory_usage();
 
-                let gpu_decoder = Gpt2GpuDecoder::new(&ctx, &weights, config.clone())?;
+                let gpu_decoder = Gpt2GpuDecoder::new(&ctx, &weights, config.clone(), decoder_config.unwrap_or_default())?;
 
                 // lm_head already transposed
+                // let gpu_lm_head_transposed =
+                //     Some(GpuTensor::from_ndarray(&ctx, &lm_head)?);
                 let gpu_lm_head_transposed =
-                    Some(GpuTensor::from_ndarray(&ctx, &lm_head)?);
+                    Some(GpuTensor::from_ndarray(&ctx, &lm_head.to_f32_transposed())?);
 
                 log::info!("✓ GPU model loaded successfully");
                 ctx.print_memory_usage();
@@ -223,6 +234,8 @@ impl LanguageModel for Gpt2Model {
     }
 }
 
+use edgetransformers::utils::linear_algebra::matmul_2d;
+
 #[async_trait]
 impl DecoderLanguageModel for Gpt2Model {
     fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput> {
@@ -231,7 +244,7 @@ impl DecoderLanguageModel for Gpt2Model {
             .expect("CPU decoder not initialized - use Device::Cpu")
     }
     fn lm_head(&self) -> &Array2<f32> {
-        &self.lm_head
+        self.lm_head.as_f32().expect("lm_head not F32")
     }
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Legacy
@@ -248,30 +261,17 @@ impl DecoderLanguageModel for Gpt2Model {
             .as_ref()
             .ok_or_else(|| anyhow!("Not a GPU model"))
     }
-    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        assert_eq!(
-            self.hidden_size(),
-            self.lm_head.shape()[0],
-            "lm_head first dim must equal hidden_size"
-        );
-        assert_eq!(
-            self.vocab_size(),
-            self.lm_head.shape()[1],
-            "lm_head second dim must equal vocab_size"
-        );
-        // This is the logic from your original `project_to_vocab` function.
-        // It works because Gpt2Model's lm_head is already transposed to [hidden_size, vocab_size].
-        let (batch_size, seq_len, hidden_size) = hidden_states.dim();
+    
+fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        let (batch, seq, hidden) = hidden_states.dim();
+        let hidden_2d = hidden_states.view().into_shape((batch * seq, hidden))?;
 
-        // Reshape to 2D for efficient matmul
-        let hidden_2d = hidden_states.to_shape((batch_size * seq_len, hidden_size))?;
+        // FAST PATH: Uses LinearLayer (matmul_2d_transposed or bf16_mixed)
+        // This reads memory contiguously!
+        let logits_2d = self.lm_head.matmul(&hidden_2d);
 
-        // Matrix multiplication: [batch*seq, hidden] @ [hidden, vocab]
-        let logits_2d = hidden_2d.dot(&self.lm_head);
-
-        // Reshape back to 3D
         logits_2d
-            .into_shape_with_order((batch_size, seq_len, self.vocab_size()))
+            .into_shape_with_order((batch, seq, self.vocab_size()))
             .map_err(|e| anyhow!(e))
     }
 }
@@ -279,20 +279,22 @@ impl DecoderLanguageModel for Gpt2Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generation::{DecodingStrategy, GenerationConfig, Generator};
+    use crate::generation::{DecodingStrategy, GenerationConfig};
+    use crate::generation::decoder::{CpuDecoderBackend, Generator};
+    
     use edgetransformers::prelude::{DecoderLanguageModel, LanguageModel};
     use std::sync::Arc;
 
     /// Helper function to load the DistilGPT2 model for testing.
     async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {
-        Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Cpu, None).await
+        Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Cpu, None, None).await
     }
 
     #[tokio::test]
     async fn test_distilgpt2_generation_parity() -> Result<()> {
         // This test verifies deterministic (greedy) generation output.
         let model = load_distilgpt2_for_test().await?;
-        let generator = Generator::new(Box::new(model));
+        let generator = Generator::new(Box::new(model))?;
 
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
         let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
@@ -362,9 +364,9 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = Generator::new(Box::new(gpt2_model));
+        let generator = Generator::new(Box::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config).await?;
@@ -396,17 +398,17 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+        let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = Generator::new(Box::new(gpt2_model));
+        let generator = Generator::new(Box::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config).await?;
 
-        let ctx = Arc::new(WgpuContext::new().await?);
+        let ctx = WgpuContext::new().await?;
         let gpt2_model_2 =
-            Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx)).await?;
-        let generator_2 = Generator::new(Box::new(gpt2_model_2));
+            Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
+        let generator_2 = Generator::new(Box::new(gpt2_model_2))?;
         let generated_text_2 = generator_2.generate(prompt, &config).await?;
 
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.

@@ -385,6 +385,7 @@ impl CrossAttentionDecoder for GpuCrossAttentionDecoder {
         encoder_attention_mask: Option<&'a Self::MaskInput>,
         decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
     ) -> Result<Self::Output> {
         let mut pool_guard = self.pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
@@ -668,7 +669,7 @@ mod tests {
     #[tokio::test]
     async fn test_gpu_cpu_layer_consistency() -> Result<()> {
         // 1. SETUP
-        let context = Arc::new(WgpuContext::new().await?);
+        let context = WgpuContext::new().await?;
         let (batch, dec_len, enc_len, hidden, inter, heads) = (1, 1, 93, 1024, 4096, 16);
 
         // 2. CREATE MODULES with identical weights
@@ -736,7 +737,7 @@ mod tests {
     #[tokio::test]
     async fn test_layer_subcomponent_parity() -> Result<()> {
         // 1. SETUP
-        let context = Arc::new(WgpuContext::new().await?);
+        let context = WgpuContext::new().await?;
         let (batch, dec_len, enc_len, hidden, inter, heads) = (1, 1, 93, 1024, 4096, 16);
 
         // 2. CREATE MODULES (Identical Weights)

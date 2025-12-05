@@ -15,7 +15,7 @@ async fn read_gpu_tensor(tensor: &GpuTensor) -> Result<Array4<f32>> {
 
 #[tokio::test]
 async fn test_gpu_reorder_cache_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let reorder_kernel = GpuReorderCache::new(&context);
 
     // --- 1. SETUP ---
@@ -68,7 +68,7 @@ async fn test_gpu_reorder_cache_parity() -> Result<()> {
 #[tokio::test]
 async fn test_reorder_at_step_2_failure_simulation() -> Result<()> {
     println!("\n=== Simulating Reorder Failure at Step 2 ===\n");
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let reorder_kernel = GpuReorderCache::new(&context);
 
     // --- 1. SETUP: State at the START of Step 2 ---

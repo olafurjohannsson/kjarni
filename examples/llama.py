@@ -1,58 +1,74 @@
 import torch
+import time
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Use your existing cached directory
+# Path to your model
 model_path = "/home/olafurj/.cache/edgetransformers/meta-llama_Llama-3.2-1B"
 
-# Set a consistent float precision for direct comparison with Rust's f32
-torch.set_default_dtype(torch.float32)
+print(f"Loading model from {model_path}...")
 
+# Load model in Float32 to match your current Rust CPU implementation
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    torch_dtype=torch.float32,
+#    torch_dtype=torch.float32,
     device_map="cpu",
     local_files_only=True,
 ).eval()
 
-tokenizer = AutoTokenizer.from_pretrained(
-    model_path,
-    local_files_only=True,
-)
+tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
 
+# --- YOUR ROBUST TOKENIZATION LOGIC ---
 prompt = "The field of Artificial Intelligence has seen a lot of progress"
-
-# --- DIAGNOSTIC PRINT ---
-# This will show us the incorrect value the tokenizer has loaded.
-print(f"Tokenizer's configured bos_token_id: {tokenizer.bos_token_id}")
-# ------------------------
-
-# --- ROBUST TOKENIZATION LOGIC ---
-# The known correct BOS token ID for Llama 3
 CORRECT_BOS_TOKEN_ID = 128000
 
-# 1. Tokenize the prompt text ONLY, without adding any special BOS/EOS tokens.
+# 1. Encode text only
 input_ids_list = tokenizer.encode(prompt, add_special_tokens=False)
 
-# 2. Manually prepend the KNOWN CORRECT BOS token ID.
+# 2. Add BOS
 input_ids_list.insert(0, CORRECT_BOS_TOKEN_ID)
 
-# 3. Convert the final, correct list of IDs into the required PyTorch tensor format.
-inputs_tensor = torch.tensor([input_ids_list], dtype=torch.long)
-# --- END OF LOGIC ---
+# 3. Create Tensor
+input_ids = torch.tensor([input_ids_list], dtype=torch.long)
+print(f"Input IDs: {input_ids[0].tolist()}")
+# --------------------------------------
 
-print("Input IDs being sent to model:", inputs_tensor[0].tolist())
+# Warmup (Prefill)
+print("Warming up (Prefill)...")
+with torch.no_grad():
+    # Run the full prompt
+    out = model(input_ids, use_cache=True)
+    past_key_values = out.past_key_values
+    
+    # Greedy pick next token
+    next_token = out.logits[:, -1, :].argmax(dim=-1).unsqueeze(0)
+
+print(f"Starting generation loop (10 tokens)...")
+total_dt = 0
+num_tokens = 10
 
 with torch.no_grad():
-    outputs = model.generate(
-        inputs_tensor,
-        max_new_tokens=100,
-        repetition_penalty=1.1,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
-    )
+    for i in range(num_tokens):
+        start = time.perf_counter()
+        
+        # --- THE HOT PATH ---
+        # Run forward pass for exactly 1 token using the KV cache
+        out = model(
+            next_token, 
+            past_key_values=past_key_values, 
+            use_cache=True
+        )
+        # --------------------
+        
+        # Update cache for next step
+        past_key_values = out.past_key_values
+        
+        # Select next token (Greedy)
+        next_token = out.logits[:, -1, :].argmax(dim=-1).unsqueeze(0)
+        
+        end = time.perf_counter()
+        dt = end - start
+        total_dt += dt
+        
+        print(f"Token #{i+1}: {dt*1000:.2f} ms | {1.0/dt:.2f} t/s")
 
-generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-print("\n--- PYTORCH OUTPUT ---")
-print(generated_text)
-print("\n--- TOKEN IDs ---")
-print(outputs[0].tolist())
+print(f"\nAverage Speed: {num_tokens / total_dt:.2f} t/s")

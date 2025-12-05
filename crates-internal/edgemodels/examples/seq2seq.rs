@@ -12,10 +12,13 @@ use edgetransformers::{Device, ModelType, WgpuContext};
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
+use std::io;
+use std::io::Write;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let ctx = get_test_context().await;
-
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     println!("Loading model...");
     let any_model = AnySeq2SeqModel::from_registry(
         ModelType::DistilBartCnn,
@@ -29,7 +32,7 @@ async fn main() -> Result<()> {
         AnySeq2SeqModel::Bart(m) => m,
     };
 
-    let generator = Seq2SeqGenerator::new(Box::new(model));
+    let generator = Seq2SeqGenerator::new(Box::new(model))?;
 
     // Get default config
     let mut generation_config = generator.model.get_default_generation_config();
@@ -56,10 +59,20 @@ async fn main() -> Result<()> {
     like C++, Haskell, and Erlang.";
 
     println!("\n--- GENERATING SUMMARY ---");
-    let summary = generator.generate(article, &generation_config).await?;
+    // let summary = generator.generate(article, &generation_config).await?;
+    //     print!("GPU Output: {}", prompt);
+    io::stdout().flush().unwrap();
+
+    // let inp = generator.encode_input(article).await?;
+
+    let f = generator.generate(&article, &generation_config).await?;
+
+    println!("Summary: {}", f);
+
+
+    println!();
 
     println!("\n--- FINAL GENERATED TEXT ---");
-    println!("{}", summary);
 
     Ok(())
 }

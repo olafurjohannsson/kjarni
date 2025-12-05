@@ -12,7 +12,7 @@ use rand::Rng;
 use common::{StreamedToken, TokenType};
 pub mod decoder;
 pub mod common;
-pub mod generator;
+// pub mod generator;
 // pub mod seq2seq;
 // pub mod seq2seq2;
 pub mod encoder_decoder;
@@ -20,8 +20,8 @@ pub mod encoder_decoder;
 pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
 
 
-pub use generator::{DecoderGenerationBackend};
-
+// pub use generator::{DecoderGenerationBackend};
+pub use edgetransformers::decoder::DecoderGenerationBackend;
 
 
 /// A generic, model-agnostic text generator for autoregressive decoding.

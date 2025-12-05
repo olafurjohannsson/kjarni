@@ -35,6 +35,9 @@ log = { workspace = true }
 ndarray-rand = { workspace = true }
 libm = { workspace = true }
 matrixmultiply = { workspace = true }
+memmap2 = { workspace = true }
+faer = { workspace = true }
+num_cpus = "1.16" 
 
 [dev-dependencies]
 env_logger = "0.10"

@@ -12,7 +12,7 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_slice_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let slice_kernel = GpuSlice::new(&context);
     let (b, h, s, d) = (2, 4, 8, 16);
     let source_cpu = Array4::from_shape_fn((b, h, s, d), |(i, j, k, l)| {

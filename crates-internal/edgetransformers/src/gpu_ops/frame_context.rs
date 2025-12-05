@@ -6,7 +6,7 @@ use wgpu::CommandEncoder;
 
 /// A guard that manages the resources for a single frame of GPU work.
 pub struct GpuFrameContext<'a> {
-    pub encoder: CommandEncoder,
+    pub encoder: Option<CommandEncoder>,
     pub pool_guard: MutexGuard<'a, GpuTensorPool>,
     pub context: &'a Arc<WgpuContext>,
     submitted: bool,
@@ -20,7 +20,7 @@ impl<'a> GpuFrameContext<'a> {
                 label: Some("GpuFrameContext Encoder"),
             });
         Self {
-            encoder: encoder,
+            encoder: Some(encoder),
             pool_guard,
             context,
             submitted: false,
@@ -28,21 +28,13 @@ impl<'a> GpuFrameContext<'a> {
     }
     
     pub fn resources(&mut self) -> (&mut CommandEncoder, &mut GpuTensorPool) {
-        (&mut self.encoder, &mut *self.pool_guard)
+        (self.encoder.as_mut().unwrap(), &mut *self.pool_guard)
     }
 
     pub fn finish(mut self) {
-        // To prevent the Drop panic, we need to manually take the encoder
-        let encoder = std::mem::replace(
-            &mut self.encoder,
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Dummy Encoder"),
-                }),
-        );
-
-        self.context.queue.submit(Some(encoder.finish()));
+        if let Some(encoder) = self.encoder.take() {
+            self.context.queue.submit(Some(encoder.finish()));
+        }
         self.pool_guard.next_frame();
         self.submitted = true;
     }
@@ -50,10 +42,20 @@ impl<'a> GpuFrameContext<'a> {
 
 impl Drop for GpuFrameContext<'_> {
     fn drop(&mut self) {
-        if !self.submitted && !std::thread::panicking() {
-            panic!(
-                "GpuFrameContext was dropped without calling .finish(). GPU work was not submitted and the memory pool was not advanced."
-            );
+        // 1. If we are already panicking (e.g. from unwinding), DO NOT panic again.
+        if std::thread::panicking() {
+            return;
+        }
+
+        // 2. If we haven't submitted, but the encoder is still there, it means
+        // we are returning early (likely due to an Err result).
+        // Panicking here hides the actual error!
+        if !self.submitted && self.encoder.is_some() {
+            // OPTION A: Log a warning instead of panicking
+            log::warn!("GpuFrameContext dropped without submission. Work discarded.");
+            
+            // OPTION B: Just silently let it drop. The command encoder will be destroyed.
+            // This is actually safer for error handling patterns using `?`.
         }
     }
 }

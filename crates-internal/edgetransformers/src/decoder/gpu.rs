@@ -342,7 +342,7 @@ impl Decoder for GpuTransformerDecoder {
         let seq_len = input.shape()[1];
 
         let use_cpu_embeddings = false;
-
+        println!("Cpu Embeddings: {}", use_cpu_embeddings);
         let mut hidden_states = if use_cpu_embeddings {
             let initial_embeddings_cpu = self.cpu_embeddings.forward(
                 input,

@@ -14,7 +14,7 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_rmsnorm_parity_with_cpu_impl() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize
     let eps = 1e-5;
     let gpu_rmsnorm = GpuRMSNorm::new(&context, eps);
@@ -34,7 +34,7 @@ async fn test_gpu_rmsnorm_parity_with_cpu_impl() -> Result<()> {
 }
 #[tokio::test]
 async fn test_gpu_rmsnorm_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize
     let eps = 1e-5;
     let gpu_rmsnorm = GpuRMSNorm::new(&context, eps);

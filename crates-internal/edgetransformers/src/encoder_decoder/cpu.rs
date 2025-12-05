@@ -8,6 +8,8 @@ use crate::traits::{
     CrossAttentionDecoderArchitecture, DecoderArchitecture, EncoderArchitecture, LanguageModelConfig,
     LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
+use crate::linear_layer::LinearLayer;
+use crate::decoder_cross_attn::{DecoderCrossAttention, DecoderSelfAttention};
 use crate::weights::ModelWeights;
 use crate::{
     decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward, normalization::LayerNorm, Cache, CpuKVCache,
@@ -52,44 +54,61 @@ impl CpuTransformerEncoderDecoder {
             weights.get_array1(embed_norm_b)?,
             decoder_config_adapter.layer_norm_eps(),
         );
-
+        let target_dtype = None; 
         let mut decoder_layers = Vec::with_capacity(config.num_decoder_layers());
         for i in 0..config.num_decoder_layers() {
             let self_attn_names = config.get_decoder_self_attention_names(i);
             let cross_attn_names = config.get_decoder_cross_attention_names(i);
             let ffn_names = config.get_decoder_feed_forward_names(i);
 
-            let self_attn = MultiHeadAttention::new(
+            // let self_attn = MultiHeadAttention::new(
+            //     config.hidden_size(),
+            //     config.num_attention_heads(),
+            //     weights.get_linear_weight(&self_attn_names.q_weight)?,
+            //     weights.get_array1(&self_attn_names.q_bias)?,
+            //     weights.get_linear_weight(&self_attn_names.k_weight)?,
+            //     weights.get_array1(&self_attn_names.k_bias)?,
+            //     weights.get_linear_weight(&self_attn_names.v_weight)?,
+            //     weights.get_array1(&self_attn_names.v_bias)?,
+            //     weights.get_linear_weight(&self_attn_names.output_weight)?,
+            //     weights.get_array1(&self_attn_names.output_bias)?,
+            //     None,
+            // );
+            let self_attn = DecoderSelfAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                weights.get_linear_weight(&self_attn_names.q_weight)?,
-                weights.get_array1(&self_attn_names.q_bias)?,
-                weights.get_linear_weight(&self_attn_names.k_weight)?,
-                weights.get_array1(&self_attn_names.k_bias)?,
-                weights.get_linear_weight(&self_attn_names.v_weight)?,
-                weights.get_array1(&self_attn_names.v_bias)?,
-                weights.get_linear_weight(&self_attn_names.output_weight)?,
-                weights.get_array1(&self_attn_names.output_bias)?,
-                None,
+                LinearLayer::from_weights(weights, &self_attn_names.q_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &self_attn_names.k_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &self_attn_names.v_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &self_attn_names.output_weight, target_dtype)?,
             );
+            
             let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&self_attn_names.norm_weight)?,
                 weights.get_array1(&self_attn_names.norm_bias)?,
                 config.layer_norm_eps(),
             );
 
-            let cross_attn = MultiHeadAttention::new(
+            // let cross_attn = MultiHeadAttention::new(
+            //     config.hidden_size(),
+            //     config.num_attention_heads(),
+            //     weights.get_linear_weight(&cross_attn_names.q_weight)?,
+            //     weights.get_array1(&cross_attn_names.q_bias)?,
+            //     weights.get_linear_weight(&cross_attn_names.k_weight)?,
+            //     weights.get_array1(&cross_attn_names.k_bias)?,
+            //     weights.get_linear_weight(&cross_attn_names.v_weight)?,
+            //     weights.get_array1(&cross_attn_names.v_bias)?,
+            //     weights.get_linear_weight(&cross_attn_names.output_weight)?,
+            //     weights.get_array1(&cross_attn_names.output_bias)?,
+            //     None,
+            // );
+            let cross_attn = DecoderCrossAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                weights.get_linear_weight(&cross_attn_names.q_weight)?,
-                weights.get_array1(&cross_attn_names.q_bias)?,
-                weights.get_linear_weight(&cross_attn_names.k_weight)?,
-                weights.get_array1(&cross_attn_names.k_bias)?,
-                weights.get_linear_weight(&cross_attn_names.v_weight)?,
-                weights.get_array1(&cross_attn_names.v_bias)?,
-                weights.get_linear_weight(&cross_attn_names.output_weight)?,
-                weights.get_array1(&cross_attn_names.output_bias)?,
-                None,
+                LinearLayer::from_weights(weights, &cross_attn_names.q_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.k_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.v_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.output_weight, target_dtype)?,
             );
             let cross_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&cross_attn_names.norm_weight)?,
@@ -150,7 +169,9 @@ impl CpuTransformerEncoderDecoder {
             config,
         })
     }
-
+ pub fn layers(&self) -> &[DecoderCrossAttentionLayer] {
+        &self.decoder_layers
+    }
     pub fn encoder(&self) -> &TransformerEncoder {
         &self.encoder
     }
@@ -162,7 +183,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
     type EncoderStateInput = Array3<f32>;
     type MaskInput = Array2<f32>;
     type Output = DecoderOutput;
-
+    
     async fn forward<'a>(
         &self,
         decoder_input_ids: &Self::TokenInput,
@@ -170,6 +191,9 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         encoder_attention_mask: Option<&'a Self::MaskInput>,
         decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
+        // NEW: Optional pre-computed Cross KV
+        // Vector of tuples (K, V) matching the layers
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
     ) -> Result<Self::Output> {
         // The generator now provides the position offset.
         let position_offset =
@@ -196,7 +220,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 .as_ref()
                 .and_then(|cache| cache.get(layer_idx));
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
-
+            let layer_cross_cache = cross_kv_caches.map(|v| &v[layer_idx]);
             // Cross attention decoding
             let (new_hidden, (new_k, new_v)) = layer.forward(
                 &hidden_states,
@@ -204,6 +228,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 decoder_attention_mask,
                 encoder_attention_mask,
                 past_kv_views,
+                layer_cross_cache
             )?;
 
             hidden_states = new_hidden;

@@ -11,6 +11,8 @@ use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
     GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
+use crate::decoder_attention::DecoderAttention;
+use crate::decoder_layer::CpuAttention;
 use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor};
 use crate::normalization::{Normalization, RMSNorm};
 use crate::rope::RoPE as CpuRoPE; // Import your CPU implementation
@@ -147,59 +149,74 @@ async fn create_test_layer_pair(
 ) -> Result<(GpuPreNormDecoderLayer, DecoderLayer)> {
     let head_dim = config.hidden_size / config.num_attention_heads;
 
-    // --- Common Random Weights (ndarray) ---
-    let q_w = Array::random(
+    // --- Weights: [out_features, in_features] ---
+    // Q: hidden → hidden
+    let q_w = crate::linear_layer::LinearLayer::from(Array::random(
         (config.hidden_size, config.hidden_size),
         Uniform::new(-0.1, 0.1),
-    );
-    let k_w = Array::random(
-        (config.hidden_size, config.kv_dim()),
+    ));
+    // K: hidden → kv_dim
+    let k_w = crate::linear_layer::LinearLayer::from(Array::random(
+        (config.kv_dim(), config.hidden_size),  // FIXED: swapped
         Uniform::new(-0.1, 0.1),
-    );
-    let v_w = Array::random(
-        (config.hidden_size, config.kv_dim()),
+    ));
+    // V: hidden → kv_dim
+    let v_w = crate::linear_layer::LinearLayer::from(Array::random(
+        (config.kv_dim(), config.hidden_size),  // FIXED: swapped
         Uniform::new(-0.1, 0.1),
-    );
-    let o_w = Array::random(
+    ));
+    // O: hidden → hidden
+    let o_w = crate::linear_layer::LinearLayer::from(Array::random(
         (config.hidden_size, config.hidden_size),
         Uniform::new(-0.1, 0.1),
-    );
+    ));
+    // gate: hidden → intermediate
     let gate_w = Array::random(
-        (config.hidden_size, config.intermediate_size),
+        (config.intermediate_size, config.hidden_size),  // FIXED: swapped
         Uniform::new(-0.1, 0.1),
     );
+    // up: hidden → intermediate
     let up_w = Array::random(
-        (config.hidden_size, config.intermediate_size),
+        (config.intermediate_size, config.hidden_size),  // FIXED: swapped
         Uniform::new(-0.1, 0.1),
     );
+    // down: intermediate → hidden
     let down_w = Array::random(
-        (config.intermediate_size, config.hidden_size),
+        (config.hidden_size, config.intermediate_size),  // FIXED: swapped
         Uniform::new(-0.1, 0.1),
     );
+    
     let attn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
     let ffn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
-    let q = GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size()))?;
 
-    // --- Build GPU Layer ---
+    // --- Helper to transpose for GPU F32 upload ---
+    let to_gpu = |arr: &Array2<f32>| -> Result<GpuTensor> {
+        let transposed = arr.t().as_standard_layout().to_owned();
+        GpuTensor::from_ndarray::<f32, _>(context, &transposed)
+    };
+
+    // --- Build GPU Layer (transpose for F32 matmul convention) ---
     let gpu_attn_weights = GpuAttentionWeights::new(
-        GpuTensor::from_ndarray::<f32, _>(context, &q_w)?,
-        q,
-        GpuTensor::from_ndarray::<f32, _>(context, &k_w)?,
+        q_w.to_gpu(context)?,
+        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?,
+        k_w.to_gpu(context)?,
         GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.kv_dim()))?,
-        GpuTensor::from_ndarray::<f32, _>(context, &v_w)?,
+        v_w.to_gpu(context)?,
         GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.kv_dim()))?,
-        GpuTensor::from_ndarray::<f32, _>(context, &o_w)?,
-        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size()))?,
+        o_w.to_gpu(context)?,
+        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?,
     )?;
+    
     let gpu_attn_norm =
         GpuNormalization::RMSNorm(GpuRMSNorm::new(context, config.layer_norm_eps()));
     let gpu_attn_norm_weights = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
         GpuTensor::from_ndarray(context, &attn_norm_w)?,
     )?);
+    
     let gpu_ffn_weights = GpuFeedForwardWeights::SwiGLU(GpuSwiGLUFFNWeights::new(
-        GpuTensor::from_ndarray(context, &gate_w)?,
-        GpuTensor::from_ndarray(context, &up_w)?,
-        GpuTensor::from_ndarray(context, &down_w)?,
+        to_gpu(&gate_w)?,
+        to_gpu(&up_w)?,
+        to_gpu(&down_w)?,
     )?);
     let gpu_ffn = GpuFeedForward::SwiGLU(GpuSwiGLUFFN::new(context)?);
     let gpu_ffn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, config.layer_norm_eps()));
@@ -217,7 +234,6 @@ async fn create_test_layer_pair(
         gpu_ffn_norm,
         gpu_ffn_norm_weights,
         Arc::new(TestLlamaConfig {
-            // Pass a new Arc'd config
             hidden_size: config.hidden_size,
             num_attention_heads: config.num_attention_heads,
             num_key_value_heads: config.num_key_value_heads,
@@ -226,18 +242,15 @@ async fn create_test_layer_pair(
         None,
     )?;
 
-    // --- Build CPU Layer ---
-    let cpu_attn = MultiHeadAttention::new(
+    // --- Build CPU Layer (uses weights directly, no transpose) ---
+    
+    let cpu_attn = crate::decoder_attention::DecoderAttention::new(
         config.hidden_size,
         config.num_attention_heads,
         q_w,
-        Array1::zeros(config.hidden_size),
         k_w,
-        Array1::zeros(config.kv_dim()),
         v_w,
-        Array1::zeros(config.kv_dim()),
         o_w,
-        Array1::zeros(config.hidden_size),
         Some(config.num_key_value_heads),
     );
     let cpu_attn_norm = Normalization::RMSNorm(RMSNorm::new(attn_norm_w, config.layer_norm_eps()));
@@ -246,7 +259,7 @@ async fn create_test_layer_pair(
     let cpu_rope = Arc::new(CpuRoPE::new(head_dim, 1024, 10000.0));
 
     let cpu_layer = DecoderLayer {
-        self_attn: cpu_attn,
+        self_attn: CpuAttention::Modern(cpu_attn),
         self_attn_layer_norm: cpu_attn_norm,
         feedforward: cpu_ffn,
         ffn_layer_norm: cpu_ffn_norm,
@@ -326,15 +339,13 @@ pub async fn forward_llama_with_debug(
     rope: Option<&GpuRoPE>,
 ) -> Result<GpuTensor> {
     let tolerance = 1e-4; // Set a reasonable tolerance for float comparisons
-
+    
     // --- Ground Truth CPU Calculation ---
     let cpu_residual_1 = hidden_states_cpu.clone();
     let cpu_ln1_out = cpu_layer.self_attn_layer_norm.forward(&cpu_residual_1);
-    let (cpu_attn_out, _, _) = cpu_layer.self_attn.forward_with_cache(
+    let (cpu_attn_out, _, _) = cpu_layer.self_attn.forward(
         &cpu_ln1_out,
-        None,
         Some(attention_mask_cpu),
-        true,
         None,
         cpu_layer.rope.as_deref(),
     )?;

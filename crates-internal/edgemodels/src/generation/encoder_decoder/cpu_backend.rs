@@ -1,25 +1,22 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use bytemuck;
 use edgetransformers::cache::{Cache, CpuBeamKVCache};
+use edgetransformers::encoder_decoder::CpuTransformerEncoderDecoder;
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use edgetransformers::models::base::{
-     DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
+    DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
 };
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
-use ndarray::{s, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, Array4, s};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::generation::encoder_decoder::{
-    GenerationBackend,
-    StepInput,
-    GpuBackend,
-    HasShape,
+    GenerationBackend, GpuBackend, HasShape, StepInput, find_best_beams_and_get_indices,
     run_beam_search,
-    find_best_beams_and_get_indices
 };
 
 /// An enum to wrap different ndarray tensor types to satisfy the GenerationBackend trait,
@@ -29,6 +26,10 @@ pub enum CpuTensor {
     U32(Array2<u32>),
     F32_2D(Array2<f32>),
     F32_3D(Array3<f32>),
+    EncoderState {
+        state: Array3<f32>,
+        cross_cache: Vec<(Array4<f32>, Array4<f32>)>,
+    },
 }
 
 impl HasShape for CpuTensor {
@@ -37,6 +38,7 @@ impl HasShape for CpuTensor {
             CpuTensor::U32(a) => a.shape(),
             CpuTensor::F32_2D(a) => a.shape(),
             CpuTensor::F32_3D(a) => a.shape(),
+            CpuTensor::EncoderState { state, .. } => state.shape(),
         }
     }
 }
@@ -59,26 +61,46 @@ impl GenerationBackend for CpuBackend {
             CpuTensor::U32(t) => t,
             _ => return Err(anyhow!("Invalid tensor type for tokens, expected U32")),
         };
-        let encoder_state = match inputs.encoder_state.unwrap() {
-            CpuTensor::F32_3D(s) => s,
-            _ => return Err(anyhow!("Invalid tensor type for encoder_state, expected F32_3D")),
+        // let encoder_state = match inputs.encoder_state.unwrap() {
+        //     CpuTensor::F32_3D(s) => s,
+        //     _ => return Err(anyhow!("Invalid tensor type for encoder_state, expected F32_3D")),
+        // };
+        let (encoder_state, cross_cache) = match inputs.encoder_state.unwrap() {
+            CpuTensor::EncoderState { state, cross_cache } => (state, Some(cross_cache)),
+            _ => return Err(anyhow!("Invalid encoder state tensor")),
         };
         let attention_mask = match inputs.attention_mask {
             CpuTensor::F32_2D(m) => m,
-            _ => return Err(anyhow!("Invalid tensor type for attention_mask, expected F32_2D")),
+            _ => {
+                return Err(anyhow!(
+                    "Invalid tensor type for attention_mask, expected F32_2D"
+                ));
+            }
         };
 
-        // 2. Call the model's CPU decoder
+        // // 2. Call the model's CPU decoder
         let decoder_output = model
             .decoder()
-            .forward(tokens, encoder_state, None, Some(attention_mask), Some(cache))
+            .forward(
+                tokens,
+                encoder_state,
+                None,
+                Some(attention_mask),
+                Some(cache),
+                cross_cache,
+            )
             .await?;
 
         Ok(decoder_output.last_hidden_state)
+
     }
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor> {
-        let seq_len = if num_beams > 0 { tokens.len() / num_beams } else { 0 };
+        let seq_len = if num_beams > 0 {
+            tokens.len() / num_beams
+        } else {
+            0
+        };
         let tokens_ndarray = Array2::from_shape_vec((num_beams, seq_len), tokens.to_vec())?;
         Ok(CpuTensor::U32(tokens_ndarray))
     }
@@ -86,7 +108,11 @@ impl GenerationBackend for CpuBackend {
     fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_tokens: &[u32]) -> Result<()> {
         let current_tensor = match tensor {
             CpuTensor::U32(t) => t,
-            _ => return Err(anyhow!("Invalid tensor type for update_token_tensor, expected U32")),
+            _ => {
+                return Err(anyhow!(
+                    "Invalid tensor type for update_token_tensor, expected U32"
+                ));
+            }
         };
         // The new tokens represent the next single token for each beam.
         let new_tokens_ndarray =
@@ -95,9 +121,38 @@ impl GenerationBackend for CpuBackend {
         Ok(())
     }
 
-    fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor> {
-        // The encoder output is already on the CPU, just clone and wrap it.
-        Ok(CpuTensor::F32_3D(encoder_output.last_hidden_state.clone()))
+    fn prepare_encoder_state(
+        &self,
+        model: &dyn EncoderDecoderLanguageModel,
+        encoder_output: &EncoderOutput,
+    ) -> Result<Self::Tensor> {
+        // FIX: Access the decoder trait object first.
+        // The 'model' is the wrapper (e.g. BartModel), which we cannot downcast to CpuTransformerEncoderDecoder.
+        // The 'decoder' IS the CpuTransformerEncoderDecoder (on CPU).
+        let decoder = model.decoder();
+
+        // Now downcast the decoder trait object to the concrete CPU struct
+        let cpu_decoder = decoder
+            .as_any()
+            .downcast_ref::<CpuTransformerEncoderDecoder>()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Decoder backend is not CpuTransformerEncoderDecoder. Are you running on GPU?"
+                )
+            })?;
+
+        let state = encoder_output.last_hidden_state.clone();
+
+        // PRE-COMPUTE CROSS-ATTENTION
+        // We iterate over the decoder layers we just accessed
+        let mut cross_cache = Vec::with_capacity(cpu_decoder.decoder_layers.len());
+        for layer in &cpu_decoder.decoder_layers {
+            // Pre-calculate Keys/Values for the entire encoder sequence
+            let (k, v) = layer.cross_attn.precompute_encoder_kv(&state)?;
+            cross_cache.push((k, v));
+        }
+            
+        Ok(CpuTensor::EncoderState { state, cross_cache })
     }
 
     fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor> {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let ctx = Arc::new(WgpuContext::new().await?);
+    let ctx = WgpuContext::new().await?;
 
     // Automatically download and load MiniLM
     let encoder = SentenceEncoder::from_registry(

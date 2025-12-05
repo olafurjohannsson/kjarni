@@ -10,7 +10,8 @@ use wgpu::{
     Adapter, DeviceDescriptor, Features, Instance, InstanceDescriptor, Limits, PowerPreference,
     RequestAdapterOptions,
 };
-
+use crate::gpu_ops::profiler::GpuProfiler;
+use crate::gpu_ops::uniforms::GpuUniformBuffer;
 #[derive(Debug, Clone)]
 pub struct GpuMemoryInfo {
     pub max_buffer_size: u64,
@@ -47,9 +48,12 @@ pub struct WgpuContext {
 
     // Lazy-initialized shared pool (best performance!)
     inference_pool: OnceLock<Arc<Mutex<GpuTensorPool>>>,
+    pub profiler: GpuProfiler,
 
-    poll_stop: Arc<AtomicBool>,
-    poll_handle: Option<std::thread::JoinHandle<()>>,
+    pub uniform_arena: GpuUniformBuffer,
+
+    // poll_stop: Arc<AtomicBool>,
+    // poll_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl WgpuContext {
@@ -63,7 +67,7 @@ impl WgpuContext {
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
-
+        let required_features = Features::TIMESTAMP_QUERY | Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::HighPerformance,
@@ -128,8 +132,7 @@ impl WgpuContext {
         let (device, queue) = adapter
             .request_device(&DeviceDescriptor {
                 label: Some("TransformerGPU"),
-                required_features: Features::TIMESTAMP_QUERY
-                    | Features::TIMESTAMP_QUERY_INSIDE_ENCODERS,
+                required_features: required_features,
                 required_limits,
                 ..Default::default()
             })
@@ -140,25 +143,25 @@ impl WgpuContext {
             memory_info.max_buffer_size as f32 / 1_073_741_824.0,
             memory_info.max_storage_buffer_binding_size as f32 / 1_073_741_824.0
         );
-        let device_arc = Arc::new(device);
+        let device_arc = Arc::new(device.clone());
         let queue_arc = Arc::new(queue);
-
+        let profiler = GpuProfiler::new(&device, 4096);
         // Start polling thread
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let device_clone = device_arc.clone();
-        let thread_stop = stop_flag.clone();
+        // let stop_flag = Arc::new(AtomicBool::new(false));
+        // let device_clone = device_arc.clone();
+        // let thread_stop = stop_flag.clone();
 
-        let handle = std::thread::Builder::new()
-            .name("wgpu-poller".into())
-            .spawn(move || {
-                log::debug!("WGPU polling thread started");
-                while !thread_stop.load(Ordering::Relaxed) {
-                    device_clone.poll(wgpu::PollType::Poll);
-                    std::thread::sleep(Duration::from_micros(100));
-                }
-                log::debug!("WGPU polling thread stopped");
-            })?;
-
+        // let handle = std::thread::Builder::new()
+        //     .name("wgpu-poller".into())
+        //     .spawn(move || {
+        //         log::debug!("WGPU polling thread started");
+        //         while !thread_stop.load(Ordering::Relaxed) {
+        //             device_clone.poll(wgpu::PollType::Poll);
+        //             std::thread::sleep(Duration::from_micros(100));
+        //         }
+        //         log::debug!("WGPU polling thread stopped");
+        //     })?;
+        let uniform_arena = GpuUniformBuffer::new(&device, 1024 * 1024 * 4, "Global Uniforms"); // 4MB
         Ok(Arc::new(Self {
             device: device_arc,
             queue: queue_arc,
@@ -166,8 +169,10 @@ impl WgpuContext {
             memory_info,
             allocated_memory: AtomicUsize::new(0),
             inference_pool: OnceLock::new(),  // Empty initially
-            poll_stop: stop_flag,
-            poll_handle: Some(handle),
+            profiler: profiler,
+            uniform_arena,
+            // poll_stop: stop_flag,
+            // poll_handle: Some(handle),
         }))
     }
     pub fn get_inference_pool(self: &Arc<Self>) -> Arc<Mutex<GpuTensorPool>> {
@@ -387,12 +392,12 @@ impl Default for GpuConfig {
     }
 }
 
-impl Drop for WgpuContext {
-    fn drop(&mut self) {
-        log::debug!("Stopping WGPU polling thread");
-        self.poll_stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.poll_handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
+// impl Drop for WgpuContext {
+//     fn drop(&mut self) {
+//         log::debug!("Stopping WGPU polling thread");
+//         self.poll_stop.store(true, Ordering::Relaxed);
+//         if let Some(handle) = self.poll_handle.take() {
+//             let _ = handle.join();
+//         }
+//     }
+// }

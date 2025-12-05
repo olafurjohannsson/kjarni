@@ -50,24 +50,25 @@ impl EdgeRAG {
         Ok(())
     }
 
-    #[wasm_bindgen]
-    pub fn search(&self, query_embedding: Vec<f32>, query_text: &str, k: usize) -> JsValue {
-        let vector_results = self.vectors.search(&query_embedding, k * 2);
-        let bm25_results = self.bm25.search(query_text, k * 2);
+    // #[wasm_bindgen]
+    // pub fn search(&self, query_embedding: Vec<f32>, query_text: &str, k: usize) -> JsValue {
+    //     let vector_results = self.vectors.search(&query_embedding, k * 2);
+    //     let bm25_results = self.bm25.search(query_text, k * 2);
         
-        let fused = hybrid::hybrid_search(vector_results, bm25_results, k);
+    //     let fused = hybrid::hybrid_search(vector_results, bm25_results, k);
         
-        let results: Vec<SearchResult> = fused
-            .into_iter()
-            .filter_map(|(idx, score)| {
-                self.chunks.get(idx).map(|chunk| SearchResult {
-                    score,
-                    chunk: chunk.clone(),
-                    search_type: SearchType::Hybrid,
-                })
-            })
-            .collect();
+    //     let results: Vec<SearchResult> = fused
+    //         .into_iter()
+    //         .filter_map(|(idx, score)| {
+    //             self.chunks.get(idx).map(|chunk| SearchResult {
+    //                 score,
+    //                 chunk: chunk.clone(),
+    //                 search_type: SearchType::Hybrid,
+    //                 document_id: 0,
+    //             })
+    //         })
+    //         .collect();
 
-        serde_wasm_bindgen::to_value(&results).unwrap()
-    }
+    //     serde_wasm_bindgen::to_value(&results).unwrap()
+    // }
 }

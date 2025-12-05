@@ -19,3 +19,7 @@ impl FeedForward {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests;

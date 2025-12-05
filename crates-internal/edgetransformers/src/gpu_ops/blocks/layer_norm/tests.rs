@@ -12,7 +12,7 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_layernorm_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize
     let eps = 1e-5;
     let gpu_layernorm = GpuLayerNorm::new(&context, eps);

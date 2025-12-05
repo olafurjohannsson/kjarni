@@ -3,11 +3,12 @@ pub mod primitives;
 pub mod blocks;
 pub mod layers;
 pub mod utils;
-
+pub mod profiler;
 pub mod tensor;
 pub mod kernel;
 mod tensor_pool;
 mod frame_context;
+pub mod uniforms;
 
 pub use tensor::{DType, GpuTensor};
 pub use kernel::Kernel;

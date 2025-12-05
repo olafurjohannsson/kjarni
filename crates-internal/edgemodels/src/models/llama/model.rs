@@ -12,25 +12,31 @@ use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::gpu_ops::GpuTensor;
 use edgetransformers::gpu_ops::blocks::rope::GpuRoPE;
+use edgetransformers::models::base::DecoderLoadConfig;
 use edgetransformers::models::base::GpuDecoder;
 use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy};
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
-use edgetransformers::{gpu_context, prelude::*};
 use edgetransformers::rope::RoPE;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
+// use edgetransformers::utils::linear_algebra::matmul_2d_faer;
+use edgetransformers::linear_layer::LinearLayer;
+use edgetransformers::utils::linear_algebra::matmul_2d_transposed;
+use edgetransformers::weights::DType;
 use edgetransformers::weights::ModelWeights;
+use edgetransformers::{gpu_context, prelude::*};
 use ndarray::{Array2, Array3, s};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 
 /// A model container for LLaMA and its variants.
 ///
 /// This struct holds the model's components (decoder, tokenizer, config) but
 /// delegates the actual text generation task to the `Generator`.
 pub struct LlamaModel {
-    decoder: Option<TransformerDecoder>,
+    decoder: Option<LlamaCpuDecoder>,
 
     gpu_decoder: Option<LlamaGpuDecoder>, // Use the unified trait
 
@@ -38,7 +44,8 @@ pub struct LlamaModel {
     config: Arc<LlamaConfig>,
     /// The language modeling head, transposed for efficient projection.
     /// Shape: `[hidden_size, vocab_size]`.
-    lm_head: Array2<f32>,
+    // lm_head: Array2<f32>,
+    lm_head: LinearLayer,
 
     // --- GPU components (will be Some if loaded on GPU) ---
     gpu_lm_head_transposed: Option<GpuTensor>,
@@ -50,6 +57,7 @@ impl LlamaModel {
     /// A list of the specific model types supported by this implementation.
     const SUPPORTED_MODELS: &'static [ModelType] = &[
         ModelType::Llama3_2_1B,
+        ModelType::Llama3_8B_Instruct,
         // Add other Llama variants here as you support them
     ];
     pub fn concrete_config(&self) -> &Arc<LlamaConfig> {
@@ -64,6 +72,7 @@ impl LlamaModel {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        decoder_config: Option<DecoderLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!("Unsupported LLaMA model type: {:?}", model_type));
@@ -78,9 +87,9 @@ impl LlamaModel {
                 .join("edgetransformers")
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
-
+        log::info!("Loading Llama model from {:?}", model_dir);
         download_model_files(&model_dir, &model_type.info().paths).await?;
-        Self::from_pretrained(&model_dir, model_type, device, context)
+        Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 
     /// Creates a `LlamaModel` from a local directory containing the model files.
@@ -89,14 +98,17 @@ impl LlamaModel {
         _model_type: ModelType, // Used for registry validation, not needed here
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        decoder_config: Option<DecoderLoadConfig>,
     ) -> Result<Self> {
+        edgetransformers::utils::configure_threading();
+        
         let weights = ModelWeights::new(model_path)?;
         let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         let config = Arc::new(LlamaConfig::from_json(&weights.config_json)?);
-   
 
+        
 
         // Set up tokenizer truncation, but no padding for autoregressive generation.
         let truncation_params = tokenizers::TruncationParams {
@@ -106,9 +118,9 @@ impl LlamaModel {
         tokenizer.with_truncation(Some(truncation_params)).unwrap();
         tokenizer.with_padding(None);
 
-        let mut cpu_decoder = None;
-        let mut gpu_decoder = None;
-        let mut gpu_lm_head_transposed = None;
+        
+        
+        // let mut gpu_lm_head_transposed = None;
 
         // Create the RoPE module, passing the scaling config if it exists.
         let cpu_rope = Arc::new(RoPE::new_with_scaling(
@@ -129,21 +141,34 @@ impl LlamaModel {
         // )?;
 
         // Llama ties the embedding and LM head weights.
-        let lm_head = weights.get_array2(config.get_lm_head_name())?;
+        let load_config = decoder_config.unwrap_or_default();
+        // let lm_head = weights.get_array2(config.get_lm_head_name())?;
+        // Determine Target DType
+        let target_dtype = load_config.target_dtype;
+
+        // Load Head using the new LinearLayer loader
+        let lm_head = LinearLayer::from_weights(&weights, config.get_lm_head_name(), target_dtype)?;
         match device {
             Device::Cpu => {
-                cpu_decoder = Some(TransformerDecoder::new(
+                // cpu_decoder = Some(TransformerDecoder::new(
+                //     &weights,
+                //     config.clone() as Arc<dyn DecoderArchitecture + Send + Sync>,
+                //     device,
+                //     None, // No context for CPU
+                //     Some(cpu_rope),
+                //     target_dtype,
+                // )?);
+                let cpu_decoder = Some(LlamaCpuDecoder::new(
                     &weights,
-                    config.clone() as Arc<dyn DecoderArchitecture + Send + Sync>,
-                    device,
-                    None, // No context for CPU
-                    Some(cpu_rope),
+                    config.clone(),
+                    cpu_rope,
+                    target_dtype,
                 )?);
                 Ok(Self {
                     config,
                     decoder: cpu_decoder,
                     tokenizer,
-                    lm_head,
+                    lm_head: lm_head,
                     gpu_decoder: None,
                     gpu_lm_head_transposed: None,
                     device,
@@ -152,25 +177,33 @@ impl LlamaModel {
             }
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a context"))?;
-                ctx.print_memory_usage();
+
                 // Create GPU RoPE
                 let gpu_rope = GpuRoPE::new(&ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache)?;
 
-                gpu_decoder = Some(LlamaGpuDecoder::new(
+                let gpu_decoder = Some(LlamaGpuDecoder::new(
                     &ctx,
                     &weights,
                     config.clone(),
                     gpu_rope,
                 )?);
-                let lm_head_transposed_cpu = lm_head.t().as_standard_layout().to_owned();
-                gpu_lm_head_transposed =
-                    Some(GpuTensor::from_ndarray(&ctx, &lm_head_transposed_cpu)?);
-
+                // let lm_head_old = weights.get_array2(config.get_lm_head_name())?;
+                // let lm_head_transposed_cpu = lm_head.t().as_standard_layout().to_owned();
+                // gpu_lm_head_transposed =
+                //     Some(GpuTensor::from_ndarray(&ctx, &lm_head_transposed_cpu)?);
+                let gpu_lm_head_transposed = if !load_config.offload_lm_head {
+                    log::info!("Loading LM Head to VRAM");
+                    let lm_head_t = lm_head.to_f32_transposed();
+                    Some(GpuTensor::from_ndarray(&ctx, &lm_head_t)?)
+                } else {
+                    log::info!("Offloading LM Head to CPU RAM");
+                    None
+                };
                 Ok(Self {
                     config,
                     decoder: None,
                     tokenizer,
-                    lm_head,
+                    lm_head: lm_head,
                     gpu_decoder,
                     gpu_lm_head_transposed,
                     device,
@@ -239,29 +272,32 @@ impl LanguageModel for LlamaModel {
         Some(128000)
     }
     fn eos_token_id(&self) -> Option<u32> {
-        Some(128001)
+        Some(self.config.eos_token_id)
     }
     fn vocab_size(&self) -> usize {
-        128256
+        self.config.vocab_size
     }
     fn hidden_size(&self) -> usize {
-        2048
+        self.config.hidden_size
     }
     fn num_layers(&self) -> usize {
-        16
+        self.config.num_hidden_layers
     }
     fn num_heads(&self) -> usize {
-        32
+        self.config.num_attention_heads
     }
 }
 
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {
     fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput> {
-        panic!("asdf")
+        self.decoder
+            .as_ref()
+            .expect("CPU decoder not initialized - use Device::Cpu")
     }
     fn lm_head(&self) -> &Array2<f32> {
-        &self.lm_head
+        // &self.lm_head.to_array2_f32()
+        self.lm_head.as_f32().expect("lm_head is in BF16 mode, cannot access as &Array2<f32>. Use project_to_logits instead.")
     }
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
@@ -282,31 +318,14 @@ impl DecoderLanguageModel for LlamaModel {
     }
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        // hidden_states shape: [batch, seq, hidden]
-        // self.lm_head shape:   [vocab, hidden]
+        let (batch, seq, hidden) = hidden_states.dim();
+        let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq, hidden))?;
 
-        let (batch_size, seq_len, hidden_size) = hidden_states.dim();
-        assert_eq!(
-            hidden_size,
-            self.lm_head.shape()[1],
-            "lm_head second dim must equal hidden_size"
-        );
-        assert_eq!(
-            self.vocab_size(),
-            self.lm_head.shape()[0],
-            "lm_head first dim must equal vocab_size"
-        );
+        // Dispatch happens here automatically
+        let logits_2d = self.lm_head.matmul(&hidden_2d);
 
-        // Reshape hidden states for efficient matrix multiplication
-        let hidden_2d = hidden_states.to_shape((batch_size * seq_len, hidden_size))?;
-
-        // Perform the multiplication. We need to transpose the lm_head so the shapes align:
-        // [batch*seq, hidden] @ [hidden, vocab] -> [batch*seq, vocab]
-        let logits_2d = hidden_2d.dot(&self.lm_head.t());
-
-        // Reshape the result back to 3D
         logits_2d
-            .into_shape_with_order((batch_size, seq_len, self.vocab_size()))
+            .into_shape_with_order((batch, seq, self.vocab_size()))
             .map_err(|e| anyhow!(e))
     }
 }

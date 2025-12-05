@@ -4,12 +4,14 @@
 //! the low-level architecture traits in `traits.rs`.
 
 use crate::gpu_ops::GpuTensor;
+use crate::linear_layer::LinearLayer;
 use crate::pooling::mean_pool;
 use crate::traits::{
     CrossAttentionDecoder, Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig,
     TransformerModel,
 };
 use crate::utils::create_full_attention_mask;
+pub use crate::weights::DType;
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -525,9 +527,46 @@ pub trait EncoderDecoderLanguageModel: LanguageModel {
 
     fn get_default_generation_config(&self) -> GenerationConfig;
 
+    fn lm_head_layer(&self) -> &LinearLayer;
     // TODO: maybe dont have these here
     fn lm_head(&self) -> &Array2<f32>;
     fn final_logits_bias(&self) -> Option<&Array1<f32>>;
+}
+
+/// Flexible input for the decoder.
+/// - Use `Gpu` when you have VRAM to spare (fastest).
+/// - Use `Cpu` when VRAM is tight (saves ~1GB for Llama 3.2 1B).
+pub enum DecoderInput<'a> {
+    Gpu(&'a GpuTensor),
+    Cpu(&'a [u32]),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DecoderLoadConfig {
+    /// If true, embedding weights are kept in system RAM and lookup happens on CPU.
+    /// Saves VRAM (~1GB for Llama 1B).
+    pub offload_embeddings: bool,
+
+    /// If true, the LM Head (final projection) is kept in system RAM.
+    /// Saves VRAM (~1GB for Llama 1B).
+    pub offload_lm_head: bool,
+
+    /// Number of layers to run on GPU. If None, all layers are on GPU.
+    /// Useful for partial offloading.
+    pub gpu_layers: Option<usize>,
+
+    pub target_dtype: Option<DType>,
+}
+
+impl Default for DecoderLoadConfig {
+    fn default() -> Self {
+        Self {
+            offload_embeddings: false, // Default to Performance (Pure GPU)
+            offload_lm_head: false,
+            gpu_layers: None,
+            target_dtype: None,
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -537,11 +576,12 @@ pub trait GpuDecoder: Send + Sync {
         &self,
         encoder: &mut wgpu::CommandEncoder, // <-- Pass in the encoder
         pool: &mut crate::gpu_ops::GpuTensorPool,    // <-- Pass in the pool
-        input_ids: &GpuTensor,
+        // input_ids: &GpuTensor,
+        input: DecoderInput<'_>,
         attention_mask: &GpuTensor,
         position_offset: usize,
         cache: Option<&mut crate::cache::GpuKVCache>,
-        encoder_hidden_states: Option<&GpuTensor>, 
+        encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor>; // Returns the final hidden states as a GpuTensor
 }
 
@@ -555,9 +595,9 @@ pub trait DecoderLanguageModel: LanguageModel {
     fn decoder(&self) -> &dyn Decoder<Input=Array2<u32>, Output=DecoderOutput>;
 
 
-/// Get the GPU-native decoder.
+    /// Get the GPU-native decoder.
     /// Returns an error if the model was not loaded with GPU support.
-fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
+    fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
         Err(anyhow::anyhow!("This model does not have a GPU decoder implementation."))
     }
 
@@ -573,6 +613,7 @@ fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
 
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;
+
 
     /// Specifies the generation loop strategy required for this model
     /// to maintain parity with its reference implementation.

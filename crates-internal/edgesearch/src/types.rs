@@ -121,8 +121,9 @@ pub struct ChunkEnrichment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub score: f32,
-    pub chunk: Chunk,
-    pub search_type: SearchType,
+    pub document_id: usize,
+    pub text: String,
+    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

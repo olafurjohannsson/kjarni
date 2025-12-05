@@ -1,9 +1,9 @@
 use crate::attention::MultiHeadAttention;
-
+use crate::decoder_attention::DecoderAttention;
 use crate::feedforward::FeedForward;
 use crate::normalization::Normalization;
-use crate::utils::linear_algebra::matmul_3d_2d;
 use crate::rope::RoPE;
+use crate::utils::linear_algebra::matmul_3d_2d;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Axis, s};
 use std::sync::Arc;
@@ -15,8 +15,48 @@ use std::sync::Arc;
 /// with respect to the KV cache, making the data flow explicit and suitable for
 /// high-performance backends like GPUs.
 
+pub enum CpuAttention {
+    Legacy(MultiHeadAttention), // GPT-2
+    Modern(DecoderAttention),   // Llama/Phi
+}
+
+impl CpuAttention {
+    /// Unified forward method that dispatches to the correct implementation.
+    pub fn forward(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: Option<&Array2<f32>>,
+        cached_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
+        rope: Option<&RoPE>,
+    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        match self {
+            CpuAttention::Legacy(legacy) => {
+                // Map the legacy signature to the unified signature
+                // Legacy often doesn't take RoPE explicitly (applied inside or manually),
+                // but if your updated MultiHeadAttention takes it, pass it.
+                // Assuming legacy.forward_with_cache returns (out, k, v)
+
+                // Note: Legacy implementation might expect query/key_value/mask args slightly differently.
+                // Adapt as needed to match MultiHeadAttention's signature.
+                legacy.forward_with_cache(
+                    hidden_states, // query
+                    None,          // key_value (None = self attn)
+                    attention_mask,
+                    true, // is_causal
+                    cached_kv,
+                    rope, // Pass RoPE if legacy supports it now
+                )
+            }
+            CpuAttention::Modern(modern) => {
+                // Modern signature matches directly
+                modern.forward(hidden_states, attention_mask, cached_kv, rope)
+            }
+        }
+    }
+}
+
 pub struct DecoderLayer {
-    pub self_attn: MultiHeadAttention,
+    pub self_attn: CpuAttention,
     pub self_attn_layer_norm: Normalization,
     pub feedforward: FeedForward,
     pub ffn_layer_norm: Normalization,
@@ -45,30 +85,52 @@ impl DecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        let t0 = std::time::Instant::now();
+
         let residual = hidden_states.clone();
-
-        // 1. Normalize the input. This is the input to the Q, K, and V projections.
         let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
+        log::info!("  LayerNorm1: {:?}", t0.elapsed());
 
-        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-            &ln1_out, // The query source is the normalized hidden state
-            None,     // For self-attention, key_value source is the same
-            Some(attention_mask),
-            true, // is_causal is always true for a DecoderLayer
-            past_kv,
-            self.rope.as_deref(),
-        )?;
+        let t1 = std::time::Instant::now();
+        // --- DISPATCH LOGIC ---
+        let (attn_out, new_k, new_v) = match &self.self_attn {
+            CpuAttention::Legacy(legacy_attn) => {
+                // Keep your old logic for MultiHeadAttention
+                legacy_attn.forward_with_cache(
+                    &ln1_out,
+                    None,
+                    Some(attention_mask),
+                    true,
+                    past_kv,
+                    self.rope.as_deref(),
+                )?
+            }
+            CpuAttention::Modern(modern_attn) => {
+                // New logic for DecoderAttention (LinearLayer / BF16)
+                // Note: Modern attention usually handles RoPE internally or accepts it
+                modern_attn.forward(
+                    &ln1_out,
+                    Some(attention_mask),
+                    past_kv,
+                    self.rope.as_deref(),
+                )?
+            }
+        };
+        // --- END DISPATCH ---
+        log::info!("  Attention: {:?}", t1.elapsed());
 
-        // 3. First residual connection.
+        let t2 = std::time::Instant::now();
         let attn_block_output = residual + attn_out;
-
-        // 4. FFN block (this part is correct)
         let residual = attn_block_output.clone();
         let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
+        log::info!("  LayerNorm2: {:?}", t2.elapsed());
+
+        let t3 = std::time::Instant::now();
         let ffn_out = self.feedforward.forward(&ln2_out)?;
+        log::info!("  FFN: {:?}", t3.elapsed());
+
         let final_output = residual + ffn_out;
 
-        // 5. Return the final output and the new K/V pair to be cached by the caller.
         Ok((final_output, (new_k, new_v)))
     }
     fn forward_postnorm(
@@ -83,21 +145,29 @@ impl DecoderLayer {
         let cache_len = position_offset; // Use the provided offset
 
         // === 1. Manually perform ALL preparation steps ===
+        let legacy_attn = match &self.self_attn {
+            CpuAttention::Legacy(a) => a,
+            CpuAttention::Modern(_) => {
+                return Err(anyhow::anyhow!(
+                    "Modern BF16 Attention not supported in Post-Norm (Legacy) path yet."
+                ));
+            }
+        };
 
         // 1a. Project Q, K, and V from the raw hidden_states
-        let mut q_proj = matmul_3d_2d(hidden_states, &self.self_attn.q_weight);
-        if !self.self_attn.q_bias.is_empty() {
-            q_proj += &self.self_attn.q_bias;
+        let mut q_proj = matmul_3d_2d(hidden_states, &legacy_attn.q_weight);
+        if !legacy_attn.q_bias.is_empty() {
+            q_proj += &legacy_attn.q_bias;
         }
-        let (new_k, new_v) = self.self_attn.project_kv(hidden_states);
+        let (new_k, new_v) = legacy_attn.project_kv(hidden_states);
 
         // 1b. Apply RoPE to the new Q and K
         let (rotated_q, rotated_k) = if let Some(r) = self.rope.as_deref() {
             r.apply_3d(
                 &q_proj,
                 &new_k,
-                self.self_attn.num_heads,
-                self.self_attn.num_kv_heads,
+                legacy_attn.num_heads,
+                legacy_attn.num_kv_heads,
                 cache_len,
             )?
         } else {
@@ -132,7 +202,7 @@ impl DecoderLayer {
         };
 
         // === 2. Call the core attend function ===
-        let context = self.self_attn.attend(
+        let context = legacy_attn.attend(
             &rotated_q,
             &full_k,
             &full_v,
@@ -142,10 +212,10 @@ impl DecoderLayer {
         )?;
 
         // === 3. Perform the final output projection ===
-        let attn_out = if !self.self_attn.output_bias.is_empty() {
-            matmul_3d_2d(&context, &self.self_attn.output_weight) + &self.self_attn.output_bias
+        let attn_out = if !legacy_attn.output_bias.is_empty() {
+            matmul_3d_2d(&context, &legacy_attn.output_weight) + &legacy_attn.output_bias
         } else {
-            matmul_3d_2d(&context, &self.self_attn.output_weight)
+            matmul_3d_2d(&context, &legacy_attn.output_weight)
         };
 
         // === 4. Add & Norm ===
@@ -165,6 +235,7 @@ impl DecoderLayer {
 mod tests {
     use super::*;
     use crate::feedforward::{FeedForward, StdFeedForward, SwiGluFeedForward};
+    use crate::linear_layer::LinearLayer;
     use crate::normalization::{LayerNorm, RMSNorm};
     use crate::rope::RoPE;
     use ndarray::{Array1, Array2, Array3, s};
@@ -175,41 +246,32 @@ mod tests {
         let hidden_size = 2048;
         let num_heads = 32;
         let num_kv_heads = 8;
-        let head_dim = hidden_size / num_heads;
+        let head_dim = hidden_size / num_heads; // 64
+        let kv_dim = num_kv_heads * head_dim; // 512
         let intermediate_size = 8192;
 
-        // Create layer with GQA
-        let q_weight = Array2::eye(hidden_size);
-        let k_weight = Array2::eye(hidden_size).slice(s![.., 0..512]).to_owned();
-        let v_weight = Array2::eye(hidden_size).slice(s![.., 0..512]).to_owned();
-        let o_weight = Array2::eye(hidden_size);
+        // Attention weights: [out_features, in_features]
+        let q_weight = LinearLayer::from(Array2::<f32>::zeros((hidden_size, hidden_size)));
+        let k_weight = LinearLayer::from(Array2::<f32>::zeros((kv_dim, hidden_size)));
+        let v_weight = LinearLayer::from(Array2::<f32>::zeros((kv_dim, hidden_size)));
+        let o_weight = LinearLayer::from(Array2::<f32>::zeros((hidden_size, hidden_size)));
 
-        let attention = MultiHeadAttention::new(
+        let attention = DecoderAttention::new(
             hidden_size,
             num_heads,
             q_weight,
-            Array1::zeros(0),
             k_weight,
-            Array1::zeros(0),
             v_weight,
-            Array1::zeros(0),
             o_weight,
-            Array1::zeros(0),
             Some(num_kv_heads),
         );
 
         let rope = Arc::new(RoPE::new(head_dim, 128, 10000.0));
 
-        // Create feed-forward
-        let gate_weight = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
-            if i == j { 1.0 } else { 0.0 }
-        });
-        let up_weight = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
-            if i == j { 1.0 } else { 0.0 }
-        });
-        let down_weight = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
-            if i == j { 1.0 } else { 0.0 }
-        });
+        // FFN weights: [out_features, in_features]
+        let gate_weight = LinearLayer::from(Array2::<f32>::zeros((intermediate_size, hidden_size)));
+        let up_weight = LinearLayer::from(Array2::<f32>::zeros((intermediate_size, hidden_size)));
+        let down_weight = LinearLayer::from(Array2::<f32>::zeros((hidden_size, intermediate_size)));
 
         let feedforward =
             FeedForward::SwiGLU(SwiGluFeedForward::new(gate_weight, up_weight, down_weight));
@@ -218,7 +280,7 @@ mod tests {
         let norm2 = Normalization::RMSNorm(RMSNorm::new(Array1::ones(hidden_size), 1e-5));
 
         let layer = DecoderLayer {
-            self_attn: attention,
+            self_attn: CpuAttention::Modern(attention),
             self_attn_layer_norm: norm1,
             feedforward,
             ffn_layer_norm: norm2,
@@ -235,8 +297,8 @@ mod tests {
 
         let (output, (k, v)) = result.unwrap();
         assert_eq!(output.shape(), &[1, 10, hidden_size]);
-        assert_eq!(k.shape(), &[1, 10, 512]); // GQA: 512 not 2048
-        assert_eq!(v.shape(), &[1, 10, 512]);
+        assert_eq!(k.shape(), &[1, 10, kv_dim]);
+        assert_eq!(v.shape(), &[1, 10, kv_dim]);
 
         // Test 2: Generate (with cache)
         let input2 = Array3::ones((1, 1, hidden_size));
@@ -247,9 +309,11 @@ mod tests {
 
         let (output2, (k2, v2)) = result2.unwrap();
         assert_eq!(output2.shape(), &[1, 1, hidden_size]);
-        assert_eq!(k2.shape(), &[1, 1, 512]);
-        assert_eq!(v2.shape(), &[1, 1, 512]);
+        assert_eq!(k2.shape(), &[1, 1, kv_dim]);
+        assert_eq!(v2.shape(), &[1, 1, kv_dim]);
 
         println!("✓ Decoder layer integration test passed");
     }
 }
+
+

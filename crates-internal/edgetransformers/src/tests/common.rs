@@ -8,7 +8,7 @@ use ndarray::{Array, Array2, Array3, Array4, Dimension, Ix2, Ix3, Ix4};
 use std::sync::Arc;
 
 pub async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 pub async fn read_gpu_tensor_4d(tensor: &GpuTensor) -> Result<Array4<f32>> {
     let shape = tensor.shape();

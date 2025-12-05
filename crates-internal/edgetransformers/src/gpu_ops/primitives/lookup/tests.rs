@@ -15,7 +15,7 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_lookup() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
 
     // 1. Setup CPU data
     // A small embedding table: [vocab_size=4, hidden_size=3]

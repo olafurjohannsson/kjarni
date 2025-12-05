@@ -35,7 +35,8 @@ pub enum ModelType {
     Gpt2XL,
     Llama3_2_1B,
     // Llama3_2_3B,
-    // Llama3_8B,
+    Llama3_8B,
+    Llama3_8B_Instruct,
     // Llama2_7B,
 
     // === Encoder-Decoder ===
@@ -187,7 +188,29 @@ impl ModelType {
                 },
                 description: "TODO",
                 size_mb: 0,
-                params_millions: 1000
+                params_millions: 1000,
+            },
+            ModelType::Llama3_8B => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3-8B/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3-8B/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3-8B/resolve/main/config.json",
+                },
+                description: "TODO",
+                size_mb: 0,
+                params_millions: 1000,
+            },
+            ModelType::Llama3_8B_Instruct => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3-8B-Instruct/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3-8B-Instruct/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3-8B-Instruct/resolve/main/config.json",
+                },
+                description: "TODO",
+                size_mb: 0,
+                params_millions: 1000,
             },
 
             // === ENCODER-DECODER ===
@@ -245,7 +268,7 @@ impl ModelType {
     pub fn architecture(&self) -> ModelArchitecture {
         self.info().architecture
     }
-//weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/model.safetensors",
+    //weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/model.safetensors",
     /// Get the repo ID from the URL
     pub fn repo_id(&self) -> String {
         let info = self.info();
@@ -282,39 +305,149 @@ impl ModelType {
 /// # Ok(())
 /// # }
 /// ```
+/// Download model files with sharded model support
 pub async fn download_model_files(
     model_dir: &Path,
     paths: &crate::models::ModelPaths,
 ) -> Result<()> {
     tokio::fs::create_dir_all(model_dir).await?;
 
-    let files = [
-        ("model.safetensors", paths.weights_url),
-        ("tokenizer.json", paths.tokenizer_url),
-        ("config.json", paths.config_url),
-    ];
+    // Download tokenizer and config first
+    download_file(model_dir, "tokenizer.json", paths.tokenizer_url).await?;
+    download_file(model_dir, "config.json", paths.config_url).await?;
 
-    for (filename, url) in files {
-        let local_path = model_dir.join(filename);
+    // Check if this is a sharded model
+    if is_sharded_model(paths.weights_url) {
+        download_sharded_weights(model_dir, paths.weights_url).await?;
+    } else {
+        download_file(model_dir, "model.safetensors", paths.weights_url).await?;
+    }
 
-        if !local_path.exists() {
-            println!("Downloading {}...", filename);
-            let response = reqwest::get(url).await?;
+    Ok(())
+}
 
-            if !response.status().is_success() {
-                return Err(anyhow!(
-                    "Failed to download {}: HTTP {}",
-                    filename,
-                    response.status()
-                ));
-            }
+/// Check if the weights URL points to a sharded model (index.json)
+fn is_sharded_model(url: &str) -> bool {
+    url.ends_with(".index.json") || url.contains("model.safetensors.index.json")
+}
 
-            let bytes = response.bytes().await?;
-            tokio::fs::write(&local_path, &bytes).await?;
-            println!("✓ Downloaded {}", filename);
-        } else {
-            println!("✓ {} already exists, skipping download", filename);
+/// Download a single file if it doesn't exist
+async fn download_file(model_dir: &Path, filename: &str, url: &str) -> Result<()> {
+    let local_path = model_dir.join(filename);
+
+    if local_path.exists() {
+        println!("✓ {} already exists, skipping download", filename);
+        return Ok(());
+    }
+
+    println!("Downloading {}...", filename);
+    let response = reqwest::get(url).await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Failed to download {}: HTTP {}",
+            filename,
+            response.status()
+        ));
+    }
+
+    let bytes = response.bytes().await?;
+    tokio::fs::write(&local_path, &bytes).await?;
+    println!("✓ Downloaded {}", filename);
+
+    Ok(())
+}
+
+/// Download sharded model weights
+async fn download_sharded_weights(model_dir: &Path, index_url: &str) -> Result<()> {
+    // 1. Download the index file
+    let index_filename = "model.safetensors.index.json";
+    let index_path = model_dir.join(index_filename);
+
+    if !index_path.exists() {
+        println!("Downloading {}...", index_filename);
+        let response = reqwest::get(index_url).await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Failed to download index: HTTP {}",
+                response.status()
+            ));
         }
+
+        let bytes = response.bytes().await?;
+        tokio::fs::write(&index_path, &bytes).await?;
+        println!("✓ Downloaded {}", index_filename);
+    } else {
+        println!("✓ {} already exists, skipping download", index_filename);
+    }
+
+    // 2. Parse the index to get shard filenames
+    let index_content = tokio::fs::read_to_string(&index_path).await?;
+    let index: serde_json::Value = serde_json::from_str(&index_content)?;
+
+    let weight_map = index["weight_map"]
+        .as_object()
+        .ok_or_else(|| anyhow!("Invalid index.json: missing weight_map"))?;
+
+    // Get unique shard filenames
+    let mut shard_files: Vec<String> = weight_map
+        .values()
+        .filter_map(|v| v.as_str())
+        .map(|s| s.to_string())
+        .collect();
+    shard_files.sort();
+    shard_files.dedup();
+
+    println!("Model has {} shards", shard_files.len());
+
+    // 3. Derive base URL from index URL
+    let base_url = index_url
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .ok_or_else(|| anyhow!("Invalid index URL"))?;
+
+    // 4. Download each shard
+    for (i, shard_filename) in shard_files.iter().enumerate() {
+        let shard_path = model_dir.join(shard_filename);
+
+        if shard_path.exists() {
+            println!(
+                "✓ [{}/{}] {} already exists, skipping",
+                i + 1,
+                shard_files.len(),
+                shard_filename
+            );
+            continue;
+        }
+
+        let shard_url = format!("{}/{}", base_url, shard_filename);
+        println!(
+            "Downloading [{}/{}] {}...",
+            i + 1,
+            shard_files.len(),
+            shard_filename
+        );
+
+        let response = reqwest::get(&shard_url).await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Failed to download {}: HTTP {}",
+                shard_filename,
+                response.status()
+            ));
+        }
+
+        let bytes = response.bytes().await?;
+        tokio::fs::write(&shard_path, &bytes).await?;
+        println!(
+            "✓ [{}/{}] Downloaded {} ({:.2} GB)",
+            i + 1,
+            shard_files.len(),
+            shard_filename,
+            bytes.len() as f64 / 1_073_741_824.0
+        );
     }
 
     Ok(())

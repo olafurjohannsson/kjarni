@@ -1,28 +1,44 @@
-
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use edgetransformers::TransformerConfig;
-use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
+use anyhow::Result;
 use edgetransformers::models::base::EncoderDecoderLanguageModel;
-use edgetransformers::models::download_model_files;
 use edgetransformers::models::{
-    ModelArchitecture, ModelType,
-    base::{GenerationConfig, DecodingStrategy, SamplingParams},
+    base::DecodingStrategy,
+    ModelType,
 };
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{
-    CrossAttentionDecoder, DecoderOutput, Encoder, EncoderDecoderArchitecture, EncoderOutput,
+    CrossAttentionDecoder, Encoder, EncoderDecoderArchitecture,
     LanguageModelConfig, TransformerModel,
 };
-use edgetransformers::weights::ModelWeights;
-use ndarray::{Array1, Array2, Array3, s};
+use edgetransformers::TransformerConfig;
+use ndarray::{s, Array1, Array2, Array3};
+use serde::Deserialize;
 use std::ops::AddAssign;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokenizers::Tokenizer;
-pub mod bart_configs;
+
 pub mod seq2seq_model;
 
-pub use bart_configs::{BartConfig, SummarizationParams, TaskSpecificParams};
-pub use seq2seq_model::{Seq2SeqModel, AnySeq2SeqModel};
+
+pub use crate::models::bart::config::BartConfig;
+pub use seq2seq_model::{AnySeq2SeqModel, Seq2SeqModel};
+
+
+#[derive(Debug, Clone, Deserialize, Copy)]
+#[allow(non_snake_case)] // To allow serde to match the camelCase keys
+pub struct SummarizationParams {
+    pub early_stopping: bool,
+    pub length_penalty: f32,
+    pub max_length: usize,
+    pub min_length: usize,
+    pub no_repeat_ngram_size: usize,
+    pub num_beams: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(non_snake_case)]
+pub struct TaskSpecificParams {
+    pub summarization: SummarizationParams,
+}
+
+#[cfg(test)]
+mod tests;
 

@@ -10,6 +10,8 @@ use crate::{
     Embeddings, FeedForward, MultiHeadAttention, feedforward::StdFeedForward,
     normalization::LayerNorm, normalization::Normalization, normalization::RMSNorm,
 };
+use crate::linear_layer::LinearLayer;
+use crate::weights::DType;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{debug, info};
@@ -29,6 +31,7 @@ impl CpuTransformerDecoder {
         weights: &ModelWeights,
         config: Arc<dyn DecoderArchitecture + Send + Sync>,
         rope: Option<Arc<RoPE>>,
+        target_dtype: Option<DType>,
     ) -> Result<Self> {
         let (word_w, pos_w, _) = config.get_embedding_weight_names();
 
@@ -59,7 +62,7 @@ impl CpuTransformerDecoder {
         let mut layers = Vec::with_capacity(config.num_hidden_layers());
 
         for i in 0..config.num_hidden_layers() {
-            let layer = Self::build_layer(weights, config.as_ref(), i, rope.clone())?;
+            let layer = Self::build_layer(weights, config.as_ref(), i, rope.clone(), target_dtype)?;
             layers.push(layer);
         }
 
@@ -79,6 +82,7 @@ impl CpuTransformerDecoder {
         config: &dyn DecoderArchitecture,
         layer_idx: usize,
         rope: Option<Arc<RoPE>>,
+        target_dtype: Option<DType>,
     ) -> Result<DecoderLayer> {
         let attn_names = config.get_attention_names(layer_idx);
 
@@ -149,11 +153,18 @@ impl CpuTransformerDecoder {
         // Load FFN (standard or SwiGLU)
         let feed_forward = if let Some(gate_weight_name) = &ffn_names.gate_weight {
             // SwiGLU (LLaMA)
-            let gate_weight = weights.get_linear_weight(gate_weight_name)?;
-            let up_weight = weights.get_linear_weight(&ffn_names.intermediate_weight)?;
-            let down_weight = weights.get_linear_weight(&ffn_names.output_weight)?;
+            // let gate_weight = weights.get_linear_weight(gate_weight_name)?;
+            // let up_weight = weights.get_linear_weight(&ffn_names.intermediate_weight)?;
+            // let down_weight = weights.get_linear_weight(&ffn_names.output_weight)?;
 
-            FeedForward::SwiGLU(SwiGluFeedForward::new(gate_weight, up_weight, down_weight))
+            // FeedForward::SwiGLU(SwiGluFeedForward::new(gate_weight, up_weight, down_weight))
+            let gate = LinearLayer::from_weights(weights, gate_weight_name, target_dtype)?;
+            let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
+            let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, target_dtype)?;
+
+            let feedforward = FeedForward::SwiGLU(SwiGluFeedForward::new(gate, up, down));
+
+            feedforward
         } else {
             // Standard FFN (GPT-2)
             let intermediate_weight = if config.transpose_ffn_weights() {
@@ -217,7 +228,7 @@ impl CpuTransformerDecoder {
         .ok_or_else(|| anyhow!("FFN normalization required for layer {}", layer_idx))?;
 
         Ok(DecoderLayer {
-            self_attn: attention,
+            self_attn: crate::decoder_layer::CpuAttention::Legacy(attention),
             self_attn_layer_norm,
             feedforward: feed_forward,
             ffn_layer_norm,

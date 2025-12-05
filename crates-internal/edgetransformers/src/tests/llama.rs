@@ -63,7 +63,7 @@ async fn test_full_llama_decoder_parity() -> Result<()> {
     });
     
     let weights = create_dummy_llama_weights(&config);
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let rope = Arc::new(RoPE::new(config.head_dim(), config.max_position_embeddings(), config.rope_theta));
 
     // --- Build CPU and GPU Decoders ---
@@ -102,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn test_gpu_gqa_parity_with_rope() -> Result<()> {
         // --- 1. Arrange ---
-        let context = Arc::new(WgpuContext::new().await?);
+        let context = WgpuContext::new().await?;
         let (b, s, h) = (1, 8, 256); // Batch, SeqLen, HiddenSize
         let num_q_heads = 8;
         let num_kv_heads = 2; // GQA Ratio: 4

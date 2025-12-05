@@ -27,36 +27,140 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use super::*;
-use crate::generation::{GenerationConfig, Generator};
+use crate::generation::{GenerationConfig};
+use crate::generation::decoder::Generator;
 
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
-    LlamaModel::from_registry(ModelType::Llama3_2_1B, None, Device::Cpu, None).await
+    LlamaModel::from_registry(ModelType::Llama3_2_1B, None, Device::Cpu, None, None).await
 }
 
-// #[tokio::test]
-// async fn test_llama3_2_1b_generation_parity() -> Result<()> {
-//     // This test verifies deterministic (greedy) generation output.
-//     let model = load_llama_for_test().await?;
-//     let generator = Generator::new(Box::new(model));
+async fn load_llama_8b_for_test() -> Result<LlamaModel> {
+    LlamaModel::from_registry(ModelType::Llama3_8B_Instruct, None, Device::Cpu, None, None).await
+}
 
-//     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
-//     let expected_output =
-//         "The field of Artificial Intelligence has seen a lot of progress in recent years";
 
-//     let config = GenerationConfig {
-//         max_new_tokens: Some(5),
-//         add_bos_token: true, // Llama models require the BOS token.
-//         strategy: DecodingStrategy::Greedy,
-//         ..Default::default()
-//     };
+#[tokio::test]
+async fn test_llama3_8b_architectural_properties() -> Result<()> {
+    // 1. Arrange: Load the model.
+    let model = load_llama_8b_for_test().await?;
+    let config = model.concrete_config();
 
-//     let generated_text = generator.generate(prompt, &config).await?;
-//     assert_eq!(generated_text.trim(), expected_output.trim());
+    // 2. Assert: Check architectural values directly from the config struct.
+    assert_eq!(config.vocab_size, 128256);
+    assert_eq!(config.hidden_size, 4096);
+    assert_eq!(config.num_hidden_layers, 32);
+    assert_eq!(config.num_attention_heads, 32);
+    assert_eq!(config.num_key_value_heads, 8); // GQA
+    assert_eq!(config.intermediate_size, 14336);
+    assert_eq!(config.max_position_embeddings, 8192);
+    assert_eq!(config.rope_theta, 500000.0);
+    assert_eq!(config.rms_norm_eps, 1e-5);
 
-//     Ok(())
-// }
+    // 3. Assert: Check that the trait implementations correctly expose these values.
+    // This catches hardcoded values like the bug we just found!
+    assert_eq!(model.vocab_size(), config.vocab_size, "vocab_size mismatch - check for hardcoded value");
+    assert_eq!(model.hidden_size(), config.hidden_size, "hidden_size mismatch - check for hardcoded value");
+    assert_eq!(model.num_layers(), config.num_hidden_layers, "num_layers mismatch - check for hardcoded value");
+    assert_eq!(model.num_heads(), config.num_attention_heads, "num_heads mismatch - check for hardcoded value");
+
+    // Check token IDs match config.json
+    assert_eq!(model.bos_token_id(), Some(128000));
+    assert_eq!(model.eos_token_id(), Some(128009)); // Note: 8B uses 128009, not 128001
+
+    Ok(())
+}
+
+/// Generic test to ensure trait values match config values.
+/// Run this for ANY model to catch hardcoded values.
+#[tokio::test]
+async fn test_llama_trait_config_consistency() -> Result<()> {
+    // Test with 1B
+    let model_1b = load_llama_for_test().await?;
+    assert_trait_matches_config(&model_1b, "Llama-3.2-1B");
+
+    // Test with 8B (if available)
+    if let Ok(model_8b) = load_llama_8b_for_test().await {
+        assert_trait_matches_config(&model_8b, "Llama-3-8B");
+    }
+
+    Ok(())
+}
+
+fn assert_trait_matches_config(model: &LlamaModel, name: &str) {
+    let config = model.concrete_config();
+    
+    assert_eq!(
+        model.vocab_size(), config.vocab_size,
+        "{}: vocab_size() should come from config", name
+    );
+    assert_eq!(
+        model.hidden_size(), config.hidden_size,
+        "{}: hidden_size() should come from config", name
+    );
+    assert_eq!(
+        model.num_layers(), config.num_hidden_layers,
+        "{}: num_layers() should come from config", name
+    );
+    assert_eq!(
+        model.num_heads(), config.num_attention_heads,
+        "{}: num_heads() should come from config", name
+    );
+}
+
+#[test]
+fn test_llama_config_parsing_8b() {
+    let json = r#"{
+        "hidden_size": 4096,
+        "num_hidden_layers": 32,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "intermediate_size": 14336,
+        "vocab_size": 128256,
+        "max_position_embeddings": 8192,
+        "rms_norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+        "bos_token_id": 128000,
+        "eos_token_id": 128009,
+        "tie_word_embeddings": false
+    }"#;
+
+    let config = LlamaConfig::from_json(json).unwrap();
+    
+    assert_eq!(config.hidden_size, 4096);
+    assert_eq!(config.num_hidden_layers, 32);
+    assert_eq!(config.num_attention_heads, 32);
+    assert_eq!(config.num_key_value_heads, 8);
+    assert_eq!(config.intermediate_size, 14336);
+    assert_eq!(config.head_dim(), 128); // 4096 / 32
+    assert_eq!(config.kv_dim(), 1024);  // 8 * 128
+    assert!(config.uses_gqa());
+}
+
+#[test]
+fn test_llama_config_parsing_1b() {
+    let json = r#"{
+        "hidden_size": 2048,
+        "num_hidden_layers": 16,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "intermediate_size": 8192,
+        "vocab_size": 128256,
+        "max_position_embeddings": 131072,
+        "rms_norm_eps": 1e-05,
+        "rope_theta": 500000.0,
+        "bos_token_id": 128000,
+        "eos_token_id": 128001
+    }"#;
+
+    let config = LlamaConfig::from_json(json).unwrap();
+    
+    assert_eq!(config.hidden_size, 2048);
+    assert_eq!(config.num_hidden_layers, 16);
+    assert_eq!(config.head_dim(), 64); // 2048 / 32
+    assert_eq!(config.kv_dim(), 512);  // 8 * 64
+}
 
 #[tokio::test]
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
@@ -89,44 +193,45 @@ async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     Ok(())
 }
 
-// #[tokio::test]
-// #[ignore] // This test downloads a large model and is very slow. Run with `cargo test -- --ignored`.
-// async fn test_llama3_2_1b_generation_parity() -> Result<()> {
-//     // This test verifies that our Llama implementation produces a known, correct output
-//     // for a deterministic (greedy) generation task.
+#[tokio::test]
+async fn test_llama3_2_1b_generation_parity() -> Result<()> {
+    // This test verifies that our Llama implementation produces a known, correct output
+    // for a deterministic (greedy) generation task.
 
-//     // 1. Setup: Define the model, prompt, and expected output.
-//     let model_type = ModelType::Llama3_2_1B;
-//     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
+    // 1. Setup: Define the model, prompt, and expected output.
+    let model_type = ModelType::Llama3_2_1B;
+    let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-//     // The "golden" output string for generating 5 new tokens, based on previous correct runs.
-//     let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the last few years";
+    // The "golden" output string for generating 5 new tokens, based on previous correct runs.
+    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the last few years.";
 
-//     // Create a config for deterministic, greedy decoding.
-//     let config = GenerationConfig {
-//         max_new_tokens: Some(1), // Generate exactly 5 new tokens.
-//         sampling_strategy: SamplingStrategy::Greedy,
-//         repetition_penalty: 1.0, // No penalty.
-//         add_bos_token: true,     // CRITICAL for Llama models.
-//         ..Default::default()
-//     };
+    // Create a config for deterministic, greedy decoding.
+    let config = GenerationConfig {
+        max_new_tokens: Some(6),
+        strategy: DecodingStrategy::Greedy,
+        repetition_penalty: 1.0, // No penalty.
+        add_bos_token: true,     // CRITICAL for Llama models.
+        ..Default::default()
+    };
+    // decoder_layer::tests::test_decoder_layer_with_rope_and_gqa
+    
+    // 2. Load model and create the generator.
+    let llama_model = LlamaModel::from_registry(
+        model_type,
+        None,
+        Device::Cpu,
+        None,
+        None,
+    ).await?;
 
-//     // 2. Load model and create the generator.
-//     let llama_model = LlamaModel::from_registry(
-//         model_type,
-//         None,
-//         Device::Cpu,
-//         None
-//     ).await?;
+    let generator = Generator::new(Box::new(llama_model))?;
 
-//     let generator = Generator::new(Box::new(llama_model));
+    // 3. Execute the generation.
+    let generated_text = generator.generate(prompt, &config).await?;
 
-//     // 3. Execute the generation.
-//     let generated_text = generator.generate(prompt, &config).await?;
+    // 4. Assert that the generated output is bit-for-bit identical to the golden value.
+    //    We trim both strings to avoid any potential whitespace differences at the end.
+    assert_eq!(generated_text.trim(), expected_output.trim());
 
-//     // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-//     //    We trim both strings to avoid any potential whitespace differences at the end.
-//     assert_eq!(generated_text.trim(), expected_output.trim());
-
-//     Ok(())
-// }
+    Ok(())
+}

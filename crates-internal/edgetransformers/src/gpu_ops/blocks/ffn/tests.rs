@@ -219,7 +219,7 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
 #[tokio::test]
 async fn test_gpu_ffn_parity_encode() -> Result<()> {
     // --- SETUP (Unchanged) ---
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::Gelu;
 
@@ -279,7 +279,7 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
 }
 #[tokio::test]
 async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::GeluNew;
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
@@ -332,7 +332,7 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
 #[tokio::test]
 async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
     // --- SETUP (Identical to the previous tests) ---
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::Gelu;
 
@@ -486,7 +486,7 @@ pub async fn assert_tensors_are_close_relative(
 }
 #[tokio::test]
 async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let activation = Activation::Gelu; // Activation doesn't matter for FC2
     let (batch_size, seq_len, intermediate_size, hidden_size) = (2, 16, 512, 128);
     let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
@@ -530,7 +530,7 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let activation = Activation::Gelu;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {

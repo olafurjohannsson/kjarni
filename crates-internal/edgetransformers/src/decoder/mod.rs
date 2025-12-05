@@ -24,6 +24,7 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 use crate::rope::RoPE;
 pub use traits::DecoderGenerationBackend;
+use crate::weights::DType;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///
@@ -47,14 +48,16 @@ impl TransformerDecoder {
         device: Device,
         context: Option<Arc<WgpuContext>>,
         rope: Option<Arc<RoPE>>,
+        dtype: Option<DType>
     ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
                 weights,
                 config.clone(),
                 rope,
+                dtype,
             )?)),
-            Device::Wgpu => {
+            Device::Wgpu => { // TODO: this is actually deprecated in favor of GpuBackend/Generator/GpuDecoder
                 let ctx = context.ok_or_else(|| {
                     anyhow!("A WGPU context is required to create a GPU-based decoder.")
                 })?;

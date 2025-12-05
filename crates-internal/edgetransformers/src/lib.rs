@@ -1,9 +1,11 @@
+
 //! Core transformer components for building transformer-based models
 //!
 //! This crate provides the fundamental building blocks for transformer architectures
 //! without model-specific implementations.
 
 //! EdgeTransformers: Fast transformer models for Rust
+
 
 pub mod activations;
 pub mod attention;
@@ -14,6 +16,8 @@ pub mod adaptive_embeddings;
 pub mod encoder;
 pub mod encoder_decoder;
 pub mod feedforward;
+pub mod decoder_attention;
+pub mod linear_layer;
 pub mod normalization;
 pub mod gpu_context;
 pub mod gpu_ops;
@@ -26,6 +30,8 @@ pub mod decoder_cross_attn_layer;
 pub mod decoder_layer;
 pub mod encoder_layer;
 pub mod rope;
+pub mod decoder_cross_attn;
+
 
 // Re-export commonly used items
 pub use crate::{

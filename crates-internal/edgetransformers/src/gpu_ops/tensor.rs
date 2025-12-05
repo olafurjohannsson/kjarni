@@ -1,46 +1,19 @@
 use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate root
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
+use crate::weights::RawTensor;
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use wgpu::CommandEncoder;
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Defines the data type of the elements in a GpuTensor.
-/// This is crucial for handling different weight formats from files like GGUF.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DType {
-    F32,
-    F16,
-    BF16,
-    U32,
-    I8,
-    Q8_0,
-    Q8_1,
-    Q4_0,
-    Q4_1,
-    Q2_0,
-    Q2_1,
-    // Add other types like F16, Q8_0, etc., as you implement them
-}
-impl DType {
-    pub fn size_of(&self) -> usize {
-        match self {
-            DType::F32 => std::mem::size_of::<f32>(),
-            DType::U32 => std::mem::size_of::<u32>(),
-            DType::I8 => std::mem::size_of::<i8>(),
-            // TODO: Add sizes for other dtypes as they are implemented.
-            // For now, panic if the size is not defined.
-            _ => unimplemented!("Size for dtype {:?} is not defined", self),
-        }
-    }
-}
+pub use crate::weights::DType;
 
 pub trait GpuDType: bytemuck::Pod {
     const DTYPE: DType;
@@ -86,6 +59,40 @@ impl fmt::Debug for GpuTensor {
 }
 
 impl GpuTensor {
+    pub fn linear_layer_dims(&self) -> (usize, usize) {
+        match self.dtype {
+            DType::BF16 => (self.shape[1], self.shape[0]), // [Out, In] -> (In, Out)
+            _ => (self.shape[0], self.shape[1]),           // [In, Out] -> (In, Out)
+        }
+    }
+    pub fn from_raw(ctx: &Arc<WgpuContext>, raw: &RawTensor, label: &str) -> Result<Self> {
+        // If raw is F32, we upload directly.
+        // If raw is BF16/F16, we currently upload as raw bytes.
+        // IMPORTANT: WGPU buffers don't care about type, just size.
+        log::info!(
+            "Uploading Tensor '{}': DType={:?}, Shape={:?} ({:.2} MB)",
+            label,
+            raw.dtype,
+            raw.shape,
+            (raw.bytes.len() as f64) / 1024.0 / 1024.0
+        );
+        let buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: &raw.bytes, // <--- Direct copy from Disk to VRAM!
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+
+        // If we uploaded BF16 bytes, we need to mark the GpuTensor as BF16
+        // so your shaders know how to treat it.
+        Ok(Self::new_allocation(
+            Arc::new(buffer),
+            raw.shape.clone(),
+            raw.dtype, // Pass the dtype along!
+            ctx.clone(),
+        ))
+    }
     /// Internal constructor - generates new ID (new allocation)
     fn new_allocation(
         buffer: Arc<Buffer>,
@@ -137,13 +144,18 @@ impl GpuTensor {
         let new_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: self.buffer.size(),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("GpuTensor::clone encoder"),
-        });
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("GpuTensor::clone encoder"),
+                });
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buffer, 0, self.buffer.size());
         self.context.queue.submit(Some(encoder.finish()));
 
@@ -158,7 +170,11 @@ impl GpuTensor {
 
     /// Creates a view with different axis permutation (metadata only)
     pub fn permute_axes(&self, axes: &[usize]) -> GpuTensor {
-        assert_eq!(axes.len(), self.rank(), "Permutation axes must match tensor rank");
+        assert_eq!(
+            axes.len(),
+            self.rank(),
+            "Permutation axes must match tensor rank"
+        );
 
         let mut new_shape = vec![0; self.rank()];
         for (i, &axis) in axes.iter().enumerate() {
@@ -270,12 +286,7 @@ impl GpuTensor {
             mapped_at_creation: false,
         });
 
-        Self::new_allocation(
-            Arc::new(buffer),
-            shape,
-            dtype,
-            context.clone(),
-        ) // ✅ New allocation = new ID
+        Self::new_allocation(Arc::new(buffer), shape, dtype, context.clone()) // ✅ New allocation = new ID
     }
 
     /// Creates from ndarray
@@ -324,17 +335,12 @@ impl GpuTensor {
         }
 
         // Creates NEW buffer, so new ID
-        let output = GpuTensor::uninitialized(
-            &self.context,
-            output_shape,
-            self.dtype,
-            "Permute Output",
-        ); // ✅ New buffer = new ID
+        let output =
+            GpuTensor::uninitialized(&self.context, output_shape, self.dtype, "Permute Output"); // ✅ New buffer = new ID
 
         permute_kernel.encode(encoder, self, &output, axes);
         output
     }
-
 
     pub fn dims2(&self) -> (usize, usize) {
         assert_eq!(self.rank(), 2, "Tensor is not rank 2");
@@ -353,7 +359,6 @@ impl GpuTensor {
         assert_eq!(self.rank(), 4, "Tensor is not rank 4");
         (self.shape[0], self.shape[1], self.shape[2], self.shape[3])
     }
-
 
     /// Creates a new GpuTensor by copying a slice from this tensor using a dedicated kernel.
     ///
@@ -412,7 +417,6 @@ impl GpuTensor {
             data_slice.to_vec(),
         )?)
     }
-
 
     pub async fn to_ndarray_2d<A>(&self) -> Result<Array2<A>>
     where
@@ -528,11 +532,11 @@ impl GpuTensor {
             DType::F16 => "f16",
             DType::BF16 => "bf16",
             DType::Q8_0 => "q8_0",
-            DType::Q8_1 => "q8_1",
+            // DType::Q8_1 => "q8_1",
             DType::Q4_0 => "q4_0",
             DType::Q4_1 => "q4_1",
-            DType::Q2_0 => "q2_0",
-            DType::Q2_1 => "q2_1",
+            // DType::Q2_0 => "q2_0",
+            // DType::Q2_1 => "q2_1",
             _ => "unknown",
         }
     }
@@ -544,7 +548,7 @@ mod tests {
     use ndarray::Array3;
 
     async fn setup_context() -> Arc<WgpuContext> {
-        Arc::new(WgpuContext::new().await.unwrap())
+        WgpuContext::new().await.unwrap()
     }
 
     #[tokio::test]

@@ -13,25 +13,30 @@ use edgetransformers::gpu_ops::blocks::{
     attention::GpuAttentionWeights,
 };
 use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use edgetransformers::models::base::DecoderInput;
+use edgetransformers::models::base::DecoderLoadConfig;
 use edgetransformers::models::base::GpuDecoder;
-use edgetransformers::traits::DecoderArchitecture;
+use edgetransformers::traits::{DecoderArchitecture, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
-use ndarray::Array1;
-use ndarray::Array2;
-use ndarray::s;
+use ndarray::{Array1, Array2, s};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// The GPU-native implementation of the GPT-2 decoder architecture.
 pub struct Gpt2GpuDecoder {
-    embedding_weights: GpuEmbeddingWeights,
-    embeddings: GpuEmbeddings,
+    // Option: If using CPU embeddings, these are None to save VRAM
+    embedding_weights: Option<GpuEmbeddingWeights>,
+    embeddings: Option<GpuEmbeddings>,
+
     layers: Vec<GpuPreNormDecoderLayer>,
     final_layer_norm: GpuNormalization,
     final_ln_weights: GpuNormalizationWeights,
-    pool: Mutex<GpuTensorPool>,
+
     context: Arc<WgpuContext>,
     config: Arc<Gpt2Config>,
+
+    // Option: If using GPU embeddings, this is None
+    cpu_embeddings: Option<edgetransformers::embeddings::Embeddings>,
 }
 
 impl Gpt2GpuDecoder {
@@ -44,12 +49,34 @@ impl Gpt2GpuDecoder {
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<Gpt2Config>,
+        load_config: DecoderLoadConfig,
     ) -> Result<Self> {
         log::info!("Building GPT-2 GPU decoder...");
 
-        // 1. Embeddings (GPT-2 has word + position embeddings)
-        let embedding_weights = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
-        let embeddings = GpuEmbeddings::new(context)?;
+        let (cpu_embeddings, embedding_weights, embeddings) = if load_config.offload_embeddings {
+            log::info!("Optimization: Loading Embedding weights to CPU RAM only.");
+
+            let (word_w, pos_w, _) = config.get_embedding_weight_names();
+            let word_embeddings = weights.get_array2(word_w)?;
+            let position_embeddings_cpu = if !pos_w.is_empty() {
+                Some(weights.get_array2(pos_w)?)
+            } else {
+                None
+            };
+
+            let cpu_embs = edgetransformers::embeddings::Embeddings::new(
+                word_embeddings,
+                position_embeddings_cpu,
+                None,
+            );
+
+            (Some(cpu_embs), None, None)
+        } else {
+            log::info!("Loading Embedding weights to VRAM.");
+            let ew = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
+            let em = GpuEmbeddings::new(context)?;
+            (None, Some(ew), Some(em))
+        };
 
         // 2. Final Layer Norm (GPT-2 uses standard LayerNorm)
         let (norm_w_name, norm_b_name) = config.get_final_layer_norm_names();
@@ -81,9 +108,9 @@ impl Gpt2GpuDecoder {
             layers,
             final_layer_norm,
             final_ln_weights,
-            pool: Mutex::new(GpuTensorPool::new(context.clone())),
             context: context.clone(),
             config,
+            cpu_embeddings,
         })
     }
 
@@ -135,7 +162,7 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &o_bias)?,
         )?;
 
-        let (self_attn_norm, self_attn_norm_weights) =  {
+        let (self_attn_norm, self_attn_norm_weights) = {
             // GPT-2 Path: Use the top-level `attn_names`
             let gamma = weights.get_array1(&attn_names.norm_weight)?;
             let beta = weights.get_array1(&attn_names.norm_bias)?;
@@ -192,22 +219,71 @@ impl GpuDecoder for Gpt2GpuDecoder {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut edgetransformers::gpu_ops::GpuTensorPool,
-        input_ids: &GpuTensor,
+        input_ids: DecoderInput<'_>, // The flexible input
         attention_mask: &GpuTensor,
         position_offset: usize,
         cache: Option<&mut GpuKVCache>,
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
-        // 1. Embeddings (word + position)
-        let mut hidden_states = self.embeddings.encode(
-            encoder,
-            &self.embedding_weights,
-            input_ids,
-            None, // No token type embeddings for GPT-2
-            position_offset,
-            self.config.as_ref(),
-            pool,
-        )?;
+        // 1. Handle Embeddings (CPU vs GPU path)
+        let mut hidden_states = match input_ids {
+            // CASE 1: CPU Input IDs
+            DecoderInput::Cpu(ids) => {
+                if let Some(cpu_embeds) = &self.cpu_embeddings {
+                    // Sub-case 1A: CPU Weights (Hybrid Mode) -> Lookup on CPU
+                    let input_array = Array2::from_shape_vec((1, ids.len()), ids.to_vec())?;
+                    let initial_embeddings_cpu = cpu_embeds.forward(
+                        &input_array,
+                        None,
+                        position_offset,
+                        self.config.scale_embeddings(),
+                    );
+                    GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)?
+                } else {
+                    // Sub-case 1B: GPU Weights (Pure GPU Mode) -> Upload IDs -> GPU Kernel
+                    let input_tensor = GpuTensor::from_ndarray(
+                        &self.context,
+                        &Array2::from_shape_vec((1, ids.len()), ids.to_vec())?,
+                    )?;
+
+                    let gpu_embeds = self
+                        .embeddings
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("Fatal: Embeddings not loaded on CPU or GPU"))?;
+                    let gpu_weights = self.embedding_weights.as_ref().unwrap();
+
+                    gpu_embeds.encode(
+                        encoder,
+                        gpu_weights,
+                        &input_tensor,
+                        None,
+                        position_offset,
+                        self.config.as_ref(),
+                        pool,
+                    )?
+                }
+            }
+
+            // CASE 2: GPU Input IDs
+            DecoderInput::Gpu(ids_tensor) => {
+                // Must have GPU weights
+                let gpu_embeds = self
+                    .embeddings
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("GPU input provided but embeddings are on CPU"))?;
+                let gpu_weights = self.embedding_weights.as_ref().unwrap();
+
+                gpu_embeds.encode(
+                    encoder,
+                    gpu_weights,
+                    ids_tensor,
+                    None,
+                    position_offset,
+                    self.config.as_ref(),
+                    pool,
+                )?
+            }
+        };
 
         let mut cache_mut_ref = cache;
 
@@ -226,7 +302,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
             hidden_states = output;
         }
 
-        // 3. Final layer normyes
+        // 3. Final layer norm
         let final_ln_output = pool.get(hidden_states.shape().to_vec());
         self.final_layer_norm.encode(
             encoder,
@@ -235,6 +311,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
             &final_ln_output,
         );
 
+        // Returns GPU tensor. Data stays on VRAM.
         Ok(final_ln_output)
     }
 }

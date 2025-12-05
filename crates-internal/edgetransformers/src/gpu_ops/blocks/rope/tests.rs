@@ -13,7 +13,7 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_rope_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (b, h, s, d) = (2, 8, 32, 64); // Batch, Heads, SeqLen, HeadDim
     let max_seq = 128;
     let theta = 10000.0;

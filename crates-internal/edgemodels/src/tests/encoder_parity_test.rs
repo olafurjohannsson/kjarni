@@ -108,7 +108,7 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
 
     // Load GPU encoder
     println!("Loading GPU encoder...");
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let gpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
             .await?;
@@ -182,7 +182,7 @@ async fn test_simple_input() -> Result<()> {
     let cpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let gpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
             .await?;
@@ -212,7 +212,7 @@ async fn test_identical_sentences() -> Result<()> {
     let cpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
 
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let gpu_encoder =
         SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
             .await?;

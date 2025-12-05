@@ -1,5 +1,6 @@
 use crate::models::gpt2::{Gpt2Config, Gpt2Model};
-use crate::generation::Generator;
+// use crate::generation::Generator;
+use crate::generation::decoder::{CpuDecoderBackend, GpuDecoderBackend, Generator};
 use anyhow::Result;
 use edgetransformers::cache::{CpuKVCache, GpuKVCache};
 use edgetransformers::decoder::TransformerDecoder;
@@ -27,13 +28,13 @@ async fn test_full_text_generation_parity() -> Result<()> {
         strategy: DecodingStrategy::Greedy,
         ..Default::default()
     };
-    let cpu_generator = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
-    let cpu_gen = Generator::new(Box::new(cpu_generator));
+    let cpu_generator = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
+    let cpu_gen = Generator::new(Box::new(cpu_generator))?;
     let cpu_generated_text = cpu_gen.generate(prompt, &config).await?;
-    let context = Arc::new(edgetransformers::WgpuContext::new().await?);
+    let context = edgetransformers::WgpuContext::new().await?;
     let gpu_generator =
-        Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context)).await?;
-    let gpu_gen = Generator::new(Box::new(gpu_generator));
+        Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context), None).await?;
+    let gpu_gen = Generator::new(Box::new(gpu_generator))?;
     let gpu_generated_text = gpu_gen.generate(prompt, &config).await?;
     assert_eq!(
         cpu_generated_text, gpu_generated_text,
@@ -65,9 +66,9 @@ async fn test_full_forward_pass_parity() -> Result<()> {
     let mut config1 = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
     config1.set_model_type("distilgpt2".to_string());
     let config: Arc<dyn DecoderArchitecture + Send + Sync> = Arc::new(config1);
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let cpu_decoder =
-        TransformerDecoder::Cpu(CpuTransformerDecoder::new(&weights, config.clone(), None)?);
+        TransformerDecoder::Cpu(CpuTransformerDecoder::new(&weights, config.clone(), None, None)?);
     let gpu_decoder = TransformerDecoder::Gpu(GpuTransformerDecoder::new(
         &weights,
         config.clone(),

@@ -22,20 +22,21 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use super::*;
-use crate::generation::{GenerationConfig, Generator};
+use crate::generation::{GenerationConfig};
+use crate::generation::decoder::{CpuDecoderBackend, GpuDecoderBackend, Generator};
 use crate::models::gpt2::model::Gpt2Model;
 use crate::models::gpt2::config::Gpt2Config;
 
 /// Helper function to load the DistilGPT2 model for testing.
 async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {
-    Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Cpu, None).await
+    Gpt2Model::from_registry(ModelType::DistilGpt2, None, Device::Cpu, None, None).await
 }
 
 #[tokio::test]
 async fn test_distilgpt2_generation_parity() -> Result<()> {
     // This test verifies deterministic (greedy) generation output.
     let model = load_distilgpt2_for_test().await?;
-    let generator = Generator::new(Box::new(model));
+    let generator = Generator::new(Box::new(model))?;
 
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
     let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
@@ -105,9 +106,9 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
 
     // 2. Load model and create the generator.
     //    We run on CPU to match the Python script's environment.
-    let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+    let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-    let generator = Generator::new(Box::new(gpt2_model));
+    let generator = Generator::new(Box::new(gpt2_model))?;
 
     // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
     let generated_text = generator.generate(prompt, &config).await?;
@@ -139,16 +140,16 @@ async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
 
     // 2. Load model and create the generator.
     //    We run on CPU to match the Python script's environment.
-    let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None).await?;
+    let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-    let generator = Generator::new(Box::new(gpt2_model));
+    let generator = Generator::new(Box::new(gpt2_model))?;
 
     // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
     let generated_text = generator.generate(prompt, &config).await?;
 
-    let ctx = Arc::new(WgpuContext::new().await?);
-    let gpt2_model_2 = Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx)).await?;
-    let generator_2 = Generator::new(Box::new(gpt2_model_2));
+    let ctx = WgpuContext::new().await?;
+    let gpt2_model_2 = Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
+    let generator_2 = Generator::new(Box::new(gpt2_model_2))?;
     let generated_text_2 = generator_2.generate(prompt, &config).await?;
 
     // 4. Assert that the generated output is bit-for-bit identical to the golden value.

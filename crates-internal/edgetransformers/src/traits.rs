@@ -153,6 +153,9 @@ pub trait CrossAttentionDecoder: TransformerModel {
         encoder_attention_mask: Option<&'a Self::MaskInput>,
         decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
+        // NEW: Optional pre-computed Cross KV
+        // Vector of tuples (K, V) matching the layers
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
     ) -> Result<Self::Output>;
 
     // fn as_any(&self) -> &dyn Any;

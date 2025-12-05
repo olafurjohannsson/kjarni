@@ -9,3 +9,4 @@ pub mod layout;
 pub mod scale;
 pub mod lookup;
 pub mod repeat_kv;
+pub mod argmax;

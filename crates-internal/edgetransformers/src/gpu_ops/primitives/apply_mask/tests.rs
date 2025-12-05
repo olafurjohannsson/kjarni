@@ -17,7 +17,7 @@ use crate::WgpuContext;
 const MASK_VALUE: f32 = -1e9;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 
 fn generate_expected_scores(

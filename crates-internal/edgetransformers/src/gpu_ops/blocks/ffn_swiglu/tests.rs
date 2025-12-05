@@ -14,30 +14,43 @@ mod common;
 
 #[tokio::test]
 async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
-    let (rows, hidden_size) = (128, 256); // (batch*seq_len), hidden_size
+    let context = WgpuContext::new().await?;
+    let (rows, hidden_size) = (128, 256); 
     let intermediate_size = 512;
     
     let gpu_swiglu = GpuSwiGLUFFN::new(&context)?;
 
-    let gate_w_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-1.0, 1.0));
-    let up_w_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-1.0, 1.0));
-    let down_w_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-1.0, 1.0));
+    // CPU weights: [Out, In] (PyTorch/LinearLayer convention)
+    let gate_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-1.0, 1.0));
+    let up_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-1.0, 1.0));
+    let down_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-1.0, 1.0));
 
+    // GPU F32 matmul expects [In, Out] - transpose on upload
     let weights_gpu = GpuSwiGLUFFNWeights::new(
-        GpuTensor::from_ndarray(&context, &gate_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &up_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &down_w_cpu)?,
+        GpuTensor::from_ndarray(&context, &gate_cpu.t().as_standard_layout().to_owned())?,
+        GpuTensor::from_ndarray(&context, &up_cpu.t().as_standard_layout().to_owned())?,
+        GpuTensor::from_ndarray(&context, &down_cpu.t().as_standard_layout().to_owned())?,
     )?;
+
+    // CPU uses LinearLayer (handles transpose internally)
+    let cpu_swiglu = CpuSwiGLUFFN::new(
+        crate::linear_layer::LinearLayer::from(gate_cpu),
+        crate::linear_layer::LinearLayer::from(up_cpu),
+        crate::linear_layer::LinearLayer::from(down_cpu),
+    );
+
     let input_cpu = Array::random((rows, hidden_size), Uniform::new(-1.0, 1.0));
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
-    let output_gpu = GpuTensor::uninitialized(&context, input_cpu.shape().to_vec(), input_gpu.dtype(), "SwiGLU Output");
-    let cpu_swiglu = CpuSwiGLUFFN::new(gate_w_cpu.clone(), up_w_cpu.clone(), down_w_cpu.clone());
-    let expected_cpu = cpu_swiglu.forward_2d(&input_cpu);
+    let output_gpu = GpuTensor::uninitialized(&context, vec![rows, hidden_size], crate::weights::DType::F32, "SwiGLU Output");
+
+    let expected_cpu = cpu_swiglu.forward_2d(&input_cpu)?;
+
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut temp = GpuTensorPool::new(context.clone());
-    gpu_swiglu.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu, &mut temp);
+    let mut pool = GpuTensorPool::new(context.clone());
+    
+    gpu_swiglu.encode(&mut encoder, &weights_gpu, &input_gpu, &output_gpu, &mut pool);
     context.queue.submit(Some(encoder.finish()));
+    
     assert_tensors_are_close(&expected_cpu, &output_gpu, "SwiGLU FFN Output", 1e-2).await;
     Ok(())
 }

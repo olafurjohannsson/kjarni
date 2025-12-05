@@ -46,7 +46,7 @@ pub trait GenerationBackend: Send + Sync {
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor>;
     fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_tokens: &[u32]) -> Result<()>;
-    fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor>;
+    fn prepare_encoder_state(&self, model: &dyn EncoderDecoderLanguageModel, encoder_output: &EncoderOutput) -> Result<Self::Tensor>;
     fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor>;
     fn reorder_cache(&self, cache: &mut dyn Cache, indices: &[usize]) -> Result<()>;
 }

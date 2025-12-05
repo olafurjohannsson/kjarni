@@ -11,7 +11,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 async fn get_test_context() -> Arc<WgpuContext> {
-    Arc::new(WgpuContext::new().await.unwrap())
+    WgpuContext::new().await.unwrap()
 }
 
 #[tokio::main]
@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
         None, // Use default cache dir
         Device::Cpu,
         None, //Some(ctx), // No WGPU context needed for CPU
+        None
     )
     .await?;
 

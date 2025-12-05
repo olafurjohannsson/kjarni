@@ -27,7 +27,7 @@ fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
 }
 #[tokio::test]
 async fn test_repeat_kv() -> Result<()> {
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let repeat_kernel = GpuRepeatKV::new(&context);
 
     // --- Setup Data ---

@@ -40,7 +40,7 @@ fn assert_all_close_3d(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, c
 #[tokio::test]
 async fn test_cache_symmetry() -> Result<()> {
     println!("\n--- Testing CPU/GPU KV Cache Symmetry ---");
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
 
     // 1. SETUP: Define shared parameters and instantiate both caches.
     let (num_layers, batch_size, max_len, hidden_size) = (1, 1, 8, 16);
@@ -234,7 +234,7 @@ fn test_cache_multiple_layers() {
 #[tokio::test]
 async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
     // --- 1. Arrange ---
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let num_layers = 2;
     let batch_size = 1;
     let num_heads = 4;
@@ -302,7 +302,7 @@ async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
 async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
     println!("\n--- Testing GPU Cache State Management Across Steps ---");
     // --- 1. Arrange ---
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
     let (num_layers, batch_size, num_heads, head_dim, capacity) = (1, 1, 2, 4, 10);
     let layer_idx = 0;
 
@@ -385,7 +385,7 @@ async fn test_cache_reorder_parity() -> Result<()> {
     const CAPACITY: usize = 10;
     const NUM_STEPS_TO_POPULATE: usize = 3;
 
-    let context = Arc::new(WgpuContext::new().await?);
+    let context = WgpuContext::new().await?;
 
     // 2. CREATE CACHES: Instantiate both CPU and GPU caches with identical configs.
     let mut cpu_cache =

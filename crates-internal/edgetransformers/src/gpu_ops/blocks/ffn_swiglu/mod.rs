@@ -87,7 +87,7 @@ impl GpuSwiGLUFFN {
         let rank = input.rank();
         assert_eq!(rank, 2, "Input tensor for GpuSwiGLUFFN must be 2D");
         let (rows, _) = (input.shape()[0], input.shape()[1]);
-        let intermediate_size = weights.up_proj.shape()[1];
+        let (_, intermediate_size) = weights.up_proj.linear_layer_dims();
 
         // 1. Gate projection: input @ gate_proj
         let gate_result = pool.get(vec![rows, intermediate_size]);
@@ -123,11 +123,16 @@ impl GpuSwiGLUFFN {
             ],
         });
         
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("SwiGLU Elementwise Pass"), timestamp_writes: None });
-        compute_pass.set_pipeline(&self.elementwise_pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("SwiGLU Elementwise Pass"), timestamp_writes: None });
+        // compute_pass.set_pipeline(&self.elementwise_pipeline);
+        // compute_pass.set_bind_group(0, &bind_group, &[]);
         let workgroups = (output.num_elements() as u32 + 255) / 256;
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        self.context.profiler.profile(encoder, "SwiGLU Elementwise", |pass| {
+            pass.set_pipeline(&self.elementwise_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(workgroups, 1, 1);
+        });
+        // compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
 
