@@ -1,33 +1,27 @@
-use crate::models::bart::config::{BartConfig, BartLikeConfig};
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use edgetransformers::cache::{Cache, CpuBeamKVCache, GpuBeamKVCache};
+use crate::models::bart::config::BartConfig;
+use anyhow::Result;
+use edgetransformers::cache::{Cache, GpuBeamKVCache};
 use edgetransformers::encoder_decoder::CpuTransformerEncoderDecoder;
-use edgetransformers::encoder_decoder::TransformerEncoderDecoder;
-use edgetransformers::gpu_ops::Kernel;
 use edgetransformers::gpu_ops::blocks::GpuCrossAttentionDecoder;
+use edgetransformers::gpu_ops::Kernel;
 use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use edgetransformers::models::base::EncoderDecoderLanguageModel;
-use edgetransformers::models::download_model_files;
 use edgetransformers::models::{
-    ModelArchitecture, ModelType,
-    base::{BeamSearchParams, DecodingStrategy, GenerationConfig},
+    base::DecodingStrategy,
+    ModelType,
 };
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{
-    CrossAttentionDecoder, DecoderOutput, Encoder, EncoderDecoderArchitecture, EncoderOutput,
+    CrossAttentionDecoder, Encoder,
     LanguageModelConfig, TransformerModel,
 };
-use edgetransformers::weights::ModelWeights;
-use ndarray::{Array1, Array2, Array3, s};
-use std::path::{Path, PathBuf};
+use ndarray::{s, Array1, Array2, Array3};
 use std::sync::Arc;
-use tokenizers::Tokenizer;
 use tokio::sync::Mutex;
 
 use super::*;
-use edgetransformers::TransformerConfig;
 use edgetransformers::prelude::LanguageModel;
+use edgetransformers::TransformerConfig;
 
 #[tokio::test]
 async fn test_cache_basic_update_and_retrieval() -> Result<()> {
@@ -480,7 +474,6 @@ async fn test_model_config() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn test_embedding_no_layer_norm() -> Result<()> {
     // 1. SETUP: Load the real model for both CPU and GPU
@@ -727,7 +720,7 @@ async fn test_embedding_stage_consistency_2() -> Result<()> {
 
 #[tokio::test]
 async fn test_cross_attention_with_real_model() -> Result<()> {
-    use ndarray::{Array2, Array3, s};
+    use ndarray::{s, Array2, Array3};
 
     // Helper function for assertions
     fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
@@ -881,7 +874,7 @@ async fn test_cross_attention_with_real_model() -> Result<()> {
 
     // CPU Cross-Attention
     println!("Running CPU cross-attention...");
-    let cpu_cross_attn_out = cpu_layer.cross_attention_block(
+    let cpu_cross_attn_out = cpu_layer.cross_attention(
         &cpu_decoder_hidden,
         &cpu_encoder_output.last_hidden_state,
         Some(&encoder_mask),
@@ -987,6 +980,215 @@ async fn test_cross_attention_with_real_model() -> Result<()> {
     );
 
     println!("\n✅ Cross-attention with real model test PASSED!");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_seq2seq_with_real_model() -> Result<()> {
+    use ndarray::{s, Array2, Array3};
+
+    fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
+        if a.shape() != b.shape() {
+            panic!("[{}] Shape mismatch: {:?} vs {:?}", context, a.shape(), b.shape());
+        }
+
+        let mut max_abs_diff: f32 = 0.0;
+        for (a_val, b_val) in a.iter().zip(b.iter()) {
+            let abs_diff: f32 = (a_val - b_val).abs();
+            max_abs_diff = max_abs_diff.max(abs_diff);
+
+            let tolerance = atol + rtol * b_val.abs();
+            if abs_diff > tolerance {
+                panic!(
+                    "[{}] Arrays not close. a={}, b={}, diff={}, tol={}",
+                    context, a_val, b_val, abs_diff, tolerance
+                );
+            }
+        }
+        println!("[{}] Check passed. Max diff: {:.6e}", context, max_abs_diff);
+    }
+
+    println!("\n=== Testing Decoder Layer with Cross-Attention ===\n");
+
+    // 1. SETUP
+    let context = WgpuContext::new().await?;
+    let model_type = ModelType::DistilBartCnn;
+
+    // 2. LOAD MODELS
+    println!("Loading CPU and GPU models...");
+
+    let cpu_model_any = AnySeq2SeqModel::from_registry(model_type, None, Device::Cpu, None).await?;
+    let cpu_model = match cpu_model_any {
+        AnySeq2SeqModel::Bart(m) => m,
+        _ => panic!("Expected BART model"),
+    };
+
+    let gpu_model_any =
+        AnySeq2SeqModel::from_registry(model_type, None, Device::Wgpu, Some(context.clone())).await?;
+    let gpu_model = match gpu_model_any {
+        AnySeq2SeqModel::Bart(m) => m,
+        _ => panic!("Expected BART model"),
+    };
+
+    // 3. PREPARE INPUTS
+    let batch_size = 1;
+    let encoder_seq_len = 10;
+    let decoder_seq_len = 1;
+
+    let input_ids = Array2::from_shape_vec(
+        (batch_size, encoder_seq_len),
+        vec![0, 23083, 21, 10, 3231, 6251, 1012, 2003, 999, 2],
+    )?;
+    let encoder_mask = Array2::ones((batch_size, encoder_seq_len));
+
+    // 4. RUN ENCODER
+    println!("\nRunning encoder forward pass...");
+
+    let cpu_encoder_output = cpu_model
+        .encoder()
+        .forward(&input_ids, &encoder_mask, None)
+        .await?;
+
+    let gpu_encoder_output = gpu_model
+        .encoder()
+        .forward(&input_ids, &encoder_mask, None)
+        .await?;
+
+    assert_all_close(
+        &cpu_encoder_output.last_hidden_state,
+        &gpu_encoder_output.last_hidden_state,
+        1e-3,
+        1e-4,
+        "Encoder Outputs",
+    );
+
+    // 5. PREPARE DECODER INPUT
+    let decoder_start_token_id = cpu_model.config().decoder_start_token_id();
+    let decoder_input_ids = Array2::from_elem((batch_size, decoder_seq_len), decoder_start_token_id);
+    let decoder_mask: Array2<f32> = Array2::ones((batch_size, decoder_seq_len));
+
+    // 6. GET DECODER HIDDEN STATES
+    println!("\nPreparing decoder hidden states...");
+
+    let cpu_decoder = cpu_model
+        .decoder()
+        .as_any()
+        .downcast_ref::<CpuTransformerEncoderDecoder>()
+        .expect("Failed to downcast CPU decoder");
+
+    let gpu_decoder = gpu_model
+        .gpu_decoder()
+        .unwrap()
+        .as_any()
+        .downcast_ref::<GpuCrossAttentionDecoder>()
+        .expect("Failed to downcast GPU decoder");
+
+    // Run embeddings
+    let cpu_decoder_hidden = cpu_decoder.decoder_embeddings.forward(
+        &decoder_input_ids,
+        None,
+        0,
+        cpu_model.config().scale_embeddings(),
+    );
+
+    let cpu_decoder_hidden = if !cpu_model.config().is_prenorm() {
+        cpu_decoder.decoder_embed_layer_norm.forward_3d(&cpu_decoder_hidden)
+    } else {
+        cpu_decoder_hidden
+    };
+
+    println!("Decoder hidden state shape: {:?}", cpu_decoder_hidden.shape());
+
+    // 7. TEST FULL DECODER LAYER (not just cross-attention)
+    println!("\n--- Testing Full Decoder Layer ---");
+
+    let cpu_layer = &cpu_decoder.decoder_layers[0];
+    let gpu_layer = &gpu_decoder.layers[0];
+
+    // CPU Decoder Layer - full forward pass
+    println!("Running CPU decoder layer...");
+    let (cpu_layer_out, (new_k, new_v)) = cpu_layer.forward(
+        &cpu_decoder_hidden,
+        &cpu_encoder_output.last_hidden_state,
+        Some(&decoder_mask),      // self_mask
+        Some(&encoder_mask),      // cross_mask
+        None,                     // past_kv (no cache for first step)
+        None,                     // cross_kv_cache
+    )?;
+
+    println!("CPU layer output shape: {:?}", cpu_layer_out.shape());
+    println!("CPU layer output sample: {:?}", cpu_layer_out.slice(s![0, 0, 0..5]));
+    println!("New K shape: {:?}, New V shape: {:?}", new_k.shape(), new_v.shape());
+
+    // GPU Decoder Layer
+    println!("Running GPU decoder layer...");
+    let gpu_layer_out = {
+        let mut cmd = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
+
+        let gpu_decoder_hidden = GpuTensor::from_ndarray(&context, &cpu_decoder_hidden)?;
+        let gpu_encoder_hidden = GpuTensor::from_ndarray(&context, &cpu_encoder_output.last_hidden_state)?;
+        let gpu_decoder_mask = GpuTensor::from_ndarray(&context, &decoder_mask)?;
+        let gpu_encoder_mask = GpuTensor::from_ndarray(&context, &encoder_mask)?;
+
+        // Run full GPU layer forward
+        let output = gpu_layer.forward(
+            &mut cmd,
+            &gpu_decoder_hidden,
+            &gpu_encoder_hidden,
+            &gpu_decoder_mask,
+            Some(&gpu_encoder_mask),
+            None, // past_kv
+            0,
+            &mut pool,
+        )?;
+
+        context.queue.submit(Some(cmd.finish()));
+        output.0.to_ndarray_3d().await?
+    };
+
+    println!("GPU layer output sample: {:?}", gpu_layer_out.slice(s![0, 0, 0..5]));
+
+    // 8. COMPARE OUTPUTS
+    assert_all_close(&cpu_layer_out, &gpu_layer_out, 1e-3, 1e-4, "Decoder Layer Outputs");
+
+    // 9. ANALYSIS
+    println!("\n--- Layer Output Analysis ---");
+
+    let cpu_mean = cpu_layer_out.mean().unwrap();
+    let cpu_std = cpu_layer_out.std(0.0);
+    let gpu_mean = gpu_layer_out.mean().unwrap();
+    let gpu_std = gpu_layer_out.std(0.0);
+
+    println!("CPU output - Mean: {:.6}, Std: {:.6}", cpu_mean, cpu_std);
+    println!("GPU output - Mean: {:.6}, Std: {:.6}", gpu_mean, gpu_std);
+
+    // Verify outputs are not degenerate
+    assert!(cpu_std > 1e-4, "CPU output has suspiciously low variance");
+    assert!(gpu_std > 1e-4, "GPU output has suspiciously low variance");
+
+    // Check that layer actually transformed the input
+    let input_output_diff = (&cpu_layer_out - &cpu_decoder_hidden)
+        .mapv(f32::abs)
+        .mean()
+        .unwrap();
+
+    println!("Mean absolute difference from input: {:.6}", input_output_diff);
+    assert!(
+        input_output_diff > 1e-3,
+        "Layer output is too similar to input - something may be wrong!"
+    );
+
+    // 10. TEST KV CACHE OUTPUT
+    println!("\n--- KV Cache Validation ---");
+    assert_eq!(new_k.shape()[0], batch_size, "K batch size mismatch");
+    assert_eq!(new_k.shape()[1], decoder_seq_len, "K seq len mismatch");
+    assert_eq!(new_v.shape()[0], batch_size, "V batch size mismatch");
+    assert_eq!(new_v.shape()[1], decoder_seq_len, "V seq len mismatch");
+    println!("KV cache shapes valid: K={:?}, V={:?}", new_k.shape(), new_v.shape());
+
+    println!("\n✅ Decoder layer with cross-attention test PASSED!");
 
     Ok(())
 }

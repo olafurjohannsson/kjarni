@@ -1,20 +1,20 @@
 use crate::activations::Activation;
+use crate::cache::CpuBeamKVCache;
 use crate::encoder::TransformerEncoder;
+use crate::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
+use crate::linear_layer::LinearLayer;
 use crate::traits::{
     CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
 };
-use crate::cache::CpuBeamKVCache;
 use crate::traits::{
     CrossAttentionDecoderArchitecture, DecoderArchitecture, EncoderArchitecture, LanguageModelConfig,
     LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
-use crate::linear_layer::LinearLayer;
-use crate::decoder_cross_attn::{DecoderCrossAttention, DecoderSelfAttention};
 use crate::weights::ModelWeights;
 use crate::{
-    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward, normalization::LayerNorm, Cache, CpuKVCache,
-    Embeddings, FeedForward,
-    MultiHeadAttention,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward, normalization::LayerNorm, Cache,
+    Embeddings, FeedForward
+    ,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -54,7 +54,7 @@ impl CpuTransformerEncoderDecoder {
             weights.get_array1(embed_norm_b)?,
             decoder_config_adapter.layer_norm_eps(),
         );
-        let target_dtype = None; 
+        let target_dtype = None;
         let mut decoder_layers = Vec::with_capacity(config.num_decoder_layers());
         for i in 0..config.num_decoder_layers() {
             let self_attn_names = config.get_decoder_self_attention_names(i);
@@ -82,7 +82,7 @@ impl CpuTransformerEncoderDecoder {
                 LinearLayer::from_weights(weights, &self_attn_names.v_weight, target_dtype)?,
                 LinearLayer::from_weights(weights, &self_attn_names.output_weight, target_dtype)?,
             );
-            
+
             let self_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&self_attn_names.norm_weight)?,
                 weights.get_array1(&self_attn_names.norm_bias)?,
@@ -169,7 +169,7 @@ impl CpuTransformerEncoderDecoder {
             config,
         })
     }
- pub fn layers(&self) -> &[DecoderCrossAttentionLayer] {
+    pub fn layers(&self) -> &[DecoderCrossAttentionLayer] {
         &self.decoder_layers
     }
     pub fn encoder(&self) -> &TransformerEncoder {
@@ -183,7 +183,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
     type EncoderStateInput = Array3<f32>;
     type MaskInput = Array2<f32>;
     type Output = DecoderOutput;
-    
+
     async fn forward<'a>(
         &self,
         decoder_input_ids: &Self::TokenInput,
@@ -193,7 +193,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
         cache: Option<&mut dyn Cache>,
         // NEW: Optional pre-computed Cross KV
         // Vector of tuples (K, V) matching the layers
-        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>,
     ) -> Result<Self::Output> {
         // The generator now provides the position offset.
         let position_offset =
@@ -228,7 +228,7 @@ impl CrossAttentionDecoder for CpuTransformerEncoderDecoder {
                 decoder_attention_mask,
                 encoder_attention_mask,
                 past_kv_views,
-                layer_cross_cache
+                layer_cross_cache,
             )?;
 
             hidden_states = new_hidden;

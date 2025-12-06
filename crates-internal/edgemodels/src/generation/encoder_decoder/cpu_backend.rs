@@ -1,23 +1,14 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytemuck;
 use edgetransformers::cache::{Cache, CpuBeamKVCache};
 use edgetransformers::encoder_decoder::CpuTransformerEncoderDecoder;
-use edgetransformers::gpu_context::WgpuContext;
-use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
-use edgetransformers::models::base::{
-    DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
-};
+use edgetransformers::models::base::EncoderDecoderLanguageModel;
 use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
-use ndarray::{Array1, Array2, Array3, Array4, s};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use ndarray::{Array2, Array3, Array4};
 
-use crate::generation::encoder_decoder::{
-    GenerationBackend, GpuBackend, HasShape, StepInput, find_best_beams_and_get_indices,
-    run_beam_search,
-};
+use edgetransformers::encoder_decoder::{GenerationBackend, HasShape, StepInput};
 
 /// An enum to wrap different ndarray tensor types to satisfy the GenerationBackend trait,
 /// which requires a single associated `Tensor` type.
@@ -92,7 +83,6 @@ impl GenerationBackend for CpuBackend {
             .await?;
 
         Ok(decoder_output.last_hidden_state)
-
     }
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor> {
@@ -151,7 +141,7 @@ impl GenerationBackend for CpuBackend {
             let (k, v) = layer.cross_attn.precompute_encoder_kv(&state)?;
             cross_cache.push((k, v));
         }
-            
+
         Ok(CpuTensor::EncoderState { state, cross_cache })
     }
 

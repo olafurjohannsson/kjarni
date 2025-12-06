@@ -9,7 +9,6 @@
 //! - down_proj: [intermediate_size, hidden_size]
 
 use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::matmul_2d_transposed;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
@@ -53,22 +52,22 @@ impl SwiGluFeedForward {
     }
     pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden_dim) = hidden.dim();
-        // Cheap View reshape
         let hidden_2d = hidden
             .view()
             .into_shape_with_order((batch * seq, hidden_dim))
             .unwrap();
 
-        // 1. Gate & Up
-        // .matmul() handles the dispatch (F32 vs BF16) internally
-        let mut gate_out = self.gate.matmul(&hidden_2d);
-        let up_out = self.up.matmul(&hidden_2d);
+        // Gate and Up can run simultaneously!
+        let (mut gate_out, up_out) = rayon::join(
+            || self.gate.matmul(&hidden_2d),
+            || self.up.matmul(&hidden_2d),
+        );
 
-        // 2. Activation
+        // Activation + multiply
         silu_parallel(&mut gate_out);
         let activated = gate_out * up_out;
 
-        // 3. Down
+        // Down
         let output_2d = self.down.matmul(&activated.view());
 
         Ok(output_2d

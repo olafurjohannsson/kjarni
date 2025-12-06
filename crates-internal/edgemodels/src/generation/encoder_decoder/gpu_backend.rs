@@ -10,7 +10,7 @@ use edgetransformers::traits::EncoderOutput;
 use ndarray::{Array1, Array2, Array3};
 use std::sync::Arc;
 
-use crate::generation::encoder_decoder::{GenerationBackend, StepInput};
+use edgetransformers::encoder_decoder::{GenerationBackend, StepInput};
 
 pub struct GpuBackend {
     pub context: Arc<WgpuContext>,

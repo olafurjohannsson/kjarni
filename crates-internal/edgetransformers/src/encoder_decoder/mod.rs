@@ -9,6 +9,8 @@
 
 mod cpu;
 mod gpu;
+mod beams;
+mod traits;
 
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::GpuCrossAttentionDecoder;
@@ -27,6 +29,16 @@ pub use gpu::GpuTransformerEncoderDecoder;
 use ndarray::{Array2, Array3};
 use std::any::Any;
 use std::sync::Arc;
+pub mod decoder_cross_attn;
+pub mod decoder_self_attn;
+
+pub use decoder_cross_attn::DecoderCrossAttention;
+pub use decoder_self_attn::DecoderSelfAttention;
+
+pub use beams::{find_best_beams_and_get_indices, run_beam_search, run_beam_search_stream, BeamHypothesis};
+// pub use cpu_backend::CpuBackend;
+// pub use gpu_backend::GpuBackend;
+pub use traits::{GenerationBackend, HasShape, StepInput};
 
 /// A generic, backend-agnostic transformer encoder-decoder stack.
 pub enum TransformerEncoderDecoder {
@@ -102,7 +114,7 @@ impl CrossAttentionDecoder for TransformerEncoderDecoder {
         cache: Option<&mut dyn Cache>,
         // NEW: Optional pre-computed Cross KV
         // Vector of tuples (K, V) matching the layers
-        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>,
     ) -> Result<Self::Output> {
         match self {
             Self::Cpu(model) => {

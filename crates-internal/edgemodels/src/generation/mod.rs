@@ -1,28 +1,21 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 
-use edgetransformers::models::{DecoderLanguageModel, project_to_vocab};
+use edgetransformers::models::{project_to_vocab, DecoderLanguageModel};
 use edgetransformers::prelude::*;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
 use log::{debug, error};
-use ndarray::{Array1, Array2, s};
+use ndarray::{s, Array1, Array2};
 use rand::Rng;
 
-use common::{StreamedToken, TokenType};
+pub use edgetransformers::common::{StreamedToken, TokenType};
 pub mod decoder;
-pub mod common;
-// pub mod generator;
-// pub mod seq2seq;
-// pub mod seq2seq2;
 pub mod encoder_decoder;
 
 pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
 
-
-// pub use generator::{DecoderGenerationBackend};
 pub use edgetransformers::decoder::DecoderGenerationBackend;
-
 
 /// A generic, model-agnostic text generator for autoregressive decoding.
 pub struct Generator {
@@ -48,7 +41,7 @@ impl Generator {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         debug!("Prompt {}", prompt);
         let tokenizer = self.model.tokenizer();
         let mut tokens = tokenizer
@@ -87,7 +80,7 @@ impl Generator {
         if prompt_len > 0 {
             let prompt_ids = Array2::from_shape_vec(
                 (batch_size, prompt_len),
-                tokens.iter().map(|&t| t ).collect(),
+                tokens.iter().map(|&t| t).collect(),
             )?;
             full_attention_mask
                 .slice_mut(s![.., 0..prompt_len])
@@ -109,7 +102,7 @@ impl Generator {
                 AutoregressiveLoop::Legacy => {
                     // Inefficient two-pass logic for GPT-2 parity
                     // 1. Prefill to fill the cache, discard output.
-                    
+
                     model
                         .decoder()
                         .forward(&prompt_ids, &mask_for_priming, Some(cache.as_mut()))
@@ -260,7 +253,6 @@ fn apply_repetition_penalty(
 
 /// Sample a token from logits
 pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Result<u32> {
-
     match strategy {
         DecodingStrategy::Greedy => {
             // Argmax

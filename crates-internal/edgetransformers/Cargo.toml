@@ -30,14 +30,18 @@ wgpu = { workspace = true }
 bytemuck = { workspace = true }
 futures = { workspace = true }
 futures-intrusive = { workspace = true }
-rand_distr ={ workspace = true}
+rand_distr = { workspace = true }
 log = { workspace = true }
 ndarray-rand = { workspace = true }
 libm = { workspace = true }
 matrixmultiply = { workspace = true }
 memmap2 = { workspace = true }
 faer = { workspace = true }
-num_cpus = "1.16" 
+num_cpus = "1.16"
+async-stream = "0.3.6"
+futures-core = "0.3.31"
+futures-util = "0.3.31"
+libc = "0.2.177"
 
 [dev-dependencies]
 env_logger = "0.10"

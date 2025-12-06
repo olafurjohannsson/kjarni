@@ -1,21 +1,18 @@
-use anyhow::{anyhow, Result};
-use async_stream::try_stream;
+pub use crate::models::base::{DecodingStrategy, GenerationConfig};
+use anyhow::Result;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
-use log::{debug, error};
 use ndarray::Array1;
 use rand::Rng;
-pub use edgetransformers::models::base::{DecodingStrategy, GenerationConfig};
-
-
-
 
 pub fn apply_repetition_penalty(
     mut logits: Array1<f32>,
     past_tokens: &[u32],
     penalty: f32,
 ) -> Array1<f32> {
-    if penalty == 1.0 { return logits; }
+    if penalty == 1.0 {
+        return logits;
+    }
     for &token_id in past_tokens {
         let score = logits[token_id as usize];
         if score > 0.0 {
@@ -36,8 +33,12 @@ pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Res
             .map(|(idx, _)| idx as u32)
             .unwrap()),
         DecodingStrategy::Sample(params) => {
-            if let Some(k) = params.top_k { logits = top_k_filtering(logits, k); }
-            if let Some(p) = params.top_p { logits = top_p_filtering(logits, p); }
+            if let Some(k) = params.top_k {
+                logits = top_k_filtering(logits, k);
+            }
+            if let Some(p) = params.top_p {
+                logits = top_p_filtering(logits, p);
+            }
             logits /= params.temperature;
             let probs = softmax_1d(&logits);
             sample_from_probs(&probs)
@@ -93,8 +94,6 @@ pub fn sample_from_probs(probs: &Array1<f32>) -> Result<u32> {
     }
     Ok((probs.len() - 1) as u32)
 }
-
-
 
 pub fn get_top_k_from_log_probs(log_probs: &Array1<f32>, k: usize) -> Vec<(u32, f32)> {
     let mut indexed_log_probs: Vec<(usize, f32)> = log_probs
@@ -160,12 +159,12 @@ mod tests {
     use ndarray::array;
 
     // ============== softmax_1d ==============
-    
+
     #[test]
     fn test_softmax_1d_basic() {
         let logits = array![1.0, 2.0, 3.0];
         let probs = softmax_1d(&logits);
-        
+
         // Sum should be 1.0
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         // All probabilities should be positive
@@ -179,7 +178,7 @@ mod tests {
     fn test_softmax_1d_uniform() {
         let logits = array![1.0, 1.0, 1.0, 1.0];
         let probs = softmax_1d(&logits);
-        
+
         // Equal logits = equal probabilities
         for &p in probs.iter() {
             assert!((p - 0.25).abs() < 1e-6);
@@ -191,7 +190,7 @@ mod tests {
         // Large values that could overflow without proper implementation
         let logits = array![1000.0, 1001.0, 1002.0];
         let probs = softmax_1d(&logits);
-        
+
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         assert!(probs.iter().all(|p| p.is_finite()));
     }
@@ -200,7 +199,7 @@ mod tests {
     fn test_softmax_1d_negative_values() {
         let logits = array![-2.0, -1.0, 0.0, 1.0];
         let probs = softmax_1d(&logits);
-        
+
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         assert!(probs[3] > probs[2]);
         assert!(probs[2] > probs[1]);
@@ -213,7 +212,7 @@ mod tests {
     fn test_log_softmax_1d_basic() {
         let logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
-        
+
         // log_softmax should equal log(softmax)
         let probs = softmax_1d(&logits);
         for i in 0..3 {
@@ -225,7 +224,7 @@ mod tests {
     fn test_log_softmax_1d_all_negative() {
         let logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
-        
+
         // All log probabilities should be <= 0
         assert!(log_probs.iter().all(|&lp| lp <= 0.0));
     }
@@ -236,7 +235,7 @@ mod tests {
     fn test_top_k_filtering_basic() {
         let logits = array![1.0, 5.0, 3.0, 4.0, 2.0];
         let filtered = top_k_filtering(logits, 3);
-        
+
         // Top 3 are indices 1 (5.0), 3 (4.0), 2 (3.0)
         assert!(filtered[1].is_finite()); // 5.0 - kept
         assert!(filtered[3].is_finite()); // 4.0 - kept
@@ -249,7 +248,7 @@ mod tests {
     fn test_top_k_filtering_k_equals_len() {
         let logits = array![1.0, 2.0, 3.0];
         let filtered = top_k_filtering(logits.clone(), 3);
-        
+
         // Nothing should be filtered
         assert!(filtered.iter().all(|x| x.is_finite()));
     }
@@ -258,7 +257,7 @@ mod tests {
     fn test_top_k_filtering_k_is_one() {
         let logits = array![1.0, 5.0, 3.0];
         let filtered = top_k_filtering(logits, 1);
-        
+
         // Only index 1 (max) should remain
         assert!(filtered[1].is_finite());
         assert!(filtered[0] == f32::NEG_INFINITY);
@@ -272,7 +271,7 @@ mod tests {
         // Create logits where softmax gives clear probabilities
         let logits = array![0.0, 1.0, 2.0, 3.0];
         let filtered = top_p_filtering(logits, 0.9);
-        
+
         // Should keep tokens until cumulative prob > 0.9
         // Higher logits should be kept
         assert!(filtered[3].is_finite()); // Highest - definitely kept
@@ -282,7 +281,7 @@ mod tests {
     fn test_top_p_filtering_p_is_one() {
         let logits = array![1.0, 2.0, 3.0, 4.0];
         let filtered = top_p_filtering(logits.clone(), 1.0);
-        
+
         // p=1.0 should keep everything
         assert!(filtered.iter().all(|x| x.is_finite()));
     }
@@ -291,7 +290,7 @@ mod tests {
     fn test_top_p_filtering_very_small_p() {
         let logits = array![1.0, 2.0, 10.0]; // 10.0 dominates after softmax
         let filtered = top_p_filtering(logits, 0.01);
-        
+
         // Only the dominant token should remain
         assert!(filtered[2].is_finite());
     }
@@ -302,7 +301,7 @@ mod tests {
     fn test_repetition_penalty_no_penalty() {
         let logits = array![1.0, 2.0, 3.0];
         let result = apply_repetition_penalty(logits.clone(), &[0, 1], 1.0);
-        
+
         // penalty=1.0 should not change anything
         assert_eq!(logits, result);
     }
@@ -311,7 +310,7 @@ mod tests {
     fn test_repetition_penalty_positive_logits() {
         let logits = array![2.0, 4.0, 6.0];
         let result = apply_repetition_penalty(logits, &[1], 2.0);
-        
+
         // Token 1 (4.0) should be divided by 2.0
         assert_eq!(result[0], 2.0); // unchanged
         assert_eq!(result[1], 2.0); // 4.0 / 2.0
@@ -322,21 +321,21 @@ mod tests {
     fn test_repetition_penalty_negative_logits() {
         let logits = array![-2.0, -4.0, 1.0];
         let result = apply_repetition_penalty(logits, &[0, 1], 2.0);
-        
+
         // Negative logits get multiplied (making them more negative)
         assert_eq!(result[0], -4.0); // -2.0 * 2.0
         assert_eq!(result[1], -8.0); // -4.0 * 2.0
-        assert_eq!(result[2], 1.0);  // unchanged
+        assert_eq!(result[2], 1.0); // unchanged
     }
 
     #[test]
     fn test_repetition_penalty_mixed_logits() {
         let logits = array![-1.0, 0.0, 2.0];
         let result = apply_repetition_penalty(logits, &[0, 2], 2.0);
-        
+
         assert_eq!(result[0], -2.0); // negative: multiplied
-        assert_eq!(result[1], 0.0);  // not penalized
-        assert_eq!(result[2], 1.0);  // positive: divided
+        assert_eq!(result[1], 0.0); // not penalized
+        assert_eq!(result[2], 1.0); // positive: divided
     }
 
     // ============== apply_repetition_penalty_mut ==============
@@ -345,7 +344,7 @@ mod tests {
     fn test_repetition_penalty_mut_basic() {
         let mut logits = array![2.0, 4.0, 6.0];
         apply_repetition_penalty_mut(&mut logits, &[1], 2.0);
-        
+
         assert_eq!(logits[0], 2.0);
         assert_eq!(logits[1], 2.0); // 4.0 / 2.0
         assert_eq!(logits[2], 6.0);
@@ -356,7 +355,7 @@ mod tests {
         let mut logits = array![1.0, 2.0, 3.0];
         // Token ID 100 is out of bounds - should be ignored
         apply_repetition_penalty_mut(&mut logits, &[100], 2.0);
-        
+
         assert_eq!(logits, array![1.0, 2.0, 3.0]);
     }
 
@@ -368,7 +367,7 @@ mod tests {
         // Tokens: [0, 1, 2, 0, 1] - if next is 2, we repeat "0, 1, 2"
         let tokens = vec![0, 1, 2, 0, 1];
         apply_no_repeat_ngram(&mut logits, &tokens, 3);
-        
+
         // Token 2 should be banned (would repeat trigram [0, 1, 2])
         assert_eq!(logits[2], f32::NEG_INFINITY);
         // Others should be unchanged
@@ -383,7 +382,7 @@ mod tests {
         let mut logits = array![1.0, 1.0, 1.0];
         let tokens = vec![0]; // Only 1 token, can't form bigram prefix
         apply_no_repeat_ngram(&mut logits, &tokens, 3);
-        
+
         // Nothing should change - sequence too short
         assert!(logits.iter().all(|&x| x == 1.0));
     }
@@ -393,7 +392,7 @@ mod tests {
         let mut logits = array![1.0, 1.0, 1.0, 1.0];
         let tokens = vec![0, 1, 2, 3]; // All unique, no repeats possible
         apply_no_repeat_ngram(&mut logits, &tokens, 3);
-        
+
         // Nothing should be banned
         assert!(logits.iter().all(|x| x.is_finite()));
     }
@@ -404,7 +403,7 @@ mod tests {
         // Tokens: [0, 1, 0] - current prefix is [0], which appeared before [1]
         let tokens = vec![0, 1, 0];
         apply_no_repeat_ngram(&mut logits, &tokens, 2);
-        
+
         // Token 1 should be banned (would repeat bigram [0, 1])
         assert_eq!(logits[1], f32::NEG_INFINITY);
     }
@@ -415,7 +414,7 @@ mod tests {
     fn test_sample_from_probs_deterministic() {
         // When one prob is 1.0, should always return that index
         let probs = array![0.0, 0.0, 1.0, 0.0];
-        
+
         for _ in 0..10 {
             let result = sample_from_probs(&probs).unwrap();
             assert_eq!(result, 2);
@@ -425,7 +424,7 @@ mod tests {
     #[test]
     fn test_sample_from_probs_valid_range() {
         let probs = array![0.25, 0.25, 0.25, 0.25];
-        
+
         for _ in 0..100 {
             let result = sample_from_probs(&probs).unwrap();
             assert!(result < 4);
@@ -438,7 +437,7 @@ mod tests {
     fn test_sample_token_greedy() {
         let logits = array![1.0, 5.0, 3.0, 2.0];
         let token = sample_token(logits, &DecodingStrategy::Greedy).unwrap();
-        
+
         // Should always pick index 1 (highest logit)
         assert_eq!(token, 1);
     }
@@ -447,37 +446,37 @@ mod tests {
     fn test_sample_token_greedy_tie() {
         let logits = array![5.0, 5.0, 1.0];
         let token = sample_token(logits, &DecodingStrategy::Greedy).unwrap();
-        
+
         // Should pick first occurrence of max
         assert!(token == 0 || token == 1);
     }
 
     #[test]
     fn test_sample_token_with_temperature() {
-        use edgetransformers::models::base::SamplingParams;
-        
+        use crate::models::base::SamplingParams;
+
         let logits = array![1.0, 2.0, 3.0];
         let strategy = DecodingStrategy::Sample(SamplingParams {
             temperature: 1.0,
             top_k: None,
             top_p: None,
         });
-        
+
         let token = sample_token(logits, &strategy).unwrap();
         assert!(token < 3);
     }
 
     #[test]
     fn test_sample_token_with_top_k() {
-        use edgetransformers::models::base::SamplingParams;
-        
+        use crate::models::base::SamplingParams;
+
         let logits = array![1.0, 2.0, 10.0, 0.5, 0.1];
         let strategy = DecodingStrategy::Sample(SamplingParams {
             temperature: 0.1, // Low temp = nearly greedy
             top_k: Some(1),
             top_p: None,
         });
-        
+
         // With top_k=1 and low temperature, should always pick max
         for _ in 0..10 {
             let token = sample_token(logits.clone(), &strategy).unwrap();
@@ -487,15 +486,15 @@ mod tests {
 
     #[test]
     fn test_sample_token_beam_search_unsupported() {
-        use edgetransformers::models::base::BeamSearchParams;
-        
+        use crate::models::base::BeamSearchParams;
+
         let logits = array![1.0, 2.0, 3.0];
         let strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
             num_beams: 4,
             length_penalty: 1.0,
             early_stopping: true,
         });
-        
+
         let result = sample_token(logits, &strategy);
         assert!(result.is_err());
     }
@@ -506,7 +505,7 @@ mod tests {
     fn test_get_top_k_from_log_probs_basic() {
         let log_probs = array![-2.0, -1.0, -3.0, -0.5, -4.0];
         let top_k = get_top_k_from_log_probs(&log_probs, 3);
-        
+
         assert_eq!(top_k.len(), 3);
         // Should be sorted by log_prob descending
         assert_eq!(top_k[0].0, 3); // -0.5 (highest)
@@ -518,7 +517,7 @@ mod tests {
     fn test_get_top_k_from_log_probs_k_greater_than_len() {
         let log_probs = array![-1.0, -2.0];
         let top_k = get_top_k_from_log_probs(&log_probs, 10);
-        
+
         // Should return all available
         assert_eq!(top_k.len(), 2);
     }
@@ -527,7 +526,7 @@ mod tests {
     fn test_get_top_k_from_log_probs_returns_correct_values() {
         let log_probs = array![-1.0, -2.0, -3.0];
         let top_k = get_top_k_from_log_probs(&log_probs, 2);
-        
+
         assert_eq!(top_k[0], (0, -1.0));
         assert_eq!(top_k[1], (1, -2.0));
     }

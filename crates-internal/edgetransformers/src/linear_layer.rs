@@ -1,11 +1,11 @@
-use crate::utils::linear_algebra::{matmul_2d_mixed_bf16, matmul_2d_transposed};
+use crate::utils::linear_algebra::{matmul_2d_f32_notranspose, matmul_2d_mixed_bf16};
 use crate::weights::{DType, ModelWeights};
 use anyhow::{anyhow, Result};
 use ndarray::{Array1, Array2, ArrayView2};
 
 pub struct LinearLayer {
     data: LinearData,
-    bias: Option<Array1<f32>>,
+    pub bias: Option<Array1<f32>>,
 }
 
 pub enum LinearData {
@@ -20,7 +20,7 @@ impl LinearLayer {
     pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
         // 1. Matrix Multiplication
         let mut result = match &self.data {
-            LinearData::F32(w) => matmul_2d_transposed(input, &w.view()),
+            LinearData::F32(w) => matmul_2d_f32_notranspose(input, &w.view()),
             LinearData::BF16(w) => matmul_2d_mixed_bf16(input, &w.view()),
         };
 
@@ -93,6 +93,7 @@ impl LinearLayer {
 
         // 2. Decide what we WANT it to be
         let target_dtype = dtype_override.unwrap_or(file_dtype);
+        // log::info!("Loading '{}': file_dtype={:?}, override={:?}", name, file_dtype, dtype_override);
 
         let data = match (file_dtype, target_dtype) {
             (DType::BF16, DType::BF16) => {

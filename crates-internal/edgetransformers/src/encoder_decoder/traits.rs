@@ -1,18 +1,12 @@
-use anyhow::{anyhow, Result};
+use crate::cache::Cache;
+use crate::gpu_ops::GpuTensor;
+use crate::models::base::EncoderDecoderLanguageModel;
+use crate::prelude::*;
+use crate::traits::EncoderOutput;
+use anyhow::Result;
 use async_trait::async_trait;
 use bytemuck;
-use edgetransformers::cache::{Cache, GpuBeamKVCache};
-use edgetransformers::gpu_context::WgpuContext;
-use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
-use edgetransformers::models::base::{
-    DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
-};
-// use crate::generation::
-use edgetransformers::prelude::*;
-use edgetransformers::traits::EncoderOutput;
-use ndarray::{s, Array1, Array2, Array3};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use ndarray::Array3;
 
 pub struct StepInput<'a, T> {
     pub tokens: &'a T,
@@ -46,7 +40,11 @@ pub trait GenerationBackend: Send + Sync {
 
     fn create_token_tensor(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor>;
     fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_tokens: &[u32]) -> Result<()>;
-    fn prepare_encoder_state(&self, model: &dyn EncoderDecoderLanguageModel, encoder_output: &EncoderOutput) -> Result<Self::Tensor>;
+    fn prepare_encoder_state(
+        &self,
+        model: &dyn EncoderDecoderLanguageModel,
+        encoder_output: &EncoderOutput,
+    ) -> Result<Self::Tensor>;
     fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor>;
     fn reorder_cache(&self, cache: &mut dyn Cache, indices: &[usize]) -> Result<()>;
 }

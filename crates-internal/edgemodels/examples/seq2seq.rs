@@ -72,6 +72,16 @@ async fn main() -> Result<()> {
 
     println!();
 
+    io::stdout().flush().unwrap();
+
+    let mut stream_gpu = generator.generate_stream(&article, &generation_config).await;
+    futures_util::pin_mut!(stream_gpu);
+    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
+        print!("{}", token.text);
+        io::stdout().flush().unwrap();
+    }
+    println!();
+
     println!("\n--- FINAL GENERATED TEXT ---");
 
     Ok(())

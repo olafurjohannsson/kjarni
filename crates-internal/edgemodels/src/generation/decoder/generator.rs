@@ -1,10 +1,10 @@
 use crate::generation::decoder::{CpuDecoderBackend, GpuDecoderBackend};
-// use crate::generation::generator::DecoderGenerationBackend;
-use edgetransformers::decoder::DecoderGenerationBackend;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 //
 use async_stream::try_stream;
 use edgetransformers::cache::Cache;
+// use crate::generation::generator::DecoderGenerationBackend;
+use edgetransformers::decoder::DecoderGenerationBackend;
 use edgetransformers::models::DecoderLanguageModel;
 use edgetransformers::prelude::*;
 use futures_core::stream::Stream;
@@ -13,10 +13,11 @@ use log::{debug, error};
 use ndarray::Array1;
 use std::sync::Arc;
 
-use crate::generation::common::sampling::{
-    GenerationConfig, apply_repetition_penalty, sample_token,
+use edgetransformers::common::sampling::{
+    apply_repetition_penalty, sample_token, GenerationConfig,
 };
-use crate::generation::common::{StreamedToken, TokenType};
+
+use edgetransformers::common::{StreamedToken, TokenType};
 
 pub enum AnyDecoderBackend {
     Cpu(CpuDecoderBackend),
@@ -92,7 +93,7 @@ impl Generator {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         debug!("Prompt: {}", prompt);
         let tokenizer = self.model.tokenizer();
         let mut tokens = tokenizer

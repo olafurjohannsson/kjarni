@@ -1,18 +1,21 @@
 use crate::models::llama::config::LlamaConfig;
-use edgetransformers::TransformerConfig;
-use edgetransformers::decoder_attention::DecoderAttention; // Or DecoderAttention if you renamed it
-use edgetransformers::feedforward::SwiGluFeedForward;
-use edgetransformers::normalization::{Normalization, RMSNorm};
-use edgetransformers::linear_layer::LinearLayer;
-use edgetransformers::rope::RoPE;
-use edgetransformers::weights::{ModelWeights, DType};
-use edgetransformers::traits::{Decoder, DecoderOutput, DecoderArchitecture, Cache, Device, TransformerModel};
-use edgetransformers::cache::CpuKVCache;
-use edgetransformers::traits::LanguageModelConfig;
-use edgetransformers::embeddings::Embeddings;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, Axis, s};
+use edgetransformers::cache::CpuKVCache;
+use edgetransformers::decoder_attention::DecoderAttention;
+use edgetransformers::TransformerConfig;
+// Or DecoderAttention if you renamed it
+use edgetransformers::embeddings::Embeddings;
+use edgetransformers::feedforward::SwiGluFeedForward;
+use edgetransformers::linear_layer::LinearLayer;
+use edgetransformers::normalization::{Normalization, RMSNorm};
+use edgetransformers::rope::RoPE;
+use edgetransformers::traits::LanguageModelConfig;
+use edgetransformers::traits::{
+    Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel,
+};
+use edgetransformers::weights::{DType, ModelWeights};
+use ndarray::{s, Array2, Array3, Axis};
 use std::sync::Arc;
 
 /// A dedicated, highly optimized CPU decoder for Llama architecture.
@@ -42,42 +45,42 @@ impl LlamaDecoderLayer {
         position_offset: usize,
         past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
-let t_start = std::time::Instant::now();
+        let t_start = std::time::Instant::now();
 
         // 1. Pre-Norm (RMS)
         let norm_1 = self.attention_norm.forward_3d(hidden_states);
-        
+
         let t_norm1 = t_start.elapsed();
 
         // 2. Attention
-        let (attn_out, new_k, new_v) = self.attention.forward(
-            &norm_1,
-            Some(attention_mask),
-            past_kv,
-            Some(&self.rope),
-        )?;
-        
+        let (attn_out, new_k, new_v) =
+            self.attention
+                .forward(&norm_1, Some(attention_mask), past_kv, Some(&self.rope))?;
+
         let t_attn = t_start.elapsed() - t_norm1;
 
         let residual_1 = hidden_states + &attn_out;
 
         // 3. Pre-Norm (RMS)
         let norm_2 = self.ffn_norm.forward_3d(&residual_1);
-        
+
         let t_norm2 = t_start.elapsed() - t_attn - t_norm1;
 
         // 4. FeedForward
         let ffn_out = self.feed_forward.forward(&norm_2)?;
-        
+
         let t_ffn = t_start.elapsed() - t_norm2 - t_attn - t_norm1;
 
         let output = residual_1 + ffn_out;
-        
+
         // Log if slow (> 10ms)
         if t_start.elapsed().as_millis() > 10 {
             log::info!(
-                "Layer Perf: Norm1: {:?}, Attn: {:?}, Norm2: {:?}, FFN: {:?}", 
-                t_norm1, t_attn, t_norm2, t_ffn
+                "Layer Perf: Norm1: {:?}, Attn: {:?}, Norm2: {:?}, FFN: {:?}",
+                t_norm1,
+                t_attn,
+                t_norm2,
+                t_ffn
             );
         }
 
@@ -101,7 +104,13 @@ impl LlamaCpuDecoder {
 
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for i in 0..config.num_hidden_layers {
-            layers.push(Self::build_layer(weights, &config, i, rope.clone(), target_dtype)?);
+            layers.push(Self::build_layer(
+                weights,
+                &config,
+                i,
+                rope.clone(),
+                target_dtype,
+            )?);
         }
 
         Ok(Self {
@@ -131,13 +140,20 @@ impl LlamaCpuDecoder {
         let attention = DecoderAttention::new(
             config.hidden_size,
             config.num_attention_heads,
-            q, k, v, o,
+            q,
+            k,
+            v,
+            o,
             // Llama has no biases, passing None is efficient
             Some(config.num_key_value_heads),
         );
 
         // Load FFN Weights (BF16/LinearLayer)
-        let gate = LinearLayer::from_weights(weights, ffn_names.gate_weight.as_ref().unwrap(), target_dtype)?;
+        let gate = LinearLayer::from_weights(
+            weights,
+            ffn_names.gate_weight.as_ref().unwrap(),
+            target_dtype,
+        )?;
         let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
         let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, target_dtype)?;
 
@@ -145,12 +161,12 @@ impl LlamaCpuDecoder {
 
         // Load Norms
         let attention_norm = RMSNorm::new(
-            weights.get_array1(&layer_names.norm_weight)?, 
-            config.rms_norm_eps
+            weights.get_array1(&layer_names.norm_weight)?,
+            config.rms_norm_eps,
         );
         let ffn_norm = RMSNorm::new(
-            weights.get_array1(&ffn_names.norm_weight)?, 
-            config.rms_norm_eps
+            weights.get_array1(&ffn_names.norm_weight)?,
+            config.rms_norm_eps,
         );
 
         Ok(LlamaDecoderLayer {
@@ -166,9 +182,15 @@ impl LlamaCpuDecoder {
 // --- Trait Impl ---
 
 impl TransformerModel for LlamaCpuDecoder {
-    fn device(&self) -> Device { Device::Cpu }
-    fn context(&self) -> Option<Arc<edgetransformers::gpu_context::WgpuContext>> { None }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn device(&self) -> Device {
+        Device::Cpu
+    }
+    fn context(&self) -> Option<Arc<edgetransformers::gpu_context::WgpuContext>> {
+        None
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[async_trait(?Send)]
@@ -187,7 +209,10 @@ impl Decoder for LlamaCpuDecoder {
 
         // 1. Embeddings
         let mut hidden_states = self.embeddings.forward(
-            input_ids, None, position_offset, false // scale_embeddings = false for Llama
+            input_ids,
+            None,
+            position_offset,
+            false, // scale_embeddings = false for Llama
         );
 
         // 2. Layers
@@ -199,12 +224,12 @@ impl Decoder for LlamaCpuDecoder {
             let past_kv_view = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
 
             let (new_hidden, new_k, new_v) = layer.forward(
-                &hidden_states, 
-                attention_mask, 
-                position_offset, 
-                past_kv_view
+                &hidden_states,
+                attention_mask,
+                position_offset,
+                past_kv_view,
             )?;
-            
+
             hidden_states = new_hidden;
             new_key_values.push((new_k, new_v));
         }
@@ -226,7 +251,11 @@ impl Decoder for LlamaCpuDecoder {
         })
     }
 
-    async fn get_hidden_states(&self, input: &Self::Input, mask: &Array2<f32>) -> Result<Array3<f32>> {
+    async fn get_hidden_states(
+        &self,
+        input: &Self::Input,
+        mask: &Array2<f32>,
+    ) -> Result<Array3<f32>> {
         let out = self.forward(input, mask, None).await?;
         Ok(out.last_hidden_state)
     }

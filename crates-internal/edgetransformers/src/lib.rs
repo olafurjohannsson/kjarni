@@ -1,4 +1,3 @@
-
 //! Core transformer components for building transformer-based models
 //!
 //! This crate provides the fundamental building blocks for transformer architectures
@@ -6,32 +5,30 @@
 
 //! EdgeTransformers: Fast transformer models for Rust
 
-
 pub mod activations;
+pub mod adaptive_embeddings;
 pub mod attention;
 pub mod cache;
+pub mod common;
 pub mod decoder;
+pub mod decoder_attention;
+pub mod decoder_cross_attn_layer;
+pub mod decoder_layer;
 pub mod embeddings;
-pub mod adaptive_embeddings;
 pub mod encoder;
 pub mod encoder_decoder;
+pub mod encoder_layer;
 pub mod feedforward;
-pub mod decoder_attention;
-pub mod linear_layer;
-pub mod normalization;
 pub mod gpu_context;
 pub mod gpu_ops;
+pub mod linear_layer;
 pub mod models;
+pub mod normalization;
 pub mod pooling;
+pub mod rope;
 pub mod traits;
 pub mod utils;
 pub mod weights;
-pub mod decoder_cross_attn_layer;
-pub mod decoder_layer;
-pub mod encoder_layer;
-pub mod rope;
-pub mod decoder_cross_attn;
-
 
 // Re-export commonly used items
 pub use crate::{
@@ -39,7 +36,7 @@ pub use crate::{
     embeddings::Embeddings,
     feedforward::FeedForward,
     normalization::Normalization,
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
+    pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
     weights::ModelWeights,
 };
 pub use cache::{Cache, CpuKVCache, GpuKVCache};

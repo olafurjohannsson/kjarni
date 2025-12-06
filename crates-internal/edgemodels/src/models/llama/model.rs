@@ -6,12 +6,15 @@
 //! The actual text generation is handled by the generic `Generator` struct.
 
 use crate::models::llama::config::LlamaConfig;
+use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use edgetransformers::decoder::TransformerDecoder;
-use edgetransformers::gpu_ops::GpuTensor;
 use edgetransformers::gpu_ops::blocks::rope::GpuRoPE;
+use edgetransformers::gpu_ops::GpuTensor;
+// use edgetransformers::utils::linear_algebra::matmul_2d_faer;
+use edgetransformers::linear_layer::LinearLayer;
 use edgetransformers::models::base::DecoderLoadConfig;
 use edgetransformers::models::base::GpuDecoder;
 use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy};
@@ -19,17 +22,14 @@ use edgetransformers::models::download_model_files;
 use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::rope::RoPE;
 use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
-// use edgetransformers::utils::linear_algebra::matmul_2d_faer;
-use edgetransformers::linear_layer::LinearLayer;
 use edgetransformers::utils::linear_algebra::matmul_2d_transposed;
 use edgetransformers::weights::DType;
 use edgetransformers::weights::ModelWeights;
 use edgetransformers::{gpu_context, prelude::*};
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
-use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 
 /// A model container for LLaMA and its variants.
 ///
@@ -101,14 +101,13 @@ impl LlamaModel {
         decoder_config: Option<DecoderLoadConfig>,
     ) -> Result<Self> {
         edgetransformers::utils::configure_threading();
-        
+
         let weights = ModelWeights::new(model_path)?;
         let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         let config = Arc::new(LlamaConfig::from_json(&weights.config_json)?);
 
-        
 
         // Set up tokenizer truncation, but no padding for autoregressive generation.
         let truncation_params = tokenizers::TruncationParams {
@@ -118,8 +117,7 @@ impl LlamaModel {
         tokenizer.with_truncation(Some(truncation_params)).unwrap();
         tokenizer.with_padding(None);
 
-        
-        
+
         // let mut gpu_lm_head_transposed = None;
 
         // Create the RoPE module, passing the scaling config if it exists.
@@ -145,6 +143,11 @@ impl LlamaModel {
         // let lm_head = weights.get_array2(config.get_lm_head_name())?;
         // Determine Target DType
         let target_dtype = load_config.target_dtype;
+
+        if target_dtype.is_some() {
+            log::info!("Loading Llama model in {:?}", target_dtype.unwrap());
+        };
+
 
         // Load Head using the new LinearLayer loader
         let lm_head = LinearLayer::from_weights(&weights, config.get_lm_head_name(), target_dtype)?;
@@ -290,7 +293,7 @@ impl LanguageModel for LlamaModel {
 
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {
-    fn decoder(&self) -> &dyn Decoder<Input = Array2<u32>, Output = DecoderOutput> {
+    fn decoder(&self) -> &dyn Decoder<Input=Array2<u32>, Output=DecoderOutput> {
         self.decoder
             .as_ref()
             .expect("CPU decoder not initialized - use Device::Cpu")
@@ -322,6 +325,10 @@ impl DecoderLanguageModel for LlamaModel {
         let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq, hidden))?;
 
         // Dispatch happens here automatically
+        log::info!("lm_head dtype: {:?}, shape: {:?}",
+        if self.lm_head.as_f32().is_some() { "F32" } else { "BF16" },
+        self.lm_head.shape()
+    );
         let logits_2d = self.lm_head.matmul(&hidden_2d);
 
         logits_2d

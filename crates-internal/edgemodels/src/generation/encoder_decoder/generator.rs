@@ -1,10 +1,10 @@
-use crate::generation::common::{StreamedToken, TokenType};
-use crate::generation::encoder_decoder::{
-    run_beam_search, run_beam_search_stream, CpuBackend, GpuBackend, HasShape,
-};
+use crate::generation::encoder_decoder::{CpuBackend, GpuBackend};
 use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 use bytemuck;
+use edgetransformers::common::{StreamedToken, TokenType};
+use edgetransformers::encoder_decoder::{run_beam_search, run_beam_search_stream, HasShape};
+
 use edgetransformers::models::base::{
     DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig, LanguageModel,
 };
@@ -12,7 +12,6 @@ use edgetransformers::prelude::*;
 use edgetransformers::traits::EncoderOutput;
 use futures_core::stream::Stream;
 use ndarray::Array2;
-
 
 pub enum AnySeq2SeqBackend {
     Cpu(CpuBackend),
@@ -57,92 +56,54 @@ impl Seq2SeqGenerator {
             .forward(&input_ids, &attention_mask, None)
             .await
     }
+    fn prepare_beam_state(
+        &self,
+        encoder_output: &EncoderOutput,
+        num_beams: usize,
+    ) -> Result<EncoderOutput> {
+        if num_beams == 1 {
+            // No copy needed for greedy search
+            return Ok(encoder_output.clone());
+        }
 
+        let original = &encoder_output.last_hidden_state;
+        let expanded = original
+            .broadcast((num_beams, original.shape()[1], original.shape()[2]))
+            .ok_or_else(|| anyhow!("Failed to broadcast encoder state"))?
+            .to_owned();
+
+        Ok(EncoderOutput {
+            last_hidden_state: expanded,
+        })
+    }
     pub async fn generate_from_encoding(
         &self,
         encoder_output: &EncoderOutput,
         config: &GenerationConfig,
     ) -> Result<String> {
-        let t_gen_start = std::time::Instant::now();
-        let result = match self.model.device() {
-            Device::Cpu => {
-                let backend = CpuBackend;
+        let t_start = std::time::Instant::now();
 
-                // 1. Determine Beam Count
-                let num_beams = match &config.strategy {
-                    DecodingStrategy::BeamSearch(params) => params.num_beams,
-                    DecodingStrategy::Greedy => 1,
-                    _ => return Err(anyhow!("Only BeamSearch and Greedy are supported.")),
-                };
-                let t_prep = std::time::Instant::now();
-                let original_encoder_state_cpu = &encoder_output.last_hidden_state;
+        // 1. Get Params
+        let num_beams = match &config.strategy {
+            DecodingStrategy::BeamSearch(p) => p.num_beams,
+            DecodingStrategy::Greedy => 1,
+            _ => return Err(anyhow!("Unsupported strategy")),
+        };
 
-                // 2. Expand encoder state to match num_beams
-                let expanded_encoder_state_cpu = original_encoder_state_cpu
-                    .broadcast((
-                        num_beams,
-                        original_encoder_state_cpu.shape()[1],
-                        original_encoder_state_cpu.shape()[2],
-                    ))
-                    .unwrap()
-                    .to_owned();
+        // 2. Prepare Data (Device Agnostic)
+        let beam_encoder_output = self.prepare_beam_state(encoder_output, num_beams)?;
 
-                let expanded_encoder_output = EncoderOutput {
-                    last_hidden_state: expanded_encoder_state_cpu,
-                };
-                log::info!("[Seq2Seq] CPU Beam Prep time: {:?}", t_prep.elapsed());
-                // 3. Run the generation loop
-                run_beam_search(
-                    self.model.as_ref(),
-                    &backend,
-                    &expanded_encoder_output,
-                    config,
-                )
-                    .await
+        // 3. Dispatch (Code is now much smaller)
+        let result = match &self.backend {
+            AnySeq2SeqBackend::Cpu(backend) => {
+                run_beam_search(self.model.as_ref(), backend, &beam_encoder_output, config).await
             }
-            Device::Wgpu => {
-                let context = self.model.context().unwrap();
-                let backend = GpuBackend {
-                    context: context.clone(),
-                };
-
-                // 1. Determine Beam Count
-                let num_beams = match &config.strategy {
-                    DecodingStrategy::BeamSearch(params) => params.num_beams,
-                    DecodingStrategy::Greedy => 1,
-                    _ => return Err(anyhow!("Only BeamSearch and Greedy are supported.")),
-                };
-
-                let original_encoder_state_cpu = &encoder_output.last_hidden_state;
-
-                // 2. Expand encoder state to match num_beams
-                // (Even for greedy/1 beam, this ensures dimensions are consistent)
-                let expanded_encoder_state_cpu = original_encoder_state_cpu
-                    .broadcast((
-                        num_beams,
-                        original_encoder_state_cpu.shape()[1],
-                        original_encoder_state_cpu.shape()[2],
-                    ))
-                    .unwrap()
-                    .to_owned();
-
-                let expanded_encoder_output = EncoderOutput {
-                    last_hidden_state: expanded_encoder_state_cpu,
-                };
-
-                // 3. Run the generation loop
-                run_beam_search(
-                    self.model.as_ref(),
-                    &backend,
-                    &expanded_encoder_output,
-                    config,
-                )
-                    .await
+            AnySeq2SeqBackend::Gpu(backend) => {
+                run_beam_search(self.model.as_ref(), backend, &beam_encoder_output, config).await
             }
         };
 
-        log::info!("[Seq2Seq] Total Generation Time: {:?}", t_gen_start.elapsed());
-
+        log::info!("[Seq2Seq] Total Time: {:?}", t_start.elapsed());
         result
     }
     pub async fn generate_stream_from_encoding(
@@ -212,7 +173,7 @@ impl Seq2SeqGenerator {
         })
     }
 
-    pub fn generate_stream<'a>(
+    pub async fn generate_stream<'a>(
         &'a self,
         input_text: &'a str,
         config: &'a GenerationConfig,

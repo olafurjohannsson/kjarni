@@ -1,22 +1,60 @@
-use edgemodels::generation::decoder::{CpuDecoderBackend, Generator};
+use edgemodels::generation::decoder::Generator;
 use edgemodels::models::llama::model::LlamaModel;
-// use edgemodels::text_generation::TextGenerator;
-use edgemodels::generation::decoder::GpuDecoderBackend;
-// use edgemodels::generation::generator::DecoderGenerationBackend;
-use edgetransformers::decoder::DecoderGenerationBackend;
-use edgetransformers::WgpuContext;
 use edgetransformers::gpu_ops::GpuTensorPool;
 use edgetransformers::models::base::DecoderLoadConfig;
 use edgetransformers::models::base::{DecodingStrategy, GenerationConfig};
+use edgetransformers::WgpuContext;
 use edgetransformers::{Device, ModelType};
 use std::io;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+
+fn bench_matmul_bf16() {
+    let m = 1;
+    let k = 2048;
+    let n = 8192;  // FFN up/gate projection
+
+    let a = ndarray::Array2::<f32>::ones((m, k));
+    let b = ndarray::Array2::<u16>::zeros((n, k));  // BF16 weights
+
+    let start = std::time::Instant::now();
+    for _ in 0..100 {
+        let _ = edgetransformers::utils::linear_algebra::matmul_2d_mixed_bf16(&a.view(), &b.view());
+    }
+    let elapsed = start.elapsed();
+
+    println!("100 iters: {:?}", elapsed);
+    println!("Per iter: {:?}", elapsed / 100);
+    println!("GFLOPS: {:.2}", (m * k * n * 2 * 100) as f64 / elapsed.as_secs_f64() / 1e9);
+}
+fn bench_down_projection() {
+    edgetransformers::utils::configure_threading();
+
+    // Down projection: [1, 8192] @ [2048, 8192]
+    let m = 1;
+    let k = 8192;
+    let n = 2048;  // This was hitting serial path!
+
+    let a = ndarray::Array2::<f32>::ones((m, k));
+    let b = ndarray::Array2::<u16>::zeros((n, k));
+
+    let start = std::time::Instant::now();
+    for _ in 0..100 {
+        let _ = edgetransformers::utils::linear_algebra::matmul_2d_mixed_bf16(&a.view(), &b.view());
+    }
+    let elapsed = start.elapsed();
+
+    println!("Down projection: 100 iters: {:?}", elapsed);
+    println!("Per iter: {:?}", elapsed / 100);
+    println!("GFLOPS: {:.2}", (m * k * n * 2 * 100) as f64 / elapsed.as_secs_f64() / 1e9);
+}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // It's good practice to use a logger for backend info
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
 
     // --- Shared Setup ---
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
@@ -39,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
         gpu_layers: None,
         offload_embeddings: false,
         offload_lm_head: false,
-        target_dtype: Some(edgetransformers::weights::DType::F32),
+        target_dtype: None,
     };
     // Step 1: Load the model onto the desired device
     let model_gpu = LlamaModel::from_registry(
@@ -49,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         None, //Some(context.clone()),
         Some(d),
     )
-    .await?;
+        .await?;
 
     // Step 2: Create the appropriate backend for the device
     // let cpu_backend = CpuDecoderBackend;
@@ -69,5 +107,7 @@ async fn main() -> anyhow::Result<()> {
         io::stdout().flush().unwrap();
     }
     println!();
+    bench_matmul_bf16();
+    bench_down_projection();
     Ok(())
 }
