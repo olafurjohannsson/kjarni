@@ -8,4 +8,6 @@ mod cpu_backend;
 pub use cpu_backend::CpuBackend;
 pub use generator::Seq2SeqGenerator;
 pub use gpu_backend::GpuBackend;
+pub use cpu_backend::CpuTensor;
+pub use gpu_backend::GpuSeq2SeqTensor;
 // pub use traits::{GenerationBackend, HasShape, StepInput};

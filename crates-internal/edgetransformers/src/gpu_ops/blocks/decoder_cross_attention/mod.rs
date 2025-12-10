@@ -9,9 +9,10 @@ use crate::gpu_ops::blocks::{
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{
-    CrossAttentionDecoder, CrossAttentionDecoderArchitecture, DecoderOutput, Device,
+    CrossAttentionDecoderArchitecture, DecoderOutput, Device,
     EncoderDecoderArchitecture, LanguageModelConfig, TransformerModel,
 };
+use crate::encoder_decoder::traits::{CrossAttentionDecoder, EncoderDecoderLanguageModel};
 use crate::weights::ModelWeights;
 use crate::Cache;
 use anyhow::Result;
@@ -253,14 +254,62 @@ impl GpuCrossAttentionDecoder {
 }
 
 impl GpuCrossAttentionDecoderLayer {
+    pub fn new(
+        context: &Arc<WgpuContext>,
+        self_attn_weights: GpuAttentionWeights,
+        self_attn_norm: GpuNormalization,
+        self_attn_norm_weights: GpuNormalizationWeights,
+        cross_attn_weights: GpuAttentionWeights,
+        cross_attn_norm: GpuNormalization,
+        cross_attn_norm_weights: GpuNormalizationWeights,
+        feedforward: GpuFeedForward,
+        ff_weights: GpuFeedForwardWeights,
+        ffn_norm: GpuNormalization,
+        ffn_norm_weights: GpuNormalizationWeights,
+        config: &dyn crate::traits::TransformerConfig,
+    ) -> Result<Self> {
+        let hidden_size = config.hidden_size() as u32;
+        let num_heads = config.num_attention_heads() as u32;
+
+        Ok(Self {
+            self_attn: GpuAttention::new(context, hidden_size, num_heads, num_heads),
+            self_attn_weights,
+            self_attn_norm,
+            self_attn_norm_weights,
+            cross_attn: GpuAttention::new(context, hidden_size, num_heads, num_heads),
+            cross_attn_weights,
+            cross_attn_norm,
+            cross_attn_norm_weights,
+            feedforward,
+            ff_weights,
+            ffn_norm,
+            ffn_norm_weights,
+            add: GpuAdd::new(context),
+        })
+    }
+    pub fn precompute_cross_kv(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        encoder_hidden_states: &GpuTensor,
+        pool: &mut GpuTensorPool,
+    ) -> (GpuTensor, GpuTensor) {
+        self.cross_attn.precompute_cross_kv(
+            encoder,
+            encoder_hidden_states,
+            &self.cross_attn_weights,
+            pool,
+        )
+    }
+
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         decoder_hidden_states: &GpuTensor,
-        encoder_hidden_states: &GpuTensor,
+        encoder_hidden_states: Option<&GpuTensor>,
         decoder_attn_mask: &GpuTensor,
         encoder_attn_mask: Option<&GpuTensor>, // GPU version of the mask
         cached_kv: Option<(&GpuTensor, &GpuTensor)>,
+        precomputed_cross_kv: Option<&(GpuTensor, GpuTensor)>,
         cache_len: usize,
         pool: &mut GpuTensorPool,
     ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
@@ -292,14 +341,36 @@ impl GpuCrossAttentionDecoderLayer {
 
         // Cross-Attention Block (Post-Norm)
         let residual = &hidden_states_after_norm1;
-        let cross_attn_output = self.cross_attn.forward_cross(
-            encoder,
-            residual,              // Query (Q)
-            encoder_hidden_states, // Key & Value (KV)
-            &self.cross_attn_weights,
-            encoder_attn_mask,
-            pool,
-        );
+        // let cross_attn_output = self.cross_attn.forward_cross(
+        //     encoder,
+        //     residual,              // Query (Q)
+        //     encoder_hidden_states, // Key & Value (KV)
+        //     &self.cross_attn_weights,
+        //     encoder_attn_mask,
+        //     pool,
+        // );
+        let cross_attn_output = if let Some((k_pre, v_pre)) = precomputed_cross_kv {
+            // FAST PATH: Use precomputed K/V
+            self.cross_attn.forward_cross_precomputed(
+                encoder,
+                residual,
+                k_pre,
+                v_pre,
+                &self.cross_attn_weights,
+                encoder_attn_mask,
+                pool
+            )
+        } else {
+            // SLOW PATH: Compute K/V on the fly
+            self.cross_attn.forward_cross(
+                encoder,
+                residual,
+                encoder_hidden_states.unwrap(), // will crash
+                &self.cross_attn_weights,
+                encoder_attn_mask,
+                pool,
+            )
+        };
         let hidden_states_after_add2 = pool.get(residual.shape().to_vec());
         self.add.encode(
             encoder,
@@ -424,10 +495,11 @@ impl CrossAttentionDecoder for GpuCrossAttentionDecoder {
             let (output, new_k, new_v) = layer.forward(
                 encoder,
                 &hidden_states,
-                &encoder_hidden_states,
+                Some(&encoder_hidden_states),
                 &decoder_attention_mask.unwrap(), // this will crash if its not provided TODO: fix
                 encoder_attention_mask,
                 cached_kv,
+                None,
                 position_offset,
                 pool,
             )?;
@@ -466,7 +538,7 @@ mod tests {
     // use crate::decoder_attention::DecoderAttention as CpuDecoderAttention;
     use crate::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
     use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
-    use crate::feedforward::{FeedForward as CpuFf, StdFeedForward as CpuStdFf};
+    use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
     use crate::normalization::LayerNorm as CpuLayerNorm;
 
     use crate::linear_layer::LinearLayer;
@@ -550,7 +622,7 @@ mod tests {
         let cross_attn_layer_norm =
             CpuLayerNorm::new(gen_bias(hidden_size, 1.0), gen_bias(hidden_size, 0.0), 1e-5);
 
-        let feedforward = CpuFf::Standard(CpuStdFf::new(
+        let feedforward = CpuFf::Legacy(CpuStdFf::new(
             gen_weight((hidden_size, intermediate_size), 0.01),
             gen_bias(intermediate_size, 0.0),
             gen_weight((intermediate_size, hidden_size), -0.01),
@@ -629,7 +701,7 @@ mod tests {
         )?);
 
         // --- 3. Feed-Forward ---
-        let ff_weights = if let crate::feedforward::FeedForward::Standard(ff) = &cpu_layer.feedforward {
+        let ff_weights = if let crate::feedforward::FeedForward::Legacy(ff) = &cpu_layer.feedforward {
             // Assuming Standard FFN doesn't use LinearLayer yet (based on your snippet),
             // or if it does, genericize logic.
             // Based on your snippet, keeping the smart constructor:
@@ -713,10 +785,11 @@ mod tests {
         let (gpu_output_t, gpu_k_t, gpu_v_t) = gpu_layer.forward(
             &mut encoder,
             &gpu_decoder_hs,
-            &gpu_encoder_hs,
+            Some(&gpu_encoder_hs),
             &gpu_decoder_mask,
             Some(&gpu_encoder_mask),
             None, // No cache
+            None,
             0,    // Cache len is 0
             &mut pool,
         )?;
@@ -776,7 +849,7 @@ mod tests {
         println!("--- Testing Self-Attention Block ---");
 
         // CPU Execution
-        let (cpu_sa_out, (cpu_k, cpu_v)) = cpu_layer.self_attention_block(
+        let (cpu_sa_out, (cpu_k, cpu_v)) = cpu_layer.self_attention(
             &cpu_hidden,
             Some(&cpu_dec_mask),
             None, // No cache for this test
@@ -841,6 +914,7 @@ mod tests {
             &input_for_step_2,
             &cpu_encoder_hs,
             Some(&cpu_enc_mask),
+            None,
         )?;
 
         // GPU Execution
@@ -897,7 +971,7 @@ mod tests {
         pool.next_frame();
 
         // CPU Execution
-        let cpu_ffn_out = cpu_layer.feed_forward_block(&input_for_step_3)?;
+        let cpu_ffn_out = cpu_layer.feed_forward(&input_for_step_3)?;
 
         // GPU Execution
         // 1. FFN

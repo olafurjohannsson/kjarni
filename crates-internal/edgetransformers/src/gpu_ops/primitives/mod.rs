@@ -10,3 +10,5 @@ pub mod scale;
 pub mod lookup;
 pub mod repeat_kv;
 pub mod argmax;
+pub mod linear;
+pub mod broadcast;

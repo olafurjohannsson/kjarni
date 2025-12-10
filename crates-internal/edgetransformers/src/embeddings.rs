@@ -203,7 +203,7 @@ mod tests {
         fn is_prenorm(&self) -> bool {
             false
         }
-        fn extra_pos_embeddings(&self) -> usize { 0 }
+        fn extra_pos_embeddings(&self) -> usize { 2 }
     }
     impl LanguageModelConfig for TestConfig {
         fn vocab_size(&self) -> usize {

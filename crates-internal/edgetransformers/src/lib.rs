@@ -6,7 +6,6 @@
 //! EdgeTransformers: Fast transformer models for Rust
 
 pub mod activations;
-pub mod adaptive_embeddings;
 pub mod attention;
 pub mod cache;
 pub mod common;
@@ -29,12 +28,14 @@ pub mod rope;
 pub mod traits;
 pub mod utils;
 pub mod weights;
+pub mod model_load_config;
 
 // Re-export commonly used items
 pub use crate::{
     attention::MultiHeadAttention,
     embeddings::Embeddings,
     feedforward::FeedForward,
+    model_load_config::{DType, ModelLoadConfig},
     normalization::Normalization,
     pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
     weights::ModelWeights,
@@ -42,7 +43,7 @@ pub use crate::{
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_context::WgpuContext;
 pub use traits::{
-    CrossAttentionDecoder, Decoder, Device, Encoder, TransformerConfig, TransformerModel,
+    Decoder, Device, Encoder, TransformerConfig, TransformerModel,
 };
 
 // Re-export model traits and registry
@@ -61,3 +62,4 @@ pub mod prelude {
 
 #[cfg(test)]
 pub mod tests;
+

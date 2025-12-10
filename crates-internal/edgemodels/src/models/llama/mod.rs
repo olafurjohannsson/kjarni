@@ -29,7 +29,6 @@ pub mod config;
 pub mod gpu_decoder;
 pub mod cpu_decoder;
 pub mod model;
-pub mod gguf_loader;
 
 #[cfg(test)]
 mod tests;

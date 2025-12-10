@@ -57,6 +57,10 @@ impl LlamaModel {
     /// A list of the specific model types supported by this implementation.
     const SUPPORTED_MODELS: &'static [ModelType] = &[
         ModelType::Llama3_2_1B,
+        ModelType::Llama3_2_3B,
+
+        
+        ModelType::Llama3_2_3B_Instruct,
         ModelType::Llama3_8B_Instruct,
         // Add other Llama variants here as you support them
     ];
@@ -127,6 +131,7 @@ impl LlamaModel {
             config.rope_theta,
             config.rope_scaling.as_ref(),
         ));
+        
         // GpuRoPE::new(context, )
 
         // The generic TransformerDecoder will be built using the LlamaConfig.
@@ -190,16 +195,22 @@ impl LlamaModel {
                     config.clone(),
                     gpu_rope,
                 )?);
-                // let lm_head_old = weights.get_array2(config.get_lm_head_name())?;
-                // let lm_head_transposed_cpu = lm_head.t().as_standard_layout().to_owned();
-                // gpu_lm_head_transposed =
-                //     Some(GpuTensor::from_ndarray(&ctx, &lm_head_transposed_cpu)?);
                 let gpu_lm_head_transposed = if !load_config.offload_lm_head {
-                    log::info!("Loading LM Head to VRAM");
-                    let lm_head_t = lm_head.to_f32_transposed();
-                    Some(GpuTensor::from_ndarray(&ctx, &lm_head_t)?)
+                    log::info!("Loading LM Head to VRAM (Unified Layout [Vocab, Hidden])");
+                    
+                    let head_name = config.get_lm_head_name();
+                    let tensor = if let Ok(raw) = weights.get_raw(head_name) {
+                         // Load Raw (BF16 or F32) without modification
+                         GpuTensor::from_raw(&ctx, &raw, "lm_head")?
+                    } else {
+                        // Fallback: Load as Array2 (F32), but DO NOT TRANSPOSE.
+                        // Standard ndarray load is [Vocab, Hidden]
+                        let arr = weights.get_array2(head_name)?;
+                        GpuTensor::from_ndarray(&ctx, &arr)?
+                    };
+                    
+                    Some(tensor)
                 } else {
-                    log::info!("Offloading LM Head to CPU RAM");
                     None
                 };
                 Ok(Self {
@@ -208,7 +219,7 @@ impl LlamaModel {
                     tokenizer,
                     lm_head: lm_head,
                     gpu_decoder,
-                    gpu_lm_head_transposed,
+                    gpu_lm_head_transposed, // This is now BF16 [Vocab, Hidden] OR F32 [Hidden, Vocab]
                     device,
                     context: Some(ctx),
                 })

@@ -3,14 +3,15 @@
 use anyhow::{anyhow, Result};
 use edgemodels::cross_encoder::CrossEncoder;
 use edgemodels::sentence_encoder::SentenceEncoder;
-use edgemodels::seq2seq::{Seq2SeqModel, AnySeq2SeqModel};
+// use edgemodels::seq2seq::{Seq2SeqModel, AnySeq2SeqModel};
 use edgemodels::generation::{Generator, encoder_decoder::Seq2SeqGenerator};
 use edgemodels::models::{
     gpt2::Gpt2Model,
     llama::model::LlamaModel
 };
 use edgetransformers::models::ModelType;
-use edgetransformers::models::base::{EncoderDecoderLanguageModel, DecoderLanguageModel, EncoderLanguageModel};
+use edgetransformers::encoder_decoder::traits::EncoderDecoderLanguageModel;
+use edgetransformers::models::base::{DecoderLanguageModel, EncoderLanguageModel};
 use edgetransformers::prelude::*;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -109,22 +110,23 @@ impl ModelManager {
         device: Device,
         context: Option<Arc<WgpuContext>>,
     ) -> Result<()> {
-        let mut guard = self.seq2seq_generator.lock().await;
-        if guard.is_some() { return Ok(()); }
+        unimplemented!()
+        // let mut guard = self.seq2seq_generator.lock().await;
+        // if guard.is_some() { return Ok(()); }
 
-        let dir = Self::resolve_cache_dir(cache_dir)?;
+        // let dir = Self::resolve_cache_dir(cache_dir)?;
 
-        // Factory logic for Seq2Seq models
-        let any_model = AnySeq2SeqModel::from_registry(model_type, Some(dir), device, context).await?;
+        // // Factory logic for Seq2Seq models
+        // let any_model = AnySeq2SeqModel::from_registry(model_type, Some(dir), device, context).await?;
         
-        // Unwrap the specific model type (currently only BART supported)
-        let model: Box<dyn EncoderDecoderLanguageModel> = match any_model {
-            AnySeq2SeqModel::Bart(m) => Box::new(m),
-        };
-        let generator = Seq2SeqGenerator::new(model)?;
+        // // Unwrap the specific model type (currently only BART supported)
+        // let model: Box<dyn EncoderDecoderLanguageModel> = match any_model {
+        //     AnySeq2SeqModel::Bart(m) => Box::new(m),
+        // };
+        // let generator = Seq2SeqGenerator::new(model)?;
 
-        *guard = Some(generator);
-        Ok(())
+        // *guard = Some(generator);
+        // Ok(())
     }
 
     /// Unload sentence encoder to free memory

@@ -8,14 +8,9 @@
 //! - up_proj:   [hidden_size, intermediate_size]  
 //! - down_proj: [intermediate_size, hidden_size]
 
-use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::matmul_2d_transposed;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
-// If 'silu_parallel' is in activations.rs, import it.
-// Otherwise we use the inline implementation below.
-use crate::activations::silu_parallel;
 use crate::feedforward::swiglu::SwiGluFeedForward;
 
 
@@ -80,13 +75,13 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
     // [out_features, in_features]
     // gate: [intermediate, hidden] = [4, 2]
     let gate_weight = Array2::from_shape_vec(
-        (4, 2), 
+        (4, 2),
         vec![
             1.0, 0.0,  // output 0 weights
             0.0, 1.0,  // output 1 weights
             0.0, 0.0,  // output 2 weights
             0.0, 0.0,  // output 3 weights
-        ]
+        ],
     ).unwrap();
 
     // up: [intermediate, hidden] = [4, 2]
@@ -97,7 +92,7 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
             0.0, 0.0,  // output 1 weights
             1.0, 0.0,  // output 2 weights
             0.0, 1.0,  // output 3 weights
-        ]
+        ],
     ).unwrap();
 
     // down: [hidden, intermediate] = [2, 4]
@@ -106,7 +101,7 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
         vec![
             1.0, 0.0, 1.0, 0.0,  // output 0 weights
             0.0, 1.0, 0.0, 1.0,  // output 1 weights
-        ]
+        ],
     ).unwrap();
 
     let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
@@ -169,25 +164,6 @@ fn test_swiglu_pytorch_parity() -> Result<()> {
     );
     Ok(())
 }
-
-// #[test]
-// fn test_swiglu_2d() {
-//     let hidden_size = 4;
-//     let intermediate_size = 8;
-//     let batch_size = 3;
-
-//     let gate_weight = Array2::ones((hidden_size, intermediate_size));
-//     let up_weight = Array2::ones((hidden_size, intermediate_size));
-//     let down_weight = Array2::ones((intermediate_size, hidden_size));
-
-//     let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
-
-//     let input = Array2::ones((batch_size, hidden_size));
-//     let output = ffn.forward_2d(&input);
-
-//     assert_eq!(output.shape(), &[batch_size, hidden_size]);
-//     assert!(output.iter().all(|&x| x.is_finite()));
-// }
 
 #[test]
 fn test_swiglu_nonlinearity() -> std::result::Result<(), anyhow::Error> {

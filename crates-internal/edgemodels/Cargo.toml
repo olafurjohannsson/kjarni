@@ -14,6 +14,7 @@ categories.workspace = true
 [dependencies]
 # Local path dependencies
 edgetransformers = { path = "../edgetransformers" }
+edgerag = { path = "../edgerag" }
 
 # Inherit from workspace
 anyhow = { workspace = true }

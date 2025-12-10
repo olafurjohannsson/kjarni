@@ -27,8 +27,8 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
 
     // GPU F32 matmul expects [In, Out] - transpose on upload
     let weights_gpu = GpuSwiGLUFFNWeights::new(
-        GpuTensor::from_ndarray(&context, &gate_cpu.t().as_standard_layout().to_owned())?,
-        GpuTensor::from_ndarray(&context, &up_cpu.t().as_standard_layout().to_owned())?,
+        GpuTensor::from_ndarray(&context, &gate_cpu.as_standard_layout().to_owned())?,
+        GpuTensor::from_ndarray(&context, &up_cpu.as_standard_layout().to_owned())?,
         GpuTensor::from_ndarray(&context, &down_cpu.t().as_standard_layout().to_owned())?,
     )?;
 

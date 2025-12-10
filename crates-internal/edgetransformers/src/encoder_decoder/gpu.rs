@@ -8,9 +8,10 @@ use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::decoder_cross_attention::GpuCrossAttentionDecoder;
 use crate::gpu_ops::GpuTensor;
 use crate::traits::{
-    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture
+    DecoderOutput, Device, EncoderDecoderArchitecture
     , TransformerModel,
 };
+use crate::encoder_decoder::traits::{EncoderDecoderLanguageModel, CrossAttentionDecoder};
 use crate::weights::ModelWeights;
 use crate::Cache;
 // Import adapters from the cpu module
@@ -62,6 +63,7 @@ impl CrossAttentionDecoder for GpuTransformerEncoderDecoder {
     type EncoderStateInput = GpuTensor;
     type MaskInput = GpuTensor;
     type Output = DecoderOutput;
+    
 
     async fn forward<'a>(
         &self,

@@ -1,13 +1,15 @@
 use anyhow::Result;
 use ndarray::Array3;
 
+pub mod legacy;
 pub mod standard;
 pub mod swiglu;
 
-pub use crate::feedforward::{standard::StdFeedForward, swiglu::SwiGluFeedForward};
+pub use crate::feedforward::{legacy::LegacyFeedForward, swiglu::SwiGluFeedForward, standard::StdFeedForward};
 
 pub enum FeedForward {
     Standard(StdFeedForward),
+    Legacy(LegacyFeedForward),
     SwiGLU(SwiGluFeedForward),
 }
 
@@ -16,6 +18,7 @@ impl FeedForward {
         match self {
             FeedForward::Standard(ffn) => ffn.forward(input),
             FeedForward::SwiGLU(swiglu) => swiglu.forward(input),
+            FeedForward::Legacy(ffn) => ffn.forward(input),
         }
     }
 }

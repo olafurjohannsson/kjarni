@@ -3,7 +3,13 @@ use wgpu::util::DeviceExt;
 
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{DType, GpuTensor, Kernel};
-
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct AddBroadcastRowUniforms {
+    m: u32,
+    n: u32,
+    _padding: [u32; 2],
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -12,7 +18,7 @@ struct AddBroadcastOffsetUniforms {
     b_row_offset: u32,
     seq_len: u32,
     hidden_size: u32,
-    b_stride_0: u32, // <-- ADD THIS: Stride for the first dimension of b (rows)
+    b_stride_0: u32,    // <-- ADD THIS: Stride for the first dimension of b (rows)
     _padding: [u32; 3], // <-- ADD THIS: Ensure alignment
 }
 
@@ -30,6 +36,8 @@ pub struct GpuAdd {
     elementwise_layout: Arc<wgpu::BindGroupLayout>,
     broadcast_offset_pipeline: Arc<wgpu::ComputePipeline>,
     broadcast_offset_layout: Arc<wgpu::BindGroupLayout>,
+    broadcast_row_pipeline: Arc<wgpu::ComputePipeline>,
+    broadcast_row_layout: Arc<wgpu::BindGroupLayout>,
     context: Arc<WgpuContext>,
 }
 
@@ -37,15 +45,78 @@ impl GpuAdd {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
         let (ew_pipe, ew_layout) = compile_elementwise_pipeline(context);
         let (bo_pipe, bo_layout) = compile_broadcast_offset_pipeline(context);
+        let (br_pipe, br_layout) = compile_broadcast_row_pipeline(context);
         Self {
             elementwise_pipeline: Arc::new(ew_pipe),
             elementwise_layout: Arc::new(ew_layout),
             broadcast_offset_pipeline: Arc::new(bo_pipe),
             broadcast_offset_layout: Arc::new(bo_layout),
+            broadcast_row_pipeline: Arc::new(br_pipe),
+            broadcast_row_layout: Arc::new(br_layout),
             context: context.clone(),
         }
     }
+    pub fn encode_broadcast_row(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        a: &GpuTensor, // The larger tensor [M, N]
+        b: &GpuTensor, // The row to broadcast [1, N]
+        output: &GpuTensor,
+    ) {
+        assert_eq!(a.rank(), 2);
+        assert!(b.rank() == 1 || (b.rank() == 2 && b.shape()[0] == 1));
+        assert_eq!(a.shape()[1], *b.shape().last().unwrap());
+        assert_eq!(a.shape(), output.shape());
 
+        let uniforms = AddBroadcastRowUniforms {
+            m: a.shape()[0] as u32,
+            n: a.shape()[1] as u32,
+            _padding: [0; 2],
+        };
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Add Broadcast Row Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Add Broadcast Row BG"),
+                layout: &self.broadcast_row_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: a.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: b.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: output.buffer().as_entire_binding(),
+                    },
+                ],
+            });
+
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Add Broadcast Row Pass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&self.broadcast_row_pipeline);
+        cpass.set_bind_group(0, &bind_group, &[]);
+        let workgroups = (a.num_elements() as u32 + 255) / 256;
+        cpass.dispatch_workgroups(workgroups, 1, 1);
+    }
     /// Encodes standard element-wise addition: `output = a + b`.
     ///
     /// # Panics
@@ -375,5 +446,83 @@ fn compile_broadcast_offset_pipeline(
     (pipeline, bind_group_layout)
 }
 
+fn compile_broadcast_row_pipeline(
+    context: &WgpuContext,
+) -> (wgpu::ComputePipeline, wgpu::BindGroupLayout) {
+    let shader = context
+        .device
+        .create_shader_module(wgpu::include_wgsl!("add_broadcast_row.wgsl"));
+    // The layout is identical to the elementwise layout, so we can reuse it
+    let bind_group_layout =
+        context
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Add Broadcast Offset Bind Group Layout"),
+                entries: &[
+                    // Uniforms @binding(0)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Input `a` (hidden_states) @binding(1)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Input `b` (pos_embeddings) @binding(2)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Output @binding(3)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+    let pipeline_layout = context
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Add Broadcast Row Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+    let pipeline = context
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Add Broadcast Row Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+    (pipeline, bind_group_layout)
+}
 #[cfg(test)]
 mod tests;

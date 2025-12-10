@@ -1,22 +1,24 @@
-use crate::WgpuContext;
 use crate::cache::CpuKVCache;
 use crate::decoder_layer::DecoderLayer;
 use crate::feedforward::SwiGluFeedForward;
 use crate::gpu_ops::tensor;
+use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
-use crate::weights::ModelWeights;
-use crate::{
-    Embeddings, FeedForward, MultiHeadAttention, feedforward::StdFeedForward,
-    normalization::LayerNorm, normalization::Normalization, normalization::RMSNorm,
-};
-use crate::linear_layer::LinearLayer;
 use crate::weights::DType;
-use anyhow::{Result, anyhow};
+use crate::weights::ModelWeights;
+use crate::WgpuContext;
+use crate::{
+    feedforward::LegacyFeedForward, feedforward::StdFeedForward, normalization::LayerNorm, normalization::Normalization,
+    normalization::RMSNorm, Embeddings, FeedForward,
+    MultiHeadAttention,
+};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use log::{debug, info};
-use ndarray::{Array1, Array2, Array3, Axis, s};
+use log::debug;
+use ndarray::{s, Array1, Array2, Array3, Axis};
 use std::sync::Arc;
+
 /// The CPU backend implementation for the generic `TransformerDecoder`.
 pub struct CpuTransformerDecoder {
     embeddings: Embeddings,
@@ -159,7 +161,8 @@ impl CpuTransformerDecoder {
 
             // FeedForward::SwiGLU(SwiGluFeedForward::new(gate_weight, up_weight, down_weight))
             let gate = LinearLayer::from_weights(weights, gate_weight_name, target_dtype)?;
-            let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
+            let up =
+                LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
             let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, target_dtype)?;
 
             let feedforward = FeedForward::SwiGLU(SwiGluFeedForward::new(gate, up, down));
@@ -179,6 +182,41 @@ impl CpuTransformerDecoder {
                 weights.get_array2(&ffn_names.output_weight)?
             };
 
+            if config.legacy_ffn_weights() {
+                let expected_intermediate_shape =
+                    [config.hidden_size(), config.intermediate_size()];
+                let expected_output_shape = [config.intermediate_size(), config.hidden_size()];
+
+                assert_eq!(
+                    intermediate_weight.shape(),
+                    expected_intermediate_shape,
+                    "Final FFN intermediate weight must have [In, Out] layout of {:?}",
+                    expected_intermediate_shape
+                );
+                assert_eq!(
+                    output_weight.shape(),
+                    expected_output_shape,
+                    "Final FFN output weight must have [In, Out] layout of {:?}",
+                    expected_output_shape
+                );
+            } else {
+                let expected_intermediate_shape =
+                    [config.intermediate_size(), config.hidden_size()];
+                let expected_output_shape = [config.hidden_size(), config.intermediate_size()];
+
+                assert_eq!(
+                    intermediate_weight.shape(),
+                    expected_intermediate_shape,
+                    "Final FFN intermediate weight must have [Out, In] layout of {:?}",
+                    expected_intermediate_shape
+                );
+                assert_eq!(
+                    output_weight.shape(),
+                    expected_output_shape,
+                    "Final FFN output weight must have [Out, In] layout of {:?}",
+                    expected_output_shape
+                );
+            }
             let intermediate_bias = Self::load_optional_bias(
                 weights,
                 &ffn_names.intermediate_bias,
@@ -187,14 +225,23 @@ impl CpuTransformerDecoder {
 
             let output_bias =
                 Self::load_optional_bias(weights, &ffn_names.output_bias, hidden_size)?;
-
-            FeedForward::Standard(StdFeedForward::new(
-                intermediate_weight,
-                intermediate_bias,
-                output_weight,
-                output_bias,
-                config.activation_function(),
-            ))
+            if config.legacy_ffn_weights() {
+                FeedForward::Legacy(LegacyFeedForward::new(
+                    intermediate_weight,
+                    intermediate_bias,
+                    output_weight,
+                    output_bias,
+                    config.activation_function(),
+                ))
+            } else {
+                FeedForward::Standard(StdFeedForward::new(
+                    intermediate_weight,
+                    intermediate_bias,
+                    output_weight,
+                    output_bias,
+                    config.activation_function(),
+                ))
+            }
         };
         // Load normalization layers
         let self_attn_layer_norm = if !attn_names.qkv_weight.is_empty() {
@@ -206,7 +253,7 @@ impl CpuTransformerDecoder {
                 ),
                 config.layer_norm_eps(),
             )?
-            .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
+                .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
         } else {
             let layer_attn_names = config.get_layer_attention_names(layer_idx);
             Self::load_normalization(
@@ -217,7 +264,7 @@ impl CpuTransformerDecoder {
                 ),
                 config.layer_norm_eps(),
             )?
-            .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
+                .ok_or_else(|| anyhow!("Attention normalization required for layer {}", layer_idx))?
         };
 
         let ffn_layer_norm = Self::load_normalization(
@@ -225,7 +272,7 @@ impl CpuTransformerDecoder {
             &(ffn_names.norm_weight.as_str(), ffn_names.norm_bias.as_str()),
             config.layer_norm_eps(),
         )?
-        .ok_or_else(|| anyhow!("FFN normalization required for layer {}", layer_idx))?;
+            .ok_or_else(|| anyhow!("FFN normalization required for layer {}", layer_idx))?;
 
         Ok(DecoderLayer {
             self_attn: crate::decoder_layer::CpuAttention::Legacy(attention),
@@ -282,7 +329,7 @@ impl TransformerModel for CpuTransformerDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

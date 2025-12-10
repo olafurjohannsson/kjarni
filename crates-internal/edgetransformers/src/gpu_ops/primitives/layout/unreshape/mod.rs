@@ -89,18 +89,21 @@ impl GpuUnreshape {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Unreshape Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        //     label: Some("Unreshape Pass"),
+        //     timestamp_writes: None,
+        // });
+        let label = format!("Unreshape");
+        self.context.profiler.profile(encoder, &label, |compute_pass| {
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        // Dispatch a 3D grid that matches the shader's logic
-        let workgroups_x = (s as u32 + 15) / 16;
-        let workgroups_y = (h as u32 + 15) / 16;
-        let workgroups_z = b as u32;
-        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            // Dispatch a 3D grid that matches the shader's logic
+            let workgroups_x = (s as u32 + 15) / 16;
+            let workgroups_y = (h as u32 + 15) / 16;
+            let workgroups_z = b as u32;
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+        });
     }
 }
 

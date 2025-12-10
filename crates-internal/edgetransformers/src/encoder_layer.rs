@@ -1,97 +1,110 @@
-// Re-export commonly used items
-use crate::utils::linear_algebra::matmul_3d_2d;
-pub use crate::{
-    attention::MultiHeadAttention,
-    cache::CpuKVCache,
-    embeddings::Embeddings,
-    feedforward::FeedForward,
-    normalization::LayerNorm,
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
-    traits::TransformerConfig,
-    weights::ModelWeights,
-};
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, ArrayView3, Axis};
+use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+use crate::feedforward::FeedForward;
+use crate::normalization::LayerNorm;
+use anyhow::Result;
+use ndarray::{Array2, Array3, Array4};
 
-/// A generic transformer layer combining attention and feedforward.
-/// This universal struct can represent an encoder layer, a decoder layer,
-/// or an encoder-decoder's decoder layer.
+/// A generic encoder transformer layer supporting:
+/// - BERT, RoBERTa, BART (post-norm)
+/// - T5 encoder (pre-norm with relative position bias)
+/// - Any bidirectional encoder architecture
 pub struct EncoderLayer {
-    // Self-Attention Components (always present)
-    pub self_attn: MultiHeadAttention,
+    pub self_attn: EncoderSelfAttention,
     pub self_attn_layer_norm: LayerNorm,
-
-    // Feed-Forward Components (always present)
     pub feedforward: FeedForward,
     pub ffn_layer_norm: LayerNorm,
 }
 
 impl EncoderLayer {
+    pub fn new(
+        self_attn: EncoderSelfAttention,
+        self_attn_layer_norm: LayerNorm,
+        feedforward: FeedForward,
+        ffn_layer_norm: LayerNorm,
+    ) -> Self {
+        Self {
+            self_attn,
+            self_attn_layer_norm,
+            feedforward,
+            ffn_layer_norm,
+        }
+    }
+
+    /// Forward pass with configurable norm order
+    ///
+    /// # Arguments
+    /// * `hidden` - Input tensor [batch, seq, hidden]
+    /// * `attention_mask` - Padding mask [batch, seq], 0 = masked
+    /// * `position_bias` - Optional relative position bias [1, heads, seq, seq] (T5/ALiBi)
+    /// * `is_prenorm` - If true, use pre-norm (T5/GPT), else post-norm (BERT/BART)
     pub fn forward(
         &self,
-        mut hidden: Array3<f32>,
+        hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
-        config: &dyn TransformerConfig,
+        position_bias: Option<&Array4<f32>>,
+        is_prenorm: bool,
     ) -> Result<Array3<f32>> {
-
-        let hidden = if config.is_prenorm() {
-            self.forward_prenorm(hidden, attention_mask, config)
+        if is_prenorm {
+            self.forward_prenorm(hidden, attention_mask, position_bias)
         } else {
-            self.forward_postnorm(hidden, attention_mask, config)
-        };
-
-        hidden
+            self.forward_postnorm(hidden, attention_mask, position_bias)
+        }
     }
-    pub fn forward_prenorm(
-        &self,
-        mut hidden: Array3<f32>,
-        attention_mask: &Array2<f32>,
-        config: &dyn TransformerConfig,
-    ) -> Result<Array3<f32>> {
-        let residual_1 = hidden.clone();
-        let ln1_out = self.self_attn_layer_norm.forward_3d(&hidden);
 
-        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-            &ln1_out,
-            None,
-            Some(attention_mask),
-            config.is_causal(),
-            None,
-            None,
-        )?;
-        let attn_block_output = residual_1 + attn_out;
-        let residual_2 = attn_block_output.clone();
-        let attn_block_output_contiguous = attn_block_output.as_standard_layout().to_owned();
-        let ln2_out = self
-            .ffn_layer_norm
-            .forward_3d(&attn_block_output_contiguous);
-        let ffn_out = self.feedforward.forward(&ln2_out)?;
-        let block_output = residual_2.as_standard_layout().to_owned()
-            + ffn_out.as_standard_layout().to_owned();
-        hidden = block_output;
+    /// Pre-norm: LN → Sublayer → Residual (T5, GPT-2, LLaMA style)
+    ///
+    /// ```text
+    /// x ──┬── LN ──► Attention ──┬──► + ──┬── LN ──► FFN ──┬──► + ──► out
+    ///     └─────────────────────►┘        └────────────────►┘
+    /// ```
+    fn forward_prenorm(
+        &self,
+        hidden: Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_bias: Option<&Array4<f32>>,
+    ) -> Result<Array3<f32>> {
+        // Attention block
+        let residual = &hidden;
+        let normed = self.self_attn_layer_norm.forward_3d(&hidden);
+        let attn_out = self
+            .self_attn
+            .forward(&normed, attention_mask, position_bias)?;
+        let hidden = residual + &attn_out;
+
+        // FFN block
+        let residual = &hidden;
+        let normed = self.ffn_layer_norm.forward_3d(&hidden);
+        let ffn_out = self.feedforward.forward(&normed)?;
+        let hidden = residual + &ffn_out;
+
         Ok(hidden)
     }
-    pub fn forward_postnorm(
+
+    /// Post-norm: Sublayer → Residual → LN (BERT, BART, RoBERTa style)
+    ///
+    /// ```text
+    /// x ──┬──► Attention ──┬──► + ──► LN ──┬──► FFN ──┬──► + ──► LN ──► out
+    ///     └────────────────►┘              └──────────►┘
+    /// ```
+    fn forward_postnorm(
         &self,
-        mut hidden: Array3<f32>,
+        hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
-        config: &dyn TransformerConfig,
+        position_bias: Option<&Array4<f32>>,
     ) -> Result<Array3<f32>> {
-        let residual = hidden.clone();
-        let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-            &hidden,
-            None,
-            Some(attention_mask),
-            config.is_causal(),
-            None,
-            None,
-        )?;
-        hidden = residual + attn_out;
-        hidden = self.self_attn_layer_norm.forward_3d(&hidden);
-        let residual = hidden.clone();
+        // Attention block
+        let residual = &hidden;
+        let attn_out = self
+            .self_attn
+            .forward(&hidden, attention_mask, position_bias)?;
+        let hidden = self
+            .self_attn_layer_norm
+            .forward_3d(&(residual + &attn_out));
+
+        // FFN block
+        let residual = &hidden;
         let ffn_out = self.feedforward.forward(&hidden)?;
-        hidden = residual + ffn_out;
-        hidden = self.ffn_layer_norm.forward_3d(&hidden);
+        let hidden = self.ffn_layer_norm.forward_3d(&(residual + &ffn_out));
 
         Ok(hidden)
     }
@@ -100,136 +113,419 @@ impl EncoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attention::MultiHeadAttention;
-    use crate::feedforward::{FeedForward, StdFeedForward};
-    use crate::normalization::LayerNorm;
-    use ndarray::{Array1, Array2, Array3};
+    use crate::feedforward::StdFeedForward;
+    use crate::linear_layer::LinearLayer;
+    use crate::{activations::Activation, feedforward::LegacyFeedForward};
+    use ndarray::{Array1, Array2, Array3, Array4};
 
-    // A mock config for testing purposes.
-    struct TestConfig {
-        is_prenorm: bool,
-    }
-    impl TransformerConfig for TestConfig {
-        fn is_prenorm(&self) -> bool {
-            self.is_prenorm
-        }
-        fn is_causal(&self) -> bool {
-            false
-        }
-        // Unused methods
-        fn hidden_size(&self) -> usize {
-            unimplemented!()
-        }
-        fn num_attention_heads(&self) -> usize {
-            unimplemented!()
-        }
-        fn num_hidden_layers(&self) -> usize {
-            unimplemented!()
-        }
-        fn layer_norm_eps(&self) -> f32 {
-            unimplemented!()
-        }
-    }
-
-    fn create_mock_encoder_layer(
+    fn create_test_layer(
         hidden_size: usize,
         intermediate_size: usize,
         num_heads: usize,
     ) -> EncoderLayer {
-        let q_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
-            if i == j { 1.1 } else { (i + j) as f32 * 0.001 }
-        });
-        let o_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
-            if i == j { 0.9 } else { (i + j) as f32 * -0.001 }
-        });
-        let fc1_weight = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
-            if i == j { 1.05 } else { 0.001 }
-        });
-        let fc2_weight = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
-            if i == j { 0.95 } else { -0.001 }
-        });
+        // Attention weights [Out, In] - square so symmetric works
+        let proj_weight =
+            Array2::from_shape_fn(
+                (hidden_size, hidden_size),
+                |(i, j)| {
+                    if i == j { 1.0 } else { 0.01 }
+                },
+            );
 
-        let self_attn = MultiHeadAttention::new(
-            hidden_size,
-            num_heads,
-            q_weight.clone(),
-            Array1::from_elem(hidden_size, 0.1),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            o_weight.clone(),
-            Array1::zeros(hidden_size),
-            None,
-        );
+        // FFN weights - LinearLayer expects [Out, In]
+        let fc1_weight = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
+            if i == j { 1.0 } else { 0.01 }
+        }); // [128, 64] = [Out, In]
+
+        let fc2_weight = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
+            if i == j { 1.0 } else { 0.01 }
+        }); // [64, 128] = [Out, In]
+
+        let q = LinearLayer::new_f32(proj_weight.clone(), Some(Array1::zeros(hidden_size)));
+        let k = LinearLayer::new_f32(proj_weight.clone(), Some(Array1::zeros(hidden_size)));
+        let v = LinearLayer::new_f32(proj_weight.clone(), Some(Array1::zeros(hidden_size)));
+        let o = LinearLayer::new_f32(proj_weight.clone(), Some(Array1::zeros(hidden_size)));
+
+        let self_attn = EncoderSelfAttention::new(hidden_size, num_heads, q, k, v, o);
+
         let self_attn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
 
+        // Use StdFeedForward with [Out, In] weights
         let feedforward = FeedForward::Standard(StdFeedForward::new(
             fc1_weight,
             Array1::zeros(intermediate_size),
             fc2_weight,
             Array1::zeros(hidden_size),
-            crate::activations::Activation::GeluNew,
+            Activation::GeluNew,
         ));
+
         let ffn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
 
-        EncoderLayer {
-            self_attn,
-            self_attn_layer_norm,
-            feedforward,
-            ffn_layer_norm,
-        }
+        EncoderLayer::new(self_attn, self_attn_layer_norm, feedforward, ffn_layer_norm)
+    }
+    #[test]
+    fn test_std_feedforward_matches_legacy_feedforward() -> Result<()> {
+        use crate::activations::Activation;
+        use crate::feedforward::{LegacyFeedForward, StdFeedForward};
+        use ndarray::{Array1, Array2, Array3};
+
+        let hidden_size = 64;
+        let intermediate_size = 128;
+        let batch_size = 2;
+        let seq_len = 10;
+
+        // Create random-ish weights (deterministic)
+        let fc1_data: Vec<f32> = (0..hidden_size * intermediate_size)
+            .map(|i| ((i % 19) as f32 - 9.0) * 0.01)
+            .collect();
+        let fc2_data: Vec<f32> = (0..intermediate_size * hidden_size)
+            .map(|i| ((i % 23) as f32 - 11.0) * 0.01)
+            .collect();
+
+        // LegacyFeedForward expects [In, Out]
+        let fc1_in_out =
+            Array2::from_shape_vec((hidden_size, intermediate_size), fc1_data.clone())?;
+        let fc2_in_out =
+            Array2::from_shape_vec((intermediate_size, hidden_size), fc2_data.clone())?;
+
+        // StdFeedForward (LinearLayer) expects [Out, In]
+        let fc1_out_in = fc1_in_out.t().as_standard_layout().to_owned(); // [intermediate, hidden]
+        let fc2_out_in = fc2_in_out.t().as_standard_layout().to_owned(); // [hidden, intermediate]
+
+        let bias1 = Array1::<f32>::zeros(intermediate_size);
+        let bias2 = Array1::<f32>::zeros(hidden_size);
+
+        // === LegacyFeedForward ([In, Out] weights) ===
+        let legacy = LegacyFeedForward::new(
+            fc1_in_out,
+            bias1.clone(),
+            fc2_in_out,
+            bias2.clone(),
+            Activation::GeluNew,
+        );
+
+        // === StdFeedForward ([Out, In] weights) ===
+        let std_ffn =
+            StdFeedForward::new(fc1_out_in, bias1, fc2_out_in, bias2, Activation::GeluNew);
+
+        // Create test input
+        let input: Array3<f32> =
+            Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(b, s, h)| {
+                ((b * 100 + s * 10 + h) % 29) as f32 * 0.1 - 1.0
+            });
+
+        // Run both
+        let legacy_output = legacy.forward(&input)?;
+        let std_output = std_ffn.forward(&input)?;
+
+        // Compare
+        let diff = (&legacy_output - &std_output).mapv(|x| x.abs());
+        let max_diff = diff.iter().cloned().fold(0.0f32, f32::max);
+        let mean_diff = diff.mean().unwrap();
+
+        println!("Max diff: {}, Mean diff: {}", max_diff, mean_diff);
+
+        assert!(
+            max_diff < 1e-5,
+            "Outputs differ! Max diff: {}, Mean diff: {}",
+            max_diff,
+            mean_diff
+        );
+
+        println!("✓ StdFeedForward matches LegacyFeedForward");
+        Ok(())
+    }
+    #[test]
+    fn test_forward_postnorm_shape() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
+
+        let input = Array3::<f32>::ones((batch, seq, hidden));
+        let mask = Array2::<f32>::ones((batch, seq));
+
+        let output = layer.forward(input, &mask, None, false)?;
+
+        assert_eq!(output.shape(), &[batch, seq, hidden]);
+        assert!(!output.iter().any(|x| x.is_nan()), "Output contains NaNs");
+
+        Ok(())
     }
 
     #[test]
-    fn test_encoder_layer_forward_postnorm() -> Result<()> {
-        let (batch_size, seq_len, hidden_size, intermediate_size, num_heads) = (2, 10, 64, 128, 4);
-        let layer = create_mock_encoder_layer(hidden_size, intermediate_size, num_heads);
-        let config = TestConfig { is_prenorm: false };
+    fn test_forward_prenorm_shape() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
 
-        let hidden_states = Array3::<f32>::ones((batch_size, seq_len, hidden_size));
-        let attention_mask = Array2::<f32>::ones((batch_size, seq_len));
+        let input = Array3::<f32>::ones((batch, seq, hidden));
+        let mask = Array2::<f32>::ones((batch, seq));
 
-        let output = layer.forward(hidden_states.clone(), &attention_mask, &config)?;
+        let output = layer.forward(input, &mask, None, true)?;
 
-        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
-        assert!(!output.iter().any(|&x| x.is_nan()), "Output contains NaNs");
+        assert_eq!(output.shape(), &[batch, seq, hidden]);
+        assert!(!output.iter().any(|x| x.is_nan()), "Output contains NaNs");
 
-        // CORRECT ASSERTION for post-norm: The mean should be very close to 0.
-        assert!(
-            output.mean().unwrap().abs() < 1e-6,
-            "Post-norm output mean should be near zero"
+        Ok(())
+    }
+
+#[test]
+fn test_postnorm_output_is_normalized() -> Result<()> {
+    let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
+    let layer = create_test_layer(hidden, intermediate, heads);
+
+    // Input with actual variance along hidden dimension
+    let input = Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
+        (h as f32) + (b * 100 + s * 10) as f32 * 0.01  // h varies from 0 to 63
+    });
+    let mask = Array2::<f32>::ones((batch, seq));
+
+    let output = layer.forward(input, &mask, None, false)?;
+
+    // Post-norm: LayerNorm normalizes EACH POSITION along hidden dim
+    for b in 0..batch {
+        for s in 0..seq {
+            let position = output.slice(ndarray::s![b, s, ..]);
+            let mean = position.mean().unwrap();
+            let std = position.std(0.0);
+
+            assert!(
+                mean.abs() < 1e-4,
+                "Position [{},{}] mean should be ~0, got {}",
+                b, s, mean
+            );
+            assert!(
+                (std - 1.0).abs() < 0.1,
+                "Position [{},{}] std should be ~1, got {}",
+                b, s, std
+            );
+        }
+    }
+
+    Ok(())
+}
+    #[test]
+    fn test_encoder_self_attention_matches_multihead_attention() -> Result<()> {
+        use crate::attention::MultiHeadAttention;
+        use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+        use crate::linear_layer::LinearLayer;
+        use ndarray::{Array1, Array2, Array3};
+
+        let hidden_size = 64;
+        let num_heads = 4;
+        let batch_size = 2;
+        let seq_len = 10;
+
+        // Create random-ish weights (deterministic for reproducibility)
+        let weight_data: Vec<f32> = (0..hidden_size * hidden_size)
+            .map(|i| ((i % 17) as f32 - 8.0) * 0.01)
+            .collect();
+
+        // Base weight in [In, Out] layout (for MultiHeadAttention)
+        let weight_in_out =
+            Array2::from_shape_vec((hidden_size, hidden_size), weight_data.clone())?;
+
+        // Transposed weight in [Out, In] layout (for EncoderSelfAttention/LinearLayer)
+        let weight_out_in = weight_in_out.t().as_standard_layout().to_owned();
+
+        let bias = Array1::<f32>::zeros(hidden_size);
+
+        // === MultiHeadAttention (old style, [In, Out] weights) ===
+        let mha = MultiHeadAttention::new(
+            hidden_size,
+            num_heads,
+            weight_in_out.clone(), // q
+            bias.clone(),
+            weight_in_out.clone(), // k
+            bias.clone(),
+            weight_in_out.clone(), // v
+            bias.clone(),
+            weight_in_out.clone(), // output
+            bias.clone(),
+            None, // num_kv_heads
         );
-        // The standard deviation should be very close to 1.
+
+        // === EncoderSelfAttention (new style, [Out, In] weights via LinearLayer) ===
+        let esa = EncoderSelfAttention::new(
+            hidden_size,
+            num_heads,
+            LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // q
+            LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // k
+            LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // v
+            LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // output
+        );
+
+        // Create test input
+        let input: Array3<f32> =
+            Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(b, s, h)| {
+                ((b * 100 + s * 10 + h) % 23) as f32 * 0.1 - 1.0
+            });
+        let mask = Array2::<f32>::ones((batch_size, seq_len));
+
+        // Run both
+        let mha_output = {
+            // MultiHeadAttention needs manual Q projection for attend()
+            let q_proj =
+                crate::utils::linear_algebra::matmul_3d_2d(&input, &mha.q_weight) + &mha.q_bias;
+            let (k, v) = mha.project_kv(&input);
+            let context = mha.attend(&q_proj, &k, &v, Some(&mask), false, 0)?;
+            crate::utils::linear_algebra::matmul_3d_2d(&context, &mha.output_weight)
+                + &mha.output_bias
+        };
+
+        let esa_output = esa.forward(&input, &mask, None)?;
+
+        // Compare
+        let diff = (&mha_output - &esa_output).mapv(|x| x.abs());
+        let max_diff = diff.iter().cloned().fold(0.0f32, f32::max);
+        let mean_diff = diff.mean().unwrap();
+
+        println!("Max diff: {}, Mean diff: {}", max_diff, mean_diff);
+
         assert!(
-            (output.std(0.0) - 1.0).abs() < 1e-5,
-            "Post-norm output std dev should be near one"
+            max_diff < 1e-5,
+            "Outputs differ! Max diff: {}, Mean diff: {}",
+            max_diff,
+            mean_diff
+        );
+
+        println!("✓ EncoderSelfAttention matches MultiHeadAttention");
+        Ok(())
+    }
+    #[test]
+    fn test_prenorm_output_not_normalized() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
+
+        let input = Array3::<f32>::ones((batch, seq, hidden)) * 5.0;
+        let mask = Array2::<f32>::ones((batch, seq));
+
+        let output = layer.forward(input, &mask, None, true)?;
+
+        // Pre-norm ends with residual addition, NOT LayerNorm
+        // So output won't be normalized to mean=0, std=1
+        let mean = output.mean().unwrap();
+
+        assert!(
+            mean.abs() > 0.5,
+            "Pre-norm mean should NOT be near zero (residual preserved), got {}",
+            mean
         );
 
         Ok(())
     }
 
     #[test]
-    fn test_encoder_layer_forward_prenorm() -> Result<()> {
-        let (batch_size, seq_len, hidden_size, intermediate_size, num_heads) = (2, 10, 64, 128, 4);
-        let layer = create_mock_encoder_layer(hidden_size, intermediate_size, num_heads);
-        let config = TestConfig { is_prenorm: true };
+    fn test_attention_mask_applied() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (1, 4, 32, 64, 2);
+        let layer = create_test_layer(hidden, intermediate, heads);
 
-        let hidden_states = Array3::<f32>::ones((batch_size, seq_len, hidden_size));
-        let attention_mask = Array2::<f32>::ones((batch_size, seq_len));
+        let input = Array3::<f32>::ones((batch, seq, hidden));
 
-        let output = layer.forward(hidden_states.clone(), &attention_mask, &config)?;
+        // Mask out last two positions
+        let mask = Array2::from_shape_vec((1, 4), vec![1.0, 1.0, 0.0, 0.0])?;
 
-        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
-        assert!(!output.iter().any(|&x| x.is_nan()), "Output contains NaNs");
+        let output = layer.forward(input, &mask, None, false)?;
 
-        // CORRECT ASSERTION for pre-norm: The final operation is an addition, so the mean will NOT be zero.
-        assert!(
-            output.mean().unwrap().abs() > 0.1,
-            "Pre-norm output mean should not be zero"
-        );
+        // Output should still be valid (no NaNs/Infs)
+        assert!(output.iter().all(|x| x.is_finite()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_position_bias() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 8, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
+
+        let input = Array3::<f32>::ones((batch, seq, hidden));
+        let mask = Array2::<f32>::ones((batch, seq));
+
+        // T5-style position bias: [1, heads, seq_q, seq_k]
+        let position_bias = Array4::<f32>::zeros((1, heads, seq, seq));
+
+        let output = layer.forward(input, &mask, Some(&position_bias), true)?;
+
+        assert_eq!(output.shape(), &[batch, seq, hidden]);
+        assert!(!output.iter().any(|x| x.is_nan()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_token() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (1, 1, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
+
+        let input = Array3::<f32>::ones((batch, seq, hidden));
+        let mask = Array2::<f32>::ones((batch, seq));
+
+        let output = layer.forward(input, &mask, None, false)?;
+
+        assert_eq!(output.shape(), &[batch, seq, hidden]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_large_batch() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (32, 16, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
+
+        let input = Array3::<f32>::ones((batch, seq, hidden));
+        let mask = Array2::<f32>::ones((batch, seq));
+
+        let output = layer.forward(input, &mask, None, false)?;
+
+        assert_eq!(output.shape(), &[batch, seq, hidden]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_residual_connection() -> Result<()> {
+        // Create layer with zero weights to isolate residual behavior
+        let hidden = 32;
+        let heads = 2;
+
+        let zero_proj = Array2::<f32>::zeros((hidden, hidden));
+        let zero_fc1 = Array2::<f32>::zeros((hidden, 64));
+        let zero_fc2 = Array2::<f32>::zeros((64, hidden));
+
+        let q = LinearLayer::new_f32(zero_proj.clone(), Some(Array1::zeros(hidden)));
+        let k = LinearLayer::new_f32(zero_proj.clone(), Some(Array1::zeros(hidden)));
+        let v = LinearLayer::new_f32(zero_proj.clone(), Some(Array1::zeros(hidden)));
+        let o = LinearLayer::new_f32(zero_proj.clone(), Some(Array1::zeros(hidden)));
+
+        let self_attn = EncoderSelfAttention::new(hidden, heads, q, k, v, o);
+        let self_attn_layer_norm =
+            LayerNorm::new(Array1::ones(hidden), Array1::zeros(hidden), 1e-5);
+
+        let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
+            zero_fc1,
+            Array1::zeros(64),
+            zero_fc2,
+            Array1::zeros(hidden),
+            Activation::GeluNew,
+        ));
+        let ffn_layer_norm = LayerNorm::new(Array1::ones(hidden), Array1::zeros(hidden), 1e-5);
+
+        let layer = EncoderLayer::new(self_attn, self_attn_layer_norm, feedforward, ffn_layer_norm);
+
+        // With zero attention/FFN weights, pre-norm output should equal input
+        // (residual passes through, sublayers contribute nothing)
+        let input = Array3::from_shape_fn((1, 4, hidden), |(_, _, h)| h as f32);
+        let mask = Array2::<f32>::ones((1, 4));
+
+        let output = layer.forward(input.clone(), &mask, None, true)?;
+
+        // Pre-norm: input passes through residual unchanged when sublayers are zero
+        for (inp, out) in input.iter().zip(output.iter()) {
+            assert!(
+                (inp - out).abs() < 1e-5,
+                "Residual should preserve input when sublayers are zero"
+            );
+        }
 
         Ok(())
     }

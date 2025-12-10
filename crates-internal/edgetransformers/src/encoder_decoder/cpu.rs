@@ -1,18 +1,21 @@
 use crate::activations::Activation;
 use crate::cache::CpuBeamKVCache;
+use crate::encoder::traits::EncoderArchitecture;
 use crate::encoder::TransformerEncoder;
+use crate::encoder_decoder::traits::CrossAttentionDecoder;
 use crate::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
+use crate::feedforward::LegacyFeedForward;
 use crate::linear_layer::LinearLayer;
 use crate::traits::{
-    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
+    CrossAttentionDecoderArchitecture, DecoderArchitecture, LanguageModelConfig,
+    LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
 use crate::traits::{
-    CrossAttentionDecoderArchitecture, DecoderArchitecture, EncoderArchitecture, LanguageModelConfig,
-    LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
+    DecoderOutput, Device, EncoderDecoderArchitecture, TransformerModel,
 };
 use crate::weights::ModelWeights;
 use crate::{
-    decoder_cross_attn_layer::DecoderCrossAttentionLayer, feedforward::StdFeedForward, normalization::LayerNorm, Cache,
+    decoder_cross_attn_layer::DecoderCrossAttentionLayer, normalization::LayerNorm, Cache,
     Embeddings, FeedForward
     ,
 };
@@ -61,19 +64,6 @@ impl CpuTransformerEncoderDecoder {
             let cross_attn_names = config.get_decoder_cross_attention_names(i);
             let ffn_names = config.get_decoder_feed_forward_names(i);
 
-            // let self_attn = MultiHeadAttention::new(
-            //     config.hidden_size(),
-            //     config.num_attention_heads(),
-            //     weights.get_linear_weight(&self_attn_names.q_weight)?,
-            //     weights.get_array1(&self_attn_names.q_bias)?,
-            //     weights.get_linear_weight(&self_attn_names.k_weight)?,
-            //     weights.get_array1(&self_attn_names.k_bias)?,
-            //     weights.get_linear_weight(&self_attn_names.v_weight)?,
-            //     weights.get_array1(&self_attn_names.v_bias)?,
-            //     weights.get_linear_weight(&self_attn_names.output_weight)?,
-            //     weights.get_array1(&self_attn_names.output_bias)?,
-            //     None,
-            // );
             let self_attn = DecoderSelfAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
@@ -89,19 +79,6 @@ impl CpuTransformerEncoderDecoder {
                 config.layer_norm_eps(),
             );
 
-            // let cross_attn = MultiHeadAttention::new(
-            //     config.hidden_size(),
-            //     config.num_attention_heads(),
-            //     weights.get_linear_weight(&cross_attn_names.q_weight)?,
-            //     weights.get_array1(&cross_attn_names.q_bias)?,
-            //     weights.get_linear_weight(&cross_attn_names.k_weight)?,
-            //     weights.get_array1(&cross_attn_names.k_bias)?,
-            //     weights.get_linear_weight(&cross_attn_names.v_weight)?,
-            //     weights.get_array1(&cross_attn_names.v_bias)?,
-            //     weights.get_linear_weight(&cross_attn_names.output_weight)?,
-            //     weights.get_array1(&cross_attn_names.output_bias)?,
-            //     None,
-            // );
             let cross_attn = DecoderCrossAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
@@ -137,7 +114,7 @@ impl CpuTransformerEncoderDecoder {
 
             // Now, call the simple "dumb" constructor with the correctly prepared weights.
 
-            let feedforward = FeedForward::Standard(StdFeedForward::new(
+            let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,

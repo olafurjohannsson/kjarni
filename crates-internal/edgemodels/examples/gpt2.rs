@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     // let pool = Arc::new(Mutex::new(GpuTensorPool::new(context.clone())));
     let d = DecoderLoadConfig {
         gpu_layers: None,
-        offload_embeddings: true,
+        offload_embeddings: false,
         offload_lm_head: false,
         target_dtype: None,
     };

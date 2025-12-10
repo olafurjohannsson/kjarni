@@ -103,11 +103,14 @@ impl GpuPermute {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&Default::default());
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (output.num_elements() as u32 + 255) / 256;
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        // let mut compute_pass = encoder.begin_compute_pass(&Default::default());
+        let label = format!("Permute");
+        self.context.profiler.profile(encoder, &label, |compute_pass| {
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = (output.num_elements() as u32 + 255) / 256;
+            compute_pass.dispatch_workgroups(workgroups, 1, 1);
+        });
     }
 }
 

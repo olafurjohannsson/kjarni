@@ -4,8 +4,8 @@ use crate::common::{
     log_softmax_1d, StreamedToken,
     TokenType,
 };
-use crate::encoder_decoder::{GenerationBackend, StepInput};
-use crate::models::base::{DecodingStrategy, EncoderDecoderLanguageModel, GenerationConfig};
+use crate::encoder_decoder::traits::{EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel, StepInput};
+use crate::models::base::{DecodingStrategy, GenerationConfig};
 use crate::traits::EncoderOutput;
 use anyhow::{anyhow, Result};
 use async_stream::try_stream;
@@ -18,7 +18,7 @@ pub struct BeamHypothesis {
     pub score: f32,
 }
 
-struct BeamContext<'a, B: GenerationBackend> {
+struct BeamContext<'a, B: EncoderDecoderGenerationBackend> {
     model: &'a dyn EncoderDecoderLanguageModel,
     backend: &'a B,
     config: &'a GenerationConfig,
@@ -35,23 +35,73 @@ struct BeamContext<'a, B: GenerationBackend> {
     decoder_start_token_id: u32,
 }
 
-impl<'a, B: GenerationBackend> BeamContext<'a, B> {
-    /// Initialize the Beam Search Context (Shared logic)
-    fn new(
+// impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
+//     /// Initialize the Beam Search Context (Shared logic)
+//     fn new(
+//         model: &'a dyn EncoderDecoderLanguageModel,
+//         backend: &'a B,
+//         encoder_output: &'a EncoderOutput,
+//         config: &'a GenerationConfig,
+//     ) -> Result<Self> {
+//         let (num_beams, _) = match &config.strategy {
+//             DecodingStrategy::BeamSearch(params) => (params.num_beams, params.length_penalty),
+//             DecodingStrategy::Greedy => (1, 1.0),
+//             _ => return Err(anyhow!("Unsupported strategy")),
+//         };
+
+//         // Initialize Cache & Tensors
+//         let cache = model.new_cache(1, config.max_length, num_beams)?;
+//         let encoder_state = backend.prepare_encoder_state(model, encoder_output)?;
+
+//         let decoder_start_token_id = model.decoder_start_token_id();
+//         let current_tokens_tensor =
+//             backend.create_token_tensor(&vec![decoder_start_token_id; num_beams], num_beams)?;
+
+//         let beams = (0..num_beams)
+//             .map(|i| BeamHypothesis {
+//                 tokens: vec![decoder_start_token_id],
+//                 score: if i == 0 { 0.0 } else { f32::NEG_INFINITY },
+//             })
+//             .collect();
+
+//         Ok(Self {
+//             model,
+//             backend,
+//             config,
+//             cache,
+//             current_tokens_tensor,
+//             encoder_state,
+//             beams,
+//             num_beams,
+//             eos_token_id: model.config().eos_token_id().unwrap_or(2),
+//             decoder_start_token_id,
+//         })
+//     }
+// }
+impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
+    // This `new` method needs to be async because `backend.encode` is async
+    async fn new(
         model: &'a dyn EncoderDecoderLanguageModel,
         backend: &'a B,
-        encoder_output: &'a EncoderOutput,
+        // UPDATED: We start from the raw text/tokens, not a pre-encoded state
+        input_text: &'a str,
         config: &'a GenerationConfig,
     ) -> Result<Self> {
-        let (num_beams, _) = match &config.strategy {
-            DecodingStrategy::BeamSearch(params) => (params.num_beams, params.length_penalty),
-            DecodingStrategy::Greedy => (1, 1.0),
+        let num_beams = match &config.strategy {
+            DecodingStrategy::BeamSearch(params) => params.num_beams,
+            DecodingStrategy::Greedy => 1,
             _ => return Err(anyhow!("Unsupported strategy")),
         };
+        
+        // Tokenize the input text
+        let encoding = model.tokenizer().encode(input_text, true).map_err(|e| anyhow!(e))?;
+        let encoder_tokens = encoding.get_ids();
 
-        // Initialize Cache & Tensors
+        // NEW: The backend is now responsible for the entire encoding pass.
+        let encoder_state = backend.encode(model, encoder_tokens, num_beams).await?;
+
+        // Downcast the Box<dyn Cache> to the concrete type B::Cache
         let cache = model.new_cache(1, config.max_length, num_beams)?;
-        let encoder_state = backend.prepare_encoder_state(model, encoder_output)?;
 
         let decoder_start_token_id = model.decoder_start_token_id();
         let current_tokens_tensor =
@@ -65,14 +115,8 @@ impl<'a, B: GenerationBackend> BeamContext<'a, B> {
             .collect();
 
         Ok(Self {
-            model,
-            backend,
-            config,
-            cache,
-            current_tokens_tensor,
-            encoder_state,
-            beams,
-            num_beams,
+            model, backend, config, cache, current_tokens_tensor,
+            encoder_state, beams, num_beams,
             eos_token_id: model.config().eos_token_id().unwrap_or(2),
             decoder_start_token_id,
         })
@@ -80,27 +124,85 @@ impl<'a, B: GenerationBackend> BeamContext<'a, B> {
 }
 
 /// Helper to compute logits and select best candidates for one step
-async fn beam_step<B: GenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usize) -> Result<()> {
-    // 1. Prepare Input
-    let attention_mask = ctx
-        .backend
-        .prepare_attention_mask(ctx.cache.get_seq_length() + 1, ctx.num_beams)?;
+// async fn beam_step<B: EncoderDecoderGenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usize) -> Result<()> {
+//     // 1. Prepare Input
+//     let attention_mask = ctx
+//         .backend
+//         .prepare_attention_mask(ctx.cache.get_seq_length() + 1, ctx.num_beams)?;
 
-    let step_input = StepInput {
-        tokens: &ctx.current_tokens_tensor,
-        encoder_state: Some(&ctx.encoder_state),
-        attention_mask: &attention_mask,
-    };
+//     let step_input = StepInput {
+//         tokens: &ctx.current_tokens_tensor,
+//         encoder_state: Some(&ctx.encoder_state),
+//         attention_mask: &attention_mask,
+//     };
 
-    // 2. Forward Pass
-    let outputs_3d = ctx
-        .backend
-        .forward(ctx.model, step_input, ctx.cache.as_mut())
-        .await?;
-    let last_hidden_state = outputs_3d.slice(s![.., 0, ..]);
+//     // 2. Forward Pass
+//     let outputs_3d = ctx
+//         .backend
+//         .forward(ctx.model, step_input, ctx.cache.as_mut())
+//         .await?;
+//     let last_hidden_state = outputs_3d.slice(s![.., 0, ..]);
 
-    // 3. Project Logits
-    let mut logits_2d = ctx.model.lm_head_layer().matmul(&last_hidden_state.view());
+//     // 3. Project Logits
+//     let mut logits_2d = ctx.model.lm_head_layer().matmul(&last_hidden_state.view());
+//     if let Some(bias) = ctx.model.final_logits_bias() {
+//         logits_2d += bias;
+//     }
+
+//     logits_2d
+//         .outer_iter_mut()
+//         .enumerate()
+//         .for_each(|(i, mut logits_row)| {
+//             if step == 0 {
+//                 if let Some(bos) = ctx.model.config().bos_token_id() {
+//                     // Optional: Force BOS if model requires it explicitly via logits
+//                     logits_row.fill(f32::NEG_INFINITY);
+//                     logits_row[bos as usize] = 0.0;
+//                 }
+//             } else {
+//                 if ctx.config.repetition_penalty != 1.0 {
+//                     apply_repetition_penalty(
+//                         &mut logits_row.to_owned(),
+//                         &ctx.beams[i].tokens,
+//                         ctx.config.repetition_penalty,
+//                     );
+//                 }
+//                 if ctx.config.no_repeat_ngram_size > 0 {
+//                     apply_no_repeat_ngram(
+//                         &mut logits_row.to_owned(),
+//                         &ctx.beams[i].tokens,
+//                         ctx.config.no_repeat_ngram_size,
+//                     );
+//                 }
+//             }
+//         });
+
+//     // 5. Select Candidates
+//     let (next_tokens, reorder_indices, updated_beams) =
+//         find_best_beams_and_get_indices(logits_2d, &ctx.beams, ctx.config, ctx.num_beams);
+
+//     // 6. Update State
+//     ctx.cache.increment_len(1);
+//     ctx.beams = updated_beams;
+//     ctx.backend
+//         .update_token_tensor(&mut ctx.current_tokens_tensor, &next_tokens)?;
+
+//     if ctx.num_beams > 1 {
+//         ctx.backend
+//             .reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
+//     }
+
+//     Ok(())
+// }
+async fn beam_step<B: EncoderDecoderGenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usize) -> Result<()> {
+   let logits_3d = ctx.backend.decode_step(
+        ctx.model,
+        &ctx.current_tokens_tensor,
+        &ctx.encoder_state,
+        ctx.cache.as_mut(),
+    ).await?;
+
+    let mut logits_2d = logits_3d.slice(s![.., -1, ..]).to_owned();
     if let Some(bias) = ctx.model.final_logits_bias() {
         logits_2d += bias;
     }
@@ -144,24 +246,76 @@ async fn beam_step<B: GenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usi
         .update_token_tensor(&mut ctx.current_tokens_tensor, &next_tokens)?;
 
     if ctx.num_beams > 1 {
-        ctx.backend
-            .reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
+        ctx.backend.reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
     }
 
     Ok(())
 }
-
 // ============================================================================
 //  Executes the full search, then decodes ONLY the final winner.
 // ============================================================================
-pub async fn run_beam_search<B: GenerationBackend>(
+// pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
+//     model: &dyn EncoderDecoderLanguageModel,
+//     backend: &B,
+//     encoder_output: &EncoderOutput,
+//     config: &GenerationConfig,
+// ) -> Result<String> {
+//     // 1. Initialize Context
+//     let mut ctx = BeamContext::new(model, backend, encoder_output, config)?;
+
+//     // 2. Loop until finished
+//     for step in 0..config.max_length {
+//         beam_step(&mut ctx, step).await?;
+
+//         // Stop if ALL beams have generated EOS
+//         if ctx
+//             .beams
+//             .iter()
+//             .all(|b| *b.tokens.last().unwrap() == ctx.eos_token_id)
+//         {
+//             break;
+//         }
+//     }
+
+//     // 3. Select Winner & Decode ONCE
+//     // The beams are already sorted by score in `find_best_beams_and_get_indices`
+//     // so beams[0] is the global winner.
+//     let best_beam = &ctx.beams[0];
+
+//     // Filter out special tokens
+//     let tokens = &best_beam.tokens;
+//     let start = if tokens.first() == Some(&ctx.decoder_start_token_id) {
+//         1
+//     } else {
+//         0
+//     };
+//     let end = if tokens.last() == Some(&ctx.eos_token_id) {
+//         tokens.len() - 1
+//     } else {
+//         tokens.len()
+//     };
+
+//     let clean_tokens = if start < end {
+//         &tokens[start..end]
+//     } else {
+//         &[]
+//     };
+
+//     let text = model
+//         .tokenizer()
+//         .decode(clean_tokens, true)
+//         .map_err(|e| anyhow!(e))?;
+//     Ok(text)
+// }
+
+pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     model: &dyn EncoderDecoderLanguageModel,
     backend: &B,
-    encoder_output: &EncoderOutput,
+    input_text: &str, // Takes raw text now
     config: &GenerationConfig,
 ) -> Result<String> {
     // 1. Initialize Context
-    let mut ctx = BeamContext::new(model, backend, encoder_output, config)?;
+    let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
 
     // 2. Loop until finished
     for step in 0..config.max_length {
@@ -207,18 +361,17 @@ pub async fn run_beam_search<B: GenerationBackend>(
         .map_err(|e| anyhow!(e))?;
     Ok(text)
 }
-
 // ============================================================================
 //  Streaming Implementation
 // ============================================================================
-pub fn run_beam_search_stream<'a, B: GenerationBackend + 'a>(
+pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
     model: &'a dyn EncoderDecoderLanguageModel,
     backend: &'a B,
-    encoder_output: &'a EncoderOutput,
+    input_text: &'a str, // Takes raw text now
     config: &'a GenerationConfig,
 ) -> impl Stream<Item=Result<StreamedToken>> + 'a {
     try_stream! {
-        let mut ctx = BeamContext::new(model, backend, encoder_output, config)?;
+        let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
 
         if ctx.num_beams > 1 {
             log::warn!("Streaming Beam Search is unstable (tokens may change). Use Greedy for stability.");

@@ -4,7 +4,6 @@ use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct NormUniforms {
@@ -177,14 +176,20 @@ impl GpuRMSNorm {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("RMSNorm Pass"),
-            timestamp_writes: None,
+        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        //     label: Some("RMSNorm Pass"),
+        //     timestamp_writes: None,
+        // });
+        let label = format!("RMSNorm");
+        self.context.profiler.profile(encoder, &label, |compute_pass| {
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            // let workgroups = (rows as u32 + 255) / 256;
+            // compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            let workgroups = rows as u32; 
+            
+            compute_pass.dispatch_workgroups(workgroups, 1, 1);
         });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (rows as u32 + 255) / 256;
-        compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
 

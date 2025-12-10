@@ -109,17 +109,20 @@ impl GpuUpdateCache {
                 ],
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Update Cache Pass"),
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.set_bind_group(0, &bind_group, &[]);
+        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        //     label: Some("Update Cache Pass"),
+        //     timestamp_writes: None,
+        // });
+        let label = format!("UpdateCache");
+        self.context.profiler.profile(encoder, &label, |compute_pass| {
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroups_x = (d as u32 + 15) / 16;
-        let workgroups_y = (s_new as u32 + 15) / 16;
-        let workgroups_z = (b * h) as u32;
-        compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            let workgroups_x = (d as u32 + 15) / 16;
+            let workgroups_y = (s_new as u32 + 15) / 16;
+            let workgroups_z = (b * h) as u32;
+            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+        });
     }
 }
 

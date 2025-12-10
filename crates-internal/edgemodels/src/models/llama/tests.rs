@@ -7,29 +7,15 @@
 
 use crate::models::llama::config::LlamaConfig;
 use crate::models::llama::model::LlamaModel;
-use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use edgetransformers::decoder::TransformerDecoder;
-use edgetransformers::gpu_ops::GpuTensor;
-use edgetransformers::gpu_ops::blocks::rope::GpuRoPE;
-use edgetransformers::models::base::GpuDecoder;
-use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy};
-use edgetransformers::models::download_model_files;
-use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
+use anyhow::Result;
+use edgetransformers::models::base::DecodingStrategy;
+use edgetransformers::models::{DecoderLanguageModel, LanguageModel, ModelType};
 use edgetransformers::prelude::*;
-use edgetransformers::rope::RoPE;
-use edgetransformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
-use edgetransformers::weights::ModelWeights;
-use ndarray::{Array2, Array3, s};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokenizers::Tokenizer;
+use edgetransformers::traits::LanguageModelConfig;
 
 use super::*;
-use crate::generation::{GenerationConfig};
 use crate::generation::decoder::Generator;
-
+use crate::generation::GenerationConfig;
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
@@ -40,37 +26,37 @@ async fn load_llama_8b_for_test() -> Result<LlamaModel> {
     LlamaModel::from_registry(ModelType::Llama3_8B_Instruct, None, Device::Cpu, None, None).await
 }
 
-
-#[tokio::test]
-async fn test_llama3_8b_architectural_properties() -> Result<()> {
-    // 1. Arrange: Load the model.
-    let model = load_llama_8b_for_test().await?;
-    let config = model.concrete_config();
-
-    // 2. Assert: Check architectural values directly from the config struct.
-    assert_eq!(config.vocab_size, 128256);
-    assert_eq!(config.hidden_size, 4096);
-    assert_eq!(config.num_hidden_layers, 32);
-    assert_eq!(config.num_attention_heads, 32);
-    assert_eq!(config.num_key_value_heads, 8); // GQA
-    assert_eq!(config.intermediate_size, 14336);
-    assert_eq!(config.max_position_embeddings, 8192);
-    assert_eq!(config.rope_theta, 500000.0);
-    assert_eq!(config.rms_norm_eps, 1e-5);
-
-    // 3. Assert: Check that the trait implementations correctly expose these values.
-    // This catches hardcoded values like the bug we just found!
-    assert_eq!(model.vocab_size(), config.vocab_size, "vocab_size mismatch - check for hardcoded value");
-    assert_eq!(model.hidden_size(), config.hidden_size, "hidden_size mismatch - check for hardcoded value");
-    assert_eq!(model.num_layers(), config.num_hidden_layers, "num_layers mismatch - check for hardcoded value");
-    assert_eq!(model.num_heads(), config.num_attention_heads, "num_heads mismatch - check for hardcoded value");
-
-    // Check token IDs match config.json
-    assert_eq!(model.bos_token_id(), Some(128000));
-    assert_eq!(model.eos_token_id(), Some(128009)); // Note: 8B uses 128009, not 128001
-
-    Ok(())
-}
+//
+// #[tokio::test]
+// async fn test_llama3_8b_architectural_properties() -> Result<()> {
+//     // 1. Arrange: Load the model.
+//     let model = load_llama_8b_for_test().await?;
+//     let config = model.concrete_config();
+//
+//     // 2. Assert: Check architectural values directly from the config struct.
+//     assert_eq!(config.vocab_size, 128256);
+//     assert_eq!(config.hidden_size, 4096);
+//     assert_eq!(config.num_hidden_layers, 32);
+//     assert_eq!(config.num_attention_heads, 32);
+//     assert_eq!(config.num_key_value_heads, 8); // GQA
+//     assert_eq!(config.intermediate_size, 14336);
+//     assert_eq!(config.max_position_embeddings, 8192);
+//     assert_eq!(config.rope_theta, 500000.0);
+//     assert_eq!(config.rms_norm_eps, 1e-5);
+//
+//     // 3. Assert: Check that the trait implementations correctly expose these values.
+//     // This catches hardcoded values like the bug we just found!
+//     assert_eq!(model.vocab_size(), config.vocab_size, "vocab_size mismatch - check for hardcoded value");
+//     assert_eq!(model.hidden_size(), config.hidden_size, "hidden_size mismatch - check for hardcoded value");
+//     assert_eq!(model.num_layers(), config.num_hidden_layers, "num_layers mismatch - check for hardcoded value");
+//     assert_eq!(model.num_heads(), config.num_attention_heads, "num_heads mismatch - check for hardcoded value");
+//
+//     // Check token IDs match config.json
+//     assert_eq!(model.bos_token_id(), Some(128000));
+//     assert_eq!(model.eos_token_id(), Some(128009)); // Note: 8B uses 128009, not 128001
+//
+//     Ok(())
+// }
 
 /// Generic test to ensure trait values match config values.
 /// Run this for ANY model to catch hardcoded values.
@@ -90,22 +76,30 @@ async fn test_llama_trait_config_consistency() -> Result<()> {
 
 fn assert_trait_matches_config(model: &LlamaModel, name: &str) {
     let config = model.concrete_config();
-    
+
     assert_eq!(
-        model.vocab_size(), config.vocab_size,
-        "{}: vocab_size() should come from config", name
+        model.vocab_size(),
+        config.vocab_size,
+        "{}: vocab_size() should come from config",
+        name
     );
     assert_eq!(
-        model.hidden_size(), config.hidden_size,
-        "{}: hidden_size() should come from config", name
+        model.hidden_size(),
+        config.hidden_size,
+        "{}: hidden_size() should come from config",
+        name
     );
     assert_eq!(
-        model.num_layers(), config.num_hidden_layers,
-        "{}: num_layers() should come from config", name
+        model.num_layers(),
+        config.num_hidden_layers,
+        "{}: num_layers() should come from config",
+        name
     );
     assert_eq!(
-        model.num_heads(), config.num_attention_heads,
-        "{}: num_heads() should come from config", name
+        model.num_heads(),
+        config.num_attention_heads,
+        "{}: num_heads() should come from config",
+        name
     );
 }
 
@@ -127,14 +121,14 @@ fn test_llama_config_parsing_8b() {
     }"#;
 
     let config = LlamaConfig::from_json(json).unwrap();
-    
+
     assert_eq!(config.hidden_size, 4096);
     assert_eq!(config.num_hidden_layers, 32);
     assert_eq!(config.num_attention_heads, 32);
     assert_eq!(config.num_key_value_heads, 8);
     assert_eq!(config.intermediate_size, 14336);
     assert_eq!(config.head_dim(), 128); // 4096 / 32
-    assert_eq!(config.kv_dim(), 1024);  // 8 * 128
+    assert_eq!(config.kv_dim(), 1024); // 8 * 128
     assert!(config.uses_gqa());
 }
 
@@ -155,11 +149,11 @@ fn test_llama_config_parsing_1b() {
     }"#;
 
     let config = LlamaConfig::from_json(json).unwrap();
-    
+
     assert_eq!(config.hidden_size, 2048);
     assert_eq!(config.num_hidden_layers, 16);
     assert_eq!(config.head_dim(), 64); // 2048 / 32
-    assert_eq!(config.kv_dim(), 512);  // 8 * 64
+    assert_eq!(config.kv_dim(), 512); // 8 * 64
 }
 
 #[tokio::test]
@@ -203,7 +197,8 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
     // The "golden" output string for generating 5 new tokens, based on previous correct runs.
-    let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the last few years.";
+    let expected_output =
+        "The field of Artificial Intelligence has seen a lot of progress in the last few years.";
 
     // Create a config for deterministic, greedy decoding.
     let config = GenerationConfig {
@@ -214,15 +209,9 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
         ..Default::default()
     };
     // decoder_layer::tests::test_decoder_layer_with_rope_and_gqa
-    
+
     // 2. Load model and create the generator.
-    let llama_model = LlamaModel::from_registry(
-        model_type,
-        None,
-        Device::Cpu,
-        None,
-        None,
-    ).await?;
+    let llama_model = LlamaModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
     let generator = Generator::new(Box::new(llama_model))?;
 

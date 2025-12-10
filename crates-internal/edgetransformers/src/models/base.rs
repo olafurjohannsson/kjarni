@@ -4,18 +4,17 @@
 //! the low-level architecture traits in `traits.rs`.
 
 use crate::gpu_ops::GpuTensor;
-use crate::linear_layer::LinearLayer;
+use crate::gpu_ops::GpuTensorPool;
 use crate::pooling::mean_pool;
 use crate::traits::{
-    CrossAttentionDecoder, Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig,
-    TransformerModel,
+    Decoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
 };
 use crate::utils::create_full_attention_mask;
 pub use crate::weights::DType;
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array2, Array3};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use tokenizers::Tokenizer;
@@ -62,35 +61,6 @@ pub struct RopeScalingConfig {
     pub original_max_position_embeddings: usize,
     pub rope_type: String,
 }
-
-/// Configuration for text generation
-// #[derive(Clone, Debug)]
-// pub struct GenerationConfig {
-//     // Let's make this optional. If it's `Some`, it takes precedence.
-//     pub max_new_tokens: Option<usize>,
-
-//     // This will be our ultimate authority for loop termination.
-//     pub max_length: usize,
-
-//     // pub max_new_tokens: usize,
-//     pub temperature: f32,
-//     pub top_k: Option<usize>,
-//     pub top_p: Option<f32>,
-//     pub repetition_penalty: f32,
-//     pub sampling_strategy: SamplingStrategy,
-//     pub eos_token_id: Option<u32>,
-//     pub pad_token_id: Option<u32>,
-//     pub num_beams: usize,
-//     pub min_length: usize,
-
-//     pub length_penalty: f32,
-//     pub early_stopping: bool,
-//     pub no_repeat_ngram_size: usize,
-
-//     /// Whether to prepend the BOS token to the prompt
-//     /// Defaults to true
-//     pub add_bos_token: bool,
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoregressiveLoop {
@@ -186,43 +156,12 @@ impl Default for GenerationConfig {
     }
 }
 
-
 // A struct to hold all the inputs for a single generation step.
 // This keeps the `forward` signature clean.
 pub struct StepInput<'a, T> {
     pub tokens: &'a T,
     pub encoder_state: Option<&'a T>, // Optional for decoder-only models
     pub attention_mask: &'a T,
-}
-
-#[async_trait(?Send)]
-pub trait GenerationBackend: Send + Sync {
-    type Cache: Cache;
-    type Tensor;
-
-    /// Runs the initial encoder pass.
-    async fn encode(&self, model: &dyn LanguageModel, tokens: &[u32]) -> Result<Self::Tensor>; // Returns the native tensor type
-
-    /// Runs one decoder forward pass.
-    async fn forward(
-        &self,
-        model: &dyn LanguageModel,
-        inputs: StepInput<Self::Tensor>,
-        cache: &mut Self::Cache,
-    ) -> Result<Array3<f32>>;
-
-    /// Converts a Vec of token IDs into the backend's native tensor format.
-    fn prepare_tokens(&self, tokens: &[u32], num_beams: usize) -> Result<Self::Tensor>;
-
-    /// Prepares the initial encoder output for the generation loop.
-    /// For CPU, this is a no-op. For GPU, it uploads to a GpuTensor.
-    fn prepare_encoder_state(&self, encoder_output: &EncoderOutput) -> Result<Self::Tensor>;
-
-    /// Prepares the attention mask for a given step.
-    fn prepare_attention_mask(&self, seq_len: usize, num_beams: usize) -> Result<Self::Tensor>;
-
-    /// Reorders the cache for beam search.
-    fn reorder_cache(&self, cache: &mut Self::Cache, indices: &[usize]) -> Result<()>;
 }
 
 /// Base trait for all language models - provides tokenization
@@ -493,45 +432,170 @@ pub trait EncoderLanguageModel: LanguageModel {
     }
 }
 
-#[async_trait]
-pub trait EncoderDecoderLanguageModel: LanguageModel {
-    /// Returns a reference to the model's encoder component.
-    fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput>;
-
-    /// Returns a reference to the model's decoder component.
-    fn decoder(
+pub trait GpuClassificationHead {
+    fn project(
         &self,
-    ) -> &dyn CrossAttentionDecoder<
-        TokenInput=Array2<u32>,
-        EncoderStateInput=Array3<f32>,
-        MaskInput=Array2<f32>,
-        Output=DecoderOutput,
-    >;
-
-    fn gpu_decoder(
-        &self,
-    ) -> &dyn CrossAttentionDecoder<
-        TokenInput=GpuTensor,
-        EncoderStateInput=GpuTensor,
-        MaskInput=GpuTensor,
-        Output=DecoderOutput,
-    >;
-
-    /// Projects the final hidden states from the decoder to vocabulary logits.
-    fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
-
-    // fn generation_config_from_preset(&self) -> GenerationConfig;
-
-    /// The token ID that should be used to start the decoding process.
-    fn decoder_start_token_id(&self) -> u32;
-
-    fn get_default_generation_config(&self) -> GenerationConfig;
-
-    fn lm_head_layer(&self) -> &LinearLayer;
-    // TODO: maybe dont have these here
-    fn lm_head(&self) -> &Array2<f32>;
-    fn final_logits_bias(&self) -> Option<&Array1<f32>>;
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+    ) -> Result<GpuTensor>;
 }
+//
+// // ============================================================================
+// // GPU ENCODER
+// // ============================================================================
+//
+// /// Flexible input for GPU encoder - supports hybrid execution.
+// ///
+// /// This enum allows the encoder to accept input in various forms,
+// /// enabling efficient hybrid CPU/GPU workflows.
+// pub enum GpuEncoderInput<'a> {
+//     /// Token IDs already on GPU.
+//     ///
+//     /// Use when: Full GPU path, token IDs already uploaded.
+//     /// Shape: `[batch_size, sequence_length]` u32
+//     TokensGpu(&'a GpuTensor),
+//
+//     /// Token IDs on CPU - will do CPU embedding lookup, upload hidden states.
+//     ///
+//     /// Use when: VRAM saving mode with cpu_embeddings=true.
+//     /// The encoder will:
+//     /// 1. Perform embedding lookup on CPU
+//     /// 2. Upload resulting hidden states to GPU
+//     /// 3. Continue with GPU layers
+//     TokensCpu(&'a Array2<u32>),
+//
+//     /// Pre-computed hidden states on GPU (skip embedding).
+//     ///
+//     /// Use when: Continuing from partial GPU execution or external embedding.
+//     /// Shape: `[batch_size, sequence_length, hidden_size]` f32
+//     HiddenGpu(&'a GpuTensor),
+//
+//     /// Pre-computed hidden states on CPU - will upload.
+//     ///
+//     /// Use when: Continuing from CPU encoder/layers to GPU.
+//     /// The encoder will upload the hidden states and continue with GPU layers.
+//     HiddenCpu(&'a Array3<f32>),
+// }
+//
+// /// Output from GPU encoder.
+// #[derive(Debug)]
+// pub struct GpuEncoderOutput {
+//     /// Final hidden states on GPU: `[batch_size, sequence_length, hidden_size]`
+//     pub last_hidden_state: GpuTensor,
+// }
+//
+// /// GPU-based transformer encoder trait.
+// ///
+// /// Provides methods for embedding lookup, normalization, and layer execution
+// /// on GPU with support for hybrid CPU/GPU workflows through `GpuEncoderInput`.
+// ///
+// pub trait GpuEncoder: Send + Sync {
+//     /// Compute embeddings only (handles CPU/GPU input).
+//     ///
+//     /// Does NOT apply the initial layer normalization.
+//     ///
+//     /// # Arguments
+//     /// * `cmd_encoder` - WGPU command encoder for recording GPU commands
+//     /// * `pool` - Tensor pool for intermediate allocations
+//     /// * `input` - Token IDs or hidden states (see `GpuEncoderInput`)
+//     /// * `token_type_ids` - Optional token type IDs on GPU
+//     ///
+//     /// # Returns
+//     /// Hidden states on GPU `[batch_size, sequence_length, hidden_size]`
+//     fn embed(
+//         &self,
+//         cmd_encoder: &mut wgpu::CommandEncoder,
+//         pool: &mut GpuTensorPool,
+//         input: GpuEncoderInput,
+//         token_type_ids: Option<&GpuTensor>,
+//     ) -> Result<GpuTensor>;
+//
+//     /// Compute embeddings + initial normalization.
+//     ///
+//     /// This produces hidden states ready to be processed by encoder layers.
+//     ///
+//     /// # Arguments
+//     /// * `cmd_encoder` - WGPU command encoder
+//     /// * `pool` - Tensor pool
+//     /// * `input` - Token IDs or hidden states
+//     /// * `token_type_ids` - Optional token type IDs
+//     ///
+//     /// # Returns
+//     /// Normalized hidden states on GPU
+//     fn embed_and_normalize(
+//         &self,
+//         cmd_encoder: &mut wgpu::CommandEncoder,
+//         pool: &mut GpuTensorPool,
+//         input: GpuEncoderInput,
+//         token_type_ids: Option<&GpuTensor>,
+//     ) -> Result<GpuTensor>;
+//
+//     /// Run layers `[start_layer, end_layer)` on hidden states.
+//     ///
+//     /// # Arguments
+//     /// * `cmd_encoder` - WGPU command encoder
+//     /// * `pool` - Tensor pool
+//     /// * `hidden_states` - Input hidden states on GPU
+//     /// * `attention_mask` - Attention mask on GPU
+//     /// * `start_layer` - First layer to execute (inclusive)
+//     /// * `end_layer` - Last layer to execute (exclusive)
+//     ///
+//     /// # Returns
+//     /// Hidden states after processing through the specified layers
+//     fn forward_layers(
+//         &self,
+//         cmd_encoder: &mut wgpu::CommandEncoder,
+//         pool: &mut GpuTensorPool,
+//         hidden_states: &GpuTensor,
+//         attention_mask: &GpuTensor,
+//         start_layer: usize,
+//         end_layer: usize,
+//     ) -> Result<GpuTensor>;
+//
+//     /// Number of encoder layers in this model.
+//     fn num_layers(&self) -> usize;
+//
+//     /// Hidden dimension of the model.
+//     fn hidden_size(&self) -> usize;
+//
+//     /// Full forward pass through the encoder.
+//     ///
+//     /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
+//     fn forward(
+//         &self,
+//         cmd_encoder: &mut wgpu::CommandEncoder,
+//         pool: &mut GpuTensorPool,
+//         input: GpuEncoderInput,
+//         attention_mask: &GpuTensor,
+//         token_type_ids: Option<&GpuTensor>,
+//     ) -> Result<GpuEncoderOutput> {
+//         let hidden = self.embed_and_normalize(cmd_encoder, pool, input, token_type_ids)?;
+//         let output = self.forward_layers(
+//             cmd_encoder,
+//             pool,
+//             &hidden,
+//             attention_mask,
+//             0,
+//             self.num_layers(),
+//         )?;
+//         Ok(GpuEncoderOutput {
+//             last_hidden_state: output,
+//         })
+//     }
+// }
+
+// #[async_trait(?Send)]
+// pub trait GpuEncoder: Send + Sync {
+//     /// Encodes input IDs into hidden states, keeping the result on the GPU.
+//     fn forward(
+//         &self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         pool: &mut GpuTensorPool,
+//         input_ids: &GpuTensor,
+//         attention_mask: &GpuTensor,
+//     ) -> Result<GpuTensor>;
+// }
 
 /// Flexible input for the decoder.
 /// - Use `Gpu` when you have VRAM to spare (fastest).
@@ -540,7 +604,28 @@ pub enum DecoderInput<'a> {
     Gpu(&'a GpuTensor),
     Cpu(&'a [u32]),
 }
-
+// Phase 2: Implement Backends and GPU Components
+// TODO #4: Implement BartGpuDecoder.
+// Action: Create the BartGpuDecoder struct and implement GpuCrossAttentionDecoder for it. This will be a new file.
+// TODO #5: Update BartModel for GPU.
+// Action:
+// In from_pretrained, instantiate BartGpuEncoder and BartGpuDecoder.
+// Load the LM head into a GpuTensor.
+// Implement the new EncoderDecoderLanguageModel accessor trait.
+// TODO #6: Implement GpuBackend against the new trait.
+// Action:
+// Implement async fn encode. This will call model.gpu_encoder().forward(...).
+// Implement async fn decode_step. This will call model.gpu_decoder().forward(...) followed by a GPU-based matrix multiplication with model.gpu_lm_head_weights(), and finally download the resulting logits.
+// TODO #7: Refactor CpuBackend against the new trait.
+// Action:
+// Implement async fn encode. This will call model.cpu_encoder().forward(...) and then pre-compute the cross-attention K/V cache, bundling it all into the CpuTensor::EncoderState.
+// Implement async fn decode_step. This will unpack the CpuTensor, call model.cpu_decoder().forward(...), and then project to logits using model.lm_head_layer().
+// Phase 3: Final Generator Integration
+// TODO #8: Update run_beam_search.
+// Status: ALMOST DONE. This function is already generic, which is great. It just needs minor updates to call the new backend methods.
+// Action:
+// Remove the call to backend.prepare_encoder_state. The initial encoder_state will now come from the new backend.encode(...) method, which you'll call once before the loop.
+// Inside the loop, replace the call to backend.forward(...) and the manual logit projection with a single call to backend.decode_step(...).
 #[derive(Debug, Clone, Copy)]
 pub struct DecoderLoadConfig {
     /// If true, embedding weights are kept in system RAM and lookup happens on CPU.
@@ -575,7 +660,7 @@ pub trait GpuDecoder: Send + Sync {
     async fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder, // <-- Pass in the encoder
-        pool: &mut crate::gpu_ops::GpuTensorPool,    // <-- Pass in the pool
+        pool: &mut crate::gpu_ops::GpuTensorPool, // <-- Pass in the pool
         // input_ids: &GpuTensor,
         input: DecoderInput<'_>,
         attention_mask: &GpuTensor,
@@ -585,7 +670,6 @@ pub trait GpuDecoder: Send + Sync {
     ) -> Result<GpuTensor>; // Returns the final hidden states as a GpuTensor
 }
 
-
 /// Trait for decoder-only language models (GPT-2, GPT-3, Llama, etc.)
 ///
 /// These models generate text autoregressively.
@@ -594,11 +678,12 @@ pub trait DecoderLanguageModel: LanguageModel {
     /// Get the decoder backend
     fn decoder(&self) -> &dyn Decoder<Input=Array2<u32>, Output=DecoderOutput>;
 
-
     /// Get the GPU-native decoder.
     /// Returns an error if the model was not loaded with GPU support.
     fn gpu_decoder(&self) -> Result<&(dyn GpuDecoder + Send + Sync)> {
-        Err(anyhow::anyhow!("This model does not have a GPU decoder implementation."))
+        Err(anyhow::anyhow!(
+            "This model does not have a GPU decoder implementation."
+        ))
     }
 
     /// Get the GPU tensor for the LM head weights.
@@ -608,12 +693,13 @@ pub trait DecoderLanguageModel: LanguageModel {
     }
     /// Get the PRE-TRANSPOSED GPU tensor for the LM head weights.
     fn gpu_lm_head_transposed(&self) -> Result<&GpuTensor> {
-        Err(anyhow!("This model does not have transposed GPU LM head weights."))
+        Err(anyhow!(
+            "This model does not have transposed GPU LM head weights."
+        ))
     }
 
     /// Get the LM head (projection to vocabulary)
     fn lm_head(&self) -> &Array2<f32>;
-
 
     /// Specifies the generation loop strategy required for this model
     /// to maintain parity with its reference implementation.

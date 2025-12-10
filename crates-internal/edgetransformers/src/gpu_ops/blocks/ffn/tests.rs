@@ -2,13 +2,13 @@
 mod common;
 
 use super::*;
-use crate::feedforward::StdFeedForward as CpuFeedForward;
-use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::feedforward::LegacyFeedForward as CpuFeedForward;
+use crate::gpu_ops::{DType, GpuTensor, GpuTensorPool};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
-use ndarray::{Array, Array1, Array2, Array3, Ix3};
-use ndarray_rand::RandomExt;
+use ndarray::{Array, Array1, Array2, Array3};
 use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::RandomExt;
 
 use crate::tests::common::{assert_all_close, assert_tensors_are_close, get_test_context};
 
@@ -171,7 +171,7 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
         &cpu_fc2_b,
     )?;
 
-    let gpu_ffn = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
+    let gpu_ffn = GpuFeedForward::new(&context, crate::activations::Activation::GeluNew)?;
     let cpu_input = Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let gpu_intermediate = GpuTensor::uninitialized(
@@ -227,14 +227,14 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
     let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
         (i + j) as f32 * -0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
 
     let cpu_ffn = CpuFeedForward::new(
@@ -266,7 +266,7 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
     let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut pool);
     context.queue.submit(Some(encoder.finish()));
     pool.next_frame();
-    
+
     assert_tensors_are_close_relative(
         &expected_cpu,
         &output_gpu,
@@ -285,14 +285,14 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
     let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
         (i + j) as f32 * -0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
     let cpu_ffn = CpuFeedForward::new(
         fc1_w_cpu.clone(),
@@ -325,7 +325,7 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
         "FFN FC1 Fused Output",
         1e-4,
     )
-    .await;
+        .await;
     Ok(())
 }
 
@@ -340,14 +340,14 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
     let fc2_w_cpu = Array2::from_shape_fn((intermediate_size, hidden_size), |(i, j)| {
         (i + j) as f32 * -0.01
     })
-    .as_standard_layout()
-    .to_owned();
+        .as_standard_layout()
+        .to_owned();
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
 
     let cpu_ffn = CpuFeedForward::new(
@@ -408,7 +408,7 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         1e-4, // Relative tolerance: 0.01%
         1e-5, // Absolute tolerance
     )
-    .await;
+        .await;
 
     Ok(())
 }

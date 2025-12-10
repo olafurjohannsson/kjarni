@@ -27,12 +27,7 @@ pub struct CpuBeamKVCache {
 
 impl CpuBeamKVCache {
     /// Creates a new, empty cache pre-allocated to the maximum size for beam search.
-    pub fn new(
-        num_layers: usize,
-        num_beams: usize,
-        max_len: usize,
-        hidden_size: usize,
-    ) -> Self {
+    pub fn new(num_layers: usize, num_beams: usize, max_len: usize, hidden_size: usize) -> Self {
         let mut layers_k = Vec::with_capacity(num_layers);
         let mut layers_v = Vec::with_capacity(num_layers);
         let mut temp_layers_k = Vec::with_capacity(num_layers);
@@ -71,7 +66,7 @@ impl CpuBeamKVCache {
             .zip(self.layers_v.par_iter())
             .zip(self.temp_layers_k.par_iter_mut())
             .zip(self.temp_layers_v.par_iter_mut())
-            .for_each(|((((source_k, source_v), dest_k), dest_v))| {
+            .for_each(|(((source_k, source_v), dest_k), dest_v)| {
                 for (dest_idx, &source_idx) in indices.iter().enumerate() {
                     let source_k_slice = source_k.slice(s![source_idx, .., ..]);
                     let mut dest_k_slice = dest_k.slice_mut(s![dest_idx, .., ..]);
@@ -104,7 +99,10 @@ impl CpuBeamKVCache {
 
         Ok(())
     }
-    pub fn get(&self, layer_idx: usize) -> Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)> {
+    pub fn get(
+        &self,
+        layer_idx: usize,
+    ) -> Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)> {
         if layer_idx >= self.layers_k.len() {
             return None;
         }
@@ -118,18 +116,29 @@ impl CpuBeamKVCache {
 }
 
 impl Cache for CpuBeamKVCache {
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
-    fn get_seq_length(&self) -> usize { self.seq_length }
-    fn set_seq_length(&mut self, len: usize) { self.seq_length = len; }
-    fn clear(&mut self) { self.seq_length = 0; }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn get_seq_length(&self) -> usize {
+        self.seq_length
+    }
+    fn set_seq_length(&mut self, len: usize) {
+        self.seq_length = len;
+    }
+    fn clear(&mut self) {
+        self.seq_length = 0;
+    }
 
     fn increment_len(&mut self, new_tokens_len: usize) {
         self.seq_length += new_tokens_len;
         assert!(
             self.seq_length <= self.capacity,
             "Cache overflow! New length {} exceeds capacity {}",
-            self.seq_length, self.capacity
+            self.seq_length,
+            self.capacity
         );
     }
 

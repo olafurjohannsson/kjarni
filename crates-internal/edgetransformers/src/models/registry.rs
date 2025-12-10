@@ -34,7 +34,9 @@ pub enum ModelType {
     Gpt2Large,
     Gpt2XL,
     Llama3_2_1B,
-    // Llama3_2_3B,
+    Llama3_2_3B,
+
+    Llama3_2_3B_Instruct,
     Llama3_8B,
     Llama3_8B_Instruct,
     // Llama2_7B,
@@ -190,6 +192,29 @@ impl ModelType {
                 size_mb: 0,
                 params_millions: 1000,
             },
+            ModelType::Llama3_2_3B => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-3B/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3.2-3B/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-3B/resolve/main/config.json",
+                },
+                description: "TODO",
+                size_mb: 0,
+                params_millions: 1000,
+            },
+            ModelType::Llama3_2_3B_Instruct => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/model.safetensors.index.json",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/config.json",
+                },
+                description: "TODO",
+                size_mb: 0,
+                params_millions: 1000,
+            },
+            
             ModelType::Llama3_8B => ModelInfo {
                 architecture: ModelArchitecture::Decoder,
                 paths: ModelPaths {

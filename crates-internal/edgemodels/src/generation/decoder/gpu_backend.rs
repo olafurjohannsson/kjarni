@@ -1,20 +1,22 @@
 // use crate::generation::generator::DecoderGenerationBackend;
-use edgetransformers::decoder::DecoderGenerationBackend;
 use anyhow::Result;
 use async_trait::async_trait;
 use edgetransformers::WgpuContext;
 use edgetransformers::cache::{Cache, GpuKVCache};
+use edgetransformers::decoder::DecoderGenerationBackend;
+use edgetransformers::gpu_ops::DType;
 use edgetransformers::gpu_ops::Kernel;
 use edgetransformers::gpu_ops::primitives::argmax::GpuArgMax;
 use edgetransformers::gpu_ops::primitives::bmm::GpuBatchedMatMul;
 use edgetransformers::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
+use edgetransformers::gpu_ops::primitives::linear::GpuLinearLayer;
+use edgetransformers::gpu_ops::primitives::matmul::GpuMatMul;
 use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use edgetransformers::models::DecoderLanguageModel;
 use edgetransformers::models::base::DecoderInput;
 pub use edgetransformers::models::base::{AutoregressiveLoop, DecodingStrategy, GenerationConfig};
 use ndarray::{Array1, Array2, Array3, s};
 use std::sync::Arc;
-use edgetransformers::gpu_ops::DType;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, MapMode};
 
 pub struct GpuDecoderBackend {
@@ -23,8 +25,11 @@ pub struct GpuDecoderBackend {
 
     // Persistent kernels
     last_token_slicer: GpuLastTokenSlice,
+
+    linear_layer: Option<GpuLinearLayer>,
     // Optional: Only exists if we are projecting on GPU
     vocab_projection_kernel: Option<GpuBatchedMatMul>,
+    gemv_bf16_kernel: Option<GpuMatMul>,
     argmax_kernel: GpuArgMax,
 
     staging_buffer: std::sync::Mutex<Option<Buffer>>,
@@ -41,10 +46,19 @@ impl GpuDecoderBackend {
         // Check if the model loaded the head to VRAM
         let has_gpu_head = model.gpu_lm_head_transposed().is_ok();
 
-        let proj_kernel = if has_gpu_head {
-            Some(GpuBatchedMatMul::new(&context))
+        let (proj_kernel, gemv_kernel) = if has_gpu_head {
+            (
+                Some(GpuBatchedMatMul::new(&context)),
+                Some(GpuMatMul::new(&context)),
+            )
         } else {
             // If head is on CPU, we don't need this kernel
+            (None, None)
+        };
+
+        let linear_layer = if has_gpu_head {
+            Some(GpuLinearLayer::new(&context))
+        } else {
             None
         };
 
@@ -52,11 +66,12 @@ impl GpuDecoderBackend {
             context: context.clone(),
             token_tensor,
             last_token_slicer: GpuLastTokenSlice::new(&context),
+            linear_layer,
             vocab_projection_kernel: proj_kernel,
             argmax_kernel: GpuArgMax::new(&context),
             staging_buffer: std::sync::Mutex::new(None),
             staging_buffer_size: std::sync::Mutex::new(0),
-
+            gemv_bf16_kernel: gemv_kernel,
             attention_mask: std::sync::Mutex::new(None),
             attention_mask_max_len: std::sync::atomic::AtomicUsize::new(0),
         })
@@ -72,8 +87,7 @@ impl GpuDecoderBackend {
         if guard.is_none() || current_max != max_len {
             log::debug!("Allocating new attention mask for max_len={}", max_len);
             let mask =
-                GpuTensor::zeros(&self.context, vec![1, max_len], 
-                    DType::F32, "AttentionMask")?;
+                GpuTensor::zeros(&self.context, vec![1, max_len], DType::F32, "AttentionMask")?;
             self.attention_mask_max_len
                 .store(max_len, Ordering::Relaxed);
             *guard = Some(mask);
@@ -226,24 +240,34 @@ impl GpuDecoderBackend {
         );
 
         let t_project = std::time::Instant::now();
-        let logits_cpu = if let (Some(proj_kernel), Ok(gpu_lm_head)) = (
+        let logits_cpu = if let (Some(linear), Some(proj_kernel), Ok(gpu_lm_head)) = (
+            &self.linear_layer,
             &self.vocab_projection_kernel,
             model.gpu_lm_head_transposed(),
         ) {
             // GPU HEAD PATH
+            // let seq_len_out = hidden_states.shape()[1];
+            // // let vocab_size = gpu_lm_head.shape()[1];
+            // let vocab_size = if gpu_lm_head.dtype() == DType::BF16 {
+            //     gpu_lm_head.shape()[0] // [Vocab, Hidden]
+            // } else {
+            //     gpu_lm_head.shape()[1] // [Hidden, Vocab] (Transposed)
+            // };
+            // No more Transpose logic checks. gpu_lm_head is always [Vocab, Hidden]
+            let batch_size = hidden_states.shape()[0];
             let seq_len_out = hidden_states.shape()[1];
-            let vocab_size = gpu_lm_head.shape()[1];
+            let vocab_size = gpu_lm_head.shape()[0]; // It's [Vocab, Hidden] now
             log::info!(
                 "  GPU project: hidden [{},{},{}] @ lm_head [{},{}]",
                 batch_size,
                 seq_len_out,
                 hidden_states.shape()[2],
                 gpu_lm_head.shape()[0],
-                vocab_size
+                gpu_lm_head.shape()[1] // FIX: was shape()[0] twice
             );
 
             let logits_output = pool.get(vec![batch_size, seq_len_out, vocab_size]);
-            proj_kernel.encode(encoder, &[&hidden_states, gpu_lm_head], &logits_output);
+            linear.encode(encoder, &hidden_states, gpu_lm_head, &logits_output);
 
             let last_token_logits = pool.get(vec![batch_size, vocab_size]);
             self.last_token_slicer
@@ -266,11 +290,11 @@ impl GpuDecoderBackend {
             );
 
             let t_submit = std::time::Instant::now();
-            
+
             self.context.profiler.process_results(encoder);
 
             frame.finish();
-            
+
             self.context.profiler.print_stats(&self.context).await;
 
             log::info!("  Submit: {:?}", t_submit.elapsed());
@@ -309,7 +333,7 @@ impl GpuDecoderBackend {
             self.context.profiler.process_results(encoder);
 
             frame.finish();
-            
+
             self.context.profiler.print_stats(&self.context).await;
 
             let t_readback = std::time::Instant::now();
@@ -318,16 +342,17 @@ impl GpuDecoderBackend {
 
             let t_cpu_proj = std::time::Instant::now();
             let hidden_3d = Array3::from_shape_vec((1, 1, hidden_size), hidden_vec.to_vec())?;
-            
+
             // 2. Use the Model's projection logic (Handles BF16/LinearLayer automatically)
             // Note: project_to_logits returns [Batch, Seq, Vocab] -> [1, 1, Vocab]
             let logits_3d = model.project_to_logits(&hidden_3d)?;
-            
+
             // 3. Flatten back to 1D for the generator
             // Get the first (and only) row
-            let logits_1d = logits_3d.index_axis(ndarray::Axis(0), 0) // Remove Batch
-                                     .index_axis(ndarray::Axis(0), 0) // Remove Seq
-                                     .to_owned();
+            let logits_1d = logits_3d
+                .index_axis(ndarray::Axis(0), 0) // Remove Batch
+                .index_axis(ndarray::Axis(0), 0) // Remove Seq
+                .to_owned();
             // --- FIX ENDS HERE ---
 
             log::info!("  CPU matmul: {:?}", t_cpu_proj.elapsed());

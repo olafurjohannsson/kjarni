@@ -75,13 +75,19 @@ impl LanguageModelConfig for Gpt2Config {
     }
     fn intermediate_size(&self) -> usize {
         self.n_embd * 4
-    } // Standard for GPT-2
+    } 
+    
+    fn legacy_ffn_weights(&self) -> bool {
+        true
+    }
+    // Keep In, Out and use Legacy FFN
     fn transpose_ffn_weights(&self) -> bool {
         false
     } // GPT-2 weights are not transposed
     fn transpose_attention_weights(&self) -> bool {
         false
     }
+
     fn eos_token_id(&self) -> Option<u32> {
         Some(50256)
     }

@@ -101,15 +101,18 @@ fn run_internal_add_bias(
         ],
     });
 
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("AddBias Compute Pass"),
-        timestamp_writes: None,
+    // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+    //     label: Some("AddBias Compute Pass"),
+    //     timestamp_writes: None,
+    // });
+    let label = format!("AddBias");
+    context.profiler.profile(encoder, &label, |compute_pass| {
+        compute_pass.set_pipeline(pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
+        
+        let workgroup_x = (size + 255) / 256;
+        compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
     });
-    compute_pass.set_pipeline(pipeline);
-    compute_pass.set_bind_group(0, &bind_group, &[]);
-    
-    let workgroup_x = (size + 255) / 256;
-    compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
 }
 
 /// The internal, private compilation function.

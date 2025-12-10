@@ -1,7 +1,5 @@
 pub use crate::models::base::{DecodingStrategy, GenerationConfig};
 use anyhow::Result;
-use futures_core::stream::Stream;
-use futures_util::TryStreamExt;
 use ndarray::Array1;
 use rand::Rng;
 

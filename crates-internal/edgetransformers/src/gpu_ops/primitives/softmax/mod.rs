@@ -114,15 +114,18 @@ fn run_internal_softmax(
         ],
     });
 
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("Softmax Compute Pass"),
-        timestamp_writes: None,
-    });
-    compute_pass.set_pipeline(pipeline);
-    compute_pass.set_bind_group(0, &bind_group, &[]);
+    // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+    //     label: Some("Softmax Compute Pass"),
+    //     timestamp_writes: None,
+    // });
+    let label = format!("Softmax");
+    context.profiler.profile(encoder, &label, |compute_pass| {
+        compute_pass.set_pipeline(pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
 
-    let workgroup_x = (rows + 255) / 256;
-    compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
+        let workgroup_x = (rows + 255) / 256;
+        compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
+    });
 }
 
 fn compile_softmax_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {

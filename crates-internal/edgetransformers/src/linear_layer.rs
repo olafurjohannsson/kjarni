@@ -1,6 +1,6 @@
 use crate::utils::linear_algebra::{matmul_2d_f32_notranspose, matmul_2d_mixed_bf16};
 use crate::weights::{DType, ModelWeights};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, ArrayView2};
 
 pub struct LinearLayer {
@@ -11,77 +11,104 @@ pub struct LinearLayer {
 pub enum LinearData {
     F32(Array2<f32>),
     BF16(Array2<u16>),
-    // Q4(Q4Tensor), // Ready for future
 }
 
 impl LinearLayer {
-    /// Computes X * W^T + b
+    /// Computes X @ W^T + b
+    /// Weights stored as [out, in], computes input[batch, in] -> output[batch, out]
     #[inline]
     pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
-        // 1. Matrix Multiplication
+        let t_start = std::time::Instant::now();
         let mut result = match &self.data {
             LinearData::F32(w) => matmul_2d_f32_notranspose(input, &w.view()),
             LinearData::BF16(w) => matmul_2d_mixed_bf16(input, &w.view()),
         };
-
-        // 2. Bias Addition (Broadcasting)
+        log::info!("[LinearLayer] MatMul took: {:?}, Input: {:?}, Weight: {:?}", t_start.elapsed(), input.shape(), self.shape());
         if let Some(bias) = &self.bias {
-            // ndarray handles [Batch, Dim] + [Dim] broadcasting automatically
-            // if the last dimensions match.
             result += bias;
         }
 
         result
     }
 
-    pub fn shape(&self) -> &[usize] {
-        let result = match &self.data {
-            LinearData::F32(w) => w.shape(),
-            LinearData::BF16(w) => w.shape(),
+    // ==================== Constructors ====================
+
+    pub fn new_f32(weight: Array2<f32>, bias: Option<Array1<f32>>) -> Self {
+        Self {
+            data: LinearData::F32(weight.as_standard_layout().to_owned()),
+            bias,
+        }
+    }
+
+    pub fn new_bf16(weight: Array2<u16>, bias: Option<Array1<f32>>) -> Self {
+        Self {
+            data: LinearData::BF16(weight.as_standard_layout().to_owned()),
+            bias,
+        }
+    }
+
+    // ==================== Loading ====================
+
+    /// Load with explicit weight and bias names
+    ///
+    /// # Arguments
+    /// * `weight_name` - Full name of weight tensor
+    /// * `bias_name` - Full name of bias tensor, or None for no bias
+    /// * `transpose` - If true, transpose weight from [in, out] to [out, in]
+    /// * `dtype_override` - Force specific dtype (None = use file dtype)
+    pub fn from_weight_and_bias(
+        weights: &ModelWeights,
+        weight_name: &str,
+        bias_name: Option<&str>,
+        transpose: bool,
+        dtype_override: Option<DType>,
+    ) -> Result<Self> {
+        let raw_tensor = weights.get_raw(weight_name)?;
+        let file_dtype = raw_tensor.dtype;
+        let target_dtype = dtype_override.unwrap_or(file_dtype);
+
+        let data = match (file_dtype, target_dtype) {
+            (DType::BF16, DType::BF16) => {
+                let mut w = weights.get_linear_weight_bf16(weight_name)?;
+                if transpose {
+                    w = w.t().as_standard_layout().to_owned();
+                }
+                LinearData::BF16(w.as_standard_layout().to_owned())
+            }
+            (DType::F32, DType::F32) | (DType::BF16, DType::F32) => {
+                let mut w = weights.get_array2(weight_name)?;
+                if transpose {
+                    w = w.t().as_standard_layout().to_owned();
+                }
+                LinearData::F32(w.as_standard_layout().to_owned())
+            }
+            (src, tgt) => {
+                return Err(anyhow!(
+                    "Cannot load '{}': {:?} -> {:?} not supported",
+                    weight_name,
+                    src,
+                    tgt
+                ));
+            }
         };
 
-        result
-    }
-
-    /// Upload to GPU with transpose for standard A @ B matmul
-    pub fn to_gpu(
-        &self,
-        ctx: &std::sync::Arc<crate::WgpuContext>,
-    ) -> Result<crate::gpu_ops::GpuTensor> {
-        crate::gpu_ops::GpuTensor::from_ndarray(ctx, &self.to_f32_transposed())
-    }
-
-    /// Converts internal weights to F32 Array2.
-    /// Useful for GPU uploading or legacy debugging.
-    pub fn to_f32(&self) -> Array2<f32> {
-        match &self.data {
-            LinearData::F32(w) => w.clone(),
-            LinearData::BF16(w) => {
-                // Convert u16 -> f32
-                // We map over the array and do the bit shift logic
-                w.mapv(|x| f32::from_bits((x as u32) << 16))
-            }
-        }
-    }
-
-    /// Returns a reference to F32 weights if they exist, else None.
-    /// Used for the legacy DecoderLanguageModel::lm_head() trait.
-    pub fn as_f32(&self) -> Option<&Array2<f32>> {
-        match &self.data {
-            LinearData::F32(w) => Some(w),
+        let bias = match bias_name {
+            Some(name) if weights.contains(name) => Some(weights.get_array1(name)?),
             _ => None,
-        }
+        };
+
+        Ok(Self { data, bias })
     }
 
-    /// Returns a transposed copy of the weights as F32.
-    /// Used for GPU upload (GPU expects [In, Out] usually, or [Out, In] depending on your kernel).
-    /// Your GPU code seemed to expect .t(), so let's provide a helper.
-    pub fn to_f32_transposed(&self) -> Array2<f32> {
-        let f32_view = self.to_f32();
-        f32_view.t().as_standard_layout().to_owned()
+    /// Load weight only (no bias)
+    pub fn from_weight(
+        weights: &ModelWeights,
+        weight_name: &str,
+        transpose: bool,
+        dtype_override: Option<DType>,
+    ) -> Result<Self> {
+        Self::from_weight_and_bias(weights, weight_name, None, transpose, dtype_override)
     }
-
-    /// Smart Loading Logic
     pub fn from_weights(
         weights: &ModelWeights,
         name: &str,
@@ -128,33 +155,69 @@ impl LinearLayer {
 
         Ok(Self { data, bias })
     }
+    // ==================== Accessors ====================
 
-    /// Returns the output dimension (number of rows in the weight matrix).
-    pub fn out_features(&self) -> usize {
+    pub fn shape(&self) -> [usize; 2] {
         match &self.data {
-            LinearData::F32(w) => w.shape()[0],
-            LinearData::BF16(w) => w.shape()[0],
+            LinearData::F32(w) => [w.shape()[0], w.shape()[1]],
+            LinearData::BF16(w) => [w.shape()[0], w.shape()[1]],
         }
     }
 
-    /// Returns the input dimension (number of columns in the weight matrix).
+    pub fn out_features(&self) -> usize {
+        self.shape()[0]
+    }
     pub fn in_features(&self) -> usize {
+        self.shape()[1]
+    }
+
+    pub fn dtype(&self) -> DType {
         match &self.data {
-            LinearData::F32(w) => w.shape()[1],
-            LinearData::BF16(w) => w.shape()[1],
+            LinearData::F32(_) => DType::F32,
+            LinearData::BF16(_) => DType::BF16,
         }
+    }
+
+    pub fn has_bias(&self) -> bool {
+        self.bias.is_some()
+    }
+
+    // ==================== Conversions ====================
+
+    pub fn to_f32(&self) -> Array2<f32> {
+        match &self.data {
+            LinearData::F32(w) => w.clone(),
+            LinearData::BF16(w) => w.mapv(|x| f32::from_bits((x as u32) << 16)),
+        }
+    }
+
+    pub fn as_f32(&self) -> Option<&Array2<f32>> {
+        match &self.data {
+            LinearData::F32(w) => Some(w),
+            _ => None,
+        }
+    }
+
+    pub fn to_f32_transposed(&self) -> Array2<f32> {
+        self.to_f32().t().as_standard_layout().to_owned()
+    }
+
+    pub fn to_gpu(
+        &self,
+        ctx: &std::sync::Arc<crate::WgpuContext>,
+    ) -> Result<crate::gpu_ops::GpuTensor> {
+        crate::gpu_ops::GpuTensor::from_ndarray(ctx, &self.to_f32())
+    }
+    pub fn to_gpu_transposed(
+        &self,
+        ctx: &std::sync::Arc<crate::WgpuContext>,
+    ) -> Result<crate::gpu_ops::GpuTensor> {
+        crate::gpu_ops::GpuTensor::from_ndarray(ctx, &self.to_f32_transposed())
     }
 }
-// --- Backwards Compatibility Implementation ---
-// This allows SwiGluFeedForward::new(Array2<f32>, ...) to still work!
+
 impl From<Array2<f32>> for LinearLayer {
     fn from(arr: Array2<f32>) -> Self {
-        // Assume input is [Out, In] or [In, Out]?
-        // Usually manual construction in tests implies standard math [In, Out] or [Out, In].
-        // Let's assume the user constructed it matching the weight shape [Out, In].
-        LinearLayer {
-            data: LinearData::F32(arr.as_standard_layout().to_owned()),
-            bias: None,
-        }
+        LinearLayer::new_f32(arr, None)
     }
 }

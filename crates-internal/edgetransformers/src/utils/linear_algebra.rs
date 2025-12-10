@@ -680,9 +680,27 @@ pub fn matmul_3d_2d(a: &Array3<f32>, b: &Array2<f32>) -> Array3<f32> {
     let (batch, m, k) = a.dim();
     let (k2, n) = b.dim();
     assert_eq!(k, k2);
-    let a_flat = a.view().into_shape((batch * m, k)).unwrap();
+    let a_flat = a.view().into_shape_with_order((batch * m, k)).unwrap();
     let b_view = b.view();
     let c_flat = matmul_2d(&a_flat, &b_view);
+    c_flat.into_shape_with_order((batch, m, n)).unwrap()
+}
+
+/// Performs matmul for a 3D input and a 2D weight matrix in [Out, In] layout.
+///
+/// This is the CPU equivalent of the optimized GPU kernels.
+/// `a` has shape [Batch, Seq, In], `b_transposed` has shape [Out, In].
+#[inline]
+pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> Array3<f32> {
+    let (batch, m, k) = a.dim();
+    let (n, k2) = b_transposed.dim(); // Shape is [Out, In]
+    assert_eq!(k, k2, "Matmul inner dimensions do not match");
+
+    let a_flat = a.view().into_shape_with_order((batch * m, k)).unwrap();
+    
+    // We use the existing matmul_2d_transposed which correctly handles the layout
+    let c_flat = matmul_2d_transposed(&a_flat.view(), &b_transposed.view());
+    
     c_flat.into_shape_with_order((batch, m, n)).unwrap()
 }
 

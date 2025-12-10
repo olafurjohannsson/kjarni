@@ -13,18 +13,18 @@ mod gpu;
 mod traits;
 
 use crate::gpu_context::WgpuContext;
+use crate::rope::RoPE;
 use crate::traits::{Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
+use crate::weights::DType;
 use crate::weights::ModelWeights;
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 pub use cpu::CpuTransformerDecoder;
 pub use gpu::GpuTransformerDecoder;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
-use crate::rope::RoPE;
 pub use traits::DecoderGenerationBackend;
-use crate::weights::DType;
 
 /// A generic, backend-agnostic transformer decoder stack.
 ///
@@ -48,7 +48,7 @@ impl TransformerDecoder {
         device: Device,
         context: Option<Arc<WgpuContext>>,
         rope: Option<Arc<RoPE>>,
-        dtype: Option<DType>
+        dtype: Option<DType>,
     ) -> Result<Self> {
         match device {
             Device::Cpu => Ok(Self::Cpu(CpuTransformerDecoder::new(
@@ -57,7 +57,8 @@ impl TransformerDecoder {
                 rope,
                 dtype,
             )?)),
-            Device::Wgpu => { // TODO: this is actually deprecated in favor of GpuBackend/Generator/GpuDecoder
+            Device::Wgpu => {
+                // TODO: this is actually deprecated in favor of GpuBackend/Generator/GpuDecoder
                 let ctx = context.ok_or_else(|| {
                     anyhow!("A WGPU context is required to create a GPU-based decoder.")
                 })?;
@@ -86,7 +87,7 @@ impl TransformerModel for TransformerDecoder {
             Self::Gpu(model) => model.context(),
         }
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

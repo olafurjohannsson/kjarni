@@ -5,7 +5,6 @@ use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
-use crate::traits::CrossAttentionDecoder;
 use crate::traits::{
     Cache, Decoder, DecoderArchitecture, TransformerConfig, TransformerModel,
 };

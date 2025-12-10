@@ -10,13 +10,12 @@
 mod cpu;
 mod gpu;
 mod beams;
-mod traits;
+pub mod traits;
 
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::GpuCrossAttentionDecoder;
-use crate::models::base::EncoderDecoderLanguageModel;
 use crate::traits::{
-    CrossAttentionDecoder, DecoderOutput, Device, EncoderDecoderArchitecture, EncoderOutput,
+    DecoderOutput, Device, EncoderDecoderArchitecture, EncoderOutput,
     TransformerModel,
 };
 use crate::weights::ModelWeights;
@@ -38,7 +37,8 @@ pub use decoder_self_attn::DecoderSelfAttention;
 pub use beams::{find_best_beams_and_get_indices, run_beam_search, run_beam_search_stream, BeamHypothesis};
 // pub use cpu_backend::CpuBackend;
 // pub use gpu_backend::GpuBackend;
-pub use traits::{GenerationBackend, HasShape, StepInput};
+pub use crate::encoder_decoder::traits::{EncoderDecoderGenerationBackend, CrossAttentionDecoder,
+    EncoderDecoderLanguageModel, HasShape, StepInput};
 
 /// A generic, backend-agnostic transformer encoder-decoder stack.
 pub enum TransformerEncoderDecoder {

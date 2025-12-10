@@ -143,7 +143,13 @@ impl LlamaConfig {
             bos_token_id: 128000,
             eos_token_id: 128001,
             pad_token_id: None,
-            rope_scaling: None,
+            rope_scaling: Some(RopeScalingConfig {
+                factor: 32.0,
+                high_freq_factor: 4.0,
+                low_freq_factor: 1.0,
+                original_max_position_embeddings: 8192,
+                rope_type: "llama3".to_string(),
+            }),
             activation_function: Some("silu".to_string()),
         }
     }
@@ -391,7 +397,25 @@ mod tests {
         assert!(config.is_causal());
         assert!(config.is_prenorm());
     }
+    #[test]
+    fn test_llama_3_2_3b_config() {
+        let config = LlamaConfig::llama_3_2_3b();
+        assert_eq!(config.hidden_size, 3072);
+        assert_eq!(config.num_hidden_layers, 28);
+        assert_eq!(config.num_attention_heads, 24);
+        assert_eq!(config.num_key_value_heads, 8);
+        assert_eq!(config.intermediate_size, 8192);
+        assert_eq!(config.head_dim(), 128);
+        assert_eq!(config.max_position_embeddings, 131072);
+        assert_eq!(config.rope_theta, 500000.0);
+        assert!(config.rope_scaling.is_some());
+        assert!(config.uses_gqa());
+        assert!(config.is_causal());
+        assert!(config.is_prenorm());
 
+        // Verify GQA ratio
+        assert_eq!(config.num_attention_heads / config.num_key_value_heads, 3); // 24/8 = 3
+    }
     #[test]
     fn test_llama_2_7b_config() {
         let config = LlamaConfig::llama_2_7b();

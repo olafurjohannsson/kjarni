@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
-use crate::Embeddings;
+use crate::encoder::traits::EncoderArchitecture;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
@@ -11,8 +11,9 @@ use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
+use crate::traits::{Device, Encoder, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
+use crate::{activations, Embeddings};
 use tokio::sync::Mutex;
 
 pub struct GpuTransformerEncoder {
@@ -72,11 +73,7 @@ impl GpuTransformerEncoder {
             let prep_attn_w = |name: &str| -> Result<Array2<f32>> {
                 let raw = weights.get_array2(name)?;
                 // todo: this is backwards, but it works for now
-                if transpose_attn {
-                    Ok(raw)
-                } else {
-                    Ok(raw.t().as_standard_layout().to_owned())
-                }
+                Ok(raw)
             };
 
             let self_attn_weights = GpuAttentionWeights::new(
@@ -132,6 +129,7 @@ impl GpuTransformerEncoder {
                 self_attn_ln_weights,
                 ff_weights,
                 ffn_ln_weights,
+                activations::Activation::Gelu,
                 config.as_ref(),
             )?);
         }
@@ -161,7 +159,7 @@ impl TransformerModel for GpuTransformerEncoder {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         Some(self.context.clone())
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

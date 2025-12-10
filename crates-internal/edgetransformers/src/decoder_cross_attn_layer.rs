@@ -10,6 +10,7 @@ pub use crate::{
     weights::ModelWeights,
 };
 use anyhow::Result;
+use std::time::Instant;
 use ndarray::{Array2, Array3, ArrayView3};
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,
@@ -42,14 +43,20 @@ impl DecoderCrossAttentionLayer {
         // OPTIONAL: Pass pre-computed Cross KV here if you have it
         cross_kv_cache: Option<&(ndarray::Array4<f32>, ndarray::Array4<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        
 
         // 1. Self Attention
+        let t_sa = Instant::now();
         let residual = hidden_states.clone();
         let (attn_out, new_k, new_v) = self.self_attn.forward(hidden_states, self_mask, past_kv)?;
 
         let hidden_states = self.self_attn_layer_norm.forward_3d(&(residual + attn_out));
+        log::info!("[CpuLayer] Self-Attention block took: {:?}", t_sa.elapsed());
+
+        
 
         // 2. Cross Attention
+        let t_ca = Instant::now();
         let residual = hidden_states.clone();
 
         let cross_out = if let Some((k_static, v_static)) = cross_kv_cache {
@@ -60,14 +67,16 @@ impl DecoderCrossAttentionLayer {
             let (k_static, v_static) = self.cross_attn.precompute_encoder_kv(encoder_hidden_states)?;
             self.cross_attn.forward(&hidden_states, &k_static, &v_static, cross_mask)?
         };
-
+        
         let hidden_states = self.cross_attn_layer_norm.forward_3d(&(residual + cross_out));
+        log::info!("[CpuLayer] Cross-Attention block took: {:?}", t_ca.elapsed());
 
         // 3. FFN
+        let t_ffn = Instant::now();
         let residual = hidden_states.clone();
         let ffn_out = self.feedforward.forward(&hidden_states)?;
         let hidden_states = self.ffn_layer_norm.forward_3d(&(residual + ffn_out));
-
+        log::info!("[CpuLayer] FFN block took: {:?}", t_ffn.elapsed());
         Ok((hidden_states, (new_k, new_v)))
     }
 
@@ -76,49 +85,52 @@ impl DecoderCrossAttentionLayer {
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
-        cross_mask: Option<&Array2<f32>>,
+        cross_attention_mask: Option<&Array2<f32>>,
+        precomputed_kv: Option<&(ndarray::Array4<f32>, ndarray::Array4<f32>)>,
     ) -> Result<Array3<f32>> {
-        let (k_static, v_static) = self.cross_attn.precompute_encoder_kv(encoder_hidden_states)?;
-        let cross_out = self.cross_attn.forward(hidden_states, &k_static, &v_static, cross_mask)?;
         let residual = hidden_states.clone();
-        Ok(self.cross_attn_layer_norm.forward_3d(&(residual + cross_out)))
+        let cross_attn_output = if let Some((k, v)) = precomputed_kv {
+            self.cross_attn.forward(hidden_states, k, v, cross_attention_mask)?
+        } else {
+            let (k, v) = self.cross_attn.precompute_encoder_kv(encoder_hidden_states)?;
+            self.cross_attn.forward(hidden_states, &k, &v, cross_attention_mask)?
+        };
+        let hidden_states_after_add = residual + cross_attn_output;
+        let final_output = self.cross_attn_layer_norm.forward_3d(&hidden_states_after_add);
+        Ok(final_output)
     }
-
-
-    // // ... keep self_attention_block, cross_attention_block, feed_forward_block as they were ...
-    // pub fn self_attention_block(
-    //     &self,
-    //     hidden_states: &Array3<f32>,
-    //     self_attention_mask: Option<&Array2<f32>>,
-    //     past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
-    // ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-    //     let residual = hidden_states.clone();
-    //     let (attn_output, new_k, new_v) = self.self_attn.forward_self_attn(
-    //         hidden_states,
-    //         self_attention_mask,
-    //         past_kv,
-    //     )?;
-    //     let hidden_states_after_add = residual + attn_output;
-    //     let final_output = self.self_attn_layer_norm.forward_3d(&hidden_states_after_add);
-    //     Ok((final_output, (new_k, new_v)))
-    // }
-
-
-    // pub fn feed_forward_block(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-    //     let residual = hidden_states.clone();
-    //     let ffn_output = self.feedforward.forward(hidden_states)?;
-    //     let hidden_states_after_add = residual + ffn_output;
-    //     let final_output = self.ffn_layer_norm.forward_3d(&hidden_states_after_add);
-    //     Ok(final_output)
-    // }
+    pub fn feed_forward(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        let residual = hidden_states.clone();
+        let ffn_output = self.feedforward.forward(hidden_states)?;
+        let hidden_states_after_add = residual + ffn_output;
+        let final_output = self.ffn_layer_norm.forward_3d(&hidden_states_after_add);
+        Ok(final_output)
+    }
+   pub fn self_attention(
+        &self,
+        hidden_states: &Array3<f32>,
+        self_attention_mask: Option<&Array2<f32>>,
+        past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
+    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        let residual = hidden_states.clone();
+        let (attn_output, new_k, new_v) = self.self_attn.forward(
+            hidden_states, 
+            self_attention_mask, 
+            past_kv
+        )?;
+        let hidden_states_after_add = residual + attn_output;
+        let final_output = self.self_attn_layer_norm.forward_3d(&hidden_states_after_add);   
+        Ok((final_output, (new_k, new_v)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::attention::MultiHeadAttention;
-    use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::feedforward::{FeedForward, LegacyFeedForward, StdFeedForward};
     use crate::normalization::LayerNorm;
+    use crate::linear_layer::LinearLayer;
     use ndarray::{Array1, Array2, Array3};
 
     fn create_mock_cross_attention_layer(
@@ -139,39 +151,29 @@ mod tests {
             if i == j { 0.95 } else { -0.001 }
         });
 
-        let self_attn = MultiHeadAttention::new(
+        let self_attn = DecoderSelfAttention::new(
             hidden_size,
             num_heads,
-            q_weight.clone(),
-            Array1::from_elem(hidden_size, 0.1),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            o_weight.clone(),
-            Array1::zeros(hidden_size),
-            None,
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(o_weight.clone()),
         );
         let self_attn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
 
-        let cross_attn = MultiHeadAttention::new(
+        let cross_attn = DecoderCrossAttention::new(
             hidden_size,
             num_heads,
-            q_weight.clone(),
-            Array1::from_elem(hidden_size, 0.1),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            q_weight.clone(),
-            Array1::zeros(hidden_size),
-            o_weight.clone(),
-            Array1::zeros(hidden_size),
-            None,
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(q_weight.clone()),
+            LinearLayer::from(o_weight.clone()),
         );
         let cross_attn_layer_norm =
             LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
 
-        let feedforward = FeedForward::Standard(StdFeedForward::new(
+        let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
             fc1_weight,
             Array1::zeros(intermediate_size),
             fc2_weight,
@@ -207,6 +209,7 @@ mod tests {
             Some(&self_mask),
             Some(&cross_mask),
             None,
+            None
         );
 
         assert!(result.is_ok(), "Forward pass failed: {:?}", result.err());

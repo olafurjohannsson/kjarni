@@ -26,6 +26,16 @@ impl GpuDType for u32 {
     const DTYPE: DType = DType::U32;
 }
 
+pub enum GpuTensorState {
+    // ... existing ...
+    EncoderState {
+        state: GpuTensor, // Original 3D state
+        // Pre-computed cross-attention KV caches for all layers
+        cross_cache: Vec<(GpuTensor, GpuTensor)>, 
+    },
+}
+
+
 /// A GPU-backed tensor that bundles a wgpu::Buffer with its shape and data type.
 /// It holds a reference-counted pointer to the buffer and context, making it cheap to clone.
 // #[derive(Clone)]
@@ -59,16 +69,12 @@ impl fmt::Debug for GpuTensor {
 }
 
 impl GpuTensor {
+/// Returns logical (in_features, out_features) for a linear layer weight.
+    /// All weights are stored physically as [Out, In].
     pub fn linear_layer_dims(&self) -> (usize, usize) {
-        match self.dtype {
-            DType::BF16 => (self.shape[1], self.shape[0]), // [Out, In] -> (In, Out)
-            _ => (self.shape[0], self.shape[1]),           // [In, Out] -> (In, Out)
-        }
+        (self.shape[1], self.shape[0])  // [Out, In] → (In, Out)
     }
     pub fn from_raw(ctx: &Arc<WgpuContext>, raw: &RawTensor, label: &str) -> Result<Self> {
-        // If raw is F32, we upload directly.
-        // If raw is BF16/F16, we currently upload as raw bytes.
-        // IMPORTANT: WGPU buffers don't care about type, just size.
         log::info!(
             "Uploading Tensor '{}': DType={:?}, Shape={:?} ({:.2} MB)",
             label,
@@ -81,7 +87,7 @@ impl GpuTensor {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: &raw.bytes, // <--- Direct copy from Disk to VRAM!
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             });
 
         // If we uploaded BF16 bytes, we need to mark the GpuTensor as BF16

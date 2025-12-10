@@ -59,9 +59,9 @@ async fn main() -> anyhow::Result<()> {
     // --- Shared Setup ---
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
     let config = GenerationConfig {
-        max_new_tokens: Some(10),
+        max_new_tokens: Some(150),
         strategy: DecodingStrategy::Greedy,
-        repetition_penalty: 1.0,
+        repetition_penalty: 1.2,
         ..Default::default()
     };
 
@@ -79,12 +79,16 @@ async fn main() -> anyhow::Result<()> {
         offload_lm_head: false,
         target_dtype: None,
     };
+    let formatted = format!(
+        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+        prompt
+    );
     // Step 1: Load the model onto the desired device
     let model_gpu = LlamaModel::from_registry(
         ModelType::Llama3_2_1B,
         None,
-        Device::Cpu,
-        None, //Some(context.clone()),
+        Device::Wgpu,
+        Some(context.clone()),
         Some(d),
     )
         .await?;
@@ -100,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     println!("prompt: {}", prompt);
     io::stdout().flush().unwrap();
 
-    let mut stream_gpu = generator_gpu.generate_stream(prompt, &config).await?;
+    let mut stream_gpu = generator_gpu.generate_stream(formatted.as_str(), &config).await?;
     futures_util::pin_mut!(stream_gpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
         print!("{}", token.text);

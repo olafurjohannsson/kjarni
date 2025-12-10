@@ -1,6 +1,4 @@
-use crate::Embeddings;
 use crate::activations::Activation;
-use crate::adaptive_embeddings::EmbeddingSelector;
 use crate::cache::GpuKVCache;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
@@ -17,9 +15,10 @@ use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::rope::RoPE;
 use crate::traits::{Cache, Decoder, DecoderArchitecture, DecoderOutput, Device, TransformerModel};
 use crate::weights::ModelWeights;
+use crate::Embeddings;
 use anyhow::Result;
 use async_trait::async_trait;
-use ndarray::{Array1, Array2, Array3, s};
+use ndarray::{s, Array1, Array2, Array3};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 /// The GPU backend for a generic Transformer Decoder.
@@ -43,8 +42,6 @@ pub struct GpuTransformerDecoder {
     context: Arc<WgpuContext>,
 
     cpu_embeddings: Embeddings,
-
-    embedding_selector: EmbeddingSelector,
 
     gpu_rope: Option<GpuRoPE>,
 
@@ -76,7 +73,6 @@ impl GpuTransformerDecoder {
         );
         let vocab_size = word_embeddings.shape()[0];
         let hidden_size = word_embeddings.shape()[1];
-        let embedding_selector = EmbeddingSelector::new(&context, vocab_size, hidden_size);
         let embedding_weights = GpuEmbeddingWeights::new(&context, weights, config.as_ref())?;
         let embeddings = GpuEmbeddings::new(&context)?;
 
@@ -128,7 +124,6 @@ impl GpuTransformerDecoder {
             config: config.clone(),
             context: context.clone(),
             cpu_embeddings,
-            embedding_selector,
             gpu_rope,
             pool: Mutex::new(GpuTensorPool::new(context)),
         })

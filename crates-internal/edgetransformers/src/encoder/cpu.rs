@@ -3,11 +3,15 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
-use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
+use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+use crate::encoder::traits::EncoderArchitecture;
+use crate::feedforward::LegacyFeedForward;
+use crate::linear_layer::LinearLayer;
+use crate::traits::{Device, Encoder, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
 use crate::{
-    Embeddings, FeedForward, MultiHeadAttention, encoder_layer::EncoderLayer,
-    feedforward::StdFeedForward, normalization::LayerNorm,
+    encoder_layer::EncoderLayer, normalization::LayerNorm, Embeddings
+    , FeedForward,
 };
 
 /// The CPU backend implementation for the generic `TransformerEncoder`.
@@ -30,6 +34,7 @@ impl CpuTransformerEncoder {
         weights: &ModelWeights,
         config: Arc<dyn EncoderArchitecture + Send + Sync>,
     ) -> Result<Self> {
+        let dtype = None;
         // Load embedding weights using the names provided by the config.
         let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
         let token_type_embeddings = match type_w {
@@ -46,7 +51,7 @@ impl CpuTransformerEncoder {
             position_embeddings,
             token_type_embeddings,
         );
-        
+
 
         let (norm_w, norm_b) = config.get_embedding_layer_norm_names();
         let embeddings_layer_norm = LayerNorm::new(
@@ -62,29 +67,14 @@ impl CpuTransformerEncoder {
             let ffn_names = config.get_feed_forward_names(i);
             let transpose_attn = config.transpose_attention_weights();
 
-            // Helper closure to prepare weights, mirroring the GPU implementation
-            let prep_attn_w = |name: &str| -> Result<Array2<f32>> {
-                let raw = weights.get_array2(name)?;
-                if transpose_attn {
-                    Ok(raw)
-                } else {
-                    Ok(raw.t().as_standard_layout().to_owned())
-                }
-            };
 
-            // Now, construct the MultiHeadAttention with the prepared weights.
-            let attention = MultiHeadAttention::new(
+            let self_attn = EncoderSelfAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                prep_attn_w(&attn_names.q_weight)?,
-                weights.get_array1(&attn_names.q_bias)?,
-                prep_attn_w(&attn_names.k_weight)?,
-                weights.get_array1(&attn_names.k_bias)?,
-                prep_attn_w(&attn_names.v_weight)?,
-                weights.get_array1(&attn_names.v_bias)?,
-                prep_attn_w(&attn_names.output_weight)?,
-                weights.get_array1(&attn_names.output_bias)?,
-                None,
+                LinearLayer::from_weight_and_bias(weights, &attn_names.q_weight, Some(&attn_names.q_bias), false, dtype)?,
+                LinearLayer::from_weight_and_bias(weights, &attn_names.k_weight, Some(&attn_names.k_bias), false, dtype)?,
+                LinearLayer::from_weight_and_bias(weights, &attn_names.v_weight, Some(&attn_names.v_bias), false, dtype)?,
+                LinearLayer::from_weight_and_bias(weights, &attn_names.output_weight, Some(&attn_names.output_bias), false, dtype)?,
             );
 
             let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
@@ -102,7 +92,7 @@ impl CpuTransformerEncoder {
                 raw_output_w
             };
 
-            let feed_forward = FeedForward::Standard(StdFeedForward::new(
+            let feed_forward = FeedForward::Legacy(LegacyFeedForward::new(
                 fc1_weight_for_constructor,
                 weights.get_array1(&ffn_names.intermediate_bias)?,
                 fc2_weight_for_constructor,
@@ -123,7 +113,7 @@ impl CpuTransformerEncoder {
             );
 
             layers.push(EncoderLayer {
-                self_attn: attention,
+                self_attn: self_attn,
                 self_attn_layer_norm,
                 feedforward: feed_forward,
                 ffn_layer_norm,
@@ -146,7 +136,7 @@ impl TransformerModel for CpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -171,8 +161,9 @@ impl Encoder for CpuTransformerEncoder {
             self.config.scale_embeddings(),
         );
         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
+        let is_prenorm = self.config().is_prenorm();
         for layer in &self.layers {
-            hidden_states = layer.forward(hidden_states, attention_mask, self.config.as_ref())?;
+            hidden_states = layer.forward(hidden_states, attention_mask, None, is_prenorm)?;
         }
 
         Ok(EncoderOutput {

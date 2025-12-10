@@ -62,6 +62,10 @@ pub struct DecoderOutput<T = f32> {
     pub past_key_values: Option<Vec<(Array4<T>, Array4<T>)>>,
 }
 
+pub trait CpuClassificationHead {
+    fn project(&self, hidden_states: &Array3<f32>) -> Array2<f32>;  // [batch, num_classes]
+}
+
 /// Defines the asynchronous interface for an encoder model (e.g., BERT).
 ///
 /// An encoder processes an entire input sequence at once, creating a
@@ -96,6 +100,121 @@ pub trait Encoder: TransformerModel {
         token_type_ids: Option<&Array2<u32>>,
     ) -> Result<Array3<f32>>;
 }
+
+
+// ============================================================================
+// CPU ENCODER
+// ============================================================================
+
+/// Output from a CPU encoder.
+#[derive(Clone, Debug)]
+pub struct CpuEncoderOutput {
+    /// Final hidden states: `[batch_size, sequence_length, hidden_size]`
+    pub last_hidden_state: Array3<f32>,
+}
+
+/// CPU-based transformer encoder trait.
+///
+/// Provides methods for embedding lookup, normalization, and layer execution
+/// with support for partial layer execution (for hybrid CPU/GPU workflows).
+///
+/// # Example
+/// ```rust
+/// // Full forward pass
+/// let output = encoder.forward(&input_ids, &attention_mask, None)?;
+///
+/// // Partial execution for hybrid workflow
+/// let hidden = encoder.embed_and_normalize(&input_ids, None);
+/// let partial = encoder.forward_layers(&hidden, &mask, 0, 6)?;  // First 6 layers
+/// // ... transfer to GPU and continue ...
+/// ```
+pub trait CpuEncoder: Send + Sync {
+    /// Compute embeddings only (word + position + token_type).
+    ///
+    /// Does NOT apply the initial layer normalization.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs for models like BERT
+    ///
+    /// # Returns
+    /// Hidden states `[batch_size, sequence_length, hidden_size]`
+    fn embed(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Array3<f32>;
+
+    /// Compute embeddings + initial normalization.
+    ///
+    /// This produces hidden states ready to be processed by encoder layers.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs
+    ///
+    /// # Returns
+    /// Normalized hidden states `[batch_size, sequence_length, hidden_size]`
+    fn embed_and_normalize(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Array3<f32>;
+
+    /// Run layers `[start_layer, end_layer)` on pre-computed hidden states.
+    ///
+    /// Useful for:
+    /// - Hybrid CPU/GPU execution
+    /// - Layer-by-layer debugging
+    /// - Partial model execution
+    ///
+    /// # Arguments
+    /// * `hidden_states` - Input hidden states `[batch_size, seq_len, hidden_size]`
+    /// * `attention_mask` - Attention mask `[batch_size, seq_len]`
+    /// * `start_layer` - First layer to execute (inclusive)
+    /// * `end_layer` - Last layer to execute (exclusive)
+    ///
+    /// # Returns
+    /// Hidden states after processing through the specified layers
+    fn forward_layers(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<Array3<f32>>;
+
+    /// Number of encoder layers in this model.
+    fn num_layers(&self) -> usize;
+
+    /// Hidden dimension of the model.
+    fn hidden_size(&self) -> usize;
+
+    /// Full forward pass through the encoder.
+    ///
+    /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `attention_mask` - Attention mask `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs
+    ///
+    /// # Returns
+    /// Encoder output containing the final hidden states
+    fn forward(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Result<CpuEncoderOutput> {
+        let hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        let output = self.forward_layers(&hidden, attention_mask, 0, self.num_layers())?;
+        Ok(CpuEncoderOutput {
+            last_hidden_state: output,
+        })
+    }
+}
+
 
 /// Defines the asynchronous interface for a standalone decoder model (e.g., GPT-2).
 ///
@@ -134,32 +253,6 @@ pub trait Decoder: TransformerModel {
     ) -> Result<Array3<f32>>;
 }
 
-/// Defines the asynchronous interface for a decoder that uses cross-attention (e.g., BART Decoder).
-///
-/// This type of decoder attends to two sources: its own previously generated tokens
-/// (self-attention) and the output of an encoder (cross-attention).
-#[async_trait(?Send)]
-pub trait CrossAttentionDecoder: TransformerModel {
-    type TokenInput;
-    type EncoderStateInput;
-    type MaskInput;
-    type Output;
-
-    /// Asynchronously performs a forward pass through the full encoder-decoder stack.
-    async fn forward<'a>(
-        &self,
-        decoder_input_ids: &Self::TokenInput,
-        encoder_hidden_states: &'a Self::EncoderStateInput,
-        encoder_attention_mask: Option<&'a Self::MaskInput>,
-        decoder_attention_mask: Option<&'a Self::MaskInput>,
-        cache: Option<&mut dyn Cache>,
-        // NEW: Optional pre-computed Cross KV
-        // Vector of tuples (K, V) matching the layers
-        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
-    ) -> Result<Self::Output>;
-
-    // fn as_any(&self) -> &dyn Any;
-}
 
 /// A trait providing high-level configuration shared by all transformer models.
 ///
@@ -241,6 +334,11 @@ pub trait LanguageModelConfig: TransformerConfig {
         false
     }
 
+    // In, Out layout for Legacy FFN weights
+    fn legacy_ffn_weights(&self) -> bool {
+        false
+    }
+
     /// If we should transpose the attention weights.
     fn transpose_attention_weights(&self) -> bool {
         false
@@ -278,25 +376,6 @@ pub trait CrossAttentionDecoderArchitecture: LanguageModelConfig {
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 }
 
-/// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
-///
-/// This trait acts as a "blueprint" that a generic `TransformerEncoder` can use to
-/// construct itself. It provides a mapping from abstract component concepts (e.g., "the query
-/// projection of the first layer's attention") to the concrete tensor names found in a
-/// `safetensors` weight file.
-pub trait EncoderArchitecture: LanguageModelConfig {
-    /// Returns the tensor names for the word, position, and token type embeddings.
-    //fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>); // RoBERTa has no token_type_embeddings
-
-    /// Returns the tensor names for the LayerNorm applied after the embedding layer.
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str);
-
-    /// Returns the names of all weights and biases for the attention component of a specific encoder layer.
-    fn get_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
-
-    /// Returns the names of all weights and biases for the feed-forward component of a specific encoder layer.
-    fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
-}
 
 /// Describes the architectural specifics of a Decoder-only model (e.g., GPT-2, Llama).
 ///

@@ -90,7 +90,7 @@ impl Gpt2GpuDecoder {
         // 3. Decoder Layers
         let mut layers = Vec::with_capacity(config.num_hidden_layers());
         for i in 0..config.num_hidden_layers() {
-            log::debug!(
+            log::info!(
                 "Building GPT-2 layer {}/{}",
                 i + 1,
                 config.num_hidden_layers()
@@ -122,34 +122,97 @@ impl Gpt2GpuDecoder {
         layer_idx: usize,
     ) -> Result<GpuPreNormDecoderLayer> {
         let hidden_size = config.hidden_size();
+        let intermediate_size = config.intermediate_size();
 
-        // USE THIS for GPT-2 (combined QKV)
         let attn_names = config.get_attention_names(layer_idx);
-        let ffn_names = config.get_feed_forward_names(layer_idx);
 
         // Load COMBINED QKV weight and split it
         let qkv_weight = weights.get_array2(&attn_names.qkv_weight)?;
         let qkv_bias = weights.get_array1(&attn_names.qkv_bias)?;
 
-        // Split the combined matrix
-        let q_weight = qkv_weight.slice(s![.., 0..hidden_size]).to_owned();
+        log::info!(
+            "Layer {}: QKV weight shape (file): {:?}, expected [In={}, Out={}]",
+            layer_idx,
+            qkv_weight.shape(),
+            hidden_size,
+            3 * hidden_size
+        );
+
+        // Split AND transpose: file is [In, Out], GPU needs [Out, In]
+        let q_weight = qkv_weight
+            .slice(s![.., 0..hidden_size])
+            .t()
+            .as_standard_layout()
+            .to_owned();
         let k_weight = qkv_weight
             .slice(s![.., hidden_size..2 * hidden_size])
+            .t()
+            .as_standard_layout()
             .to_owned();
         let v_weight = qkv_weight
             .slice(s![.., 2 * hidden_size..3 * hidden_size])
+            .t()
+            .as_standard_layout()
             .to_owned();
 
-        // Split the combined bias
+        // Verify [Out, In] layout for GPU
+        assert_eq!(
+            q_weight.shape(),
+            &[hidden_size, hidden_size],
+            "Q weight must be [Out={}, In={}] for GPU, got {:?}",
+            hidden_size,
+            hidden_size,
+            q_weight.shape()
+        );
+        assert_eq!(
+            k_weight.shape(),
+            &[hidden_size, hidden_size],
+            "K weight must be [Out={}, In={}] for GPU, got {:?}",
+            hidden_size,
+            hidden_size,
+            k_weight.shape()
+        );
+        assert_eq!(
+            v_weight.shape(),
+            &[hidden_size, hidden_size],
+            "V weight must be [Out={}, In={}] for GPU, got {:?}",
+            hidden_size,
+            hidden_size,
+            v_weight.shape()
+        );
+
+        log::info!(
+            "Layer {}: Q/K/V weights transposed to [Out, In]: {:?}",
+            layer_idx,
+            q_weight.shape()
+        );
+
+        // Split biases (no transpose needed for 1D)
         let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
         let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
         let v_bias = qkv_bias
             .slice(s![2 * hidden_size..3 * hidden_size])
             .to_owned();
 
-        // Load output projection
-        let o_weight = weights.get_array2(&attn_names.output_weight)?;
+        // Output projection - transpose from [In, Out] to [Out, In]
+        let o_weight_raw = weights.get_array2(&attn_names.output_weight)?;
+        log::info!(
+            "Layer {}: O weight shape (file): {:?}",
+            layer_idx,
+            o_weight_raw.shape()
+        );
+
+        let o_weight = o_weight_raw.t().as_standard_layout().to_owned();
         let o_bias = weights.get_array1(&attn_names.output_bias)?;
+
+        assert_eq!(
+            o_weight.shape(),
+            &[hidden_size, hidden_size],
+            "Output weight must be [Out={}, In={}] for GPU, got {:?}",
+            hidden_size,
+            hidden_size,
+            o_weight.shape()
+        );
 
         let self_attn_weights = GpuAttentionWeights::new(
             GpuTensor::from_ndarray(&context, &q_weight)?,
@@ -162,8 +225,8 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &o_bias)?,
         )?;
 
+        // --- Attention LayerNorm (unchanged) ---
         let (self_attn_norm, self_attn_norm_weights) = {
-            // GPT-2 Path: Use the top-level `attn_names`
             let gamma = weights.get_array1(&attn_names.norm_weight)?;
             let beta = weights.get_array1(&attn_names.norm_bias)?;
             (
@@ -175,10 +238,41 @@ impl Gpt2GpuDecoder {
             )
         };
 
-        // GPT-2 uses standard FFN (not SwiGLU)
-        let intermediate_w = weights.get_linear_weight(&ffn_names.intermediate_weight)?;
+        // --- FFN weights with transpose ---
+        let ffn_names = config.get_feed_forward_names(layer_idx);
+
+        let intermediate_w_raw = weights.get_array2(&ffn_names.intermediate_weight)?;
+        let output_w_raw = weights.get_array2(&ffn_names.output_weight)?;
+
+        log::info!(
+            "Layer {}: FFN intermediate weight (file): {:?}, output weight (file): {:?}",
+            layer_idx,
+            intermediate_w_raw.shape(),
+            output_w_raw.shape()
+        );
+
+        // Transpose: [In, Out] -> [Out, In]
+        let intermediate_w = intermediate_w_raw.t().as_standard_layout().to_owned();
+        let output_w = output_w_raw.t().as_standard_layout().to_owned();
+
+        assert_eq!(
+            intermediate_w.shape(),
+            &[intermediate_size, hidden_size],
+            "FFN intermediate must be [Out={}, In={}] for GPU, got {:?}",
+            intermediate_size,
+            hidden_size,
+            intermediate_w.shape()
+        );
+        assert_eq!(
+            output_w.shape(),
+            &[hidden_size, intermediate_size],
+            "FFN output must be [Out={}, In={}] for GPU, got {:?}",
+            hidden_size,
+            intermediate_size,
+            output_w.shape()
+        );
+
         let intermediate_b = weights.get_array1(&ffn_names.intermediate_bias)?;
-        let output_w = weights.get_linear_weight(&ffn_names.output_weight)?;
         let output_b = weights.get_array1(&ffn_names.output_bias)?;
 
         let ff_weights = GpuFeedForwardWeights::Standard(GpuStandardFFNWeights::new(
@@ -187,16 +281,28 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &output_w)?,
             GpuTensor::from_ndarray(&context, &output_b)?,
         )?);
+
         let feedforward =
             GpuFeedForward::Standard(GpuStandardFFN::new(&context, config.activation_function())?);
 
-        // GPT-2 uses LayerNorm
+        // --- FFN LayerNorm (unchanged) ---
         let ffn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
             GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_weight)?)?,
             GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_bias)?)?,
         )?);
         let ffn_norm =
             GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, config.layer_norm_eps()));
+
+        log::info!(
+            "✓ Layer {} built: attn [{}, {}], ffn [{}, {}] → [{}, {}]",
+            layer_idx,
+            hidden_size,
+            hidden_size,
+            intermediate_size,
+            hidden_size,
+            hidden_size,
+            intermediate_size
+        );
 
         Ok(GpuPreNormDecoderLayer::new(
             &context,

@@ -878,6 +878,7 @@ async fn test_cross_attention_with_real_model() -> Result<()> {
         &cpu_decoder_hidden,
         &cpu_encoder_output.last_hidden_state,
         Some(&encoder_mask),
+        None
     )?;
 
     println!(
@@ -1140,6 +1141,7 @@ async fn test_seq2seq_with_real_model() -> Result<()> {
             &gpu_decoder_mask,
             Some(&gpu_encoder_mask),
             None, // past_kv
+            None,
             0,
             &mut pool,
         )?;

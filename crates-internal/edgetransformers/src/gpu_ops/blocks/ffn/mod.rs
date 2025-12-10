@@ -28,16 +28,15 @@
 //! to inspect the model's configuration (`transpose_ffn_weights` flag) and perform any
 //! necessary transpositions *before* calling this constructor.
 
-use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::{GpuFrameContext, GpuTensorPool};
-use anyhow::{Result, anyhow};
+use crate::gpu_ops::GpuTensorPool;
+use crate::WgpuContext;
+use anyhow::Result;
 use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, CommandEncoder, ComputePipeline};
-
+use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
 /// Uniform struct passed to both FC1 and FC2 shaders.
 #[repr(C)]
@@ -95,7 +94,19 @@ impl GpuFeedForwardWeights {
             fc2_bias,
         })
     }
-
+    pub fn from_config_names(
+        context: &Arc<WgpuContext>,
+        weights: &crate::weights::ModelWeights,
+        names: &crate::traits::LayerFeedForwardNames,
+    ) -> Result<Self> {
+        // This assumes a standard FFN. You can add a match for SwiGLU here later.
+        Ok(crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights::new(
+            GpuTensor::from_raw(context, &weights.get_raw(&names.intermediate_weight)?, "ff1_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.intermediate_bias)?, "ff1_b")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.output_weight)?, "ff2_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.output_bias)?, "ff2_b")?,
+        )?)
+    }
     /// Creates a new `GpuFeedForwardWeights` container from CPU ndarrays.
     /// This is the recommended "smart" constructor.
     pub fn from_ndarrays(
@@ -132,16 +143,17 @@ pub struct GpuFeedForward {
 impl GpuFeedForward {
     /// Creates a new `GpuFeedForward` block from pre-prepared weights.
     pub fn new(context: &Arc<WgpuContext>, activation: Activation) -> Result<Self> {
-        // match activation {
-        //     Activation::Gelu => (), // Supported
-        //     _ => {
-        //         return Err(anyhow!(
-        //             "GpuFeedForward's fused kernel currently only supports GELU."
-        //         ));
-        //     }
-        // }
+        match activation {
+            Activation::Gelu => (),
+            Activation::GeluNew => (),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "GpuFeedForward's fused kernel currently only supports gelu and gelu_new."
+                ));
+            }
+        }
 
-        let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context);
+        let (fc1_pipeline, fc1_layout) = compile_fc1_pipeline(context, activation);
         let (fc2_pipeline, fc2_layout) = compile_fc2_pipeline(context);
 
         Ok(Self {
@@ -358,9 +370,18 @@ impl GpuFeedForward {
     }
 }
 
-fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
+fn compile_fc1_pipeline(context: &WgpuContext, activation: Activation) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
     let shader = device.create_shader_module(wgpu::include_wgsl!("./fc1.wgsl"));
+
+    let act_function = match activation {
+        Activation::Gelu => 0.0,
+        Activation::GeluNew => 1.0,
+        _ => 0.0
+    };
+    let constants = [
+        ("0", act_function)
+    ];
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("FC1 Bind Group Layout"),
@@ -434,7 +455,10 @@ fn compile_fc1_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLay
         layout: Some(&pipeline_layout),
         module: &shader,
         entry_point: Some("main"),
-        compilation_options: Default::default(),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &constants,
+            ..Default::default()
+        },
         cache: None,
     });
 

@@ -52,6 +52,14 @@ pub struct BartConfig {
     pub extra_pos_embeddings: u32,
     pub is_encoder_decoder: bool,
     pub model_type: String,
+
+    
+}
+
+impl BartConfig {
+    pub fn from_json(json: &str) -> anyhow::Result<Self> {
+        Ok(serde_json::from_str(json)?)
+    }
 }
 
 impl TransformerConfig for BartConfig {
@@ -98,7 +106,7 @@ impl LanguageModelConfig for BartConfig {
         self.encoder_ffn_dim
     } // Use encoder's as default
     fn transpose_ffn_weights(&self) -> bool {
-        true
+        false
     } // PyTorch linear layers need transposing
     fn transpose_attention_weights(&self) -> bool {
         true

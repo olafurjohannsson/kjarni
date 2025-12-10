@@ -128,7 +128,7 @@ impl ModelWeights {
 
         // Check for sharded model
         let index_file = path.join("model.safetensors.index.json");
-        
+
         if index_file.exists() {
             Self::load_sharded(path, config_json)
         } else {
@@ -139,11 +139,9 @@ impl ModelWeights {
     fn load_single(path: &Path, config_json: String) -> Result<Self> {
         let weights_file = path.join("model.safetensors");
         let (shard, tensor_names) = Self::load_shard(&weights_file)?;
-        
-        let tensor_to_shard: HashMap<String, usize> = tensor_names
-            .into_iter()
-            .map(|name| (name, 0))
-            .collect();
+
+        let tensor_to_shard: HashMap<String, usize> =
+            tensor_names.into_iter().map(|name| (name, 0)).collect();
 
         Ok(Self {
             shards: vec![shard],
@@ -206,28 +204,28 @@ impl ModelWeights {
         })
     }
 
-fn load_shard(path: &std::path::PathBuf) -> Result<(ShardInfo, Vec<String>)> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("Failed to open {:?}", path))?;
+    fn load_shard(path: &std::path::PathBuf) -> Result<(ShardInfo, Vec<String>)> {
+        let file = fs::File::open(path).with_context(|| format!("Failed to open {:?}", path))?;
 
-    let mmap = unsafe { Mmap::map(&file)? };
-    let static_slice: &'static [u8] =
-        unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&mmap[..]) };
+        let mmap = unsafe { Mmap::map(&file)? };
+        let static_slice: &'static [u8] =
+            unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&mmap[..]) };
 
-    let safetensors = SafeTensors::deserialize(static_slice)?;
-    let tensor_names: Vec<String> = safetensors.names().iter().map(|s| s.to_string()).collect();
+        let safetensors = SafeTensors::deserialize(static_slice)?;
+        let tensor_names: Vec<String> = safetensors.names().iter().map(|s| s.to_string()).collect();
 
-    Ok((
-        ShardInfo {
-            _backing: ShardBacking::Mmap(mmap),
-            safetensors,
-        },
-        tensor_names,
-    ))
-}
+        Ok((
+            ShardInfo {
+                _backing: ShardBacking::Mmap(mmap),
+                safetensors,
+            },
+            tensor_names,
+        ))
+    }
 
     pub fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
-        let shard_idx = self.tensor_to_shard
+        let shard_idx = self
+            .tensor_to_shard
             .get(name)
             .ok_or_else(|| anyhow!("Tensor '{}' not found in any shard", name))?;
 
@@ -261,24 +259,17 @@ fn load_shard(path: &std::path::PathBuf) -> Result<(ShardInfo, Vec<String>)> {
         self.tensor_to_shard.contains_key(name)
     }
 
-
-pub fn from_bytes(data: Vec<u8>, config_json: &str) -> Result<Self> {
+    pub fn from_bytes(data: Vec<u8>, config_json: &str) -> Result<Self> {
         // Store the bytes
         let data = Box::leak(data.into_boxed_slice()); // Leak to get 'static lifetime
-        
-        let safetensors = SafeTensors::deserialize(data)?;
-        
-        // Build tensor map (all tensors in shard 0)
-        let tensor_names: Vec<String> = safetensors
-            .names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
 
-        let tensor_to_shard: HashMap<String, usize> = tensor_names
-            .into_iter()
-            .map(|name| (name, 0))
-            .collect();
+        let safetensors = SafeTensors::deserialize(data)?;
+
+        // Build tensor map (all tensors in shard 0)
+        let tensor_names: Vec<String> = safetensors.names().iter().map(|s| s.to_string()).collect();
+
+        let tensor_to_shard: HashMap<String, usize> =
+            tensor_names.into_iter().map(|name| (name, 0)).collect();
 
         let shard = ShardInfo {
             _backing: ShardBacking::Memory(data),
@@ -310,7 +301,7 @@ pub fn from_bytes(data: Vec<u8>, config_json: &str) -> Result<Self> {
         for (idx, (filename, data)) in shard_data.into_iter().enumerate() {
             let data = Box::leak(data.into_boxed_slice());
             let safetensors = SafeTensors::deserialize(data)?;
-            
+
             shards.push(ShardInfo {
                 _backing: ShardBacking::Memory(data),
                 safetensors,
@@ -362,7 +353,6 @@ pub fn from_bytes(data: Vec<u8>, config_json: &str) -> Result<Self> {
 
         Ok(arr)
     }
-
 
     // --- Legacy / CPU Helpers ---
 

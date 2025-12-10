@@ -62,7 +62,7 @@ impl LlamaGpuDecoder {
             let arr_t = arr
                 .view()
                 .into_dimensionality::<ndarray::Ix2>()?
-                .t()
+                // .t()
                 .as_standard_layout()
                 .to_owned();
             let tensor = GpuTensor::from_ndarray(ctx, &arr_t)?;
@@ -154,7 +154,6 @@ impl LlamaGpuDecoder {
     ) -> Result<GpuPreNormDecoderLayer> {
         let hidden_size = config.hidden_size();
         let kv_dim = config.kv_dim();
-        let attn_names = config.get_attention_names(i);
         let ffn_names = config.get_feed_forward_names(i);
         let layer_attn_names = config.get_layer_attention_names(i);
 

@@ -255,19 +255,22 @@ fn run_internal_bmm(
         ],
     });
 
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("BMM Compute Pass"),
-        timestamp_writes: None,
+    // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+    //     label: Some("BMM Compute Pass"),
+    //     timestamp_writes: None,
+    // });
+    let label = format!("BMM");
+    context.profiler.profile(encoder, &label, |compute_pass| {
+        compute_pass.set_pipeline(pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
+
+        const TILE_DIM: u32 = 32;
+        let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
+        let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
+        let workgroup_z = batch;
+
+        compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
     });
-    compute_pass.set_pipeline(pipeline);
-    compute_pass.set_bind_group(0, &bind_group, &[]);
-
-    const TILE_DIM: u32 = 32;
-    let workgroup_x = (n + TILE_DIM - 1) / TILE_DIM;
-    let workgroup_y = (m + TILE_DIM - 1) / TILE_DIM;
-    let workgroup_z = batch;
-
-    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
 }
 
 fn compile_bmm_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {

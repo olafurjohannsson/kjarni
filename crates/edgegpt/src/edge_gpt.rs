@@ -80,7 +80,7 @@ impl EdgeGPT {
         let generator = guard.as_ref().unwrap();
         
         let config = generator.model.get_default_generation_config();
-        generator.generate(text, &config).await
+        generator.generate(text, Some(&config)).await
     }
 
     /// Translate text (Alias for summarize/generate on translation models)

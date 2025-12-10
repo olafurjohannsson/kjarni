@@ -10,6 +10,7 @@ use crate::models::gpt2::config::Gpt2Config;
 use crate::models::gpt2::gpu_decoder::Gpt2GpuDecoder;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use edgetransformers::TransformerConfig;
 use edgetransformers::decoder::TransformerDecoder;
 use edgetransformers::gpu_ops::GpuTensor;
 use edgetransformers::linear_layer::LinearLayer;
@@ -116,13 +117,15 @@ impl Gpt2Model {
             config_arc.get_lm_head_name(), 
             decoder_config.unwrap_or_default().target_dtype
         )?;
-
+        
         let config = config_arc
             .as_any()
             .downcast_ref::<Gpt2Config>()
             .cloned()
             .map(Arc::new)
             .ok_or_else(|| anyhow!("Failed to downcast config to Gpt2Config"))?;
+        
+        assert_eq!(lm_head.shape(), [config.vocab_size, config.hidden_size()], "LM head shape mismatch");
 
         // Split CPU/GPU paths
         match device {
@@ -154,9 +157,9 @@ impl Gpt2Model {
                 // lm_head already transposed
                 // let gpu_lm_head_transposed =
                 //     Some(GpuTensor::from_ndarray(&ctx, &lm_head)?);
-                let gpu_lm_head_transposed =
-                    Some(GpuTensor::from_ndarray(&ctx, &lm_head.to_f32_transposed())?);
-
+                // let gpu_lm_head_transposed =
+                //     Some(GpuTensor::from_ndarray(&ctx, &lm_head.to_f32_transposed())?);
+                let gpu_lm_head = Some(GpuTensor::from_ndarray(&ctx, lm_head.as_f32().unwrap())?);
                 log::info!("✓ GPU model loaded successfully");
                 ctx.print_memory_usage();
 
@@ -166,7 +169,7 @@ impl Gpt2Model {
                     tokenizer,
                     config,
                     lm_head,
-                    gpu_lm_head_transposed,
+                    gpu_lm_head_transposed: gpu_lm_head,
                     device,
                     context: Some(ctx),
                 })

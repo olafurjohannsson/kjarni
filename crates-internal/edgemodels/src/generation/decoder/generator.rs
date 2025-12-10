@@ -24,6 +24,9 @@ pub enum AnyDecoderBackend {
     Gpu(GpuDecoderBackend),
 }
 
+// #[async_trait(?Send)]
+// impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
+
 impl AnyDecoderBackend {
     /// Prefill phase - process initial prompt tokens
     pub async fn prefill<'a>(
@@ -138,7 +141,8 @@ impl Generator {
             .await?;
 
         log::info!("Prefill phase took: {:?}", prefill_start.elapsed());
-
+        log::info!("Tokens: {:?}", tokens);
+        log::info!("Next token logits shape: {:?}", next_token_logits.shape());
         Ok(try_stream! {
             // --- 1. Yield the prompt tokens ---
             for &token_id in &prompt_tokens {

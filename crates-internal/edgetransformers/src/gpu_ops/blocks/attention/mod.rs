@@ -1,6 +1,7 @@
 // mod fused;
 
 use crate::gpu_context::WgpuContext;
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::kernel::Kernel;
@@ -21,56 +22,6 @@ use std::sync::Arc;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 
-/// A simple memory pool for managing temporary, intermediate GPU tensors.
-pub struct TempStorage {
-    context: Arc<WgpuContext>,
-    pool: HashMap<Vec<usize>, Vec<GpuTensor>>,
-    active: Vec<GpuTensor>,
-}
-
-impl TempStorage {
-    pub fn new(context: Arc<WgpuContext>) -> Self {
-        Self {
-            context,
-            pool: HashMap::new(),
-            active: Vec::new(),
-        }
-    }
-
-    pub fn get(&mut self, shape: Vec<usize>) -> GpuTensor {
-        let tensor = if let Some(tensors) = self.pool.get_mut(&shape) {
-            if let Some(tensor) = tensors.pop() {
-                tensor
-            } else {
-                GpuTensor::uninitialized(
-                    &self.context,
-                    shape,
-                    crate::gpu_ops::DType::F32,
-                    "TempTensor",
-                )
-            }
-        } else {
-            GpuTensor::uninitialized(
-                &self.context,
-                shape,
-                crate::gpu_ops::DType::F32,
-                "TempTensor",
-            )
-        };
-        self.active.push(tensor.clone());
-        tensor
-    }
-
-    pub fn reclaim(&mut self) {
-        for tensor in self.active.drain(..) {
-            self.pool
-                .entry(tensor.shape().to_vec())
-                .or_default()
-                .push(tensor);
-        }
-    }
-}
-
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
     pub q_weight: GpuTensor, // (crate)
@@ -84,6 +35,22 @@ pub struct GpuAttentionWeights {
 }
 
 impl GpuAttentionWeights {
+    pub fn from_config_names(
+        context: &Arc<WgpuContext>,
+        weights: &crate::weights::ModelWeights,
+        names: &crate::traits::LayerAttentionNames,
+    ) -> Result<Self> {
+        Ok(Self::new(
+            GpuTensor::from_raw(context, &weights.get_raw(&names.q_weight)?, "q_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.q_bias)?, "q_b")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.k_weight)?, "k_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.k_bias)?, "k_b")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.v_weight)?, "v_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.v_bias)?, "v_b")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.output_weight)?, "o_w")?,
+            GpuTensor::from_raw(context, &weights.get_raw(&names.output_bias)?, "o_b")?,
+        )?)
+    }
     pub fn new(
         q_weight: GpuTensor,
         q_bias: GpuTensor,
@@ -181,6 +148,7 @@ impl GpuAttentionWeights {
 pub struct GpuAttention {
     pub matmul: GpuMatMul,
     pub bmm: GpuBatchedMatMul,
+    pub linear: GpuLinearLayer,
     pub add_bias: GpuAddBias,
     pub reshape: GpuReshape,
     pub unreshape: GpuUnreshape,
@@ -209,6 +177,7 @@ impl GpuAttention {
         Self {
             matmul: GpuMatMul::new(context),
             bmm: GpuBatchedMatMul::new(context),
+            linear: GpuLinearLayer::new(context),
             add_bias: GpuAddBias::new(context),
             reshape: GpuReshape::new(context),
             unreshape: GpuUnreshape::new(context),
@@ -653,7 +622,7 @@ impl GpuAttention {
             // Split heads for RoPE
             let k_split = self.split_heads(encoder, &new_k, pool);
             let k_rotated_4d = pool.get(k_split.shape().to_vec());
-            let dummy_q_out = pool.get(k_split.shape().to_vec());
+            // let dummy_q_out = pool.get(k_split.shape().to_vec());
             rope_encoder.encode(encoder, &k_split, &k_rotated_4d, position_offset);
             // Merge back to 3D for cache storage
             self.merge_heads(encoder, &k_rotated_4d, pool)
@@ -829,7 +798,8 @@ impl GpuAttention {
         let input_2d = input.view(vec![b * s, h]);
         let proj_2d = pool.get(vec![b * s, out_features]);
 
-        self.matmul.encode(encoder, &[&input_2d, weight], &proj_2d);
+        self.linear.encode(encoder, &input_2d, &weight, &proj_2d);
+        // self.matmul.encode(encoder, &[&input_2d, &weight], &proj_2d);
 
         // Add bias if it exists (check for non-zero length)
         let output_2d = if bias.shape()[0] > 0 {
@@ -912,5 +882,85 @@ impl GpuAttention {
     ) {
         // The apply_mask kernel should handle broadcasting
         self.apply_mask.encode(encoder, scores, mask, false, position_offset, logical_key_len);
+    }
+     /// Step 1: Pre-compute K and V from Encoder States (Optimized)
+    /// 
+    /// 1. Projects K and V from the static encoder states.
+    /// 2. Splits heads.
+    /// 3. PERMUTES K to [B, H, D, S] immediately. This saves permuting it every decoding step!
+    pub fn precompute_cross_kv(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        key_value: &GpuTensor, // Encoder Hidden States [B, S_enc, H_dim]
+        weights: &GpuAttentionWeights,
+        pool: &mut GpuTensorPool,
+    ) -> (GpuTensor, GpuTensor) {
+        // 1. Project K and V
+        let k_proj = self.project(encoder, key_value, &weights.k_weight, &weights.k_bias, pool);
+        let v_proj = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, pool);
+
+        // 2. Split Heads [B, S, H*D] -> [B, H, S, D]
+        let k_heads = self.split_heads(encoder, &k_proj, pool); 
+        let v_heads = self.split_heads(encoder, &v_proj, pool);
+
+        // 3. OPTIMIZATION: Permute K immediately for BMM
+        // We want Q [B, H, S_q, D] @ K_T [B, H, D, S_k]
+        // k_heads is [B, H, S, D]. We permute to [B, H, D, S].
+        // This makes it "Read-Only" optimal for the entire generation loop.
+        let k_optimized = k_heads.permute(encoder, &self.permute, &[0, 1, 3, 2]);
+
+        // V stays as [B, H, S, D] because context = Scores @ V
+        (k_optimized, v_heads)
+    }
+
+    /// Step 2: Forward using Pre-computed K/V
+    /// 
+    /// Faster than `forward_cross` because it skips K/V projection and K permutation.
+    pub fn forward_cross_precomputed(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        query: &GpuTensor,                // Decoder hidden state [B, S_dec, H_dim]
+        precomputed_k: &GpuTensor,        // [B, H, D, S_enc] (Already transposed!)
+        precomputed_v: &GpuTensor,        // [B, H, S_enc, D]
+        weights: &GpuAttentionWeights,
+        attention_mask: Option<&GpuTensor>,
+        pool: &mut GpuTensorPool,
+    ) -> GpuTensor {
+        // 1. Project Q only
+        let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
+        
+        // 2. Split Q Heads [B, H, S_dec, D]
+        let q_heads = self.split_heads(encoder, &q_proj, pool);
+
+        // 3. Attention Scores: Q @ K_precomputed
+        // q_heads [B, H, S_dec, D] @ k_pre [B, H, D, S_enc] -> [B, H, S_dec, S_enc]
+        // Note: No permutation needed on K here!
+        let scores = self.bmm_4d(encoder, &q_heads, precomputed_k, pool);
+
+        // 4. Apply Mask
+        if let Some(mask) = attention_mask {
+            // Reusing existing mask logic. Position/logical len usually 0 for cross attn padding mask
+            let position_offset = 0;
+            // The mask shape should match the last dim of scores (S_enc)
+            let logical_key_len = precomputed_k.shape()[3] as u32; 
+            self.apply_padding_mask(encoder, &scores, mask, pool, position_offset, logical_key_len);
+        }
+
+        // 5. Softmax
+        self.softmax.encode(encoder, &scores, self.scale_factor);
+
+        // 6. Context: Scores @ V_precomputed
+        // [B, H, S_dec, S_enc] @ [B, H, S_enc, D] -> [B, H, S_dec, D]
+        let context = self.bmm_4d(encoder, &scores, precomputed_v, pool);
+
+        // 7. Merge & Output
+        let context_merged = self.merge_heads(encoder, &context, pool);
+        self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            pool,
+        )
     }
 }

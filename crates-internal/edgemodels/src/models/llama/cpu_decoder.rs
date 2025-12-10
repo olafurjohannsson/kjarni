@@ -136,7 +136,7 @@ impl LlamaCpuDecoder {
         let k = LinearLayer::from_weights(weights, &layer_names.k_weight, target_dtype)?;
         let v = LinearLayer::from_weights(weights, &layer_names.v_weight, target_dtype)?;
         let o = LinearLayer::from_weights(weights, &layer_names.output_weight, target_dtype)?;
-
+        
         let attention = DecoderAttention::new(
             config.hidden_size,
             config.num_attention_heads,
@@ -156,6 +156,8 @@ impl LlamaCpuDecoder {
         )?;
         let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
         let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, target_dtype)?;
+
+
 
         let feed_forward = SwiGluFeedForward::new(gate, up, down);
 

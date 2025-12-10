@@ -120,17 +120,20 @@ fn run_internal_apply_mask(
         ],
     });
 
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some("Apply Mask Pass"),
-        timestamp_writes: None,
-    });
-    compute_pass.set_pipeline(pipeline);
-    compute_pass.set_bind_group(0, &bind_group, &[]);
+    // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+    //     label: Some("Apply Mask Pass"),
+    //     timestamp_writes: None,
+    // });
+    let label = format!("ApplyMask");
+    context.profiler.profile(encoder, &label, |compute_pass| {
+        compute_pass.set_pipeline(pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
 
-    let workgroup_x = (uniforms.query_len + 15) / 16;
-    let workgroup_y = (uniforms.key_stride + 15) / 16;
-    let workgroup_z = uniforms.batch_size * uniforms.num_heads;
-    compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z)
+        let workgroup_x = (uniforms.query_len + 15) / 16;
+        let workgroup_y = (uniforms.key_stride + 15) / 16;
+        let workgroup_z = uniforms.batch_size * uniforms.num_heads;
+        compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z)
+    });
 }
 
 pub fn compile_apply_mask_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {

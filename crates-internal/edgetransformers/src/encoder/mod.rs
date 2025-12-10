@@ -11,17 +11,34 @@
 
 mod cpu;
 mod gpu;
+pub mod encoder_self_attention;
+pub mod traits;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
+use crate::encoder::traits::EncoderArchitecture;
 use crate::gpu_context::WgpuContext;
-use crate::traits::{Device, Encoder, EncoderArchitecture, EncoderOutput, TransformerModel};
+use crate::traits::{Device, Encoder, EncoderOutput, TransformerModel};
 use crate::weights::ModelWeights;
 use cpu::CpuTransformerEncoder;
 use gpu::GpuTransformerEncoder;
+
+pub mod prelude {
+    pub use crate::encoder::traits::{
+        DType,
+        EncoderLanguageModel,
+        EncodingConfig,
+        GpuClassificationHead,
+        GpuEncoder,
+        GpuEncoderInput,
+        GpuEncoderOutput,
+        PoolingStrategy,
+    };
+}
+
 
 /// A generic, backend-agnostic transformer encoder stack.
 ///
@@ -87,7 +104,7 @@ impl TransformerModel for TransformerEncoder {
             Self::Gpu(model) => model.device(),
         }
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
