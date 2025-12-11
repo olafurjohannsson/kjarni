@@ -4,13 +4,14 @@ use async_trait::async_trait;
 use edgetransformers::activations::Activation;
 use edgetransformers::embeddings::Embeddings;
 use edgetransformers::encoder::encoder_self_attention::EncoderSelfAttention;
+use edgetransformers::encoder::traits::CpuEncoder;
 use edgetransformers::encoder_layer::EncoderLayer;
 use edgetransformers::feedforward::{FeedForward, StdFeedForward};
 use edgetransformers::linear_layer::LinearLayer;
 use edgetransformers::normalization::LayerNorm;
 use edgetransformers::prelude::*;
 use edgetransformers::traits::TransformerConfig;
-use edgetransformers::traits::{CpuEncoder, Encoder, TransformerModel};
+use edgetransformers::traits::{Encoder, TransformerModel};
 use edgetransformers::weights::ModelWeights;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
@@ -210,4 +211,79 @@ impl CpuEncoder for BartCpuEncoder {
     // ) -> Result<Array3<f32>> {
     //     Ok(self.forward(input, mask, None).await?.last_hidden_state)
     // }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use ndarray::{s, Array2};
+    use std::path::Path;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_bart_encoder_layer0_golden() -> Result<()> {
+        // 1. Setup
+        let path_str = "/home/olafurj/.cache/edgetransformers/olafuraron_distilbart-cnn-12-6/";
+        let path = Path::new(path_str);
+        if !path.exists() {
+            println!("SKIPPING TEST: Weights not found.");
+            return Ok(());
+        }
+        let weights = ModelWeights::new(path)?;
+
+        let config_json = std::fs::read_to_string(path.join("config.json"))?;
+        let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
+
+        // 2. Create Encoder
+        let encoder = BartCpuEncoder::new(&weights, config.clone())?;
+
+        // 3. Prepare Input IDs
+        let input_ids_vec = vec![0, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
+        let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
+
+        // 4. Run Embeddings + LayerNorm
+        // This validates "embed_and_normalize" vs Python "Layer 0 Input"
+        let hidden = encoder.embed_and_normalize(&input_ids, None);
+
+        // --- CHECKPOINT A: Input to Layer 0 ---
+        // Paste the output from the Python script here!
+        let expected_input: Vec<f32> = vec![
+            -0.012427182, -0.1763359, 0.028129267, -0.010629091, 0.015348487,
+            0.00571412, 0.020377142, -0.07212893, -0.012256589, -0.07150629
+        ];
+
+        // If this assertion fails, your `embed_layer_norm` or `embed_and_normalize` logic is wrong.
+        let actual_input_slice = hidden.slice(s![0, 0, 0..10]);
+        for (i, &expected) in expected_input.iter().enumerate() {
+            let actual = actual_input_slice[i];
+            assert!((actual - expected).abs() < 1e-5, "Layer 0 Input Mismatch at {}: expected {}, got {}", i, expected, actual);
+        }
+        println!("✅ Checkpoint A Passed: Layer 0 Input matches.");
+
+        // 5. Run Layer 0
+        let mask = Array2::<f32>::ones((1, 10));
+        // Note: passing None for attention_mask because we are testing unmasked
+        // If your layer logic requires it, pass &mask
+        let layer0_out = encoder.layers[0].forward(hidden.clone(), &mask, None, false)?;
+
+        // --- CHECKPOINT B: Output of Layer 0 ---
+        // --- CHECKPOINT B: Layer 0 Output ---
+        let expected_output: Vec<f32> = vec![
+            -0.009041301, -0.054615177, -0.012196737, -0.009672836, 0.02251066,
+            0.021573834, 0.0050799875, -0.0085836, 0.03302486, -0.033092678
+        ];
+
+        let actual_output_slice = layer0_out.slice(s![0, 0, 0..10]);
+        println!("Layer 0 Actual: {:?}", actual_output_slice);
+
+        for (i, &expected) in expected_output.iter().enumerate() {
+            let actual = actual_output_slice[i];
+            assert!((actual - expected).abs() < 1e-4, "Layer 0 Output Mismatch at {}: expected {}, got {}", i, expected, actual);
+        }
+
+        println!("✅ Checkpoint B Passed: Layer 0 Output matches.");
+        Ok(())
+    }
 }

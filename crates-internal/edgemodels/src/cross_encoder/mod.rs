@@ -3,17 +3,18 @@
 //! Takes two texts as input and outputs a relevance score.
 //! Used for reranking search results or computing pairwise similarity.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use edgetransformers::models::download_model_files;
 use ndarray::{Array1, Array2};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+use edgetransformers::encoder::traits::EncoderArchitecture;
 use edgetransformers::encoder::TransformerEncoder;
 use edgetransformers::models::{ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
-use edgetransformers::traits::{Encoder, EncoderArchitecture, LanguageModelConfig};
+use edgetransformers::traits::{Encoder, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
 
 mod configs;
@@ -418,7 +419,7 @@ impl TransformerModel for CrossEncoder {
     fn device(&self) -> Device {
         self.encoder.device()
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

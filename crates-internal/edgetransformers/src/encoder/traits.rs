@@ -3,6 +3,7 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
+use crate::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::GpuTensorPool;
 use crate::models::base::LanguageModel;
@@ -13,41 +14,7 @@ pub use crate::weights::DType;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
-use std::fmt;
 
-#[derive(Clone, Debug)]
-pub struct EncodingConfig {
-    pub pooling_strategy: PoolingStrategy,
-    pub normalize: bool,
-}
-impl fmt::Display for EncodingConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "EncodingConfig {{ pooling_strategy: {}, normalize: {} }}",
-            self.pooling_strategy, self.normalize
-        )
-    }
-}
-/// Pooling strategies for sequence outputs
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PoolingStrategy {
-    Mean,
-    Max,
-    Cls,
-    LastToken,
-}
-impl fmt::Display for PoolingStrategy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            PoolingStrategy::Mean => "Mean",
-            PoolingStrategy::Max => "Max",
-            PoolingStrategy::Cls => "CLS",
-            PoolingStrategy::LastToken => "LastToken",
-        };
-        write!(f, "{}", s)
-    }
-}
 
 /// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
 ///
@@ -197,14 +164,112 @@ pub trait EncoderLanguageModel: LanguageModel {
     }
 }
 
-pub trait GpuClassificationHead {
-    fn project(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
-        hidden_states: &GpuTensor,
-    ) -> Result<GpuTensor>;
+
+// ============================================================================
+// CPU ENCODER
+// ============================================================================
+
+/// Output from a CPU encoder.
+#[derive(Clone, Debug)]
+pub struct CpuEncoderOutput {
+    /// Final hidden states: `[batch_size, sequence_length, hidden_size]`
+    pub last_hidden_state: Array3<f32>,
 }
+
+/// CPU-based transformer encoder trait.
+///
+/// Provides methods for embedding lookup, normalization, and layer execution
+/// with support for partial layer execution (for hybrid CPU/GPU workflows).
+///
+
+/// ```
+pub trait CpuEncoder: Send + Sync {
+    /// Compute embeddings only (word + position + token_type).
+    ///
+    /// Does NOT apply the initial layer normalization.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs for models like BERT
+    ///
+    /// # Returns
+    /// Hidden states `[batch_size, sequence_length, hidden_size]`
+    fn embed(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Array3<f32>;
+
+    /// Compute embeddings + initial normalization.
+    ///
+    /// This produces hidden states ready to be processed by encoder layers.
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs
+    ///
+    /// # Returns
+    /// Normalized hidden states `[batch_size, sequence_length, hidden_size]`
+    fn embed_and_normalize(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Array3<f32>;
+
+    /// Run layers `[start_layer, end_layer)` on pre-computed hidden states.
+    ///
+    /// Useful for:
+    /// - Hybrid CPU/GPU execution
+    /// - Layer-by-layer debugging
+    /// - Partial model execution
+    ///
+    /// # Arguments
+    /// * `hidden_states` - Input hidden states `[batch_size, seq_len, hidden_size]`
+    /// * `attention_mask` - Attention mask `[batch_size, seq_len]`
+    /// * `start_layer` - First layer to execute (inclusive)
+    /// * `end_layer` - Last layer to execute (exclusive)
+    ///
+    /// # Returns
+    /// Hidden states after processing through the specified layers
+    fn forward_layers(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<Array3<f32>>;
+
+    /// Number of encoder layers in this model.
+    fn num_layers(&self) -> usize;
+
+    /// Hidden dimension of the model.
+    fn hidden_size(&self) -> usize;
+
+    /// Full forward pass through the encoder.
+    ///
+    /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
+    ///
+    /// # Arguments
+    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
+    /// * `attention_mask` - Attention mask `[batch_size, sequence_length]`
+    /// * `token_type_ids` - Optional token type IDs
+    ///
+    /// # Returns
+    /// Encoder output containing the final hidden states
+    fn forward(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<u32>>,
+    ) -> Result<CpuEncoderOutput> {
+        let hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        let output = self.forward_layers(&hidden, attention_mask, 0, self.num_layers())?;
+        Ok(CpuEncoderOutput {
+            last_hidden_state: output,
+        })
+    }
+}
+
 
 // ============================================================================
 // GPU ENCODER
@@ -255,18 +320,7 @@ pub struct GpuEncoderOutput {
 /// Provides methods for embedding lookup, normalization, and layer execution
 /// on GPU with support for hybrid CPU/GPU workflows through `GpuEncoderInput`.
 ///
-/// # Example
-/// ```rust
-/// // Full GPU path
-/// let output = encoder.forward(cmd, pool, GpuEncoderInput::TokensGpu(&ids), &mask, None)?;
-///
-/// // VRAM saving: CPU embeddings → GPU layers
-/// let output = encoder.forward(cmd, pool, GpuEncoderInput::TokensCpu(&ids_cpu), &mask, None)?;
-///
-/// // Hybrid: continue from CPU hidden states
-/// let cpu_hidden = cpu_encoder.forward_layers(&hidden, &mask, 0, 6)?;
-/// let output = encoder.forward_layers(cmd, pool, &uploaded_hidden, &mask, 6, 12)?;
-/// ```
+
 pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only (handles CPU/GPU input).
     ///

@@ -9,7 +9,7 @@ use crate::models::base::{GenerationConfig, LanguageModel};
 use crate::prelude::*;
 // use crate::models::base::De
 use crate::traits::DecoderOutput;
-use crate::traits::{CpuEncoder, EncoderOutput};
+use crate::traits::EncoderOutput;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytemuck;

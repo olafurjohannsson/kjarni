@@ -1,19 +1,18 @@
-
 use crate::models::bart::config::BartConfig;
 use anyhow::Result;
 use async_trait::async_trait;
-use edgetransformers::cache::CpuBeamKVCache;
 use edgetransformers::activations::Activation;
-use edgetransformers::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
+use edgetransformers::cache::CpuBeamKVCache;
 use edgetransformers::decoder_cross_attn_layer::DecoderCrossAttentionLayer;
 use edgetransformers::embeddings::Embeddings;
 use edgetransformers::encoder::TransformerEncoder;
+use edgetransformers::encoder_decoder::traits::CrossAttentionDecoder;
+use edgetransformers::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
 use edgetransformers::feedforward::{FeedForward, LegacyFeedForward, StdFeedForward};
 use edgetransformers::linear_layer::LinearLayer;
 use edgetransformers::normalization::LayerNorm;
 use edgetransformers::prelude::*;
-use edgetransformers::traits::{DecoderOutput};
-use edgetransformers::encoder_decoder::traits::CrossAttentionDecoder;
+use edgetransformers::traits::DecoderOutput;
 use edgetransformers::weights::ModelWeights;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
@@ -23,11 +22,27 @@ pub struct BartCpuDecoder {
     embeddings: Embeddings,
     layers: Vec<DecoderCrossAttentionLayer>,
     // BART puts layer norm *after* embedding
-    embed_layer_norm: LayerNorm, 
+    embed_layer_norm: LayerNorm,
     config: Arc<BartConfig>,
 }
 
 impl BartCpuDecoder {
+    pub fn debug_embeddings(
+        &self,
+        decoder_input_ids: &Array2<u32>,
+        position_offset: usize,
+    ) -> Array3<f32> {
+        self.embeddings.forward(decoder_input_ids, None, position_offset + 2, false)
+    }
+
+    pub fn debug_embed_with_ln(
+        &self,
+        decoder_input_ids: &Array2<u32>,
+        position_offset: usize,
+    ) -> Array3<f32> {
+        let hidden = self.debug_embeddings(decoder_input_ids, position_offset);
+        self.embed_layer_norm.forward_3d(&hidden)
+    }
     pub fn new(weights: &ModelWeights, config: Arc<BartConfig>) -> Result<Self> {
         // 1. Embeddings
         // "model.shared.weight" is the word embedding
@@ -97,7 +112,7 @@ impl BartCpuDecoder {
         // Note: Using raw arrays for StdFeedForward until it supports LinearLayer
         let fc1 = weights.get_array2(&format!("{}.fc1.weight", prefix))?;
         let fc2 = weights.get_array2(&format!("{}.fc2.weight", prefix))?;
-        
+
         let ffn = FeedForward::Legacy(LegacyFeedForward::new(
             fc1.t().as_standard_layout().to_owned(), // Transpose
             weights.get_array1(&format!("{}.fc1.bias", prefix))?,
@@ -159,11 +174,11 @@ impl CrossAttentionDecoder for BartCpuDecoder {
         encoder_attention_mask: Option<&'a Self::MaskInput>,
         decoder_attention_mask: Option<&'a Self::MaskInput>,
         cache: Option<&mut dyn Cache>,
-        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>, 
+        cross_kv_caches: Option<&Vec<(ndarray::Array4<f32>, ndarray::Array4<f32>)>>,
     ) -> Result<Self::Output> {
         let t_total = Instant::now();
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
-        
+
         // --- 1. Embeddings ---
         let t_embed = Instant::now();
         let mut hidden_states = self.embeddings.forward(
@@ -197,7 +212,7 @@ impl CrossAttentionDecoder for BartCpuDecoder {
                 past_kv_view,
                 layer_cross,
             )?;
-            
+
             hidden_states = out;
             new_kv.push((nk, nv));
             log::info!("[CpuDecoder] Layer {} took: {:?}", i, t_layer.elapsed());
@@ -209,7 +224,7 @@ impl CrossAttentionDecoder for BartCpuDecoder {
                 cache.update(i, &k, &v)?;
             }
         }
-        
+
         log::info!("[CpuDecoder] Total forward pass took: {:?}", t_total.elapsed());
         Ok(DecoderOutput { last_hidden_state: hidden_states, past_key_values: None })
     }

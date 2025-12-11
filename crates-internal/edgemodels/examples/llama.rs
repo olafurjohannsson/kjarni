@@ -79,39 +79,41 @@ async fn main() -> anyhow::Result<()> {
         offload_lm_head: false,
         target_dtype: None,
     };
-    let formatted = format!(
-        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
-        prompt
-    );
-    // Step 1: Load the model onto the desired device
     let model_gpu = LlamaModel::from_registry(
         ModelType::Llama3_2_1B,
         None,
         Device::Wgpu,
         Some(context.clone()),
         Some(d),
-    )
-        .await?;
-
-    // Step 2: Create the appropriate backend for the device
-    // let cpu_backend = CpuDecoderBackend;
-    // let gpu_backend = GpuDecoderBackend::new(context.clone(), pool.clone())?;
-
-    // Step 3: Create the generic Generator with the model and backend
+    ).await?;
     let generator_gpu = Generator::new(Box::new(model_gpu))?;
 
-    // Step 4: Generate text. The user-facing API is unchanged!
     println!("prompt: {}", prompt);
     io::stdout().flush().unwrap();
 
-    let mut stream_gpu = generator_gpu.generate_stream(formatted.as_str(), &config).await?;
+    let mut stream_gpu = generator_gpu.generate_stream(prompt, &config).await?;
     futures_util::pin_mut!(stream_gpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }
     println!();
-    bench_matmul_bf16();
-    bench_down_projection();
+
+    io::stdout().flush().unwrap();
+    let model_cpu = LlamaModel::from_registry(
+        ModelType::Llama3_2_1B,
+        None,
+        Device::Cpu,
+        None,
+        Some(d),
+    ).await?;
+    let generator_cpu = Generator::new(Box::new(model_cpu))?;
+    let mut stream_cpu = generator_gpu.generate_stream(prompt, &config).await?;
+    futures_util::pin_mut!(stream_cpu);
+    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {
+        print!("{}", token.text);
+        io::stdout().flush().unwrap();
+    }
+    println!();
     Ok(())
 }

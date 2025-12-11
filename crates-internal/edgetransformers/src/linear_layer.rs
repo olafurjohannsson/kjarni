@@ -1,11 +1,25 @@
-use crate::utils::linear_algebra::{matmul_2d_f32_notranspose, matmul_2d_mixed_bf16};
+use crate::utils::linear_algebra::{matmul_2d_mixed_bf16, matmul_2d_transposed};
 use crate::weights::{DType, ModelWeights};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ndarray::{Array1, Array2, ArrayView2};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WeightLayout {
+    /// Shape: [InFeatures, OutFeatures]
+    /// Math: y = x @ W
+    /// Best for: CPU (Faer), Matrix-Vector multiplication where columns are contiguous
+    InOut,
+
+    /// Shape: [OutFeatures, InFeatures]
+    /// Math: y = x @ W^T
+    /// Best for: Custom AVX Kernels (Dot Product), GPU Coalescing
+    OutIn,
+}
 
 pub struct LinearLayer {
     data: LinearData,
     pub bias: Option<Array1<f32>>,
+    pub layout: WeightLayout,
 }
 
 pub enum LinearData {
@@ -18,16 +32,18 @@ impl LinearLayer {
     /// Weights stored as [out, in], computes input[batch, in] -> output[batch, out]
     #[inline]
     pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
-        let t_start = std::time::Instant::now();
         let mut result = match &self.data {
-            LinearData::F32(w) => matmul_2d_f32_notranspose(input, &w.view()),
+            // Use standard Faer transpose logic.
+            // It might be slower than pre-transposing, but it is GUARANTEED correct.
+            LinearData::F32(w) => matmul_2d_transposed(input, &w.view()),
+
+            // Your custom kernel expects OutIn
             LinearData::BF16(w) => matmul_2d_mixed_bf16(input, &w.view()),
         };
-        log::info!("[LinearLayer] MatMul took: {:?}, Input: {:?}, Weight: {:?}", t_start.elapsed(), input.shape(), self.shape());
+
         if let Some(bias) = &self.bias {
             result += bias;
         }
-
         result
     }
 
@@ -37,6 +53,7 @@ impl LinearLayer {
         Self {
             data: LinearData::F32(weight.as_standard_layout().to_owned()),
             bias,
+            layout: WeightLayout::OutIn,
         }
     }
 
@@ -44,6 +61,7 @@ impl LinearLayer {
         Self {
             data: LinearData::BF16(weight.as_standard_layout().to_owned()),
             bias,
+            layout: WeightLayout::OutIn,
         }
     }
 
@@ -97,7 +115,7 @@ impl LinearLayer {
             _ => None,
         };
 
-        Ok(Self { data, bias })
+        Ok(Self { data, bias, layout: WeightLayout::OutIn })
     }
 
     /// Load weight only (no bias)
@@ -114,13 +132,10 @@ impl LinearLayer {
         name: &str,
         dtype_override: Option<DType>,
     ) -> Result<Self> {
-        // 1. Peek at the file to see what it actually is
+        // Simple loader. No transpose logic.
         let raw_tensor = weights.get_raw(name)?;
         let file_dtype = raw_tensor.dtype;
-
-        // 2. Decide what we WANT it to be
         let target_dtype = dtype_override.unwrap_or(file_dtype);
-        // log::info!("Loading '{}': file_dtype={:?}, override={:?}", name, file_dtype, dtype_override);
 
         let data = match (file_dtype, target_dtype) {
             (DType::BF16, DType::BF16) => {
@@ -131,14 +146,7 @@ impl LinearLayer {
                 let w = weights.get_array2(name)?;
                 LinearData::F32(w.as_standard_layout().to_owned())
             }
-            (src, tgt) => {
-                return Err(anyhow!(
-                    "Cannot load tensor '{}': Source is {:?}, Target is {:?} (Conversion not supported)",
-                    name,
-                    src,
-                    tgt
-                ));
-            }
+            _ => return Err(anyhow!("Unsupported conversion")),
         };
 
         let bias_key = if name.ends_with(".weight") {
@@ -146,14 +154,108 @@ impl LinearLayer {
         } else {
             format!("{}.bias", name.trim_end_matches(".weight"))
         };
-
         let bias = if weights.contains(&bias_key) {
             Some(weights.get_array1(&bias_key)?)
         } else {
             None
         };
 
-        Ok(Self { data, bias })
+        Ok(Self { data, bias, layout: WeightLayout::OutIn })
+    }
+    /// Smart loader that converts whatever is in the file to the optimal format for this backend.
+    ///
+    /// For CPU (Faer), optimal is `InOut`.
+    /// For GPU/SIMD, optimal is `OutIn`.
+    pub fn from_weights_layout(
+        weights: &ModelWeights,
+        name: &str,
+        source_layout_hint: Option<WeightLayout>, // None = Try to Auto-Detect
+        dtype_override: Option<DType>,
+    ) -> Result<Self> {
+        let raw_tensor = weights.get_raw(name)?;
+        let shape = raw_tensor.shape.clone();
+
+        // --- 1. Load Bias (Crucial for auto-detection) ---
+        let bias_key = if name.ends_with(".weight") {
+            name.replace(".weight", ".bias")
+        } else {
+            format!("{}.bias", name.trim_end_matches(".weight"))
+        };
+        let bias = if weights.contains(&bias_key) {
+            Some(weights.get_array1(&bias_key)?)
+        } else {
+            None
+        };
+
+        // --- 2. Determine Source Layout ---
+        let source_layout = match source_layout_hint {
+            Some(l) => l,
+            None => Self::infer_layout(&shape, bias.as_ref().map(|b| b.shape()[0]))?,
+        };
+
+        // --- 3. Determine Target Layout (Optimization Strategy) ---
+        // For CPU F32, Faer is much faster with [In, Out].
+        // For BF16 custom kernels, you might prefer [Out, In].
+        let target_layout = match dtype_override.unwrap_or(raw_tensor.dtype) {
+            DType::F32 => WeightLayout::InOut,
+            _ => WeightLayout::OutIn,
+        };
+
+        let transpose_needed = source_layout != target_layout;
+
+        // --- 4. Load & Transpose if needed ---
+        let data = match (raw_tensor.dtype, dtype_override.unwrap_or(raw_tensor.dtype)) {
+            (DType::F32, DType::F32) | (DType::BF16, DType::F32) => {
+                let mut w = weights.get_array2(name)?;
+                if transpose_needed {
+                    w = w.t().as_standard_layout().to_owned();
+                }
+                LinearData::F32(w.as_standard_layout().to_owned())
+            }
+            (DType::BF16, DType::BF16) => {
+                let mut w = weights.get_linear_weight_bf16(name)?;
+                if transpose_needed {
+                    w = w.t().as_standard_layout().to_owned();
+                }
+                LinearData::BF16(w.as_standard_layout().to_owned())
+            }
+            _ => return Err(anyhow!("Unsupported dtype conversion")),
+        };
+
+        Ok(Self { data, bias, layout: target_layout })
+    }
+
+    /// Heuristic to detect layout based on shapes and bias
+    fn infer_layout(weight_shape: &[usize], bias_len: Option<usize>) -> Result<WeightLayout> {
+        if weight_shape.len() != 2 {
+            return Err(anyhow!("Weight must be 2D"));
+        }
+        let (dim0, dim1) = (weight_shape[0], weight_shape[1]);
+
+        // Case A: Bias is present
+        if let Some(bias_size) = bias_len {
+            if dim0 == bias_size && dim1 != bias_size {
+                // Bias matches Dim0 -> Dim0 is OutFeatures -> [Out, In]
+                return Ok(WeightLayout::OutIn);
+            }
+            if dim1 == bias_size && dim0 != bias_size {
+                // Bias matches Dim1 -> Dim1 is OutFeatures -> [In, Out]
+                return Ok(WeightLayout::InOut);
+            }
+            if dim0 == bias_size && dim1 == bias_size {
+                // Square matrix with matching bias. Ambiguous.
+                // Default to PyTorch standard (OutIn) as it's most common today (Llama, Bart, Bert).
+                // GPT-2 users MUST provide explicit hint.
+                log::warn!("Ambiguous square matrix with bias. Defaulting to OutIn (PyTorch standard).");
+                return Ok(WeightLayout::OutIn);
+            }
+        }
+
+        // Case B: No Bias (Rectangular)
+        // Hard to guess without model knowledge.
+        // Usually [4096, 1024] -> OutIn (FFN Expansion)
+        // Defaulting to OutIn is the safest bet for Safetensors/HuggingFace.
+        Ok(WeightLayout::OutIn)
     }
     // ==================== Accessors ====================
 

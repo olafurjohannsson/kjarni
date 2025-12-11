@@ -53,6 +53,12 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let attention_mask = Array2::ones(input_ids.dim());
         let encoder_output = cpu_encoder
             .forward(&input_ids, &attention_mask, None)?;
+        // --- DEBUG LOG ---
+        let hidden = &encoder_output.last_hidden_state;
+        let slice = hidden.slice(ndarray::s![0, 0, 0..10]);
+        log::error!("CHECKPOINT 2 - Encoder Hidden: {:?}", slice);
+        // -----------------
+
         let original_state = &encoder_output.last_hidden_state;
         let state = if num_beams > 1 {
             original_state
@@ -94,12 +100,14 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             CpuTensor::EncoderState { state, cross_cache } => (state, Some(cross_cache)),
             _ => return Err(anyhow!("Invalid tensor type for encoder_state")),
         };
+
+
         let attention_mask = Array2::ones(tokens.dim());
         let decoder_output = cpu_decoder
             .forward(
                 tokens,
                 enc_state,
-                None,
+                None, //Some(&position_ids),
                 Some(&attention_mask),
                 Some(cache),
                 cross_kv,

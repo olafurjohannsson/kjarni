@@ -2,13 +2,18 @@
 //!
 //! This test helps identify where GPU implementation diverges from CPU.
 
+use crate::models::bart::model::BartModel;
 use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
 use edgetransformers::encoder::prelude::*;
+use edgetransformers::encoder::prelude::*;
+use edgetransformers::encoder::traits::CpuEncoder;
 use edgetransformers::gpu_context::WgpuContext;
+use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor};
 use edgetransformers::models::ModelType;
-use edgetransformers::traits::{CpuEncoder, Device};
+use edgetransformers::traits::Device;
 use ndarray::Array2;
+use ndarray::Array3;
 
 const TOLERANCE: f32 = 1e-3; // Allow small numerical differences
 
@@ -94,11 +99,6 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
         false
     }
 }
-use crate::models::bart::model::BartModel;
-use edgetransformers::gpu_ops::{GpuFrameContext, GpuTensor};
-
-use edgetransformers::models::base::GpuEncoderInput;
-use ndarray::Array3;
 
 #[tokio::test]
 async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
@@ -192,9 +192,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     println!("=== STEP 3: AFTER LAYER 0 ===");
     let h = cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
 
-    let cpu_layer0 =
-
-        cpu_encoder.forward_layers(&h, &mask_cpu, 0, 1)?;
+    let cpu_layer0 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 1)?;
 
     {
         let mut pool_guard = pool.lock().await;
@@ -202,11 +200,13 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let (enc, pool_ref) = frame.resources();
 
         let input_gpu = gpu_encoder.embed_and_normalize(
-            enc, pool_ref, GpuEncoderInput::TokensGpu(&input_ids_gpu), None)?;
+            enc,
+            pool_ref,
+            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            None,
+        )?;
 
-
-        let gpu_layer0 =
-            gpu_encoder.forward_layers(enc, pool_ref, &input_gpu, &mask_gpu, 0, 1)?;
+        let gpu_layer0 = gpu_encoder.forward_layers(enc, pool_ref, &input_gpu, &mask_gpu, 0, 1)?;
         frame.finish();
 
         let gpu_layer0_cpu = gpu_layer0.to_ndarray_3d::<f32>().await?;
@@ -222,7 +222,11 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
             let mut frame = GpuFrameContext::new(&ctx, pool_guard);
             let (enc, pool_ref) = frame.resources();
             let input_gpu = gpu_encoder.embed_and_normalize(
-                enc, pool_ref, GpuEncoderInput::TokensGpu(&input_ids_gpu), None)?;
+                enc,
+                pool_ref,
+                GpuEncoderInput::TokensGpu(&input_ids_gpu),
+                None,
+            )?;
             let gpu_layer_n =
                 gpu_encoder.forward_layers(enc, pool_ref, &input_gpu, &mask_gpu, 0, n)?;
             frame.finish();
@@ -271,7 +275,11 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
         let input_gpu = gpu_encoder.embed_and_normalize(
-            enc, pool_ref, GpuEncoderInput::TokensGpu(&input_ids_gpu), None)?;
+            enc,
+            pool_ref,
+            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            None,
+        )?;
         let gpu_debug_12 =
             gpu_encoder.forward_layers(enc, pool_ref, &input_gpu, &mask_gpu, 0, 12)?;
         let gpu_forward = gpu_encoder.forward(
@@ -315,7 +323,12 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         frame.finish();
 
         let gpu_full_cpu = gpu_full.last_hidden_state.to_ndarray_3d::<f32>().await?;
-        assert_close(&cpu_full.last_hidden_state, &gpu_full_cpu, 1e-4, "Full Encoder");
+        assert_close(
+            &cpu_full.last_hidden_state,
+            &gpu_full_cpu,
+            1e-4,
+            "Full Encoder",
+        );
     }
 
     println!("✓ All steps passed!");

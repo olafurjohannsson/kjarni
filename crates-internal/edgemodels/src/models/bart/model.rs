@@ -10,6 +10,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use edgetransformers::cache::{Cache, CpuBeamKVCache, GpuBeamKVCache};
 use edgetransformers::encoder::prelude::*;
+use edgetransformers::encoder::traits::CpuEncoder;
 use edgetransformers::encoder_decoder::traits::{
     CrossAttentionDecoder, EncoderDecoderLanguageModel, GpuCrossAttentionDecoder,
 };
@@ -20,7 +21,7 @@ use edgetransformers::models::download_model_files;
 use edgetransformers::models::{ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
 use edgetransformers::traits::{
-    CpuEncoder, DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
+    DecoderOutput, Encoder, EncoderOutput, LanguageModelConfig, TransformerModel,
 };
 use edgetransformers::weights::ModelWeights;
 use ndarray::{Array1, Array2, Array3};
@@ -54,6 +55,13 @@ impl BartModel {
         ModelType::DistilBartCnn,
         ModelType::MarianEnIs,
     ];
+    pub fn bart_cpu_decoder(&self) -> Option<&BartCpuDecoder> {
+        self.cpu_decoder.as_ref()
+    }
+
+    pub fn bart_gpu_decoder(&self) -> Option<&BartGpuDecoder> {
+        self.gpu_decoder.as_ref()
+    }
     pub fn bart_cpu_encoder(&self) -> Option<&BartCpuEncoder> {
         self.cpu_encoder.as_ref()
     }

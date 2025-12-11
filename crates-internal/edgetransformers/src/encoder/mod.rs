@@ -13,6 +13,9 @@ mod cpu;
 mod gpu;
 pub mod encoder_self_attention;
 pub mod traits;
+mod classifier;
+mod pooler;
+pub mod config;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -27,15 +30,34 @@ use cpu::CpuTransformerEncoder;
 use gpu::GpuTransformerEncoder;
 
 pub mod prelude {
-    pub use crate::encoder::traits::{
-        DType,
-        EncoderLanguageModel,
-        EncodingConfig,
-        GpuClassificationHead,
-        GpuEncoder,
-        GpuEncoderInput,
-        GpuEncoderOutput,
-        PoolingStrategy,
+    pub use crate::encoder::{
+        classifier::{
+            CpuSequenceClassifier,
+            CpuTokenClassifier,
+            GpuClassificationHead,
+            GpuSequenceClassifier,
+            GpuTokenClassifier,
+        },
+        config::{
+            EncoderLoadConfig,
+            EncodingConfig,
+            PoolingStrategy,
+        },
+        encoder_self_attention::EncoderSelfAttention,
+        pooler::{
+            CpuPooler,
+            GpuPooler,
+            StandardCpuPooler,
+        },
+        traits::{
+            CpuEncoder,
+            CpuEncoderOutput,
+            DType,
+            EncoderLanguageModel,
+            GpuEncoder,
+            GpuEncoderInput,
+            GpuEncoderOutput,
+        },
     };
 }
 

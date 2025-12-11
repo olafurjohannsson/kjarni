@@ -1,9 +1,7 @@
 //! Embedding layers for transformers
 
-use crate::gpu_ops::primitives::scale;
 use ndarray::parallel::prelude::*;
-use ndarray::{Array2, Array3, Axis, s};
-use tokio::sync::Mutex;
+use ndarray::{s, Array2, Array3, Axis};
 /// Configuration for embedding layers
 pub struct EmbeddingConfig {
     pub vocab_size: usize,
@@ -171,13 +169,13 @@ mod tests {
     use super::*;
     use super::*;
     use crate::gpu_context::WgpuContext;
-    use crate::gpu_ops::{GpuTensor, GpuTensorPool, GpuFrameContext};
     use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
-    use crate::traits::{LanguageModelConfig, TransformerConfig}; // Make sure traits are in scope
+    use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+    use crate::traits::{LanguageModelConfig, TransformerConfig};
+    // Make sure traits are in scope
     use anyhow::Result;
-    use ndarray::{Array2, arr2};
+    use ndarray::{arr2, Array2};
     use std::path::Path;
-    use std::sync::Arc;
 
     // --- Mock Config for testing ---
     struct TestConfig {
@@ -249,84 +247,147 @@ mod tests {
             );
         }
     }
-
     #[tokio::test]
-async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
-    // --- 1. Setup Common Data and Config ---
-    let context = WgpuContext::new().await?;
-    let config = TestConfig {
-        extra_pos_embeddings: 2,
-        scale_embed: false,
-    };
+    async fn test_bart_embeddings_golden_parity() -> Result<()> {
+        use std::path::Path;
+        use ndarray::Array2;
+        use crate::weights::ModelWeights;
 
-    // Create mock inputs on CPU
-    let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
-    let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
+        // 1. Setup - Point this to your local DistilBART weights
+        // You can download them via Python:
+        // `huggingface_hub.snapshot_download("sshleifer/distilbart-cnn-12-6")`
+        let path_str = "/home/olafurj/.cache/edgetransformers/olafuraron_distilbart-cnn-12-6/";
+        let path = Path::new(path_str);
+        assert!(path.exists());
+        if !path.exists() {
+            println!("SKIPPING TEST: Weights not found at {}. Please download them to run golden test.", path_str);
+            return Ok(());
+        }
 
-    // Keep the hardcoded path for now as requested
-    let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
-    let weights = crate::weights::ModelWeights::new(Path::new(p))?;
+        let weights = ModelWeights::new(path)?;
 
-    // --- 2. Run CPU Path (Expected Result) ---
-    let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
-    let token_type_embeddings = if let Some(name) = type_w {
-        Some(weights.get_array2(name)?)
-    } else {
-        None
-    };
+        // 2. Load Weights (Standard BART naming)
+        let word_emb = weights.get_array2("model.shared.weight")?;
+        let pos_emb = weights.get_array2("model.encoder.embed_positions.weight")?;
 
-    let cpu_embeddings = Embeddings::new(
-        weights.get_array2(word_w)?,
-        Some(weights.get_array2(pos_w)?),
-        token_type_embeddings,
-    );
-    let expected_output = cpu_embeddings.forward(
-        &input_ids_cpu,
-        Some(&token_type_ids_cpu),
-        config.extra_pos_embeddings(),
-        config.scale_embeddings(),
-    );
+        // BART-specific: No token type embeddings
+        let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
 
-    // --- 3. Setup GPU Modules and Inputs ---
-    let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
-    let gpu_embeddings = GpuEmbeddings::new(&context)?;
+        // 3. Define Inputs (From your Python Checkpoint 1)
+        // "Rust is a multi-paradigm..."
+        let input_ids_vec = vec![0, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
+        let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
 
-    // Upload inputs
-    let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-    let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
-    
-    // --- START CORRECTION ---
+        // 4. Run Forward
+        // CONFIG CHECK: extra_pos_embeddings=2, scale_embeddings=False
+        let output = embeddings.forward(
+            &input_ids,
+            None,
+            2,     // position_offset (BART starts at 2)
+            false, // scale_embeddings (DistilBART is false)
+        );
 
-    // 1. Create the encoder and pool directly for the test.
-    let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut pool = GpuTensorPool::new(context.clone());
+        // 5. Assert against Ground Truth (From your Python Checkpoint 1.5)
+        let expected_first_10 = vec![
+            0.011993408, -0.13934326, 0.058532715, -0.042541504, -0.061767578,
+            -0.002746582, 0.0048828125, -0.037017822, -0.015655518, -0.053588867
+        ];
 
-    // 2. Call the encode function with the raw &mut encoder and &mut pool.
-    let output_gpu = gpu_embeddings.encode(
-        &mut encoder,
-        &gpu_embedding_weights,
-        &input_ids_gpu,
-        Some(&token_type_ids_gpu),
-        0, // position_offset
-        &config,
-        &mut pool,
-    )?;
+        let actual_slice = output.slice(s![0, 0, 0..10]);
+        println!("Golden Test - Actual Output: {:?}", actual_slice);
 
-    // 3. Submit the work and advance the pool's frame.
-    context.queue.submit(Some(encoder.finish()));
-    pool.next_frame();
+        for (i, &expected) in expected_first_10.iter().enumerate() {
+            let actual = actual_slice[i];
+            let diff = (actual - expected).abs();
 
-    // --- END CORRECTION ---
+            // Tolerance 1e-5 is usually safe for F32 comparisons across PyTorch/Rust
+            assert!(
+                diff < 1e-5,
+                "Mismatch at index {}: expected {}, got {} (diff {})",
+                i, expected, actual, diff
+            );
+        }
 
-    // --- 4. Verify Results ---
-    let actual_output = output_gpu.to_ndarray_3d().await?;
+        println!("✅ Golden Test Passed: Embeddings match PyTorch exactly.");
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
+        // --- 1. Setup Common Data and Config ---
+        let context = WgpuContext::new().await?;
+        let config = TestConfig {
+            extra_pos_embeddings: 2,
+            scale_embed: false,
+        };
 
-    // Using a slightly more relaxed tolerance for embeddings is often wise,
-    // as it involves multiple additions which can accumulate small errors.
-    assert_tensors_are_close(&expected_output, &actual_output, 1e-5);
-    
-    Ok(())
-}
+        // Create mock inputs on CPU
+        let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
+        let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
+
+        // Keep the hardcoded path for now as requested
+        let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+        let weights = crate::weights::ModelWeights::new(Path::new(p))?;
+
+        // --- 2. Run CPU Path (Expected Result) ---
+        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
+        let token_type_embeddings = if let Some(name) = type_w {
+            Some(weights.get_array2(name)?)
+        } else {
+            None
+        };
+
+        let cpu_embeddings = Embeddings::new(
+            weights.get_array2(word_w)?,
+            Some(weights.get_array2(pos_w)?),
+            token_type_embeddings,
+        );
+        let expected_output = cpu_embeddings.forward(
+            &input_ids_cpu,
+            Some(&token_type_ids_cpu),
+            config.extra_pos_embeddings(),
+            config.scale_embeddings(),
+        );
+
+        // --- 3. Setup GPU Modules and Inputs ---
+        let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
+        let gpu_embeddings = GpuEmbeddings::new(&context)?;
+
+        // Upload inputs
+        let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
+        let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
+
+        // --- START CORRECTION ---
+
+        // 1. Create the encoder and pool directly for the test.
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
+
+        // 2. Call the encode function with the raw &mut encoder and &mut pool.
+        let output_gpu = gpu_embeddings.encode(
+            &mut encoder,
+            &gpu_embedding_weights,
+            &input_ids_gpu,
+            Some(&token_type_ids_gpu),
+            0, // position_offset
+            &config,
+            &mut pool,
+        )?;
+
+        // 3. Submit the work and advance the pool's frame.
+        context.queue.submit(Some(encoder.finish()));
+        pool.next_frame();
+
+        // --- END CORRECTION ---
+
+        // --- 4. Verify Results ---
+        let actual_output = output_gpu.to_ndarray_3d().await?;
+
+        // Using a slightly more relaxed tolerance for embeddings is often wise,
+        // as it involves multiple additions which can accumulate small errors.
+        assert_tensors_are_close(&expected_output, &actual_output, 1e-5);
+
+        Ok(())
+    }
     #[tokio::test]
     async fn test_gpu_vs_cpu_embeddings_parity_no_token_type_ids() -> Result<()> {
         // --- 1. Setup Common Data and Config ---

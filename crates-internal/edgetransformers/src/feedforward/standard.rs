@@ -1,4 +1,4 @@
-use crate::activations::{Activation, apply_activation_2d, apply_activation};
+use crate::activations::{apply_activation, apply_activation_2d, Activation};
 use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array1, Array2, Array3};
@@ -43,7 +43,7 @@ impl StdFeedForward {
         }
     }
 
- pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
+    pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, _) = hidden.dim();
 
         // Ensure contiguous layout before reshape

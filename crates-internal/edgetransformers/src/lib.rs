@@ -28,14 +28,12 @@ pub mod rope;
 pub mod traits;
 pub mod utils;
 pub mod weights;
-pub mod model_load_config;
 
 // Re-export commonly used items
 pub use crate::{
     attention::MultiHeadAttention,
     embeddings::Embeddings,
     feedforward::FeedForward,
-    model_load_config::{DType, ModelLoadConfig},
     normalization::Normalization,
     pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
     weights::ModelWeights,

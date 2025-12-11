@@ -1,8 +1,55 @@
 pub use crate::models::base::{DecodingStrategy, GenerationConfig};
 use anyhow::Result;
 use ndarray::Array1;
+use ndarray::{ArrayBase, DataMut, Ix1};
 use rand::Rng;
 
+/// Apply repetition penalty in-place - works with both Array1 and ArrayViewMut1
+pub fn apply_repetition_penalty_inplace<S>(logits: &mut ArrayBase<S, Ix1>, tokens: &[u32], penalty: f32)
+where
+    S: DataMut<Elem=f32>,
+{
+    if penalty == 1.0 {
+        return;
+    }
+    for &token in tokens {
+        let idx = token as usize;
+        if idx < logits.len() {
+            let score = logits[idx];
+            if score < 0.0 {
+                logits[idx] = score * penalty;
+            } else {
+                logits[idx] = score / penalty;
+            }
+        }
+    }
+}
+
+/// Apply no-repeat n-gram blocking in-place - works with both Array1 and ArrayViewMut1
+pub fn apply_no_repeat_ngram_inplace<S>(logits: &mut ArrayBase<S, Ix1>, tokens: &[u32], ngram_size: usize)
+where
+    S: DataMut<Elem=f32>,
+{
+    let n = ngram_size;
+    // Need at least n-1 tokens to form a prefix
+    if tokens.len() < n - 1 {
+        return;
+    }
+
+    // The last n-1 tokens form the current prefix
+    let current_prefix = &tokens[tokens.len() - (n - 1)..];
+
+    // Look for any historical n-gram that starts with this prefix
+    for window in tokens.windows(n) {
+        if &window[..n - 1] == current_prefix {
+            // This n-gram would be repeated - ban the completing token
+            let banned_token = window[n - 1] as usize;
+            if banned_token < logits.len() {
+                logits[banned_token] = f32::NEG_INFINITY;
+            }
+        }
+    }
+}
 pub fn apply_repetition_penalty(
     mut logits: Array1<f32>,
     past_tokens: &[u32],
@@ -527,5 +574,35 @@ mod tests {
 
         assert_eq!(top_k[0], (0, -1.0));
         assert_eq!(top_k[1], (1, -2.0));
+    }
+    #[test]
+    fn test_no_repeat_ngram_inplace_actually_works() {
+        use ndarray::Array1;
+
+        let mut logits = Array1::from_vec(vec![1.0; 100]);
+        let tokens = vec![10, 20, 30, 10, 20];  // Prefix is [10, 20], which appeared before 30
+
+        apply_no_repeat_ngram_inplace(&mut logits, &tokens, 3);
+
+        // Token 30 should be banned because [10, 20, 30] would repeat
+        assert_eq!(logits[30], f32::NEG_INFINITY, "Token 30 should be banned!");
+        assert_eq!(logits[0], 1.0, "Other tokens should be unchanged");
+    }
+
+    #[test]
+    fn test_no_repeat_ngram_inplace_with_view() {
+        use ndarray::Array2;
+
+        let mut logits_2d = Array2::from_elem((4, 100), 1.0f32);
+        let tokens = vec![10, 20, 30, 10, 20];
+
+        for mut row in logits_2d.outer_iter_mut() {
+            apply_no_repeat_ngram_inplace(&mut row, &tokens, 3);
+        }
+
+        // Check that all rows have token 30 banned
+        for row in logits_2d.rows() {
+            assert_eq!(row[30], f32::NEG_INFINITY, "Token 30 should be banned in all rows!");
+        }
     }
 }

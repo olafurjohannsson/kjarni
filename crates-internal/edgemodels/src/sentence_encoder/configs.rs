@@ -2,8 +2,9 @@
 
 use anyhow::Result;
 use edgetransformers::activations::Activation;
+use edgetransformers::encoder::traits::EncoderArchitecture;
 use edgetransformers::traits::{
-    EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
+    LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
     TransformerConfig,
 };
 use serde::Deserialize;
@@ -35,7 +36,7 @@ impl LanguageModelConfig for MiniLMConfig {
     }
     fn decoder_start_token_id(&self) -> u32 {
         0
-    }    
+    }
     fn as_any(&self) -> &dyn Any {
         self // Simply return a reference to self as a `&dyn Any`
     }

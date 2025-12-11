@@ -27,7 +27,11 @@ use anyhow::anyhow;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let article = "Rust is a multi-paradigm, general-purpose programming language.";
+    let article = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, \
+type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without \
+using a garbage collector. To simultaneously enforce memory safety and prevent data races, its 'borrow checker' \
+tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages \
+like C++, Haskell, and Erlang.";
     // --- 1. SETUP ---
     log::info!("Loading models for CPU and GPU...");
     let ctx = get_test_context().await;
@@ -40,8 +44,8 @@ async fn main() -> Result<()> {
     use std::io;
     let cpu_generator = Seq2SeqGenerator::new(Box::new(cpu_model))?;
     let mut cpu_generation_config = cpu_generator.model.get_default_generation_config();
-    cpu_generation_config.max_new_tokens = Some(100);
-
+    // cpu_generation_config.max_new_tokens = Some(100);
+    println!("GenConfig {:?}", cpu_generation_config);
     io::stdout().flush().unwrap();
     let cpu_summary = cpu_generator
         .generate_stream(article, Some(&cpu_generation_config));
@@ -58,6 +62,7 @@ async fn main() -> Result<()> {
 
 
     futures_util::pin_mut!(cpu_summary);
+    println!("\n--- FINAL CPU GENERATED SUMMARY ---");
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut cpu_summary).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
@@ -69,15 +74,16 @@ async fn main() -> Result<()> {
     let gpu_summary = gpu_generator
         .generate_stream(article, Some(&gpu_generation_config));
     futures_util::pin_mut!(gpu_summary);
+    println!("\n--- FINAL GPU GENERATED SUMMARY ---");
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut gpu_summary).await? {
         print!("{}", token.text);
         std::io::stdout().flush().unwrap();
     }
 
-    println!("\n--- FINAL GPU GENERATED SUMMARY ---");
+
     // println!("Summary: {}", gpu_summary);
     println!("");
-    println!("\n--- FINAL GPU GENERATED SUMMARY ---");
+
     // println!("Summary: {}", gpu_summary);
 
     Ok(())

@@ -3,20 +3,21 @@
 //! Supports BERT-style encoder models like MiniLM, MPNet, and DistilBERT.
 //! Automatically downloads models from HuggingFace using the registry.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::Array2;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+use edgetransformers::encoder::traits::EncoderArchitecture;
 use edgetransformers::encoder::TransformerEncoder;
+use edgetransformers::models::base::{EncodingConfig, PoolingStrategy};
 use edgetransformers::models::download_model_files;
 use edgetransformers::models::{EncoderLanguageModel, LanguageModel, ModelArchitecture, ModelType};
 use edgetransformers::prelude::*;
-use edgetransformers::traits::{Encoder, EncoderArchitecture, EncoderOutput, LanguageModelConfig};
+use edgetransformers::traits::{Encoder, EncoderOutput, LanguageModelConfig};
 use edgetransformers::weights::ModelWeights;
-use edgetransformers::models::base::{EncodingConfig, PoolingStrategy};
 mod configs;
 
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
@@ -195,7 +196,7 @@ impl SentenceEncoder {
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
         let config = EncodingConfig {
             normalize: true,
-            pooling_strategy: PoolingStrategy::Mean
+            pooling_strategy: PoolingStrategy::Mean,
         };
         <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
@@ -204,7 +205,7 @@ impl SentenceEncoder {
     pub async fn encode_raw(&self, text: &str) -> Result<Vec<f32>> {
         let config = EncodingConfig {
             normalize: false,
-            pooling_strategy: PoolingStrategy::Mean
+            pooling_strategy: PoolingStrategy::Mean,
         };
         <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
@@ -225,7 +226,7 @@ impl SentenceEncoder {
                 "lastToken" => PoolingStrategy::LastToken,
                 "max" => PoolingStrategy::Max,
                 _ => panic!("Unknown pooling strategy {}", strategy)
-            }
+            },
         };
         <Self as EncoderLanguageModel>::encode(self, text, &config).await
     }
@@ -234,7 +235,7 @@ impl SentenceEncoder {
     pub async fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let config = EncodingConfig {
             normalize: true,
-            pooling_strategy: PoolingStrategy::Mean
+            pooling_strategy: PoolingStrategy::Mean,
         };
         <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
@@ -243,7 +244,7 @@ impl SentenceEncoder {
     pub async fn encode_batch_raw(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let config = EncodingConfig {
             normalize: false,
-            pooling_strategy: PoolingStrategy::Mean
+            pooling_strategy: PoolingStrategy::Mean,
         };
         <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
@@ -264,7 +265,7 @@ impl SentenceEncoder {
                 "lastToken" => PoolingStrategy::LastToken,
                 "max" => PoolingStrategy::Max,
                 _ => panic!("Unknown pooling strategy {}", strategy)
-            }
+            },
         };
         <Self as EncoderLanguageModel>::encode_batch(self, texts, &config).await
     }
@@ -286,7 +287,7 @@ impl LanguageModel for SentenceEncoder {
 // Implement encoder language model trait
 #[async_trait]
 impl EncoderLanguageModel for SentenceEncoder {
-    fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput> {
+    fn encoder(&self) -> &dyn Encoder<Input=Array2<u32>, Output=EncoderOutput> {
         &self.encoder
     }
 }
@@ -296,7 +297,7 @@ impl TransformerModel for SentenceEncoder {
     fn device(&self) -> Device {
         self.encoder.device()
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

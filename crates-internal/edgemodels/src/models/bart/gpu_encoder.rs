@@ -2,6 +2,7 @@ use crate::models::bart::config::BartConfig;
 use anyhow::{anyhow, Result};
 use edgetransformers::activations::Activation;
 use edgetransformers::embeddings::Embeddings;
+use edgetransformers::encoder::config::EncoderLoadConfig;
 use edgetransformers::encoder::prelude::*;
 use edgetransformers::gpu_context::WgpuContext;
 use edgetransformers::gpu_ops::blocks::attention::GpuAttentionWeights;
@@ -14,13 +15,12 @@ use edgetransformers::gpu_ops::blocks::{
 use edgetransformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use edgetransformers::traits::{LanguageModelConfig, TransformerConfig};
 use edgetransformers::weights::ModelWeights;
-use edgetransformers::ModelLoadConfig;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 
 /// GPU-accelerated BART encoder.
 ///
-/// Supports flexible CPU/GPU memory placement via `ModelLoadConfig`:
+/// Supports flexible CPU/GPU memory placement via `EncoderLoadConfig`:
 /// - Full GPU execution (default)
 /// - CPU embeddings with GPU layers (saves VRAM)
 /// - Partial layer execution for hybrid workflows
@@ -28,7 +28,7 @@ use wgpu::CommandEncoder;
 pub struct BartGpuEncoder {
     context: Arc<WgpuContext>,
     config: Arc<BartConfig>,
-    load_config: ModelLoadConfig,
+    load_config: EncoderLoadConfig,
 
     // --- GPU Kernels ---
     gpu_embeddings: GpuEmbeddings,
@@ -58,7 +58,7 @@ impl BartGpuEncoder {
         weights: &ModelWeights,
         config: Arc<BartConfig>,
     ) -> Result<Self> {
-        Self::with_config(context, weights, config, ModelLoadConfig::default())
+        Self::with_config(context, weights, config, EncoderLoadConfig::default())
     }
 
     /// Create a new BART GPU encoder with custom load configuration.
@@ -72,7 +72,7 @@ impl BartGpuEncoder {
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<BartConfig>,
-        load_config: ModelLoadConfig,
+        load_config: EncoderLoadConfig,
     ) -> Result<Self> {
         let hidden_size = config.hidden_size();
         let intermediate_size = config.encoder_ffn_dim;
@@ -168,7 +168,7 @@ impl BartGpuEncoder {
         weights: &ModelWeights,
         config: Arc<BartConfig>,
     ) -> Result<Self> {
-        Self::with_config(context, weights, config, ModelLoadConfig::offload_embeddings())
+        Self::with_config(context, weights, config, EncoderLoadConfig::offload_embeddings())
     }
 
     // ========================================================================
@@ -180,7 +180,7 @@ impl BartGpuEncoder {
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: &BartConfig,
-        _load_config: &ModelLoadConfig,
+        _load_config: &EncoderLoadConfig,
     ) -> Result<Vec<GpuEncoderLayer>> {
         let hidden_size = config.hidden_size();
         let intermediate_size = config.encoder_ffn_dim;
@@ -366,7 +366,7 @@ impl BartGpuEncoder {
     }
 
     /// Get the load configuration.
-    pub fn load_config(&self) -> &ModelLoadConfig {
+    pub fn load_config(&self) -> &EncoderLoadConfig {
         &self.load_config
     }
 
@@ -557,24 +557,24 @@ mod tests {
     /// Test input validation
     #[test]
     fn test_model_load_config() {
-        let config = ModelLoadConfig::default();
+        let config = EncoderLoadConfig::default();
         assert!(!config.cpu_embeddings);
-        assert!(!config.cpu_output_head);
+        // assert!(!config.cpu_output_head);
         assert!(config.gpu_layer_range.is_none());
         assert!(config.dtype.is_none());
 
-        let config = ModelLoadConfig::offload_embeddings();
+        let config = EncoderLoadConfig::offload_embeddings();
         assert!(config.cpu_embeddings);
 
-        let config = ModelLoadConfig::max_offload();
-        assert!(config.cpu_embeddings);
-        assert!(config.cpu_output_head);
+        // let config = EncoderLoadConfig::max_offload();
+        // assert!(config.cpu_embeddings);
+        // assert!(config.cpu_output_head);
 
-        let config = ModelLoadConfig::partial_gpu(0, 6);
+        let config = EncoderLoadConfig::partial_gpu(0, 6);
         assert_eq!(config.gpu_layer_range, Some((0, 6)));
 
         // Test builder pattern
-        let config = ModelLoadConfig::default()
+        let config = EncoderLoadConfig::default()
             .with_cpu_embeddings(true)
             .with_gpu_layer_range(0, 8);
         assert!(config.cpu_embeddings);

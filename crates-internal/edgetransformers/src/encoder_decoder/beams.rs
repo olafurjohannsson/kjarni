@@ -1,10 +1,12 @@
 use crate::cache::Cache;
 use crate::common::{
-    apply_no_repeat_ngram, apply_repetition_penalty_mut as apply_repetition_penalty, get_top_k_from_log_probs,
-    log_softmax_1d, StreamedToken,
-    TokenType,
+    apply_no_repeat_ngram, apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace, apply_repetition_penalty_mut as apply_repetition_penalty,
+    get_top_k_from_log_probs, log_softmax_1d,
+    StreamedToken, TokenType,
 };
-use crate::encoder_decoder::traits::{EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel, StepInput};
+use crate::encoder_decoder::traits::{
+    EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel, StepInput,
+};
 use crate::models::base::{DecodingStrategy, GenerationConfig};
 use crate::traits::EncoderOutput;
 use anyhow::{anyhow, Result};
@@ -35,49 +37,6 @@ struct BeamContext<'a, B: EncoderDecoderGenerationBackend> {
     decoder_start_token_id: u32,
 }
 
-// impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
-//     /// Initialize the Beam Search Context (Shared logic)
-//     fn new(
-//         model: &'a dyn EncoderDecoderLanguageModel,
-//         backend: &'a B,
-//         encoder_output: &'a EncoderOutput,
-//         config: &'a GenerationConfig,
-//     ) -> Result<Self> {
-//         let (num_beams, _) = match &config.strategy {
-//             DecodingStrategy::BeamSearch(params) => (params.num_beams, params.length_penalty),
-//             DecodingStrategy::Greedy => (1, 1.0),
-//             _ => return Err(anyhow!("Unsupported strategy")),
-//         };
-
-//         // Initialize Cache & Tensors
-//         let cache = model.new_cache(1, config.max_length, num_beams)?;
-//         let encoder_state = backend.prepare_encoder_state(model, encoder_output)?;
-
-//         let decoder_start_token_id = model.decoder_start_token_id();
-//         let current_tokens_tensor =
-//             backend.create_token_tensor(&vec![decoder_start_token_id; num_beams], num_beams)?;
-
-//         let beams = (0..num_beams)
-//             .map(|i| BeamHypothesis {
-//                 tokens: vec![decoder_start_token_id],
-//                 score: if i == 0 { 0.0 } else { f32::NEG_INFINITY },
-//             })
-//             .collect();
-
-//         Ok(Self {
-//             model,
-//             backend,
-//             config,
-//             cache,
-//             current_tokens_tensor,
-//             encoder_state,
-//             beams,
-//             num_beams,
-//             eos_token_id: model.config().eos_token_id().unwrap_or(2),
-//             decoder_start_token_id,
-//         })
-//     }
-// }
 impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
     // This `new` method needs to be async because `backend.encode` is async
     async fn new(
@@ -92,9 +51,14 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             DecodingStrategy::Greedy => 1,
             _ => return Err(anyhow!("Unsupported strategy")),
         };
-        
+
         // Tokenize the input text
-        let encoding = model.tokenizer().encode(input_text, true).map_err(|e| anyhow!(e))?;
+        let encoding = model
+            .tokenizer()
+            .encode(input_text, true)
+            .map_err(|e| anyhow!(e))?;
+        let ids = encoding.get_ids();
+        log::error!("CHECKPOINT 1 - Input IDs: {:?}", &ids[..10.min(ids.len())]);
         let encoder_tokens = encoding.get_ids();
 
         // NEW: The backend is now responsible for the entire encoding pass.
@@ -115,122 +79,84 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             .collect();
 
         Ok(Self {
-            model, backend, config, cache, current_tokens_tensor,
-            encoder_state, beams, num_beams,
+            model,
+            backend,
+            config,
+            cache,
+            current_tokens_tensor,
+            encoder_state,
+            beams,
+            num_beams,
             eos_token_id: model.config().eos_token_id().unwrap_or(2),
             decoder_start_token_id,
         })
     }
 }
 
-/// Helper to compute logits and select best candidates for one step
-// async fn beam_step<B: EncoderDecoderGenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usize) -> Result<()> {
-//     // 1. Prepare Input
-//     let attention_mask = ctx
-//         .backend
-//         .prepare_attention_mask(ctx.cache.get_seq_length() + 1, ctx.num_beams)?;
-
-//     let step_input = StepInput {
-//         tokens: &ctx.current_tokens_tensor,
-//         encoder_state: Some(&ctx.encoder_state),
-//         attention_mask: &attention_mask,
-//     };
-
-//     // 2. Forward Pass
-//     let outputs_3d = ctx
-//         .backend
-//         .forward(ctx.model, step_input, ctx.cache.as_mut())
-//         .await?;
-//     let last_hidden_state = outputs_3d.slice(s![.., 0, ..]);
-
-//     // 3. Project Logits
-//     let mut logits_2d = ctx.model.lm_head_layer().matmul(&last_hidden_state.view());
-//     if let Some(bias) = ctx.model.final_logits_bias() {
-//         logits_2d += bias;
-//     }
-
-//     logits_2d
-//         .outer_iter_mut()
-//         .enumerate()
-//         .for_each(|(i, mut logits_row)| {
-//             if step == 0 {
-//                 if let Some(bos) = ctx.model.config().bos_token_id() {
-//                     // Optional: Force BOS if model requires it explicitly via logits
-//                     logits_row.fill(f32::NEG_INFINITY);
-//                     logits_row[bos as usize] = 0.0;
-//                 }
-//             } else {
-//                 if ctx.config.repetition_penalty != 1.0 {
-//                     apply_repetition_penalty(
-//                         &mut logits_row.to_owned(),
-//                         &ctx.beams[i].tokens,
-//                         ctx.config.repetition_penalty,
-//                     );
-//                 }
-//                 if ctx.config.no_repeat_ngram_size > 0 {
-//                     apply_no_repeat_ngram(
-//                         &mut logits_row.to_owned(),
-//                         &ctx.beams[i].tokens,
-//                         ctx.config.no_repeat_ngram_size,
-//                     );
-//                 }
-//             }
-//         });
-
-//     // 5. Select Candidates
-//     let (next_tokens, reorder_indices, updated_beams) =
-//         find_best_beams_and_get_indices(logits_2d, &ctx.beams, ctx.config, ctx.num_beams);
-
-//     // 6. Update State
-//     ctx.cache.increment_len(1);
-//     ctx.beams = updated_beams;
-//     ctx.backend
-//         .update_token_tensor(&mut ctx.current_tokens_tensor, &next_tokens)?;
-
-//     if ctx.num_beams > 1 {
-//         ctx.backend
-//             .reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
-//     }
-
-//     Ok(())
-// }
-async fn beam_step<B: EncoderDecoderGenerationBackend>(ctx: &mut BeamContext<'_, B>, step: usize) -> Result<()> {
-   let logits_3d = ctx.backend.decode_step(
-        ctx.model,
-        &ctx.current_tokens_tensor,
-        &ctx.encoder_state,
-        ctx.cache.as_mut(),
-    ).await?;
+async fn beam_step<B: EncoderDecoderGenerationBackend>(
+    ctx: &mut BeamContext<'_, B>,
+    step: usize,
+) -> Result<()> {
+    let logits_3d = ctx
+        .backend
+        .decode_step(
+            ctx.model,
+            &ctx.current_tokens_tensor,
+            &ctx.encoder_state,
+            ctx.cache.as_mut(),
+        )
+        .await?;
 
     let mut logits_2d = logits_3d.slice(s![.., -1, ..]).to_owned();
-    if let Some(bias) = ctx.model.final_logits_bias() {
-        logits_2d += bias;
-    }
-
+    // if let Some(bias) = ctx.model.final_logits_bias() {
+    //     logits_2d += bias;
+    // }
+    let forced_bos_token_id: Option<u32> = Some(0); // ← ADD THIS
+    let t = logits_2d.clone();
     logits_2d
         .outer_iter_mut()
         .enumerate()
         .for_each(|(i, mut logits_row)| {
             if step == 0 {
-                if let Some(bos) = ctx.model.config().bos_token_id() {
-                    // Optional: Force BOS if model requires it explicitly via logits
+                let slice = t.slice(s![0, 0..10]);
+                log::error!("CHECKPOINT 3 - Logits Step 0: {:?}", slice);
+                // log::error!("Rust Logits Step 0 [0, 0..10]: {:?}", slice);
+                // Use forced_bos_token_id, not bos_token_id
+                if let Some(forced_bos_id) = forced_bos_token_id {
                     logits_row.fill(f32::NEG_INFINITY);
-                    logits_row[bos as usize] = 0.0;
+                    logits_row[forced_bos_id as usize] = 0.0;
                 }
+                // if let Some(bos) = ctx.model.config().bos_token_id() {
+                //     // Optional: Force BOS if model requires it explicitly via logits
+                //     logits_row.fill(f32::NEG_INFINITY);
+                //     logits_row[bos as usize] = 0.0;
+                // }
             } else {
                 if ctx.config.repetition_penalty != 1.0 {
-                    apply_repetition_penalty(
-                        &mut logits_row.to_owned(),
+                    apply_repetition_penalty_inplace(
+                        &mut logits_row, // ✅ Pass the view directly
                         &ctx.beams[i].tokens,
                         ctx.config.repetition_penalty,
                     );
                 }
                 if ctx.config.no_repeat_ngram_size > 0 {
-                    apply_no_repeat_ngram(
-                        &mut logits_row.to_owned(),
+                    // Debug: count how many tokens are -inf BEFORE
+                    let blocked_before = logits_row
+                        .iter()
+                        .filter(|&&x| x == f32::NEG_INFINITY)
+                        .count();
+
+                    apply_no_repeat_ngram_inplace(
+                        &mut logits_row,
                         &ctx.beams[i].tokens,
                         ctx.config.no_repeat_ngram_size,
                     );
+
+                    // Debug: count how many tokens are -inf AFTER
+                    let blocked_after = logits_row
+                        .iter()
+                        .filter(|&&x| x == f32::NEG_INFINITY)
+                        .count();
                 }
             }
         });
@@ -246,7 +172,8 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(ctx: &mut BeamContext<'_,
         .update_token_tensor(&mut ctx.current_tokens_tensor, &next_tokens)?;
 
     if ctx.num_beams > 1 {
-        ctx.backend.reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
+        ctx.backend
+            .reorder_cache(ctx.cache.as_mut(), &reorder_indices)?;
     }
 
     Ok(())

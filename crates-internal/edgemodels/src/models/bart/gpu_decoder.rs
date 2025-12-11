@@ -40,14 +40,61 @@ pub struct BartGpuDecoder {
 }
 
 impl BartGpuDecoder {
+    pub fn debug_embeddings(
+        &self,
+        encoder: &mut CommandEncoder,
+        pool: &mut GpuTensorPool,
+        decoder_input_ids: &GpuTensor,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        self.embeddings.encode(
+            encoder,
+            &self.embedding_weights,
+            decoder_input_ids,
+            None,
+            position_offset,
+            self.config.as_ref(),
+            pool,
+        )
+    }
+
+    pub fn debug_embed_with_ln(
+        &self,
+        encoder: &mut CommandEncoder,
+        pool: &mut GpuTensorPool,
+        decoder_input_ids: &GpuTensor,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        let hidden = self.debug_embeddings(encoder, pool, decoder_input_ids, position_offset)?;
+        let ln_output = pool.get(hidden.shape().to_vec());
+        self.embed_layer_norm.encode(encoder, &self.embed_ln_weights, &hidden, &ln_output);
+        Ok(ln_output)
+    }
     pub fn new(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<BartConfig>,
     ) -> Result<Self> {
         // 1. Embeddings
-        let embedding_weights = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
+        // let embedding_weights = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
 
+        // 1. Embeddings - MANUALLY load with decoder-specific paths
+        let word_emb = GpuTensor::from_raw(
+            context,
+            &weights.get_raw("model.shared.weight")?,
+            "decoder_word_emb",
+        )?;
+        let pos_emb = GpuTensor::from_raw(
+            context,
+            &weights.get_raw("model.decoder.embed_positions.weight")?,  // DECODER positions!
+            "decoder_pos_emb",
+        )?;
+
+        let embedding_weights = GpuEmbeddingWeights {
+            word_embeddings: word_emb,
+            position_embeddings: Some(pos_emb),
+            token_type_embeddings: None,
+        };
         // 2. Initial LayerNorm
         let (norm_w_name, norm_b_name) = config.get_decoder_embedding_ln_names();
         let embed_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
@@ -185,7 +232,7 @@ impl GpuCrossAttentionDecoder for BartGpuDecoder {
             &self.embedding_weights,
             decoder_input_ids,
             None,
-            position_offset + 2,
+            position_offset,
             self.config.as_ref(),
             pool,
         )?;

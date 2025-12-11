@@ -1,13 +1,14 @@
 //! Model configurations for cross-encoders
 
 use anyhow::Result;
+use edgetransformers::activations::Activation;
+use edgetransformers::encoder::traits::EncoderArchitecture;
 use edgetransformers::traits::{
-    EncoderArchitecture, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
+    LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
     TransformerConfig,
 };
-use std::any::Any;
 use serde::Deserialize;
-use edgetransformers::activations::Activation;
+use std::any::Any;
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMCrossEncoderConfig {
@@ -56,7 +57,7 @@ impl LanguageModelConfig for MiniLMCrossEncoderConfig {
     fn activation_function(&self) -> Activation {
         Activation::GeluNew
     }
-     fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
+    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
         (
             "bert.embeddings.word_embeddings.weight",
             "bert.embeddings.position_embeddings.weight",
