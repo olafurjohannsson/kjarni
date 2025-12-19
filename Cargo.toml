@@ -1,10 +1,11 @@
 [workspace]
 members = [
-    "crates/edgegpt",          
-    "crates-internal/edgetransformers", 
-    "crates-internal/edgesearch",     
-    "crates-internal/edgerag", 
-    "crates-internal/edgemodels",      
+    "crates/kjarni",
+    "crates/kjarni-cli",
+    "crates/kjarni-transformers", 
+    "crates/kjarni-search",     
+    "crates/kjarni-rag", 
+    "crates/kjarni-models",      
 ]
 
 resolver = "2"

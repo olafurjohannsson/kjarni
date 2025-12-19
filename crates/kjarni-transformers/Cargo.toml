@@ -1,0 +1,50 @@
+[package]
+name = "kjarni-transformers"
+description = "Low-level transformer operations for Kjarni"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+safetensors = { workspace = true }
+ndarray = { workspace = true }
+rand = { workspace = true }
+half = { workspace = true }
+pollster = { workspace = true }
+once_cell = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tokenizers = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
+futures-intrusive = { workspace = true }
+rand_distr = { workspace = true }
+log = { workspace = true }
+ndarray-rand = { workspace = true }
+libm = { workspace = true }
+matrixmultiply = { workspace = true }
+memmap2 = { workspace = true }
+faer = { workspace = true }
+
+num_cpus = "1.16"
+async-stream = "0.3.6"
+futures-core = "0.3.31"
+futures-util = "0.3.31"
+libc = "0.2.177"
+strum = "0.26"
+strum_macros = "0.26"
+
+[dev-dependencies]
+env_logger = "0.10"

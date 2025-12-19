@@ -1,0 +1,33 @@
+//! GPT implementation using Kjarni Transformers
+//! 
+//! Provides autoregressive language models for text generation.
+
+pub mod tokenizer;
+pub mod cross_encoder;
+pub mod sentence_encoder;
+pub mod sequence_classifier;
+pub mod models;
+
+pub use cross_encoder::CrossEncoder;
+pub use sentence_encoder::SentenceEncoder;
+pub use sequence_classifier::SequenceClassifier;
+// pub use text_generation::TextGenerator;
+// pub use generation::Generator;
+
+/// A callback for streaming generated tokens.
+///
+/// The callback receives the token ID (`u32`) and its decoded text representation (`&str`).
+/// It should return `true` to continue generation or `false` to stop early.
+pub type TokenCallback<'a> = Box<dyn FnMut(u32, &str) -> bool + 'a>;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
+#[cfg(test)]
+pub mod tests;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use tokenizers::Tokenizer;
+
+#[cfg(target_arch = "wasm32")]
+pub use tokenizer::wasm::BPETokenizer;

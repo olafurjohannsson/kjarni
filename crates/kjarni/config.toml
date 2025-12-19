@@ -1,0 +1,14 @@
+[defaults]
+decoder = "llama-3.2-1b"
+encoder = "minilm-l6-v2"
+cross_encoder = "minilm-l6-v2-cross-encoder"
+seq2seq = "distilbart-cnn"
+
+[generation]
+temperature = 0.7
+max_tokens = 100
+repetition_penalty = 1.1
+
+[cache]
+# Optional override
+# dir = "/custom/path"
