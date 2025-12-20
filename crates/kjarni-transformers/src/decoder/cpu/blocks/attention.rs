@@ -1,8 +1,7 @@
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
-use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d};
 use anyhow::Result;
-use ndarray::{Array1, Array2, Array3, Array4, Axis, s};
+use ndarray::{s, Array2, Array3, Array4, Axis};
 
 /// Optimized Attention for modern Decoders (Llama, Phi, Qwen, Mistral).
 /// Features: Separate QKV, RoPE, GQA, BF16 support via LinearLayer.

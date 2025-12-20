@@ -8,7 +8,7 @@
 //! - up_proj:   [hidden_size, intermediate_size]  
 //! - down_proj: [intermediate_size, hidden_size]
 
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 

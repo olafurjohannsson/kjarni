@@ -7,21 +7,21 @@ use ndarray::{s, Array2, Array3, Axis};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    WgpuContext,
     cache::CpuKVCache,
     decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
-    linear_layer_old::LinearLayer,
-    normalization::{RMSNorm},
+    linear_layer::LinearLayer,
+    normalization::RMSNorm,
     rope::RoPE,
+    tensor::DType,
     traits::{
         Cache, Decoder, DecoderArchitecture, Device, LanguageModelConfig,
         TransformerModel,
     },
-    weights_old::{ModelWeights},
-    tensor::DType,
+    weights::ModelWeights,
     TransformerConfig,
+    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -136,13 +136,13 @@ impl LlamaCpuDecoder {
     ) -> Result<LlamaDecoderLayer> {
         let layer_names = config.get_layer_attention_names(i);
         let ffn_names = config.get_feed_forward_names(i);
-
+        let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::Faer);
         // Load Attention Weights (BF16/LinearLayer)
-        let q = LinearLayer::from_weights(weights, &layer_names.q_weight, target_dtype)?;
-        let k = LinearLayer::from_weights(weights, &layer_names.k_weight, target_dtype)?;
-        let v = LinearLayer::from_weights(weights, &layer_names.v_weight, target_dtype)?;
-        let o = LinearLayer::from_weights(weights, &layer_names.output_weight, target_dtype)?;
-        
+        let q = LinearLayer::from_weights(weights, &layer_names.q_weight, None, target_dtype, strategy)?;
+        let k = LinearLayer::from_weights(weights, &layer_names.k_weight, None, target_dtype, strategy)?;
+        let v = LinearLayer::from_weights(weights, &layer_names.v_weight, None, target_dtype, strategy)?;
+        let o = LinearLayer::from_weights(weights, &layer_names.output_weight, None, target_dtype, strategy)?;
+
         let attention = DecoderAttention::new(
             config.hidden_size,
             config.num_attention_heads,
@@ -158,11 +158,12 @@ impl LlamaCpuDecoder {
         let gate = LinearLayer::from_weights(
             weights,
             ffn_names.gate_weight.as_ref().unwrap(),
+            None,
             target_dtype,
+            strategy,
         )?;
-        let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, target_dtype)?;
-        let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, target_dtype)?;
-
+        let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, None, target_dtype, strategy)?;
+        let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, None, target_dtype, strategy)?;
 
 
         let feed_forward = SwiGluFeedForward::new(gate, up, down);
@@ -202,7 +203,6 @@ impl TransformerModel for LlamaCpuDecoder {
 }
 
 
-
 impl CpuDecoder for LlamaCpuDecoder {
     fn embed(
         &self,
@@ -213,7 +213,7 @@ impl CpuDecoder for LlamaCpuDecoder {
             DecoderInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
                 let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-            
+
                 Ok(self.embeddings.forward(&input_ids, None, position_offset, false))
             }
             DecoderInput::HiddenCpu(hidden) => Ok(hidden.clone()),
@@ -259,7 +259,7 @@ impl CpuDecoder for LlamaCpuDecoder {
             // 3. Get Past KV View
             // We use .as_ref() to borrow the Option content without moving it
             let past_kv = cpu_cache_opt.as_ref().and_then(|c| c.get(i));
-            
+
             // Map the Tuple(Array3, Array3) to Tuple(ArrayView3, ArrayView3)
             let past_kv_view = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
 

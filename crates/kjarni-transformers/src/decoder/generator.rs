@@ -1,11 +1,11 @@
 use crate::common::{
-    GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram,
-    apply_repetition_penalty_mut, sample_token,
+    apply_no_repeat_ngram, apply_repetition_penalty_mut, sample_token, GenerationConfig,
+    StreamedToken, TokenType,
 };
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::prelude::*;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
@@ -98,7 +98,7 @@ impl DecoderGenerator {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         debug!("Starting generation for prompt: '{}'", prompt);
 
         // Encode the prompt and handle special tokens
@@ -245,14 +245,14 @@ impl DecoderGenerator {
 
             if tokens_generated > 0 && total_generation_time.as_secs_f64() > 0.0 {
                 let tokens_per_sec = tokens_generated as f64 / total_generation_time.as_secs_f64();
-                info!(
+                println!(
                     "Generation complete. Generated {} tokens in {:.3}s ({:.2} tokens/sec)",
                     tokens_generated,
                     total_generation_time.as_secs_f64(),
                     tokens_per_sec
                 );
             } else if tokens_generated > 0 {
-                 info!("Generation complete. Generated {} tokens.", tokens_generated);
+                 println!("Generation complete. Generated {} tokens.", tokens_generated);
             }
         })
     }
