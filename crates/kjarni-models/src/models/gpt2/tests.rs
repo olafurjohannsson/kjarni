@@ -6,26 +6,16 @@
 //! The actual text generation is handled by the generic `Generator` struct,
 //! which can operate on any model that implements the `DecoderLanguageModel` trait.
 
-
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use kjarni_transformers::models::base::{AutoregressiveLoop};
-use kjarni_transformers::models::download_model_files;
-use kjarni_transformers::models::{LanguageModel, ModelArchitecture, ModelType};
-use kjarni_transformers::prelude::*;
+use anyhow::Result;
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
-use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
-use kjarni_transformers::traits::{Decoder, DecoderArchitecture, DecoderOutput, LanguageModelConfig};
-use kjarni_transformers::weights_old::ModelWeights;
-use ndarray::{Array2, Array3};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokenizers::Tokenizer;
+use kjarni_transformers::models::{LanguageModel, ModelType};
+use kjarni_transformers::prelude::*;
+use kjarni_transformers::traits::{Decoder, DecoderOutput};
 
 use super::*;
 
 use crate::models::gpt2::model::Gpt2Model;
-use crate::models::gpt2::config::Gpt2Config;
 
 /// Helper function to load the DistilGPT2 model for testing.
 async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {

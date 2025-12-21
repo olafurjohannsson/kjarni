@@ -1,5 +1,5 @@
 use crate::activations::{apply_activation, apply_activation_2d, Activation};
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array1, Array2, Array3};
 

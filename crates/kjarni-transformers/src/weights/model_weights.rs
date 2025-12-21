@@ -85,42 +85,46 @@ impl ModelWeights {
 }
 
 /// Converts a `RawTensor` into a `TypedCpuTensor`, performing the necessary parsing.
-fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
-    let context_err = |e| anyhow!("Failed to cast bytes for tensor '{}' (dtype {:?}): {}", raw.name, raw.dtype, e);
+/// Safely cast bytes to a typed slice, handling unaligned data
+fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
+    if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
+        slice.to_vec()
+    } else {
+        // Unaligned: copy to aligned buffer first
+        let mut aligned = vec![0u8; bytes.len()];
+        aligned.copy_from_slice(bytes);
+        bytemuck::cast_slice(&aligned).to_vec()
+    }
+}
 
+fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
     match raw.dtype {
         DType::F32 => {
-            let data: Vec<f32> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            let data: Vec<f32> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::F32(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
         DType::F16 => {
-            let data: Vec<f16> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            let data: Vec<f16> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::F16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
         DType::BF16 => {
-            let data: Vec<bf16> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            let data: Vec<bf16> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::BF16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
         DType::Q8_0 => {
-            if raw.shape.len() != 2 {
-                return Err(anyhow!("Q8_0 tensor '{}' must be 2D", raw.name));
-            }
-            let blocks: Vec<BlockQ8_0> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            let blocks: Vec<BlockQ8_0> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::Q8_0(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))
         }
         DType::Q4_K => {
-            if raw.shape.len() != 2 {
-                return Err(anyhow!("Q4_K tensor '{}' must be 2D", raw.name));
-            }
-            let blocks: Vec<BlockQ4_K> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::Q4_K(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))
         }
-        _ => Err(anyhow!("Unsupported dtype for typed conversion: {:?}", raw.dtype)),
+        _ => Err(anyhow!("Unsupported dtype: {:?}", raw.dtype)),
     }
 }

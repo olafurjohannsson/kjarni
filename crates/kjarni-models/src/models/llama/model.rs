@@ -10,30 +10,30 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    WgpuContext,
     decoder::prelude::*,
     gpu_context,
     gpu_ops::{
-        GpuFrameContext, GpuTensor, Kernel,
-        blocks::rope::GpuRoPE,
-        primitives::{linear::GpuLinearLayer, matmul::GpuMatMul},
+        blocks::rope::GpuRoPE, primitives::{linear::GpuLinearLayer, matmul::GpuMatMul}, GpuFrameContext,
+        GpuTensor,
+        Kernel,
     },
     linear_layer::LinearLayer,
     models::{
-        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
+        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
     },
     prelude::*,
     rope::RoPE,
     tensor::{DType, RawTensor},
-    traits::{Decoder, DecoderArchitecture, LanguageModelConfig},
+    traits::{DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
+    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -159,7 +159,7 @@ impl LlamaModel {
             config.get_lm_head_name(),
             None,
             target_dtype,
-            Some(kjarni_transformers::linear_layer::F32MatmulStrategy::Faer),
+            None,
         )?;
         match device {
             Device::Cpu => {
@@ -183,10 +183,10 @@ impl LlamaModel {
             }
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a context"))?;
-                
+
                 // Create GPU RoPE
                 let gpu_rope = GpuRoPE::new(&ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache)?;
-                
+
                 let gpu_decoder = Some(LlamaGpuDecoder::new(
                     &ctx,
                     &weights,
@@ -196,7 +196,7 @@ impl LlamaModel {
                 )?);
                 let gpu_lm_head_transposed = if !load_config.offload_lm_head {
                     log::info!("Loading LM Head to VRAM (Unified Layout [Vocab, Hidden])");
-                
+
                     let head_name = config.get_lm_head_name();
                     let tensor = if let Ok(raw) = weights.get_raw(head_name) {
                         // Load Raw (BF16 or F32) without modification
@@ -205,7 +205,7 @@ impl LlamaModel {
                         let arr = weights.get_array2(head_name)?;
                         GpuTensor::from_ndarray(&ctx, &arr)?
                     };
-                
+
                     Some(tensor)
                 } else {
                     None
@@ -305,20 +305,25 @@ impl CpuDecoderOps for LlamaModel {
     }
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        let t_start = std::time::Instant::now(); // <-- ADD TIMER
+        let t_start = std::time::Instant::now();
 
         let (batch, seq, hidden) = hidden_states.dim();
-        let hidden_2d = hidden_states
-            .view()
-            .into_shape_with_order((batch * seq, hidden))?;
+        let fast = false; // batch == 1 && seq == 1
 
-        let logits_2d = self.lm_head.matmul(&hidden_2d);
+        let logits_2d = if fast {
+            // Optimized path for single-token decode
+            let hidden_1d = hidden_states.slice(s![0, 0, ..]);
+            let logits_1d = self.lm_head.project_logits(&hidden_1d);
 
-        // Log only for the decode step (seq_len == 1)
-        if seq == 1 {
-            log::info!("[Logits Projection] Time: {:?}", t_start.elapsed()); // <-- ADD LOG
-        }
-
+            logits_1d.insert_axis(ndarray::Axis(0))
+        } else {
+            // Batched/prefill path
+            let hidden_2d = hidden_states
+                .view()
+                .into_shape_with_order((batch * seq, hidden))?;
+            self.lm_head.matmul(&hidden_2d)
+        };
+        log::info!("[Logits Projection] Time: {:?}", t_start.elapsed());
         logits_2d
             .into_shape_with_order((batch, seq, self.vocab_size()))
             .map_err(|e| anyhow!(e))

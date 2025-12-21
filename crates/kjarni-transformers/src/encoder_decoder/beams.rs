@@ -1,16 +1,16 @@
 use crate::cache::Cache;
 use crate::common::{
-    StreamedToken, TokenType, apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace,
-    get_top_k_from_log_probs, log_softmax_1d,
+    apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace, get_top_k_from_log_probs, log_softmax_1d,
+    StreamedToken, TokenType,
 };
+use crate::common::{DecodingStrategy, GenerationConfig};
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
-use crate::common::{DecodingStrategy, GenerationConfig};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 use futures_core::Stream;
-use ndarray::{Array2, s};
+use ndarray::{s, Array2};
 
 #[derive(Clone, Debug)]
 pub struct BeamHypothesis {
@@ -144,7 +144,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
                 params.early_stopping,
             ),
             DecodingStrategy::Greedy | DecodingStrategy::Sample(_) => (1, 1.0, false),
-            
+
             _ => return Err(anyhow!("Unsupported strategy for Beam Search runner")),
         };
 
@@ -250,22 +250,29 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     ctx: &mut BeamContext<'_, B>,
     step: usize,
 ) -> Result<bool> {
- // --- DEBUG PRINT START ---
+    // --- DEBUG PRINT START ---
     log::info!("\n--- Step {} ---", step);
     for (i, beam) in ctx.beams.iter().enumerate() {
-        // Just like Python, skip decoding everything if it gets too slow, 
+        // Just like Python, skip decoding everything if it gets too slow,
         // but for debugging this single sentence it's fine.
-        let text = ctx.model.tokenizer().decode(&beam.tokens, false).unwrap_or_default();
+        let text = ctx
+            .model
+            .tokenizer()
+            .decode(&beam.tokens, false)
+            .unwrap_or_default();
         let safe_text = text.replace('\n', " ");
-        
+
         // Show last 5 tokens for ID comparison
         let len = beam.tokens.len();
         let start = if len > 5 { len - 5 } else { 0 };
         let last_ids = &beam.tokens[start..];
-        
+
         log::info!(
-            "Beam {}: {:?} | Score: {:.4} | \"{}\"", 
-            i, last_ids, beam.score, safe_text
+            "Beam {}: {:?} | Score: {:.4} | \"{}\"",
+            i,
+            last_ids,
+            beam.score,
+            safe_text
         );
     }
     // --- DEBUG PRINT END ---
@@ -334,17 +341,25 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     let mut active_reorder = Vec::with_capacity(ctx.num_beams);
 
     // 4. Process Candidates (Matches HF `BeamSearchScorer.process`, Line 185 loop)
-    for (global_rank, (beam, next_token, source_idx, _beam_token_rank)) in all_candidates.into_iter().enumerate() {
+    for (global_rank, (beam, next_token, source_idx, _beam_token_rank)) in
+        all_candidates.into_iter().enumerate()
+    {
         if next_token == ctx.eos_token_id {
             if global_rank >= ctx.num_beams {
                 continue;
             }
-            
+
             ctx.finished.add(beam);
         } else {
             // LOG ACTIVE
-            log::info!("Step {}: ACTIVE Beam {} -> {}. RawScore {:.4}", step, source_idx, next_token, beam.score);
-            
+            log::info!(
+                "Step {}: ACTIVE Beam {} -> {}. RawScore {:.4}",
+                step,
+                source_idx,
+                next_token,
+                beam.score
+            );
+
             active_beams.push(beam);
             active_tokens.push(next_token);
             active_reorder.push(source_idx);
@@ -410,7 +425,12 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     for step in 0..config.max_length {
         let should_stop = beam_step(&mut ctx, step).await?;
         if should_stop {
-            log::info!("Step {}: Early Stopping Triggered (len={} >= {})", step, ctx.finished.len(), ctx.num_beams);
+            log::info!(
+                "Step {}: Early Stopping Triggered (len={} >= {})",
+                step,
+                ctx.finished.len(),
+                ctx.num_beams
+            );
             stopped_early = true;
             break;
         }
@@ -430,17 +450,24 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
             }
         }
     }
-// --- DEBUG DUMP START ---
+    // --- DEBUG DUMP START ---
     log::info!("\n=== FINAL FINISHED HYPOTHESES ===");
     // Access internal vector directly if pub, or verify logic
     // We assume ctx.finished.hypotheses is accessible or we use a getter/debug
     // Since FinishedHypotheses is in the same module in your snippets, we can iterate.
     for (i, h) in ctx.finished.hypotheses.iter().enumerate() {
-        let text = model.tokenizer().decode(&h.tokens, true).unwrap_or_default();
+        let text = model
+            .tokenizer()
+            .decode(&h.tokens, true)
+            .unwrap_or_default();
         let norm_score = h.normalized_score(ctx.finished.length_penalty, ctx.finished.prompt_len);
         log::info!(
-            "Hypothesis {}: Raw={:.4} | Norm={:.4} | Len={} | \"{}\"", 
-            i, h.score, norm_score, h.tokens.len(), text.replace('\n', " ")
+            "Hypothesis {}: Raw={:.4} | Norm={:.4} | Len={} | \"{}\"",
+            i,
+            h.score,
+            norm_score,
+            h.tokens.len(),
+            text.replace('\n', " ")
         );
     }
     log::info!("=================================\n");
@@ -489,7 +516,7 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
     backend: &'a B,
     input_text: &'a str,
     config: &'a GenerationConfig,
-) -> impl Stream<Item = Result<StreamedToken>> + 'a {
+) -> impl Stream<Item=Result<StreamedToken>> + 'a {
     try_stream! {
         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
 
@@ -529,8 +556,7 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
 #[cfg(test)]
 mod beam_tests {
     use super::*;
-    use crate::models::ModelType;   // Adjust path
-    use crate::traits::Device;      // Adjust path
+    // Adjust path
     use ndarray::Array2;
 
     // ========================================================================
@@ -542,18 +568,26 @@ mod beam_tests {
         // Setup: 6 tokens. Prompt len 1. Generated len = 5.
         // Formula: score / (5.0 ^ alpha)
         let beam = BeamHypothesis {
-            tokens: vec![0; 6], 
+            tokens: vec![0; 6],
             score: -5.0,
         };
         let prompt_len = 1.0;
 
         // alpha = 1.0 (Linear) -> -5.0 / 5.0^1 = -1.0
         let score_linear = beam.normalized_score(1.0, prompt_len);
-        assert!((score_linear - (-1.0)).abs() < 1e-5, "Linear penalty failed: {}", score_linear);
+        assert!(
+            (score_linear - (-1.0)).abs() < 1e-5,
+            "Linear penalty failed: {}",
+            score_linear
+        );
 
         // alpha = 2.0 (Square) -> -5.0 / 5.0^2 = -5.0 / 25.0 = -0.2
         let score_square = beam.normalized_score(2.0, prompt_len);
-        assert!((score_square - (-0.2)).abs() < 1e-5, "Square penalty failed: {}", score_square);
+        assert!(
+            (score_square - (-0.2)).abs() < 1e-5,
+            "Square penalty failed: {}",
+            score_square
+        );
     }
 
     #[test]
@@ -564,41 +598,68 @@ mod beam_tests {
         let mut finished = FinishedHypotheses::new(num_beams, length_penalty, prompt_len);
 
         // 1. Add valid beam (Score -10, Len 5 -> Norm -2.0)
-        finished.add(BeamHypothesis { tokens: vec![0; 5], score: -10.0 });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -10.0,
+        });
         assert_eq!(finished.len(), 1);
         assert_eq!(finished.worst_score, -2.0);
 
         // 2. Add better beam (Score -5, Len 5 -> Norm -1.0)
-        finished.add(BeamHypothesis { tokens: vec![0; 5], score: -5.0 });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -5.0,
+        });
         assert_eq!(finished.len(), 2);
         assert_eq!(finished.best().unwrap().score, -5.0); // Best is first
         assert_eq!(finished.worst_score, -2.0); // Worst is still -2.0
 
         // 3. Add garbage beam (-inf). Should be REJECTED.
-        finished.add(BeamHypothesis { tokens: vec![0; 5], score: f32::NEG_INFINITY });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: f32::NEG_INFINITY,
+        });
         assert_eq!(finished.len(), 2, "-inf beam should not be added");
 
-        // 4. Add best beam (Score -2, Len 2 -> Norm -1.0) 
+        // 4. Add best beam (Score -2, Len 2 -> Norm -1.0)
         // Note: Sort is stable-ish, check sorting logic
-        finished.add(BeamHypothesis { tokens: vec![0; 2], score: -2.0 });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 2],
+            score: -2.0,
+        });
         assert_eq!(finished.len(), 2, "Should truncate to num_beams");
         // Current norms: [-1.0 (from step 4), -1.0 (from step 2), -2.0 (from step 1)]
         // The -2.0 should be dropped.
-        assert!(finished.worst_score > -2.0, "Worst score should have improved");
+        assert!(
+            finished.worst_score > -2.0,
+            "Worst score should have improved"
+        );
     }
 
     #[test]
     fn test_is_done_heuristic() {
         // length penalty 1.0, prompt len 0 for simplicity
-        let mut finished = FinishedHypotheses::new(2, 1.0, 0); 
-        
+        let mut finished = FinishedHypotheses::new(2, 1.0, 0);
+
         // Case 1: Not enough hypotheses
-        finished.add(BeamHypothesis { tokens: vec![0; 5], score: -10.0 }); // Norm -2.0
-        assert!(!finished.is_done(false, -5.0, 10), "Should not be done if < num_beams");
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -10.0,
+        }); // Norm -2.0
+        assert!(
+            !finished.is_done(false, -5.0, 10),
+            "Should not be done if < num_beams"
+        );
 
         // Case 2: Enough hypotheses, Early Stopping True
-        finished.add(BeamHypothesis { tokens: vec![0; 5], score: -10.0 }); 
-        assert!(finished.is_done(true, -5.0, 20), "Early stopping should trigger");
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -10.0,
+        });
+        assert!(
+            finished.is_done(true, -5.0, 20),
+            "Early stopping should trigger"
+        );
 
         // Case 3: Early Stopping False -> Math Check
         // Worst finished norm: -2.0
@@ -606,13 +667,19 @@ mod beam_tests {
         // Current len: 10
         // Potential best norm: -5.0 / 10^1 = -0.5
         // -0.5 > -2.0. We can still find a better beam.
-        assert!(!finished.is_done(false, -5.0, 10), "Heuristic should say continue");
+        assert!(
+            !finished.is_done(false, -5.0, 10),
+            "Heuristic should say continue"
+        );
 
         // Case 4: Impossible to improve
         // Best unfinished: -50.0
         // Potential: -50.0 / 10 = -5.0
         // -5.0 < -2.0. We cannot beat the worst finished beam.
-        assert!(finished.is_done(false, -50.0, 10), "Heuristic should say done");
+        assert!(
+            finished.is_done(false, -50.0, 10),
+            "Heuristic should say done"
+        );
     }
 
     #[test]
@@ -620,22 +687,32 @@ mod beam_tests {
         // Setup:
         // Beam 0 (Score 0.0): Logits [-1.0, -2.0, -3.0]
         // Beam 1 (Score 0.0): Logits [-0.5, -4.0, -5.0]
-        
-        let logits = Array2::from_shape_vec((2, 3), vec![
-            -1.0, -2.0, -3.0, // Beam 0
-            -0.5, -4.0, -5.0  // Beam 1
-        ]).unwrap();
+
+        let logits = Array2::from_shape_vec(
+            (2, 3),
+            vec![
+                -1.0, -2.0, -3.0, // Beam 0
+                -0.5, -4.0, -5.0, // Beam 1
+            ],
+        )
+            .unwrap();
 
         let beams = vec![
-            BeamHypothesis { tokens: vec![0], score: 0.0 },
-            BeamHypothesis { tokens: vec![0], score: 0.0 },
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
         ];
 
         let candidates = find_best_beams_and_get_candidates(logits, &beams, 2);
-        
+
         // --- Logic Check ---
         // We need to calculate what the log_probs actually are to verify sorting.
-        // Beam 1: logits [-0.5, -4.0, -5.0]. 
+        // Beam 1: logits [-0.5, -4.0, -5.0].
         //   Exp: [0.6065, 0.0183, 0.0067]. Sum: 0.6315. LogSum: -0.459.
         //   LogSoftmax[0] = -0.5 - (-0.459) = -0.041
         //
@@ -643,23 +720,31 @@ mod beam_tests {
         //   Exp: [0.3678, 0.1353, 0.0498]. Sum: 0.5529. LogSum: -0.592.
         //   LogSoftmax[0] = -1.0 - (-0.592) = -0.408
         //
-        // Expected Order: 
+        // Expected Order:
         // 1. Beam 1, Token 0 (Score ~ -0.04)
         // 2. Beam 0, Token 0 (Score ~ -0.41)
-        
+
         // Assert Candidate 1 (Best)
         let best = &candidates[0];
         assert_eq!(best.2, 1); // Token ID 0 (from Beam 1) -> wait, indices are local? 
-                               // Token ID comes from column index. Both top picks are index 0.
-                               // 3rd element in tuple is TokenID. 
-        assert_eq!(best.1, 0, "Token ID should be 0"); 
+        // Token ID comes from column index. Both top picks are index 0.
+        // 3rd element in tuple is TokenID.
+        assert_eq!(best.1, 0, "Token ID should be 0");
         assert_eq!(best.2, 1, "Source Beam should be 1");
-        assert!((best.0.score - (-0.0405)).abs() < 0.001, "Score mismatch: {}", best.0.score);
+        assert!(
+            (best.0.score - (-0.0405)).abs() < 0.001,
+            "Score mismatch: {}",
+            best.0.score
+        );
 
         // Assert Candidate 2 (Second Best)
         let second = &candidates[1];
         assert_eq!(second.1, 0, "Token ID should be 0");
         assert_eq!(second.2, 0, "Source Beam should be 0");
-        assert!((second.0.score - (-0.4076)).abs() < 0.001, "Score mismatch: {}", second.0.score);
+        assert!(
+            (second.0.score - (-0.4076)).abs() < 0.001,
+            "Score mismatch: {}",
+            second.0.score
+        );
     }
 }

@@ -1,29 +1,23 @@
 use super::*;
+use crate::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
+use crate::encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer as CpuDecoderLayer;
+use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
+use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
 };
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
-use crate::traits::{
-    CrossAttentionDecoderArchitecture, DecoderOutput, Device, EncoderDecoderArchitecture,
-    LanguageModelConfig, TransformerModel,
-};
-use anyhow::Result;
-use ndarray::{Array2, Array, Array1, Array3, s};
-use std::sync::Arc;
-use crate::encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer as CpuDecoderLayer;
-use crate::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
-use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
-use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::normalization::LayerNorm as CpuLayerNorm;
+use anyhow::Result;
+use ndarray::{s, Array, Array1, Array2, Array3};
+use std::sync::Arc;
 
 use crate::linear_layer::LinearLayer;
-use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
-use tokio::sync::Mutex;
+use ndarray_rand::RandomExt;
 
 // Ensure this is imported
 
@@ -43,7 +37,6 @@ fn assert_all_close_debug(cpu: &Array3<f32>, gpu: &Array3<f32>, rtol: f32, atol:
         println!("[DEBUG PASS] {} matches. Max diff: {}", name, max_diff);
     }
 }
-
 
 
 fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {

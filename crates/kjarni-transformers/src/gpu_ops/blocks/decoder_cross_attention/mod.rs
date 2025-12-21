@@ -1,26 +1,21 @@
-use crate::cache::GpuBeamKVCache;
+use crate::encoder_decoder::traits::EncoderDecoderLanguageModel;
 use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
 };
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{
-    CrossAttentionDecoderArchitecture, DecoderOutput, Device,
+    CrossAttentionDecoderArchitecture,
     EncoderDecoderArchitecture, LanguageModelConfig, TransformerModel,
 };
-use crate::encoder_decoder::traits::{EncoderDecoderLanguageModel};
-use crate::weights_old::ModelWeights;
 use crate::Cache;
 use anyhow::Result;
-use async_trait::async_trait;
 use ndarray::{s, Array2, Array3};
 use std::any::Any;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 // This is just a data container, like the CPU version.
 pub struct GpuCrossAttentionDecoderLayer {
@@ -358,7 +353,7 @@ impl GpuCrossAttentionDecoderLayer {
                 v_pre,
                 &self.cross_attn_weights,
                 encoder_attn_mask,
-                pool
+                pool,
             )
         } else {
             // SLOW PATH: Compute K/V on the fly

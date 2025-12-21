@@ -1,7 +1,7 @@
 //! Pretrained model registry with metadata
 
 use crate::utils::levenshtein;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use strum_macros::EnumIter;
 
@@ -138,6 +138,9 @@ impl ModelType {
             ModelType::Llama3_2_3B_Instruct | ModelType::Llama3_8B_Instruct
         )
     }
+    pub fn is_bart_model(&self) -> bool {
+        matches!(self, ModelType::DistilBartCnn | ModelType::BartLargeCnn)
+    }
     pub fn is_llama_model(&self) -> bool {
         matches!(
             self,
@@ -200,7 +203,7 @@ impl ModelType {
     }
 
     /// Get all available model types
-    pub fn all() -> impl Iterator<Item = ModelType> {
+    pub fn all() -> impl Iterator<Item=ModelType> {
         use strum::IntoEnumIterator;
         ModelType::iter()
     }

@@ -8,11 +8,9 @@ use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::LanguageModel;
 use crate::pooling::mean_pool;
 use crate::traits::{
-    Encoder, EncoderOutput, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
+    LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
 };
-use crate::utils::create_full_attention_mask;
-use crate::tensor::DType;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 

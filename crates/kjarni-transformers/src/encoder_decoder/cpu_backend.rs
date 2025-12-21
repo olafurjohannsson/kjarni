@@ -1,15 +1,14 @@
 use crate::cache::{Cache, CpuBeamKVCache};
 use crate::encoder_decoder::traits::CpuCrossDecoderOutput;
 use crate::prelude::*;
-use crate::traits::EncoderOutput;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytemuck;
-use ndarray::{Array2, Array3, Array4};
+use ndarray::{Array2, Array3};
 
 use crate::encoder_decoder::{
-    EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
-    traits::{CpuCrossDecoder, CpuCrossAttentionKVCache, CpuEncoderDecoderOps, GpuEncoderDecoderOps},
+    traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuEncoderDecoderOps}, EncoderDecoderGenerationBackend,
+    EncoderDecoderLanguageModel,
 };
 
 #[derive(Debug)]
@@ -98,7 +97,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             cpu_cache.update(i, &k, &v)?;
         }
         let logits = ops.project_to_logits(&decoder_output.last_hidden_state)?;
-        
+
         Ok(logits)
     }
 

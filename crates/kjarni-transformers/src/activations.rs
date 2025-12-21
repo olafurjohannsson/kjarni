@@ -178,7 +178,7 @@ pub fn relu_parallel(x: &mut Array3<f32>) {
 
 pub fn silu_generic<S, D>(x: &mut ArrayBase<S, D>)
 where
-    S: DataMut<Elem = f32>,
+    S: DataMut<Elem=f32>,
     D: ndarray::Dimension,
 {
     x.mapv_inplace(silu_scalar);
@@ -186,7 +186,7 @@ where
 
 pub fn silu_fast<S, D>(x: &mut ArrayBase<S, D>)
 where
-    S: DataMut<Elem = f32>,
+    S: DataMut<Elem=f32>,
     D: ndarray::Dimension,
 {
     x.mapv_inplace(silu_fast_scalar);

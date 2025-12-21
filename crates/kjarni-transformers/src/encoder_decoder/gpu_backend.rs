@@ -6,16 +6,15 @@ use crate::encoder_decoder::traits::{
 };
 use crate::encoder_decoder::traits::{GpuCrossAttentionKVCache, GpuCrossDecoderOutput};
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::GpuFrameContext;
-use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::Kernel;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::broadcast::GpuBroadcast;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
+use crate::gpu_ops::GpuFrameContext;
+use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::Kernel;
 use crate::prelude::*;
-use crate::traits::EncoderOutput;
-use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::Result;
 use async_trait::async_trait;
 use bytemuck;
 use ndarray::{Array1, Array2, Array3};
@@ -164,7 +163,7 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
             Some(cache),
             Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
         )?;
-        
+
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
 
         for (i, (k, v)) in decoder_hidden_states.new_self_attn_kv.into_iter().enumerate() {

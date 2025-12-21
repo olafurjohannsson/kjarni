@@ -1,13 +1,13 @@
-use crate::GpuKVCache;
 use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
+use crate::gpu_ops::Kernel;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::traits::{
-    Cache, Decoder, DecoderArchitecture, TransformerConfig, TransformerModel,
+    Cache, DecoderArchitecture, TransformerConfig, TransformerModel,
 };
+use crate::GpuKVCache;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -32,7 +32,6 @@ pub struct GpuPreNormDecoderLayer {
 }
 
 impl GpuPreNormDecoderLayer {
-
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
@@ -161,7 +160,7 @@ impl GpuPreNormDecoderLayer {
                 attention_mask,
                 position_offset,
                 temp,
-                &self.self_attn_weights
+                &self.self_attn_weights,
             )
         } else {
             // No cache - use new K/V directly
@@ -173,7 +172,7 @@ impl GpuPreNormDecoderLayer {
                 attention_mask,
                 position_offset,
                 temp,
-                &self.self_attn_weights
+                &self.self_attn_weights,
             )
         };
 

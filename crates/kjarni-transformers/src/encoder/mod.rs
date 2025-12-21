@@ -19,18 +19,17 @@ pub mod config;
 pub mod encoder_layer;
 
 use crate::encoder::traits::EncoderArchitecture;
-use crate::gpu_context::WgpuContext;
-use crate::traits::{Device, Encoder, EncoderOutput, TransformerModel};
+use crate::traits::TransformerModel;
 pub use cpu::CpuTransformerEncoder;
 pub use gpu::GpuTransformerEncoder;
-pub use traits::{SentenceEncoderModel, CpuEncoderOps, GpuEncoderOps, CpuEncoder, GpuEncoder};
+pub use traits::{CpuEncoder, CpuEncoderOps, GpuEncoder, GpuEncoderOps, SentenceEncoderModel};
 
 
 pub mod prelude {
     pub use crate::encoder::{
         classifier::{
             CpuSequenceClassificationHead,
-            GpuSequenceClassificationHead
+            GpuSequenceClassificationHead,
         },
         config::{
             EncoderLoadConfig,
@@ -51,7 +50,6 @@ pub mod prelude {
             GpuEncoderInput,
             GpuEncoderOutput,
         },
-        
     };
 }
 

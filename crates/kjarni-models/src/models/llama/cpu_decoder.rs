@@ -7,24 +7,20 @@ use ndarray::{s, Array2, Array3, Axis};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    cache::CpuKVCache,
-    decoder::prelude::*,
+    cache::CpuKVCache, decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
     normalization::RMSNorm,
     rope::RoPE,
     tensor::DType,
-    traits::{
-        Cache, Decoder, DecoderArchitecture, Device, LanguageModelConfig,
-        TransformerModel,
-    },
+    traits::{Cache, DecoderArchitecture, Device, LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
     TransformerConfig,
     WgpuContext,
 };
 
-// --- Crate-Specific ---
+
 use crate::models::llama::config::LlamaConfig;
 
 pub struct LlamaCpuDecoder {
@@ -138,10 +134,34 @@ impl LlamaCpuDecoder {
         let ffn_names = config.get_feed_forward_names(i);
         let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::Faer);
         // Load Attention Weights (BF16/LinearLayer)
-        let q = LinearLayer::from_weights(weights, &layer_names.q_weight, None, target_dtype, strategy)?;
-        let k = LinearLayer::from_weights(weights, &layer_names.k_weight, None, target_dtype, strategy)?;
-        let v = LinearLayer::from_weights(weights, &layer_names.v_weight, None, target_dtype, strategy)?;
-        let o = LinearLayer::from_weights(weights, &layer_names.output_weight, None, target_dtype, strategy)?;
+        let q = LinearLayer::from_weights(
+            weights,
+            &layer_names.q_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
+        let k = LinearLayer::from_weights(
+            weights,
+            &layer_names.k_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
+        let v = LinearLayer::from_weights(
+            weights,
+            &layer_names.v_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
+        let o = LinearLayer::from_weights(
+            weights,
+            &layer_names.output_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
 
         let attention = DecoderAttention::new(
             config.hidden_size,
@@ -162,9 +182,20 @@ impl LlamaCpuDecoder {
             target_dtype,
             strategy,
         )?;
-        let up = LinearLayer::from_weights(weights, &ffn_names.intermediate_weight, None, target_dtype, strategy)?;
-        let down = LinearLayer::from_weights(weights, &ffn_names.output_weight, None, target_dtype, strategy)?;
-
+        let up = LinearLayer::from_weights(
+            weights,
+            &ffn_names.intermediate_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
+        let down = LinearLayer::from_weights(
+            weights,
+            &ffn_names.output_weight,
+            None,
+            target_dtype,
+            strategy,
+        )?;
 
         let feed_forward = SwiGluFeedForward::new(gate, up, down);
 
@@ -202,22 +233,21 @@ impl TransformerModel for LlamaCpuDecoder {
     }
 }
 
-
 impl CpuDecoder for LlamaCpuDecoder {
-    fn embed(
-        &self,
-        input: DecoderInput<'_>,
-        position_offset: usize,
-    ) -> Result<Array3<f32>> {
+    fn embed(&self, input: DecoderInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
         match input {
             DecoderInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
                 let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
 
-                Ok(self.embeddings.forward(&input_ids, None, position_offset, false))
+                Ok(self
+                    .embeddings
+                    .forward(&input_ids, None, position_offset, false))
             }
             DecoderInput::HiddenCpu(hidden) => Ok(hidden.clone()),
-            _ => Err(anyhow!("LlamaCpuDecoder received GPU input. Transfer to CPU first.")),
+            _ => Err(anyhow!(
+                "LlamaCpuDecoder received GPU input. Transfer to CPU first."
+            )),
         }
     }
 
@@ -248,12 +278,14 @@ impl CpuDecoder for LlamaCpuDecoder {
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
         // 2. Store new K/V pairs temporarily.
-        // We cannot update the cache *inside* the loop because `cpu_cache_opt` is borrowed 
+        // We cannot update the cache *inside* the loop because `cpu_cache_opt` is borrowed
         // to get `past_kv` (immutable borrow), preventing a mutable borrow for `update`.
         let mut new_key_values = Vec::with_capacity(end_layer - start_layer);
 
         for i in start_layer..end_layer {
-            if i >= self.layers.len() { break; }
+            if i >= self.layers.len() {
+                break;
+            }
             let layer = &self.layers[i];
 
             // 3. Get Past KV View
@@ -264,12 +296,8 @@ impl CpuDecoder for LlamaCpuDecoder {
             let past_kv_view = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
 
             // 4. Layer Forward
-            let (new_hidden, new_k, new_v) = layer.forward(
-                &hidden,
-                attention_mask,
-                position_offset,
-                past_kv_view,
-            )?;
+            let (new_hidden, new_k, new_v) =
+                layer.forward(&hidden, attention_mask, position_offset, past_kv_view)?;
 
             hidden = new_hidden;
             new_key_values.push((new_k, new_v));
@@ -316,4 +344,3 @@ impl CpuDecoder for LlamaCpuDecoder {
         Ok(output)
     }
 }
-

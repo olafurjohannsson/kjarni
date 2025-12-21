@@ -12,15 +12,12 @@
 use crate::gpu_ops::GpuTensor;
 use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0};
 use crate::tensor::{DType, QuantizedMatrix, RawTensor, TypedCpuTensor};
-use crate::utils::linear_algebra::{
-    matmul_2d, matmul_2d_f32_notranspose as matmul_2d_f32_custom_simd, matmul_2d_mixed_bf16_new,
-};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
-use crate::{WgpuContext, ops};
-use anyhow::{Result, anyhow};
+use crate::{ops, WgpuContext};
+use anyhow::{anyhow, Result};
 use half::bf16;
-use ndarray::{Array1, Array2, ArrayView2, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Ix1, Ix2};
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -62,7 +59,7 @@ impl LinearLayer {
             f32_strategy: F32MatmulStrategy::CustomSimd,
         }
     }
-    
+
     /// Creates a new BF16 `LinearLayer` from a weight matrix and an optional bias.
     pub fn new_bf16(weights: Array2<bf16>, bias: impl Into<Option<Array1<f32>>>) -> Self {
         Self {
@@ -169,6 +166,27 @@ impl LinearLayer {
             bias,
             f32_strategy: strategy,
         })
+    }
+
+    /// Optimized logits projection for single-token decode
+    /// Returns [1, vocab_size] for consistency with matmul output
+    #[inline]
+    pub fn project_logits(&self, hidden_1d: &ArrayView1<f32>) -> Array1<f32> {
+        match &self.data {
+            LinearData::BF16(w) => {
+                crate::kernels::project_logits_bf16(hidden_1d, &w.view())
+            }
+            LinearData::F32(w) => {
+                // For F32, use regular matmul path
+                unimplemented!()
+                // let hidden_2d = hidden_1d.view().insert_axis(ndarray::Axis(0));
+                // let result = self.matmul(&hidden_2d);
+                // result.into_shape_with_order(result.len()).unwrap()
+            }
+            _ => {
+                unimplemented!("Logits projection not implemented for {:?}", self.dtype())
+            }
+        }
     }
 
     /// Computes `y = x @ W^T + b`, dispatching to the optimal backend kernel.

@@ -10,7 +10,7 @@ use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{LanguageModelConfig, TransformerConfig};
-use crate::{activations};
+use crate::activations;
 
 pub struct GpuEncoderLayer {
     self_attn: GpuAttention,
@@ -196,8 +196,8 @@ impl GpuEncoderLayer {
 mod tests {
     use super::*;
     use crate::activations::Activation;
-    use crate::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::encoder::encoder_layer::EncoderLayer;
+    use crate::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
@@ -222,7 +222,7 @@ mod tests {
         let model_path = std::path::Path::new(
             "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6",
         );
-        let weights = crate::weights_old::ModelWeights::new(model_path)?;
+        let weights = crate::weights::ModelWeights::new(model_path)?;
 
         let prefix = "model.encoder.layers.0";
 

@@ -4,9 +4,6 @@
 use crate::activations::Activation;
 pub use crate::cache::Cache;
 use crate::WgpuContext;
-use anyhow::Result;
-use async_trait::async_trait;
-use ndarray::{Array2, Array3, Array4};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -55,101 +52,6 @@ pub trait TransformerModel: Send + Sync {
 ///
 /// This allows for generic model loading and initialization from configuration data.
 pub trait ModelConfig: Send + Sync + Any {}
-
-/// The standard output from an encoder model.
-#[derive(Clone)]
-pub struct EncoderOutput<T = f32> {
-    /// The final hidden states of the encoder.
-    /// Shape: `(batch_size, sequence_length, hidden_size)`.
-    pub last_hidden_state: Array3<T>,
-}
-
-/// The standard output from a decoder model.
-pub struct DecoderOutput<T = f32> {
-    /// The final hidden states of the decoder.
-    /// Shape: `(batch_size, sequence_length, hidden_size)`.
-    pub last_hidden_state: Array3<T>,
-    /// The updated Key-Value cache after this forward pass.
-    /// This can be fed back into the next generation step.
-    pub past_key_values: Option<Vec<(Array4<T>, Array4<T>)>>,
-}
-
-pub trait CpuClassificationHead {
-    fn project(&self, hidden_states: &Array3<f32>) -> Array2<f32>;  // [batch, num_classes]
-}
-
-/// Defines the asynchronous interface for an encoder model (e.g., BERT).
-///
-/// An encoder processes an entire input sequence at once, creating a
-/// rich, contextualized representation.
-#[async_trait]
-pub trait Encoder: TransformerModel {
-    type Input;
-    type Output;
-
-    /// Asynchronously performs a forward pass through the encoder.
-    ///
-    /// # Arguments
-    /// * `input` - The input tensor (e.g., token embeddings).
-    /// * `attention_mask` - A mask to prevent attention to padding tokens.
-    ///
-    /// # Returns
-    /// An `EncoderOutput` containing the final hidden states.
-    async fn forward(
-        &self,
-        input: &Self::Input,
-        attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
-    ) -> Result<Self::Output>;
-
-    /// Get raw hidden states
-    ///
-    /// Default implementation calls forward and extracts last_hidden_state.
-    async fn get_hidden_states(
-        &self,
-        input: &Self::Input,
-        attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
-    ) -> Result<Array3<f32>>;
-}
-
-
-/// Defines the asynchronous interface for a standalone decoder model (e.g., GPT-2).
-///
-/// A decoder is typically used for autoregressive generation, where it predicts
-/// one token at a time. It uses a causal attention mask to ensure that a given
-/// position can only attend to previous positions.
-#[async_trait(?Send)]
-pub trait Decoder: TransformerModel {
-    type Input;
-    type Output;
-
-    /// Asynchronously performs a forward pass through the decoder.
-    ///
-    /// # Arguments
-    /// * `input` - The input tensor for the current step(s).
-    /// * `attention_mask` - The causal attention mask.
-    /// * `cache` - An optional mutable reference to a `Cache` object to enable
-    ///   efficient, incremental decoding by reusing past Key-Value states.
-    ///
-    /// # Returns
-    /// A `DecoderOutput` containing the new hidden states and the updated cache.
-    async fn forward(
-        &self,
-        input: &Self::Input,
-        attention_mask: &Array2<f32>,
-        cache: Option<&mut dyn Cache>,
-    ) -> Result<Self::Output>;
-
-    /// Get raw hidden states
-    ///
-    /// Default implementation calls forward with no cache and extracts last_hidden_state.
-    async fn get_hidden_states(
-        &self,
-        input: &Self::Input,
-        attention_mask: &Array2<f32>,
-    ) -> Result<Array3<f32>>;
-}
 
 
 /// A trait providing high-level configuration shared by all transformer models.

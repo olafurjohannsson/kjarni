@@ -6,7 +6,7 @@ pub mod errors;
 use wasm_bindgen::prelude::*;
 use crate::{ModelType, GPTConfig, GenerationConfig, SamplingStrategy};
 use crate::model::distilgpt2::DistilGPT2;
-use crate::weights_old::ModelWeights;
+use crate::weights::ModelWeights;
 use crate::tokenizer::wasm::BPETokenizer;
 
 #[wasm_bindgen]
