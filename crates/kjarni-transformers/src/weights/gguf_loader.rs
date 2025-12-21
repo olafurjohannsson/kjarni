@@ -1,16 +1,18 @@
 use crate::tensor::{DType, RawTensor};
 use crate::weights::WeightLoader;
-use anyhow::{anyhow, Result, Context};
+use anyhow::{Context, Result, anyhow};
 use memmap2::Mmap;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
-use std::collections::BTreeMap;
 // Import your gguf-rs components
-use gguf_rs::{get_gguf_container, ByteOrder, GGUFContainer, GGUFModel, FILE_MAGIC_GGUF_LE, FILE_MAGIC_GGUF_BE};
 use byteorder::{LittleEndian, ReadBytesExt};
+use gguf_rs::{
+    ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer, GGUFModel, get_gguf_container,
+};
 use serde_json::Value;
 
 pub struct GgufLoader {
@@ -28,14 +30,16 @@ struct GgufTensorInfo {
 }
 
 impl GgufLoader {
-pub fn new(path: &Path) -> Result<Self> {
+    pub fn new(path: &Path) -> Result<Self> {
         // 1. Open the file for header parsing
         let mut header_file = File::open(path).context("Failed to open GGUF file for header")?;
-        
+
         // 2. Determine ByteOrder by reading first 4 bytes
         let bo = {
             let mut magic = [0u8; 4];
-            header_file.read_exact(&mut magic).context("Failed to read GGUF magic")?;
+            header_file
+                .read_exact(&mut magic)
+                .context("Failed to read GGUF magic")?;
             let magic_val = i32::from_le_bytes(magic);
             match magic_val {
                 FILE_MAGIC_GGUF_LE => ByteOrder::LE,
@@ -44,24 +48,40 @@ pub fn new(path: &Path) -> Result<Self> {
             }
         };
 
-        // 3. Hand the file to gguf-rs. 
-        // The file pointer is already at position 4, which is exactly where 
+        // 3. Hand the file to gguf-rs.
+        // The file pointer is already at position 4, which is exactly where
         // the library expects to start reading the version number.
         let mut container = GGUFContainer::new(bo, Box::new(header_file));
-        let model = container.decode().map_err(|e| anyhow!("GGUF Decode Error: {}", e))?;
+        let model = container
+            .decode()
+            .map_err(|e| anyhow!("GGUF Decode Error: {}", e))?;
 
         // 4. Map tensors and metadata
         let mut tensor_map = HashMap::new();
         let mut total_tensor_bytes = 0u64;
-        
+
         for t in model.tensors() {
             total_tensor_bytes += t.size;
-            tensor_map.insert(t.name.clone(), GgufTensorInfo {
-                kind: t.kind,
-                offset: t.offset,
-                size: t.size,
-                shape: t.shape.iter().map(|&s| s as usize).collect(),
-            });
+
+            // REVERSE the shape from GGUF [width, height] to ndarray [height, width]
+            let mut shape: Vec<usize> = t.shape.iter().map(|&s| s as usize).collect();
+            shape.reverse();
+
+            // Filter out 1s (GGUF often pads shapes to 4D, e.g., [2048, 128256, 1, 1])
+            let cleaned_shape: Vec<usize> = shape
+                .into_iter()
+                .filter(|&d| d > 1 || t.shape.len() <= 1)
+                .collect();
+
+            tensor_map.insert(
+                t.name.clone(),
+                GgufTensorInfo {
+                    kind: t.kind,
+                    offset: t.offset,
+                    size: t.size,
+                    shape: cleaned_shape,
+                },
+            );
         }
         let metadata = model.metadata().clone();
 
@@ -69,11 +89,14 @@ pub fn new(path: &Path) -> Result<Self> {
         // This avoids any lifetime or pointer conflicts.
         let mmap_file = File::open(path).context("Failed to open GGUF file for mmap")?;
         let mmap = unsafe { Mmap::map(&mmap_file)? };
-        
+
         // Calculate data offset
         let data_start_offset = (mmap.len() as u64 - total_tensor_bytes) & !31;
 
-        log::info!("Successfully loaded GGUF model: {} tensors", tensor_map.len());
+        log::info!(
+            "Successfully loaded GGUF model: {} tensors",
+            tensor_map.len()
+        );
 
         Ok(Self {
             mmap,
@@ -83,25 +106,37 @@ pub fn new(path: &Path) -> Result<Self> {
         })
     }
 
-        /// Gets a string value from metadata
+    /// Gets a string value from metadata
     pub fn get_string(&self, key: &str) -> Option<&str> {
         self.metadata.get(key).and_then(|v| v.as_str())
     }
 
     /// Gets a u32 value from metadata (casting from JSON u64)
     pub fn get_u32(&self, key: &str) -> Option<u32> {
-        self.metadata.get(key).and_then(|v| v.as_u64()).map(|v| v as u32)
+        self.metadata
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
     }
 
     /// Gets a f32 value from metadata (casting from JSON f64)
     pub fn get_f32(&self, key: &str) -> Option<f32> {
-        self.metadata.get(key).and_then(|v| v.as_f64()).map(|v| v as f32)
+        self.metadata
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
     }
     fn translate_name(&self, name: &str) -> String {
         // 1. Handle the basics
-        if name == "model.embed_tokens.weight" { return "token_embd.weight".to_string(); }
-        if name == "model.norm.weight" { return "output_norm.weight".to_string(); }
-        if name == "lm_head.weight" { return "output.weight".to_string(); }
+        if name == "model.embed_tokens.weight" {
+            return "token_embd.weight".to_string();
+        }
+        if name == "model.norm.weight" {
+            return "output_norm.weight".to_string();
+        }
+        if name == "lm_head.weight" {
+            return "output.weight".to_string();
+        }
 
         // 2. Handle the layers: "model.layers.N.xxx" -> "blk.N.xxx"
         if name.starts_with("model.layers.") {
@@ -134,8 +169,13 @@ impl WeightLoader for GgufLoader {
     fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
         let gguf_name = self.translate_name(name);
 
-        let info = self.tensor_map.get(&gguf_name)
-            .ok_or_else(|| anyhow!("Tensor '{}' (translated to '{}') not found in GGUF", name, gguf_name))?;
+        let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
+            anyhow!(
+                "Tensor '{}' (translated to '{}') not found in GGUF",
+                name,
+                gguf_name
+            )
+        })?;
 
         // Mapping GGML Type IDs to your internal DType
         let dtype = match info.kind {

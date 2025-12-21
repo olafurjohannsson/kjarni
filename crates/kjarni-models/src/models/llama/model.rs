@@ -314,7 +314,7 @@ impl CpuDecoderOps for LlamaModel {
         let t_start = std::time::Instant::now();
 
         let (batch, seq, hidden) = hidden_states.dim();
-        let fast = batch == 1 && seq == 1;
+        let fast = false; // batch == 1 && seq == 1;
 
         let logits_2d = if fast {
             // Optimized path for single-token decode
