@@ -14,7 +14,7 @@ use kjarni_transformers::{
     linear_layer::LinearLayer,
     normalization::LayerNorm,
     traits::{DecoderArchitecture, LanguageModelConfig},
-    weights_old::{ModelWeights},
+    weights::{ModelWeights},
     tensor::DType,
     Embeddings, FeedForward, MultiHeadAttention, Normalization, TransformerConfig,
 };

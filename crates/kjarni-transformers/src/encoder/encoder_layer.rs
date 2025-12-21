@@ -114,7 +114,7 @@ impl EncoderLayer {
 mod tests {
     use super::*;
     use crate::feedforward::StdFeedForward;
-    use crate::linear_layer_old::LinearLayer;
+    use crate::linear_layer::LinearLayer;
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
 
@@ -308,7 +308,7 @@ fn test_postnorm_output_is_normalized() -> Result<()> {
     fn test_encoder_self_attention_matches_multihead_attention() -> Result<()> {
         use crate::attention::MultiHeadAttention;
         use crate::encoder::encoder_self_attention::EncoderSelfAttention;
-        use crate::linear_layer_old::LinearLayer;
+        use crate::linear_layer::LinearLayer;
         use ndarray::{Array1, Array2, Array3};
 
         let hidden_size = 64;

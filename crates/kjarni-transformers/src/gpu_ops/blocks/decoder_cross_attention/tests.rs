@@ -20,7 +20,7 @@ use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
 use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
 use crate::normalization::LayerNorm as CpuLayerNorm;
 
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use tokio::sync::Mutex;

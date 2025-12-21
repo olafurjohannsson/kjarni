@@ -251,7 +251,7 @@ mod tests {
     async fn test_bart_embeddings_golden_parity() -> Result<()> {
         use std::path::Path;
         use ndarray::Array2;
-        use crate::weights_old::ModelWeights;
+        use crate::weights::ModelWeights;
         let path_str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
         let path = Path::new(path_str);
         assert!(path.exists());
@@ -322,7 +322,7 @@ mod tests {
 
         // Keep the hardcoded path for now as requested
         let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
-        let weights = crate::weights_old::ModelWeights::new(Path::new(p))?;
+        let weights = crate::weights::ModelWeights::new(Path::new(p))?;
 
         // --- 2. Run CPU Path (Expected Result) ---
         let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
@@ -399,7 +399,7 @@ mod tests {
         let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
 
         // --- 2. Run CPU Path (Expected Result) ---
-        let mut weights = crate::weights_old ::ModelWeights::new(Path::new(p))?;
+        let mut weights = crate::weights ::ModelWeights::new(Path::new(p))?;
         let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
         let token_type_embeddings = match type_w {
             Some(name) => Some(weights.get_array2(name)?), // Load if present

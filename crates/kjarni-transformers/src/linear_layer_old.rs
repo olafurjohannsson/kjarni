@@ -37,7 +37,7 @@ impl LinearLayer {
         let mut result = match &self.data {
             // Use standard Faer transpose logic.
             // It might be slower than pre-transposing, but it is GUARANTEED correct.
-            LinearData::F32(w) => matmul_2d(input, &w.view()),
+            LinearData::F32(w) => matmul_2d_transposed(input, &w.view()),
 
             // Your custom kernel expects OutIn
             LinearData::BF16(w) => matmul_2d_mixed_bf16(input, &w.view()),

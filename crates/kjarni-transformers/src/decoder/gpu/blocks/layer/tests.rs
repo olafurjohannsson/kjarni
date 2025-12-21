@@ -1,5 +1,6 @@
 use super::*;
 use crate::Device::Cpu;
+use crate::linear_layer::LinearLayer;
 use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
@@ -151,22 +152,22 @@ async fn create_test_layer_pair(
 
     // --- Weights: [out_features, in_features] ---
     // Q: hidden → hidden
-    let q_w = crate::linear_layer_old::LinearLayer::from(Array::random(
+    let q_w = LinearLayer::from(Array::random(
         (config.hidden_size, config.hidden_size),
         Uniform::new(-0.1, 0.1),
     ));
     // K: hidden → kv_dim
-    let k_w = crate::linear_layer_old::LinearLayer::from(Array::random(
+    let k_w = LinearLayer::from(Array::random(
         (config.kv_dim(), config.hidden_size), // FIXED: swapped
         Uniform::new(-0.1, 0.1),
     ));
     // V: hidden → kv_dim
-    let v_w = crate::linear_layer_old::LinearLayer::from(Array::random(
+    let v_w = LinearLayer::from(Array::random(
         (config.kv_dim(), config.hidden_size), // FIXED: swapped
         Uniform::new(-0.1, 0.1),
     ));
     // O: hidden → hidden
-    let o_w = crate::linear_layer_old::LinearLayer::from(Array::random(
+    let o_w = LinearLayer::from(Array::random(
         (config.hidden_size, config.hidden_size),
         Uniform::new(-0.1, 0.1),
     ));
@@ -319,10 +320,10 @@ fn test_decoder_attention_matches_multihead_attention() -> Result<()> {
     let da = DecoderAttention::new(
         hidden_size,
         num_heads,
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // q
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // k
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // v
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // o_proj
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // q
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // k
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // v
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())), // o_proj
         Some(num_heads), // num_kv_heads = num_heads to disable GQA
     );
 
@@ -710,10 +711,10 @@ fn test_decoder_attention_with_rope_matches_mha() -> Result<()> {
     let da = DecoderAttention::new(
         hidden_size,
         num_heads,
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(weight_out_in.clone(), Some(bias.clone())),
         Some(num_heads), // num_kv_heads = num_heads (no GQA)
     );
 
@@ -851,10 +852,10 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
     let da_gqa = DecoderAttention::new(
         hidden_size,
         num_heads,
-        crate::linear_layer_old::LinearLayer::new_f32(q_weight_out_in.clone(), Some(bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(k_weight_out_in.clone(), Some(kv_bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(v_weight_out_in.clone(), Some(kv_bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(o_weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(q_weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(k_weight_out_in.clone(), Some(kv_bias.clone())),
+        LinearLayer::new_f32(v_weight_out_in.clone(), Some(kv_bias.clone())),
+        LinearLayer::new_f32(o_weight_out_in.clone(), Some(bias.clone())),
         Some(num_kv_heads), // Enable GQA
     );
 
@@ -884,10 +885,10 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
     let da_mha = DecoderAttention::new(
         hidden_size,
         num_heads,
-        crate::linear_layer_old::LinearLayer::new_f32(q_weight_out_in.clone(), Some(bias.clone())),
-        crate::linear_layer_old::LinearLayer::new_f32(expanded_k_weight, Some(bias.clone())), // Use expanded K
-        crate::linear_layer_old::LinearLayer::new_f32(expanded_v_weight, Some(bias.clone())), // Use expanded V
-        crate::linear_layer_old::LinearLayer::new_f32(o_weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(q_weight_out_in.clone(), Some(bias.clone())),
+        LinearLayer::new_f32(expanded_k_weight, Some(bias.clone())), // Use expanded K
+        LinearLayer::new_f32(expanded_v_weight, Some(bias.clone())), // Use expanded V
+        LinearLayer::new_f32(o_weight_out_in.clone(), Some(bias.clone())),
         Some(num_heads), // No GQA, it's now standard MHA
     );
 

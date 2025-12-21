@@ -21,13 +21,13 @@ use kjarni_transformers::{
     TransformerConfig, WgpuContext,
     decoder::prelude::*,
     gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
-    linear_layer_old::LinearLayer,
+    linear_layer::LinearLayer,
     models::{
         LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
     traits::{DecoderArchitecture, LanguageModelConfig},
-    weights_old::{ModelWeights},
+    weights::{ModelWeights},
     tensor::{DType, RawTensor},
 };
 
@@ -117,7 +117,9 @@ impl Gpt2Model {
         let lm_head = LinearLayer::from_weights(
             &weights,
             config_arc.get_lm_head_name(),
+            None,
             decoder_config.unwrap_or_default().target_dtype,
+            None,
         )?;
 
         let config = config_arc

@@ -37,7 +37,7 @@ pub struct GpuAttentionWeights {
 impl GpuAttentionWeights {
     pub fn from_config_names(
         context: &Arc<WgpuContext>,
-        weights: &crate::weights_old::ModelWeights,
+        weights: &crate::weights::ModelWeights,
         names: &crate::traits::LayerAttentionNames,
     ) -> Result<Self> {
         Ok(Self::new(

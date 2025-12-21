@@ -12,7 +12,7 @@ use crate::gpu_ops::primitives::{
     tanh::GpuTanh,
 };
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use ndarray::{Array1, Array2, Array3, s};
 
 // ============================================================================

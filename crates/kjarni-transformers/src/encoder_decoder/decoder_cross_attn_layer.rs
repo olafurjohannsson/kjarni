@@ -146,7 +146,7 @@ mod tests {
     use super::*;
     use crate::attention::MultiHeadAttention;
     use crate::feedforward::{FeedForward, LegacyFeedForward, StdFeedForward};
-    use crate::linear_layer_old::LinearLayer;
+    use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
     use ndarray::{Array1, Array2, Array3};
 

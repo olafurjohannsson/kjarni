@@ -8,11 +8,11 @@ use kjarni_transformers::{
     encoder::{encoder_layer::EncoderLayer, prelude::*},
     encoder_decoder::traits::CpuCrossDecoder,
     feedforward::{FeedForward, StdFeedForward},
-    linear_layer_old::LinearLayer,
+    linear_layer::LinearLayer,
     normalization::LayerNorm,
     traits::{Device, EncoderDecoderArchitecture, TransformerConfig, TransformerModel},
     utils::linear_algebra::{apply_attention_mask, matmul_4d},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
 };
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
@@ -46,32 +46,32 @@ impl BartCpuEncoder {
             let prefix = format!("model.encoder.layers.{}", i);
 
             // 1. Load LinearLayers externally
-            let q_proj = LinearLayer::from_weight_and_bias(
+            let q_proj = LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.q_proj.weight", prefix),
                 Some(&format!("{}.self_attn.q_proj.bias", prefix)),
-                false,
+                None,
                 None,
             )?;
-            let k_proj = LinearLayer::from_weight_and_bias(
+            let k_proj = LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.k_proj.weight", prefix),
                 Some(&format!("{}.self_attn.k_proj.bias", prefix)),
-                false,
+                None,
                 None,
             )?;
-            let v_proj = LinearLayer::from_weight_and_bias(
+            let v_proj = LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.v_proj.weight", prefix),
                 Some(&format!("{}.self_attn.v_proj.bias", prefix)),
-                false,
+                None,
                 None,
             )?;
-            let out_proj = LinearLayer::from_weight_and_bias(
+            let out_proj = LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.out_proj.weight", prefix),
                 Some(&format!("{}.self_attn.out_proj.bias", prefix)),
-                false,
+                None,
                 None,
             )?;
 

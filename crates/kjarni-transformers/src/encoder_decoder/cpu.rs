@@ -4,19 +4,17 @@ use crate::encoder::traits::EncoderArchitecture;
 use crate::encoder_decoder::traits::CpuCrossDecoder;
 use crate::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
 use crate::feedforward::LegacyFeedForward;
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use crate::traits::{
     CrossAttentionDecoderArchitecture, DecoderArchitecture, LanguageModelConfig,
     LayerAttentionNames, LayerDecoderAttentionNames, LayerFeedForwardNames, TransformerConfig,
 };
-use crate::traits::{
-    Device, EncoderDecoderArchitecture, TransformerModel,
-};
-use crate::weights_old::ModelWeights;
+use crate::traits::{Device, EncoderDecoderArchitecture, TransformerModel};
+use crate::weights::ModelWeights;
 use crate::{
-    encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer, normalization::LayerNorm, Cache,
-    Embeddings, FeedForward
-    ,
+    Cache, Embeddings, FeedForward,
+    encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer,
+    normalization::LayerNorm,
 };
 use anyhow::Result;
 use std::any::Any;
@@ -64,10 +62,34 @@ impl CpuTransformerEncoderDecoder {
             let self_attn = DecoderSelfAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                LinearLayer::from_weights(weights, &self_attn_names.q_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &self_attn_names.k_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &self_attn_names.v_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &self_attn_names.output_weight, target_dtype)?,
+                LinearLayer::from_weights(
+                    weights,
+                    &self_attn_names.q_weight,
+                    None,
+                    target_dtype,
+                    None,
+                )?,
+                LinearLayer::from_weights(
+                    weights,
+                    &self_attn_names.k_weight,
+                    None,
+                    target_dtype,
+                    None,
+                )?,
+                LinearLayer::from_weights(
+                    weights,
+                    &self_attn_names.v_weight,
+                    None,
+                    target_dtype,
+                    None,
+                )?,
+                LinearLayer::from_weights(
+                    weights,
+                    &self_attn_names.output_weight,
+                    None,
+                    target_dtype,
+                    None,
+                )?,
             );
 
             let self_attn_layer_norm = LayerNorm::new(
@@ -79,10 +101,10 @@ impl CpuTransformerEncoderDecoder {
             let cross_attn = DecoderCrossAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                LinearLayer::from_weights(weights, &cross_attn_names.q_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &cross_attn_names.k_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &cross_attn_names.v_weight, target_dtype)?,
-                LinearLayer::from_weights(weights, &cross_attn_names.output_weight, target_dtype)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.q_weight, None, target_dtype, None)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.k_weight, None, target_dtype, None)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.v_weight, None, target_dtype, None)?,
+                LinearLayer::from_weights(weights, &cross_attn_names.output_weight, None, target_dtype, None)?,
             );
             let cross_attn_layer_norm = LayerNorm::new(
                 weights.get_array1(&cross_attn_names.norm_weight)?,

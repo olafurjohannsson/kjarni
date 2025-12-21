@@ -23,7 +23,7 @@ use kjarni_transformers::{
         GpuTensor, GpuTensorPool,
     },
     traits::{DecoderArchitecture, LanguageModelConfig},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
     TransformerConfig, WgpuContext,
 };
 

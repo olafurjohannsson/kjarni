@@ -8,7 +8,7 @@ use kjarni_transformers::{
     normalization::LayerNorm,
     traits::{Device, TransformerModel},
     utils::linear_algebra::{apply_attention_mask, matmul_4d},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
 };
 use ndarray::{Array2, Array3, s};
 use std::sync::Arc;

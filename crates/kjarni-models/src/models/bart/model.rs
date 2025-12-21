@@ -22,11 +22,11 @@ use kjarni_transformers::{
         GpuFrameContext, GpuTensor,
         primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer},
     },
-    linear_layer_old::LinearLayer,
+    linear_layer::LinearLayer,
     models::{ModelType, download_model_files},
     prelude::*,
     traits::{LanguageModelConfig, TransformerModel},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
 };
 
 // --- Crate-Specific ---
@@ -137,7 +137,8 @@ impl BartModel {
         println!("Using LM Head key: {}", config.get_lm_head_name());
         // Load CPU versions of head/bias regardless, as they are small
 
-        let lm_head = LinearLayer::from_weights(&weights, config.get_lm_head_name(), None)?;
+        let lm_head = LinearLayer::from_weights(&weights, 
+            config.get_lm_head_name(), None, None, None)?;
         let final_logits_bias = weights.get_array1("final_logits_bias").ok();
 
         match device {

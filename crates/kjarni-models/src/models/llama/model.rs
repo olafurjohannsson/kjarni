@@ -10,30 +10,30 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
+    WgpuContext,
     decoder::prelude::*,
     gpu_context,
     gpu_ops::{
-        blocks::rope::GpuRoPE, primitives::{linear::GpuLinearLayer, matmul::GpuMatMul}, GpuFrameContext,
-        GpuTensor,
-        Kernel,
+        GpuFrameContext, GpuTensor, Kernel,
+        blocks::rope::GpuRoPE,
+        primitives::{linear::GpuLinearLayer, matmul::GpuMatMul},
     },
     linear_layer::LinearLayer,
     models::{
-        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
+        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
     rope::RoPE,
     tensor::{DType, RawTensor},
     traits::{Decoder, DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
-    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -182,47 +182,46 @@ impl LlamaModel {
                 })
             }
             Device::Wgpu => {
-                unimplemented!()
-                // let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a context"))?;
-                //
-                // // Create GPU RoPE
-                // let gpu_rope = GpuRoPE::new(&ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache)?;
-                //
-                // let gpu_decoder = Some(LlamaGpuDecoder::new(
-                //     &ctx,
-                //     &weights,
-                //     config.clone(),
-                //     gpu_rope,
-                //     load_config,
-                // )?);
-                // let gpu_lm_head_transposed = if !load_config.offload_lm_head {
-                //     log::info!("Loading LM Head to VRAM (Unified Layout [Vocab, Hidden])");
-                //
-                //     let head_name = config.get_lm_head_name();
-                //     let tensor = if let Ok(raw) = weights.get_raw(head_name) {
-                //         // Load Raw (BF16 or F32) without modification
-                //         GpuTensor::from_raw(&ctx, &raw, "lm_head")?
-                //     } else {
-                //         let arr = weights.get_array2(head_name)?;
-                //         GpuTensor::from_ndarray(&ctx, &arr)?
-                //     };
-                //
-                //     Some(tensor)
-                // } else {
-                //     None
-                // };
-                // let gpu_lm_head_layer = Some(GpuLinearLayer::new(&ctx));
-                // Ok(Self {
-                //     config,
-                //     decoder: None,
-                //     tokenizer,
-                //     lm_head: lm_head,
-                //     gpu_decoder,
-                //     gpu_lm_head_transposed,
-                //     gpu_lm_head_layer: gpu_lm_head_layer,
-                //     device,
-                //     context: Some(ctx),
-                // })
+                let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a context"))?;
+                
+                // Create GPU RoPE
+                let gpu_rope = GpuRoPE::new(&ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache)?;
+                
+                let gpu_decoder = Some(LlamaGpuDecoder::new(
+                    &ctx,
+                    &weights,
+                    config.clone(),
+                    gpu_rope,
+                    load_config,
+                )?);
+                let gpu_lm_head_transposed = if !load_config.offload_lm_head {
+                    log::info!("Loading LM Head to VRAM (Unified Layout [Vocab, Hidden])");
+                
+                    let head_name = config.get_lm_head_name();
+                    let tensor = if let Ok(raw) = weights.get_raw(head_name) {
+                        // Load Raw (BF16 or F32) without modification
+                        GpuTensor::from_raw(&ctx, &raw, "lm_head")?
+                    } else {
+                        let arr = weights.get_array2(head_name)?;
+                        GpuTensor::from_ndarray(&ctx, &arr)?
+                    };
+                
+                    Some(tensor)
+                } else {
+                    None
+                };
+                let gpu_lm_head_layer = Some(GpuLinearLayer::new(&ctx));
+                Ok(Self {
+                    config,
+                    decoder: None,
+                    tokenizer,
+                    lm_head: lm_head,
+                    gpu_decoder,
+                    gpu_lm_head_transposed,
+                    gpu_lm_head_layer: gpu_lm_head_layer,
+                    device,
+                    context: Some(ctx),
+                })
             }
         }
     }
@@ -306,12 +305,20 @@ impl CpuDecoderOps for LlamaModel {
     }
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        let t_start = std::time::Instant::now(); // <-- ADD TIMER
+
         let (batch, seq, hidden) = hidden_states.dim();
-        // Reshape to 2D [Batch*Seq, Hidden]
         let hidden_2d = hidden_states
             .view()
             .into_shape_with_order((batch * seq, hidden))?;
+
         let logits_2d = self.lm_head.matmul(&hidden_2d);
+
+        // Log only for the decode step (seq_len == 1)
+        if seq == 1 {
+            log::info!("[Logits Projection] Time: {:?}", t_start.elapsed()); // <-- ADD LOG
+        }
+
         logits_2d
             .into_shape_with_order((batch, seq, self.vocab_size()))
             .map_err(|e| anyhow!(e))

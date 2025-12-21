@@ -27,7 +27,7 @@ use kjarni_transformers::{
     },
     models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
     traits::{Cache, Device, LanguageModelConfig, TransformerModel},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
     
 };
 

@@ -6,7 +6,7 @@ use anyhow::Result;
 use ndarray::{Array};
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
 use std::sync::Arc;
-
+use crate::linear_layer::LinearLayer;
 use crate::tests::common::{assert_tensors_are_close_2d as assert_tensors_are_close};
 
 #[path = "../../../tests/common.rs"]
@@ -34,9 +34,9 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
 
     // CPU uses LinearLayer (handles transpose internally)
     let cpu_swiglu = CpuSwiGLUFFN::new(
-        crate::linear_layer_old::LinearLayer::from(gate_cpu),
-        crate::linear_layer_old::LinearLayer::from(up_cpu),
-        crate::linear_layer_old::LinearLayer::from(down_cpu),
+        LinearLayer::from(gate_cpu),
+        LinearLayer::from(up_cpu),
+        LinearLayer::from(down_cpu),
     );
 
     let input_cpu = Array::random((rows, hidden_size), Uniform::new(-1.0, 1.0));

@@ -7,15 +7,15 @@ use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache},
     embeddings::Embeddings,
     encoder_decoder::{
-        DecoderCrossAttention, DecoderSelfAttention, 
+        DecoderCrossAttention, DecoderSelfAttention,
         decoder_cross_attn_layer::DecoderCrossAttentionLayer,
         traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
     },
-    normalization::LayerNorm,
-    linear_layer_old::LinearLayer,
     feedforward::{FeedForward, LegacyFeedForward},
-    weights_old::ModelWeights,
-    traits::{Device, TransformerModel, EncoderDecoderArchitecture},
+    linear_layer::LinearLayer,
+    normalization::LayerNorm,
+    traits::{Device, EncoderDecoderArchitecture, TransformerModel},
+    weights::ModelWeights,
 };
 
 use ndarray::{Array2, Array3};
@@ -68,22 +68,30 @@ impl BartCpuDecoder {
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.q_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.k_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.v_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.self_attn.out_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
         );
         let self_attn_norm = LayerNorm::new(
@@ -99,22 +107,30 @@ impl BartCpuDecoder {
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.encoder_attn.q_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.encoder_attn.k_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.encoder_attn.v_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
             LinearLayer::from_weights(
                 weights,
                 &format!("{}.encoder_attn.out_proj.weight", prefix),
+                None,
                 dtype,
+                None,
             )?,
         );
         let cross_attn_norm = LayerNorm::new(
@@ -312,8 +328,7 @@ mod tests {
     use ndarray::{Array2, s};
     use std::path::Path;
 
-    const DISTILBART_PATH: &str =
-        "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
+    const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
     mod golden {
         // Encoder output for 10-token input
@@ -444,7 +459,7 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None)?;
+        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // Encode
@@ -499,7 +514,7 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None)?;
+        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // 1. Encode
@@ -566,7 +581,7 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None)?;
+        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // Full input (93 tokens as Python used)
@@ -680,7 +695,7 @@ mod tests {
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         // Load LM head
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None)?;
+        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
         // final_logits_bias is [1, vocab_size], squeeze to 1D
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 

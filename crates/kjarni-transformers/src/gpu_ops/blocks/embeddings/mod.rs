@@ -30,7 +30,7 @@ use crate::gpu_ops::primitives::lookup::GpuLookup;
 use crate::gpu_ops::primitives::scale::GpuScale;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::traits::LanguageModelConfig;
-use crate::weights_old::ModelWeights;
+use crate::weights::ModelWeights;
 use anyhow::Result;
 use std::sync::Arc;
 

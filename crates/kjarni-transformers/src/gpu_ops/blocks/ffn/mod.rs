@@ -96,7 +96,7 @@ impl GpuFeedForwardWeights {
     }
     pub fn from_config_names(
         context: &Arc<WgpuContext>,
-        weights: &crate::weights_old::ModelWeights,
+        weights: &crate::weights::ModelWeights,
         names: &crate::traits::LayerFeedForwardNames,
     ) -> Result<Self> {
         // This assumes a standard FFN. You can add a match for SwiGLU here later.

@@ -29,9 +29,9 @@ use kjarni_transformers::{
         },
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
-    linear_layer_old::LinearLayer,
+    linear_layer::LinearLayer,
     models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
-    weights_old::ModelWeights,
+    weights::ModelWeights,
     traits::{LanguageModelConfig, TransformerModel, Device},
 };
 mod configs;
@@ -132,18 +132,18 @@ impl SequenceClassifier {
         let mut gpu_head = None;
 
         // --- Logic to load weights is now unified before the match statement ---
-        let pooler = LinearLayer::from_weight_and_bias(
+        let pooler = LinearLayer::from_weights(
             &weights,
             "bert.pooler.dense.weight",
             Some("bert.pooler.dense.bias"),
-            false,
+            None,
             None,
         )?;
-        let classifier = LinearLayer::from_weight_and_bias(
+        let classifier = LinearLayer::from_weights(
             &weights,
             "classifier.weight",
             Some("classifier.bias"),
-            false,
+            None,
             None,
         )?;
 

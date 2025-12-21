@@ -204,7 +204,7 @@ mod tests {
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
     use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
-    use crate::linear_layer_old::LinearLayer;
+    use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
     use crate::WgpuContext;
     use anyhow::Result;

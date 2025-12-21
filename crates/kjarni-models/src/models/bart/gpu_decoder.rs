@@ -23,7 +23,7 @@ use kjarni_transformers::gpu_ops::blocks::{
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::traits::{EncoderDecoderArchitecture, TransformerConfig};
-use kjarni_transformers::weights_old::ModelWeights;
+use kjarni_transformers::weights::ModelWeights;
 use ndarray::Array2;
 use std::sync::Arc;
 use wgpu::CommandEncoder;

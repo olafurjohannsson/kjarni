@@ -1,5 +1,5 @@
 // Import Zip
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decode};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, Axis, Zip};

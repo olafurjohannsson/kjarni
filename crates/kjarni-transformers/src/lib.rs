@@ -28,6 +28,8 @@ pub mod weights;
 pub mod weights_old;
 pub mod tensor;
 pub mod chat;
+pub mod ops;
+pub mod kernels;
 
 // Re-export commonly used items
 pub use crate::{

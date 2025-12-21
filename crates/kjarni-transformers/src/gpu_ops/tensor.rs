@@ -26,14 +26,6 @@ impl GpuDType for u32 {
     const DTYPE: DType = DType::U32;
 }
 
-pub enum GpuTensorState {
-    // ... existing ...
-    EncoderState {
-        state: GpuTensor, // Original 3D state
-        // Pre-computed cross-attention KV caches for all layers
-        cross_cache: Vec<(GpuTensor, GpuTensor)>,
-    },
-}
 
 /// A GPU-backed tensor that bundles a wgpu::Buffer with its shape and data type.
 /// It holds a reference-counted pointer to the buffer and context, making it cheap to clone.
@@ -293,7 +285,7 @@ impl GpuTensor {
             mapped_at_creation: false,
         });
 
-        Self::new_allocation(Arc::new(buffer), shape, dtype, context.clone()) // ✅ New allocation = new ID
+        Self::new_allocation(Arc::new(buffer), shape, dtype, context.clone()) 
     }
 
     /// Creates from ndarray
@@ -320,7 +312,7 @@ impl GpuTensor {
             shape,
             A::DTYPE,
             context.clone(),
-        )) // ✅ New allocation = new ID
+        )) 
     }
 
     /// Permute with actual data copy (creates new buffer)
@@ -538,6 +530,7 @@ impl GpuTensor {
             DType::BF16 => "bf16",
             DType::U32 => "u32",
             DType::Q4_K => "q4_k",
+            DType::Q8_0 => "q8_0"
         }
     }
 }

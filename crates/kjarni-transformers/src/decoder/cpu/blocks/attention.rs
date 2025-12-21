@@ -1,6 +1,7 @@
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use anyhow::Result;
+use std::time::{Instant, Duration};
 use ndarray::{s, Array2, Array3, Array4, Axis};
 
 /// Optimized Attention for modern Decoders (Llama, Phi, Qwen, Mistral).
@@ -49,17 +50,21 @@ impl DecoderAttention {
         cached_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
         rope: Option<&RoPE>,
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        let is_decode_step = hidden_states.shape()[1] == 1;
+        let t_total = Instant::now();
         let (batch_size, seq_len, _) = hidden_states.dim();
 
         // 1. Flatten Input for LinearLayer [Batch*Seq, Hidden]
         let hidden_2d = hidden_states
             .view()
-            .into_shape((batch_size * seq_len, self.num_heads * self.head_dim))?;
-
+            .into_shape_with_order((batch_size * seq_len, self.num_heads * self.head_dim))?;
+        
+        let t_qkv = Instant::now();
         // 2. Project Q, K, V (BF16 OPTIMIZED KERNEL)
         let q = self.q_proj.matmul(&hidden_2d);
         let k = self.k_proj.matmul(&hidden_2d);
         let v = self.v_proj.matmul(&hidden_2d);
+        
 
         // 3. Reshape [Batch, Seq, Dim]
         let q_3d =
@@ -68,7 +73,9 @@ impl DecoderAttention {
             k.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
         let v_3d =
             v.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
+        let d_qkv = t_qkv.elapsed();
 
+        let t_rope = Instant::now();
         // 4. RoPE
         let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[1]);
         let (q_rope, k_rope) = if let Some(r) = rope {
@@ -77,8 +84,11 @@ impl DecoderAttention {
             (q_3d, k_3d)
         };
 
-        // 5. Update Cache & Concatenate
-        // We create full_k and full_v here.
+        let d_rope = t_rope.elapsed();
+
+    
+        let t_cache = Instant::now();
+
         let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
             // Note: Standard layout required here for cache update efficiency usually
             let full_k = ndarray::concatenate![Axis(1), cached_k, k_rope.view()]
@@ -98,7 +108,9 @@ impl DecoderAttention {
             .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3])
             .to_owned();
-
+        
+        let d_cache = t_cache.elapsed();
+        let t_scores = Instant::now();
         // ---------------------------------------------------------------------
         // CRITICAL OPTIMIZATION: GQA WITHOUT COPYING
         // ---------------------------------------------------------------------
@@ -129,6 +141,9 @@ impl DecoderAttention {
             crate::utils::linear_algebra::matmul_4d(&q_heads, &k_t)
         };
 
+        let d_scores = t_scores.elapsed();
+
+        let t_softmax = Instant::now();
         // Scaling
         scores.mapv_inplace(|x| x * self.scale_factor);
 
@@ -137,9 +152,15 @@ impl DecoderAttention {
         }
 
         self.apply_causal_mask(&mut scores, cache_len);
+        
+
+
 
         // Softmax
         self.softmax_inplace(&mut scores);
+
+        let d_softmax = t_softmax.elapsed();
+        let t_context = Instant::now();
 
         // 8. Output Context
         let context = if seq_len == 1 {
@@ -162,7 +183,8 @@ impl DecoderAttention {
             let v_heads = self.prepare_kv_heads(&full_v, batch_size)?;
             crate::utils::linear_algebra::matmul_4d(&scores, &v_heads)
         };
-
+        let d_context = t_context.elapsed();
+        let t_o_proj = Instant::now();
         let context_flat = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
@@ -173,6 +195,34 @@ impl DecoderAttention {
         let output = self.o_proj.matmul(&context_flat.view());
         let output_3d =
             output.into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?;
+        let d_o_proj = t_o_proj.elapsed();
+
+        let d_total = t_total.elapsed();
+        if is_decode_step {
+            log::info!(
+                "[Attention Perf] Total: {:?}, QKV Proj: {:?}, RoPE: {:?}, Cache: {:?}, Scores (Q@K): {:?}, Softmax: {:?}, Context (S@V): {:?}, Out Proj: {:?}",
+                d_total,
+                d_qkv,
+                d_rope,
+                d_cache,
+                d_scores,
+                d_softmax,
+                d_context,
+                d_o_proj
+            );
+        } else {
+            log::info!(
+                "[PREFILL Attention Perf] Total: {:?}, QKV Proj: {:?}, RoPE: {:?}, Cache: {:?}, Scores (Q@K): {:?}, Softmax: {:?}, Context (S@V): {:?}, Out Proj: {:?}",
+                d_total,
+                d_qkv,
+                d_rope,
+                d_cache,
+                d_scores,
+                d_softmax,
+                d_context,
+                d_o_proj
+            );
+        }
 
         Ok((output_3d, k_rope, v_3d))
     }

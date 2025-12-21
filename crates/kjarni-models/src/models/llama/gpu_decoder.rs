@@ -24,7 +24,7 @@ use kjarni_transformers::{
         },
     },
     traits::{DecoderArchitecture, LanguageModelConfig},
-    weights_old::{ModelWeights},
+    weights::{ModelWeights},
     tensor::DType,
 };
 

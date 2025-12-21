@@ -12,7 +12,7 @@ use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::traits::{Device, TransformerModel};
-use crate::weights_old::ModelWeights;
+use crate::weights::ModelWeights;
 use crate::{activations, Embeddings};
 
 pub struct GpuTransformerEncoder {

@@ -3,6 +3,7 @@
 pub mod linear_algebra;
 pub mod masks;
 pub mod levenshtein;
+pub mod tensor_ops;
 pub use masks::*;
 pub use levenshtein::{find_similar, find_within_distance, distance, similarity};
 

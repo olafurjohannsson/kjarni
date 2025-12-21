@@ -6,9 +6,9 @@ use crate::encoder::CpuEncoder;
 use crate::encoder::encoder_self_attention::EncoderSelfAttention;
 use crate::encoder::traits::EncoderArchitecture;
 use crate::feedforward::LegacyFeedForward;
-use crate::linear_layer_old::LinearLayer;
+use crate::linear_layer::LinearLayer;
 use crate::traits::{Device, TransformerModel};
-use crate::weights_old::ModelWeights;
+use crate::weights::ModelWeights;
 use crate::{
     Embeddings, FeedForward, encoder::encoder_layer::EncoderLayer, normalization::LayerNorm,
 };
@@ -62,33 +62,33 @@ impl CpuTransformerEncoder {
             let self_attn = EncoderSelfAttention::new(
                 config.hidden_size(),
                 config.num_attention_heads(),
-                LinearLayer::from_weight_and_bias(
+                LinearLayer::from_weights(
                     weights,
                     &attn_names.q_weight,
                     Some(&attn_names.q_bias),
-                    false,
                     dtype,
+                    None
                 )?,
-                LinearLayer::from_weight_and_bias(
+                LinearLayer::from_weights(
                     weights,
                     &attn_names.k_weight,
                     Some(&attn_names.k_bias),
-                    false,
                     dtype,
+                    None
                 )?,
-                LinearLayer::from_weight_and_bias(
+                LinearLayer::from_weights(
                     weights,
                     &attn_names.v_weight,
                     Some(&attn_names.v_bias),
-                    false,
                     dtype,
+                    None
                 )?,
-                LinearLayer::from_weight_and_bias(
+                LinearLayer::from_weights(
                     weights,
                     &attn_names.output_weight,
                     Some(&attn_names.output_bias),
-                    false,
                     dtype,
+                    None
                 )?,
             );
 

@@ -1,7 +1,7 @@
 
     use super::*;
     use crate::feedforward::{FeedForward, StdFeedForward, SwiGluFeedForward};
-    use crate::linear_layer_old::LinearLayer;
+    use crate::linear_layer::LinearLayer;
     use crate::normalization::{LayerNorm, RMSNorm};
     use crate::rope::RoPE;
     use ndarray::{Array1, Array2, Array3, s};

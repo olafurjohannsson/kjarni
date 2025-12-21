@@ -24,9 +24,9 @@ fn test_swiglu_ffn_shapes() -> Result<()> {
     // LinearLayer convention: [out_features, in_features]
     // gate/up: hidden → intermediate, so [intermediate, hidden]
     // down: intermediate → hidden, so [hidden, intermediate]
-    let gate_weight = Array2::zeros((intermediate_size, hidden_size));  // [256, 64]
-    let up_weight = Array2::zeros((intermediate_size, hidden_size));    // [256, 64]
-    let down_weight = Array2::zeros((hidden_size, intermediate_size));  // [64, 256]
+    let gate_weight: Array2<f32> = Array2::zeros((intermediate_size, hidden_size));  // [256, 64]
+    let up_weight: Array2<f32> = Array2::zeros((intermediate_size, hidden_size));    // [256, 64]
+    let down_weight: Array2<f32> = Array2::zeros((hidden_size, intermediate_size));  // [64, 256]
 
     let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
 
@@ -171,9 +171,9 @@ fn test_swiglu_nonlinearity() -> std::result::Result<(), anyhow::Error> {
     let hidden_size = 4;
     let intermediate_size = 4;
 
-    let gate_weight = Array2::eye(hidden_size);
-    let up_weight = Array2::eye(hidden_size);
-    let down_weight = Array2::eye(hidden_size);
+    let gate_weight: Array2<f32> = Array2::eye(hidden_size);
+    let up_weight: Array2<f32> = Array2::eye(hidden_size);
+    let down_weight: Array2<f32> = Array2::eye(hidden_size);
 
     let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
 

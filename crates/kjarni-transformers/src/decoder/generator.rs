@@ -1,15 +1,16 @@
 use crate::common::{
-    apply_no_repeat_ngram, apply_repetition_penalty_mut, sample_token, GenerationConfig,
-    StreamedToken, TokenType,
+    GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram,
+    apply_repetition_penalty_mut, sample_token,
 };
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::prelude::*;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
 use log::{debug, info, warn};
+use std::time::{Duration, Instant};
 
 /// Orchestrates autoregressive text generation for decoder-only models.
 ///
@@ -98,7 +99,7 @@ impl DecoderGenerator {
         &self,
         prompt: &str,
         config: &GenerationConfig,
-    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
         debug!("Starting generation for prompt: '{}'", prompt);
 
         // Encode the prompt and handle special tokens
@@ -171,9 +172,10 @@ impl DecoderGenerator {
                 };
             }
 
-            let mut total_decode_time = std::time::Duration::new(0, 0);
+            let mut total_sampling_time = Duration::new(0, 0);
+            let mut total_backend_time = Duration::new(0, 0);
             let mut tokens_generated = 0;
-            let generation_start_time = std::time::Instant::now();
+            let generation_start_time = Instant::now();
 
             // Begin the autoregressive generation loop
             for i in 0..config.max_new_tokens.unwrap_or(max_len) {
@@ -190,7 +192,7 @@ impl DecoderGenerator {
                     info!("Generation reached max length ({})", max_len);
                     break;
                 }
-
+                let t_sampling_start = Instant::now();
                 let mut logits = next_token_logits.clone();
 
                 // Repetition Penalty
@@ -213,6 +215,9 @@ impl DecoderGenerator {
 
                 // 3. Sampling (Top-K, Top-P, Min-P, Temp)
                 let next_token = sample_token(logits, &config.strategy)?;
+
+                total_sampling_time += t_sampling_start.elapsed();
+
                 tokens.push(next_token);
 
 
@@ -232,27 +237,45 @@ impl DecoderGenerator {
 
                 if tokens.len() >= max_len { break; }
 
+                let t_backend_start = Instant::now();
+
                 self.backend.update_token_tensor(&mut token_tensor, next_token)?;
+
+                // This is the main compute-bound part (all the matmuls).
                 next_token_logits = self.backend.decode_one(
                     self.model.as_ref(),
                     &token_tensor,
                     tokens.len(),
                     cache.as_mut(),
                 ).await?;
+
+                total_backend_time += t_backend_start.elapsed();
             }
 
             let total_generation_time = generation_start_time.elapsed();
 
             if tokens_generated > 0 && total_generation_time.as_secs_f64() > 0.0 {
                 let tokens_per_sec = tokens_generated as f64 / total_generation_time.as_secs_f64();
-                println!(
-                    "Generation complete. Generated {} tokens in {:.3}s ({:.2} tokens/sec)",
-                    tokens_generated,
-                    total_generation_time.as_secs_f64(),
-                    tokens_per_sec
-                );
+                
+                // Calculate average time per token for each stage
+                let avg_total_per_token = total_generation_time / tokens_generated;
+                let avg_sampling_per_token = total_sampling_time / tokens_generated;
+                let avg_backend_per_token = total_backend_time / tokens_generated;
+
+                // Log the detailed breakdown
+                info!("-------------------- Generation Performance --------------------");
+                info!("Total Tokens: {}", tokens_generated);
+                info!("Total Time:   {:.3}s", total_generation_time.as_secs_f64());
+                info!("Overall T/s:  {:.2}", tokens_per_sec);
+                info!("----------------------------------------------------------------");
+                info!("Avg. Time per Token Breakdown:");
+                info!("  - Total:    {:?}", avg_total_per_token);
+                info!("  - Sampling: {:?} (Memory-Bound Part)", avg_sampling_per_token);
+                info!("  - Backend:  {:?} (Compute-Bound Part)", avg_backend_per_token);
+                info!("----------------------------------------------------------------");
+
             } else if tokens_generated > 0 {
-                 println!("Generation complete. Generated {} tokens.", tokens_generated);
+                 info!("Generation complete. Generated {} tokens.", tokens_generated);
             }
         })
     }

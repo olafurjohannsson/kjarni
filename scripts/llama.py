@@ -15,7 +15,7 @@ print(f"Loading model from {model_path}...")
 # 1. Force Float32 to match Rust CPU backend (ndarray<f32>)
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    torch_dtype=torch.float32,
+    torch_dtype=torch.bfloat16,
     device_map="cpu",
     local_files_only=True,
 ).eval()

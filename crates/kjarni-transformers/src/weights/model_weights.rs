@@ -1,26 +1,34 @@
-//! Model weights loader with dtype-aware loading
 
+use super::{safetensors_loader::SafeTensorsLoader, WeightLoader};
+use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0};
+use crate::tensor::{
+    dtype::DType,
+    raw_tensor::RawTensor,
+    {QuantizedMatrix, TypedCpuTensor},
+};
 use anyhow::{anyhow, Result};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
 use std::path::Path;
 
-use crate::tensor::{DType, RawTensor, TypedCpuTensor};
-use super::{WeightLoader, SafeTensorsLoader};
-
-/// High-level interface for loading model weights
+/// High-level interface for loading model weights from a directory.
+///
+/// This struct detects the weight format (`.safetensors`, `.gguf`, etc.) and provides
+/// a consistent API for accessing tensors in various typed formats.
 pub struct ModelWeights {
     loader: Box<dyn WeightLoader>,
     pub config_json: String,
 }
 
 impl ModelWeights {
+    /// Creates a new `ModelWeights` loader from a given model directory path.
     pub fn new(path: &Path) -> Result<Self> {
         let loader: Box<dyn WeightLoader> = if path.join("model.safetensors").exists()
             || path.join("model.safetensors.index.json").exists()
         {
             Box::new(SafeTensorsLoader::new(path)?)
         } else {
+            // Placeholder for GGUF or other formats
             return Err(anyhow!("No supported weight format found in {:?}", path));
         };
 
@@ -29,127 +37,90 @@ impl ModelWeights {
         Ok(Self { loader, config_json })
     }
 
-    /// Check if tensor exists
+    /// Checks if a tensor with the given name exists in the model files.
     pub fn contains(&self, name: &str) -> bool {
         self.loader.contains(name)
     }
 
-    // =========================================================================
-    // Low-level access (for advanced use cases)
-    // =========================================================================
-
-    /// Get raw tensor (for GPU DMA or custom processing)
+    /// Gets a raw, untyped view of a tensor's bytes.
+    ///
+    /// This is a low-level function intended for advanced use cases like direct
+    /// GPU DMA transfers where you need a pointer to the raw data in the mmap'd file.
     pub fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
         self.loader.get_raw(name)
     }
 
-    /// Get typed tensor (preserves original dtype)
+    /// Gets a typed tensor, preserving its original, memory-efficient dtype.
+    ///
+    /// This is the primary and most efficient method for loading tensors for CPU computation,
+    /// as it avoids unnecessary type conversions and allocations.
     pub fn get_typed_tensor(&self, name: &str) -> Result<TypedCpuTensor> {
-        let raw = self.get_raw(name)?;
+        let raw = self.loader.get_raw(name)?;
         raw_to_typed(raw)
     }
 
-    // =========================================================================
-    // High-level access (always returns F32, converts if needed)
-    // =========================================================================
+    // --- High-level accessors (use with care, as they may convert and allocate) ---
 
-    /// Load as F32 Array1 (for biases, layer norm weights)
-    /// Converts from F16/BF16 if needed
+    /// Loads a tensor and converts it to `Array1<f32>`.
+    ///
+    /// This is a convenience method for small 1D tensors like biases or norms.
+    /// It will fail if the tensor is not 1D or is a quantized matrix type.
     pub fn get_array1(&self, name: &str) -> Result<Array1<f32>> {
         let typed = self.get_typed_tensor(name)?;
-        typed.to_array1_f32()
+        typed
+            .to_array1_f32()
             .map_err(|e| anyhow!("Failed to load '{}' as Array1<f32>: {}", name, e))
     }
 
-    /// Load as F32 Array2 (for weight matrices)
-    /// Converts from F16/BF16 if needed
+    /// Loads a tensor and converts it to `Array2<f32>`.
+    ///
+    /// **Warning:** This will perform a slow, full dequantization for quantized types
+    /// and should only be used for debugging or for models that are entirely F32/BF16/F16.
     pub fn get_array2(&self, name: &str) -> Result<Array2<f32>> {
         let typed = self.get_typed_tensor(name)?;
-        typed.to_array2_f32()
+        typed
+            .to_array2_f32()
             .map_err(|e| anyhow!("Failed to load '{}' as Array2<f32>: {}", name, e))
-    }
-
-    /// Load as F32 ArrayD (generic shape)
-    pub fn get_arrayd(&self, name: &str) -> Result<ArrayD<f32>> {
-        let typed = self.get_typed_tensor(name)?;
-        typed.to_arrayd_f32()
-            .map_err(|e| anyhow!("Failed to load '{}' as ArrayD<f32>: {}", name, e))
-    }
-
-    // =========================================================================
-    // Dtype-preserving loading (for memory-constrained scenarios)
-    // =========================================================================
-
-    /// Load tensor keeping original dtype
-    /// Use this for large tensors where memory matters
-    pub fn get_typed_array2(&self, name: &str) -> Result<TypedCpuTensor> {
-        let typed = self.get_typed_tensor(name)?;
-        // Validate it's 2D
-        if typed.shape().len() != 2 {
-            return Err(anyhow!(
-                "Tensor '{}' has {} dimensions, expected 2",
-                name,
-                typed.shape().len()
-            ));
-        }
-        Ok(typed)
-    }
-
-    /// Load with optional dtype override
-    /// - None: keep original dtype
-    /// - Some(DType::F32): convert to F32
-    /// - Some(DType::BF16): convert to BF16 (useful for downcasting F32 models)
-    pub fn get_array2_as(&self, name: &str, dtype: Option<DType>) -> Result<TypedCpuTensor> {
-        let typed = self.get_typed_tensor(name)?;
-
-        match dtype {
-            None => Ok(typed),
-            Some(DType::F32) => Ok(TypedCpuTensor::F32(typed.to_arrayd_f32()?)),
-            Some(DType::BF16) => {
-                let f32_arr = typed.to_arrayd_f32()?;
-                let bf16_arr = f32_arr.mapv(|v| bf16::from_f32(v));
-                Ok(TypedCpuTensor::BF16(bf16_arr))
-            }
-            Some(DType::F16) => {
-                let f32_arr = typed.to_arrayd_f32()?;
-                let f16_arr = f32_arr.mapv(|v| f16::from_f32(v));
-                Ok(TypedCpuTensor::F16(f16_arr))
-            }
-            Some(other) => Err(anyhow!("Cannot convert to {:?}", other)),
-        }
     }
 }
 
-/// Convert RawTensor to TypedCpuTensor
+/// Converts a `RawTensor` into a `TypedCpuTensor`, performing the necessary parsing.
 fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
+    let context_err = |e| anyhow!("Failed to cast bytes for tensor '{}' (dtype {:?}): {}", raw.name, raw.dtype, e);
+
     match raw.dtype {
         DType::F32 => {
-            let data: Vec<f32> = if let Ok(slice) = bytemuck::try_cast_slice::<u8, f32>(&raw.bytes) {
-                slice.to_vec()
-            } else {
-                raw.bytes
-                    .chunks_exact(4)
-                    .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                    .collect()
-            };
+            let data: Vec<f32> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
             Ok(TypedCpuTensor::F32(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
         DType::F16 => {
-            let data: Vec<f16> = bytemuck::try_cast_slice::<u8, f16>(&raw.bytes)
-                .map_err(|e| anyhow!("Failed to cast to f16: {}", e))?
-                .to_vec();
+            let data: Vec<f16> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
             Ok(TypedCpuTensor::F16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
         DType::BF16 => {
-            let data: Vec<bf16> = bytemuck::try_cast_slice::<u8, bf16>(&raw.bytes)
-                .map_err(|e| anyhow!("Failed to cast to bf16: {}", e))?
-                .to_vec();
+            let data: Vec<bf16> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
             Ok(TypedCpuTensor::BF16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
         }
-        DType::Q4_K => {
-            // TODO: Parse Q4_K format properly
-            Err(anyhow!("Q4_K loading not yet implemented"))
+        DType::Q8_0 => {
+            if raw.shape.len() != 2 {
+                return Err(anyhow!("Q8_0 tensor '{}' must be 2D", raw.name));
+            }
+            let blocks: Vec<BlockQ8_0> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            Ok(TypedCpuTensor::Q8_0(QuantizedMatrix {
+                blocks,
+                shape: [raw.shape[0], raw.shape[1]],
+            }))
         }
-        other => Err(anyhow!("Unsupported dtype: {:?}", other)),
+        DType::Q4_K => {
+            if raw.shape.len() != 2 {
+                return Err(anyhow!("Q4_K tensor '{}' must be 2D", raw.name));
+            }
+            let blocks: Vec<BlockQ4_K> = bytemuck::try_cast_slice(&raw.bytes).map_err(context_err)?.to_vec();
+            Ok(TypedCpuTensor::Q4_K(QuantizedMatrix {
+                blocks,
+                shape: [raw.shape[0], raw.shape[1]],
+            }))
+        }
+        _ => Err(anyhow!("Unsupported dtype for typed conversion: {:?}", raw.dtype)),
     }
 }
