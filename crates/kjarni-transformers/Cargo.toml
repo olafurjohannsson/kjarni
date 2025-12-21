@@ -39,6 +39,7 @@ memmap2 = { workspace = true }
 faer = { workspace = true }
 gguf-rs = { workspace = true }
 gguf = "0.1.2"
+byteorder = "1.5.0"
 num_cpus = "1.16"
 async-stream = "0.3.6"
 futures-core = "0.3.31"

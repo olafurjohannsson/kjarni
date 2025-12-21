@@ -41,7 +41,7 @@ impl CpuTransformerEncoderDecoder {
 
         let (word_w, pos_w, _) = config.get_decoder_embedding_names();
         let decoder_embeddings = Embeddings::new(
-            weights.get_array2(word_w)?,
+            crate::embeddings::EmbeddingData::F32(weights.get_array2(word_w)?),
             Some(weights.get_array2(pos_w)?),
             None,
         );

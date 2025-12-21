@@ -10,30 +10,30 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow, Context};
 use async_trait::async_trait;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
+    WgpuContext,
     decoder::prelude::*,
     gpu_context,
     gpu_ops::{
-        blocks::rope::GpuRoPE, primitives::{linear::GpuLinearLayer, matmul::GpuMatMul}, GpuFrameContext,
-        GpuTensor,
-        Kernel,
+        GpuFrameContext, GpuTensor, Kernel,
+        blocks::rope::GpuRoPE,
+        primitives::{linear::GpuLinearLayer, matmul::GpuMatMul},
     },
     linear_layer::LinearLayer,
     models::{
-        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
+        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
     rope::RoPE,
     tensor::{DType, RawTensor},
     traits::{DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
-    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -124,8 +124,14 @@ impl LlamaModel {
         kjarni_transformers::utils::configure_threading();
 
         let weights = ModelWeights::new(model_path)?;
-        let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
-            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        let tokenizer_path = if model_path.is_file() {
+            model_path.parent().unwrap().join("tokenizer.json")
+        } else {
+            model_path.join("tokenizer.json")
+        };
+
+        let mut tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| anyhow!(e))?;
 
         let config = Arc::new(LlamaConfig::from_json(&weights.config_json)?);
 
@@ -308,7 +314,7 @@ impl CpuDecoderOps for LlamaModel {
         let t_start = std::time::Instant::now();
 
         let (batch, seq, hidden) = hidden_states.dim();
-        let fast = false; // batch == 1 && seq == 1
+        let fast = batch == 1 && seq == 1;
 
         let logits_2d = if fast {
             // Optimized path for single-token decode

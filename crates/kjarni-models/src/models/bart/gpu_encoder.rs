@@ -1,5 +1,5 @@
 use crate::models::bart::config::BartConfig;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::embeddings::Embeddings;
 use kjarni_transformers::encoder::config::EncoderLoadConfig;
@@ -8,12 +8,12 @@ use kjarni_transformers::gpu_context::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
-use kjarni_transformers::traits::EncoderDecoderArchitecture;
 use kjarni_transformers::gpu_ops::blocks::{
-    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
     GpuFeedForwardWeightsStd, GpuNormalization, GpuNormalizationWeights,
+    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
+use kjarni_transformers::traits::EncoderDecoderArchitecture;
 use kjarni_transformers::traits::{LanguageModelConfig, TransformerConfig};
 use kjarni_transformers::weights::ModelWeights;
 use std::sync::Arc;
@@ -90,16 +90,18 @@ impl BartGpuEncoder {
                 (config.vocab_size * hidden_size * 4) as f64 / 1_000_000.0
             );
 
-            let word_emb = weights.get_array2(config.get_shared_embedding_weight_name())?;
+            // let word_emb = weights.get_array2(config.get_shared_embedding_weight_name())?;
             let pos_emb = weights.get_array2("model.encoder.embed_positions.weight")?;
+
+            let word_embeddings = weights.get_array2(config.get_shared_embedding_weight_name())?;
 
             log::debug!(
                 "  Word embeddings: {:?}, Position embeddings: {:?}",
-                word_emb.shape(),
+                word_embeddings.shape(),
                 pos_emb.shape()
             );
-
-            let cpu_emb = Embeddings::new(word_emb, Some(pos_emb), None);
+            let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
+            let cpu_emb = Embeddings::new(embed, Some(pos_emb), None);
             (Some(cpu_emb), None)
         } else {
             log::info!(
@@ -169,7 +171,12 @@ impl BartGpuEncoder {
         weights: &ModelWeights,
         config: Arc<BartConfig>,
     ) -> Result<Self> {
-        Self::with_config(context, weights, config, EncoderLoadConfig::offload_embeddings())
+        Self::with_config(
+            context,
+            weights,
+            config,
+            EncoderLoadConfig::offload_embeddings(),
+        )
     }
 
     // ========================================================================

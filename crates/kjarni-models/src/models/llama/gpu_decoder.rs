@@ -23,9 +23,9 @@ use kjarni_transformers::{
             rope::GpuRoPE,
         },
     },
-    traits::{DecoderArchitecture, LanguageModelConfig},
-    weights::{ModelWeights},
     tensor::DType,
+    traits::{DecoderArchitecture, LanguageModelConfig},
+    weights::ModelWeights,
 };
 
 // --- Crate-Specific ---
@@ -87,7 +87,11 @@ impl LlamaGpuDecoder {
                 let (word_w, _, _) = config.get_embedding_weight_names();
                 let word_embeddings = weights.get_array2(word_w)?;
 
-                let cpu_embs = Embeddings::new(word_embeddings, None, None);
+                let cpu_embs = Embeddings::new(
+                    kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
+                    None,
+                    None,
+                );
                 (Some(cpu_embs), None, None)
             } else {
                 log::info!("Loading Llama Embedding weights to VRAM.");

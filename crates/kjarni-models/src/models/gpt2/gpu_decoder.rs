@@ -73,7 +73,7 @@ impl Gpt2GpuDecoder {
             };
 
             let cpu_embs = Embeddings::new(
-                word_embeddings,
+                kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
                 position_embeddings_cpu,
                 None,
             );

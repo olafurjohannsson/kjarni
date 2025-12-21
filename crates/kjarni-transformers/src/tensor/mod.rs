@@ -1,4 +1,3 @@
-
 //! Defines the core tensor and data type structures for the engine.
 //!
 //! The central enum is `TypedCpuTensor`, which provides a type-safe container
@@ -11,8 +10,11 @@ pub mod raw_tensor;
 pub use dtype::DType;
 pub use raw_tensor::RawTensor;
 
-use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0};
-use anyhow::{anyhow, Result};
+use crate::kernels::{
+    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+    scalar::{dequantize_q4_k_block, dequantize_q6_k_block},
+};
+use anyhow::{Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, Ix1, Ix2};
 
@@ -35,6 +37,7 @@ pub enum TypedCpuTensor {
     /// Quantized tensors are stored as a vector of their block structs for maximum performance.
     Q8_0(QuantizedMatrix<BlockQ8_0>),
     Q4_K(QuantizedMatrix<BlockQ4_K>),
+    Q6_K(QuantizedMatrix<BlockQ6_K>),
 }
 
 impl TypedCpuTensor {
@@ -46,6 +49,7 @@ impl TypedCpuTensor {
             TypedCpuTensor::F16(_) => DType::F16,
             TypedCpuTensor::Q8_0(_) => DType::Q8_0,
             TypedCpuTensor::Q4_K(_) => DType::Q4_K,
+            TypedCpuTensor::Q6_K(_) => DType::Q6_K,
         }
     }
 
@@ -57,33 +61,98 @@ impl TypedCpuTensor {
             TypedCpuTensor::BF16(arr) => arr.shape(),
             TypedCpuTensor::Q8_0(q) => &q.shape,
             TypedCpuTensor::Q4_K(q) => &q.shape,
+            TypedCpuTensor::Q6_K(q) => &q.shape,
         }
     }
-
+    pub fn to_array2_f32(self) -> Result<Array2<f32>> {
+        match self {
+            TypedCpuTensor::F32(arr) => {
+                let shape = arr.shape();
+                // Use only the first two dimensions, effectively squeezing [2048, 128256, 1] into [2048, 128256]
+                Ok(arr
+                    .clone()
+                    .into_shape_with_order((shape[0], shape[1]))?
+                    .into_dimensionality::<Ix2>()?)
+            }
+            TypedCpuTensor::F16(arr) => {
+                let shape = arr.shape();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order((shape[0], shape[1]))?
+                    .into_dimensionality::<Ix2>()?)
+            }
+            TypedCpuTensor::BF16(arr) => {
+                let shape = arr.shape();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order((shape[0], shape[1]))?
+                    .into_dimensionality::<Ix2>()?)
+            }
+            Self::Q4_K(matrix) => {
+                let mut res = Array2::zeros((matrix.shape[0], matrix.shape[1]));
+                for (row_idx, mut row) in res.axis_iter_mut(ndarray::Axis(0)).enumerate() {
+                    let blocks_per_row = matrix.shape[1] / 256;
+                    let row_blocks =
+                        &matrix.blocks[row_idx * blocks_per_row..(row_idx + 1) * blocks_per_row];
+                    let row_slice = row.as_slice_mut().unwrap();
+                    for (b_idx, block) in row_blocks.iter().enumerate() {
+                        dequantize_q4_k_block(
+                            block,
+                            &mut row_slice[b_idx * 256..(b_idx + 1) * 256],
+                        );
+                    }
+                }
+                Ok(res)
+            }
+            Self::Q6_K(matrix) => {
+                let mut res = Array2::zeros((matrix.shape[0], matrix.shape[1]));
+                for (row_idx, mut row) in res.axis_iter_mut(ndarray::Axis(0)).enumerate() {
+                    let blocks_per_row = matrix.shape[1] / 256;
+                    let row_blocks =
+                        &matrix.blocks[row_idx * blocks_per_row..(row_idx + 1) * blocks_per_row];
+                    let row_slice = row.as_slice_mut().unwrap();
+                    for (b_idx, block) in row_blocks.iter().enumerate() {
+                        dequantize_q6_k_block(
+                            block,
+                            &mut row_slice[b_idx * 256..(b_idx + 1) * 256],
+                        );
+                    }
+                }
+                Ok(res)
+            }
+            _ => Err(anyhow!(
+                "Dequantization to F32 not implemented for this type"
+            )),
+        }
+    }
     /// Converts the tensor to an `Array1<f32>`. Fails for matrix types.
     ///
     /// This is typically used for loading biases or layer normalization weights.
     pub fn to_array1_f32(&self) -> Result<Array1<f32>> {
         match self {
-            TypedCpuTensor::F32(arr) => Ok(arr.clone().into_dimensionality::<Ix1>()?),
-            TypedCpuTensor::F16(arr) => Ok(arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?),
-            TypedCpuTensor::BF16(arr) => Ok(arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?),
+            TypedCpuTensor::F32(arr) => {
+                let len = arr.len(); // Total elements (e.g., 2048)
+                // .into_shape_with_order(len) flattens [2048, 1] into [2048]
+                Ok(arr
+                    .clone()
+                    .into_shape_with_order(len)?
+                    .into_dimensionality::<Ix1>()?)
+            }
+            TypedCpuTensor::F16(arr) => {
+                let len = arr.len();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order(len)?
+                    .into_dimensionality::<Ix1>()?)
+            }
+            TypedCpuTensor::BF16(arr) => {
+                let len = arr.len();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order(len)?
+                    .into_dimensionality::<Ix1>()?)
+            }
             _ => Err(anyhow!("Cannot convert a matrix-quantized type to Array1")),
-        }
-    }
-
-    /// Converts the tensor to an `Array2<f32>`.
-    ///
-    /// **Warning:** For quantized types, this performs a full, slow dequantization
-    /// and should only be used for debugging or testing, not in performance-critical paths.
-    pub fn to_array2_f32(&self) -> Result<Array2<f32>> {
-        match self {
-            TypedCpuTensor::F32(arr) => Ok(arr.clone().into_dimensionality::<Ix2>()?),
-            TypedCpuTensor::F16(arr) => Ok(arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix2>()?),
-            TypedCpuTensor::BF16(arr) => Ok(arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix2>()?),
-            _ => Err(anyhow!(
-                "Full dequantization to Array2 is a slow, debug-only operation and is not supported. Use block-wise operations instead."
-            )),
         }
     }
 }

@@ -2,21 +2,21 @@
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log::debug;
-use ndarray::{s, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, s};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
+    Embeddings, FeedForward, MultiHeadAttention, Normalization, TransformerConfig,
     cache::{Cache, CpuKVCache},
     decoder::prelude::*,
     feedforward::{LegacyFeedForward, StdFeedForward},
     linear_layer::LinearLayer,
     normalization::LayerNorm,
-    traits::{DecoderArchitecture, LanguageModelConfig},
-    weights::{ModelWeights},
     tensor::DType,
-    Embeddings, FeedForward, MultiHeadAttention, Normalization, TransformerConfig,
+    traits::{DecoderArchitecture, LanguageModelConfig},
+    weights::ModelWeights,
 };
 
 // --- Crate-Specific ---
@@ -46,7 +46,11 @@ impl Gpt2CpuDecoder {
             None
         };
 
-        let embeddings = Embeddings::new(word_embeddings, position_embeddings, None);
+        let embeddings = Embeddings::new(
+            kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
+            position_embeddings,
+            None,
+        );
 
         // 2. Final Layer Norm
         let (norm_w, norm_b) = config.get_final_layer_norm_names();
@@ -400,8 +404,6 @@ impl CpuDecoder for Gpt2CpuDecoder {
     }
 }
 
-
-
 // GPT 2 is pre norm and load In, Out
 
 pub struct GptPreNormDecoderLayer {
@@ -421,13 +423,13 @@ impl GptPreNormDecoderLayer {
         let residual = hidden_states.clone();
         let ln1_out = self.self_attn_layer_norm.forward(hidden_states);
         let (attn_out, new_k, new_v) = self.self_attn.forward_with_cache(
-                    &ln1_out,
-                    None,
-                    Some(attention_mask),
-                    true,
-                    past_kv,
-                    None,
-                )?;
+            &ln1_out,
+            None,
+            Some(attention_mask),
+            true,
+            past_kv,
+            None,
+        )?;
         let attn_block_output = residual + attn_out;
         let residual = attn_block_output.clone();
         let ln2_out = self.ffn_layer_norm.forward(&attn_block_output);
@@ -436,4 +438,3 @@ impl GptPreNormDecoderLayer {
         Ok((final_output, (new_k, new_v)))
     }
 }
-

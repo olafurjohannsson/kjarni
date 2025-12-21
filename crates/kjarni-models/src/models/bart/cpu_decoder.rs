@@ -30,8 +30,11 @@ pub struct BartCpuDecoder {
 
 impl BartCpuDecoder {
     pub fn new(weights: &ModelWeights, config: Arc<BartConfig>) -> Result<Self> {
+        let word_embeddings = weights.get_array2(config.get_shared_embedding_weight_name())?;
+        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
+
         let embeddings = Embeddings::new(
-            weights.get_array2(config.get_shared_embedding_weight_name())?,
+            embed,
             Some(weights.get_array2("model.decoder.embed_positions.weight")?),
             None, // No token_type_embeddings in BART
         );

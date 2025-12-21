@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
         gpu_layers: None,
         offload_embeddings: false,
         offload_lm_head: false,
-        target_dtype: Some(DType::BF16),
+        target_dtype: None,
     };
     // let model_gpu = LlamaModel::from_registry(
     //     ModelType::Llama3_2_1B,
@@ -95,13 +95,21 @@ async fn main() -> anyhow::Result<()> {
     // println!();
     //
     // io::stdout().flush().unwrap();
-    let model_cpu = LlamaModel::from_registry(
-        ModelType::Llama3_2_1B,
-        None,
+    // let model_cpu = LlamaModel::from_registry(
+    //     ModelType::Llama3_2_1B,
+    //     None,
+    //     Device::Cpu,
+    //     None,
+    //     Some(d),
+    // ).await?;
+    let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/llama-3.2-1b-instruct-q4_k_m.gguf");
+
+    let model_cpu = LlamaModel::from_pretrained(
+        model_path,
         Device::Cpu,
-        None,
-        Some(d),
-    ).await?;
+        None, // No WgpuContext for CPU
+        Some(d), // Your LoadConfig
+    )?;
     let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config).await?;
     futures_util::pin_mut!(stream_cpu);

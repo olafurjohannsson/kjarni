@@ -16,6 +16,8 @@ pub enum DType {
     Q8_0,
     /// 4-bit block-quantized with K-quants (from GGUF)
     Q4_K,
+
+    Q6_K
 }
 
 impl DType {
@@ -37,6 +39,7 @@ impl DType {
             gguf::GGMLType::F16 => Ok(DType::F16),
             gguf::GGMLType::Q8_0 => Ok(DType::Q8_0),
             gguf::GGMLType::Q4K => Ok(DType::Q4_K),
+            gguf::GGMLType::Q6K => Ok(DType::Q6_K),
             _ => Err(anyhow!("Unsupported or unknown GGUF DType: {:?}", dtype)),
         }
     }
@@ -67,6 +70,9 @@ impl DType {
                 let num_blocks = num_elements / QK_K;
                 Ok(num_blocks * std::mem::size_of::<BlockQ4_K>())
             }
+            DType::Q6_K => {
+                unimplemented!()
+            }
         }
     }
 
@@ -79,7 +85,7 @@ impl DType {
             DType::F16 => 2,
             DType::BF16 => 2,
             DType::U32 => 4,
-            DType::Q8_0 | DType::Q4_K => {
+            DType::Q8_0 | DType::Q4_K | DType::Q6_K => {
                 panic!(
                     "DType::size_of() is not defined for block-quantized types like {:?}. Use buffer_size_for_shape() instead.",
                     self

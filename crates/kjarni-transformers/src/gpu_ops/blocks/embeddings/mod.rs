@@ -349,7 +349,12 @@ mod embedding_parity_tests {
         let (word_emb, _) = make_embeddings(vocab_size, 128, hidden_size);
 
         // CPU
-        let cpu_embed = Embeddings::new(word_emb.clone(), None, None);
+
+        let cpu_embed = Embeddings::new(
+            crate::embeddings::EmbeddingData::F32(word_emb.clone()),
+            None,
+            None,
+        );
 
         // GPU
         let gpu_weights = GpuEmbeddingWeights {
@@ -406,7 +411,11 @@ mod embedding_parity_tests {
 
         let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
-        let cpu_embed = Embeddings::new(word_emb.clone(), Some(pos_emb.clone()), None);
+        let cpu_embed = Embeddings::new(
+            crate::embeddings::EmbeddingData::F32(word_emb.clone()),
+            Some(pos_emb.clone()),
+            None,
+        );
 
         let gpu_weights = GpuEmbeddingWeights {
             word_embeddings: GpuTensor::from_ndarray(&ctx, &word_emb)?,
@@ -468,7 +477,11 @@ mod embedding_parity_tests {
 
         let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
-        let cpu_embed = Embeddings::new(word_emb.clone(), Some(pos_emb.clone()), None);
+        let cpu_embed = Embeddings::new(
+            crate::embeddings::EmbeddingData::F32(word_emb.clone()),
+            Some(pos_emb.clone()),
+            None,
+        );
 
         let gpu_weights = GpuEmbeddingWeights {
             word_embeddings: GpuTensor::from_ndarray(&ctx, &word_emb)?,
@@ -531,7 +544,11 @@ mod embedding_parity_tests {
 
         let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
-        let cpu_embed = Embeddings::new(word_emb.clone(), Some(pos_emb.clone()), None);
+        let cpu_embed = Embeddings::new(
+            crate::embeddings::EmbeddingData::F32(word_emb.clone()),
+            Some(pos_emb.clone()),
+            None,
+        );
 
         let gpu_weights = GpuEmbeddingWeights {
             word_embeddings: GpuTensor::from_ndarray(&ctx, &word_emb)?,

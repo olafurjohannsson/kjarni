@@ -64,3 +64,5 @@ fn scalar_dot_q8_q4(a_blocks: &[BlockQ8_0], b_blocks: &[BlockQ4_K]) -> f32 {
     }
     total_sum
 }
+
+

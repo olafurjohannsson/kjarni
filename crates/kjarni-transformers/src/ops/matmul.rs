@@ -5,7 +5,9 @@
 //! away the `unsafe` kernel implementations, providing a robust and safe API to the
 //! rest of the inference engine.
 
-use crate::kernels::{self, q_common::{BlockQ4_K, BlockQ8_0}};
+#[cfg(target_arch = "x86_64")]
+use crate::kernels::q_common::BlockQ6_K;
+use crate::kernels::{self, q_common::{BlockQ4_K, BlockQ8_0, QK_K}};
 use half::bf16;
 use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
@@ -187,6 +189,146 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
     c
 }
 
+/// Dispatcher for Q6_K 2D MatMul
+pub fn matmul_2d_cpu_q6_k(
+    input: &ArrayView2<f32>,
+    weights: &[BlockQ6_K],
+) -> Array2<f32> {
+    let (batch_size, k) = input.dim();
+    let num_blocks_per_row = k / QK_K;
+    let out_features = weights.len() / num_blocks_per_row;
+
+    let mut output = Array2::zeros((batch_size, out_features));
+
+    // Parallelize over the batch and output features
+    output.axis_iter_mut(ndarray::Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(b_idx, mut out_row)| {
+            let b = input.row(b_idx);
+            let input_row = b.as_slice().unwrap();
+            let out_slice = out_row.as_slice_mut().unwrap();
+
+            unsafe {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                        matmul_vec_q6_k_avx2(out_slice, input_row, weights, k);
+                        return;
+                    }
+                }
+                
+                // Fallback to scalar
+                matmul_vec_q6_k_scalar(out_slice, input_row, weights, k);
+            }
+        });
+
+    output
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+unsafe fn matmul_vec_q6_k_avx2(
+    out_chunk: &mut [f32],
+    a: &[f32],
+    b_blocks: &[BlockQ6_K],
+    k: usize,
+) {
+    use std::arch::x86_64::*;
+
+    use crate::kernels::q_common::QK_K;
+    let blocks_per_row = k / QK_K;
+    let mut temp_w = [0.0f32; QK_K]; // Stack buffer for dequantized weights
+
+    for (i, out_val) in out_chunk.iter_mut().enumerate() {
+        let row_blocks = &b_blocks[i * blocks_per_row..(i + 1) * blocks_per_row];
+        let mut sum_vec = _mm256_setzero_ps();
+
+        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
+            let block = &row_blocks[block_idx];
+            
+            // 1. Dequantize Q6_K block to F32 temp buffer
+            dequantize_q6_k_block(block, &mut temp_w);
+
+            // 2. Perform AVX2 Dot Product
+            let mut a_ptr = a_chunk.as_ptr();
+            let mut w_ptr = temp_w.as_ptr();
+            for _ in 0..32 { // 256 elements / 8 per YMM = 32 iterations
+                let av = _mm256_loadu_ps(a_ptr);
+                let wv = _mm256_loadu_ps(w_ptr);
+                sum_vec = _mm256_fmadd_ps(av, wv, sum_vec);
+                a_ptr = a_ptr.add(8);
+                w_ptr = w_ptr.add(8);
+            }
+        }
+        
+        // 3. Horizontal sum
+        let mut res = hsum_avx(sum_vec);
+        *out_val = res;
+    }
+}
+
+#[inline(always)]
+fn dequantize_q6_k_block(b: &BlockQ6_K, out: &mut [f32]) {
+    let d = b.d.to_f32();
+    
+    // Q6_K processes 256 elements in groups of 128
+    for i in 0..2 {
+        let ql = &b.ql[i * 64..];
+        let qh = &b.qh[i * 32..];
+        let sc = &b.scales[i * 8..];
+        let out_ptr = &mut out[i * 128..];
+
+        for j in 0..32 {
+            // Unpack scales (GGUF Q6_K uses 8-bit scales)
+            let sc0 = sc[j / 16] as f32; // Simplified scale indexing
+            let sc1 = sc[2 + j / 16] as f32;
+
+            // Reassemble 6-bit values: (ql & 0xF) | ((qh & 3) << 4)
+            // Note: This matches the GGML_TYPE_Q6_K bit manipulation
+            let h = (qh[j % 16] >> (2 * (j / 16))) & 3;
+            
+            let q0 = ((ql[j] & 0xF) as i8 | ((h & 1) << 4) as i8) - 32;
+            let q1 = ((ql[j + 32] & 0xF) as i8 | ((h & 2) << 3) as i8) - 32;
+            let q2 = ((ql[j] >> 4) as i8 | ((h & 1) << 4) as i8) - 32;
+            let q3 = ((ql[j + 32] >> 4) as i8 | ((h & 2) << 3) as i8) - 32;
+
+            out_ptr[j] = d * q0 as f32 * sc0;
+            out_ptr[j + 32] = d * q1 as f32 * sc1;
+            out_ptr[j + 64] = d * q2 as f32 * sc0;
+            out_ptr[j + 96] = d * q3 as f32 * sc1;
+        }
+    }
+}
+
+// Scalar Fallback
+unsafe fn matmul_vec_q6_k_scalar(out: &mut [f32], a: &[f32], b: &[BlockQ6_K], k: usize) {
+    let mut temp_w = [0.0f32; QK_K];
+    let blocks_per_row = k / QK_K;
+    for (i, out_val) in out.iter_mut().enumerate() {
+        let row_blocks = &b[i * blocks_per_row..(i + 1) * blocks_per_row];
+        let mut sum = 0.0f32;
+        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
+            dequantize_q6_k_block(&row_blocks[block_idx], &mut temp_w);
+            for j in 0..QK_K {
+                sum += a_chunk[j] * temp_w[j];
+            }
+        }
+        *out_val = sum;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn hsum_avx(v: std::arch::x86_64::__m256) -> f32 {
+    use std::arch::x86_64::*;
+    let vlow = _mm256_castps256_ps128(v);
+    let vhigh = _mm256_extractf128_ps(v, 1);
+    let vsum = _mm_add_ps(vlow, vhigh);
+    let vsum = _mm_hadd_ps(vsum, vsum);
+    let vsum = _mm_hadd_ps(vsum, vsum);
+    _mm_cvtss_f32(vsum)
+}
 
 // /// Computes `C = A @ B.T` for F32 input `A` and Q4_K quantized weight matrix `B`,
 // /// using on-the-fly quantization of `A`.

@@ -10,12 +10,12 @@
 //! handles this layout (e.g., by performing a transposed matrix multiplication).
 
 use crate::gpu_ops::GpuTensor;
-use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0};
+use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{DType, QuantizedMatrix, RawTensor, TypedCpuTensor};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
-use crate::{ops, WgpuContext};
-use anyhow::{anyhow, Result};
+use crate::{WgpuContext, ops};
+use anyhow::{Result, anyhow};
 use half::bf16;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Ix1, Ix2};
 use std::borrow::Cow;
@@ -44,6 +44,7 @@ pub enum LinearData {
     BF16(Array2<bf16>),
     Q8_0(QuantizedMatrix<BlockQ8_0>),
     Q4_K(QuantizedMatrix<BlockQ4_K>),
+    Q6_K(QuantizedMatrix<BlockQ6_K>),
 }
 
 impl LinearLayer {
@@ -114,6 +115,7 @@ impl LinearLayer {
                 // The loader already parsed the blocks. We just take ownership.
                 LinearData::Q4_K(matrix)
             }
+            (TypedCpuTensor::Q6_K(matrix), DType::Q6_K) => LinearData::Q6_K(matrix),
             // --- Type Conversion Paths ---
             (TypedCpuTensor::BF16(arr), DType::F32) => {
                 let weights_out_in = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
@@ -173,9 +175,7 @@ impl LinearLayer {
     #[inline]
     pub fn project_logits(&self, hidden_1d: &ArrayView1<f32>) -> Array1<f32> {
         match &self.data {
-            LinearData::BF16(w) => {
-                crate::kernels::project_logits_bf16(hidden_1d, &w.view())
-            }
+            LinearData::BF16(w) => crate::kernels::project_logits_bf16(hidden_1d, &w.view()),
             LinearData::F32(w) => {
                 // For F32, use regular matmul path
                 unimplemented!()
@@ -199,6 +199,7 @@ impl LinearLayer {
             },
             LinearData::BF16(w) => ops::matmul::matmul_2d_cpu_bf16(input, &w.view()),
             LinearData::Q8_0(w) => ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks),
+            LinearData::Q6_K(w) => ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks),
             LinearData::Q4_K(w) => ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks),
         };
 
@@ -222,6 +223,7 @@ impl LinearLayer {
             LinearData::BF16(w) => w.shape()[0],
             LinearData::Q8_0(w) => w.shape[0],
             LinearData::Q4_K(w) => w.shape[0],
+            LinearData::Q6_K(w) => w.shape[0],
         }
     }
 
@@ -234,6 +236,7 @@ impl LinearLayer {
             LinearData::BF16(w) => w.shape()[1],
             LinearData::Q8_0(w) => w.shape[1],
             LinearData::Q4_K(w) => w.shape[1],
+            LinearData::Q6_K(w) => w.shape[1],
         }
     }
 
@@ -242,6 +245,7 @@ impl LinearLayer {
             LinearData::F32(_) => DType::F32,
             LinearData::BF16(_) => DType::BF16,
             LinearData::Q8_0(_) => DType::Q8_0,
+            LinearData::Q6_K(_) => DType::Q6_K,
             LinearData::Q4_K(_) => DType::Q4_K,
         }
     }
@@ -334,6 +338,9 @@ impl LinearLayer {
                     dtype: DType::Q4_K,
                 };
                 GpuTensor::from_raw(ctx, &raw_tensor, label)
+            }
+            LinearData::Q6_K(matrix) => {
+                unimplemented!()
             }
         }
     }

@@ -41,9 +41,9 @@ impl GpuTransformerEncoder {
         } else {
             Array2::zeros((0, 0)) // Placeholder for models without token types
         };
-
+        
         let cpu_embeddings = Embeddings::new(
-            word_embeddings.clone(),
+            crate::embeddings::EmbeddingData::F32(word_embeddings.clone()),
             Some(position_embeddings.clone()),
             Some(token_type_embeddings.clone()),
         );

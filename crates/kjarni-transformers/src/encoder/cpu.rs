@@ -38,8 +38,9 @@ impl CpuTransformerEncoder {
         } else {
             Some(weights.get_array2(pos_w)?)
         };
+        
         let embeddings = Embeddings::new(
-            weights.get_array2(word_w)?,
+            crate::embeddings::EmbeddingData::F32(weights.get_array2(word_w)?),
             position_embeddings,
             token_type_embeddings,
         );

@@ -40,11 +40,11 @@ pub struct GpuTensor {
 impl Clone for GpuTensor {
     fn clone(&self) -> Self {
         Self {
-            buffer: Arc::clone(&self.buffer), // ✅ Cheap Arc clone
+            buffer: Arc::clone(&self.buffer),
             shape: self.shape.clone(),
             dtype: self.dtype,
             context: self.context.clone(),
-            id: self.id, // ✅ CRITICAL: Keep same ID (same buffer!)
+            id: self.id,
         }
     }
 }
@@ -530,7 +530,8 @@ impl GpuTensor {
             DType::BF16 => "bf16",
             DType::U32 => "u32",
             DType::Q4_K => "q4_k",
-            DType::Q8_0 => "q8_0"
+            DType::Q8_0 => "q8_0",
+            DType::Q6_K => "q6_k",
         }
     }
 }

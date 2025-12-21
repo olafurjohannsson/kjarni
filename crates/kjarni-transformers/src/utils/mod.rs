@@ -26,25 +26,35 @@ pub fn configure_threading() {
     let physical_cores = num_cpus::get_physical();
     let logical_cores = num_cpus::get();
 
-    let num_threads = if is_intel_hybrid() {
-        let p_cores = get_p_core_count().unwrap_or(physical_cores / 2);
-
-        // Pin main thread to P-cores
-        #[cfg(target_os = "linux")]
-        set_thread_affinity(p_cores);
-
-        p_cores
+    let (num_threads, is_hybrid) = if is_intel_hybrid() {
+        (get_p_core_count().unwrap_or(physical_cores / 2), true)
     } else if physical_cores < logical_cores {
-        physical_cores
+        (physical_cores, false) // This hits for your Xeon (sets 6 threads)
     } else {
-        logical_cores
+        (logical_cores, false)
     };
+
+    // FIX: Set affinity for the main thread regardless of hybrid status
+    // On your Xeon, this pins the main thread to Core 0.
+    #[cfg(target_os = "linux")]
+    set_thread_affinity(num_threads);
 
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
+        .start_handler(move |thread_index| {
+            // FIX: Pin every Rayon worker thread to its own core
+            // This ensures Thread 0 is on Core 0, Thread 1 on Core 1, etc.
+            // This is CRITICAL for consistent memory bandwidth.
+            #[cfg(target_os = "linux")]
+            unsafe {
+                let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
+                libc::CPU_SET(thread_index, &mut cpuset);
+                libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpuset);
+            }
+        })
         .build_global();
 
-    log::info!("Threading: {} threads, hybrid={}", num_threads, is_intel_hybrid());
+    log::info!("Threading: {} threads, hybrid={}", num_threads, is_hybrid);
 }
 
 fn is_intel_hybrid() -> bool {

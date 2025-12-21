@@ -38,6 +38,18 @@ pub struct BlockQ4_K {
     pub qs: [u8; QK_K / 2],
 }
 
+/// A 6-bit "K-Quant" quantization block (256 elements).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BlockQ6_K {
+    pub ql: [u8; 128],      // Lower 4 bits of the 6-bit values
+    pub qh: [u8; 64],       // Upper 2 bits of the 6-bit values
+    pub scales: [i8; 16],   // 8-bit scales
+    pub d: f16,             // Global scale (f16)
+}
+
+const _: () = assert!(std::mem::size_of::<BlockQ6_K>() == 210);
+
 // Compile-time sanity checks for memory layout.
 const _: () = assert!(std::mem::size_of::<BlockQ8_0>() == 34);
 const _: () = assert!(std::mem::size_of::<BlockQ4_K>() == 144);

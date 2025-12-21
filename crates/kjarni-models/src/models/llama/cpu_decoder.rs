@@ -2,12 +2,14 @@
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
-use ndarray::{s, Array2, Array3, Axis};
+use anyhow::{Result, anyhow};
+use ndarray::{Array2, Array3, Axis, s};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    cache::CpuKVCache, decoder::prelude::*,
+    TransformerConfig, WgpuContext,
+    cache::CpuKVCache,
+    decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
@@ -16,10 +18,7 @@ use kjarni_transformers::{
     tensor::DType,
     traits::{Cache, DecoderArchitecture, Device, LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
-    TransformerConfig,
-    WgpuContext,
 };
-
 
 use crate::models::llama::config::LlamaConfig;
 
@@ -98,8 +97,19 @@ impl LlamaCpuDecoder {
         target_dtype: Option<DType>,
     ) -> Result<Self> {
         let (word_w, _, _) = config.get_embedding_weight_names();
-        let word_embeddings = weights.get_array2(word_w)?;
-        let embeddings = Embeddings::new(word_embeddings, None, None);
+        // let word_embeddings = weights.get_array2(word_w)?;
+        
+        let embeddings = Embeddings::from_weights(
+            &weights,
+            word_w,
+            None,
+            None
+        )?;
+        // let embeddings = Embeddings::new(
+        //     kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
+        //     None,
+        //     None,
+        // );
 
         let (norm_w, _) = config.get_final_layer_norm_names();
         let final_norm = RMSNorm::new(weights.get_array1(norm_w)?, config.layer_norm_eps());

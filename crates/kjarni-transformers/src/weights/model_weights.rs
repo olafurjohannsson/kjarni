@@ -1,16 +1,15 @@
-
-use super::{safetensors_loader::SafeTensorsLoader, WeightLoader};
-use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0};
+use super::{WeightLoader, gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader};
+use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{
     dtype::DType,
     raw_tensor::RawTensor,
     {QuantizedMatrix, TypedCpuTensor},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow, Context};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
 use std::path::Path;
-
+use serde_json::json;
 /// High-level interface for loading model weights from a directory.
 ///
 /// This struct detects the weight format (`.safetensors`, `.gguf`, etc.) and provides
@@ -21,20 +20,79 @@ pub struct ModelWeights {
 }
 
 impl ModelWeights {
-    /// Creates a new `ModelWeights` loader from a given model directory path.
     pub fn new(path: &Path) -> Result<Self> {
-        let loader: Box<dyn WeightLoader> = if path.join("model.safetensors").exists()
-            || path.join("model.safetensors.index.json").exists()
-        {
-            Box::new(SafeTensorsLoader::new(path)?)
-        } else {
-            // Placeholder for GGUF or other formats
-            return Err(anyhow!("No supported weight format found in {:?}", path));
-        };
+        // 1. Check if the path is a direct GGUF file
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+            return Self::from_gguf_file(path);
+        }
 
-        let config_json = std::fs::read_to_string(path.join("config.json"))?;
+        // 2. If it's a directory, look for contents
+        if path.is_dir() {
+            // Check for Safetensors
+            if path.join("model.safetensors").exists()
+                || path.join("model.safetensors.index.json").exists()
+            {
+                let loader = Box::new(SafeTensorsLoader::new(path)?);
+                let config_json = std::fs::read_to_string(path.join("config.json"))
+                    .context("Safetensors model directory missing config.json")?;
+                return Ok(Self {
+                    loader,
+                    config_json,
+                });
+            }
 
-        Ok(Self { loader, config_json })
+            // Check for a GGUF file inside the directory (common for llama.cpp users)
+            let gguf_in_dir = std::fs::read_dir(path)?
+                .filter_map(|e| e.ok())
+                .find(|e| e.path().extension().and_then(|s| s.to_str()) == Some("gguf"));
+
+            if let Some(entry) = gguf_in_dir {
+                return Self::from_gguf_file(&entry.path());
+            }
+        }
+        Err(anyhow!("No supported weight format found at {:?}", path))
+    }
+
+    /// Internal helper to load a GGUF and synthesize its configuration metadata.
+    fn from_gguf_file(path: &Path) -> Result<Self> {
+        let loader = GgufLoader::new(path)?;
+
+        // GGUF stores configuration in its metadata.
+        // We synthesize a JSON string that matches the LlamaConfig expected format.
+        // This allows the rest of the pipeline to remain unchanged.
+        let config_json = Self::synthesize_config_from_gguf(&loader)?;
+
+        Ok(Self {
+            loader: Box::new(loader),
+            config_json,
+        })
+    }
+
+    /// Maps GGUF metadata keys to standard HuggingFace config keys.
+    fn synthesize_config_from_gguf(loader: &GgufLoader) -> Result<String> {
+        // We use the model we decoded in the loader.
+        // Note: You may need to expose a method on GgufLoader to get metadata values.
+
+        // These keys are standard in Llama GGUF files.
+        let arch = loader.get_string("general.architecture").unwrap_or("llama");
+
+        // Map GGUF keys to HF JSON keys
+        let config = json!({
+            "architecture": arch,
+            "hidden_size": loader.get_u32(&format!("{}.embedding_length", arch)),
+            "intermediate_size": loader.get_u32(&format!("{}.feed_forward_length", arch)),
+            "num_attention_heads": loader.get_u32(&format!("{}.attention.head_count", arch)),
+            "num_hidden_layers": loader.get_u32(&format!("{}.block_count", arch)),
+            "num_key_value_heads": loader.get_u32(&format!("{}.attention.head_count_kv", arch)),
+            "max_position_embeddings": loader.get_u32(&format!("{}.context_length", arch)),
+            "rope_theta": loader.get_f32(&format!("{}.attention.layer_norm_rms_epsilon", arch)).unwrap_or(1e-5), // Some map to eps
+            "rms_norm_eps": loader.get_f32(&format!("{}.attention.layer_norm_rms_epsilon", arch)).unwrap_or(1e-5),
+            "vocab_size": 128256, // Usually safe to hardcode or find in metadata
+            "bos_token_id": 128000,
+            "eos_token_id": 128001,
+        });
+
+        Ok(config.to_string())
     }
 
     /// Checks if a tensor with the given name exists in the model files.
@@ -101,15 +159,24 @@ fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
     match raw.dtype {
         DType::F32 => {
             let data: Vec<f32> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::F32(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(TypedCpuTensor::F32(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
         DType::F16 => {
             let data: Vec<f16> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::F16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(TypedCpuTensor::F16(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
         DType::BF16 => {
             let data: Vec<bf16> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::BF16(ArrayD::from_shape_vec(IxDyn(&raw.shape), data)?))
+            Ok(TypedCpuTensor::BF16(ArrayD::from_shape_vec(
+                IxDyn(&raw.shape),
+                data,
+            )?))
         }
         DType::Q8_0 => {
             let blocks: Vec<BlockQ8_0> = cast_or_copy(&raw.bytes);
@@ -121,6 +188,13 @@ fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
         DType::Q4_K => {
             let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
             Ok(TypedCpuTensor::Q4_K(QuantizedMatrix {
+                blocks,
+                shape: [raw.shape[0], raw.shape[1]],
+            }))
+        }
+        DType::Q6_K => {
+            let blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
+            Ok(TypedCpuTensor::Q6_K(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))

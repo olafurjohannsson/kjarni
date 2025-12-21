@@ -11,7 +11,6 @@ use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::{LanguageModel, ModelType};
 use kjarni_transformers::prelude::*;
-use kjarni_transformers::traits::{Decoder, DecoderOutput};
 
 use super::*;
 
