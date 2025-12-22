@@ -3,32 +3,31 @@
 //! Supports BERT-style encoder models like MiniLM, MPNet, and DistilBERT.
 //! Automatically downloads models from HuggingFace using the registry.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use kjarni_transformers::{
-    WgpuContext,
     encoder::{
         config::{EncodingConfig, PoolingStrategy},
         traits::{
-            CpuEncoderOps, 
             CpuEncoder,
-            GpuEncoderOps,
+            CpuEncoderOps,
+            EncoderArchitecture,
+            EncoderLanguageModel,
             GpuEncoder,
-            EncoderArchitecture, 
-            EncoderLanguageModel, 
+            GpuEncoderOps,
             SentenceEncoderModel,
         },
         CpuTransformerEncoder,
         GpuTransformerEncoder,
     },
-    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
+    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
     traits::{Cache, Device, LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
-    
+    WgpuContext,
 };
 
 mod configs;
@@ -294,8 +293,32 @@ impl LanguageModel for SentenceEncoder {
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn config(&self) -> &dyn LanguageModelConfig {
-        self.config.as_ref()
+    fn context_size(&self) -> usize {
+        todo!()
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn vocab_size(&self) -> usize {
+        todo!()
+    }
+    fn hidden_size(&self) -> usize {
+        todo!()
+    }
+    fn num_heads(&self) -> usize {
+        todo!()
+    }
+    fn num_layers(&self) -> usize {
+        todo!()
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        todo!()
     }
 }
 

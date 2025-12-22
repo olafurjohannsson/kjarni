@@ -1,14 +1,12 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
-use ndarray::{Array, Array1, Array3, Axis, Ix3};
-use std::sync::Arc;
-use crate::tests::common::{assert_tensors_are_close};
+use ndarray::{Array1, Array3, Axis};
 
 #[path = "../../../tests/common.rs"]
 mod common;
-
 
 #[tokio::test]
 async fn test_gpu_layernorm_parity() -> Result<()> {

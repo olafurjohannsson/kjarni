@@ -43,7 +43,7 @@ pub trait EncoderLanguageModel: LanguageModel {
     fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps>;
 
     fn dimension(&self) -> usize {
-        self.config().hidden_size()
+        self.hidden_size()
     }
     fn encoder_dimensions(&self) -> usize {
         // either GPU or CPU

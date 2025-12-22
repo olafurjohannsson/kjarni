@@ -1,13 +1,10 @@
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array, Array3, arr3, arr2, Ix3};
-use std::sync::Arc;
+use ndarray::{arr3, Array, Array3, Ix3};
 
-// --- You will need these helper functions in your test module ---
 
-// Helper to read a GpuTensor back to the CPU for comparison.
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
     let shape = tensor.shape().to_vec();
     let raw_data = tensor.read_raw_data().await?;
@@ -75,19 +72,14 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
     let a_gpu = GpuTensor::from_ndarray(&context, &a_cpu)?;
     let b_gpu = GpuTensor::from_ndarray(&context, &b_cpu)?;
     let vec: Vec<usize> = a_cpu.shape().iter().map(|&d| d as usize).collect();
-    let output_gpu = GpuTensor::zeros(
-        &context,
-        vec,
-        crate::gpu_ops::DType::F32,
-        "f32",
-    )?;
+    let output_gpu = GpuTensor::zeros(&context, vec, crate::gpu_ops::DType::F32, "f32")?;
 
     // 3. Execute kernel
     let add_kernel = GpuAdd::new(&context);
     let mut encoder = context.device.create_command_encoder(&Default::default());
     add_kernel.encode_broadcast_offset(&mut encoder, &a_gpu, &b_gpu, b_row_offset, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
-    
+
     // Ensure GPU work completes
     let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
 

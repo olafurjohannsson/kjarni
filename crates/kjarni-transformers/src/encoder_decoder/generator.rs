@@ -1,17 +1,17 @@
-use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
-use crate::encoder_decoder::gpu_backend::{self, GpuBackend};
-use anyhow::{Result, anyhow};
-use async_stream::try_stream;
-use async_trait::async_trait;
 use crate::cache::Cache;
 use crate::common::StreamedToken;
+use crate::common::{DecodingStrategy, GenerationConfig};
+use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
+use crate::encoder_decoder::gpu_backend::{self, GpuBackend};
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
 use crate::encoder_decoder::{run_beam_search, run_beam_search_stream};
-use crate::models::base::{LanguageModel};
-use crate::common::{DecodingStrategy, GenerationConfig};
+use crate::models::base::LanguageModel;
 use crate::prelude::*;
+use anyhow::{anyhow, Result};
+use async_stream::try_stream;
+use async_trait::async_trait;
 use futures_core::stream::Stream;
 use ndarray::Array3;
 use std::any::Any;
@@ -112,14 +112,13 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
     }
 }
 
-pub struct Seq2SeqGenerator {
+pub struct EncoderDecoderGenerator {
     pub model: Box<dyn EncoderDecoderLanguageModel>,
     backend: AnyEncoderDecoderBackend,
 }
 
-impl Seq2SeqGenerator {
+impl EncoderDecoderGenerator {
     pub fn new(model: Box<dyn EncoderDecoderLanguageModel>) -> Result<Self> {
-        println!("Initializing Seq2SeqGenerator, Encoder Dimensions {}", model.encoder_dimensions());
         let backend = match model.device() {
             Device::Cpu => AnyEncoderDecoderBackend::Cpu(CpuBackend),
             Device::Wgpu => {
@@ -147,7 +146,7 @@ impl Seq2SeqGenerator {
             input_text,
             &generation_config,
         )
-        .await;
+            .await;
 
         let elapsed = t_start.elapsed();
         if let Ok(ref text) = result {
@@ -179,7 +178,7 @@ impl Seq2SeqGenerator {
         &'a self,
         input_text: &'a str,
         config: Option<&GenerationConfig>,
-    ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
+    ) -> impl Stream<Item=Result<StreamedToken>> + 'a {
         let owned_config =
             config.map_or_else(|| self.model.get_default_generation_config(), |c| c.clone());
 
@@ -225,5 +224,3 @@ impl Seq2SeqGenerator {
         }
     }
 }
-
-

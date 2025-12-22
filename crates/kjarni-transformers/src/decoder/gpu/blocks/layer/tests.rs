@@ -1,11 +1,8 @@
 use super::*;
-use crate::Device::Cpu;
-use crate::linear_layer::LinearLayer;
 use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
@@ -13,14 +10,17 @@ use crate::gpu_ops::blocks::{
     GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
 use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor};
+use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
-use crate::rope::RoPE as CpuRoPE; // Import your CPU implementation
+use crate::rope::RoPE as CpuRoPE;
+use crate::Device::Cpu;
+use crate::WgpuContext;
 use anyhow::Result;
 use common::{
     assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context, read_gpu_tensor_to_vec,
 };
 use ndarray::{Array, Array1, Array2, Array3, Array4, Ix4};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use ndarray_rand::{rand_distr::Uniform, RandomExt};
 use std::sync::Arc;
 
 #[path = "../../../../tests/common.rs"]
@@ -264,7 +264,6 @@ async fn create_test_layer_pair(
     let cpu_ffn_norm = Normalization::RMSNorm(RMSNorm::new(ffn_norm_w, config.layer_norm_eps()));
     let cpu_rope = Arc::new(CpuRoPE::new(head_dim, 1024, 10000.0));
 
- 
 
     let cpu_layer = DecoderLayer {
         self_attn: cpu_attn,
@@ -412,8 +411,8 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
         GpuTensor::from_ndarray(&context, &up_w_cpu)?, // Native [Out, In]
         GpuTensor::from_ndarray(&context, &down_w_cpu.t().as_standard_layout().to_owned())?, // Transposed [In, Out]
     )?;
-    
-    
+
+
     // --- 3. Create GPU FFN Block ---
     let gpu_ffn_block = GpuSwiGLUFFN::new(&context)?;
 
@@ -428,7 +427,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
     // GPU Path
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let mut temp = GpuTensorPool::new(context.clone());
-    
+
     // The FFN kernel expects a 2D input
     let (b, s, h) = input_gpu.dims3();
     let input_gpu_2d = input_gpu.view(vec![b * s, h]);
@@ -454,7 +453,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
         "SwiGLU FFN Parity",
         1e-4, // FFNs can have slightly larger precision diffs due to multiple ops
     ).await;
-    
+
     println!("✓ GPU SwiGLU FFN matches CPU implementation.");
 
     Ok(())
@@ -506,7 +505,7 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
         &mut pool,
         Some(&gpu_rope_instance),
     )
-    .await?;
+        .await?;
 
     log::info!(
         "✅✅✅ All intermediate steps in the Llama layer match the CPU implementation! ✅✅✅"
@@ -615,7 +614,7 @@ pub async fn forward_llama_with_debug(
         "attn_block_output",
         tolerance,
     )
-    .await;
+        .await;
     let residual_2_gpu = &attn_block_output_gpu;
     let ln2_out_gpu = temp.get(residual_2_gpu.shape().to_vec());
     gpu_layer.ffn_norm.encode(
@@ -665,7 +664,7 @@ pub async fn forward_llama_with_debug(
         "final_output",
         tolerance,
     )
-    .await;
+        .await;
     log::info!("✓ Step 6: Final layer output matches CPU.");
 
     Ok(final_output_gpu)
@@ -816,7 +815,7 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
         "GpuRepeatKV Kernel vs CPU Logic",
         1e-6, // Use a very small tolerance
     )
-    .await;
+        .await;
 
     println!("✓ GpuRepeatKV kernel is correct!");
 
@@ -963,7 +962,7 @@ async fn test_rope_parity_single_token() -> Result<()> {
         "RoPE single token",
         1e-5,
     )
-    .await;
+        .await;
 
     Ok(())
 }

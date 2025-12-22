@@ -3,6 +3,7 @@
 
 use crate::activations::Activation;
 pub use crate::cache::Cache;
+use crate::models::base::RopeScalingConfig;
 use crate::WgpuContext;
 use std::any::Any;
 use std::sync::Arc;
@@ -33,6 +34,59 @@ impl Device {
     }
 }
 
+/// The mathematical ground truth of a model.
+/// Used by kernels to allocate buffers and perform SIMD operations.
+#[derive(Debug, Clone)]
+pub struct ModelMetadata {
+    pub hidden_size: usize,
+    pub num_layers: usize,
+    pub num_attention_heads: usize,
+    pub num_kv_heads: usize,
+    pub head_dim: usize,
+    pub vocab_size: usize,
+    pub max_seq_len: usize,
+    pub norm_eps: f32,
+    pub activation: Activation,
+    pub rope_theta: Option<f32>,
+    pub scale_embeddings: bool,
+    pub extra_pos_embeddings: usize,
+    pub rope_scaling: Option<RopeScalingConfig>,
+}
+
+/// The naming templates for tensors.
+/// Uses "{}" as a placeholder for the layer index.
+#[derive(Debug, Clone)]
+pub struct ModelLayout {
+    pub token_embedding: String,
+    pub position_embedding: Option<String>, // None for Llama/RoPE
+    pub final_norm: String,
+    pub lm_head: String,
+
+    // Layer templates
+    pub attn_q: String,
+    pub attn_k: String,
+    pub attn_v: String,
+    pub attn_o: String,
+    pub attn_norm: String,
+
+    pub ffn_gate: Option<String>, // Some for Llama (SwiGLU), None for BERT
+    pub ffn_up: String,
+    pub ffn_down: String,
+    pub ffn_norm: String,
+
+    pub cross_attn_q: Option<String>,
+    pub cross_attn_k: Option<String>,
+    pub cross_attn_v: Option<String>,
+    pub cross_attn_o: Option<String>,
+    pub cross_attn_norm: Option<String>,
+}
+
+/// The ONLY trait a model configuration needs to implement.
+pub trait ModelConfig: Send + Sync {
+    fn metadata(&self) -> ModelMetadata;
+    fn layout(&self) -> ModelLayout;
+    fn model_type(&self) -> &str;
+}
 
 /// A base marker trait for all models in the library.
 ///
@@ -47,12 +101,6 @@ pub trait TransformerModel: Send + Sync {
     }
     fn as_any(&self) -> &dyn Any;
 }
-
-/// A marker trait for model configuration structs (e.g., `BertConfig`, `GptConfig`).
-///
-/// This allows for generic model loading and initialization from configuration data.
-pub trait ModelConfig: Send + Sync + Any {}
-
 
 /// A trait providing high-level configuration shared by all transformer models.
 ///
@@ -178,7 +226,6 @@ pub trait CrossAttentionDecoderArchitecture: LanguageModelConfig {
     /// The names for the feed-forward component of a specific decoder layer.
     fn get_decoder_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
 }
-
 
 /// Describes the architectural specifics of a Decoder-only model (e.g., GPT-2, Llama).
 ///
@@ -311,4 +358,3 @@ pub trait EncoderDecoderArchitecture: LanguageModelConfig + Any {
 
     // fn decoder_start_token_id(&self) -> u32;
 }
-

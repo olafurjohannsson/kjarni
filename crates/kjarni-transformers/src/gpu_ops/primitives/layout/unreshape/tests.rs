@@ -1,4 +1,4 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::{GpuTensor, primitives::layout::unreshape::GpuUnreshape};
 use anyhow::Result;
 use ndarray::{Array, Array3, Array4};

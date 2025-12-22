@@ -1,9 +1,9 @@
 use crate::cache::Cache;
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{
-    GpuTensor, blocks::cache::GpuUpdateCache, blocks::cache::reorder::GpuReorderCache,
+    blocks::cache::reorder::GpuReorderCache, blocks::cache::GpuUpdateCache, GpuTensor,
 };
-use anyhow::{Result, anyhow};
+use crate::WgpuContext;
+use anyhow::{anyhow, Result};
 use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;

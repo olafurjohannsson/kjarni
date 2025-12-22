@@ -5,7 +5,7 @@ pub use crate::{
     embeddings::Embeddings,
     feedforward::FeedForward,
     normalization::LayerNorm,
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
+    pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
     traits::TransformerConfig,
     weights::ModelWeights,
 };
@@ -17,11 +17,9 @@ use std::time::Instant;
 /// or an encoder-decoder's decoder layer.
 pub struct DecoderCrossAttentionLayer {
     // Self-Attention Components
-    // pub self_attn: MultiHeadAttention,
     pub self_attn: DecoderSelfAttention,
     pub self_attn_layer_norm: LayerNorm,
     // Cross-Attention Components
-    // pub cross_attn: MultiHeadAttention,
     pub cross_attn: DecoderCrossAttention,
     pub cross_attn_layer_norm: LayerNorm,
     // Feed-Forward Components
@@ -144,8 +142,7 @@ impl DecoderCrossAttentionLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attention::MultiHeadAttention;
-    use crate::feedforward::{FeedForward, LegacyFeedForward, StdFeedForward};
+    use crate::feedforward::{FeedForward, LegacyFeedForward};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
     use ndarray::{Array1, Array2, Array3};

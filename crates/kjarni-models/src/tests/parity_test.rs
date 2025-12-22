@@ -1,8 +1,8 @@
-use anyhow::Result;
 use crate::sentence_encoder::SentenceEncoder;
+use anyhow::Result;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::prelude::Device;
-use kjarni_transformers::gpu_context::WgpuContext;
+use kjarni_transformers::WgpuContext;
 use std::path::Path;
 use tokio;
 use tokio::fs;
@@ -35,7 +35,7 @@ async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
 
 fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, name: &str) {
     assert_eq!(cpu.len(), gpu.len(), "{}: Batch size mismatch", name);
-    
+
     for (batch_idx, (cpu_emb, gpu_emb)) in cpu.iter().zip(gpu.iter()).enumerate() {
         assert_eq!(
             cpu_emb.len(),
@@ -113,11 +113,17 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
 
     // Initialize both encoders
     println!("Initializing CPU encoder...");
-    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let cpu_encoder =
+        SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
     println!("Initializing GPU encoder...");
     let gpu_context = WgpuContext::new().await?;
-    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
+    let gpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        ModelType::MiniLML6V2,
+        Device::Wgpu,
+        Some(gpu_context),
+    )?;
 
     // Test with single sentence
     let sentence = "The quick brown fox jumps over the lazy dog.";
@@ -152,11 +158,17 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
 
     // Initialize both encoders
     println!("Initializing CPU encoder...");
-    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let cpu_encoder =
+        SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
 
     println!("Initializing GPU encoder...");
     let gpu_context = WgpuContext::new().await?;
-    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
+    let gpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        ModelType::MiniLML6V2,
+        Device::Wgpu,
+        Some(gpu_context),
+    )?;
 
     // Test with batch of sentences
     let sentences = &[
@@ -191,9 +203,15 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
     ensure_model_files(model_repo, &cache_dir).await?;
 
     // Initialize both encoders
-    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let cpu_encoder =
+        SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
     let gpu_context = WgpuContext::new().await?;
-    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
+    let gpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        ModelType::MiniLML6V2,
+        Device::Wgpu,
+        Some(gpu_context),
+    )?;
 
     // Test with varied length sentences
     let sentences = &[
@@ -227,9 +245,15 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
     ensure_model_files(model_repo, &cache_dir).await?;
 
     // Initialize both encoders
-    let cpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
+    let cpu_encoder =
+        SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Cpu, None)?;
     let gpu_context = WgpuContext::new().await?;
-    let gpu_encoder = SentenceEncoder::from_pretrained(&cache_dir, ModelType::MiniLML6V2, Device::Wgpu, Some(gpu_context))?;
+    let gpu_encoder = SentenceEncoder::from_pretrained(
+        &cache_dir,
+        ModelType::MiniLML6V2,
+        Device::Wgpu,
+        Some(gpu_context),
+    )?;
 
     // Create large batch (32 sentences)
     let base_sentences = vec![
@@ -238,7 +262,7 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
         "WGPU provides a modern graphics and compute API.",
         "This library aims for maximum performance.",
     ];
-    
+
     let mut sentences = Vec::new();
     for i in 0..4 {
         for s in &base_sentences {

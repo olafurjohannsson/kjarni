@@ -1,4 +1,4 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -13,77 +13,81 @@ pub struct GpuLastTokenSlice {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct LastTokenUniforms {
     batch_size: u32,
-    seq_len: u32,     // Full sequence length in source
+    seq_len: u32, // Full sequence length in source
     vocab_size: u32,
     _padding: u32,
 }
 
 impl GpuLastTokenSlice {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
-        let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Last Token Slice Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("last_token_slice.wgsl").into()),
-        });
+        let shader = context
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Last Token Slice Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("last_token_slice.wgsl").into()),
+            });
 
-        let bind_group_layout = context.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                label: Some("Last Token Slice Bind Group Layout"),
-                entries: &[
-                    // Input: [batch, seq, vocab]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+        let bind_group_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Last Token Slice Bind Group Layout"),
+                    entries: &[
+                        // Input: [batch, seq, vocab]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    // Output: [batch, 1, vocab] or [batch, vocab]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        // Output: [batch, 1, vocab] or [batch, vocab]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    // Uniforms
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        // Uniforms
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
-            }
-        );
+                    ],
+                });
 
-        let pipeline_layout = context.device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("Last Token Slice Pipeline Layout"),
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            }
-        );
+        let pipeline_layout =
+            context
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Last Token Slice Pipeline Layout"),
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
-        let pipeline = context.device.create_compute_pipeline(
-            &wgpu::ComputePipelineDescriptor {
+        let pipeline = context
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("Last Token Slice Pipeline"),
                 layout: Some(&pipeline_layout),
                 module: &shader,
                 entry_point: Some("main"),
                 compilation_options: Default::default(),
                 cache: None,
-            }
-        );
+            });
 
         Self {
             pipeline,
@@ -96,11 +100,11 @@ impl GpuLastTokenSlice {
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        src: &GpuTensor,      // [batch, seq_len, vocab_size]
-        dst: &GpuTensor,      // [batch, vocab_size] or [batch, 1, vocab_size]
+        src: &GpuTensor, // [batch, seq_len, vocab_size]
+        dst: &GpuTensor, // [batch, vocab_size] or [batch, 1, vocab_size]
     ) {
         assert_eq!(src.rank(), 3, "Source must be 3D: [batch, seq, vocab]");
-        
+
         let batch_size = src.shape()[0];
         let seq_len = src.shape()[1];
         let vocab_size = src.shape()[2];
@@ -112,16 +116,19 @@ impl GpuLastTokenSlice {
             _padding: 0,
         };
 
-        let uniform_buffer = self.context.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Last Token Slice Uniforms"),
-                contents: bytemuck::cast_slice(&[uniforms]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            }
-        );
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Last Token Slice Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
-        let bind_group = self.context.device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Last Token Slice Bind Group"),
                 layout: &self.bind_group_layout,
                 entries: &[
@@ -138,15 +145,12 @@ impl GpuLastTokenSlice {
                         resource: uniform_buffer.as_entire_binding(),
                     },
                 ],
-            }
-        );
+            });
 
-        let mut compute_pass = encoder.begin_compute_pass(
-            &wgpu::ComputePassDescriptor {
-                label: Some("Last Token Slice Pass"),
-                timestamp_writes: None,
-            }
-        );
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Last Token Slice Pass"),
+            timestamp_writes: None,
+        });
 
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -156,7 +160,7 @@ impl GpuLastTokenSlice {
         let workgroup_size = 256;
         let total_elements = (batch_size * vocab_size) as u32;
         let num_workgroups = (total_elements + workgroup_size - 1) / workgroup_size;
-        
+
         compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
     }
 }

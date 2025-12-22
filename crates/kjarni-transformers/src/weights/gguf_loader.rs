@@ -1,24 +1,25 @@
 use crate::tensor::{DType, RawTensor};
 use crate::weights::WeightLoader;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
+// Import your gguf-rs components
+use byteorder::{LittleEndian, ReadBytesExt};
+use gguf_rs::{
+    get_gguf_container, ByteOrder, GGUFContainer, GGUFModel, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE,
+};
 use memmap2::Mmap;
+use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
-// Import your gguf-rs components
-use byteorder::{LittleEndian, ReadBytesExt};
-use gguf_rs::{
-    ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer, GGUFModel, get_gguf_container,
-};
-use serde_json::Value;
 
 pub struct GgufLoader {
     mmap: Mmap,
     tensor_map: HashMap<String, GgufTensorInfo>,
-    metadata: BTreeMap<String, Value>, // Store the metadata map here
+    metadata: BTreeMap<String, Value>,
+    pub architecture: String,
     data_start_offset: u64,
 }
 
@@ -102,29 +103,18 @@ impl GgufLoader {
             mmap,
             tensor_map,
             metadata,
+            architecture: model.model_family(),
             data_start_offset,
         })
     }
 
-    /// Gets a string value from metadata
-    pub fn get_string(&self, key: &str) -> Option<&str> {
-        self.metadata.get(key).and_then(|v| v.as_str())
+    /// Generic getter that prepends the architecture prefix automatically
+    pub fn get_arch_u32(&self, key: &str) -> Option<u32> {
+        self.get_u32(&format!("{}.{}", self.architecture, key))
     }
 
-    /// Gets a u32 value from metadata (casting from JSON u64)
-    pub fn get_u32(&self, key: &str) -> Option<u32> {
-        self.metadata
-            .get(key)
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32)
-    }
-
-    /// Gets a f32 value from metadata (casting from JSON f64)
-    pub fn get_f32(&self, key: &str) -> Option<f32> {
-        self.metadata
-            .get(key)
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
+    pub fn get_arch_f32(&self, key: &str) -> Option<f32> {
+        self.get_f32(&format!("{}.{}", self.architecture, key))
     }
     fn translate_name(&self, name: &str) -> String {
         // 1. Handle the basics
@@ -204,6 +194,26 @@ impl WeightLoader for GgufLoader {
         })
     }
 
+    /// Gets a string value from metadata
+    fn get_string(&self, key: &str) -> Option<&str> {
+        self.metadata.get(key).and_then(|v| v.as_str())
+    }
+
+    /// Gets a u32 value from metadata (casting from JSON u64)
+    fn get_u32(&self, key: &str) -> Option<u32> {
+        self.metadata
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+    }
+
+    /// Gets a f32 value from metadata (casting from JSON f64)
+    fn get_f32(&self, key: &str) -> Option<f32> {
+        self.metadata
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+    }
     fn contains(&self, name: &str) -> bool {
         self.tensor_map.contains_key(name)
     }

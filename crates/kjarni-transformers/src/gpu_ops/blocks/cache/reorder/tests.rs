@@ -1,16 +1,18 @@
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::blocks::cache::reorder::GpuReorderCache;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::blocks::cache::reorder::GpuReorderCache;
 use anyhow::Result;
-use ndarray::{s, Array, Array1, Array4, Axis, Ix4};
-use std::sync::Arc;
+use ndarray::{Array1, Array4, s};
 
 // Helper to read a GpuTensor back to the CPU for comparison.
 async fn read_gpu_tensor(tensor: &GpuTensor) -> Result<Array4<f32>> {
     let shape = tensor.shape().to_vec();
     let raw_data = tensor.read_raw_data().await?;
     let data_slice: &[f32] = bytemuck::cast_slice(&raw_data);
-    Ok(Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), data_slice.to_vec())?)
+    Ok(Array4::from_shape_vec(
+        (shape[0], shape[1], shape[2], shape[3]),
+        data_slice.to_vec(),
+    )?)
 }
 
 #[tokio::test]
@@ -23,11 +25,12 @@ async fn test_gpu_reorder_cache_parity() -> Result<()> {
     let (num_beams, num_heads, seq_len, head_dim) = (4, 2, 5, 8);
 
     // Create a source tensor where each beam has a unique, identifiable value.
-    let source_cpu = Array4::from_shape_fn((num_beams, num_heads, seq_len, head_dim), |(b, _, _, _)| {
-        (b as f32 + 1.0) * 100.0 // Beam 0 -> 100.0, Beam 1 -> 200.0, etc.
-    });
+    let source_cpu =
+        Array4::from_shape_fn((num_beams, num_heads, seq_len, head_dim), |(b, _, _, _)| {
+            (b as f32 + 1.0) * 100.0 // Beam 0 -> 100.0, Beam 1 -> 200.0, etc.
+        });
     let source_gpu = GpuTensor::from_ndarray(&context, &source_cpu)?;
-    
+
     // --- 2. DEFINE THE REORDERING ---
     // This is the `parent_indices` from a beam search step.
     // New beam 0 comes from old beam 2.
@@ -48,22 +51,35 @@ async fn test_gpu_reorder_cache_parity() -> Result<()> {
     }
 
     // --- 4. GPU EXECUTION ---
-    let output_gpu = GpuTensor::uninitialized(&context, source_cpu.shape().to_vec(), source_gpu.dtype(), "Reorder Dst");
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        source_cpu.shape().to_vec(),
+        source_gpu.dtype(),
+        "Reorder Dst",
+    );
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    reorder_kernel.encode(&mut encoder, &source_gpu, &output_gpu, &indices_gpu, seq_len);
+    reorder_kernel.encode(
+        &mut encoder,
+        &source_gpu,
+        &output_gpu,
+        &indices_gpu,
+        seq_len,
+    );
     context.queue.submit(Some(encoder.finish()));
 
     // --- 5. COMPARE RESULTS ---
     let actual_gpu_result = read_gpu_tensor(&output_gpu).await?;
-    
+
     // For a data copy operation, the results should be exact.
-    assert_eq!(expected_cpu, actual_gpu_result, "GPU reorder result does not match CPU ground truth.");
+    assert_eq!(
+        expected_cpu, actual_gpu_result,
+        "GPU reorder result does not match CPU ground truth."
+    );
 
     println!("✅ GpuReorderCache passed parity test!");
     Ok(())
 }
-
 
 #[tokio::test]
 async fn test_reorder_at_step_2_failure_simulation() -> Result<()> {
@@ -106,7 +122,12 @@ async fn test_reorder_at_step_2_failure_simulation() -> Result<()> {
     }
 
     // --- 4. GPU EXECUTION ---
-    let output_gpu = GpuTensor::uninitialized(&context, source_cpu.shape().to_vec(), source_gpu.dtype(), "Reorder Dst");
+    let output_gpu = GpuTensor::uninitialized(
+        &context,
+        source_cpu.shape().to_vec(),
+        source_gpu.dtype(),
+        "Reorder Dst",
+    );
     let mut encoder = context.device.create_command_encoder(&Default::default());
     reorder_kernel.encode(
         &mut encoder,
@@ -119,7 +140,10 @@ async fn test_reorder_at_step_2_failure_simulation() -> Result<()> {
 
     // --- 5. VERIFY ---
     let actual_gpu_result = read_gpu_tensor(&output_gpu).await?;
-    assert_eq!(expected_cpu, actual_gpu_result, "GPU reorder result does not match CPU ground truth for the failure case.");
+    assert_eq!(
+        expected_cpu, actual_gpu_result,
+        "GPU reorder result does not match CPU ground truth for the failure case."
+    );
 
     println!("✅ GPU reorder kernel correctly simulates the Step 2 reorder!");
 
@@ -149,7 +173,9 @@ async fn test_reorder_at_step_2_failure_simulation() -> Result<()> {
     // The ONLY reason the CPU works is due to floating point differences making another
     // token slightly more likely. The GPU is not wrong, it's just exposing the flaw
     // in the penalty configuration.
-    println!("Analysis complete: The reorder kernel is correct. The divergence is caused by a logic flaw (penalty config) exposed by GPU floating point arithmetic.");
+    println!(
+        "Analysis complete: The reorder kernel is correct. The divergence is caused by a logic flaw (penalty config) exposed by GPU floating point arithmetic."
+    );
 
     Ok(())
 }

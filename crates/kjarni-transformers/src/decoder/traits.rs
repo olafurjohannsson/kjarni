@@ -17,21 +17,19 @@
 //!
 //! 3.  **Operations Strategy (`CpuDecoderOps` / `GpuDecoderOps`)**:
 //!     -   **Role**: Mathematician. Handles model-specific logic that varies between architectures.
-//!     -   **Knowledge**: Knows how to generate masks (Causal vs Sliding Window), how to project logits (Norm vs Scaling), etc.
+//!     -   **Knowledge**: Knows how to generate masks (Causal vs Sliding Window), how t<o project logits (Norm vs Scaling), etc.
 //!
 //! 4.  **Compute Components (`CpuDecoder` / `GpuDecoder`)**:
 //!     -   **Role**: Engine. Executes the heavy Transformer layers.
 //!     -   **Knowledge**: Pure linear algebra. Embed -> Normalize -> Forward Layers.
 
-use crate::WgpuContext;
 use crate::cache::{Cache, GpuKVCache};
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::common::GenerationConfig;
+use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{AutoregressiveLoop, LanguageModel};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
-use std::sync::Arc;
 use wgpu::CommandEncoder;
 
 // ============================================================================

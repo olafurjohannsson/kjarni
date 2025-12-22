@@ -1,10 +1,6 @@
 use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
-use kjarni_transformers::{
-    gpu_context::WgpuContext,
-    models::ModelType,
-    traits::Device,
-};
+use kjarni_transformers::{models::ModelType, traits::Device, WgpuContext};
 use tokio;
 
 const TOLERANCE: f32 = 1e-3;
@@ -90,13 +86,8 @@ async fn test_torch_sentence_encoder_cls_golden_values() -> Result<()> {
 }
 #[tokio::test]
 async fn test_encode_raw_unnormalized() -> Result<()> {
-    let encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
     let text = "This is a test sentence.";
     let normalized = encoder.encode(text).await?;
     let raw = encoder.encode_raw(text).await?;
@@ -117,22 +108,14 @@ async fn test_encode_raw_unnormalized() -> Result<()> {
 }
 #[tokio::test]
 async fn test_encode_batch_raw() -> Result<()> {
-    let encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
     let texts = vec!["First sentence", "Second sentence", "Third sentence"];
     let normalized_batch = encoder.encode_batch(&texts).await?;
     let raw_batch = encoder.encode_batch_raw(&texts).await?;
     assert_eq!(normalized_batch.len(), raw_batch.len());
     assert_eq!(normalized_batch.len(), 3);
-    for (i, (norm_emb, raw_emb)) in normalized_batch.iter()
-        .zip(raw_batch.iter())
-        .enumerate() 
-    {
+    for (i, (norm_emb, raw_emb)) in normalized_batch.iter().zip(raw_batch.iter()).enumerate() {
         assert_eq!(norm_emb.len(), raw_emb.len());
         let norm: f32 = norm_emb.iter().map(|x| x * x).sum::<f32>().sqrt();
         let raw_norm: f32 = raw_emb.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -152,18 +135,19 @@ async fn test_encode_batch_raw() -> Result<()> {
 
 #[tokio::test]
 async fn test_encode_batch_with_full_control() -> Result<()> {
-    let encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
     let texts = vec!["Sentence one", "Sentence two"];
-    let mean_norm = encoder.encode_batch_with(&texts, Some("mean"), true).await?;
-    let mean_raw = encoder.encode_batch_with(&texts, Some("mean"), false).await?;
+    let mean_norm = encoder
+        .encode_batch_with(&texts, Some("mean"), true)
+        .await?;
+    let mean_raw = encoder
+        .encode_batch_with(&texts, Some("mean"), false)
+        .await?;
     let cls_norm = encoder.encode_batch_with(&texts, Some("cls"), true).await?;
-    let cls_raw = encoder.encode_batch_with(&texts, Some("cls"), false).await?;
+    let cls_raw = encoder
+        .encode_batch_with(&texts, Some("cls"), false)
+        .await?;
     assert_eq!(mean_norm.len(), 2);
     assert_eq!(mean_raw.len(), 2);
     assert_eq!(cls_norm.len(), 2);
@@ -176,13 +160,8 @@ async fn test_encode_batch_with_full_control() -> Result<()> {
 }
 #[tokio::test]
 async fn test_encode_with_custom_pooling() -> Result<()> {
-    let encoder = SentenceEncoder::from_registry(
-        ModelType::MiniLML6V2,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
     let text = "This is a test sentence.";
     let mean_embedding = encoder.encode_with(text, Some("mean"), true).await?;
     let cls_embedding = encoder.encode_with(text, Some("cls"), true).await?;
@@ -196,7 +175,8 @@ async fn test_encode_with_custom_pooling() -> Result<()> {
         (cls_norm - 1.0).abs() < 0.001,
         "CLS pooled embedding should be normalized"
     );
-    let dot_product: f32 = mean_embedding.iter()
+    let dot_product: f32 = mean_embedding
+        .iter()
         .zip(cls_embedding.iter())
         .map(|(a, b)| a * b)
         .sum();

@@ -2,17 +2,7 @@
 
 use anyhow::{anyhow, Result};
 
-use kjarni::{
-    registry,
-    models::BartModel,
-    Seq2SeqGenerator,
-    GenerationConfig,
-    DecodingStrategy,
-    BeamSearchParams,
-    ModelArchitecture,
-    ModelType,
-    Device,
-};
+use kjarni::{models::BartModel, registry, BeamSearchParams, DecodingStrategy, Device, EncoderDecoderGenerator, ModelArchitecture, ModelType};
 
 use super::util::resolve_input;
 
@@ -90,7 +80,7 @@ pub async fn run(
         }
     };
 
-    let generator = Seq2SeqGenerator::new(Box::new(loaded_model))?;
+    let generator = EncoderDecoderGenerator::new(Box::new(loaded_model))?;
 
     // 4. Build generation config
     // Start with model's default config (from task_specific_params)

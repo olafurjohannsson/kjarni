@@ -1,7 +1,7 @@
 use crate::cache::Cache;
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor, blocks::cache::GpuUpdateCache};
-use anyhow::{Result, anyhow};
+use crate::gpu_ops::{blocks::cache::GpuUpdateCache, GpuTensor};
+use crate::WgpuContext;
+use anyhow::{anyhow, Result};
 use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -102,7 +102,7 @@ impl GpuKVCache {
 
         Ok(())
     }
-    
+
     /// Retrieves a view of the cached keys and values for a specific layer.
     pub fn get(&self, layer_idx: usize) -> Option<(GpuTensor, GpuTensor)> {
         if layer_idx >= self.k_tensors.len() {

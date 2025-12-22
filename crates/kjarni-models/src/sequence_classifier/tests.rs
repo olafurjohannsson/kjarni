@@ -1,10 +1,8 @@
-
 use crate::cross_encoder::CrossEncoder;
 use anyhow::Result;
-use kjarni_transformers::gpu_context::WgpuContext;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
-use std::sync::Arc;
+use kjarni_transformers::WgpuContext;
 use tokio;
 
 #[tokio::test]
@@ -19,7 +17,7 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
         Device::Wgpu,
         Some(context),
     )
-    .await?;
+        .await?;
     let cpu_score = cpu_encoder
         .predict_pair("i love edgeGPT", "edgeGPT is a new model inference library")
         .await?;
@@ -32,7 +30,6 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
 
     assert!((gpu_score - torch_value).abs() < 1e-3);
 
-    
     assert!((cpu_score - gpu_score).abs() < 1e-3);
     Ok(())
 }
@@ -81,7 +78,7 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
         Device::Wgpu,
         Some(context),
     )
-    .await?;
+        .await?;
     let gpu_indices = gpu_encoder.rerank(query, &documents).await?;
     let gpu_rank: Vec<usize> = gpu_indices.iter().map(|v| v.0).collect();
     let cpu_rank: Vec<usize> = cpu_indices.iter().map(|v| v.0).collect();
@@ -91,13 +88,9 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
 }
 #[tokio::test]
 async fn test_rerank_returns_scores() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let query = "machine learning";
     let documents = vec![
         "Machine learning is awesome",
@@ -112,7 +105,7 @@ async fn test_rerank_returns_scores() -> Result<()> {
     }
     for i in 1..ranked.len() {
         assert!(
-            ranked[i-1].1 >= ranked[i].1,
+            ranked[i - 1].1 >= ranked[i].1,
             "Scores should be sorted in descending order"
         );
     }
@@ -121,13 +114,9 @@ async fn test_rerank_returns_scores() -> Result<()> {
 
 #[tokio::test]
 async fn test_rerank_indices_backwards_compat() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let query = "machine learning";
     let documents = vec![
         "Machine learning is awesome",
@@ -136,30 +125,23 @@ async fn test_rerank_indices_backwards_compat() -> Result<()> {
     ];
     let ranked_with_scores = encoder.rerank(query, &documents).await?;
     let ranked_indices = encoder.rerank_indices(query, &documents).await?;
-    let indices_from_scored: Vec<usize> = ranked_with_scores
-        .iter()
-        .map(|(idx, _)| *idx)
-        .collect();
+    let indices_from_scored: Vec<usize> = ranked_with_scores.iter().map(|(idx, _)| *idx).collect();
     assert_eq!(ranked_indices, indices_from_scored);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_rerank_top_k() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let query = "machine learning";
     let documents = vec![
-        "Machine learning is awesome",           // Should rank high
-        "The weather is nice today",             // Should rank low
-        "Deep learning uses neural networks",    // Should rank high
-        "I like pizza",                          // Should rank low
-        "AI and ML are transforming the world",  // Should rank high
+        "Machine learning is awesome",          // Should rank high
+        "The weather is nice today",            // Should rank low
+        "Deep learning uses neural networks",   // Should rank high
+        "I like pizza",                         // Should rank low
+        "AI and ML are transforming the world", // Should rank high
     ];
     let top_2 = encoder.rerank_top_k(query, &documents, 2).await?;
     assert_eq!(top_2.len(), 2, "Should return exactly 2 results");
@@ -175,13 +157,9 @@ async fn test_rerank_top_k() -> Result<()> {
 
 #[tokio::test]
 async fn test_rerank_top_k_indices() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let query = "machine learning";
     let documents = vec![
         "Machine learning is awesome",
@@ -192,23 +170,16 @@ async fn test_rerank_top_k_indices() -> Result<()> {
     let top_2_with_scores = encoder.rerank_top_k(query, &documents, 2).await?;
     let top_2_indices = encoder.rerank_top_k_indices(query, &documents, 2).await?;
     assert_eq!(top_2_indices.len(), 2);
-    let expected_indices: Vec<usize> = top_2_with_scores
-        .iter()
-        .map(|(idx, _)| *idx)
-        .collect();
+    let expected_indices: Vec<usize> = top_2_with_scores.iter().map(|(idx, _)| *idx).collect();
     assert_eq!(top_2_indices, expected_indices);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_rerank_empty_documents() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let ranked = encoder.rerank("query", &[]).await?;
     assert!(ranked.is_empty());
     let ranked_indices = encoder.rerank_indices("query", &[]).await?;
@@ -220,13 +191,9 @@ async fn test_rerank_empty_documents() -> Result<()> {
 
 #[tokio::test]
 async fn test_rerank_top_k_exceeds_document_count() -> Result<()> {
-    let encoder = CrossEncoder::from_registry(
-        ModelType::MiniLML6V2CrossEncoder,
-        None,
-        Device::Cpu,
-        None,
-    )
-    .await?;
+    let encoder =
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+            .await?;
     let documents = vec!["Doc 1", "Doc 2", "Doc 3"];
     let top_10 = encoder.rerank_top_k("query", &documents, 10).await?;
     assert_eq!(top_10.len(), 3);

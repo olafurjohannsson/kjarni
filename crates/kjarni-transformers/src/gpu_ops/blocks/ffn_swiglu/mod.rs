@@ -1,10 +1,10 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::tensor::DType;
 use anyhow::Result;
 use std::sync::Arc;
-use crate::tensor::DType;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]

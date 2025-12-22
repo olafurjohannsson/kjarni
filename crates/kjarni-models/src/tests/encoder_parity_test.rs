@@ -7,10 +7,10 @@ use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
 use kjarni_transformers::encoder::prelude::*;
 use kjarni_transformers::encoder::traits::CpuEncoder;
-use kjarni_transformers::gpu_context::WgpuContext;
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
+use kjarni_transformers::WgpuContext;
 use ndarray::Array2;
 use ndarray::Array3;
 

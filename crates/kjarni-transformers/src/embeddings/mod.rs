@@ -1,9 +1,13 @@
+mod loader;
+
 use crate::tensor::TypedCpuTensor;
 use crate::weights::ModelWeights;
 use anyhow::Result;
 use half::bf16;
-use ndarray::{Array2, Array3, Axis, s};
+use ndarray::{s, Array2, Array3, Axis};
 use rayon::prelude::*;
+
+pub use loader::LoadedEmbeddings;
 
 /// An enum to hold the word embeddings table in its native, memory-efficient format.
 pub enum EmbeddingData {

@@ -1,14 +1,12 @@
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::primitives::layout::slice::GpuSlice;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::Result;
-use ndarray::{s, Array, Array4};
 use common::read_gpu_tensor;
-use std::sync::Arc;
+use ndarray::{Array4, s};
 
 #[path = "../../../../tests/common.rs"]
 mod common;
-
 
 #[tokio::test]
 async fn test_gpu_slice_parity() -> Result<()> {
@@ -30,8 +28,7 @@ async fn test_gpu_slice_parity() -> Result<()> {
         ])
         .to_owned();
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    let actual_slice_gpu =
-        source_gpu.slice(&mut encoder, &slice_kernel, &offset, &shape)?;
+    let actual_slice_gpu = source_gpu.slice(&mut encoder, &slice_kernel, &offset, &shape)?;
     context.queue.submit(Some(encoder.finish()));
     let actual_slice_cpu: Array4<f32> = read_gpu_tensor(&actual_slice_gpu).await?;
     assert_eq!(

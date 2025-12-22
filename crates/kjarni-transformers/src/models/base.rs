@@ -3,14 +3,12 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
-use crate::traits::{
-   LanguageModelConfig, TransformerModel,
-};
 pub use crate::tensor::DType;
+use crate::traits::TransformerModel;
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array2};
+use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 
@@ -35,6 +33,24 @@ pub enum AutoregressiveLoop {
     Legacy,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ModelLoadConfig {
+    pub offload_embeddings: bool,
+    pub offload_lm_head: bool,
+    pub gpu_layers: Option<usize>,
+    pub target_dtype: Option<DType>, // User override
+}
+
+impl Default for ModelLoadConfig {
+    fn default() -> Self {
+        Self {
+            offload_embeddings: false,
+            offload_lm_head: false,
+            gpu_layers: None,
+            target_dtype: None, // Default to "detect from file"
+        }
+    }
+}
 
 
 /// Base trait for all language models - provides tokenization
@@ -43,35 +59,18 @@ pub enum AutoregressiveLoop {
 /// and encoder-decoder (BART) models.
 #[async_trait]
 pub trait LanguageModel: TransformerModel {
-    /// The physical maximum context length of the model (e.g., 4096, 8192, 128k).
-    fn context_size(&self) -> usize {
-        self.config().max_position_embeddings()
-    }
+    fn vocab_size(&self) -> usize;
+    fn hidden_size(&self) -> usize;
+    fn num_layers(&self) -> usize;
+    fn num_heads(&self) -> usize;
+    fn context_size(&self) -> usize;
+    fn tokenizer(&self) -> &Tokenizer;
 
-    /// Returns a set of token IDs that should stop generation immediately.
-    /// For Llama 3, this includes EOS and EOT_ID.
-    fn stop_token_ids(&self) -> std::collections::HashSet<u32> {
-        let mut set = std::collections::HashSet::new();
-        if let Some(id) = self.eos_token_id() {
-            set.insert(id);
-        }
-        // Llama 3 specific hack (ideal world: load this from tokenizer_config.json)
-        // <|eot_id|> = 128009
-        if let Some(eot) = self.tokenizer().token_to_id("<|eot_id|>") {
-            set.insert(eot);
-        }
-        set
-    }
-    /// Get the model's configuration
-    ///
-    /// This provides access to all architectural parameters like
-    /// vocab_size, max_position_embeddings, hidden_size, etc.
-    fn config(&self) -> &dyn LanguageModelConfig;
+    fn eos_token_id(&self) -> Option<u32>;
+    fn bos_token_id(&self) -> Option<u32>;
+    fn forced_bos_token_id(&self) -> Option<u32>;
+    fn pad_token_id(&self) -> Option<u32>;
 
-    /// Creates a new, empty Key-Value cache appropriately configured for this model.
-    ///
-    /// The model implementation is responsible for choosing the correct cache type
-    /// (CPU/GPU) and initializing it with the correct dimensions.
     fn new_cache(
         &self,
         batch_size: usize,
@@ -79,69 +78,29 @@ pub trait LanguageModel: TransformerModel {
         num_beams: usize,
     ) -> Result<Box<dyn Cache>>;
 
-    /// Maximum sequence length the model can handle
+    // --- Logic Methods (Default implementations are now safe) ---
+
+    fn stop_token_ids(&self) -> std::collections::HashSet<u32> {
+        let mut set = std::collections::HashSet::new();
+        if let Some(id) = self.eos_token_id() {
+            set.insert(id);
+        }
+        // Llama 3 specific EOT ID
+        if let Some(eot) = self.tokenizer().token_to_id("<|eot_id|>") {
+            set.insert(eot);
+        }
+        set
+    }
+
     fn max_length(&self) -> usize {
-        self.config().max_position_embeddings()
+        self.context_size()
     }
 
-    /// Size of the vocabulary
-    fn vocab_size(&self) -> usize {
-        self.config().vocab_size()
-    }
-
-    /// Hidden state dimensionality
-    fn hidden_size(&self) -> usize {
-        self.config().hidden_size()
-    }
-
-    /// Number of transformer layers
-    fn num_layers(&self) -> usize {
-        self.config().num_hidden_layers()
-    }
-
-    /// Number of attention heads
-    fn num_heads(&self) -> usize {
-        self.config().num_attention_heads()
-    }
-
-    /// Get the tokenizer
-    fn tokenizer(&self) -> &Tokenizer;
-
-    /// Get the end-of-sequence token ID (if applicable)
-    fn eos_token_id(&self) -> Option<u32> {
-        self.config()
-            .eos_token_id()
-            .or_else(|| self.tokenizer().token_to_id("</s>"))
-            .or_else(|| self.tokenizer().token_to_id("<|endoftext|>"))
-    }
-
-    /// Get the padding token ID (if applicable)
-    fn pad_token_id(&self) -> Option<u32> {
-        self.config()
-            .pad_token_id()
-            .or_else(|| self.tokenizer().token_to_id("<pad>"))
-            .or_else(|| self.tokenizer().token_to_id("[PAD]"))
-    }
-
-    /// Get the beginning-of-sequence token ID (if applicable)
-    fn bos_token_id(&self) -> Option<u32> {
-        self.config()
-            .bos_token_id()
-            .or_else(|| self.tokenizer().token_to_id("<s>"))
-            .or_else(|| self.tokenizer().token_to_id("[CLS]"))
-    }
-
-    /// Tokenize text into token IDs
-    ///
-    /// Returns Array2<f32> with shape [1, seq_len]
     fn tokenize(&self, text: &str) -> Result<Array2<u32>> {
-        let encoding = self
-            .tokenizer()
+        let encoding = self.tokenizer()
             .encode(text, true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
-
         let ids = encoding.get_ids().to_vec();
-
         let seq_len = ids.len();
         Ok(Array2::from_shape_vec((1, seq_len), ids)?)
     }

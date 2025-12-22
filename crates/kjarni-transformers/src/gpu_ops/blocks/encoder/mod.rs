@@ -1,8 +1,9 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::WgpuContext;
+use crate::activations;
 use crate::encoder::traits::EncoderArchitecture;
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
@@ -10,7 +11,6 @@ use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{LanguageModelConfig, TransformerConfig};
-use crate::activations;
 
 pub struct GpuEncoderLayer {
     self_attn: GpuAttention,
@@ -195,18 +195,18 @@ impl GpuEncoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WgpuContext;
     use crate::activations::Activation;
     use crate::encoder::encoder_layer::EncoderLayer;
     use crate::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
-    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
@@ -219,9 +219,8 @@ mod tests {
         let ctx = Arc::new(WgpuContext::new().await?);
 
         // Load actual BART weights
-        let model_path = std::path::Path::new(
-            "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6",
-        );
+        let model_path =
+            std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
         let weights = crate::weights::ModelWeights::new(model_path)?;
 
         let prefix = "model.encoder.layers.0";

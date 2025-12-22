@@ -1,8 +1,8 @@
 use anyhow::Result;
-use kjarni_transformers::encoder_decoder::Seq2SeqGenerator;
 use kjarni_models::models::bart::model::BartModel;
-use kjarni_transformers::WgpuContext;
 use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
+use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::{Device, ModelType};
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ like C++, Haskell, and Erlang.";
         BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone())).await?;
     use std::io;
     use std::io::Write;
-    let cpu_generator = Seq2SeqGenerator::new(Box::new(cpu_model))?;
+    let cpu_generator = EncoderDecoderGenerator::new(Box::new(cpu_model))?;
     let config = GenerationConfig {
         max_length: 142,
         min_length: 56,
@@ -71,7 +71,7 @@ like C++, Haskell, and Erlang.";
         io::stdout().flush().unwrap();
     }
 
-    let gpu_generator = Seq2SeqGenerator::new(Box::new(gpu_model))?;
+    let gpu_generator = EncoderDecoderGenerator::new(Box::new(gpu_model))?;
     let gpu_generation_config = gpu_generator.model.get_default_generation_config();
     let gpu_summary = gpu_generator.generate_stream(article, Some(&gpu_generation_config));
     futures_util::pin_mut!(gpu_summary);

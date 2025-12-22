@@ -1,11 +1,10 @@
 use super::{Cache, CpuKVCache, GpuKVCache};
 use crate::cache::{CpuBeamKVCache, GpuBeamKVCache};
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor, blocks::cache::GpuUpdateCache}; // Ensure GpuUpdateCache is public
+use crate::gpu_ops::GpuTensor;
+use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array, Array1, Array3, Array4, Ix3, Ix4, s};
+use ndarray::{s, Array, Array1, Array3, Array4};
 use ndarray_rand::rand_distr::Uniform;
-use std::sync::Arc;
 use ndarray_rand::RandomExt;
 
 // Helper to read a GPU tensor back to a generic ndarray for comparison.
@@ -19,7 +18,12 @@ async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Ar
 }
 fn assert_all_close_3d(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
     if a.shape() != b.shape() {
-        panic!("[{}] Shape mismatch: {:?} vs {:?}", context, a.shape(), b.shape());
+        panic!(
+            "[{}] Shape mismatch: {:?} vs {:?}",
+            context,
+            a.shape(),
+            b.shape()
+        );
     }
     let mut max_diff = 0.0;
     for (a_val, b_val) in a.iter().zip(b.iter()) {
@@ -35,27 +39,25 @@ fn assert_all_close_3d(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, c
             );
         }
     }
-    println!("[{}] Check passed. Max absolute difference: {:.6e}", context, max_diff);
+    println!(
+        "[{}] Check passed. Max absolute difference: {:.6e}",
+        context, max_diff
+    );
 }
 #[tokio::test]
 async fn test_cache_symmetry() -> Result<()> {
     println!("\n--- Testing CPU/GPU KV Cache Symmetry ---");
     let context = WgpuContext::new().await?;
-
-    // 1. SETUP: Define shared parameters and instantiate both caches.
     let (num_layers, batch_size, max_len, hidden_size) = (1, 1, 8, 16);
     let layer_idx = 0;
 
     let mut cpu_cache = CpuKVCache::new(num_layers, batch_size, max_len, hidden_size);
-
-    // GPU cache operates on head-split data.
     let num_heads = 4;
     let head_dim = hidden_size / num_heads;
     let mut gpu_cache = GpuKVCache::new(
         &context, num_layers, batch_size, num_heads, head_dim, max_len,
     )?;
 
-    // 2. SIMULATE STEP 1 (Prompt processing, seq_len = 3)
     let prompt_len = 3;
     let new_k_cpu_1 =
         Array3::<f32>::from_shape_fn((batch_size, prompt_len, hidden_size), |(b, s, h)| {
@@ -74,7 +76,13 @@ async fn test_cache_symmetry() -> Result<()> {
     let new_k_gpu_1 = GpuTensor::from_ndarray(&context, &new_k_cpu_1)?;
     let new_v_gpu_1 = GpuTensor::from_ndarray(&context, &new_v_cpu_1)?;
     let mut encoder1 = context.device.create_command_encoder(&Default::default());
-    gpu_cache.update(&mut encoder1, layer_idx, &new_k_gpu_1, &new_v_gpu_1, gpu_cache.get_seq_length())?;
+    gpu_cache.update(
+        &mut encoder1,
+        layer_idx,
+        &new_k_gpu_1,
+        &new_v_gpu_1,
+        gpu_cache.get_seq_length(),
+    )?;
     context.queue.submit(Some(encoder1.finish()));
     gpu_cache.increment_len(prompt_len);
 
@@ -97,8 +105,14 @@ async fn test_cache_symmetry() -> Result<()> {
     let new_k_gpu_2 = GpuTensor::from_ndarray(&context, &new_k_cpu_2)?;
     let new_v_gpu_2 = GpuTensor::from_ndarray(&context, &new_v_cpu_2)?;
     let mut encoder2 = context.device.create_command_encoder(&Default::default());
-    
-    gpu_cache.update(&mut encoder2, layer_idx, &new_k_gpu_2, &new_v_gpu_2, gpu_cache.get_seq_length())?;
+
+    gpu_cache.update(
+        &mut encoder2,
+        layer_idx,
+        &new_k_gpu_2,
+        &new_v_gpu_2,
+        gpu_cache.get_seq_length(),
+    )?;
     context.queue.submit(Some(encoder2.finish()));
     gpu_cache.increment_len(gen_len);
 
@@ -268,7 +282,13 @@ async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
 
     // --- 2. Act ---
     // Update the cache at the specified offset
-    cache.update(&mut encoder, layer_idx_to_test, &new_k_gpu, &new_v_gpu, position_offset)?;
+    cache.update(
+        &mut encoder,
+        layer_idx_to_test,
+        &new_k_gpu,
+        &new_v_gpu,
+        position_offset,
+    )?;
     context.queue.submit(Some(encoder.finish()));
 
     // Get the full physical buffer and download it
@@ -325,12 +345,22 @@ async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
 
         // The logic from inside the `forward` loop
         let mut encoder = context.device.create_command_encoder(&Default::default());
-        gpu_cache.update(&mut encoder, layer_idx, &new_k_gpu_1, &new_v_gpu_1, position_offset)?;
+        gpu_cache.update(
+            &mut encoder,
+            layer_idx,
+            &new_k_gpu_1,
+            &new_v_gpu_1,
+            position_offset,
+        )?;
         context.queue.submit(Some(encoder.finish()));
 
         // The logic from the end of a `forward` call
         gpu_cache.set_seq_length(position_offset + prompt_len);
-        assert_eq!(gpu_cache.get_seq_length(), 3, "Length after step 1 should be 3");
+        assert_eq!(
+            gpu_cache.get_seq_length(),
+            3,
+            "Length after step 1 should be 3"
+        );
     }
 
     // --- 3. Act: Step 2 (e.g., Generating 1 new token) ---
@@ -347,7 +377,13 @@ async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
 
         // Logic from inside the `forward` loop
         let mut encoder = context.device.create_command_encoder(&Default::default());
-        gpu_cache.update(&mut encoder, layer_idx, &new_k_gpu_2, &new_v_gpu_2, position_offset)?;
+        gpu_cache.update(
+            &mut encoder,
+            layer_idx,
+            &new_k_gpu_2,
+            &new_v_gpu_2,
+            position_offset,
+        )?;
         context.queue.submit(Some(encoder.finish()));
 
         // Logic from the end of the `forward` call
@@ -362,12 +398,18 @@ async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
 
     // Check the data from the first update
     let slice1 = k_cache_cpu.slice(s![0, 0, 0..3, ..]);
-    assert!(slice1.iter().all(|&x| x == 1.0), "Data from step 1 is incorrect or was overwritten");
+    assert!(
+        slice1.iter().all(|&x| x == 1.0),
+        "Data from step 1 is incorrect or was overwritten"
+    );
 
     // CRITICAL: Check the data from the second update
     let slice2 = k_cache_cpu.slice(s![0, 0, 3..4, ..]);
-    assert!(slice2.iter().all(|&x| x == 99.0), "Data from step 2 was not written to the correct offset");
-    
+    assert!(
+        slice2.iter().all(|&x| x == 99.0),
+        "Data from step 2 was not written to the correct offset"
+    );
+
     println!("✓ GPU cache stateful update test passed.");
     Ok(())
 }
@@ -388,8 +430,7 @@ async fn test_cache_reorder_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
 
     // 2. CREATE CACHES: Instantiate both CPU and GPU caches with identical configs.
-    let mut cpu_cache =
-        CpuBeamKVCache::new(NUM_LAYERS, NUM_BEAMS, CAPACITY, HIDDEN_SIZE);
+    let mut cpu_cache = CpuBeamKVCache::new(NUM_LAYERS, NUM_BEAMS, CAPACITY, HIDDEN_SIZE);
     let mut gpu_cache = GpuBeamKVCache::new(
         &context, NUM_LAYERS, NUM_BEAMS, NUM_HEADS, HEAD_DIM, CAPACITY,
     )?;
@@ -454,12 +495,12 @@ async fn test_cache_reorder_parity() -> Result<()> {
         let p1 = gpu_k_4d.permuted_axes([0, 2, 1, 3]);
         let p2 = gpu_v_4d.permuted_axes([0, 2, 1, 3]);
         // CRITICAL: Reshape GPU data from [beam, head, seq, dim] to [beam, seq, hidden] to match CPU layout
-        let gpu_k_reshaped = p1
-            .as_standard_layout()
-            .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
-        let gpu_v_reshaped = p2
-            .as_standard_layout()
-            .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
+        let gpu_k_reshaped =
+            p1.as_standard_layout()
+                .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
+        let gpu_v_reshaped =
+            p2.as_standard_layout()
+                .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
 
         // Compare only the active parts of the cache
         let active_slice = s![.., 0..NUM_STEPS_TO_POPULATE, ..];
@@ -469,10 +510,22 @@ async fn test_cache_reorder_parity() -> Result<()> {
         let gpu_v_active = gpu_v_reshaped.slice(active_slice);
 
         let context_k = format!("Layer {} Key Cache", layer_idx);
-        assert_all_close_3d(&cpu_k_active.to_owned(), &gpu_k_active.to_owned(), 1e-5, 1e-5, &context_k);
+        assert_all_close_3d(
+            &cpu_k_active.to_owned(),
+            &gpu_k_active.to_owned(),
+            1e-5,
+            1e-5,
+            &context_k,
+        );
 
         let context_v = format!("Layer {} Value Cache", layer_idx);
-        assert_all_close_3d(&cpu_v_active.to_owned(), &gpu_v_active.to_owned(), 1e-5, 1e-5, &context_v);
+        assert_all_close_3d(
+            &cpu_v_active.to_owned(),
+            &gpu_v_active.to_owned(),
+            1e-5,
+            1e-5,
+            &context_v,
+        );
     }
 
     println!("\n✅✅✅ CPU and GPU cache reordering implementations have perfect parity!");

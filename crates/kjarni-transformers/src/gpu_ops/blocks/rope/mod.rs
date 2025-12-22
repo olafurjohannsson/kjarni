@@ -1,4 +1,4 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::rope::RoPE;
 use anyhow::Result;
@@ -184,22 +184,39 @@ impl GpuRoPE {
                 label: Some("RoPE Bind Group"),
                 layout: &self.bind_group_layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: tensor_in.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: self.cos_cache.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: self.sin_cache.buffer().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: tensor_out.buffer().as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: tensor_in.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.cos_cache.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.sin_cache.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: tensor_out.buffer().as_entire_binding(),
+                    },
                 ],
             });
-        self.context.profiler.profile(encoder, "RoPE Rotation", |pass| {
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
+        self.context
+            .profiler
+            .profile(encoder, "RoPE Rotation", |pass| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
 
-            let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
-            let workgroups_y = seq_len as u32;
-            let workgroups_z = (batch_size * num_heads) as u32;
-            pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-        });
+                let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
+                let workgroups_y = seq_len as u32;
+                let workgroups_z = (batch_size * num_heads) as u32;
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            });
         // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
         //     label: Some("RoPE Pass"),
         //     timestamp_writes: None,

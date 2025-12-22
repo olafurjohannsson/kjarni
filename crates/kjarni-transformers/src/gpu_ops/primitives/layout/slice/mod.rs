@@ -1,8 +1,7 @@
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::WgpuContext;
+use crate::gpu_ops::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use anyhow::Result;
 
 // Simplified for now, this would be part of a larger Kernel trait
 pub struct GpuSlice {
@@ -100,7 +99,6 @@ impl GpuSlice {
         }
     }
 
-
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -189,7 +187,6 @@ impl GpuSlice {
         compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, workgroup_z);
     }
 }
-
 
 #[cfg(test)]
 mod tests;

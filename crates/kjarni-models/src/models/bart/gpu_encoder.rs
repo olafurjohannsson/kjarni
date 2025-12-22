@@ -1,21 +1,21 @@
 use crate::models::bart::config::BartConfig;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::embeddings::Embeddings;
 use kjarni_transformers::encoder::config::EncoderLoadConfig;
 use kjarni_transformers::encoder::prelude::*;
-use kjarni_transformers::gpu_context::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
-    GpuFeedForwardWeightsStd, GpuNormalization, GpuNormalizationWeights,
-    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
+    layer_norm::{GpuLayerNorm, GpuLayerNormWeights}, GpuFeedForwardWeightsStd, GpuNormalization,
+    GpuNormalizationWeights,
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::traits::EncoderDecoderArchitecture;
 use kjarni_transformers::traits::{LanguageModelConfig, TransformerConfig};
 use kjarni_transformers::weights::ModelWeights;
+use kjarni_transformers::WgpuContext;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 
@@ -411,16 +411,16 @@ impl GpuEncoder for BartGpuEncoder {
                         Use GpuEncoderInput::TokensCpu instead."
                     )
                 })?;
-
-                self.gpu_embeddings.encode(
-                    cmd_encoder,
-                    weights,
-                    input_ids,
-                    token_type_ids,
-                    0, // Position offset handled by config.extra_pos_embeddings()
-                    self.config.as_ref(),
-                    pool,
-                )
+                unimplemented!()
+                // self.gpu_embeddings.encode(
+                //     cmd_encoder,
+                //     weights,
+                //     input_ids,
+                //     token_type_ids,
+                //     0, // Position offset handled by config.extra_pos_embeddings()
+                //     self.config.as_ref(),
+                //     pool,
+                // )
             }
 
             GpuEncoderInput::TokensCpu(input_ids) => {

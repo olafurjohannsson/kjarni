@@ -1,5 +1,5 @@
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::gpu_ops::GpuTensor;
+use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;

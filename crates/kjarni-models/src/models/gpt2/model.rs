@@ -11,24 +11,24 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    TransformerConfig, WgpuContext,
-    decoder::prelude::*,
-    gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
+    decoder::prelude::*, gpu_ops::{primitives::linear::GpuLinearLayer, GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
     models::{
-        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
+        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
     },
     prelude::*,
-    traits::{DecoderArchitecture, LanguageModelConfig},
-    weights::{ModelWeights},
     tensor::{DType, RawTensor},
+    traits::{DecoderArchitecture, LanguageModelConfig},
+    weights::ModelWeights,
+    TransformerConfig,
+    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -203,9 +203,28 @@ impl LanguageModel for Gpt2Model {
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn config(&self) -> &dyn LanguageModelConfig {
-        self.config.as_ref()
+    fn context_size(&self) -> usize {
+        todo!()
     }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn vocab_size(&self) -> usize {
+        todo!()
+    }
+    fn hidden_size(&self) -> usize {
+        todo!()
+    }
+    fn num_heads(&self) -> usize {
+        todo!()
+    }
+    fn num_layers(&self) -> usize {
+        todo!()
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+
     fn bos_token_id(&self) -> Option<u32> {
         Some(50256)
     }
@@ -354,10 +373,9 @@ impl DecoderLanguageModel for Gpt2Model {
 mod tests {
     use super::*;
 
-    use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
+    use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
     use kjarni_transformers::decoder::prelude::*;
     use kjarni_transformers::prelude::LanguageModel;
-    use std::sync::Arc;
 
     /// Helper function to load the DistilGPT2 model for testing.
     async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {

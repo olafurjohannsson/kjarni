@@ -1,18 +1,17 @@
 use super::*;
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_2d};
+use crate::WgpuContext;
+use crate::gpu_ops::DType;
 use anyhow::Result;
 use ndarray::{Array, Array2};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use crate::gpu_ops::DType;
 
 #[path = "../../../tests/common.rs"]
 mod common;
 
-use common::{read_gpu_tensor_to_vec};
+use common::read_gpu_tensor_to_vec;
 
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
@@ -29,7 +28,6 @@ fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
     );
 }
 
-
 /// A helper function to run a single matmul test case.
 async fn run_matmul_test(m: usize, k: usize, n: usize) -> Result<()> {
     let context = get_test_context().await;
@@ -45,13 +43,13 @@ async fn run_matmul_test(m: usize, k: usize, n: usize) -> Result<()> {
     let mut encoder = context.device.create_command_encoder(&Default::default());
     matmul_kernel.encode(&mut encoder, &[&gpu_a, &gpu_b], &gpu_c);
     context.queue.submit(std::iter::once(encoder.finish()));
-    
+
     // --- FIX IS HERE ---
     // 1. Read the flat Vec<f32> and shape from the GPU.
     let (gpu_result_vec, result_shape) = read_gpu_tensor_to_vec::<f32>(&gpu_c).await?;
     // 2. Reshape it into the KNOWN dimension type (Array2).
     let gpu_result = Array2::from_shape_vec((result_shape[0], result_shape[1]), gpu_result_vec)?;
-    
+
     let cpu_result = cpu_a.dot(&cpu_b);
 
     println!("Verifying MatMul [{}, {}, {}]...", m, k, n);

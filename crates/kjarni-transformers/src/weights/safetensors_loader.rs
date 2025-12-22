@@ -1,5 +1,5 @@
 use crate::tensor::{DType, RawTensor};
-use crate::weights::gguf_loader::GgufLoader; // To satisfy the trait bound
+// To satisfy the trait bound
 use crate::weights::WeightLoader;
 use anyhow::{anyhow, Context, Result};
 use memmap2::Mmap;

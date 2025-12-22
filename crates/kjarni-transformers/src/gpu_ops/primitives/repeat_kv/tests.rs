@@ -1,19 +1,13 @@
 use super::*;
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_2d};
+use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array, Array2};
 use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use crate::gpu_ops::DType;
-use ndarray::{Array4};
 #[path = "../../../tests/common.rs"]
 mod common;
 
-use common::{read_gpu_tensor_to_vec, assert_tensors_are_close_4d};
-
+use common::assert_tensors_are_close_4d;
 
 // Helper to compare two ndarray arrays for near-equality.
 fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
@@ -40,7 +34,12 @@ async fn test_repeat_kv() -> Result<()> {
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
 
     // Output shape: [batch=1, num_q_heads=4, seq=2, dim=2]
-    let output_gpu = GpuTensor::zeros(&context, vec![1, 4, 2, 2], crate::gpu_ops::DType::F32, "output")?;
+    let output_gpu = GpuTensor::zeros(
+        &context,
+        vec![1, 4, 2, 2],
+        crate::gpu_ops::DType::F32,
+        "output",
+    )?;
 
     // --- Execute Kernel ---
     let mut encoder = context.device.create_command_encoder(&Default::default());

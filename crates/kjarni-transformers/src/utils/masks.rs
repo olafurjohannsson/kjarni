@@ -1,6 +1,46 @@
-use ndarray::{Array2, Array3, Array4, s};
+use anyhow::anyhow;
+use ndarray::{s, Array2, Array3, Array4, Axis, Zip};
 
 pub const MASK_VALUE: f32 = -1e9; // SAME as GPU
+
+/// Apply padding mask to attention scores
+///
+/// Masks positions where mask[batch, key_pos] == 0
+pub fn apply_padding_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow::Result<Array4<f32>> {
+    let (batch_size, num_heads, seq_q, seq_k) = scores.dim();
+
+    if mask.shape()[0] != batch_size {
+        return Err(anyhow!(
+            "Mask batch size {} doesn't match scores batch size {}",
+            mask.shape()[0],
+            batch_size
+        ));
+    }
+
+    if mask.shape()[1] != seq_k {
+        return Err(anyhow!(
+            "Mask sequence length {} doesn't match key sequence length {}",
+            mask.shape()[1],
+            seq_k
+        ));
+    }
+
+    // Expand mask: [batch, seq_k] → [batch, 1, 1, seq_k]
+    let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
+
+    // Broadcast and apply
+    if let Some(broadcast_mask) = mask_expanded.broadcast((batch_size, num_heads, seq_q, seq_k)) {
+        Zip::from(&mut scores)
+            .and(&broadcast_mask)
+            .for_each(|s, &m| {
+                if m == 0.0 {
+                    *s = MASK_VALUE;
+                }
+            });
+    }
+
+    Ok(scores)
+}
 
 /// Apply causal mask to attention scores
 ///
@@ -46,12 +86,12 @@ pub fn create_causal_mask(seq_len: usize) -> Array2<f32> {
 pub fn create_batched_causal_mask(batch_size: usize, seq_len: usize) -> Array3<f32> {
     let single_mask = create_causal_mask(seq_len);
     let mut batched = Array3::zeros((batch_size, seq_len, seq_len));
-    
+
     for b in 0..batch_size {
         batched.slice_mut(ndarray::s![b, .., ..])
             .assign(&single_mask);
     }
-    
+
     batched
 }
 /// Create a padding mask from token IDs
@@ -73,14 +113,14 @@ pub fn expand_mask_for_attention(
 ) -> Array3<f32> {
     let (batch_size, seq_len) = mask.dim();
     let mut expanded = Array3::zeros((batch_size, num_heads, seq_len));
-    
+
     for b in 0..batch_size {
         for h in 0..num_heads {
             expanded.slice_mut(ndarray::s![b, h, ..])
                 .assign(&mask.row(b));
         }
     }
-    
+
     expanded
 }
 
@@ -91,20 +131,20 @@ mod tests {
     #[test]
     fn test_causal_mask() {
         let mask = create_causal_mask(3);
-        
+
         // Expected:
         // [[1, 0, 0],
         //  [1, 1, 0],
         //  [1, 1, 1]]
-        
+
         assert_eq!(mask[[0, 0]], 1.0);
         assert_eq!(mask[[0, 1]], 0.0);
         assert_eq!(mask[[0, 2]], 0.0);
-        
+
         assert_eq!(mask[[1, 0]], 1.0);
         assert_eq!(mask[[1, 1]], 1.0);
         assert_eq!(mask[[1, 2]], 0.0);
-        
+
         assert_eq!(mask[[2, 0]], 1.0);
         assert_eq!(mask[[2, 1]], 1.0);
         assert_eq!(mask[[2, 2]], 1.0);
@@ -114,7 +154,7 @@ mod tests {
     fn test_padding_mask() {
         let tokens = Array2::from_shape_vec((1, 5), vec![1.0, 2.0, 3.0, 0.0, 0.0]).unwrap();
         let mask = create_padding_mask_from_tokens(&tokens, 0.0);
-        
+
         assert_eq!(mask[[0, 0]], 1.0);
         assert_eq!(mask[[0, 1]], 1.0);
         assert_eq!(mask[[0, 2]], 1.0);

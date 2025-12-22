@@ -1,4 +1,4 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use anyhow::Result;
 use std::sync::Arc;
@@ -181,15 +181,17 @@ impl GpuRMSNorm {
         //     timestamp_writes: None,
         // });
         let label = format!("RMSNorm");
-        self.context.profiler.profile(encoder, &label, |compute_pass| {
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-            // let workgroups = (rows as u32 + 255) / 256;
-            // compute_pass.dispatch_workgroups(workgroups, 1, 1);
-            let workgroups = rows as u32; 
-            
-            compute_pass.dispatch_workgroups(workgroups, 1, 1);
-        });
+        self.context
+            .profiler
+            .profile(encoder, &label, |compute_pass| {
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                // let workgroups = (rows as u32 + 255) / 256;
+                // compute_pass.dispatch_workgroups(workgroups, 1, 1);
+                let workgroups = rows as u32;
+
+                compute_pass.dispatch_workgroups(workgroups, 1, 1);
+            });
     }
 }
 

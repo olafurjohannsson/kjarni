@@ -168,7 +168,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             })
             .collect();
 
-        let forced_bos_token_id = model.config().forced_bos_token_id();
+        let forced_bos_token_id = model.forced_bos_token_id();
 
         // **Dynamic Prompt Length Calculation**
         // Base is 1 (decoder_start_token).
@@ -188,7 +188,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             beams,
             finished,
             num_beams,
-            eos_token_id: model.config().eos_token_id().unwrap_or(2),
+            eos_token_id: model.eos_token_id().unwrap_or(2),
             decoder_start_token_id,
             forced_bos_token_id,
             early_stopping,

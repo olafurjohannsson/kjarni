@@ -343,14 +343,14 @@ impl GpuDecoder for Gpt2GpuDecoder {
                     // 1A. CPU Embeddings Loaded: Compute on CPU, Upload Result
                     // (Saves VRAM, slower due to upload of float hidden states)
                     let input_array = Array2::from_shape_vec((1, ids.len()), ids.to_vec())?;
-                    
+
                     let initial_embeddings_cpu = cpu_embeds.forward(
                         &input_array,
                         None,
                         position_offset,
                         self.config.scale_embeddings(),
                     );
-                    
+
                     GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)
                 } else {
                     // 1B. GPU Embeddings Loaded: Upload Tokens, Compute on GPU
@@ -363,16 +363,16 @@ impl GpuDecoder for Gpt2GpuDecoder {
                     let gpu_embeds = self.embeddings.as_ref()
                         .ok_or_else(|| anyhow!("Embeddings not loaded on CPU or GPU"))?;
                     let gpu_weights = self.embedding_weights.as_ref().unwrap();
-
-                    gpu_embeds.encode(
-                        encoder,
-                        gpu_weights,
-                        &tokens_tensor,
-                        None,
-                        position_offset,
-                        self.config.as_ref(),
-                        pool,
-                    )
+                    unimplemented!()
+                    // gpu_embeds.encode(
+                    //     encoder,
+                    //     gpu_weights,
+                    //     &tokens_tensor,
+                    //     None,
+                    //     position_offset,
+                    //     self.config.as_ref(),
+                    //     pool,
+                    // )
                 }
             }
             // Case 2: Tokens already on GPU (Optimized Beam Search)
@@ -381,15 +381,16 @@ impl GpuDecoder for Gpt2GpuDecoder {
                     .ok_or_else(|| anyhow!("GPU input provided but embeddings are on CPU"))?;
                 let gpu_weights = self.embedding_weights.as_ref().unwrap();
 
-                gpu_embeds.encode(
-                    encoder,
-                    gpu_weights,
-                    ids_tensor,
-                    None,
-                    position_offset,
-                    self.config.as_ref(),
-                    pool,
-                )
+                // gpu_embeds.encode(
+                //     encoder,
+                //     gpu_weights,
+                //     ids_tensor,
+                //     None,
+                //     position_offset,
+                //     self.config.as_ref(),
+                //     pool,
+                // )
+                unimplemented!()
             }
             // Case 3: Pre-computed Hidden States (Multimodal / Prefix Tuning)
             DecoderInput::HiddenGpu(t) => Ok(t.clone()),
@@ -425,7 +426,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
         for i in start_layer..end_layer {
             if i >= self.layers.len() { break; }
             let layer = &self.layers[i];
-            
+
             // Re-borrow cache mutably
             let layer_cache = cache.as_deref_mut();
 
@@ -488,7 +489,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
             &hidden,
             &final_ln_output,
         );
-        
+
         Ok(final_ln_output)
     }
 }

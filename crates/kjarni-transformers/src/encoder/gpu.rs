@@ -1,9 +1,8 @@
 use anyhow::Result;
-use ndarray::{Array2};
+use ndarray::Array2;
 use std::sync::Arc;
 
 use crate::encoder::traits::EncoderArchitecture;
-use crate::gpu_context::WgpuContext;
 use crate::encoder::traits::{GpuEncoder, GpuEncoderInput};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
@@ -13,6 +12,7 @@ use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::traits::{Device, TransformerModel};
 use crate::weights::ModelWeights;
+use crate::WgpuContext;
 use crate::{activations, Embeddings};
 
 pub struct GpuTransformerEncoder {
@@ -24,7 +24,6 @@ pub struct GpuTransformerEncoder {
     config: Arc<dyn EncoderArchitecture + Send + Sync>,
     context: Arc<WgpuContext>,
     cpu_embeddings: Embeddings,
-    // pool: Mutex<GpuTensorPool>,
 }
 
 impl GpuTransformerEncoder {
@@ -39,9 +38,9 @@ impl GpuTransformerEncoder {
         let token_type_embeddings = if let Some(name) = type_w {
             weights.get_array2(name)?
         } else {
-            Array2::zeros((0, 0)) // Placeholder for models without token types
+            Array2::zeros((0, 0))
         };
-        
+
         let cpu_embeddings = Embeddings::new(
             crate::embeddings::EmbeddingData::F32(word_embeddings.clone()),
             Some(position_embeddings.clone()),
@@ -180,22 +179,26 @@ impl GpuEncoder for GpuTransformerEncoder {
                     input_ids,
                     token_type_ids,
                     0, // Encoders don't use a rolling position offset
-                    self.config.as_ref(),
+                    self.config.hidden_size(),
+                    0,               // no extra pos embeddings for Llama
+                    self.config.scale_embeddings(), // from ModelMetadata
                     pool,
                 )
             }
             GpuEncoderInput::TokensCpu(input_ids_cpu) => {
                 // Hybrid path: embeddings on CPU, layers on GPU.
                 let hidden_cpu = self.cpu_embeddings.forward(
-                    input_ids_cpu, 
+                    input_ids_cpu,
                     None, // Assuming CPU path doesn't get token_type_ids for now
-                    self.config.extra_pos_embeddings(), 
-                    self.config.scale_embeddings()
+                    self.config.extra_pos_embeddings(),
+                    self.config.scale_embeddings(),
                 );
                 GpuTensor::from_ndarray(&self.context, &hidden_cpu)
             }
             GpuEncoderInput::HiddenGpu(hidden_states) => Ok(hidden_states.clone()),
-            GpuEncoderInput::HiddenCpu(hidden_states_cpu) => GpuTensor::from_ndarray(&self.context, hidden_states_cpu),
+            GpuEncoderInput::HiddenCpu(hidden_states_cpu) => {
+                GpuTensor::from_ndarray(&self.context, hidden_states_cpu)
+            }
         }
     }
 
@@ -208,7 +211,7 @@ impl GpuEncoder for GpuTransformerEncoder {
     ) -> Result<GpuTensor> {
         // This logic is taken directly from your old `forward` method.
         let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids)?;
-        
+
         // This logic correctly handles post-norm models like BERT/BART.
         // For a pre-norm model, this would just return `hidden_states`.
         if !self.config.is_prenorm() {
@@ -255,85 +258,5 @@ impl GpuEncoder for GpuTransformerEncoder {
     fn hidden_size(&self) -> usize {
         self.config.hidden_size()
     }
-
-    // The default `forward` method in the `GpuEncoder` trait will automatically
-    // chain these three methods together, so you don't need to implement it here.
 }
-
-// #[async_trait]
-// impl Encoder for GpuTransformerEncoder {
-//     type Input = Array2<u32>;
-//     type Output = EncoderOutput;
-
-//     async fn forward(
-//         &self,
-//         input_ids: &Self::Input,
-//         attention_mask: &Array2<f32>,
-//         token_type_ids: Option<&Array2<u32>>,
-//     ) -> Result<Self::Output> {
-//         let pool_guard = self.pool.lock().await;
-//         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
-//         let (encoder, pool) = frame.resources();
-
-//         let input_ids_gpu = GpuTensor::from_ndarray(&self.context, input_ids)?;
-
-//         // Handle optional token_type_ids upload
-//         let token_type_ids_gpu = if let Some(ids) = token_type_ids {
-//             Some(GpuTensor::from_ndarray(&self.context, ids)?)
-//         } else {
-//             None
-//         };
-
-//         let mut hidden_states = self.embeddings.encode(
-//             encoder,
-//             &self.embedding_weights,
-//             &input_ids_gpu,
-//             token_type_ids_gpu.as_ref(), // Pass as Option<&GpuTensor>
-//             0,                           // encoder doesnt need a dynamic position offset
-//             self.config.as_ref(),
-//             pool,
-//         )?;
-
-//         let attention_mask_gpu = GpuTensor::from_ndarray(&self.context, attention_mask)?;
-
-//         if !self.config.is_prenorm() {
-//             let ln_output = pool.get(hidden_states.shape().to_vec());
-//             self.embedding_layer_norm.encode(
-//                 encoder,
-//                 &self.embedding_ln_weights,
-//                 &hidden_states,
-//                 &ln_output,
-//             );
-//             hidden_states = ln_output;
-//         }
-
-//         for layer in self.layers.iter() {
-//             hidden_states = layer.forward(
-//                 encoder,
-//                 &hidden_states,
-//                 &attention_mask_gpu,
-//                 self.config.as_ref(),
-//                 pool,
-//             )?;
-//         }
-
-//         frame.finish();
-//         let last_hidden_state_cpu = hidden_states.to_ndarray_3d().await?;
-
-//         Ok(EncoderOutput {
-//             last_hidden_state: last_hidden_state_cpu,
-//         })
-//     }
-
-//     async fn get_hidden_states(
-//         &self,
-//         input: &Self::Input,
-//         attention_mask: &Array2<f32>,
-//         token_type_ids: Option<&Array2<u32>>,
-//     ) -> Result<Array3<f32>> {
-//         let output = self.forward(input, attention_mask, token_type_ids).await?;
-//         Ok(output.last_hidden_state)
-//     }
-// }
-
 

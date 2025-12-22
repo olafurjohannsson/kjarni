@@ -1,18 +1,18 @@
-
-pub mod primitives;
 pub mod blocks;
+pub mod context;
+mod frame_context;
+pub mod kernel;
 pub mod layers;
-pub mod utils;
+pub mod primitives;
 pub mod profiler;
 pub mod tensor;
-pub mod kernel;
 mod tensor_pool;
-mod frame_context;
 pub mod uniforms;
+pub mod utils;
 
-pub use tensor::{DType, GpuTensor};
 pub use kernel::Kernel;
+pub use tensor::{DType, GpuTensor};
 
-
+pub use context::WgpuContext;
 pub use frame_context::GpuFrameContext;
 pub use tensor_pool::GpuTensorPool;

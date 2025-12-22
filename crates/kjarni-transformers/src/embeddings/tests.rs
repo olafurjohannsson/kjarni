@@ -1,14 +1,11 @@
-
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::traits::{LanguageModelConfig, TransformerConfig};
-// Make sure traits are in scope
-use anyhow::Result;
-use ndarray::{Array2, arr2};
-use std::path::Path;
+use crate::WgpuContext;
 
-// --- Mock Config for testing ---
+use anyhow::Result;
+use ndarray::{arr2, Array2};
+
 struct TestConfig {
     extra_pos_embeddings: usize,
     scale_embed: bool,
@@ -210,7 +207,7 @@ async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
         &input_ids_gpu,
         Some(&token_type_ids_gpu),
         0, // position_offset
-        &config,
+        config,
         &mut pool,
     )?;
 

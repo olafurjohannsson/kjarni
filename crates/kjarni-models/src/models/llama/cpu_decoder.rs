@@ -2,25 +2,27 @@
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, Axis, s};
+use anyhow::{anyhow, Result};
+use ndarray::{s, Array2, Array3, Axis};
 
-// --- Workspace Crates ---
+use crate::models::llama::config::LlamaConfig;
+
 use kjarni_transformers::{
-    TransformerConfig, WgpuContext,
-    cache::CpuKVCache,
-    decoder::prelude::*,
+    cache::CpuKVCache, decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
     normalization::RMSNorm,
     rope::RoPE,
     tensor::DType,
-    traits::{Cache, DecoderArchitecture, Device, LanguageModelConfig, TransformerModel},
+    traits::{
+        Cache, DecoderArchitecture, Device, LanguageModelConfig, ModelConfig, ModelLayout,
+        ModelMetadata, TransformerModel,
+    },
     weights::ModelWeights,
+    TransformerConfig,
+    WgpuContext,
 };
-
-use crate::models::llama::config::LlamaConfig;
 
 pub struct LlamaCpuDecoder {
     embeddings: Embeddings,
@@ -96,29 +98,18 @@ impl LlamaCpuDecoder {
         rope: Arc<RoPE>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
-        let (word_w, _, _) = config.get_embedding_weight_names();
-        // let word_embeddings = weights.get_array2(word_w)?;
-        
-        let embeddings = Embeddings::from_weights(
-            &weights,
-            word_w,
-            None,
-            None
-        )?;
-        // let embeddings = Embeddings::new(
-        //     kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
-        //     None,
-        //     None,
-        // );
+        let metadata = config.metadata();
+        let layout = config.layout();
 
-        let (norm_w, _) = config.get_final_layer_norm_names();
-        let final_norm = RMSNorm::new(weights.get_array1(norm_w)?, config.layer_norm_eps());
+        let embeddings = Embeddings::from_weights(&weights, &layout.token_embedding, None, None)?;
+        let final_norm = RMSNorm::new(weights.get_array1(&layout.final_norm)?, metadata.norm_eps);
 
-        let mut layers = Vec::with_capacity(config.num_hidden_layers);
+        let mut layers = Vec::with_capacity(metadata.num_layers);
         for i in 0..config.num_hidden_layers {
             layers.push(Self::build_layer(
                 weights,
-                &config,
+                &metadata,
+                &layout,
                 i,
                 rope.clone(),
                 target_dtype,
@@ -135,73 +126,77 @@ impl LlamaCpuDecoder {
 
     fn build_layer(
         weights: &ModelWeights,
-        config: &LlamaConfig,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
         i: usize,
         rope: Arc<RoPE>,
         target_dtype: Option<DType>,
     ) -> Result<LlamaDecoderLayer> {
-        let layer_names = config.get_layer_attention_names(i);
-        let ffn_names = config.get_feed_forward_names(i);
+        let idx = i.to_string();
         let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::Faer);
-        // Load Attention Weights (BF16/LinearLayer)
+
+        // Helper to replace the index template "{}" with the actual layer index
+        let name = |template: &String| template.replace("{}", &idx);
+
+        // --- 1. Load Attention Weights ---
         let q = LinearLayer::from_weights(
             weights,
-            &layer_names.q_weight,
+            &name(&layout.attn_q),
             None,
             target_dtype,
             strategy,
         )?;
         let k = LinearLayer::from_weights(
             weights,
-            &layer_names.k_weight,
+            &name(&layout.attn_k),
             None,
             target_dtype,
             strategy,
         )?;
         let v = LinearLayer::from_weights(
             weights,
-            &layer_names.v_weight,
+            &name(&layout.attn_v),
             None,
             target_dtype,
             strategy,
         )?;
         let o = LinearLayer::from_weights(
             weights,
-            &layer_names.output_weight,
+            &name(&layout.attn_o),
             None,
             target_dtype,
             strategy,
         )?;
 
         let attention = DecoderAttention::new(
-            config.hidden_size,
-            config.num_attention_heads,
+            meta.hidden_size,
+            meta.num_attention_heads,
             q,
             k,
             v,
             o,
-            // Llama has no biases, passing None is efficient
-            Some(config.num_key_value_heads),
+            Some(meta.num_kv_heads),
         );
 
-        // Load FFN Weights (BF16/LinearLayer)
-        let gate = LinearLayer::from_weights(
-            weights,
-            ffn_names.gate_weight.as_ref().unwrap(),
-            None,
-            target_dtype,
-            strategy,
-        )?;
+        // --- 2. Load FFN Weights ---
+        // Llama uses SwiGLU, so gate_weight is required
+        let gate_name = layout
+            .ffn_gate
+            .as_ref()
+            .ok_or_else(|| anyhow!("Llama architecture requires ffn_gate for SwiGLU"))?;
+
+        let gate =
+            LinearLayer::from_weights(weights, &name(gate_name), None, target_dtype, strategy)?;
         let up = LinearLayer::from_weights(
             weights,
-            &ffn_names.intermediate_weight,
+            &name(&layout.ffn_up),
             None,
             target_dtype,
             strategy,
         )?;
         let down = LinearLayer::from_weights(
             weights,
-            &ffn_names.output_weight,
+            &name(&layout.ffn_down),
             None,
             target_dtype,
             strategy,
@@ -209,15 +204,10 @@ impl LlamaCpuDecoder {
 
         let feed_forward = SwiGluFeedForward::new(gate, up, down);
 
-        // Load Norms
-        let attention_norm = RMSNorm::new(
-            weights.get_array1(&layer_names.norm_weight)?,
-            config.rms_norm_eps,
-        );
-        let ffn_norm = RMSNorm::new(
-            weights.get_array1(&ffn_names.norm_weight)?,
-            config.rms_norm_eps,
-        );
+        // --- 3. Load Norms ---
+        let attention_norm =
+            RMSNorm::new(weights.get_array1(&name(&layout.attn_norm))?, meta.norm_eps);
+        let ffn_norm = RMSNorm::new(weights.get_array1(&name(&layout.ffn_norm))?, meta.norm_eps);
 
         Ok(LlamaDecoderLayer {
             attention,

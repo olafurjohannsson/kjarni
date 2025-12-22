@@ -1,21 +1,21 @@
-use super::{WeightLoader, gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader};
+use super::{gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader, WeightLoader};
 use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{
     dtype::DType,
     raw_tensor::RawTensor,
     {QuantizedMatrix, TypedCpuTensor},
 };
-use anyhow::{Result, anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
-use std::path::Path;
 use serde_json::json;
+use std::path::Path;
 /// High-level interface for loading model weights from a directory.
 ///
 /// This struct detects the weight format (`.safetensors`, `.gguf`, etc.) and provides
 /// a consistent API for accessing tensors in various typed formats.
 pub struct ModelWeights {
-    loader: Box<dyn WeightLoader>,
+    pub loader: Box<dyn WeightLoader>,
     pub config_json: String,
 }
 
@@ -51,6 +51,56 @@ impl ModelWeights {
             }
         }
         Err(anyhow!("No supported weight format found at {:?}", path))
+    }
+
+    /// Determines the DType to use for a specific tensor.
+    /// Priority: 1. User Override, 2. File's inherent DType
+    pub fn resolve_dtype(&self, tensor_name: &str, override_dtype: Option<DType>) -> Result<DType> {
+        if let Some(dt) = override_dtype {
+            return Ok(dt);
+        }
+        // Probe the loader for the actual type in the file
+        let raw = self.get_raw(tensor_name)?;
+        Ok(raw.dtype)
+    }
+    /// Loads a tensor and ensures it is in the target DType, converting if necessary.
+    /// This is used to force F16 on GPU or F32 for specific kernels.
+    pub fn get_raw_resolved(&self, name: &str, target_dt: Option<DType>) -> Result<RawTensor<'_>> {
+        let raw = self.get_raw(name)?;
+        let current_dt = raw.dtype;
+
+        match target_dt {
+            Some(target) if target != current_dt => {
+                log::trace!(
+                    "Converting tensor '{}' from {:?} to {:?}",
+                    name,
+                    current_dt,
+                    target
+                );
+                // We must dequantize/convert to an owned buffer
+                let typed = self.get_typed_tensor(name)?;
+                let converted_bytes = match target {
+                    DType::F32 => {
+                        bytemuck::cast_slice(&typed.to_array1_f32()?.as_slice().unwrap()).to_vec()
+                    }
+                    DType::F16 => {
+                        let f32_arr = typed.to_array1_f32()?;
+                        let f16_data: Vec<half::f16> =
+                            f32_arr.iter().map(|&v| half::f16::from_f32(v)).collect();
+                        bytemuck::cast_slice(&f16_data).to_vec()
+                    }
+                    _ => unimplemented!("Conversion to {:?} not yet implemented", target),
+                };
+
+                Ok(RawTensor {
+                    name: name.to_string(),
+                    bytes: std::borrow::Cow::Owned(converted_bytes),
+                    shape: raw.shape.clone(),
+                    dtype: target,
+                })
+            }
+            _ => Ok(raw), // No override or same type, return zero-copy borrow
+        }
     }
 
     /// Internal helper to load a GGUF and synthesize its configuration metadata.

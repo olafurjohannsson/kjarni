@@ -1,13 +1,9 @@
 use super::*;
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::utils::{assert_vecs_are_close, read_buffer_2d};
+use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array, Array2, Array3, arr2, arr3};
+use ndarray::{arr2, arr3, Array2, Array3};
 use ndarray_rand::RandomExt;
-use rand_distr::Uniform;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use crate::gpu_ops::DType;
 
 #[path = "../../../tests/common.rs"]
 mod common;

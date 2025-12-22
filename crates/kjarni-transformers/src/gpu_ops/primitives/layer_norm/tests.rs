@@ -1,9 +1,8 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::primitives::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use anyhow::Result;
 use ndarray::{Array, Array1, Array3, Axis, Ix3};
-use std::sync::Arc;
 
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
     let shape = tensor.shape().to_vec();

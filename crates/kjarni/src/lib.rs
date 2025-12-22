@@ -59,14 +59,14 @@
 //! This crate provides a high-level API for running transformer models
 //! on edge devices, with Python and C bindings.
 
+mod config;
+mod config_utils;
 mod cross_encoder_api;
 mod edge_gpt;
+mod kjarni;
 mod model_manager;
 mod sentence_encoder_api;
 mod utils;
-mod config;
-mod config_utils;
-mod kjarni;
 // Re-export main API
 pub use cross_encoder_api::CrossEncoderAPI;
 pub use edge_gpt::{EdgeGPT, EdgeGPTBuilder};
@@ -93,35 +93,18 @@ pub use kjarni_transformers::decoder::generator::DecoderGenerator;
 pub use kjarni_transformers::decoder::traits::DecoderLanguageModel;
 
 // Re-export seq2seq generation (encoder-decoders)
-pub use kjarni_transformers::encoder_decoder::{
-    Seq2SeqGenerator,
-    
-};
+pub use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 
 pub use kjarni_transformers::encoder::traits::EncoderLanguageModel;
 
 pub use kjarni_rag::{
+    config::IndexConfig, segment::{Segment, SegmentBuilder, SegmentMeta}, DocumentLoader, IndexReader, IndexWriter, LoaderConfig,
     SearchIndex,
-    TextSplitter,
     SplitterConfig,
-    DocumentLoader,
-    LoaderConfig,
-    IndexReader,
-    IndexWriter,
-    config::IndexConfig,
-    segment::{Segment, SegmentBuilder, SegmentMeta},
+    TextSplitter,
 };
 
-pub use kjarni_search::{
-    Bm25Index,
-    Chunk,
-    ChunkMetadata,
-    SearchResult,
-    SearchMode,
-    VectorStore,
-
-};
-
+pub use kjarni_search::{Bm25Index, Chunk, ChunkMetadata, SearchMode, SearchResult, VectorStore};
 
 // Re-export commonly used types from dependencies
 pub use kjarni_transformers::prelude::*;
@@ -129,7 +112,9 @@ pub use kjarni_transformers::prelude::*;
 pub mod models {
     pub use kjarni_models::models::bart::model::BartModel;
     pub use kjarni_models::models::gpt2::Gpt2Model;
-    pub use kjarni_models::models::llama::{LlamaModel, Llama3ChatTemplate, Llama2ChatTemplate, LlamaConfig};
+    pub use kjarni_models::models::llama::{
+        Llama2ChatTemplate, Llama3ChatTemplate, LlamaConfig, LlamaModel,
+    };
 }
 pub mod registry;
 

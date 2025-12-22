@@ -1,7 +1,7 @@
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::GpuTensorPool; // Adjust path
+use crate::gpu_ops::GpuTensorPool;
+use crate::WgpuContext;
 use std::sync::Arc;
-use tokio::sync::MutexGuard; // Use the async mutex guard
+use tokio::sync::MutexGuard;
 use wgpu::CommandEncoder;
 
 /// A guard that manages the resources for a single frame of GPU work.
@@ -26,7 +26,7 @@ impl<'a> GpuFrameContext<'a> {
             submitted: false,
         }
     }
-    
+
     pub fn resources(&mut self) -> (&mut CommandEncoder, &mut GpuTensorPool) {
         (self.encoder.as_mut().unwrap(), &mut *self.pool_guard)
     }
@@ -53,7 +53,7 @@ impl Drop for GpuFrameContext<'_> {
         if !self.submitted && self.encoder.is_some() {
             // OPTION A: Log a warning instead of panicking
             log::warn!("GpuFrameContext dropped without submission. Work discarded.");
-            
+
             // OPTION B: Just silently let it drop. The command encoder will be destroyed.
             // This is actually safer for error handling patterns using `?`.
         }

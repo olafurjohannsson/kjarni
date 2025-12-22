@@ -1,12 +1,11 @@
-use crate::models::gpt2::{Gpt2Model};
+use crate::models::gpt2::Gpt2Model;
 use anyhow::Result;
-use kjarni_transformers::gpu_context::WgpuContext;
-use kjarni_transformers::models::ModelType;
-use kjarni_transformers::common::{GenerationConfig, DecodingStrategy};
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
+use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
-use ndarray::{Array3};
-
+use kjarni_transformers::WgpuContext;
+use ndarray::Array3;
 
 #[tokio::test]
 async fn test_full_text_generation_parity() -> Result<()> {

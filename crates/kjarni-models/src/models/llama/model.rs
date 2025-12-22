@@ -10,35 +10,35 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 use tokenizers::Tokenizer;
 
+// --- Crate-Specific ---
+use crate::models::llama::{
+    config::LlamaConfig, cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder,
+};
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::ModelConfig;
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    WgpuContext,
     decoder::prelude::*,
-    gpu_context,
     gpu_ops::{
-        GpuFrameContext, GpuTensor, Kernel,
-        blocks::rope::GpuRoPE,
-        primitives::{linear::GpuLinearLayer, matmul::GpuMatMul},
+        blocks::rope::GpuRoPE, primitives::{linear::GpuLinearLayer, matmul::GpuMatMul}, GpuFrameContext,
+        GpuTensor,
+        Kernel,
     },
     linear_layer::LinearLayer,
     models::{
-        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
+        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
     },
     prelude::*,
     rope::RoPE,
     tensor::{DType, RawTensor},
     traits::{DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
-};
-
-// --- Crate-Specific ---
-use crate::models::llama::{
-    config::LlamaConfig, cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder,
+    WgpuContext,
 };
 
 /// A model container for LLaMA and its variants.
@@ -70,7 +70,6 @@ impl LlamaModel {
         ModelType::Llama3_2_3B,
         ModelType::Llama3_2_3B_Instruct,
         ModelType::Llama3_8B_Instruct,
-        // Add other Llama variants here as you support them
     ];
     pub fn concrete_config(&self) -> &Arc<LlamaConfig> {
         &self.config
@@ -84,7 +83,7 @@ impl LlamaModel {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        decoder_config: Option<DecoderLoadConfig>,
+        decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!("Unsupported LLaMA model type: {:?}", model_type));
@@ -119,25 +118,29 @@ impl LlamaModel {
         model_path: &Path,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        decoder_config: Option<DecoderLoadConfig>,
+        decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         kjarni_transformers::utils::configure_threading();
 
+        // load weights and config
         let weights = ModelWeights::new(model_path)?;
+        let config =
+            LlamaConfig::from_loader(&*weights.loader, Some(weights.config_json.as_ref()))?;
+
+        let metadata = config.metadata();
+        let layout = config.layout();
+
+        // resolve tokenizer
         let tokenizer_path = if model_path.is_file() {
             model_path.parent().unwrap().join("tokenizer.json")
         } else {
             model_path.join("tokenizer.json")
         };
-
-        let mut tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow!(e))?;
-
-        let config = Arc::new(LlamaConfig::from_json(&weights.config_json)?);
+        let mut tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
 
         // Set up tokenizer truncation, but no padding for autoregressive generation.
         let truncation_params = tokenizers::TruncationParams {
-            max_length: config.max_position_embeddings(),
+            max_length: metadata.max_seq_len,
             ..Default::default()
         };
         tokenizer.with_truncation(Some(truncation_params)).unwrap();
@@ -145,10 +148,10 @@ impl LlamaModel {
 
         // Create the RoPE module, passing the scaling config if it exists.
         let cpu_rope = Arc::new(RoPE::new_with_scaling(
-            config.head_dim(),
-            config.max_position_embeddings(),
-            config.rope_theta,
-            config.rope_scaling.as_ref(),
+            metadata.head_dim,
+            metadata.max_seq_len,
+            metadata.rope_theta.unwrap_or(500000.0),
+            metadata.rope_scaling.as_ref(),
         ));
 
         // Llama ties the embedding and LM head weights.
@@ -160,13 +163,8 @@ impl LlamaModel {
         };
 
         // Load Head using the new LinearLayer loader
-        let lm_head = LinearLayer::from_weights(
-            &weights,
-            config.get_lm_head_name(),
-            None,
-            target_dtype,
-            None,
-        )?;
+        let lm_head =
+            LinearLayer::from_weights(&weights, &layout.lm_head, None, target_dtype, None)?;
         match device {
             Device::Cpu => {
                 let cpu_decoder = Some(LlamaCpuDecoder::new(
@@ -203,12 +201,11 @@ impl LlamaModel {
                 let gpu_lm_head_transposed = if !load_config.offload_lm_head {
                     log::info!("Loading LM Head to VRAM (Unified Layout [Vocab, Hidden])");
 
-                    let head_name = config.get_lm_head_name();
-                    let tensor = if let Ok(raw) = weights.get_raw(head_name) {
+                    let tensor = if let Ok(raw) = weights.get_raw(&layout.lm_head) {
                         // Load Raw (BF16 or F32) without modification
                         GpuTensor::from_raw(&ctx, &raw, "lm_head")?
                     } else {
-                        let arr = weights.get_array2(head_name)?;
+                        let arr = weights.get_array2(&layout.lm_head)?;
                         GpuTensor::from_ndarray(&ctx, &arr)?
                     };
 
@@ -253,53 +250,77 @@ impl LanguageModel for LlamaModel {
         max_len: usize,
         _num_beams: usize,
     ) -> Result<Box<dyn Cache>> {
+        // 1. Get the unified metadata
+        let meta = self.config.metadata();
+
+        // 2. Calculate dimensions for the cache
+        let head_dim = meta.head_dim;
+        let kv_dim = head_dim * meta.num_kv_heads;
+
         Ok(match self.device() {
-            Device::Cpu => Box::new(CpuKVCache::new(
-                self.num_layers(),
-                batch_size,
-                max_len,
-                self.config().kv_dim(),
-            )),
+            Device::Cpu => {
+                // Initialize CPU KV Cache
+                Box::new(CpuKVCache::new(
+                    meta.num_layers,
+                    batch_size,
+                    max_len,
+                    kv_dim,
+                ))
+            }
             Device::Wgpu => {
                 let context = self
                     .context()
                     .ok_or_else(|| anyhow!("GPU model missing context"))?;
-                let head_dim = self.hidden_size() / self.num_heads();
+
+                // Initialize GPU KV Cache
                 Box::new(GpuKVCache::new(
                     &context,
-                    self.num_layers(),
+                    meta.num_layers,
                     batch_size,
-                    self.config().num_key_value_heads(),
+                    meta.num_kv_heads,
                     head_dim,
                     max_len,
                 )?)
             }
         })
     }
-
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn config(&self) -> &dyn LanguageModelConfig {
-        self.config.as_ref()
+
+    fn vocab_size(&self) -> usize {
+        self.config.metadata().vocab_size
     }
+
+    fn hidden_size(&self) -> usize {
+        self.config.metadata().hidden_size
+    }
+
+    fn num_layers(&self) -> usize {
+        self.config.metadata().num_layers
+    }
+
+    fn num_heads(&self) -> usize {
+        self.config.metadata().num_attention_heads
+    }
+
     fn bos_token_id(&self) -> Option<u32> {
         Some(self.config.bos_token_id)
     }
+
     fn eos_token_id(&self) -> Option<u32> {
         Some(self.config.eos_token_id)
     }
-    fn vocab_size(&self) -> usize {
-        self.config.vocab_size
+
+    fn context_size(&self) -> usize {
+        self.config.metadata().max_seq_len
     }
-    fn hidden_size(&self) -> usize {
-        self.config.hidden_size
+
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
     }
-    fn num_layers(&self) -> usize {
-        self.config.num_hidden_layers
-    }
-    fn num_heads(&self) -> usize {
-        self.config.num_attention_heads
+    fn pad_token_id(&self) -> Option<u32> {
+        self.config.pad_token_id
     }
 }
 

@@ -1,5 +1,5 @@
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -206,7 +206,6 @@ impl GpuLayerNorm {
         compute_pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -1,8 +1,8 @@
 use crate::models::bart::config::BartConfig;
+use anyhow::anyhow;
 // IMPORTANT: You will need to create this generic layer component.
 // Its structure is implied by the usage here.
 use anyhow::Result;
-use anyhow::anyhow;
 use async_trait::async_trait;
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::cache::Cache;
@@ -12,18 +12,18 @@ use kjarni_transformers::encoder_decoder::traits::{
     GpuCrossAttentionKVCache, GpuCrossDecoder, GpuCrossDecoderOutput,
 };
 
-use kjarni_transformers::gpu_context::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::decoder_cross_attention::GpuCrossAttentionDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
-    GpuNormalization, GpuNormalizationWeights,
-    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
+    layer_norm::{GpuLayerNorm, GpuLayerNormWeights}, GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights,
+    GpuFeedForwardWeightsStd, GpuNormalization,
+    GpuNormalizationWeights,
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::traits::{EncoderDecoderArchitecture, TransformerConfig};
 use kjarni_transformers::weights::ModelWeights;
+use kjarni_transformers::WgpuContext;
 use ndarray::Array2;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
@@ -52,15 +52,16 @@ impl BartGpuDecoder {
         decoder_input_ids: &GpuTensor,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        self.embeddings.encode(
-            encoder,
-            &self.embedding_weights,
-            decoder_input_ids,
-            None,
-            position_offset,
-            self.config.as_ref(),
-            pool,
-        )
+        unimplemented!()
+        // self.embeddings.encode(
+        //     encoder,
+        //     &self.embedding_weights,
+        //     decoder_input_ids,
+        //     None,
+        //     position_offset,
+        //     self.config.as_ref(),
+        //     pool,
+        // )
     }
 
     pub fn debug_embed_with_ln(
@@ -239,27 +240,29 @@ impl GpuCrossDecoder for BartGpuDecoder {
                     &self.context,
                     &Array2::from_shape_vec((1, ids.len()), ids.to_vec())?,
                 )?;
-                self.embeddings.encode(
-                    encoder,
-                    &self.embedding_weights,
-                    &ids_gpu, // Pass the GpuTensor
-                    None,
-                    position_offset,
-                    self.config.as_ref(),
-                    pool,
-                )?
+                unimplemented!()
+                // self.embeddings.encode(
+                //     encoder,
+                //     &self.embedding_weights,
+                //     &ids_gpu, // Pass the GpuTensor
+                //     None,
+                //     position_offset,
+                //     self.config.as_ref(),
+                //     pool,
+                // )?
             }
             DecoderInput::TokensGpu(ids_gpu) => {
                 // This is the efficient path.
-                self.embeddings.encode(
-                    encoder,
-                    &self.embedding_weights,
-                    ids_gpu, // Pass the GpuTensor
-                    None,
-                    position_offset,
-                    self.config.as_ref(),
-                    pool,
-                )?
+                unimplemented!()
+                // self.embeddings.encode(
+                //     encoder,
+                //     &self.embedding_weights,
+                //     ids_gpu, // Pass the GpuTensor
+                //     None,
+                //     position_offset,
+                //     self.config.as_ref(),
+                //     pool,
+                // )?
             }
             DecoderInput::HiddenGpu(hidden) => hidden.clone(),
             _ => {

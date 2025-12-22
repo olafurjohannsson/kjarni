@@ -3,7 +3,7 @@
 //! Takes two texts as input and outputs a relevance score.
 //! Used for reranking search results or computing pairwise similarity.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ndarray::Array2;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,27 +12,27 @@ use tokenizers::Tokenizer;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
-    WgpuContext,
     cache::Cache,
     encoder::{
-        CpuEncoder, 
-        GpuEncoder,
-        CpuTransformerEncoder,
-        GpuTransformerEncoder,
         classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
         traits::{
-            CpuEncoderOps, 
+            CpuEncoderOps,
             EncoderArchitecture,
             EncoderLanguageModel,
             GpuEncoderInput,
             GpuEncoderOps,
         },
+        CpuEncoder,
+        CpuTransformerEncoder,
+        GpuEncoder,
+        GpuTransformerEncoder,
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
-    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
+    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
+    traits::{Device, LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
-    traits::{LanguageModelConfig, TransformerModel, Device},
+    WgpuContext,
 };
 mod configs;
 pub use configs::MiniLMCrossEncoderConfig;
@@ -414,8 +414,32 @@ impl LanguageModel for SequenceClassifier {
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn config(&self) -> &dyn LanguageModelConfig {
-        self.config.as_ref()
+    fn context_size(&self) -> usize {
+        todo!()
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn vocab_size(&self) -> usize {
+        todo!()
+    }
+    fn hidden_size(&self) -> usize {
+        todo!()
+    }
+    fn num_heads(&self) -> usize {
+        todo!()
+    }
+    fn num_layers(&self) -> usize {
+        todo!()
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        todo!()
     }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
         panic!("SequenceClassifiers do not use a KV cache.")

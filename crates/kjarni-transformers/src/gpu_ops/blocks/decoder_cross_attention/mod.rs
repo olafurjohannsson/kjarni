@@ -1,5 +1,6 @@
+use crate::Cache;
+use crate::WgpuContext;
 use crate::encoder_decoder::traits::EncoderDecoderLanguageModel;
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
@@ -8,12 +9,11 @@ use crate::gpu_ops::blocks::{
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::{
-    CrossAttentionDecoderArchitecture,
-    EncoderDecoderArchitecture, LanguageModelConfig, TransformerModel,
+    CrossAttentionDecoderArchitecture, EncoderDecoderArchitecture, LanguageModelConfig,
+    TransformerModel,
 };
-use crate::Cache;
 use anyhow::Result;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -507,7 +507,6 @@ impl GpuCrossAttentionDecoderLayer {
 //         })
 //     }
 // }
-
 
 #[cfg(test)]
 mod tests;

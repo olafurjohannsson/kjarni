@@ -1,20 +1,18 @@
+use crate::WgpuContext;
 use crate::attention::MultiHeadAttention;
 use crate::cache::{Cache, CpuKVCache, GpuKVCache};
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::cache::GpuUpdateCache;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::{
-    DType, GpuTensor, GpuTensorPool, GpuFrameContext,
+    DType, GpuFrameContext, GpuTensor, GpuTensorPool,
     blocks::attention::attention::{GpuAttention, GpuAttentionWeights, TempStorage},
 };
 use anyhow::Result;
+use common::{assert_tensors_are_close, read_gpu_tensor_to_vec};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Axis, Ix3, Ix4};
 use std::sync::Arc;
-use common::{assert_tensors_are_close, read_gpu_tensor_to_vec};
 #[path = "../../../tests/common.rs"]
 mod common;
-
-
 
 /// Helper to create a CPU attention block with dummy weights.
 fn create_cpu_attention(

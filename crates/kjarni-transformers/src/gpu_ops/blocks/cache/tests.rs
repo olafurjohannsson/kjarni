@@ -1,8 +1,8 @@
 use super::GpuUpdateCache;
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use anyhow::Result;
-use ndarray::{Array, Array3, Array4, Ix4, s};
+use ndarray::{Array, Array3, Array4};
 use std::sync::Arc;
 
 // Helper to get a test context.

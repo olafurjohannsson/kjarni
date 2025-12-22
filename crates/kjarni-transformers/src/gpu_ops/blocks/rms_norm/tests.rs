@@ -1,13 +1,12 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
+use crate::normalization::rms_norm::RMSNorm;
+use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
-use ndarray::{Array, Array1, Array3, Axis, Ix3};
+use ndarray::{Array, Array1, Array3, Axis};
 use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
-use std::sync::Arc;
-use crate::normalization::rms_norm::RMSNorm;
-use crate::tests::common::{assert_tensors_are_close};
 
 #[path = "../../../tests/common.rs"]
 mod common;

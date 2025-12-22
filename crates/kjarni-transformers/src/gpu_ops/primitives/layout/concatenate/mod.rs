@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -220,8 +219,7 @@ impl GpuConcatenate {
         let workgroup_size = (8, 8, 8);
         let workgroups_x = (out_shape[3] as u32 + workgroup_size.0 - 1) / workgroup_size.0;
         let workgroups_y = (out_shape[2] as u32 + workgroup_size.1 - 1) / workgroup_size.1;
-        let workgroups_z =
-            (out_shape[0] * out_shape[1] + workgroup_size.2 - 1) / workgroup_size.2;
+        let workgroups_z = (out_shape[0] * out_shape[1] + workgroup_size.2 - 1) / workgroup_size.2;
 
         compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z as u32);
     }

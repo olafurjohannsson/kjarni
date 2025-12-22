@@ -1,26 +1,23 @@
-// mod fused;
-
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::primitives::linear::GpuLinearLayer;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::kernel::Kernel;
+use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
+use crate::gpu_ops::primitives::layout::slice::GpuSlice;
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
 use crate::gpu_ops::primitives::{
     add_bias::GpuAddBias,
     apply_mask::GpuApplyMask,
-    bmm::{BStrides, GpuBatchedMatMul},
+    bmm::GpuBatchedMatMul,
     layout::reshape::GpuReshape,
     layout::unreshape::GpuUnreshape,
     matmul::GpuMatMul,
     softmax::GpuSoftmax,
 };
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::WgpuContext;
 use anyhow::Result;
-use std::collections::HashMap;
 use std::sync::Arc;
-use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
-use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
@@ -62,7 +59,7 @@ impl GpuAttentionWeights {
         output_bias: GpuTensor,
     ) -> Result<Self> {
         // --- FIXED: Use logical dimensions for layout-agnostic checks ---
-        
+
         // Q
         assert_eq!(q_weight.rank(), 2, "Q weight must be 2D");
         assert_eq!(q_bias.rank(), 1, "Q bias must be 1D");
@@ -161,7 +158,7 @@ pub struct GpuAttention {
     pub num_heads: u32,
     pub num_kv_heads: u32,
     pub scale_factor: f32,
-    pub head_dim: u32
+    pub head_dim: u32,
 }
 
 impl GpuAttention {
@@ -233,9 +230,9 @@ impl GpuAttention {
 
         // Apply causal mask
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
-            position_offset as u32,
-            logical_key_len as u32);
+        self.apply_mask.encode(encoder, &scores, attention_mask, true,
+                               position_offset as u32,
+                               logical_key_len as u32);
 
         // Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -342,7 +339,7 @@ impl GpuAttention {
         // Attention scores
         let k_transposed = k_expanded.permute(encoder, &self.permute, &[0, 1, 3, 2]);
         let scores = self.bmm_4d(encoder, &q_heads, &k_transposed, pool);
-        
+
         // Apply masks
         // if let Some(mask) = attention_mask {
         //     self.apply_mask.encode(encoder, &scores, mask, false, 0);
@@ -421,9 +418,9 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, q_heads, &k_transposed, pool);
 
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
-            position_offset as u32,
-            logical_key_len as u32);
+        self.apply_mask.encode(encoder, &scores, attention_mask, true,
+                               position_offset as u32,
+                               logical_key_len as u32);
         self.softmax.encode(encoder, &scores, self.scale_factor);
 
         let context = self.bmm_4d(encoder, &scores, &v_expanded, pool);
@@ -697,9 +694,9 @@ impl GpuAttention {
 
         // 3b. Apply mask
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true, 
-            position_offset as u32,
-            logical_key_len as u32);
+        self.apply_mask.encode(encoder, &scores, attention_mask, true,
+                               position_offset as u32,
+                               logical_key_len as u32);
 
         // 3c. Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -790,10 +787,10 @@ impl GpuAttention {
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
         let (b, s, h) = input.dims3();
-        
+
         // --- FIXED: Use logical output features based on DType ---
-        let (_, out_features) = weight.linear_layer_dims(); 
-        
+        let (_, out_features) = weight.linear_layer_dims();
+
         // Flatten for matmul
         let input_2d = input.view(vec![b * s, h]);
         let proj_2d = pool.get(vec![b * s, out_features]);
@@ -883,8 +880,8 @@ impl GpuAttention {
         // The apply_mask kernel should handle broadcasting
         self.apply_mask.encode(encoder, scores, mask, false, position_offset, logical_key_len);
     }
-     /// Step 1: Pre-compute K and V from Encoder States (Optimized)
-    /// 
+    /// Step 1: Pre-compute K and V from Encoder States (Optimized)
+    ///
     /// 1. Projects K and V from the static encoder states.
     /// 2. Splits heads.
     /// 3. PERMUTES K to [B, H, D, S] immediately. This saves permuting it every decoding step!
@@ -900,7 +897,7 @@ impl GpuAttention {
         let v_proj = self.project(encoder, key_value, &weights.v_weight, &weights.v_bias, pool);
 
         // 2. Split Heads [B, S, H*D] -> [B, H, S, D]
-        let k_heads = self.split_heads(encoder, &k_proj, pool); 
+        let k_heads = self.split_heads(encoder, &k_proj, pool);
         let v_heads = self.split_heads(encoder, &v_proj, pool);
 
         // 3. OPTIMIZATION: Permute K immediately for BMM
@@ -914,7 +911,7 @@ impl GpuAttention {
     }
 
     /// Step 2: Forward using Pre-computed K/V
-    /// 
+    ///
     /// Faster than `forward_cross` because it skips K/V projection and K permutation.
     pub fn forward_cross_precomputed(
         &self,
@@ -928,7 +925,7 @@ impl GpuAttention {
     ) -> GpuTensor {
         // 1. Project Q only
         let q_proj = self.project(encoder, query, &weights.q_weight, &weights.q_bias, pool);
-        
+
         // 2. Split Q Heads [B, H, S_dec, D]
         let q_heads = self.split_heads(encoder, &q_proj, pool);
 
@@ -942,7 +939,7 @@ impl GpuAttention {
             // Reusing existing mask logic. Position/logical len usually 0 for cross attn padding mask
             let position_offset = 0;
             // The mask shape should match the last dim of scores (S_enc)
-            let logical_key_len = precomputed_k.shape()[3] as u32; 
+            let logical_key_len = precomputed_k.shape()[3] as u32;
             self.apply_padding_mask(encoder, &scores, mask, pool, position_offset, logical_key_len);
         }
 

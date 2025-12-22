@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu_context::WgpuContext;
-use crate::gpu_ops::{DType, GpuTensor, Kernel};
+use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::WgpuContext;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct AddBroadcastRowUniforms {

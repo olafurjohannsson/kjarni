@@ -1,15 +1,13 @@
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::GpuTensor;
-use crate::rope::RoPE as CpuRoPE; // Import your CPU implementation
+use crate::rope::RoPE as CpuRoPE;
+use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array, Array4, Ix4};
+use common::assert_tensors_are_close_4d;
+use ndarray::Array;
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
-use std::sync::Arc;
-use common::{assert_tensors_are_close, assert_tensors_are_close_4d, read_gpu_tensor_to_vec};
 #[path = "../../../tests/common.rs"]
 mod common;
-
 
 #[tokio::test]
 async fn test_gpu_rope_parity() -> Result<()> {
@@ -38,8 +36,18 @@ async fn test_gpu_rope_parity() -> Result<()> {
     let mut encoder = context.device.create_command_encoder(&Default::default());
 
     // Create uninitialized output tensors for the results
-    let q_rot_gpu = GpuTensor::uninitialized(&context, q_gpu.shape().to_vec(), crate::gpu_ops::DType::F32, "Rotated Q Output");
-    let k_rot_gpu = GpuTensor::uninitialized(&context, k_gpu.shape().to_vec(), crate::gpu_ops::DType::F32, "Rotated K Output");
+    let q_rot_gpu = GpuTensor::uninitialized(
+        &context,
+        q_gpu.shape().to_vec(),
+        crate::gpu_ops::DType::F32,
+        "Rotated Q Output",
+    );
+    let k_rot_gpu = GpuTensor::uninitialized(
+        &context,
+        k_gpu.shape().to_vec(),
+        crate::gpu_ops::DType::F32,
+        "Rotated K Output",
+    );
 
     // Call the new, out-of-place encode function
     gpu_rope.encode(&mut encoder, &q_gpu, &q_rot_gpu, position_offset);

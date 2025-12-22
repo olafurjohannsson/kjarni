@@ -1,20 +1,18 @@
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::traits::{
-    Cache, DecoderArchitecture, TransformerConfig, TransformerModel,
-};
+use crate::traits::{Cache, DecoderArchitecture, TransformerConfig, TransformerModel};
 use crate::GpuKVCache;
+use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardWeights,
-    GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
+    GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN,
+    GpuSwiGLUFFNWeights,
 };
 
 pub struct GpuPreNormDecoderLayer {
@@ -154,9 +152,9 @@ impl GpuPreNormDecoderLayer {
             // All inputs to llama_attention are now correctly shaped 4D tensors.
             self.self_attn.llama_attention(
                 encoder,
-                &q_rotated,      // [B, H_q, 1, D]
-                &cached_k,       // [B, H_kv, S_full, D]
-                &cached_v,       // [B, H_kv, S_full, D]
+                &q_rotated, // [B, H_q, 1, D]
+                &cached_k,  // [B, H_kv, S_full, D]
+                &cached_v,  // [B, H_kv, S_full, D]
                 attention_mask,
                 position_offset,
                 temp,
@@ -204,7 +202,6 @@ impl GpuPreNormDecoderLayer {
         let final_output = temp.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &final_output);
-
 
         let k_for_return = self.self_attn.merge_heads(encoder, &k_rotated, temp);
         Ok((final_output, (k_for_return, v_proj)))

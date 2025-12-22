@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kjarni_transformers::traits::EncoderDecoderArchitecture;
 use ndarray::{Array1, Array3};
@@ -13,17 +13,17 @@ use tokenizers::Tokenizer;
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
     common::{BeamSearchParams, DecodingStrategy, GenerationConfig},
-    encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+    encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
     gpu_ops::{
-        GpuFrameContext, GpuTensor,
-        primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer},
+        primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer}, GpuFrameContext,
+        GpuTensor,
     },
     linear_layer::LinearLayer,
-    models::{ModelType, download_model_files},
+    models::{download_model_files, ModelType},
     prelude::*,
     traits::{LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
@@ -137,8 +137,8 @@ impl BartModel {
         println!("Using LM Head key: {}", config.get_lm_head_name());
         // Load CPU versions of head/bias regardless, as they are small
 
-        let lm_head = LinearLayer::from_weights(&weights, 
-            config.get_lm_head_name(), None, None, None)?;
+        let lm_head = LinearLayer::from_weights(&weights,
+                                                config.get_lm_head_name(), None, None, None)?;
         let final_logits_bias = weights.get_array1("final_logits_bias").ok();
 
         match device {
@@ -255,8 +255,32 @@ impl LanguageModel for BartModel {
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn config(&self) -> &dyn LanguageModelConfig {
-        self.config.as_ref()
+    fn context_size(&self) -> usize {
+        todo!()
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn vocab_size(&self) -> usize {
+        todo!()
+    }
+    fn hidden_size(&self) -> usize {
+        todo!()
+    }
+    fn num_heads(&self) -> usize {
+        todo!()
+    }
+    fn num_layers(&self) -> usize {
+        todo!()
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        todo!()
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        todo!()
     }
 
     fn new_cache(

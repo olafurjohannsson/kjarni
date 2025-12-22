@@ -5,7 +5,6 @@ use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
 use crate::encoder_decoder::traits::{GpuCrossAttentionKVCache, GpuCrossDecoderOutput};
-use crate::gpu_context::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::broadcast::GpuBroadcast;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
@@ -13,6 +12,7 @@ use crate::gpu_ops::GpuFrameContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::Kernel;
 use crate::prelude::*;
+use crate::WgpuContext;
 use anyhow::anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -29,7 +29,6 @@ impl GpuBackend {
     }
 }
 
-// --- REFACTOR: The Tensor enum now holds the output of the `ops` methods ---
 #[derive(Debug)]
 pub enum GpuSeq2SeqState {
     TokenIds(GpuTensor),
@@ -133,7 +132,7 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
         };
         let GpuSeq2SeqState::EncoderOutput {
             hidden_states: encoder_hidden_states,
-            cross_attention_kv_cache
+            cross_attention_kv_cache,
         } = encoder_state
         else {
             return Err(anyhow!("Invalid tensor type for encoder_state"));
@@ -166,7 +165,11 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
 
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
 
-        for (i, (k, v)) in decoder_hidden_states.new_self_attn_kv.into_iter().enumerate() {
+        for (i, (k, v)) in decoder_hidden_states
+            .new_self_attn_kv
+            .into_iter()
+            .enumerate()
+        {
             // The update command is recorded into the SAME command encoder
             gpu_cache.update(encoder_cmd, i, &k, &v);
         }

@@ -1,4 +1,4 @@
-use crate::gpu_context::WgpuContext;
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -25,10 +25,10 @@ pub struct GpuReorderCache {
 impl GpuReorderCache {
     pub fn new(context: &Arc<WgpuContext>) -> Self {
         let device = &context.device;
-        
+
         // Ensure this string matches the WGSL above
         let shader_source = include_str!("./reorder.wgsl");
-        
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Reorder Cache Shader"),
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
@@ -125,22 +125,40 @@ impl GpuReorderCache {
             _padding: [0; 3],
         };
 
-        let uniform_buffer = self.context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Reorder Uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Reorder Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
-        let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Reorder Bind Group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: indices.buffer().as_entire_binding() },
-                BindGroupEntry { binding: 2, resource: src_cache.buffer().as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: dst_cache.buffer().as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Reorder Bind Group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: indices.buffer().as_entire_binding(),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: src_cache.buffer().as_entire_binding(),
+                    },
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: dst_cache.buffer().as_entire_binding(),
+                    },
+                ],
+            });
 
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Reorder Cache Pass"),

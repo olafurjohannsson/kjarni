@@ -1,32 +1,20 @@
 use anyhow::Result;
 
 use kjarni_transformers::{
-    WgpuContext,
+    common::DecodingStrategy,
     encoder_decoder::{
-        CpuBackend,
-        GpuBackend,
-        Seq2SeqGenerator,
-        CpuSeq2SeqState,
+        traits::{CpuCrossDecoder, EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel}, CpuBackend, CpuSeq2SeqState, EncoderDecoderGenerator, GpuBackend,
         GpuSeq2SeqState,
-
-        traits::{
-            EncoderDecoderGenerationBackend,
-            EncoderDecoderLanguageModel,
-            CpuCrossDecoder
-        },
-        
     },
-    models::{
-        ModelType,
-    },
-    common::DecodingStrategy
+    models::ModelType,
+    WgpuContext,
 };
 
 use kjarni_models::models::bart::model::BartModel;
 use kjarni_transformers::gpu_ops::tensor::GpuTensor;
-use kjarni_transformers::models::base::LanguageModel;
-use kjarni_transformers::{Device};
 use kjarni_transformers::gpu_ops::GpuFrameContext;
+use kjarni_transformers::models::base::LanguageModel;
+use kjarni_transformers::Device;
 use ndarray::{ArrayViewD, IxDyn};
 use std::sync::Arc;
 async fn get_test_context() -> Arc<WgpuContext> {
@@ -236,7 +224,7 @@ async fn main() -> Result<()> {
     );
 
     // --- 4. RUN FULL GENERATION (if checks pass) ---
-    let generator = Seq2SeqGenerator::new(Box::new(gpu_model))?;
+    let generator = EncoderDecoderGenerator::new(Box::new(gpu_model))?;
     let generation_config = generator.model.get_default_generation_config();
     let summary = generator
         .generate(article, Some(&generation_config))
