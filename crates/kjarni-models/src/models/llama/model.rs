@@ -36,7 +36,6 @@ use kjarni_transformers::{
     prelude::*,
     rope::RoPE,
     tensor::{DType, RawTensor},
-    traits::{DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
     WgpuContext,
 };

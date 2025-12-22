@@ -1,67 +1,80 @@
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::traits::{LanguageModelConfig, TransformerConfig};
+use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
+use crate::embeddings::Embeddings;
+use crate::normalization::Normalization;
+// Unified Traits
 use crate::WgpuContext;
 
 use anyhow::Result;
-use ndarray::{arr2, Array2};
+use ndarray::{arr2, s, Array2, Array3};
 
 struct TestConfig {
     extra_pos_embeddings: usize,
     scale_embed: bool,
 }
-impl TransformerConfig for TestConfig {
-    fn hidden_size(&self) -> usize {
-        384
+
+// Replaces TransformerConfig and LanguageModelConfig
+impl ModelConfig for TestConfig {
+    fn model_type(&self) -> &str {
+        "test_encoder"
     }
-    fn num_attention_heads(&self) -> usize {
-        12
+
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: 384,
+            num_layers: 6,
+            num_attention_heads: 12,
+            num_kv_heads: 12,
+            head_dim: 384 / 12,
+            vocab_size: 30522,
+            max_seq_len: 512,
+            norm_eps: 1e-12,
+            activation: crate::activations::Activation::Gelu,
+            rope_theta: None,
+            rope_scaling: None,
+            scale_embeddings: self.scale_embed,
+            extra_pos_embeddings: self.extra_pos_embeddings,
+            is_prenorm: false,
+            transpose_ffn_weights: false,
+        }
     }
-    fn num_hidden_layers(&self) -> usize {
-        6
-    }
-    fn layer_norm_eps(&self) -> f32 {
-        1e-12
-    }
-    fn is_causal(&self) -> bool {
-        false
-    }
-    fn is_prenorm(&self) -> bool {
-        false
-    }
-    fn extra_pos_embeddings(&self) -> usize {
-        2
-    }
-}
-impl LanguageModelConfig for TestConfig {
-    fn vocab_size(&self) -> usize {
-        30522
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
-    fn max_position_embeddings(&self) -> usize {
-        512
-    }
-    fn intermediate_size(&self) -> usize {
-        1536
-    }
-    fn scale_embeddings(&self) -> bool {
-        self.scale_embed
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn activation_function(&self) -> crate::activations::Activation {
-        crate::activations::Activation::Gelu
-    }
-    // Dummy names, not used in this test
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "embeddings.word_embeddings.weight",
-            "embeddings.position_embeddings.weight",
-            Some("embeddings.token_type_embeddings.weight"),
-        )
+
+    fn layout(&self) -> ModelLayout {
+        ModelLayout {
+            token_embedding: "embeddings.word_embeddings.weight".to_string(),
+            position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+            token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
+            embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
+            embedding_norm_bias: "embeddings.LayerNorm.bias".to_string(),
+            final_norm: "".to_string(),
+            lm_head: "".to_string(),
+
+            attn_q: "".to_string(),
+            attn_k: "".to_string(),
+            attn_v: "".to_string(),
+            attn_o: "".to_string(),
+            attn_norm: "".to_string(),
+            attn_q_bias: String::new(),
+            attn_k_bias: String::new(),
+            attn_v_bias: String::new(),
+            attn_o_bias: String::new(),
+            attn_norm_bias: String::new(),
+
+            ffn_gate: None,
+            ffn_up: "".to_string(),
+            ffn_down: "".to_string(),
+            ffn_norm: "".to_string(),
+            ffn_up_bias: String::new(),
+            ffn_down_bias: String::new(),
+            ffn_norm_bias: String::new(),
+
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
+        }
     }
 }
 

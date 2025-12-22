@@ -29,7 +29,6 @@ use crate::gpu_ops::primitives::lookup::GpuLookup;
 use crate::gpu_ops::primitives::scale::GpuScale;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
-use crate::traits::LanguageModelConfig;
 use crate::weights::ModelWeights;
 use crate::WgpuContext;
 use anyhow::Result;
@@ -59,12 +58,24 @@ impl GpuEmbeddingWeights {
         let word_embeddings = load_resolved(word_name, "word_embeddings")?;
 
         let position_embeddings = if let Some(n) = pos_name {
-            if weights.contains(n) { Some(load_resolved(n, "pos_embeddings")?) } else { None }
-        } else { None };
+            if weights.contains(n) {
+                Some(load_resolved(n, "pos_embeddings")?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let token_type_embeddings = if let Some(n) = type_name {
-            if weights.contains(n) { Some(load_resolved(n, "type_embeddings")?) } else { None }
-        } else { None };
+            if weights.contains(n) {
+                Some(load_resolved(n, "type_embeddings")?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         Ok(Self {
             word_embeddings,
@@ -77,23 +88,38 @@ impl GpuEmbeddingWeights {
     pub fn new(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
-        config: &dyn LanguageModelConfig,
+        word_name: &str,
+        pos_name: Option<&str>,
+        type_name: Option<&str>,
+        target_dtype: Option<DType>,
     ) -> Result<Self> {
-        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
+        // Helper to resolve DType and upload to GPU
+        let load_and_upload = |name: &str, label: &str| -> Result<GpuTensor> {
+            let raw = weights.get_raw_resolved(name, target_dtype)?;
+            GpuTensor::from_raw(context, &raw, label)
+        };
 
-        let word_embeddings_cpu = weights.get_array2(word_w)?;
-        let word_embeddings = GpuTensor::from_ndarray(context, &word_embeddings_cpu)?;
+        // 1. Word Embeddings (Required)
+        let word_embeddings = load_and_upload(word_name, "word_embeddings")?;
 
-        let position_embeddings = if !pos_w.is_empty() {
-            let pos_cpu = weights.get_array2(pos_w)?;
-            Some(GpuTensor::from_ndarray(context, &pos_cpu)?)
+        // 2. Position Embeddings (Optional)
+        let position_embeddings = if let Some(name) = pos_name {
+            if weights.contains(name) {
+                Some(load_and_upload(name, "pos_embeddings")?)
+            } else {
+                None
+            }
         } else {
             None
         };
 
-        let token_type_embeddings = if let Some(name) = type_w {
-            let type_cpu = weights.get_array2(name)?;
-            Some(GpuTensor::from_ndarray(context, &type_cpu)?)
+        // 3. Token Type Embeddings (Optional - BERT style)
+        let token_type_embeddings = if let Some(name) = type_name {
+            if weights.contains(name) {
+                Some(load_and_upload(name, "type_embeddings")?)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -207,12 +233,8 @@ impl GpuEmbeddings {
             let scale_factor = (hidden_size as f32).sqrt();
             let scale_out = pool.get(hidden_states.shape().to_vec());
 
-            self.scale.encode_out_of_place(
-                encoder,
-                &hidden_states,
-                &scale_out,
-                scale_factor,
-            );
+            self.scale
+                .encode_out_of_place(encoder, &hidden_states, &scale_out, scale_factor);
 
             hidden_states = scale_out;
         }

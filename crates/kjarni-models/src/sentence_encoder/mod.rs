@@ -11,27 +11,23 @@ use tokenizers::Tokenizer;
 
 use kjarni_transformers::{
     encoder::{
-        config::{EncodingConfig, PoolingStrategy},
-        traits::{
-            CpuEncoder,
-            CpuEncoderOps,
-            EncoderArchitecture,
-            EncoderLanguageModel,
-            GpuEncoder,
-            GpuEncoderOps,
+        config::{EncodingConfig, PoolingStrategy}, traits::{
+            CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps,
             SentenceEncoderModel,
         },
         CpuTransformerEncoder,
         GpuTransformerEncoder,
     },
     models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
-    traits::{Cache, Device, LanguageModelConfig, TransformerModel},
+    traits::{Cache, Device},
     weights::ModelWeights,
     WgpuContext,
 };
 
 mod configs;
 pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata};
 
 /// Sentence encoder for semantic similarity tasks
 ///
@@ -41,9 +37,11 @@ pub struct SentenceEncoder {
     gpu_encoder: Option<GpuTransformerEncoder>,
     tokenizer: Tokenizer,
     model_type: ModelType,
-    config: Arc<dyn EncoderArchitecture + Send + Sync>,
+    config: Arc<dyn kjarni_transformers::traits::ModelConfig>, // Unified Trait
     device: Device,
     context: Option<Arc<WgpuContext>>,
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl SentenceEncoder {
@@ -127,6 +125,7 @@ impl SentenceEncoder {
         model_type: ModelType,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        load_cfg: Option<ModelLoadConfig>, // Respect Runtime Config
     ) -> Result<Self> {
         // Validate model type
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
@@ -135,10 +134,11 @@ impl SentenceEncoder {
 
         // Load weights and tokenizer
         let weights = ModelWeights::new(model_path)?;
+        let load_cfg = load_cfg.unwrap_or_default();
         let mut tokenizer = Tokenizer::from_file(model_path.join("tokenizer.json"))
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
-        let config: Arc<dyn EncoderArchitecture + Send + Sync> = match model_type {
+        let config: Arc<dyn ModelConfig> = match model_type {
             ModelType::MiniLML6V2 => Arc::new(MiniLMConfig::from_json(&weights.config_json)?),
             ModelType::MpnetBaseV2 => Arc::new(MPNetConfig::from_json(&weights.config_json)?),
             ModelType::DistilBertBaseCased => {
@@ -146,19 +146,31 @@ impl SentenceEncoder {
             }
             _ => return Err(anyhow!("Unsupported encoder model: {:?}", model_type)),
         };
-
+        let meta = config.metadata();
+        let layout = config.layout();
         let mut cpu_encoder = None;
         let mut gpu_encoder = None;
 
         match device {
             Device::Cpu => {
-                cpu_encoder = Some(CpuTransformerEncoder::new(&weights, config.clone())?);
+                cpu_encoder = Some(CpuTransformerEncoder::new(
+                    &weights,
+                    meta.clone(),
+                    layout.clone(),
+                    load_cfg,
+                )?);
             }
             Device::Wgpu => {
                 let ctx = context
                     .clone()
-                    .ok_or_else(|| anyhow!("A WGPU context is required for GPU-based models."))?;
-                gpu_encoder = Some(GpuTransformerEncoder::new(&weights, config.clone(), ctx)?);
+                    .ok_or_else(|| anyhow!("WGPU context required"))?;
+                gpu_encoder = Some(GpuTransformerEncoder::new(
+                    &weights,
+                    ctx,
+                    meta.clone(),
+                    layout.clone(),
+                    load_cfg,
+                )?);
             }
         }
         // Configure tokenizer padding and truncation using the model's config
@@ -183,6 +195,8 @@ impl SentenceEncoder {
             model_type,
             device,
             context,
+            meta,
+            layout,
         })
     }
 
@@ -282,47 +296,22 @@ impl SentenceEncoder {
 
 // Implement base language model trait
 impl LanguageModel for SentenceEncoder {
-    fn new_cache(
-        &self,
-        _batch_size: usize,
-        _max_len: usize,
-        _num_beams: usize,
-    ) -> Result<Box<dyn Cache>> {
-        panic!("Sentence Encoder does not support KV Cache");
-    }
-    fn tokenizer(&self) -> &Tokenizer {
-        &self.tokenizer
-    }
-    fn context_size(&self) -> usize {
-        todo!()
-    }
-    fn forced_bos_token_id(&self) -> Option<u32> {
-        todo!()
-    }
-    fn pad_token_id(&self) -> Option<u32> {
-        todo!()
-    }
-    fn vocab_size(&self) -> usize {
-        todo!()
-    }
-    fn hidden_size(&self) -> usize {
-        todo!()
-    }
-    fn num_heads(&self) -> usize {
-        todo!()
-    }
-    fn num_layers(&self) -> usize {
-        todo!()
-    }
-    fn eos_token_id(&self) -> Option<u32> {
-        todo!()
-    }
-    fn bos_token_id(&self) -> Option<u32> {
-        todo!()
+    fn vocab_size(&self) -> usize { self.meta.vocab_size }
+    fn hidden_size(&self) -> usize { self.meta.hidden_size }
+    fn num_layers(&self) -> usize { self.meta.num_layers }
+    fn num_heads(&self) -> usize { self.meta.num_attention_heads }
+    fn context_size(&self) -> usize { self.meta.max_seq_len }
+    fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
+    fn bos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[CLS]") }
+    fn eos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[SEP]") }
+    fn pad_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[PAD]") }
+
+    fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
+        Err(anyhow!("Sentence Encoders do not use a KV cache."))
     }
 }
 
-impl TransformerModel for SentenceEncoder {
+impl InferenceModel for SentenceEncoder {
     fn device(&self) -> Device {
         self.device
     }
@@ -369,7 +358,6 @@ impl EncoderLanguageModel for SentenceEncoder {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

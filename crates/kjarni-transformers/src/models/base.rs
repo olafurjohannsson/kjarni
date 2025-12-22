@@ -4,14 +4,13 @@
 //! the low-level architecture traits in `traits.rs`.
 
 pub use crate::tensor::DType;
-use crate::traits::TransformerModel;
+use crate::traits::InferenceModel;
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RopeScalingConfig {
@@ -58,7 +57,7 @@ impl Default for ModelLoadConfig {
 /// This is implemented by encoder-only (BERT), decoder-only (GPT),
 /// and encoder-decoder (BART) models.
 #[async_trait]
-pub trait LanguageModel: TransformerModel {
+pub trait LanguageModel: InferenceModel {
     fn vocab_size(&self) -> usize;
     fn hidden_size(&self) -> usize;
     fn num_layers(&self) -> usize;

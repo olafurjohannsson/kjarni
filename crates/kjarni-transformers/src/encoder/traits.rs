@@ -7,32 +7,11 @@ use crate::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::LanguageModel;
 use crate::pooling::mean_pool;
-use crate::traits::{
-    LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames,
-};
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 
-/// Describes the specific architectural details of an Encoder-only model (e.g., BERT, RoBERTa).
-///
-/// This trait acts as a "blueprint" that a generic `TransformerEncoder` can use to
-/// construct itself. It provides a mapping from abstract component concepts (e.g., "the query
-/// projection of the first layer's attention") to the concrete tensor names found in a
-/// `safetensors` weight file.
-pub trait EncoderArchitecture: LanguageModelConfig {
-    /// Returns the tensor names for the word, position, and token type embeddings.
-    //fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>); // RoBERTa has no token_type_embeddings
-
-    /// Returns the tensor names for the LayerNorm applied after the embedding layer.
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str);
-
-    /// Returns the names of all weights and biases for the attention component of a specific encoder layer.
-    fn get_attention_names(&self, layer_index: usize) -> LayerAttentionNames;
-
-    /// Returns the names of all weights and biases for the feed-forward component of a specific encoder layer.
-    fn get_feed_forward_names(&self, layer_index: usize) -> LayerFeedForwardNames;
-}
 /// Trait for encoder-only language models (BERT, RoBERTa, etc.)
 ///
 /// These models encode text into fixed-size embeddings.

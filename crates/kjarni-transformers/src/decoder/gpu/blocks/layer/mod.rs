@@ -3,7 +3,7 @@ use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::traits::{Cache, DecoderArchitecture, TransformerConfig, TransformerModel};
+use crate::traits::Cache;
 use crate::GpuKVCache;
 use crate::WgpuContext;
 use anyhow::Result;
@@ -26,7 +26,6 @@ pub struct GpuPreNormDecoderLayer {
     pub ffn_norm_weights: GpuNormalizationWeights,
     add: GpuAdd,
     concat: GpuConcatenate,
-    config: Arc<dyn DecoderArchitecture + Send + Sync>,
 }
 
 impl GpuPreNormDecoderLayer {
@@ -39,14 +38,20 @@ impl GpuPreNormDecoderLayer {
         ff_weights: GpuFeedForwardWeights,
         ffn_norm: GpuNormalization,
         ffn_norm_weights: GpuNormalizationWeights,
-        config: Arc<dyn DecoderArchitecture + Send + Sync>,
-        gpu_rope: Option<&GpuRoPE>,
+        hidden_size: usize,
+        num_heads: usize,
+        num_kv_heads: usize,
     ) -> Result<Self> {
-        let hidden_size = config.hidden_size() as u32;
-        let num_heads = config.num_attention_heads() as u32;
-        let num_kv_heads = config.num_key_value_heads() as u32;
+        // let hidden_size = config.hidden_size() as u32;
+        // let num_heads = config.num_attention_heads() as u32;
+        // let num_kv_heads = config.num_key_value_heads() as u32;
 
-        let self_attn = GpuAttention::new(context, hidden_size, num_heads, num_kv_heads);
+        let self_attn = GpuAttention::new(
+            context,
+            hidden_size as u32,
+            num_heads as u32,
+            num_kv_heads as u32,
+        );
         let add = GpuAdd::new(&context);
         let concat = GpuConcatenate::new(&context);
 
@@ -59,7 +64,6 @@ impl GpuPreNormDecoderLayer {
             ff_weights,
             ffn_norm,
             ffn_norm_weights,
-            config,
             add,
             concat,
         })

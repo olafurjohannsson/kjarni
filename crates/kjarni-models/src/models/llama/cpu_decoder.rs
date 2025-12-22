@@ -8,19 +8,16 @@ use ndarray::{s, Array2, Array3, Axis};
 use crate::models::llama::config::LlamaConfig;
 
 use kjarni_transformers::{
-    cache::CpuKVCache, decoder::prelude::*,
+    cache::CpuKVCache,
+    decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
     normalization::RMSNorm,
     rope::RoPE,
     tensor::DType,
-    traits::{
-        Cache, DecoderArchitecture, Device, LanguageModelConfig, ModelConfig, ModelLayout,
-        ModelMetadata, TransformerModel,
-    },
+    traits::{Cache, Device, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    TransformerConfig,
     WgpuContext,
 };
 

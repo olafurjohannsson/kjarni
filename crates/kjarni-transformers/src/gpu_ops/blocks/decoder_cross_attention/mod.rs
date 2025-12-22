@@ -1,5 +1,3 @@
-use crate::Cache;
-use crate::WgpuContext;
 use crate::encoder_decoder::traits::EncoderDecoderLanguageModel;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::{
@@ -8,12 +6,11 @@ use crate::gpu_ops::blocks::{
 };
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
-use crate::traits::{
-    CrossAttentionDecoderArchitecture, EncoderDecoderArchitecture, LanguageModelConfig,
-    TransformerModel,
-};
+use crate::traits::ModelMetadata;
+use crate::Cache;
+use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -261,10 +258,10 @@ impl GpuCrossAttentionDecoderLayer {
         ff_weights: GpuFeedForwardWeights,
         ffn_norm: GpuNormalization,
         ffn_norm_weights: GpuNormalizationWeights,
-        config: &dyn crate::traits::TransformerConfig,
+        metadata: &ModelMetadata,
     ) -> Result<Self> {
-        let hidden_size = config.hidden_size() as u32;
-        let num_heads = config.num_attention_heads() as u32;
+        let hidden_size = metadata.hidden_size as u32;
+        let num_heads = metadata.num_attention_heads as u32;
 
         Ok(Self {
             self_attn: GpuAttention::new(context, hidden_size, num_heads, num_heads),

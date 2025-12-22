@@ -39,7 +39,7 @@ pub use crate::{
 };
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_ops::context::WgpuContext;
-pub use traits::{Device, TransformerConfig, TransformerModel};
+pub use traits::Device;
 
 // Re-export model traits and registry
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
@@ -49,7 +49,7 @@ pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache, GpuKVCache};
     pub use crate::gpu_ops::context::WgpuContext;
     pub use crate::models::LanguageModel;
-    pub use crate::traits::{Device, TransformerModel};
+    pub use crate::traits::Device;
 }
 
 #[cfg(test)]

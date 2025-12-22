@@ -1,15 +1,12 @@
 //! Model-specific configurations for sentence encoders
-
 use anyhow::Result;
-
-use kjarni_transformers::{
-    activations::Activation,
-    encoder::traits::EncoderArchitecture,
-    traits::{LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames, TransformerConfig},
-};
+use kjarni_transformers::activations::Activation;
+use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use serde::Deserialize;
-use std::any::Any;
-/// Configuration for MiniLM models (sentence-transformers/all-MiniLM-L6-v2)
+
+// ============================================================================
+// 1. MiniLM Configuration
+// ============================================================================
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMConfig {
     pub hidden_size: usize,
@@ -19,7 +16,6 @@ pub struct MiniLMConfig {
     #[serde(alias = "hidden_act", alias = "activation_function")]
     pub activation_function: Option<String>,
     pub max_position_embeddings: usize,
-    pub type_vocab_size: usize,
     pub vocab_size: usize,
     pub layer_norm_eps: f32,
 }
@@ -30,111 +26,76 @@ impl MiniLMConfig {
     }
 }
 
-impl LanguageModelConfig for MiniLMConfig {
-    fn intermediate_size(&self) -> usize {
-        self.intermediate_size
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position_embeddings
-    }
-    fn transpose_attention_weights(&self) -> bool {
-        false
-    }
-    fn transpose_ffn_weights(&self) -> bool {
-        true
-    }
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn activation_function(&self) -> Activation {
-        self.activation_function
-            .as_ref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(Activation::Gelu)
-    }
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "embeddings.word_embeddings.weight",
-            "embeddings.position_embeddings.weight",
-            Some("embeddings.token_type_embeddings.weight"),
-        )
-    }
-}
-
-impl TransformerConfig for MiniLMConfig {
-    fn hidden_size(&self) -> usize {
-        self.hidden_size
+impl ModelConfig for MiniLMConfig {
+    fn model_type(&self) -> &str {
+        "minilm"
     }
 
-    fn num_hidden_layers(&self) -> usize {
-        self.num_hidden_layers
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.num_attention_heads
-    }
-
-    fn layer_norm_eps(&self) -> f32 {
-        self.layer_norm_eps
-    }
-
-    fn is_causal(&self) -> bool {
-        false // Encoders are not causal
-    }
-
-    fn is_prenorm(&self) -> bool {
-        false // BERT-style is post-norm
-    }
-}
-
-impl EncoderArchitecture for MiniLMConfig {
-    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-    //     (
-    //         "embeddings.word_embeddings.weight",
-    //         "embeddings.position_embeddings.weight",
-    //         Some("embeddings.token_type_embeddings.weight"),
-    //     )
-    // }
-
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
-        ("embeddings.LayerNorm.weight", "embeddings.LayerNorm.bias")
-    }
-
-    fn get_attention_names(&self, layer: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!("encoder.layer.{}.attention.self.query.weight", layer),
-            q_bias: format!("encoder.layer.{}.attention.self.query.bias", layer),
-            k_weight: format!("encoder.layer.{}.attention.self.key.weight", layer),
-            k_bias: format!("encoder.layer.{}.attention.self.key.bias", layer),
-            v_weight: format!("encoder.layer.{}.attention.self.value.weight", layer),
-            v_bias: format!("encoder.layer.{}.attention.self.value.bias", layer),
-            output_weight: format!("encoder.layer.{}.attention.output.dense.weight", layer),
-            output_bias: format!("encoder.layer.{}.attention.output.dense.bias", layer),
-            norm_weight: format!("encoder.layer.{}.attention.output.LayerNorm.weight", layer),
-            norm_bias: format!("encoder.layer.{}.attention.output.LayerNorm.bias", layer),
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: self.hidden_size,
+            num_layers: self.num_hidden_layers,
+            num_attention_heads: self.num_attention_heads,
+            num_kv_heads: self.num_attention_heads,
+            head_dim: self.hidden_size / self.num_attention_heads,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position_embeddings,
+            norm_eps: self.layer_norm_eps,
+            activation: self
+                .activation_function
+                .as_ref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(Activation::Gelu),
+            rope_theta: None,
+            rope_scaling: None,
+            scale_embeddings: false,
+            extra_pos_embeddings: 0,
+            is_prenorm: false, // BERT-style
+            transpose_ffn_weights: true,
         }
     }
 
-    fn get_feed_forward_names(&self, layer: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("encoder.layer.{}.intermediate.dense.weight", layer),
-            intermediate_bias: format!("encoder.layer.{}.intermediate.dense.bias", layer),
-            output_weight: format!("encoder.layer.{}.output.dense.weight", layer),
-            output_bias: format!("encoder.layer.{}.output.dense.bias", layer),
-            norm_weight: format!("encoder.layer.{}.output.LayerNorm.weight", layer),
-            norm_bias: format!("encoder.layer.{}.output.LayerNorm.bias", layer),
-            gate_weight: None,
+    fn layout(&self) -> ModelLayout {
+        ModelLayout {
+            token_embedding: "embeddings.word_embeddings.weight".to_string(),
+            position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+            token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
+            embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
+            embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
+            final_norm: "encoder.layer.5.output.LayerNorm.weight".to_string(), // Placeholder
+            lm_head: "cls.predictions.decoder.weight".to_string(),
+
+            attn_q: "encoder.layer.{}.attention.self.query.weight".to_string(),
+            attn_q_bias: Some("encoder.layer.{}.attention.self.query.bias".to_string()),
+            attn_k: "encoder.layer.{}.attention.self.key.weight".to_string(),
+            attn_k_bias: Some("encoder.layer.{}.attention.self.key.bias".to_string()),
+            attn_v: "encoder.layer.{}.attention.self.value.weight".to_string(),
+            attn_v_bias: Some("encoder.layer.{}.attention.self.value.bias".to_string()),
+            attn_o: "encoder.layer.{}.attention.output.dense.weight".to_string(),
+            attn_o_bias: Some("encoder.layer.{}.attention.output.dense.bias".to_string()),
+            attn_norm: "encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+            attn_norm_bias: Some("encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
+
+            ffn_gate: None,
+            ffn_up: "encoder.layer.{}.intermediate.dense.weight".to_string(),
+            ffn_up_bias: Some("encoder.layer.{}.intermediate.dense.bias".to_string()),
+            ffn_down: "encoder.layer.{}.output.dense.weight".to_string(),
+            ffn_down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
+            ffn_norm: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
+            ffn_norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
+
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
         }
     }
 }
 
-/// Configuration for MPNet models (sentence-transformers/all-mpnet-base-v2)
+// ============================================================================
+// 2. MPNet Configuration
+// ============================================================================
 #[derive(Debug, Clone, Deserialize)]
 pub struct MPNetConfig {
     pub hidden_size: usize,
@@ -153,115 +114,78 @@ impl MPNetConfig {
     }
 }
 
-impl TransformerConfig for MPNetConfig {
-    fn hidden_size(&self) -> usize {
-        self.hidden_size
+impl ModelConfig for MPNetConfig {
+    fn model_type(&self) -> &str {
+        "mpnet"
     }
 
-    fn num_hidden_layers(&self) -> usize {
-        self.num_hidden_layers
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.num_attention_heads
-    }
-
-    fn layer_norm_eps(&self) -> f32 {
-        self.layer_norm_eps
-    }
-
-    fn is_causal(&self) -> bool {
-        false
-    }
-
-    fn is_prenorm(&self) -> bool {
-        false
-    }
-}
-
-impl LanguageModelConfig for MPNetConfig {
-    fn intermediate_size(&self) -> usize {
-        self.intermediate_size
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position_embeddings
-    }
-    fn transpose_attention_weights(&self) -> bool {
-        false
-    }
-    fn transpose_ffn_weights(&self) -> bool {
-        false
-    }
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
-    fn activation_function(&self) -> Activation {
-        Activation::GeluNew
-    }
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "embeddings.word_embeddings.weight",
-            "embeddings.position_embeddings.weight",
-            Some("embeddings.token_type_embeddings.weight"), // MPNet doesn't use this but we return it
-        )
-    }
-}
-
-impl EncoderArchitecture for MPNetConfig {
-    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-    //     (
-    //         "embeddings.word_embeddings.weight",
-    //         "embeddings.position_embeddings.weight",
-    //         Some("embeddings.token_type_embeddings.weight"), // MPNet doesn't use this but we return it
-    //     )
-    // }
-
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
-        ("embeddings.LayerNorm.weight", "embeddings.LayerNorm.bias")
-    }
-
-    fn get_attention_names(&self, layer: usize) -> LayerAttentionNames {
-        // MPNet uses "mpnet" prefix instead of "encoder"
-        LayerAttentionNames {
-            q_weight: format!("mpnet.encoder.layer.{}.attention.attn.q.weight", layer),
-            q_bias: format!("mpnet.encoder.layer.{}.attention.attn.q.bias", layer),
-            k_weight: format!("mpnet.encoder.layer.{}.attention.attn.k.weight", layer),
-            k_bias: format!("mpnet.encoder.layer.{}.attention.attn.k.bias", layer),
-            v_weight: format!("mpnet.encoder.layer.{}.attention.attn.v.weight", layer),
-            v_bias: format!("mpnet.encoder.layer.{}.attention.attn.v.bias", layer),
-            output_weight: format!("mpnet.encoder.layer.{}.attention.attn.o.weight", layer),
-            output_bias: format!("mpnet.encoder.layer.{}.attention.attn.o.bias", layer),
-            norm_weight: format!("mpnet.encoder.layer.{}.attention.LayerNorm.weight", layer),
-            norm_bias: format!("mpnet.encoder.layer.{}.attention.LayerNorm.bias", layer),
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: self.hidden_size,
+            num_layers: self.num_hidden_layers,
+            num_attention_heads: self.num_attention_heads,
+            num_kv_heads: self.num_attention_heads,
+            head_dim: self.hidden_size / self.num_attention_heads,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position_embeddings,
+            norm_eps: self.layer_norm_eps,
+            activation: Activation::GeluNew,
+            rope_theta: None,
+            rope_scaling: None,
+            scale_embeddings: false,
+            extra_pos_embeddings: 0,
+            is_prenorm: false,
+            transpose_ffn_weights: false,
         }
     }
 
-    fn get_feed_forward_names(&self, layer: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("mpnet.encoder.layer.{}.ffn.intermediate.weight", layer),
-            intermediate_bias: format!("mpnet.encoder.layer.{}.ffn.intermediate.bias", layer),
-            output_weight: format!("mpnet.encoder.layer.{}.ffn.output.weight", layer),
-            output_bias: format!("mpnet.encoder.layer.{}.ffn.output.bias", layer),
-            norm_weight: format!("mpnet.encoder.layer.{}.LayerNorm.weight", layer),
-            norm_bias: format!("mpnet.encoder.layer.{}.LayerNorm.bias", layer),
-            gate_weight: None,
+    fn layout(&self) -> ModelLayout {
+        ModelLayout {
+            token_embedding: "embeddings.word_embeddings.weight".to_string(),
+            position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+            token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
+            embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
+            embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
+            final_norm: "mpnet.pooler.dense.weight".to_string(),
+            lm_head: "classifier.weight".to_string(),
+
+            attn_q: "mpnet.encoder.layer.{}.attention.attn.q.weight".to_string(),
+            attn_q_bias: Some("mpnet.encoder.layer.{}.attention.attn.q.bias".to_string()),
+            attn_k: "mpnet.encoder.layer.{}.attention.attn.k.weight".to_string(),
+            attn_k_bias: Some("mpnet.encoder.layer.{}.attention.attn.k.bias".to_string()),
+            attn_v: "mpnet.encoder.layer.{}.attention.attn.v.weight".to_string(),
+            attn_v_bias: Some("mpnet.encoder.layer.{}.attention.attn.v.bias".to_string()),
+            attn_o: "mpnet.encoder.layer.{}.attention.attn.o.weight".to_string(),
+            attn_o_bias: Some("mpnet.encoder.layer.{}.attention.attn.o.bias".to_string()),
+            attn_norm: "mpnet.encoder.layer.{}.attention.LayerNorm.weight".to_string(),
+            attn_norm_bias: Some("mpnet.encoder.layer.{}.attention.LayerNorm.bias".to_string()),
+
+            ffn_gate: None,
+            ffn_up: "mpnet.encoder.layer.{}.ffn.intermediate.weight".to_string(),
+            ffn_up_bias: Some("mpnet.encoder.layer.{}.ffn.intermediate.bias".to_string()),
+            ffn_down: "mpnet.encoder.layer.{}.ffn.output.weight".to_string(),
+            ffn_down_bias: Some("mpnet.encoder.layer.{}.ffn.output.bias".to_string()),
+            ffn_norm: "mpnet.encoder.layer.{}.LayerNorm.weight".to_string(),
+            ffn_norm_bias: Some("mpnet.encoder.layer.{}.LayerNorm.bias".to_string()),
+
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
         }
     }
 }
 
-/// Configuration for DistilBERT models
+// ============================================================================
+// 3. DistilBERT Configuration
+// ============================================================================
 #[derive(Debug, Clone, Deserialize)]
 pub struct DistilBERTConfig {
-    pub dim: usize, // DistilBERT uses 'dim' instead of 'hidden_size'
+    pub dim: usize,
     pub n_layers: usize,
     pub n_heads: usize,
-    pub hidden_dim: usize, // intermediate_size
+    pub hidden_dim: usize,
     pub activation: String,
     pub max_position_embeddings: usize,
     pub vocab_size: usize,
@@ -273,139 +197,69 @@ impl DistilBERTConfig {
     }
 }
 
-impl TransformerConfig for DistilBERTConfig {
-    fn hidden_size(&self) -> usize {
-        self.dim
+impl ModelConfig for DistilBERTConfig {
+    fn model_type(&self) -> &str {
+        "distilbert"
     }
 
-    fn num_hidden_layers(&self) -> usize {
-        self.n_layers
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.n_heads
-    }
-
-    fn layer_norm_eps(&self) -> f32 {
-        1e-12
-    }
-
-    fn is_causal(&self) -> bool {
-        false
-    }
-
-    fn is_prenorm(&self) -> bool {
-        false
-    }
-}
-
-impl LanguageModelConfig for DistilBERTConfig {
-    fn intermediate_size(&self) -> usize {
-        self.hidden_dim
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position_embeddings
-    }
-    fn transpose_attention_weights(&self) -> bool {
-        false
-    }
-    fn transpose_ffn_weights(&self) -> bool {
-        true
-    }
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
-    fn activation_function(&self) -> Activation {
-        Activation::GeluNew
-    }
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "distilbert.embeddings.word_embeddings.weight",
-            "distilbert.embeddings.position_embeddings.weight",
-            None, // DistilBERT doesn't have token_type_embeddings
-        )
-    }
-}
-
-impl EncoderArchitecture for DistilBERTConfig {
-    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-    //     (
-    //         "distilbert.embeddings.word_embeddings.weight",
-    //         "distilbert.embeddings.position_embeddings.weight",
-    //         None, // DistilBERT doesn't have token_type_embeddings
-    //     )
-    // }
-
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
-        (
-            "distilbert.embeddings.LayerNorm.weight",
-            "distilbert.embeddings.LayerNorm.bias",
-        )
-    }
-
-    fn get_attention_names(&self, layer: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!(
-                "distilbert.transformer.layer.{}.attention.q_lin.weight",
-                layer
-            ),
-            q_bias: format!(
-                "distilbert.transformer.layer.{}.attention.q_lin.bias",
-                layer
-            ),
-            k_weight: format!(
-                "distilbert.transformer.layer.{}.attention.k_lin.weight",
-                layer
-            ),
-            k_bias: format!(
-                "distilbert.transformer.layer.{}.attention.k_lin.bias",
-                layer
-            ),
-            v_weight: format!(
-                "distilbert.transformer.layer.{}.attention.v_lin.weight",
-                layer
-            ),
-            v_bias: format!(
-                "distilbert.transformer.layer.{}.attention.v_lin.bias",
-                layer
-            ),
-            output_weight: format!(
-                "distilbert.transformer.layer.{}.attention.out_lin.weight",
-                layer
-            ),
-            output_bias: format!(
-                "distilbert.transformer.layer.{}.attention.out_lin.bias",
-                layer
-            ),
-            norm_weight: format!(
-                "distilbert.transformer.layer.{}.sa_layer_norm.weight",
-                layer
-            ),
-            norm_bias: format!("distilbert.transformer.layer.{}.sa_layer_norm.bias", layer),
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: self.dim,
+            num_layers: self.n_layers,
+            num_attention_heads: self.n_heads,
+            num_kv_heads: self.n_heads,
+            head_dim: self.dim / self.n_heads,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position_embeddings,
+            norm_eps: 1e-12,
+            activation: Activation::GeluNew,
+            rope_theta: None,
+            rope_scaling: None,
+            scale_embeddings: false,
+            extra_pos_embeddings: 0,
+            is_prenorm: false,
+            transpose_ffn_weights: true,
         }
     }
 
-    fn get_feed_forward_names(&self, layer: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("distilbert.transformer.layer.{}.ffn.lin1.weight", layer),
-            intermediate_bias: format!("distilbert.transformer.layer.{}.ffn.lin1.bias", layer),
-            output_weight: format!("distilbert.transformer.layer.{}.ffn.lin2.weight", layer),
-            output_bias: format!("distilbert.transformer.layer.{}.ffn.lin2.bias", layer),
-            norm_weight: format!(
-                "distilbert.transformer.layer.{}.output_layer_norm.weight",
-                layer
+    fn layout(&self) -> ModelLayout {
+        ModelLayout {
+            token_embedding: "distilbert.embeddings.word_embeddings.weight".to_string(),
+            position_embedding: Some(
+                "distilbert.embeddings.position_embeddings.weight".to_string(),
             ),
-            norm_bias: format!(
-                "distilbert.transformer.layer.{}.output_layer_norm.bias",
-                layer
+            token_type_embedding: None,
+            embedding_norm: Some("distilbert.embeddings.LayerNorm.weight".to_string()),
+            embedding_norm_bias: Some("distilbert.embeddings.LayerNorm.bias".to_string()),
+            final_norm: "".to_string(),
+            lm_head: "vocab_projector.weight".to_string(),
+
+            attn_q: "distilbert.transformer.layer.{}.attention.q_lin.weight".to_string(),
+            attn_q_bias: Some("distilbert.transformer.layer.{}.attention.q_lin.bias".to_string()),
+            attn_k: "distilbert.transformer.layer.{}.attention.k_lin.weight".to_string(),
+            attn_k_bias: Some("distilbert.transformer.layer.{}.attention.k_lin.bias".to_string()),
+            attn_v: "distilbert.transformer.layer.{}.attention.v_lin.weight".to_string(),
+            attn_v_bias: Some("distilbert.transformer.layer.{}.attention.v_lin.bias".to_string()),
+            attn_o: "distilbert.transformer.layer.{}.attention.out_lin.weight".to_string(),
+            attn_o_bias: Some("distilbert.transformer.layer.{}.attention.out_lin.bias".to_string()),
+            attn_norm: "distilbert.transformer.layer.{}.sa_layer_norm.weight".to_string(),
+            attn_norm_bias: Some("distilbert.transformer.layer.{}.sa_layer_norm.bias".to_string()),
+
+            ffn_gate: None,
+            ffn_up: "distilbert.transformer.layer.{}.ffn.lin1.weight".to_string(),
+            ffn_up_bias: Some("distilbert.transformer.layer.{}.ffn.lin1.bias".to_string()),
+            ffn_down: "distilbert.transformer.layer.{}.ffn.lin2.weight".to_string(),
+            ffn_down_bias: Some("distilbert.transformer.layer.{}.ffn.lin2.bias".to_string()),
+            ffn_norm: "distilbert.transformer.layer.{}.output_layer_norm.weight".to_string(),
+            ffn_norm_bias: Some(
+                "distilbert.transformer.layer.{}.output_layer_norm.bias".to_string(),
             ),
-            gate_weight: None,
+
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
         }
     }
 }

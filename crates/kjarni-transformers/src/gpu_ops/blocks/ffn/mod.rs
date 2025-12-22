@@ -32,7 +32,7 @@ use crate::activations::Activation;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::GpuTensorPool;
 use crate::WgpuContext;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -94,18 +94,39 @@ impl GpuFeedForwardWeights {
             fc2_bias,
         })
     }
-    pub fn from_config_names(
+    pub fn from_layout(
         context: &Arc<WgpuContext>,
         weights: &crate::weights::ModelWeights,
-        names: &crate::traits::LayerFeedForwardNames,
+        layout: &crate::traits::ModelLayout,
+        layer_idx: usize,
+        target_dtype: Option<crate::tensor::DType>,
     ) -> Result<Self> {
-        // This assumes a standard FFN. You can add a match for SwiGLU here later.
-        Ok(crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights::new(
-            GpuTensor::from_raw(context, &weights.get_raw(&names.intermediate_weight)?, "ff1_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.intermediate_bias)?, "ff1_b")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.output_weight)?, "ff2_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.output_bias)?, "ff2_b")?,
-        )?)
+        let idx = layer_idx.to_string();
+        let name = |template: &String| template.replace("{}", &idx);
+
+        // Helper for required weights (Up/Intermediate and Down/Output)
+        let load_weight = |template: &String, label: &str| -> Result<GpuTensor> {
+            let raw = weights.get_raw_resolved(&name(template), target_dtype)?;
+            GpuTensor::from_raw(context, &raw, label)
+        };
+
+        // Helper for optional biases (standard in BERT, rare in Llama)
+        let load_bias = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
+            let n = template.as_ref().ok_or_else(|| {
+                anyhow!("Standard FFN for layer {} requires bias: {}", idx, label)
+            })?;
+            let raw = weights.get_raw_resolved(&n.replace("{}", &idx), target_dtype)?;
+            GpuTensor::from_raw(context, &raw, label)
+        };
+
+        // 2. Standard Path (2 weights + 2 biases)
+        let up_t = load_weight(&layout.ffn_up, "ff1_w")?;
+        let up_b = load_bias(&layout.ffn_up_bias, "ff1_b")?;
+        let down_t = load_weight(&layout.ffn_down, "ff2_w")?;
+        let down_b = load_bias(&layout.ffn_down_bias, "ff2_b")?;
+
+        // Use the constructor from your snippet
+        Ok(GpuFeedForwardWeights::new(up_t, up_b, down_t, down_b)?)
     }
     /// Creates a new `GpuFeedForwardWeights` container from CPU ndarrays.
     /// This is the recommended "smart" constructor.
@@ -174,11 +195,7 @@ impl GpuFeedForward {
     ) -> GpuTensor {
         // Get a temporary tensor for the intermediate result.
         let intermediate_size = weights.fc1_bias.shape()[0];
-        let intermediate_shape = vec![
-            input.shape()[0],
-            input.shape()[1],
-            intermediate_size,
-        ];
+        let intermediate_shape = vec![input.shape()[0], input.shape()[1], intermediate_size];
         let intermediate = pool.get(intermediate_shape);
 
         // Get the final output tensor.
@@ -203,11 +220,7 @@ impl GpuFeedForward {
     ) {
         // Get a temporary tensor for the intermediate result.
         let intermediate_size = weights.fc1_bias.shape()[0];
-        let intermediate_shape = vec![
-            input.shape()[0],
-            input.shape()[1],
-            intermediate_size,
-        ];
+        let intermediate_shape = vec![input.shape()[0], input.shape()[1], intermediate_size];
         let intermediate = pool.get(intermediate_shape);
         // Run the two passes.
         self.run_fc1(encoder, weights, input, &intermediate);
@@ -370,18 +383,19 @@ impl GpuFeedForward {
     }
 }
 
-fn compile_fc1_pipeline(context: &WgpuContext, activation: Activation) -> (ComputePipeline, BindGroupLayout) {
+fn compile_fc1_pipeline(
+    context: &WgpuContext,
+    activation: Activation,
+) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
     let shader = device.create_shader_module(wgpu::include_wgsl!("./fc1.wgsl"));
 
     let act_function = match activation {
         Activation::Gelu => 0.0,
         Activation::GeluNew => 1.0,
-        _ => 0.0
+        _ => 0.0,
     };
-    let constants = [
-        ("0", act_function)
-    ];
+    let constants = [("0", act_function)];
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("FC1 Bind Group Layout"),

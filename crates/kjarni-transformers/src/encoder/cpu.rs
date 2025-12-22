@@ -1,137 +1,144 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ndarray::{Array2, Array3};
-use std::sync::Arc;
 
-use crate::encoder::CpuEncoder;
 use crate::encoder::encoder_self_attention::EncoderSelfAttention;
-use crate::encoder::traits::EncoderArchitecture;
+use crate::encoder::CpuEncoder;
 use crate::feedforward::LegacyFeedForward;
 use crate::linear_layer::LinearLayer;
-use crate::traits::{Device, TransformerModel};
+use crate::models::base::ModelLoadConfig;
+use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use crate::{
-    Embeddings, FeedForward, encoder::encoder_layer::EncoderLayer, normalization::LayerNorm,
+    encoder::encoder_layer::EncoderLayer, normalization::LayerNorm, Embeddings, FeedForward,
 };
 
 pub struct CpuTransformerEncoder {
     embeddings: Embeddings,
     embeddings_layer_norm: LayerNorm,
     layers: Vec<EncoderLayer>,
-    config: Arc<dyn EncoderArchitecture + Send + Sync>,
+    pub metadata: ModelMetadata,
 }
 
 impl CpuTransformerEncoder {
-    
     pub fn new(
         weights: &ModelWeights,
-        config: Arc<dyn EncoderArchitecture + Send + Sync>,
+        meta: ModelMetadata,
+        layout: ModelLayout,
+        load_cfg: ModelLoadConfig,
     ) -> Result<Self> {
-        let dtype = None;
-        // Load embedding weights using the names provided by the config.
-        let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
-        let token_type_embeddings = match type_w {
-            Some(name) => Some(weights.get_array2(name)?), // Load if present
-            None => None,
-        };
-        let position_embeddings = if pos_w.is_empty() {
-            None
-        } else {
-            Some(weights.get_array2(pos_w)?)
-        };
-        
-        let embeddings = Embeddings::new(
-            crate::embeddings::EmbeddingData::F32(weights.get_array2(word_w)?),
-            position_embeddings,
-            token_type_embeddings,
-        );
+        let dtype = load_cfg.target_dtype;
 
-        let (norm_w, norm_b) = config.get_embedding_layer_norm_names();
+        // 1. Embeddings (Generic Loader handles Word/Pos/Type)
+        let embeddings = Embeddings::from_weights(
+            weights,
+            &layout.token_embedding,
+            layout.position_embedding.as_deref(),
+            layout.token_type_embedding.as_deref(),
+        )?;
+
+        // 2. Embedding LayerNorm
+        let emb_norm_w = layout
+            .embedding_norm
+            .as_ref()
+            .context("Encoder requires embedding_norm")?;
+        let emb_norm_b = layout
+            .embedding_norm_bias
+            .as_ref()
+            .context("Encoder requires embedding_norm_bias")?;
         let embeddings_layer_norm = LayerNorm::new(
-            weights.get_array1(norm_w)?,
-            weights.get_array1(norm_b)?,
-            config.layer_norm_eps(),
+            weights.get_array1(emb_norm_w)?,
+            weights.get_array1(emb_norm_b)?,
+            meta.norm_eps,
         );
+        let q_bias = &layout.attn_q_bias.unwrap();
+        let k_bias = &layout.attn_k_bias.unwrap();
+        let v_bias = &layout.attn_v_bias.unwrap();
+        let o_bias = &layout.attn_o_bias.unwrap();
+        let ffn_up_bias = &layout.ffn_up_bias.unwrap();
+        let ffn_down_bias = &layout.ffn_down_bias.unwrap();
+        let attn_norm_bias = &layout.attn_norm_bias.unwrap();
+        let ffn_norm_bias = &layout.ffn_norm_bias.unwrap();
 
-        // LayerNorm::from_weights(weights, norm_w, norm_b, config.layer_norm_eps())?;
-
-        // Build each transformer layer.
-        let mut layers = Vec::with_capacity(config.num_hidden_layers());
-        for i in 0..config.num_hidden_layers() {
-            let attn_names = config.get_attention_names(i);
-            let ffn_names = config.get_feed_forward_names(i);
+        // 3. Build Layers
+        let mut layers = Vec::with_capacity(meta.num_layers);
+        for i in 0..meta.num_layers {
+            let idx = i.to_string();
+            let name = |template: &String| template.replace("{}", &idx);
 
             let self_attn = EncoderSelfAttention::new(
-                config.hidden_size(),
-                config.num_attention_heads(),
+                meta.hidden_size,
+                meta.num_attention_heads,
                 LinearLayer::from_weights(
                     weights,
-                    &attn_names.q_weight,
-                    Some(&attn_names.q_bias),
+                    &name(&layout.attn_q),
+                    Some(&name(q_bias)),
                     dtype,
-                    None
+                    None,
                 )?,
                 LinearLayer::from_weights(
                     weights,
-                    &attn_names.k_weight,
-                    Some(&attn_names.k_bias),
+                    &name(&layout.attn_k),
+                    Some(&name(k_bias)),
                     dtype,
-                    None
+                    None,
                 )?,
                 LinearLayer::from_weights(
                     weights,
-                    &attn_names.v_weight,
-                    Some(&attn_names.v_bias),
+                    &name(&layout.attn_v),
+                    Some(&name(v_bias)),
                     dtype,
-                    None
+                    None,
                 )?,
                 LinearLayer::from_weights(
                     weights,
-                    &attn_names.output_weight,
-                    Some(&attn_names.output_bias),
+                    &name(&layout.attn_o),
+                    Some(&name(o_bias)),
                     dtype,
-                    None
+                    None,
                 )?,
             );
 
-            let raw_intermediate_w = weights.get_array2(&ffn_names.intermediate_weight)?;
-            let raw_output_w = weights.get_array2(&ffn_names.output_weight)?;
+            // 4. Load FFN weights as Array2 (as required by LegacyFeedForward)
+            let raw_up_w = weights.get_array2(&name(&layout.ffn_up))?;
+            let raw_down_w = weights.get_array2(&name(&layout.ffn_down))?;
 
-            let fc1_weight_for_constructor = if config.transpose_ffn_weights() {
-                raw_intermediate_w.t().as_standard_layout().to_owned()
+            let up_w = if meta.transpose_ffn_weights {
+                raw_up_w.t().as_standard_layout().to_owned()
             } else {
-                raw_intermediate_w
+                raw_up_w
             };
 
-            let fc2_weight_for_constructor = if config.transpose_ffn_weights() {
-                raw_output_w.t().as_standard_layout().to_owned()
+            let down_w = if meta.transpose_ffn_weights {
+                raw_down_w.t().as_standard_layout().to_owned()
             } else {
-                raw_output_w
+                raw_down_w
             };
 
-            let feed_forward = FeedForward::Legacy(LegacyFeedForward::new(
-                fc1_weight_for_constructor,
-                weights.get_array1(&ffn_names.intermediate_bias)?,
-                fc2_weight_for_constructor,
-                weights.get_array1(&ffn_names.output_bias)?,
-                config.activation_function(),
+            let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
+                up_w,
+                weights.get_array1(&name(ffn_up_bias))?,
+                down_w,
+                weights.get_array1(&name(ffn_down_bias))?,
+                meta.activation,
             ));
 
+            // 5. Layer Norms
             let self_attn_layer_norm = LayerNorm::new(
-                weights.get_array1(&attn_names.norm_weight)?,
-                weights.get_array1(&attn_names.norm_bias)?,
-                config.layer_norm_eps(),
+                weights.get_array1(&name(&layout.attn_norm))?,
+                weights.get_array1(&name(attn_norm_bias))?,
+                meta.norm_eps,
             );
 
             let ffn_layer_norm = LayerNorm::new(
-                weights.get_array1(&ffn_names.norm_weight)?,
-                weights.get_array1(&ffn_names.norm_bias)?,
-                config.layer_norm_eps(),
+                weights.get_array1(&name(&layout.ffn_norm))?,
+                weights.get_array1(&name(ffn_norm_bias))?,
+                meta.norm_eps,
             );
 
             layers.push(EncoderLayer {
-                self_attn: self_attn,
+                self_attn,
                 self_attn_layer_norm,
-                feedforward: feed_forward,
+                feedforward,
                 ffn_layer_norm,
             });
         }
@@ -140,15 +147,12 @@ impl CpuTransformerEncoder {
             embeddings,
             embeddings_layer_norm,
             layers,
-            config: config as Arc<dyn EncoderArchitecture + Send + Sync>,
+            metadata: meta,
         })
-    }
-    pub fn config(&self) -> &Arc<dyn EncoderArchitecture + Send + Sync> {
-        &self.config
     }
 }
 
-impl TransformerModel for CpuTransformerEncoder {
+impl InferenceModel for CpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
@@ -162,8 +166,8 @@ impl CpuEncoder for CpuTransformerEncoder {
         self.embeddings.forward(
             input_ids,
             token_type_ids,
-            self.config.extra_pos_embeddings(), // Assumes config has this
-            self.config.scale_embeddings(),     // Assumes config has this
+            self.metadata.extra_pos_embeddings,
+            self.metadata.scale_embeddings,
         )
     }
 
@@ -184,9 +188,8 @@ impl CpuEncoder for CpuTransformerEncoder {
         end_layer: usize,
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
-        let is_prenorm = self.config.is_prenorm();
+        let is_prenorm = self.metadata.is_prenorm;
         for layer in &self.layers[start_layer..end_layer] {
-            // Note: Your EncoderLayer::forward might need to be non-async
             hidden = layer.forward(hidden, attention_mask, None, is_prenorm)?;
         }
         Ok(hidden)
@@ -197,49 +200,6 @@ impl CpuEncoder for CpuTransformerEncoder {
     }
 
     fn hidden_size(&self) -> usize {
-        self.config.hidden_size()
+        self.metadata.hidden_size
     }
-
-    // The full `forward` method is provided by the trait's default implementation,
-    // so you don't need to write it here unless you want to override it.
 }
-
-// #[async_trait]
-// impl Encoder for CpuTransformerEncoder {
-//     type Input = Array2<u32>; // The direct input is token IDs
-//     type Output = EncoderOutput;
-
-//     /// Executes the forward pass for the CPU encoder.
-//     /// It's marked `async` to match the trait, but all operations are synchronous.
-//     async fn forward(
-//         &self,
-//         input_ids: &Self::Input,
-//         attention_mask: &Array2<f32>,
-//         token_type_ids: Option<&Array2<u32>>,
-//     ) -> Result<Self::Output> {
-//         let mut hidden_states = self.embeddings.forward(
-//             input_ids,
-//             token_type_ids,
-//             self.config.extra_pos_embeddings(),
-//             self.config.scale_embeddings(),
-//         );
-//         hidden_states = self.embeddings_layer_norm.forward_3d(&hidden_states);
-//         let is_prenorm = self.config().is_prenorm();
-//         for layer in &self.layers {
-//             hidden_states = layer.forward(hidden_states, attention_mask, None, is_prenorm)?;
-//         }
-
-//         Ok(EncoderOutput {
-//             last_hidden_state: hidden_states,
-//         })
-//     }
-//     async fn get_hidden_states(
-//         &self,
-//         input: &Self::Input,
-//         attention_mask: &Array2<f32>,
-//         token_type_ids: Option<&Array2<u32>>,
-//     ) -> Result<Array3<f32>> {
-//         let output = self.forward(input, attention_mask, token_type_ids).await?;
-//         Ok(output.last_hidden_state)
-//     }
-// }

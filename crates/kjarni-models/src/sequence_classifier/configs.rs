@@ -2,13 +2,7 @@
 
 use anyhow::Result;
 
-use kjarni_transformers::{
-    activations::Activation,
-    encoder::{
-        CpuEncoder, GpuEncoder, traits::EncoderArchitecture},
-    models::LanguageModel,
-    traits::{TransformerConfig, LanguageModelConfig, LayerAttentionNames, LayerFeedForwardNames},
-};
+use kjarni_transformers::activations::Activation;
 use serde::Deserialize;
 use std::any::Any;
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)

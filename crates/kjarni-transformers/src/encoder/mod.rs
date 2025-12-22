@@ -9,47 +9,28 @@
 
 //! given model, allowing for maximum code reuse.
 
-mod cpu;
-mod gpu;
-pub mod encoder_self_attention;
-pub mod traits;
 pub mod classifier;
-pub mod pooler;
 pub mod config;
+mod cpu;
 pub mod encoder_layer;
+pub mod encoder_self_attention;
+mod gpu;
+pub mod pooler;
+pub mod traits;
 
-use crate::encoder::traits::EncoderArchitecture;
-use crate::traits::TransformerModel;
 pub use cpu::CpuTransformerEncoder;
 pub use gpu::GpuTransformerEncoder;
 pub use traits::{CpuEncoder, CpuEncoderOps, GpuEncoder, GpuEncoderOps, SentenceEncoderModel};
 
-
 pub mod prelude {
     pub use crate::encoder::{
-        classifier::{
-            CpuSequenceClassificationHead,
-            GpuSequenceClassificationHead,
-        },
-        config::{
-            EncoderLoadConfig,
-            EncodingConfig,
-            PoolingStrategy,
-        },
+        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
+        config::{EncoderLoadConfig, EncodingConfig, PoolingStrategy},
         encoder_self_attention::EncoderSelfAttention,
-        pooler::{
-            CpuPooler,
-            GpuPooler,
-            StandardCpuPooler,
-        },
+        pooler::{CpuPooler, GpuPooler, StandardCpuPooler},
         traits::{
-            CpuEncoder,
-            CpuEncoderOutput,
-            EncoderLanguageModel,
-            GpuEncoder,
-            GpuEncoderInput,
+            CpuEncoder, CpuEncoderOutput, EncoderLanguageModel, GpuEncoder, GpuEncoderInput,
             GpuEncoderOutput,
         },
     };
 }
-

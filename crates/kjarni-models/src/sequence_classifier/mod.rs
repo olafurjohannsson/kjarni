@@ -14,28 +14,21 @@ use async_trait::async_trait;
 use kjarni_transformers::{
     cache::Cache,
     encoder::{
-        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
-        traits::{
-            CpuEncoderOps,
-            EncoderArchitecture,
-            EncoderLanguageModel,
-            GpuEncoderInput,
-            GpuEncoderOps,
-        },
-        CpuEncoder,
-        CpuTransformerEncoder,
+        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead}, traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderInput, GpuEncoderOps}, CpuEncoder, CpuTransformerEncoder,
         GpuEncoder,
         GpuTransformerEncoder,
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
     models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
-    traits::{Device, LanguageModelConfig, TransformerModel},
+    traits::Device,
     weights::ModelWeights,
     WgpuContext,
 };
 mod configs;
 pub use configs::MiniLMCrossEncoderConfig;
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
 
 /// A generic sequence classifier for running models like BERT and RoBERTa on classification tasks.
 ///
@@ -49,10 +42,11 @@ pub struct SequenceClassifier {
     gpu_head: Option<GpuSequenceClassificationHead>,
 
     tokenizer: Tokenizer,
-    config: Arc<dyn EncoderArchitecture + Send + Sync>,
     model_type: ModelType,
     device: Device,
     context: Option<Arc<WgpuContext>>,
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl SequenceClassifier {
@@ -65,6 +59,7 @@ impl SequenceClassifier {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        load_cfg: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!(

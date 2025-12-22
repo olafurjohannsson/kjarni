@@ -6,46 +6,65 @@ use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
 use crate::gpu_ops::primitives::{
-    add_bias::GpuAddBias,
-    apply_mask::GpuApplyMask,
-    bmm::GpuBatchedMatMul,
-    layout::reshape::GpuReshape,
-    layout::unreshape::GpuUnreshape,
-    matmul::GpuMatMul,
+    add_bias::GpuAddBias, apply_mask::GpuApplyMask, bmm::GpuBatchedMatMul,
+    layout::reshape::GpuReshape, layout::unreshape::GpuUnreshape, matmul::GpuMatMul,
     softmax::GpuSoftmax,
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::WgpuContext;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
-    pub q_weight: GpuTensor, // (crate)
-    pub q_bias: GpuTensor, // (crate)
-    pub k_weight: GpuTensor, // (crate)
-    pub k_bias: GpuTensor, // (crate)
-    pub v_weight: GpuTensor, // (crate)
-    pub v_bias: GpuTensor, // (crate)
+    pub q_weight: GpuTensor,      // (crate)
+    pub q_bias: GpuTensor,        // (crate)
+    pub k_weight: GpuTensor,      // (crate)
+    pub k_bias: GpuTensor,        // (crate)
+    pub v_weight: GpuTensor,      // (crate)
+    pub v_bias: GpuTensor,        // (crate)
     pub output_weight: GpuTensor, // (crate)
-    pub output_bias: GpuTensor, // (crate)
+    pub output_bias: GpuTensor,   // (crate)
 }
 
 impl GpuAttentionWeights {
-    pub fn from_config_names(
+    pub fn from_layout(
         context: &Arc<WgpuContext>,
         weights: &crate::weights::ModelWeights,
-        names: &crate::traits::LayerAttentionNames,
+        layout: &crate::traits::ModelLayout,
+        layer_idx: usize,
+        target_dtype: Option<crate::tensor::DType>,
     ) -> Result<Self> {
+        let idx = layer_idx.to_string();
+
+        // Helper to resolve the template string and load the tensor
+        let load = |template: &String, label: &str| -> Result<GpuTensor> {
+            let name = template.replace("{}", &idx);
+            let raw = weights.get_raw_resolved(&name, target_dtype)?;
+            GpuTensor::from_raw(context, &raw, label)
+        };
+
+        // Helper for optional fields (like biases)
+        let load_opt = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
+            let t = template.as_ref().ok_or_else(|| {
+                anyhow!(
+                    "Attention layout for layer {} is missing required tensor: {}",
+                    idx,
+                    label
+                )
+            })?;
+            load(t, label)
+        };
+
         Ok(Self::new(
-            GpuTensor::from_raw(context, &weights.get_raw(&names.q_weight)?, "q_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.q_bias)?, "q_b")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.k_weight)?, "k_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.k_bias)?, "k_b")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.v_weight)?, "v_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.v_bias)?, "v_b")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.output_weight)?, "o_w")?,
-            GpuTensor::from_raw(context, &weights.get_raw(&names.output_bias)?, "o_b")?,
+            load(&layout.attn_q, "q_w")?,
+            load_opt(&layout.attn_q_bias, "q_b")?,
+            load(&layout.attn_k, "k_w")?,
+            load_opt(&layout.attn_k_bias, "k_b")?,
+            load(&layout.attn_v, "v_w")?,
+            load_opt(&layout.attn_v_bias, "v_b")?,
+            load(&layout.attn_o, "o_w")?,
+            load_opt(&layout.attn_o_bias, "o_b")?,
         )?)
     }
     pub fn new(
@@ -58,8 +77,6 @@ impl GpuAttentionWeights {
         output_weight: GpuTensor,
         output_bias: GpuTensor,
     ) -> Result<Self> {
-        // --- FIXED: Use logical dimensions for layout-agnostic checks ---
-
         // Q
         assert_eq!(q_weight.rank(), 2, "Q weight must be 2D");
         assert_eq!(q_bias.rank(), 1, "Q bias must be 1D");
@@ -105,27 +122,23 @@ impl GpuAttentionWeights {
         let hidden_size = q_in;
 
         assert_eq!(
-            k_in,
-            hidden_size,
+            k_in, hidden_size,
             "K weight input dim must match Q weight input dim"
         );
         assert_eq!(
-            v_in,
-            hidden_size,
+            v_in, hidden_size,
             "V weight input dim must match Q weight input dim"
         );
 
         // Output projection input must match Q projection output
         assert_eq!(
-            o_in,
-            q_out,
+            o_in, q_out,
             "Output projection input dim must match Q projection output dim"
         );
 
         // Output projection output must match original hidden size
         assert_eq!(
-            o_out,
-            hidden_size,
+            o_out, hidden_size,
             "Output projection output dim must match the model's hidden size"
         );
 
@@ -193,9 +206,9 @@ impl GpuAttention {
     pub fn llama_attention(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        q_heads: &GpuTensor,  // [B, H, S_q, D] - already rotated
-        k_heads: &GpuTensor,  // [B, H, S_k, D] - already rotated
-        v_heads: &GpuTensor,  // [B, H, S_v, D] - not rotated
+        q_heads: &GpuTensor, // [B, H, S_q, D] - already rotated
+        k_heads: &GpuTensor, // [B, H, S_k, D] - already rotated
+        v_heads: &GpuTensor, // [B, H, S_v, D] - not rotated
         attention_mask: &GpuTensor,
         position_offset: usize,
         pool: &mut GpuTensorPool,
@@ -230,9 +243,14 @@ impl GpuAttention {
 
         // Apply causal mask
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true,
-                               position_offset as u32,
-                               logical_key_len as u32);
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            true,
+            position_offset as u32,
+            logical_key_len as u32,
+        );
 
         // Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -302,8 +320,10 @@ impl GpuAttention {
             let full_k_tensor = pool.get(vec![batch_size, full_len, kv_hidden]);
             let full_v_tensor = pool.get(vec![batch_size, full_len, kv_hidden]);
 
-            self.gpu_concatenate.encode(encoder, &[cached_k, &k_rotated], &full_k_tensor, 1);
-            self.gpu_concatenate.encode(encoder, &[cached_v, &v_proj], &full_v_tensor, 1);
+            self.gpu_concatenate
+                .encode(encoder, &[cached_k, &k_rotated], &full_k_tensor, 1);
+            self.gpu_concatenate
+                .encode(encoder, &[cached_v, &v_proj], &full_v_tensor, 1);
 
             (full_k_tensor, full_v_tensor)
         } else {
@@ -388,9 +408,9 @@ impl GpuAttention {
     pub fn attend_cached(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        q_heads: &GpuTensor,     // Already split and rotated [B, H, S_q, D]
-        cache_k: &GpuTensor,      // Cached K [B, H, S_full, D]
-        cache_v: &GpuTensor,      // Cached V [B, H, S_full, D]
+        q_heads: &GpuTensor, // Already split and rotated [B, H, S_q, D]
+        cache_k: &GpuTensor, // Cached K [B, H, S_full, D]
+        cache_v: &GpuTensor, // Cached V [B, H, S_full, D]
         attention_mask: &GpuTensor,
         weights: &GpuAttentionWeights,
         position_offset: usize,
@@ -418,21 +438,32 @@ impl GpuAttention {
         let scores = self.bmm_4d(encoder, q_heads, &k_transposed, pool);
 
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true,
-                               position_offset as u32,
-                               logical_key_len as u32);
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            true,
+            position_offset as u32,
+            logical_key_len as u32,
+        );
         self.softmax.encode(encoder, &scores, self.scale_factor);
 
         let context = self.bmm_4d(encoder, &scores, &v_expanded, pool);
         let context_merged = self.merge_heads(encoder, &context, pool);
 
-        self.project(encoder, &context_merged, &weights.output_weight, &weights.output_bias, pool)
+        self.project(
+            encoder,
+            &context_merged,
+            &weights.output_weight,
+            &weights.output_bias,
+            pool,
+        )
     }
     pub fn forward_cross(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        query: &GpuTensor,           // Decoder hidden states
-        key_value: &GpuTensor,       // Encoder hidden states
+        query: &GpuTensor,     // Decoder hidden states
+        key_value: &GpuTensor, // Encoder hidden states
         weights: &GpuAttentionWeights,
         attention_mask: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
@@ -456,7 +487,14 @@ impl GpuAttention {
             // This uses your existing apply_padding_mask helper, which is correct.
             let position_offset = 0 as u32;
             let logical_key_len = key_value.shape()[1] as u32;
-            self.apply_padding_mask(encoder, &scores, mask, pool, position_offset, logical_key_len);
+            self.apply_padding_mask(
+                encoder,
+                &scores,
+                mask,
+                pool,
+                position_offset,
+                logical_key_len,
+            );
         }
 
         // 5. Softmax.
@@ -508,7 +546,8 @@ impl GpuAttention {
         cached_kv: Option<(&GpuTensor, &GpuTensor)>, // The 4D cache [B, H, S_cache, D]
         cache_len: usize,
         pool: &mut GpuTensorPool,
-    ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> { // Returns (output, new_k_3d, new_v_3d)
+    ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
+        // Returns (output, new_k_3d, new_v_3d)
 
         let (batch_size, query_len, _hidden_size) = query.dims3();
         // let cache_len = cached_kv.map_or(0, |(k, _)| k.shape()[2]);
@@ -535,14 +574,26 @@ impl GpuAttention {
 
                 let slice_shape = &[b, h, cache_len, d];
                 let slice_offset = &[0, 0, 0, 0];
-                let valid_cache_k = cached_k.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
-                let valid_cache_v = cached_v.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
+                let valid_cache_k =
+                    cached_k.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
+                let valid_cache_v =
+                    cached_v.slice(encoder, &self.slice_kernel, slice_offset, slice_shape)?;
 
                 let full_k_tensor = pool.get(vec![b, h, full_len, d]);
                 let full_v_tensor = pool.get(vec![b, h, full_len, d]);
 
-                self.gpu_concatenate.encode(encoder, &[&valid_cache_k, &k_heads_new], &full_k_tensor, 2);
-                self.gpu_concatenate.encode(encoder, &[&valid_cache_v, &v_heads_new], &full_v_tensor, 2);
+                self.gpu_concatenate.encode(
+                    encoder,
+                    &[&valid_cache_k, &k_heads_new],
+                    &full_k_tensor,
+                    2,
+                );
+                self.gpu_concatenate.encode(
+                    encoder,
+                    &[&valid_cache_v, &v_heads_new],
+                    &full_v_tensor,
+                    2,
+                );
 
                 (full_k_tensor, full_v_tensor)
             } else {
@@ -561,14 +612,17 @@ impl GpuAttention {
 
         // Add debug readback (only for debugging - remove in production):
 
-
         let expected_scores_shape = vec![
             q_heads.shape()[0],
             q_heads.shape()[1],
             q_heads.shape()[2],
             k_transposed.shape()[3],
         ];
-        assert_eq!(scores.shape(), &expected_scores_shape, "Scores tensor has unexpected shape!");
+        assert_eq!(
+            scores.shape(),
+            &expected_scores_shape,
+            "Scores tensor has unexpected shape!"
+        );
         // println!(
         //     "!!! INSIDE forward_seq2seq. Scores shape: {:?}, Mask shape: {:?}",
         //     scores.shape(),
@@ -676,8 +730,10 @@ impl GpuAttention {
             let k_repeated_4d = pool.get(vec![batch, num_q_heads, max_seq_len, head_dim]);
             let v_repeated_4d = pool.get(vec![batch, num_q_heads, max_seq_len, head_dim]);
 
-            self.repeat_kv.encode(encoder, &physical_k_4d, &k_repeated_4d);
-            self.repeat_kv.encode(encoder, &physical_v_4d, &v_repeated_4d);
+            self.repeat_kv
+                .encode(encoder, &physical_k_4d, &k_repeated_4d);
+            self.repeat_kv
+                .encode(encoder, &physical_v_4d, &v_repeated_4d);
 
             (k_repeated_4d, v_repeated_4d)
         } else {
@@ -694,9 +750,14 @@ impl GpuAttention {
 
         // 3b. Apply mask
         let logical_key_len = scores.shape()[2] + position_offset;
-        self.apply_mask.encode(encoder, &scores, attention_mask, true,
-                               position_offset as u32,
-                               logical_key_len as u32);
+        self.apply_mask.encode(
+            encoder,
+            &scores,
+            attention_mask,
+            true,
+            position_offset as u32,
+            logical_key_len as u32,
+        );
 
         // 3c. Softmax
         self.softmax.encode(encoder, &scores, self.scale_factor);
@@ -871,14 +932,21 @@ impl GpuAttention {
     fn apply_padding_mask(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scores: &GpuTensor,  // [B, H, S_q, S_k]
-        mask: &GpuTensor,     // [B, S_k]
+        scores: &GpuTensor, // [B, H, S_q, S_k]
+        mask: &GpuTensor,   // [B, S_k]
         pool: &mut GpuTensorPool,
         position_offset: u32,
         logical_key_len: u32,
     ) {
         // The apply_mask kernel should handle broadcasting
-        self.apply_mask.encode(encoder, scores, mask, false, position_offset, logical_key_len);
+        self.apply_mask.encode(
+            encoder,
+            scores,
+            mask,
+            false,
+            position_offset,
+            logical_key_len,
+        );
     }
     /// Step 1: Pre-compute K and V from Encoder States (Optimized)
     ///
@@ -916,9 +984,9 @@ impl GpuAttention {
     pub fn forward_cross_precomputed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        query: &GpuTensor,                // Decoder hidden state [B, S_dec, H_dim]
-        precomputed_k: &GpuTensor,        // [B, H, D, S_enc] (Already transposed!)
-        precomputed_v: &GpuTensor,        // [B, H, S_enc, D]
+        query: &GpuTensor,         // Decoder hidden state [B, S_dec, H_dim]
+        precomputed_k: &GpuTensor, // [B, H, D, S_enc] (Already transposed!)
+        precomputed_v: &GpuTensor, // [B, H, S_enc, D]
         weights: &GpuAttentionWeights,
         attention_mask: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
@@ -940,7 +1008,14 @@ impl GpuAttention {
             let position_offset = 0;
             // The mask shape should match the last dim of scores (S_enc)
             let logical_key_len = precomputed_k.shape()[3] as u32;
-            self.apply_padding_mask(encoder, &scores, mask, pool, position_offset, logical_key_len);
+            self.apply_padding_mask(
+                encoder,
+                &scores,
+                mask,
+                pool,
+                position_offset,
+                logical_key_len,
+            );
         }
 
         // 5. Softmax

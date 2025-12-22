@@ -1,16 +1,15 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::WgpuContext;
 use crate::activations;
-use crate::encoder::traits::EncoderArchitecture;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
-use crate::traits::{LanguageModelConfig, TransformerConfig};
+use crate::traits::ModelMetadata;
+use crate::WgpuContext;
 
 pub struct GpuEncoderLayer {
     self_attn: GpuAttention,
@@ -34,18 +33,26 @@ impl GpuEncoderLayer {
         ff_weights: GpuFeedForwardWeights,
         ffn_ln_weights: GpuLayerNormWeights,
         activation: activations::Activation,
-        config: &dyn TransformerConfig,
+        meta: &ModelMetadata,
     ) -> Result<Self> {
-        let hidden_size = config.hidden_size() as u32;
-        let num_heads = config.num_attention_heads() as u32;
-        let num_kv_heads = 0; //config.num_key_value_heads() as u32;
+        let hidden_size = meta.hidden_size as u32;
+        let num_heads = meta.num_attention_heads as u32;
 
+        // In Encoders, KV heads usually equal Attention heads.
+        // Metadata provides this logic (falling back to num_heads if not specified).
+        let num_kv_heads = meta.num_kv_heads as u32;
+
+        // 1. Initialize Attention Engine
         let self_attn = GpuAttention::new(context, hidden_size, num_heads, num_kv_heads);
-        let self_attn_layer_norm = GpuLayerNorm::new(context, config.layer_norm_eps());
 
+        // 2. Initialize LayerNorm Engines (using Metadata eps)
+        let self_attn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
+        let ffn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
+
+        // 3. Initialize FFN Engine
         let feedforward = GpuFeedForward::new(context, activation)?;
-        let ffn_layer_norm = GpuLayerNorm::new(context, config.layer_norm_eps());
 
+        // 4. Initialize Math Engine
         let add = GpuAdd::new(context);
 
         Ok(Self {
@@ -66,10 +73,13 @@ impl GpuEncoderLayer {
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
-        config: &dyn TransformerConfig,
+        meta: &ModelMetadata, // Use Metadata struct
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
-        if config.is_prenorm() {
+        // Dispatch based on architectural style defined in metadata
+        // BERT/RoBERTa = Post-Norm (false)
+        // Llama/Modern Encoders = Pre-Norm (true)
+        if meta.is_prenorm {
             self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
         } else {
             self.forward_postnorm(encoder, hidden_states, attention_mask, pool)
@@ -195,18 +205,18 @@ impl GpuEncoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::WgpuContext;
     use crate::activations::Activation;
     use crate::encoder::encoder_layer::EncoderLayer;
     use crate::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
-    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
+    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
+    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;

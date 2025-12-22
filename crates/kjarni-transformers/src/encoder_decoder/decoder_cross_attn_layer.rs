@@ -6,7 +6,6 @@ pub use crate::{
     feedforward::FeedForward,
     normalization::LayerNorm,
     pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
-    traits::TransformerConfig,
     weights::ModelWeights,
 };
 use anyhow::Result;
