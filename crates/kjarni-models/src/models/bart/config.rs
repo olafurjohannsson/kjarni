@@ -1,7 +1,10 @@
 use kjarni_transformers::{
     activations::Activation,
     encoder_decoder::TaskSpecificParams,
-    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    traits::{
+        AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout,
+        FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata,
+    },
 };
 use serde::Deserialize;
 
@@ -103,60 +106,90 @@ impl ModelConfig for BartConfig {
     fn layout(&self) -> ModelLayout {
         let shared = self.get_shared_weight_name();
 
+        // --- Define the Encoder's Layer Structure ---
+        let encoder_layer = EncoderLayerLayout {
+            self_attn: AttentionLayout {
+                q_weight: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
+                q_bias: Some("model.encoder.layers.{}.self_attn.q_proj.bias".to_string()),
+                k_weight: "model.encoder.layers.{}.self_attn.k_proj.weight".to_string(),
+                k_bias: Some("model.encoder.layers.{}.self_attn.k_proj.bias".to_string()),
+                v_weight: "model.encoder.layers.{}.self_attn.v_proj.weight".to_string(),
+                v_bias: Some("model.encoder.layers.{}.self_attn.v_proj.bias".to_string()),
+                o_weight: "model.encoder.layers.{}.self_attn.out_proj.weight".to_string(),
+                o_bias: Some("model.encoder.layers.{}.self_attn.out_proj.bias".to_string()),
+                norm_weight: "model.encoder.layers.{}.self_attn_layer_norm.weight".to_string(),
+                norm_bias: Some("model.encoder.layers.{}.self_attn_layer_norm.bias".to_string()),
+            },
+            ffn: FeedForwardLayout {
+                up_weight: "model.encoder.layers.{}.fc1.weight".to_string(),
+                up_bias: Some("model.encoder.layers.{}.fc1.bias".to_string()),
+                down_weight: "model.encoder.layers.{}.fc2.weight".to_string(),
+                down_bias: Some("model.encoder.layers.{}.fc2.bias".to_string()),
+                gate_weight: None,
+                norm_weight: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
+                norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
+            },
+        };
+
+        // --- Define the Decoder's Layer Structure ---
+        let decoder_layer = DecoderLayerLayout {
+            self_attn: AttentionLayout {
+                q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),
+                q_bias: Some("model.decoder.layers.{}.self_attn.q_proj.bias".to_string()),
+                k_weight: "model.decoder.layers.{}.self_attn.k_proj.weight".to_string(),
+                k_bias: Some("model.decoder.layers.{}.self_attn.k_proj.bias".to_string()),
+                v_weight: "model.decoder.layers.{}.self_attn.v_proj.weight".to_string(),
+                v_bias: Some("model.decoder.layers.{}.self_attn.v_proj.bias".to_string()),
+                o_weight: "model.decoder.layers.{}.self_attn.out_proj.weight".to_string(),
+                o_bias: Some("model.decoder.layers.{}.self_attn.out_proj.bias".to_string()),
+                norm_weight: "model.decoder.layers.{}.self_attn_layer_norm.weight".to_string(),
+                norm_bias: Some("model.decoder.layers.{}.self_attn_layer_norm.bias".to_string()),
+            },
+            cross_attn: Some(AttentionLayout {
+                q_weight: "model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string(),
+                q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
+                k_weight: "model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string(),
+                k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
+                v_weight: "model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string(),
+                v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
+                o_weight: "model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string(),
+                o_bias: Some("model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string()),
+                norm_weight: "model.decoder.layers.{}.encoder_attn_layer_norm.weight".to_string(),
+                norm_bias: Some("model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string()),
+            }),
+            ffn: FeedForwardLayout {
+                up_weight: "model.decoder.layers.{}.fc1.weight".to_string(),
+                up_bias: Some("model.decoder.layers.{}.fc1.bias".to_string()),
+                down_weight: "model.decoder.layers.{}.fc2.weight".to_string(),
+                down_bias: Some("model.decoder.layers.{}.fc2.bias".to_string()),
+                gate_weight: None,
+                norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
+                norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
+            },
+        };
+
+        // --- Assemble the final ModelLayout ---
         ModelLayout {
-            // --- Shared Embeddings ---
             token_embedding: shared.clone(),
-            position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
-            token_type_embedding: None,
-            embedding_norm: Some("model.encoder.layernorm_embedding.weight".to_string()),
-            embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
-
-            // BART ties LM Head and Shared Weight
             lm_head: shared,
-            final_norm: "model.encoder.layernorm_embedding.weight".to_string(), // Simplified
-            final_norm_bias: None,
-
-            // --- Encoder Layer Templates ---
-            attn_q: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
-            attn_q_bias: Some("model.encoder.layers.{}.self_attn.q_proj.bias".to_string()),
-            attn_k: "model.encoder.layers.{}.self_attn.k_proj.weight".to_string(),
-            attn_k_bias: Some("model.encoder.layers.{}.self_attn.k_proj.bias".to_string()),
-            attn_v: "model.encoder.layers.{}.self_attn.v_proj.weight".to_string(),
-            attn_v_bias: Some("model.encoder.layers.{}.self_attn.v_proj.bias".to_string()),
-            attn_o: "model.encoder.layers.{}.self_attn.out_proj.weight".to_string(),
-            attn_o_bias: Some("model.encoder.layers.{}.self_attn.out_proj.bias".to_string()),
-            attn_norm: "model.encoder.layers.{}.self_attn_layer_norm.weight".to_string(),
-            attn_norm_bias: Some("model.encoder.layers.{}.self_attn_layer_norm.bias".to_string()),
-
-            ffn_gate: None,
-            ffn_up: "model.encoder.layers.{}.fc1.weight".to_string(),
-            ffn_up_bias: Some("model.encoder.layers.{}.fc1.bias".to_string()),
-            ffn_down: "model.encoder.layers.{}.fc2.weight".to_string(),
-            ffn_down_bias: Some("model.encoder.layers.{}.fc2.bias".to_string()),
-            ffn_norm: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
-            ffn_norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
-
-            // --- Decoder Cross-Attention Templates ---
-            cross_attn_q: Some("model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string()),
-            cross_attn_q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
-
-            cross_attn_k: Some("model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string()),
-            cross_attn_k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
-
-            cross_attn_v: Some("model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string()),
-            cross_attn_v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
-
-            cross_attn_o: Some("model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string()),
-            cross_attn_o_bias: Some(
-                "model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string(),
-            ),
-
-            cross_attn_norm: Some(
-                "model.decoder.layers.{}.encoder_attn_layer_norm.weight".to_string(),
-            ),
-            cross_attn_norm_bias: Some(
-                "model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string(),
-            ),
+            encoder: Some(EncoderLayout {
+                position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
+                token_type_embedding: None,
+                embedding_norm_weight: Some("model.encoder.layernorm_embedding.weight".to_string()),
+                embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
+                final_norm_weight: None, // BART encoder doesn't have a final norm
+                final_norm_bias: None,
+                layer: encoder_layer,
+            }),
+            decoder: Some(DecoderLayout {
+                position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
+                token_type_embedding: None,
+                embedding_norm_weight: Some("model.decoder.layernorm_embedding.weight".to_string()),
+                embedding_norm_bias: Some("model.decoder.layernorm_embedding.bias".to_string()),
+                final_norm_weight: None, // BART decoder doesn't have a final norm before the LM head
+                final_norm_bias: None,
+                layer: decoder_layer,
+            }),
         }
     }
 }
@@ -212,20 +245,66 @@ mod tests {
         let config: BartConfig = serde_json::from_str(DISTILBART_CNN_CONFIG_JSON).unwrap();
         let layout = config.layout();
 
+        // --- Get nested layouts for both encoder and decoder ---
+        let encoder_layout = layout
+            .encoder
+            .as_ref()
+            .expect("BART should have an encoder layout");
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("BART should have a decoder layout");
+
+        // --- Verify Root/Shared Names ---
         assert_eq!(layout.token_embedding, "model.shared.weight");
+        assert_eq!(layout.lm_head, "model.shared.weight");
+
+        // --- Verify Encoder-Specific Names ---
         assert_eq!(
-            layout.attn_q.replace("{}", "5"),
+            encoder_layout.layer.self_attn.q_weight.replace("{}", "5"),
             "model.encoder.layers.5.self_attn.q_proj.weight"
         );
         assert_eq!(
-            layout.ffn_up.replace("{}", "0"),
+            encoder_layout.layer.ffn.up_weight.replace("{}", "0"),
             "model.encoder.layers.0.fc1.weight"
         );
-
-        let cross_q = layout.cross_attn_q.unwrap();
         assert_eq!(
-            cross_q.replace("{}", "1"),
+            encoder_layout.embedding_norm_weight.as_ref().unwrap(),
+            "model.encoder.layernorm_embedding.weight"
+        );
+
+        // --- Verify Decoder-Specific Names ---
+        // Test decoder's SELF-attention (the source of the original bug)
+        assert_eq!(
+            decoder_layout.layer.self_attn.q_weight.replace("{}", "3"),
+            "model.decoder.layers.3.self_attn.q_proj.weight"
+        );
+
+        // Test decoder's CROSS-attention
+        let cross_attn_layout = decoder_layout.layer.cross_attn.as_ref().unwrap();
+        assert_eq!(
+            cross_attn_layout.q_weight.replace("{}", "1"),
             "model.decoder.layers.1.encoder_attn.q_proj.weight"
+        );
+        assert_eq!(
+            cross_attn_layout
+                .norm_bias
+                .as_ref()
+                .unwrap()
+                .replace("{}", "4"),
+            "model.decoder.layers.4.encoder_attn_layer_norm.bias"
+        );
+
+        // Test decoder's FFN
+        assert_eq!(
+            decoder_layout
+                .layer
+                .ffn
+                .down_bias
+                .as_ref()
+                .unwrap()
+                .replace("{}", "2"),
+            "model.decoder.layers.2.fc2.bias"
         );
     }
 }

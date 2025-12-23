@@ -217,6 +217,7 @@ mod tests {
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
+    use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
@@ -495,53 +496,47 @@ mod tests {
             }
         }
 
-        fn layout(&self) -> crate::traits::ModelLayout {
-            crate::traits::ModelLayout {
+        fn layout(&self) -> ModelLayout {
+            // --- Define the Decoder's Layer Structure for the test ---
+            let decoder_layer = DecoderLayerLayout {
+                self_attn: AttentionLayout {
+                    q_weight: "layer.{}.attn.q.weight".to_string(),
+                    q_bias: Some("layer.{}.attn.q.bias".to_string()),
+                    k_weight: "layer.{}.attn.k.weight".to_string(),
+                    k_bias: Some("layer.{}.attn.k.bias".to_string()),
+                    v_weight: "layer.{}.attn.v.weight".to_string(),
+                    v_bias: Some("layer.{}.attn.v.bias".to_string()),
+                    o_weight: "layer.{}.attn.o.weight".to_string(),
+                    o_bias: Some("layer.{}.attn.o.bias".to_string()),
+                    norm_weight: "layer.{}.attn_ln.weight".to_string(),
+                    norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
+                },
+                cross_attn: None, // No cross-attention in this test model
+                ffn: FeedForwardLayout {
+                    up_weight: "layer.{}.ffn.up.weight".to_string(),
+                    up_bias: Some("layer.{}.ffn.up.bias".to_string()),
+                    down_weight: "layer.{}.ffn.down.weight".to_string(),
+                    down_bias: Some("layer.{}.ffn.down.bias".to_string()),
+                    gate_weight: None, // Standard FFN for this test
+                    norm_weight: "layer.{}.ffn_ln.weight".to_string(),
+                    norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
+                },
+            };
+
+            // --- Assemble the final ModelLayout ---
+            ModelLayout {
                 token_embedding: "embeddings.word_embeddings.weight".to_string(),
-                position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
-                token_type_embedding: None,
-                embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
-                embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()), // Now Some
-
-                final_norm: "norm.weight".to_string(),
-                final_norm_bias: None,
                 lm_head: "lm_head.weight".to_string(),
-
-                // Attention Templates
-                attn_q: "layer.{}.attn.q.weight".to_string(),
-                attn_k: "layer.{}.attn.k.weight".to_string(),
-                attn_v: "layer.{}.attn.v.weight".to_string(),
-                attn_o: "layer.{}.attn.o.weight".to_string(),
-                attn_norm: "layer.{}.attn_ln.weight".to_string(),
-
-                // Biases are now Option<String>
-                attn_q_bias: Some("layer.{}.attn.q.bias".to_string()),
-                attn_k_bias: Some("layer.{}.attn.k.bias".to_string()),
-                attn_v_bias: Some("layer.{}.attn.v.bias".to_string()),
-                attn_o_bias: Some("layer.{}.attn.o.bias".to_string()),
-                attn_norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
-
-                // FFN Templates
-                ffn_gate: None, // Standard FFN, no SwiGLU
-                ffn_up: "layer.{}.ffn.up.weight".to_string(),
-                ffn_down: "layer.{}.ffn.down.weight".to_string(),
-                ffn_norm: "layer.{}.ffn_ln.weight".to_string(),
-
-                // Biases are now Option<String>
-                ffn_up_bias: Some("layer.{}.ffn.up.bias".to_string()),
-                ffn_down_bias: Some("layer.{}.ffn.down.bias".to_string()),
-                ffn_norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
-
-                cross_attn_q: None,
-                cross_attn_k: None,
-                cross_attn_v: None,
-                cross_attn_o: None,
-                cross_attn_norm: None,
-                cross_attn_q_bias: None,
-                cross_attn_k_bias: None,
-                cross_attn_v_bias: None,
-                cross_attn_o_bias: None,
-                cross_attn_norm_bias: None,
+                encoder: None, // This is a decoder-only test model
+                decoder: Some(DecoderLayout {
+                    position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+                    token_type_embedding: None,
+                    embedding_norm_weight: Some("embeddings.LayerNorm.weight".to_string()),
+                    embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
+                    final_norm_weight: Some("norm.weight".to_string()),
+                    final_norm_bias: None,
+                    layer: decoder_layer,
+                }),
             }
         }
     }

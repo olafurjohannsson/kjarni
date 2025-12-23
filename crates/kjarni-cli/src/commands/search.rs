@@ -101,7 +101,7 @@ async fn get_query_embedding(
         eprintln!("Loading encoder '{}'...", model);
     }
 
-    let encoder = SentenceEncoder::from_registry(model_type, None, device, None).await?;
+    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
 
     // Verify dimension matches
     let embedding = encoder.encode(query).await?;

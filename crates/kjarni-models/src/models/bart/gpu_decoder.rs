@@ -90,52 +90,13 @@ impl BartGpuDecoder {
         // --- 3. Decoder Layers Loop ---
         let mut layers = Vec::with_capacity(config.decoder_layers);
         for i in 0..config.decoder_layers {
-            let idx = i.to_string();
-            let name = |t: &String| t.replace("{}", &idx);
-            let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &idx)).unwrap();
+            // Get the specific decoder layout, which is guaranteed to exist for BART.
+            let decoder_layout = layout.decoder.as_ref().unwrap();
+            let layer_layout = &decoder_layout.layer;
 
-            // --- 3a. Self Attention (Using Layout templates) ---
-            let self_attn_weights = GpuAttentionWeights::new(
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&name(&layout.attn_q), target_dt)?,
-                    "q",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&opt_name(&layout.attn_q_bias), target_dt)?,
-                    "q_b",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&name(&layout.attn_k), target_dt)?,
-                    "k",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&opt_name(&layout.attn_k_bias), target_dt)?,
-                    "k_b",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&name(&layout.attn_v), target_dt)?,
-                    "v",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&opt_name(&layout.attn_v_bias), target_dt)?,
-                    "v_b",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&name(&layout.attn_o), target_dt)?,
-                    "o",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(&opt_name(&layout.attn_o_bias), target_dt)?,
-                    "o_b",
-                )?,
+            // --- 3a. Self Attention ---
+            let self_attn_weights = GpuAttentionWeights::from_self_attn_layout(
+                context, weights, &layout, i, target_dt,
             )?;
 
             let self_attn_norm =
@@ -143,76 +104,33 @@ impl BartGpuDecoder {
 
             let self_attn_ln_weights =
                 GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-                    GpuTensor::from_raw(
+                    GpuTensor::from_model_weights(
                         context,
-                        &weights.get_raw(&name(&layout.attn_norm))?,
+                        weights,
+                        &layer_layout
+                            .self_attn
+                            .norm_weight
+                            .replace("{}", &i.to_string()),
+                        target_dt,
                         "sa_ln_w",
                     )?,
-                    GpuTensor::from_raw(
+                    GpuTensor::from_model_weights(
                         context,
-                        &weights.get_raw(&opt_name(&layout.attn_norm_bias))?,
+                        weights,
+                        &layer_layout
+                            .self_attn
+                            .norm_bias
+                            .as_ref()
+                            .unwrap()
+                            .replace("{}", &i.to_string()),
+                        target_dt,
                         "sa_ln_b",
                     )?,
                 )?);
 
-            // --- 3b. Cross Attention (Using Layout templates) ---
-            let cross_attn_weights = GpuAttentionWeights::new(
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(
-                        &name(layout.cross_attn_q.as_ref().unwrap()),
-                        target_dt,
-                    )?,
-                    "cq",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights
-                        .get_raw_resolved(&name(&layout.cross_attn_q_bias.clone().unwrap()), target_dt)?,
-                    "cq_b",
-                )?, // Reusing bias template
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(
-                        &name(layout.cross_attn_k.as_ref().unwrap()),
-                        target_dt,
-                    )?,
-                    "ck",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights
-                        .get_raw_resolved(&name(&layout.cross_attn_k_bias.clone().unwrap()), target_dt)?,
-                    "ck_b",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(
-                        &name(layout.cross_attn_v.as_ref().unwrap()),
-                        target_dt,
-                    )?,
-                    "cv",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights
-                        .get_raw_resolved(&name(&layout.cross_attn_v_bias.clone().unwrap()), target_dt)?,
-                    "cv_b",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw_resolved(
-                        &name(layout.cross_attn_o.as_ref().unwrap()),
-                        target_dt,
-                    )?,
-                    "co",
-                )?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights
-                        .get_raw_resolved(&name(&layout.cross_attn_o_bias.clone().unwrap()), target_dt)?,
-                    "co_b",
-                )?,
+            // --- 3b. Cross Attention ---
+            let cross_attn_weights = GpuAttentionWeights::from_cross_attn_layout(
+                context, weights, &layout, i, target_dt,
             )?;
 
             let cross_attn_norm =
@@ -220,48 +138,67 @@ impl BartGpuDecoder {
 
             let cross_attn_ln_weights =
                 GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-                    GpuTensor::from_raw(
+                    GpuTensor::from_model_weights(
                         context,
-                        &weights.get_raw(&name(layout.cross_attn_norm.as_ref().unwrap()))?,
+                        weights,
+                        &layer_layout
+                            .cross_attn
+                            .as_ref()
+                            .unwrap()
+                            .norm_weight
+                            .replace("{}", &i.to_string()),
+                        target_dt,
                         "ca_ln_w",
                     )?,
-                    GpuTensor::from_raw(
+                    GpuTensor::from_model_weights(
                         context,
-                        &weights.get_raw(&opt_name(&layout.cross_attn_norm_bias))?,
+                        weights,
+                        &layer_layout
+                            .cross_attn
+                            .as_ref()
+                            .unwrap()
+                            .norm_bias
+                            .as_ref()
+                            .unwrap()
+                            .replace("{}", &i.to_string()),
+                        target_dt,
                         "ca_ln_b",
                     )?,
                 )?);
 
-            // --- 3c. FFN (Preserved Logic: GpuFeedForwardWeightsStd) ---
+            // --- 3c. FFN (Standard Path for BART) ---
             let feedforward =
                 GpuFeedForward::Standard(GpuFeedForwardStd::new(context, meta.activation)?);
 
-            let ff_weights = GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::new(
-                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.ffn_up))?, "ff1_w")?,
-                GpuTensor::from_raw(
+            let ff_weights =
+                GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::from_layout(
                     context,
-                    &weights.get_raw(&opt_name(&layout.ffn_up_bias))?,
-                    "ff1_b",
-                )?,
-                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.ffn_down))?, "ff2_w")?,
-                GpuTensor::from_raw(
-                    context,
-                    &weights.get_raw(&opt_name(&layout.ffn_down_bias))?,
-                    "ff2_b",
-                )?,
-            )?);
+                    weights,
+                    &layer_layout.ffn,
+                    i,
+                    target_dt,
+                )?);
 
             let ffn_norm = GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
 
             let ffn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     context,
-                    &weights.get_raw(&name(&layout.ffn_norm))?,
+                    weights,
+                    &layer_layout.ffn.norm_weight.replace("{}", &i.to_string()),
+                    target_dt,
                     "ffn_ln_w",
                 )?,
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     context,
-                    &weights.get_raw(&opt_name(&layout.ffn_norm_bias))?,
+                    weights,
+                    &layer_layout
+                        .ffn
+                        .norm_bias
+                        .as_ref()
+                        .unwrap()
+                        .replace("{}", &i.to_string()),
+                    target_dt,
                     "ffn_ln_b",
                 )?,
             )?);
@@ -317,8 +254,15 @@ impl GpuCrossDecoder for BartGpuDecoder {
                 let ids = ids.as_standard_layout().to_owned();
                 let ids_gpu = GpuTensor::from_ndarray(&self.context, &ids)?;
                 self.embeddings.encode(
-                    encoder, &self.embedding_weights, &ids_gpu, None,
-                    position_offset, meta.hidden_size, meta.extra_pos_embeddings, meta.scale_embeddings, pool
+                    encoder,
+                    &self.embedding_weights,
+                    &ids_gpu,
+                    None,
+                    position_offset,
+                    meta.hidden_size,
+                    meta.extra_pos_embeddings,
+                    meta.scale_embeddings,
+                    pool,
                 )
                 // if let Some(cpu_embeds) = &self.cpu_embeddings {
                 //     let input_array = Array2::from_shape_vec((1, ids.len()), ids.to_vec())?;
@@ -334,14 +278,21 @@ impl GpuCrossDecoder for BartGpuDecoder {
                 //     )
                 // }
             }
-            ModelInput::TokensGpu(ids_gpu) => {
-                self.embeddings.encode(
-                    encoder, &self.embedding_weights, ids_gpu, None,
-                    position_offset, meta.hidden_size, meta.extra_pos_embeddings, meta.scale_embeddings, pool
-                )
-            }
+            ModelInput::TokensGpu(ids_gpu) => self.embeddings.encode(
+                encoder,
+                &self.embedding_weights,
+                ids_gpu,
+                None,
+                position_offset,
+                meta.hidden_size,
+                meta.extra_pos_embeddings,
+                meta.scale_embeddings,
+                pool,
+            ),
             ModelInput::HiddenGpu(t) => Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => GpuTensor::from_ndarray(&self.context, &t.as_standard_layout().to_owned()),
+            ModelInput::HiddenCpu(t) => {
+                GpuTensor::from_ndarray(&self.context, &t.as_standard_layout().to_owned())
+            }
         }
     }
 
@@ -354,7 +305,8 @@ impl GpuCrossDecoder for BartGpuDecoder {
     ) -> Result<GpuTensor> {
         let hidden = self.embed(encoder, pool, input, position_offset).await?;
         let ln_output = pool.get(hidden.shape().to_vec());
-        self.embed_layer_norm.encode(encoder, &self.embed_ln_weights, &hidden, &ln_output);
+        self.embed_layer_norm
+            .encode(encoder, &self.embed_ln_weights, &hidden, &ln_output);
         Ok(ln_output)
     }
 
@@ -371,7 +323,9 @@ impl GpuCrossDecoder for BartGpuDecoder {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<GpuCrossDecoderOutput> {
-        let gpu_cache = cache.as_deref_mut().and_then(|c| c.as_any_mut().downcast_mut::<GpuBeamKVCache>());
+        let gpu_cache = cache
+            .as_deref_mut()
+            .and_then(|c| c.as_any_mut().downcast_mut::<GpuBeamKVCache>());
         let mut current_hidden = hidden_states.clone();
         let mut new_self_attn_kvs = Vec::with_capacity(self.layers.len());
 
@@ -423,7 +377,6 @@ impl GpuCrossDecoder for BartGpuDecoder {
         Ok(GpuCrossAttentionKVCache(cache))
     }
 
-    
     // fn forward(
     //     &self,
     //     encoder: &mut CommandEncoder,

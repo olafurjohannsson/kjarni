@@ -478,7 +478,7 @@ async fn load_encoder(model: &str, gpu: bool, quiet: bool) -> Result<SentenceEnc
         eprintln!("Loading encoder '{}'...", model);
     }
 
-    SentenceEncoder::from_registry(model_type, None, device, None).await
+    SentenceEncoder::from_registry(model_type, None, device, None, None).await
 }
 
 /// Calculate total size of index directory

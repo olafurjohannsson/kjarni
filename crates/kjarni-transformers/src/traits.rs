@@ -67,50 +67,85 @@ pub struct ModelMetadata {
     pub is_prenorm: bool,
 }
 
-/// The naming templates for weights inside the file (Safetensors or GGUF).
+/// Naming templates for a standard attention block (self- or cross-attention).
+#[derive(Debug, Clone)]
+pub struct AttentionLayout {
+    pub q_weight: String,
+    pub q_bias: Option<String>,
+    pub k_weight: String,
+    pub k_bias: Option<String>,
+    pub v_weight: String,
+    pub v_bias: Option<String>,
+    pub o_weight: String,
+    pub o_bias: Option<String>,
+    pub norm_weight: String,
+    pub norm_bias: Option<String>,
+}
+
+/// Naming templates for a standard feed-forward network block.
+#[derive(Debug, Clone)]
+pub struct FeedForwardLayout {
+    pub up_weight: String,
+    pub up_bias: Option<String>,
+    pub down_weight: String,
+    pub down_bias: Option<String>,
+    pub gate_weight: Option<String>, // For SwiGLU/GEGLU variants
+    pub norm_weight: String,
+    pub norm_bias: Option<String>,
+}
+
+/// Naming templates for a complete encoder transformer layer.
+#[derive(Debug, Clone)]
+pub struct EncoderLayerLayout {
+    pub self_attn: AttentionLayout,
+    pub ffn: FeedForwardLayout,
+}
+
+/// Naming templates for a complete decoder transformer layer.
+#[derive(Debug, Clone)]
+pub struct DecoderLayerLayout {
+    pub self_attn: AttentionLayout,
+    pub cross_attn: Option<AttentionLayout>, // Only present in encoder-decoder models
+    pub ffn: FeedForwardLayout,
+}
+
+/// Naming templates for all components of an encoder block.
+#[derive(Debug, Clone)]
+pub struct EncoderLayout {
+    pub position_embedding: Option<String>,
+    pub token_type_embedding: Option<String>,
+    pub embedding_norm_weight: Option<String>,
+    pub embedding_norm_bias: Option<String>,
+    pub final_norm_weight: Option<String>,
+    pub final_norm_bias: Option<String>,
+    pub layer: EncoderLayerLayout,
+}
+
+/// Naming templates for all components of a decoder block.
+#[derive(Debug, Clone)]
+pub struct DecoderLayout {
+    pub position_embedding: Option<String>,
+    pub token_type_embedding: Option<String>,
+    pub embedding_norm_weight: Option<String>,
+    pub embedding_norm_bias: Option<String>,
+    pub final_norm_weight: Option<String>,
+    pub final_norm_bias: Option<String>,
+    pub layer: DecoderLayerLayout,
+}
+
+/// The top-level, comprehensive layout for any transformer model.
+///
+/// This struct acts as the single source of truth for all tensor names.
+/// - For a **decoder-only** model (Llama), `encoder` will be `None`.
+/// - For an **encoder-only** model (BERT), `decoder` and `lm_head` will be `None`.
+/// - For an **encoder-decoder** model (BART), both `encoder` and `decoder` will be `Some`.
 #[derive(Debug, Clone)]
 pub struct ModelLayout {
     pub token_embedding: String,
-    pub position_embedding: Option<String>,
-    pub token_type_embedding: Option<String>,
-    pub embedding_norm: Option<String>,
-    pub embedding_norm_bias: Option<String>,
-    pub final_norm: String,
-    pub final_norm_bias: Option<String>,
     pub lm_head: String,
-
-    // Layer templates (use "{}" for index)
-    pub attn_q: String,
-    pub attn_q_bias: Option<String>, // Added for Encoders
-    pub attn_k: String,
-    pub attn_k_bias: Option<String>,
-    pub attn_v: String,
-    pub attn_v_bias: Option<String>,
-    pub attn_o: String,
-    pub attn_o_bias: Option<String>,
-    pub attn_norm: String,
-    pub attn_norm_bias: Option<String>,
-
-    pub ffn_up: String,
-    pub ffn_up_bias: Option<String>,
-    pub ffn_down: String,
-    pub ffn_down_bias: Option<String>,
-    pub ffn_norm: String,
-    pub ffn_norm_bias: Option<String>,
-    pub ffn_gate: Option<String>,
-
-    pub cross_attn_q: Option<String>,
-    pub cross_attn_q_bias: Option<String>,
-    pub cross_attn_k: Option<String>,
-    pub cross_attn_k_bias: Option<String>,
-    pub cross_attn_v: Option<String>,
-    pub cross_attn_v_bias: Option<String>,
-    pub cross_attn_o: Option<String>,
-    pub cross_attn_o_bias: Option<String>,
-    pub cross_attn_norm: Option<String>,
-    pub cross_attn_norm_bias: Option<String>,
+    pub encoder: Option<EncoderLayout>,
+    pub decoder: Option<DecoderLayout>,
 }
-
 pub trait ModelConfig: Send + Sync {
     fn metadata(&self) -> ModelMetadata;
     fn layout(&self) -> ModelLayout;

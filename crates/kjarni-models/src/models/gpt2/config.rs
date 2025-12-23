@@ -1,5 +1,8 @@
 use kjarni_transformers::activations::Activation;
-use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
+use kjarni_transformers::traits::{
+    AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
+    ModelLayout, ModelMetadata,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,59 +78,49 @@ impl ModelConfig for Gpt2Config {
             "h.{}"
         };
 
+        // --- Define the Decoder's Layer Structure ---
+        let decoder_layer = DecoderLayerLayout {
+            self_attn: AttentionLayout {
+                // NOTE: GPT-2 uses a fused QKV weight matrix. We point q_weight to it
+                // and leave k/v empty to signal to the loader that it's a fused operation.
+                // The loader for the GPT-2 layer will need to handle this special case.
+                q_weight: format!("{}.attn.c_attn.weight", lp),
+                q_bias: Some(format!("{}.attn.c_attn.bias", lp)),
+                k_weight: String::new(), // Empty indicates fused with Q
+                k_bias: None,
+                v_weight: String::new(), // Empty indicates fused with Q
+                v_bias: None,
+                o_weight: format!("{}.attn.c_proj.weight", lp),
+                o_bias: Some(format!("{}.attn.c_proj.bias", lp)),
+                norm_weight: format!("{}.ln_1.weight", lp),
+                norm_bias: Some(format!("{}.ln_1.bias", lp)),
+            },
+            cross_attn: None, // GPT-2 is decoder-only
+            ffn: FeedForwardLayout {
+                up_weight: format!("{}.mlp.c_fc.weight", lp),
+                up_bias: Some(format!("{}.mlp.c_fc.bias", lp)),
+                down_weight: format!("{}.mlp.c_proj.weight", lp),
+                down_bias: Some(format!("{}.mlp.c_proj.bias", lp)),
+                gate_weight: None, // GPT-2 uses GELU, not SwiGLU
+                norm_weight: format!("{}.ln_2.weight", lp),
+                norm_bias: Some(format!("{}.ln_2.bias", lp)),
+            },
+        };
+
+        // --- Assemble the final ModelLayout ---
         ModelLayout {
-            // --- Root Level ---
             token_embedding: format!("{}wte.weight", p),
-            position_embedding: Some(format!("{}wpe.weight", p)),
-            token_type_embedding: None,
-            embedding_norm: None,
-            embedding_norm_bias: None,
-
-            final_norm: format!("{}ln_f.weight", p),
-            // GPT-2 uses biases in LayerNorm
-            final_norm_bias: Some(format!("{}ln_f.bias", p)),
-
-            // GPT-2 shares weights with word embeddings
-            lm_head: format!("{}wte.weight", p),
-
-            // --- Attention Templates ---
-            // Note: GPT-2 uses fused QKV projections named `c_attn`
-            attn_q: format!("{}.attn.c_attn.weight", lp),
-            attn_q_bias: Some(format!("{}.attn.c_attn.bias", lp)),
-
-            // k and v are part of c_attn in GPT-2, so we leave templates empty
-            // to indicate the model should use the fused projection logic
-            attn_k: String::new(),
-            attn_k_bias: None,
-            attn_v: String::new(),
-            attn_v_bias: None,
-
-            attn_o: format!("{}.attn.c_proj.weight", lp),
-            attn_o_bias: Some(format!("{}.attn.c_proj.bias", lp)),
-
-            attn_norm: format!("{}.ln_1.weight", lp),
-            attn_norm_bias: Some(format!("{}.ln_1.bias", lp)),
-
-            // --- FFN Templates ---
-            ffn_gate: None, // GPT-2 is not SwiGLU
-            ffn_up: format!("{}.mlp.c_fc.weight", lp),
-            ffn_up_bias: Some(format!("{}.mlp.c_fc.bias", lp)),
-            ffn_down: format!("{}.mlp.c_proj.weight", lp),
-            ffn_down_bias: Some(format!("{}.mlp.c_proj.bias", lp)),
-            ffn_norm: format!("{}.ln_2.weight", lp),
-            ffn_norm_bias: Some(format!("{}.ln_2.bias", lp)),
-
-            // --- Seq2Seq ---
-            cross_attn_q: None,
-            cross_attn_k: None,
-            cross_attn_v: None,
-            cross_attn_o: None,
-            cross_attn_norm: None,
-            cross_attn_q_bias: None,
-            cross_attn_k_bias: None,
-            cross_attn_v_bias: None,
-            cross_attn_o_bias: None,
-            cross_attn_norm_bias: None,
+            lm_head: format!("{}wte.weight", p), // GPT-2 ties weights
+            encoder: None,                       // GPT-2 is decoder-only
+            decoder: Some(DecoderLayout {
+                position_embedding: Some(format!("{}wpe.weight", p)),
+                token_type_embedding: None,
+                embedding_norm_weight: None, // GPT-2 has no embedding norm
+                embedding_norm_bias: None,
+                final_norm_weight: Some(format!("{}ln_f.weight", p)),
+                final_norm_bias: Some(format!("{}ln_f.bias", p)),
+                layer: decoder_layer,
+            }),
         }
     }
 }
@@ -161,11 +154,49 @@ mod tests {
         let meta = config.metadata();
         let layout = config.layout();
 
+        // --- Get the nested decoder layout ---
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("GPT-2 should have a decoder layout");
+        let layer_layout = &decoder_layout.layer;
+
+        // --- Verify Architectural Correctness ---
+        assert!(
+            layout.encoder.is_none(),
+            "GPT-2 is decoder-only, encoder should be None"
+        );
+        assert!(
+            layer_layout.cross_attn.is_none(),
+            "GPT-2 has no cross-attention"
+        );
+
+        // --- Verify Naming Conventions ---
         assert_eq!(meta.hidden_size, 768);
         assert_eq!(layout.token_embedding, "wte.weight");
-        assert_eq!(layout.position_embedding.unwrap(), "wpe.weight");
-        assert_eq!(layout.attn_q.replace("{}", "0"), "h.0.attn.c_attn.weight");
+        assert_eq!(
+            decoder_layout.position_embedding.as_ref().unwrap(),
+            "wpe.weight"
+        );
         assert_eq!(layout.lm_head, "wte.weight");
+
+        // Verify a self-attention name
+        assert_eq!(
+            layer_layout.self_attn.q_weight.replace("{}", "0"),
+            "h.0.attn.c_attn.weight"
+        );
+
+        // Verify an FFN name
+        assert_eq!(
+            layer_layout.ffn.down_weight.replace("{}", "11"),
+            "h.11.mlp.c_proj.weight"
+        );
+
+        // Verify a final norm name
+        assert_eq!(
+            decoder_layout.final_norm_weight.as_ref().unwrap(),
+            "ln_f.weight"
+        );
     }
 
     #[test]
@@ -174,13 +205,47 @@ mod tests {
         let meta = config.metadata();
         let layout = config.layout();
 
+        // --- Get the nested decoder layout ---
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("DistilGPT2 should have a decoder layout");
+        let layer_layout = &decoder_layout.layer;
+
+        // --- Verify Architectural Correctness ---
+        assert!(
+            layout.encoder.is_none(),
+            "DistilGPT2 is decoder-only, encoder should be None"
+        );
+        assert!(
+            layer_layout.cross_attn.is_none(),
+            "DistilGPT2 has no cross-attention"
+        );
+
+        // --- Verify Naming Conventions ---
         assert_eq!(meta.num_layers, 6);
         assert_eq!(layout.token_embedding, "transformer.wte.weight");
-        assert_eq!(layout.position_embedding.unwrap(), "transformer.wpe.weight");
         assert_eq!(
-            layout.ffn_up.replace("{}", "0"),
-            "transformer.h.0.mlp.c_fc.weight"
+            decoder_layout.position_embedding.as_ref().unwrap(),
+            "transformer.wpe.weight"
         );
         assert_eq!(layout.lm_head, "transformer.wte.weight");
+
+        // Verify an FFN name
+        assert_eq!(
+            layer_layout.ffn.up_weight.replace("{}", "0"),
+            "transformer.h.0.mlp.c_fc.weight"
+        );
+
+        // Verify a self-attention name
+        assert_eq!(
+            layer_layout
+                .self_attn
+                .o_bias
+                .as_ref()
+                .unwrap()
+                .replace("{}", "5"),
+            "transformer.h.5.attn.c_proj.bias"
+        );
     }
 }

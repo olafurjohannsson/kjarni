@@ -28,11 +28,14 @@
 //! to inspect the model's configuration (`transpose_ffn_weights` flag) and perform any
 //! necessary transpositions *before* calling this constructor.
 
+use crate::WgpuContext;
 use crate::activations::Activation;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::GpuTensorPool;
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use crate::tensor::DType;
+use crate::traits::FeedForwardLayout;
+use crate::weights::ModelWeights;
+use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -96,37 +99,46 @@ impl GpuFeedForwardWeights {
     }
     pub fn from_layout(
         context: &Arc<WgpuContext>,
-        weights: &crate::weights::ModelWeights,
-        layout: &crate::traits::ModelLayout,
+        weights: &ModelWeights,
+        ffn_layout: &FeedForwardLayout,
         layer_idx: usize,
-        target_dtype: Option<crate::tensor::DType>,
+        target_dtype: Option<DType>,
     ) -> Result<Self> {
-        let idx = layer_idx.to_string();
-        let name = |template: &String| template.replace("{}", &idx);
+        let i_str = &layer_idx.to_string();
+        let label_prefix = format!("layer{}.ffn", layer_idx);
 
-        // Helper for required weights (Up/Intermediate and Down/Output)
-        let load_weight = |template: &String, label: &str| -> Result<GpuTensor> {
-            let raw = weights.get_raw_resolved(&name(template), target_dtype)?;
-            GpuTensor::from_raw(context, &raw, label)
-        };
-
-        // Helper for optional biases (standard in BERT, rare in Llama)
+        // Helper for loading optional biases, which are required for a standard FFN.
         let load_bias = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
-            let n = template.as_ref().ok_or_else(|| {
-                anyhow!("Standard FFN for layer {} requires bias: {}", idx, label)
+            let name = template.as_ref().ok_or_else(|| {
+                anyhow!("Standard FFN layout is missing required bias: {}", label)
             })?;
-            let raw = weights.get_raw_resolved(&n.replace("{}", &idx), target_dtype)?;
-            GpuTensor::from_raw(context, &raw, label)
+            GpuTensor::from_model_weights(
+                context,
+                weights,
+                &name.replace("{}", i_str),
+                target_dtype,
+                &format!("{}.{}", label_prefix, label),
+            )
         };
 
-        // 2. Standard Path (2 weights + 2 biases)
-        let up_t = load_weight(&layout.ffn_up, "ff1_w")?;
-        let up_b = load_bias(&layout.ffn_up_bias, "ff1_b")?;
-        let down_t = load_weight(&layout.ffn_down, "ff2_w")?;
-        let down_b = load_bias(&layout.ffn_down_bias, "ff2_b")?;
+        let up_w = GpuTensor::from_model_weights(
+            context,
+            weights,
+            &ffn_layout.up_weight.replace("{}", i_str),
+            target_dtype,
+            &format!("{}.up_w", label_prefix),
+        )?;
+        let down_w = GpuTensor::from_model_weights(
+            context,
+            weights,
+            &ffn_layout.down_weight.replace("{}", i_str),
+            target_dtype,
+            &format!("{}.down_w", label_prefix),
+        )?;
+        let up_b = load_bias(&ffn_layout.up_bias, "up_b")?;
+        let down_b = load_bias(&ffn_layout.down_bias, "down_b")?;
 
-        // Use the constructor from your snippet
-        Ok(GpuFeedForwardWeights::new(up_t, up_b, down_t, down_b)?)
+        Self::new(up_w, up_b, down_w, down_b)
     }
     /// Creates a new `GpuFeedForwardWeights` container from CPU ndarrays.
     /// This is the recommended "smart" constructor.

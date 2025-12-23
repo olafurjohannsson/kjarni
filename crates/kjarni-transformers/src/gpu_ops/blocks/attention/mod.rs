@@ -1,3 +1,4 @@
+use crate::WgpuContext;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::kernel::Kernel;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
@@ -11,8 +12,10 @@ use crate::gpu_ops::primitives::{
     softmax::GpuSoftmax,
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use crate::tensor::DType;
+use crate::traits::{AttentionLayout, ModelLayout};
+use crate::weights::ModelWeights;
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
 /// GPU tensors for attention weights.
@@ -30,42 +33,98 @@ pub struct GpuAttentionWeights {
 impl GpuAttentionWeights {
     pub fn from_layout(
         context: &Arc<WgpuContext>,
-        weights: &crate::weights::ModelWeights,
-        layout: &crate::traits::ModelLayout,
+        weights: &ModelWeights,
+        attn_layout: &AttentionLayout,
         layer_idx: usize,
-        target_dtype: Option<crate::tensor::DType>,
+        target_dtype: Option<DType>,
+        label_prefix: &str,
     ) -> Result<Self> {
-        let idx = layer_idx.to_string();
+        let i_str = &layer_idx.to_string();
 
-        // Helper to resolve the template string and load the tensor
-        let load = |template: &String, label: &str| -> Result<GpuTensor> {
-            let name = template.replace("{}", &idx);
-            let raw = weights.get_raw_resolved(&name, target_dtype)?;
-            GpuTensor::from_raw(context, &raw, label)
+        // Helper for required fields
+        let load = |template: &str, label: &str| {
+            GpuTensor::from_model_weights(
+                context,
+                weights,
+                &template.replace("{}", i_str),
+                target_dtype,
+                &format!("{}.{}", label_prefix, label),
+            )
         };
 
-        // Helper for optional fields (like biases)
-        let load_opt = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
-            let t = template.as_ref().ok_or_else(|| {
+        // Helper for optional fields
+        let load_opt = |template: &Option<String>, label: &str| {
+            let name = template.as_ref().ok_or_else(|| {
                 anyhow!(
-                    "Attention layout for layer {} is missing required tensor: {}",
-                    idx,
+                    "Attention layout for {} is missing required tensor: {}",
+                    label_prefix,
                     label
                 )
             })?;
-            load(t, label)
+            load(name, label)
         };
 
-        Ok(Self::new(
-            load(&layout.attn_q, "q_w")?,
-            load_opt(&layout.attn_q_bias, "q_b")?,
-            load(&layout.attn_k, "k_w")?,
-            load_opt(&layout.attn_k_bias, "k_b")?,
-            load(&layout.attn_v, "v_w")?,
-            load_opt(&layout.attn_v_bias, "v_b")?,
-            load(&layout.attn_o, "o_w")?,
-            load_opt(&layout.attn_o_bias, "o_b")?,
-        )?)
+        Self::new(
+            load(&attn_layout.q_weight, "q_w")?,
+            load_opt(&attn_layout.q_bias, "q_b")?,
+            load(&attn_layout.k_weight, "k_w")?,
+            load_opt(&attn_layout.k_bias, "k_b")?,
+            load(&attn_layout.v_weight, "v_w")?,
+            load_opt(&attn_layout.v_bias, "v_b")?,
+            load(&attn_layout.o_weight, "o_w")?,
+            load_opt(&attn_layout.o_bias, "o_b")?,
+        )
+    }
+
+    /// High-level constructor for a **decoder's self-attention** block.
+    pub fn from_self_attn_layout(
+        ctx: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        layout: &ModelLayout,
+        layer_index: usize,
+        target_dt: Option<DType>,
+    ) -> Result<Self> {
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .ok_or_else(|| anyhow!("ModelLayout is missing a decoder layout"))?;
+
+        Self::from_layout(
+            ctx,
+            weights,
+            &decoder_layout.layer.self_attn,
+            layer_index,
+            target_dt,
+            &format!("layer{}.self_attn", layer_index),
+        )
+    }
+
+    /// High-level constructor for a **decoder's cross-attention** block.
+    pub fn from_cross_attn_layout(
+        ctx: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        layout: &ModelLayout,
+        layer_index: usize,
+        target_dt: Option<DType>,
+    ) -> Result<Self> {
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .ok_or_else(|| anyhow!("ModelLayout is missing a decoder layout"))?;
+        let cross_attn_layout = decoder_layout
+            .layer
+            .cross_attn
+            .as_ref()
+            .ok_or_else(|| anyhow!("Decoder layout is missing a cross-attention layout"))?;
+
+        Self::from_layout(
+            ctx,
+            weights,
+            cross_attn_layout,
+            layer_index,
+            target_dt,
+            &format!("layer{}.cross_attn", layer_index),
+        )
     }
     pub fn new(
         q_weight: GpuTensor,

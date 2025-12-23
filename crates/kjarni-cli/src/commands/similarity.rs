@@ -43,7 +43,7 @@ pub async fn run(
         eprintln!("Loading encoder '{}'...", model);
     }
 
-    let encoder = SentenceEncoder::from_registry(model_type, None, device, None).await?;
+    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
 
     // 3. Encode both texts
     if !quiet {

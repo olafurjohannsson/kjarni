@@ -8,26 +8,26 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 // --- Workspace Crates ---
 use kjarni_transformers::{
+    WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
     embeddings::{Embeddings, LoadedEmbeddings},
     gpu_ops::{
+        GpuTensor, GpuTensorPool, Kernel,
         blocks::{
-            attention::{GpuAttention, GpuAttentionWeights}, embeddings::{GpuEmbeddingWeights, GpuEmbeddings}, rms_norm::{GpuRMSNorm, GpuRMSNormWeights}, rope::GpuRoPE,
-            GpuFeedForward, GpuFeedForwardWeights,
-            GpuNormalization,
-            GpuNormalizationWeights,
-            GpuSwiGLUFFN,
-            GpuSwiGLUFFNWeights,
-        }, primitives::add::GpuAdd, GpuTensor,
-        GpuTensorPool,
-        Kernel,
+            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
+            GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
+            attention::{GpuAttention, GpuAttentionWeights},
+            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
+            rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
+            rope::GpuRoPE,
+        },
+        primitives::add::GpuAdd,
     },
     models::base::ModelLoadConfig,
     tensor::DType,
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    WgpuContext,
 };
 use ndarray::Array2;
 
@@ -59,29 +59,32 @@ impl LlamaGpuDecoder {
     ) -> Result<Self> {
         let meta = config.metadata();
         let layout = config.layout();
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
 
         // 1. Unified Embedding Loading
         let embs = LoadedEmbeddings::from_layout(context, weights, &layout, load_config)?;
 
         // 2. Final Layer Norm
-        let norm_raw = weights.get_raw_resolved(&layout.final_norm, load_config.target_dtype)?;
+        let final_norm_name = decoder_layout.final_norm_weight.as_ref().unwrap();
         let final_layer_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, meta.norm_eps));
         let final_ln_weights = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
-            GpuTensor::from_raw(context, &norm_raw, "final_norm")?,
+            GpuTensor::from_model_weights(
+                context,
+                weights,
+                final_norm_name,
+                load_config.target_dtype,
+                "final_norm",
+            )?,
         )?);
 
         // 3. Decoder Layers
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
-            // No more casting to dyn DecoderArchitecture!
-            let decoder_layer = Self::build_layer(
-                context.clone(),
-                weights,
-                &meta,
-                &layout,
-                i,
-                load_config,
-            )?;
+            let decoder_layer =
+                Self::build_layer(context.clone(), weights, &meta, &layout, i, load_config)?;
             layers.push(decoder_layer);
         }
 
@@ -107,32 +110,50 @@ impl LlamaGpuDecoder {
         i: usize,
         load_config: ModelLoadConfig,
     ) -> Result<LlamaGpuDecoderLayer> {
+        // Get the specific nested layouts for the decoder.
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
+        let layer_layout = &decoder_layout.layer;
+        let self_attn_layout = &layer_layout.self_attn;
+        let ffn_layout = &layer_layout.ffn;
+
         let idx = i.to_string();
         let name = |template: &String| template.replace("{}", &idx);
         let target_dt = load_config.target_dtype;
 
-        // --- 1. Attention Weights ---
-        let q_t = GpuTensor::from_raw(
+        // --- 1. Attention Weights (Using original GpuTensor::from_raw calls) ---
+        let q_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(&layout.attn_q), target_dt)?,
+            weights,
+            &name(&self_attn_layout.q_weight),
+            target_dt,
             "q",
         )?;
-        let k_t = GpuTensor::from_raw(
+        let k_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(&layout.attn_k), target_dt)?,
+            weights,
+            &name(&self_attn_layout.k_weight),
+            target_dt,
             "k",
         )?;
-        let v_t = GpuTensor::from_raw(
+        let v_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(&layout.attn_v), target_dt)?,
+            weights,
+            &name(&self_attn_layout.v_weight),
+            target_dt,
             "v",
         )?;
-        let o_t = GpuTensor::from_raw(
+        let o_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(&layout.attn_o), target_dt)?,
+            weights,
+            &name(&self_attn_layout.o_weight),
+            target_dt,
             "o",
         )?;
 
+        // Dummy biases for Llama (logic preserved)
         let q_bias = GpuTensor::zeros(&context, vec![meta.hidden_size], DType::F32, "q_b")?;
         let head_dim = meta.hidden_size / meta.num_attention_heads;
         let k_bias = GpuTensor::zeros(
@@ -152,39 +173,51 @@ impl LlamaGpuDecoder {
             o_t,
             q_bias,
         )?;
-        let self_attn_norm_w =
-            GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(GpuTensor::from_raw(
-                &context,
-                &weights.get_raw_resolved(&name(&layout.attn_norm), target_dt)?,
-                "attn_norm",
-            )?)?);
 
-        // --- 2. FFN Weights ---
-        let gate_name = layout.ffn_gate.as_ref().context("SwiGLU requires gate")?;
-        let gate_t = GpuTensor::from_raw(
+        let self_attn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
+            GpuTensor::from_model_weights(
+                &context,
+                weights,
+                &name(&self_attn_layout.norm_weight),
+                target_dt,
+                "attn_norm",
+            )?,
+        )?);
+
+        // --- 2. FFN Weights (Using original GpuTensor::from_raw calls, LOGIC PRESERVED) ---
+        let gate_name = ffn_layout
+            .gate_weight
+            .as_ref()
+            .context("SwiGLU requires gate")?;
+        let gate_t =
+            GpuTensor::from_model_weights(&context, weights, &name(gate_name), target_dt, "gate")?;
+        let up_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(gate_name), target_dt)?,
-            "gate",
-        )?;
-        let up_t = GpuTensor::from_raw(
-            &context,
-            &weights.get_raw_resolved(&name(&layout.ffn_up), target_dt)?,
+            weights,
+            &name(&ffn_layout.up_weight),
+            target_dt,
             "up",
         )?;
-        let down_t = GpuTensor::from_raw(
+        let down_t = GpuTensor::from_model_weights(
             &context,
-            &weights.get_raw_resolved(&name(&layout.ffn_down), target_dt)?,
+            weights,
+            &name(&ffn_layout.down_weight),
+            target_dt,
             "down",
         )?;
 
         let ff_weights =
             GpuFeedForwardWeights::SwiGLU(GpuSwiGLUFFNWeights::new(gate_t, up_t, down_t)?);
-        let ffn_norm_w =
-            GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(GpuTensor::from_raw(
+
+        let ffn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
+            GpuTensor::from_model_weights(
                 &context,
-                &weights.get_raw_resolved(&name(&layout.ffn_norm), target_dt)?,
+                weights,
+                &name(&ffn_layout.norm_weight),
+                target_dt,
                 "ffn_norm",
-            )?)?);
+            )?,
+        )?);
 
         // --- 3. Construct Dedicated Layer ---
         LlamaGpuDecoderLayer::new(

@@ -126,10 +126,16 @@ impl SequenceClassifier {
         let meta = config.metadata();
         let layout = config.layout();
         let load_cfg = load_cfg.unwrap_or_default();
+        let encoder_layout = &layout.encoder.as_ref().ok_or_else(|| {
+            anyhow!(
+                "Model layout for {:?} missing encoder component",
+                model_type
+            )
+        })?;
         // Note: For BERT-style classification, we use the final_norm (Pooler) and lm_head (Classifier)
         let pooler = LinearLayer::from_weights(
             &weights,
-            &layout.final_norm,
+            &encoder_layout.final_norm_weight.as_deref().unwrap(),
             None,
             load_cfg.target_dtype,
             None,

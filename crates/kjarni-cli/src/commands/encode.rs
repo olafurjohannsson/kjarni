@@ -45,7 +45,7 @@ pub async fn run(
 
     // 3. Load encoder
     eprintln!("Loading model '{}'...", model);
-    let encoder = SentenceEncoder::from_registry(model_type, None, device, None).await?;
+    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
 
     // 4. Encode
     if is_batch {

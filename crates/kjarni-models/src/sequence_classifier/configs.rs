@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use kjarni_transformers::activations::Activation;
-use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
+use kjarni_transformers::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata};
 use serde::Deserialize;
 
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
@@ -55,59 +55,59 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             rope_scaling: None,
             scale_embeddings: false,
             extra_pos_embeddings: 0,
-            is_prenorm: false, // BERT uses Post-Norm
+            is_prenorm: false,           // BERT uses Post-Norm
             transpose_ffn_weights: true, // MiniLM quirk
             transpose_attention_weights: false,
         }
     }
 
     fn layout(&self) -> ModelLayout {
+        // --- Define the Encoder's Layer Structure ---
+        let encoder_layer = EncoderLayerLayout {
+            self_attn: AttentionLayout {
+                q_weight: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
+                q_bias: Some("bert.encoder.layer.{}.attention.self.query.bias".to_string()),
+                k_weight: "bert.encoder.layer.{}.attention.self.key.weight".to_string(),
+                k_bias: Some("bert.encoder.layer.{}.attention.self.key.bias".to_string()),
+                v_weight: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
+                v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
+                o_weight: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
+                o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
+                norm_weight: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+                norm_bias: Some(
+                    "bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string(),
+                ),
+            },
+            ffn: FeedForwardLayout {
+                up_weight: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
+                up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
+                down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
+                down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
+                gate_weight: None, // No SwiGLU in BERT/MiniLM
+                norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
+            },
+        };
+
+        // --- Assemble the final ModelLayout ---
         ModelLayout {
-            // Root Level Weights
             token_embedding: "bert.embeddings.word_embeddings.weight".to_string(),
-            position_embedding: Some("bert.embeddings.position_embeddings.weight".to_string()),
-            token_type_embedding: Some("bert.embeddings.token_type_embeddings.weight".to_string()),
-            embedding_norm: Some("bert.embeddings.LayerNorm.weight".to_string()),
-            embedding_norm_bias: Some("bert.embeddings.LayerNorm.bias".to_string()),
-            
-            // For Cross-Encoders, the 'final_norm' is often the Pooler
-            final_norm: "bert.pooler.dense.weight".to_string(),
-            final_norm_bias: None,
-            // The classifier head
+            // For encoder-only models, lm_head is often a separate classifier or pooler.
             lm_head: "classifier.weight".to_string(),
-
-            // Attention Templates
-            attn_q: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
-            attn_q_bias: Some("bert.encoder.layer.{}.attention.self.query.bias".to_string()),
-            attn_k: "bert.encoder.layer.{}.attention.self.key.weight".to_string(),
-            attn_k_bias: Some("bert.encoder.layer.{}.attention.self.key.bias".to_string()),
-            attn_v: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
-            attn_v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
-            attn_o: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
-            attn_o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
-            attn_norm: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
-            attn_norm_bias: Some("bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
-
-            // FFN Templates
-            ffn_gate: None, // No SwiGLU in MiniLM
-            ffn_up: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
-            ffn_up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
-            ffn_down: "bert.encoder.layer.{}.output.dense.weight".to_string(),
-            ffn_down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
-            ffn_norm: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
-            ffn_norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
-
-            // Cross-attention not used in encoder-only MiniLM
-            cross_attn_q: None,
-            cross_attn_k: None,
-            cross_attn_v: None,
-            cross_attn_o: None,
-            cross_attn_norm: None,
-            cross_attn_q_bias: None,
-                cross_attn_k_bias: None,
-                cross_attn_v_bias: None,
-                cross_attn_o_bias: None,
-                cross_attn_norm_bias: None,
+            encoder: Some(EncoderLayout {
+                position_embedding: Some("bert.embeddings.position_embeddings.weight".to_string()),
+                token_type_embedding: Some(
+                    "bert.embeddings.token_type_embeddings.weight".to_string(),
+                ),
+                embedding_norm_weight: Some("bert.embeddings.LayerNorm.weight".to_string()),
+                embedding_norm_bias: Some("bert.embeddings.LayerNorm.bias".to_string()),
+                // For BERT, the "final_norm" is often considered the pooler layer.
+                // If you have a model with a true final norm, you would populate this.
+                final_norm_weight: Some("bert.pooler.dense.weight".to_string()),
+                final_norm_bias: Some("bert.pooler.dense.bias".to_string()), // Pooler has a bias
+                layer: encoder_layer,
+            }),
+            decoder: None, // This is an encoder-only model
         }
     }
 }

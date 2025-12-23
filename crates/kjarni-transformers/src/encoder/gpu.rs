@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
+use crate::Embeddings;
+use crate::WgpuContext;
 use crate::encoder::traits::{GpuEncoder, GpuEncoderInput};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
@@ -11,8 +13,6 @@ use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::models::base::ModelLoadConfig;
 use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
-use crate::Embeddings;
-use crate::WgpuContext;
 
 pub struct GpuTransformerEncoder {
     embedding_weights: GpuEmbeddingWeights,
@@ -35,122 +35,110 @@ impl GpuTransformerEncoder {
     ) -> Result<Self> {
         let target_dt = load_cfg.target_dtype;
 
-        // 1. Load Embeddings for CPU (as a fallback/prefill tool)
+        // Step 1: Get the specific encoder layout from the top-level model layout.
+        let encoder_layout = layout
+            .encoder
+            .as_ref()
+            .context("ModelLayout is missing the required 'encoder' layout")?;
+
+        // 2. Load Embeddings for CPU (as a fallback/prefill tool)
         let cpu_embeddings = Embeddings::from_weights(
             weights,
             &layout.token_embedding,
-            layout.position_embedding.as_deref(),
-            layout.token_type_embedding.as_deref(),
+            encoder_layout.position_embedding.as_deref(),
+            encoder_layout.token_type_embedding.as_deref(),
         )?;
 
-        // 2. Load Embeddings for GPU
-        // Using the generic from_layout helper we discussed
+        // 3. Load Embeddings for GPU
         let embedding_weights = GpuEmbeddingWeights::from_layout(
             &context,
             weights,
             &layout.token_embedding,
-            layout.position_embedding.as_deref(),
-            layout.token_type_embedding.as_deref(),
+            encoder_layout.position_embedding.as_deref(),
+            encoder_layout.token_type_embedding.as_deref(),
             target_dt,
         )?;
         let embeddings = GpuEmbeddings::new(&context)?;
 
-        // 3. Load Embedding LayerNorm (Gamma and Beta)
-        let emb_norm_name = layout
-            .embedding_norm
+        // 4. Load Embedding LayerNorm (Gamma and Beta)
+        let emb_norm_w_name = encoder_layout
+            .embedding_norm_weight
             .as_ref()
-            .context("Encoder requires embedding_norm")?;
-        let emb_norm_bias = layout
+            .context("Encoder layout requires embedding_norm_weight")?;
+        let emb_norm_b_name = encoder_layout
             .embedding_norm_bias
             .as_ref()
-            .context("Encoder requires embedding_norm_bias")?;
+            .context("Encoder layout requires embedding_norm_bias")?;
 
         let embedding_ln_weights = GpuLayerNormWeights::new(
-            GpuTensor::from_raw(
+            GpuTensor::from_model_weights(
                 &context,
-                &weights.get_raw_resolved(emb_norm_name, target_dt)?,
+                weights,
+                emb_norm_w_name,
+                target_dt,
                 "emb_ln_gamma",
             )?,
-            GpuTensor::from_raw(
+            GpuTensor::from_model_weights(
                 &context,
-                &weights.get_raw_resolved(emb_norm_bias, target_dt)?,
+                weights,
+                emb_norm_b_name,
+                target_dt,
                 "emb_ln_beta",
             )?,
         )?;
         let embedding_layer_norm = GpuLayerNorm::new(&context, meta.norm_eps);
 
-        // 4. Build Layers Loop
+        // 5. Build Layers Loop
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
-            let idx = i.to_string();
-            let name = |t: &String| t.replace("{}", &idx);
-            let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &idx));
-
-            // --- Attention Weights ---
-            let self_attn_weights = GpuAttentionWeights::new(
-                GpuTensor::from_raw(
-                    &context,
-                    &weights.get_raw_resolved(&name(&layout.attn_q), target_dt)?,
-                    "q",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.attn_q_bias).unwrap(), target_dt)?,
-                    "q_b",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights.get_raw_resolved(&name(&layout.attn_k), target_dt)?,
-                    "k",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.attn_k_bias).unwrap(), target_dt)?,
-                    "k_b",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights.get_raw_resolved(&name(&layout.attn_v), target_dt)?,
-                    "v",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.attn_v_bias).unwrap(), target_dt)?,
-                    "v_b",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights.get_raw_resolved(&name(&layout.attn_o), target_dt)?,
-                    "o",
-                )?,
-                GpuTensor::from_raw(
-                    &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.attn_o_bias).unwrap(), target_dt)?,
-                    "o_b",
-                )?,
+            // --- Attention Weights (using the reusable constructor) ---
+            let self_attn_weights = GpuAttentionWeights::from_self_attn_layout(
+                &context, weights, &layout, // Pass the whole layout
+                i, target_dt,
             )?;
 
             let self_attn_ln_weights = GpuLayerNormWeights::new(
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     &context,
-                    &weights.get_raw_resolved(&name(&layout.attn_norm), target_dt)?,
+                    weights,
+                    &encoder_layout
+                        .layer
+                        .self_attn
+                        .norm_weight
+                        .replace("{}", &i.to_string()),
+                    target_dt,
                     "attn_ln_g",
                 )?,
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.attn_norm_bias).unwrap(), target_dt)?,
+                    weights,
+                    &encoder_layout
+                        .layer
+                        .self_attn
+                        .norm_bias
+                        .as_ref()
+                        .unwrap()
+                        .replace("{}", &i.to_string()),
+                    target_dt,
                     "attn_ln_b",
                 )?,
             )?;
 
             // --- FFN Weights (Legacy Path for Encoders) ---
-            let up_w_raw = weights.get_array2(&name(&layout.ffn_up))?;
-            let down_w_raw = weights.get_array2(&name(&layout.ffn_down))?;
+            let up_w_raw = weights.get_array2(
+                &encoder_layout
+                    .layer
+                    .ffn
+                    .up_weight
+                    .replace("{}", &i.to_string()),
+            )?;
+            let down_w_raw = weights.get_array2(
+                &encoder_layout
+                    .layer
+                    .ffn
+                    .down_weight
+                    .replace("{}", &i.to_string()),
+            )?;
 
             // Handle Transposition
             let up_w = if meta.transpose_ffn_weights {
@@ -167,26 +155,55 @@ impl GpuTransformerEncoder {
             let ff_weights = GpuFeedForwardWeights::from_ndarrays(
                 &context,
                 &up_w,
-                &weights.get_array1(&opt_name(&layout.ffn_up_bias).unwrap())?,
+                &weights.get_array1(
+                    &encoder_layout
+                        .layer
+                        .ffn
+                        .up_bias
+                        .as_ref()
+                        .unwrap()
+                        .replace("{}", &i.to_string()),
+                )?,
                 &down_w,
-                &weights.get_array1(&opt_name(&layout.ffn_down_bias).unwrap())?,
+                &weights.get_array1(
+                    &encoder_layout
+                        .layer
+                        .ffn
+                        .down_bias
+                        .as_ref()
+                        .unwrap()
+                        .replace("{}", &i.to_string()),
+                )?,
             )?;
 
             let ffn_ln_weights = GpuLayerNormWeights::new(
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     &context,
-                    &weights.get_raw_resolved(&name(&layout.ffn_norm), target_dt)?,
+                    weights,
+                    &encoder_layout
+                        .layer
+                        .ffn
+                        .norm_weight
+                        .replace("{}", &i.to_string()),
+                    target_dt,
                     "ffn_ln_g",
                 )?,
-                GpuTensor::from_raw(
+                GpuTensor::from_model_weights(
                     &context,
-                    &weights
-                        .get_raw_resolved(&opt_name(&layout.ffn_norm_bias).unwrap(), target_dt)?,
+                    weights,
+                    &encoder_layout
+                        .layer
+                        .ffn
+                        .norm_bias
+                        .as_ref()
+                        .unwrap()
+                        .replace("{}", &i.to_string()),
+                    target_dt,
                     "ffn_ln_b",
                 )?,
             )?;
 
-            // 5. Build the Encoder Layer
+            // 6. Build the Encoder Layer
             layers.push(GpuEncoderLayer::new(
                 &context,
                 self_attn_weights,
@@ -194,7 +211,7 @@ impl GpuTransformerEncoder {
                 ff_weights,
                 ffn_ln_weights,
                 meta.activation,
-                &meta, // Pass metadata instead of config
+                &meta,
             )?);
         }
 

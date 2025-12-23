@@ -6,7 +6,7 @@ use crate::{
     weights::ModelWeights,
     WgpuContext,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
 pub struct LoadedEmbeddings {
@@ -23,7 +23,9 @@ impl LoadedEmbeddings {
         load_config: ModelLoadConfig,
     ) -> Result<Self> {
         let word_name = &layout.token_embedding;
-        let pos_name = layout.position_embedding.as_deref();
+        let encoder_layout = layout.encoder.as_ref().context("ModelLayout is missing the required 'encoder' layout")?;
+
+        let pos_name = encoder_layout.position_embedding.as_deref();
         // Llama doesn't have type embeddings, but BERT does
         let type_name = None;
 

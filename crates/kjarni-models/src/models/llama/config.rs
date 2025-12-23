@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use kjarni_transformers::models::base::RopeScalingConfig;
 use kjarni_transformers::{
     activations::Activation,
-    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    traits::{ModelConfig, ModelLayout, ModelMetadata, DecoderLayout, DecoderLayerLayout, AttentionLayout, FeedForwardLayout},
     weights::WeightLoader,
 };
 use serde::Deserialize;
@@ -195,64 +195,51 @@ impl ModelConfig for LlamaConfig {
     }
 
     fn layout(&self) -> ModelLayout {
+        // --- Define the Decoder's Layer Structure ---
+        let decoder_layer = DecoderLayerLayout {
+            self_attn: AttentionLayout {
+                q_weight: "model.layers.{}.self_attn.q_proj.weight".to_string(),
+                q_bias: None,
+                k_weight: "model.layers.{}.self_attn.k_proj.weight".to_string(),
+                k_bias: None,
+                v_weight: "model.layers.{}.self_attn.v_proj.weight".to_string(),
+                v_bias: None,
+                o_weight: "model.layers.{}.self_attn.o_proj.weight".to_string(),
+                o_bias: None,
+                norm_weight: "model.layers.{}.input_layernorm.weight".to_string(),
+                norm_bias: None,
+            },
+            cross_attn: None, // Llama is decoder-only
+            ffn: FeedForwardLayout {
+                up_weight: "model.layers.{}.mlp.up_proj.weight".to_string(),
+                up_bias: None,
+                down_weight: "model.layers.{}.mlp.down_proj.weight".to_string(),
+                down_bias: None,
+                gate_weight: Some("model.layers.{}.mlp.gate_proj.weight".to_string()), // Llama uses SwiGLU
+                norm_weight: "model.layers.{}.post_attention_layernorm.weight".to_string(),
+                norm_bias: None,
+            },
+        };
+
+        // --- Assemble the final ModelLayout ---
         ModelLayout {
-            // --- Root Level ---
             token_embedding: "model.embed_tokens.weight".to_string(),
-            position_embedding: None, // Llama uses RoPE (functional), not a table
-            token_type_embedding: None,
-            embedding_norm: None,
-            embedding_norm_bias: None,
-
-            final_norm: "model.norm.weight".to_string(),
-            final_norm_bias: None,
-
-            // Logic for Llama 3.2 1B (Tied) vs 8B (Separate)
             lm_head: if self.tie_word_embeddings {
                 "model.embed_tokens.weight"
             } else {
                 "lm_head.weight"
             }
             .to_string(),
-
-            // --- Attention Templates ---
-            attn_q: "model.layers.{}.self_attn.q_proj.weight".to_string(),
-            attn_q_bias: None,
-
-            attn_k: "model.layers.{}.self_attn.k_proj.weight".to_string(),
-            attn_k_bias: None,
-
-            attn_v: "model.layers.{}.self_attn.v_proj.weight".to_string(),
-            attn_v_bias: None,
-
-            attn_o: "model.layers.{}.self_attn.o_proj.weight".to_string(),
-            attn_o_bias: None,
-
-            attn_norm: "model.layers.{}.input_layernorm.weight".to_string(),
-            attn_norm_bias: None,
-
-            // --- FFN Templates (SwiGLU) ---
-            // Llama always uses the Gate projection for SwiGLU
-            ffn_gate: Some("model.layers.{}.mlp.gate_proj.weight".to_string()),
-            ffn_up: "model.layers.{}.mlp.up_proj.weight".to_string(),
-            ffn_up_bias: None,
-
-            ffn_down: "model.layers.{}.mlp.down_proj.weight".to_string(),
-            ffn_down_bias: None,
-
-            ffn_norm: "model.layers.{}.post_attention_layernorm.weight".to_string(),
-            ffn_norm_bias: None,
-
-            // --- Seq2Seq (Not used in Llama) ---
-            cross_attn_q: None,
-            cross_attn_k: None,
-            cross_attn_v: None,
-            cross_attn_o: None,
-            cross_attn_norm: None,
-            cross_attn_q_bias: None,
-            cross_attn_k_bias: None,
-            cross_attn_v_bias: None,
-            cross_attn_o_bias: None,
-            cross_attn_norm_bias: None,
+            encoder: None, // Llama is decoder-only
+            decoder: Some(DecoderLayout {
+                position_embedding: None, // Llama uses RoPE, not learned positional embeddings
+                token_type_embedding: None,
+                embedding_norm_weight: None, // Llama has no embedding norm
+                embedding_norm_bias: None,
+                final_norm_weight: Some("model.norm.weight".to_string()),
+                final_norm_bias: None,
+                layer: decoder_layer,
+            }),
         }
     }
 }

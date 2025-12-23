@@ -84,7 +84,7 @@ pub async fn run(
         eprintln!("Loading model '{}'...", model);
     }
 
-    let encoder = CrossEncoder::from_registry(model_type, None, device, None).await?;
+    let encoder = CrossEncoder::from_registry(model_type, None, device, None, None).await?;
 
     // 4. Rerank
     if !quiet {

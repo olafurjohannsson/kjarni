@@ -2,13 +2,23 @@
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
-use ndarray::{s, Array2, Array3, Axis};
+use anyhow::{Result, anyhow};
+use ndarray::{Array2, Array3, Axis, s};
 
 use crate::models::llama::config::LlamaConfig;
 
 use kjarni_transformers::{
-    WgpuContext, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, normalization::RMSNorm, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
+    WgpuContext,
+    cache::CpuKVCache,
+    decoder::prelude::*,
+    embeddings::Embeddings,
+    feedforward::SwiGluFeedForward,
+    linear_layer::LinearLayer,
+    normalization::RMSNorm,
+    rope::RoPE,
+    tensor::DType,
+    traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 pub struct LlamaCpuDecoder {
@@ -87,9 +97,22 @@ impl LlamaCpuDecoder {
     ) -> Result<Self> {
         let metadata = config.metadata();
         let layout = config.layout();
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
 
-        let embeddings = Embeddings::from_weights(&weights, &layout.token_embedding, None, None)?;
-        let final_norm = RMSNorm::new(weights.get_array1(&layout.final_norm)?, metadata.norm_eps);
+        let embeddings = Embeddings::from_weights(
+            weights,
+            &layout.token_embedding,
+            decoder_layout.position_embedding.as_deref(), // Correctly access nested field
+            decoder_layout.token_type_embedding.as_deref(),
+        )?;
+
+        let final_norm = RMSNorm::new(
+            weights.get_array1(decoder_layout.final_norm_weight.as_ref().unwrap())?,
+            metadata.norm_eps,
+        );
 
         let mut layers = Vec::with_capacity(metadata.num_layers);
         for i in 0..config.num_hidden_layers {
@@ -119,8 +142,17 @@ impl LlamaCpuDecoder {
         rope: Arc<RoPE>,
         target_dtype: Option<DType>,
     ) -> Result<LlamaDecoderLayer> {
+        // Get the specific nested layouts for the decoder.
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
+        let layer_layout = &decoder_layout.layer;
+        let self_attn_layout = &layer_layout.self_attn;
+        let ffn_layout = &layer_layout.ffn;
+
         let idx = i.to_string();
-        let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::Faer);
+        let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::CustomSimd); // Recommended default
 
         // Helper to replace the index template "{}" with the actual layer index
         let name = |template: &String| template.replace("{}", &idx);
@@ -128,28 +160,28 @@ impl LlamaCpuDecoder {
         // --- 1. Load Attention Weights ---
         let q = LinearLayer::from_weights(
             weights,
-            &name(&layout.attn_q),
+            &name(&self_attn_layout.q_weight),
             None,
             target_dtype,
             strategy,
         )?;
         let k = LinearLayer::from_weights(
             weights,
-            &name(&layout.attn_k),
+            &name(&self_attn_layout.k_weight),
             None,
             target_dtype,
             strategy,
         )?;
         let v = LinearLayer::from_weights(
             weights,
-            &name(&layout.attn_v),
+            &name(&self_attn_layout.v_weight),
             None,
             target_dtype,
             strategy,
         )?;
         let o = LinearLayer::from_weights(
             weights,
-            &name(&layout.attn_o),
+            &name(&self_attn_layout.o_weight),
             None,
             target_dtype,
             strategy,
@@ -166,9 +198,8 @@ impl LlamaCpuDecoder {
         );
 
         // --- 2. Load FFN Weights ---
-        // Llama uses SwiGLU, so gate_weight is required
-        let gate_name = layout
-            .ffn_gate
+        let gate_name = ffn_layout
+            .gate_weight
             .as_ref()
             .ok_or_else(|| anyhow!("Llama architecture requires ffn_gate for SwiGLU"))?;
 
@@ -176,14 +207,14 @@ impl LlamaCpuDecoder {
             LinearLayer::from_weights(weights, &name(gate_name), None, target_dtype, strategy)?;
         let up = LinearLayer::from_weights(
             weights,
-            &name(&layout.ffn_up),
+            &name(&ffn_layout.up_weight),
             None,
             target_dtype,
             strategy,
         )?;
         let down = LinearLayer::from_weights(
             weights,
-            &name(&layout.ffn_down),
+            &name(&ffn_layout.down_weight),
             None,
             target_dtype,
             strategy,
@@ -192,9 +223,14 @@ impl LlamaCpuDecoder {
         let feed_forward = SwiGluFeedForward::new(gate, up, down);
 
         // --- 3. Load Norms ---
-        let attention_norm =
-            RMSNorm::new(weights.get_array1(&name(&layout.attn_norm))?, meta.norm_eps);
-        let ffn_norm = RMSNorm::new(weights.get_array1(&name(&layout.ffn_norm))?, meta.norm_eps);
+        let attention_norm = RMSNorm::new(
+            weights.get_array1(&name(&self_attn_layout.norm_weight))?,
+            meta.norm_eps,
+        );
+        let ffn_norm = RMSNorm::new(
+            weights.get_array1(&name(&ffn_layout.norm_weight))?,
+            meta.norm_eps,
+        );
 
         Ok(LlamaDecoderLayer {
             attention,

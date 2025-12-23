@@ -63,7 +63,7 @@ pub async fn run(
         eprintln!("Loading classifier '{}'...", model);
     }
 
-    let classifier = SequenceClassifier::from_registry(model_type, None, device, None).await?;
+    let classifier = SequenceClassifier::from_registry(model_type, None, device, None, None).await?;
 
     // 3. Handle custom labels for zero-shot
     let predictions = if let Some(label_str) = labels {

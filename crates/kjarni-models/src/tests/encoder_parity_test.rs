@@ -171,43 +171,87 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         "BART must use position offset 2"
     );
 
-    // ========================================================================
-    // WEIGHT NAMING SANITY CHECKS (Layout)
-    // ========================================================================
+    // Get the nested layouts for both CPU and GPU models.
+    let cpu_encoder_layout = cpu_model
+        .layout
+        .encoder
+        .as_ref()
+        .expect("CPU model requires encoder layout");
+    let cpu_decoder_layout = cpu_model
+        .layout
+        .decoder
+        .as_ref()
+        .expect("CPU model requires decoder layout");
+    let gpu_encoder_layout = gpu_model
+        .layout
+        .encoder
+        .as_ref()
+        .expect("GPU model requires encoder layout");
+    let gpu_decoder_layout = gpu_model
+        .layout
+        .decoder
+        .as_ref()
+        .expect("GPU model requires decoder layout");
 
     // 1. Check Shared weights
     assert_eq!(
         cpu_model.layout.token_embedding,
         gpu_model.layout.token_embedding
     );
+    assert_eq!(cpu_model.layout.lm_head, gpu_model.layout.lm_head);
 
-    // 2. Check for "Llama leaks" (Ensure SwiGLU isn't accidentally enabled)
+    // 2. Check for "Llama leaks" (Ensure SwiGLU isn't accidentally enabled in either encoder or decoder)
     assert!(
-        cpu_model.layout.ffn_gate.is_none(),
-        "BART should not have a SwiGLU gate"
+        cpu_encoder_layout.layer.ffn.gate_weight.is_none(),
+        "BART encoder should not have a SwiGLU gate"
     );
     assert!(
-        gpu_model.layout.ffn_gate.is_none(),
-        "BART should not have a SwiGLU gate"
+        cpu_decoder_layout.layer.ffn.gate_weight.is_none(),
+        "BART decoder should not have a SwiGLU gate"
+    );
+    assert!(
+        gpu_encoder_layout.layer.ffn.gate_weight.is_none(),
+        "BART GPU encoder should not have a SwiGLU gate"
+    );
+    assert!(
+        gpu_decoder_layout.layer.ffn.gate_weight.is_none(),
+        "BART GPU decoder should not have a SwiGLU gate"
     );
 
     // 3. Check Attention Bias names (Ensure they aren't empty)
+    // We check one from the encoder and one from the decoder to be thorough.
     assert!(
-        !cpu_model.layout.attn_q_bias.as_ref().unwrap().is_empty(),
-        "BART requires attention biases"
+        cpu_encoder_layout.layer.self_attn.q_bias.is_some(),
+        "BART encoder requires attention biases"
     );
     assert!(
-        !gpu_model.layout.attn_norm_bias.as_ref().unwrap().is_empty(),
-        "BART requires norm biases"
+        cpu_decoder_layout.layer.self_attn.norm_bias.is_some(),
+        "BART decoder requires norm biases"
+    );
+    // Also check the GPU side for consistency
+    assert!(
+        gpu_encoder_layout.layer.self_attn.q_bias.is_some(),
+        "BART GPU encoder requires attention biases"
+    );
+    assert!(
+        gpu_decoder_layout.layer.self_attn.norm_bias.is_some(),
+        "BART GPU decoder requires norm biases"
     );
 
     // 4. Check Cross-Attention Templates (If used in the test)
-    if cpu_model.layout.cross_attn_q.is_some() {
-        assert_eq!(cpu_model.layout.cross_attn_q, gpu_model.layout.cross_attn_q);
-        assert_eq!(
-            cpu_model.layout.cross_attn_q_bias,
-            gpu_model.layout.cross_attn_q_bias
+    let cpu_cross_attn_layout = cpu_decoder_layout.layer.cross_attn.as_ref();
+    let gpu_cross_attn_layout = gpu_decoder_layout.layer.cross_attn.as_ref();
+
+    if cpu_cross_attn_layout.is_some() {
+        assert!(
+            gpu_cross_attn_layout.is_some(),
+            "GPU layout should also have cross-attention"
         );
+        let cpu_cross = cpu_cross_attn_layout.unwrap();
+        let gpu_cross = gpu_cross_attn_layout.unwrap();
+
+        assert_eq!(cpu_cross.q_weight, gpu_cross.q_weight);
+        assert_eq!(cpu_cross.q_bias, gpu_cross.q_bias);
     }
 
     log::info!("✓ Metadata and Layout verified for both CPU and GPU");
