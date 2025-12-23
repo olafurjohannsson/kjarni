@@ -3,7 +3,7 @@
 //! Takes two texts as input and outputs a relevance score.
 //! Used for reranking search results or computing pairwise similarity.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ndarray::Array2;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,23 +12,23 @@ use tokenizers::Tokenizer;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
+    WgpuContext,
     cache::Cache,
     encoder::{
-        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead}, traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderInput, GpuEncoderOps}, CpuEncoder, CpuTransformerEncoder,
-        GpuEncoder,
-        GpuTransformerEncoder,
+        CpuEncoder, CpuTransformerEncoder, GpuEncoder, GpuTransformerEncoder,
+        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
+        traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderInput, GpuEncoderOps},
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
-    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
+    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
     traits::Device,
     weights::ModelWeights,
-    WgpuContext,
 };
 mod configs;
 pub use configs::MiniLMCrossEncoderConfig;
 use kjarni_transformers::models::base::ModelLoadConfig;
-use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
+use kjarni_transformers::traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata};
 
 /// A generic sequence classifier for running models like BERT and RoBERTa on classification tasks.
 ///
@@ -47,6 +47,7 @@ pub struct SequenceClassifier {
     context: Option<Arc<WgpuContext>>,
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
+    config: Arc<dyn ModelConfig>,
 }
 
 impl SequenceClassifier {
@@ -91,7 +92,7 @@ impl SequenceClassifier {
         download_model_files(&model_dir, &info.paths).await?;
 
         // Load from local path
-        Self::from_pretrained(&model_dir, model_type, device, context)
+        Self::from_pretrained(&model_dir, model_type, device, context, load_cfg)
     }
 
     /// Create cross-encoder from local model directory
@@ -100,6 +101,7 @@ impl SequenceClassifier {
         model_type: ModelType,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        load_cfg: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!(
@@ -114,37 +116,45 @@ impl SequenceClassifier {
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         // Load encoder
-        let config = match model_type {
+        let config: Arc<dyn ModelConfig> = match model_type {
             ModelType::MiniLML6V2CrossEncoder => {
                 let config = Arc::new(MiniLMCrossEncoderConfig::from_json(&weights.config_json)?);
                 config
             }
             _ => return Err(anyhow!("Unsupported cross-encoder: {:?}", model_type)),
         };
+        let meta = config.metadata();
+        let layout = config.layout();
+        let load_cfg = load_cfg.unwrap_or_default();
+        // Note: For BERT-style classification, we use the final_norm (Pooler) and lm_head (Classifier)
+        let pooler = LinearLayer::from_weights(
+            &weights,
+            &layout.final_norm,
+            None,
+            load_cfg.target_dtype,
+            None,
+        )?;
+        let classifier = LinearLayer::from_weights(
+            &weights,
+            &layout.lm_head,
+            None,
+            load_cfg.target_dtype,
+            None,
+        )?;
+
         let mut cpu_encoder = None;
         let mut gpu_encoder = None;
         let mut cpu_head = None;
         let mut gpu_head = None;
 
-        // --- Logic to load weights is now unified before the match statement ---
-        let pooler = LinearLayer::from_weights(
-            &weights,
-            "bert.pooler.dense.weight",
-            Some("bert.pooler.dense.bias"),
-            None,
-            None,
-        )?;
-        let classifier = LinearLayer::from_weights(
-            &weights,
-            "classifier.weight",
-            Some("classifier.bias"),
-            None,
-            None,
-        )?;
-
         match device {
             Device::Cpu => {
-                cpu_encoder = Some(CpuTransformerEncoder::new(&weights, config.clone())?);
+                cpu_encoder = Some(CpuTransformerEncoder::new(
+                    &weights,
+                    meta.clone(),
+                    layout.clone(),
+                    load_cfg,
+                )?);
                 cpu_head = Some(CpuSequenceClassificationHead::new(
                     Some(pooler),
                     classifier,
@@ -156,11 +166,12 @@ impl SequenceClassifier {
                     .ok_or_else(|| anyhow!("WGPU context required"))?;
                 gpu_encoder = Some(GpuTransformerEncoder::new(
                     &weights,
-                    config.clone(),
                     ctx.clone(),
+                    meta.clone(),
+                    layout.clone(),
+                    load_cfg,
                 )?);
 
-                // Use the to_gpu() helpers you already have!
                 gpu_head = Some(GpuSequenceClassificationHead::new(
                     &ctx,
                     Some(pooler.to_gpu(&ctx)?),
@@ -171,7 +182,7 @@ impl SequenceClassifier {
             }
         }
         let truncation_params = tokenizers::TruncationParams {
-            max_length: config.max_position_embeddings(),
+            max_length: meta.max_seq_len,
             ..Default::default()
         };
 
@@ -193,6 +204,8 @@ impl SequenceClassifier {
             model_type,
             device,
             context,
+            meta,
+            layout,
         })
     }
 
@@ -401,47 +414,49 @@ impl SequenceClassifier {
 
     /// Get the maximum sequence length
     pub fn max_seq_length(&self) -> usize {
-        self.config.max_position_embeddings()
+        self.meta.max_seq_len
     }
 }
 
 impl LanguageModel for SequenceClassifier {
+    // Implement same getters as SentenceEncoder using self.meta
+    fn vocab_size(&self) -> usize {
+        self.meta.vocab_size
+    }
+    fn hidden_size(&self) -> usize {
+        self.meta.hidden_size
+    }
+    fn num_layers(&self) -> usize {
+        self.meta.num_layers
+    }
+    fn num_heads(&self) -> usize {
+        self.meta.num_attention_heads
+    }
+    fn context_size(&self) -> usize {
+        self.meta.max_seq_len
+    }
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
-    fn context_size(&self) -> usize {
-        todo!()
-    }
-    fn forced_bos_token_id(&self) -> Option<u32> {
-        todo!()
-    }
-    fn pad_token_id(&self) -> Option<u32> {
-        todo!()
-    }
-    fn vocab_size(&self) -> usize {
-        todo!()
-    }
-    fn hidden_size(&self) -> usize {
-        todo!()
-    }
-    fn num_heads(&self) -> usize {
-        todo!()
-    }
-    fn num_layers(&self) -> usize {
-        todo!()
+    fn bos_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[CLS]")
     }
     fn eos_token_id(&self) -> Option<u32> {
-        todo!()
+        self.tokenizer.token_to_id("[SEP]")
     }
-    fn bos_token_id(&self) -> Option<u32> {
-        todo!()
+    fn pad_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[PAD]")
     }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
+
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
-        panic!("SequenceClassifiers do not use a KV cache.")
+        Err(anyhow!("Sequence Classifiers do not use a KV cache."))
     }
 }
 
-impl TransformerModel for SequenceClassifier {
+impl InferenceModel for SequenceClassifier {
     fn device(&self) -> Device {
         self.device
     }

@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         offload_embeddings: false,
         offload_lm_head: false,
         target_dtype: None,
+        ..Default::default()
     };
     // let model_gpu = LlamaModel::from_registry(
     //     ModelType::Llama3_2_1B,
@@ -108,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         model_path,
         Device::Cpu,
         None, // No WgpuContext for CPU
-        Some(d), // Your LoadConfig
+        None,
     )?;
     let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config).await?;

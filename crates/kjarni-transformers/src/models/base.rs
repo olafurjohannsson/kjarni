@@ -4,7 +4,7 @@
 //! the low-level architecture traits in `traits.rs`.
 
 pub use crate::tensor::DType;
-use crate::traits::InferenceModel;
+use crate::{gpu_ops::GpuTensor, traits::InferenceModel};
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -32,12 +32,31 @@ pub enum AutoregressiveLoop {
     Legacy,
 }
 
+#[derive(Debug)]
+pub enum ModelInput<'a> {
+    /// Token IDs on GPU. Shape: [batch, seq]
+    TokensGpu(&'a GpuTensor),
+
+    /// Token IDs on CPU. Shape: [batch, seq]
+    /// We use ArrayView2 to handle both flat slices and 2D arrays.
+    TokensCpu(ndarray::ArrayView2<'a, u32>),
+
+    /// Pre-computed hidden states on GPU. Shape: [batch, seq, hidden]
+    HiddenGpu(&'a GpuTensor),
+
+    /// Pre-computed hidden states on CPU. Shape: [batch, seq, hidden]
+    HiddenCpu(ndarray::ArrayView3<'a, f32>),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ModelLoadConfig {
     pub offload_embeddings: bool,
     pub offload_lm_head: bool,
     pub gpu_layers: Option<usize>,
     pub target_dtype: Option<DType>, // User override
+    pub gpu_layer_range: Option<(usize, usize)>,
+    pub max_batch_size: Option<usize>,
+    pub max_sequence_length: Option<usize>,
 }
 
 impl Default for ModelLoadConfig {
@@ -47,7 +66,67 @@ impl Default for ModelLoadConfig {
             offload_lm_head: false,
             gpu_layers: None,
             target_dtype: None, // Default to "detect from file"
+            gpu_layer_range: None,
+            max_batch_size: None,
+            max_sequence_length: None,
         }
+    }
+}
+
+impl ModelLoadConfig {
+    /// Full GPU execution (default, maximum performance)
+    pub fn full_gpu() -> Self {
+        Self::default()
+    }
+
+    /// CPU embeddings, GPU layers (saves ~500MB-2GB VRAM)
+    pub fn set_offload_embeddings() -> Self {
+        Self {
+            offload_embeddings: true,
+            ..Default::default()
+        }
+    }
+
+    /// Quantized model loading
+    pub fn quantized(dtype: DType) -> Self {
+        Self {
+            target_dtype: Some(dtype),
+            ..Default::default()
+        }
+    }
+
+    /// Partial GPU execution: only layers [start, end) on GPU
+    pub fn partial_gpu(start: usize, end: usize) -> Self {
+        Self {
+            gpu_layer_range: Some((start, end)),
+            ..Default::default()
+        }
+    }
+
+    // Builder methods
+    pub fn with_offload_embeddings(mut self, offload: bool) -> Self {
+        self.offload_embeddings = offload;
+        self
+    }
+
+    pub fn with_gpu_layer_range(mut self, start: usize, end: usize) -> Self {
+        self.gpu_layer_range = Some((start, end));
+        self
+    }
+
+    pub fn with_target_dtype(mut self, dtype: DType) -> Self {
+        self.target_dtype = Some(dtype);
+        self
+    }
+
+    pub fn with_max_batch_size(mut self, size: usize) -> Self {
+        self.max_batch_size = Some(size);
+        self
+    }
+
+    pub fn with_max_sequence_length(mut self, len: usize) -> Self {
+        self.max_sequence_length = Some(len);
+        self
     }
 }
 

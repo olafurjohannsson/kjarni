@@ -52,6 +52,7 @@ impl ModelConfig for MiniLMConfig {
             extra_pos_embeddings: 0,
             is_prenorm: false, // BERT-style
             transpose_ffn_weights: true,
+            transpose_attention_weights: false,
         }
     }
 
@@ -63,6 +64,7 @@ impl ModelConfig for MiniLMConfig {
             embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
             embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
             final_norm: "encoder.layer.5.output.LayerNorm.weight".to_string(), // Placeholder
+            final_norm_bias: None,
             lm_head: "cls.predictions.decoder.weight".to_string(),
 
             attn_q: "encoder.layer.{}.attention.self.query.weight".to_string(),
@@ -89,6 +91,11 @@ impl ModelConfig for MiniLMConfig {
             cross_attn_v: None,
             cross_attn_o: None,
             cross_attn_norm: None,
+            cross_attn_q_bias: None,
+            cross_attn_k_bias: None,
+            cross_attn_v_bias: None,
+            cross_attn_o_bias: None,
+            cross_attn_norm_bias: None,
         }
     }
 }
@@ -136,6 +143,7 @@ impl ModelConfig for MPNetConfig {
             extra_pos_embeddings: 0,
             is_prenorm: false,
             transpose_ffn_weights: false,
+            transpose_attention_weights: false,
         }
     }
 
@@ -147,6 +155,7 @@ impl ModelConfig for MPNetConfig {
             embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
             embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
             final_norm: "mpnet.pooler.dense.weight".to_string(),
+            final_norm_bias: None,
             lm_head: "classifier.weight".to_string(),
 
             attn_q: "mpnet.encoder.layer.{}.attention.attn.q.weight".to_string(),
@@ -173,6 +182,11 @@ impl ModelConfig for MPNetConfig {
             cross_attn_v: None,
             cross_attn_o: None,
             cross_attn_norm: None,
+            cross_attn_q_bias: None,
+            cross_attn_k_bias: None,
+            cross_attn_v_bias: None,
+            cross_attn_o_bias: None,
+            cross_attn_norm_bias: None,
         }
     }
 }
@@ -219,6 +233,7 @@ impl ModelConfig for DistilBERTConfig {
             extra_pos_embeddings: 0,
             is_prenorm: false,
             transpose_ffn_weights: true,
+            transpose_attention_weights: false,
         }
     }
 
@@ -232,6 +247,7 @@ impl ModelConfig for DistilBERTConfig {
             embedding_norm: Some("distilbert.embeddings.LayerNorm.weight".to_string()),
             embedding_norm_bias: Some("distilbert.embeddings.LayerNorm.bias".to_string()),
             final_norm: "".to_string(),
+            final_norm_bias: None,
             lm_head: "vocab_projector.weight".to_string(),
 
             attn_q: "distilbert.transformer.layer.{}.attention.q_lin.weight".to_string(),
@@ -260,6 +276,11 @@ impl ModelConfig for DistilBERTConfig {
             cross_attn_v: None,
             cross_attn_o: None,
             cross_attn_norm: None,
+            cross_attn_q_bias: None,
+            cross_attn_k_bias: None,
+            cross_attn_v_bias: None,
+            cross_attn_o_bias: None,
+            cross_attn_norm_bias: None,
         }
     }
 }

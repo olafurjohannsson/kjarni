@@ -1,4 +1,6 @@
 use super::*;
+use crate::Device::Cpu;
+use crate::WgpuContext;
 use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
@@ -14,15 +16,13 @@ use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
 use crate::rope::RoPE as CpuRoPE;
 use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
-use crate::Device::Cpu;
-use crate::WgpuContext;
 // New Traits
 use anyhow::Result;
 use common::{
     assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context, read_gpu_tensor_to_vec,
 };
 use ndarray::{Array, Array1, Array2, Array3, Array4, Ix4};
-use ndarray_rand::{rand_distr::Uniform, RandomExt};
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::sync::Arc;
 
 #[path = "../../../../tests/common.rs"]
@@ -59,6 +59,7 @@ impl ModelConfig for TestLlamaConfig {
             extra_pos_embeddings: 0,
             is_prenorm: true,
             transpose_ffn_weights: false,
+            transpose_attention_weights: false,
         }
     }
 
@@ -70,6 +71,7 @@ impl ModelConfig for TestLlamaConfig {
             embedding_norm: None,
             embedding_norm_bias: None,
             final_norm: "norm.weight".to_string(),
+            final_norm_bias: None,
             lm_head: "lm_head.weight".to_string(),
 
             // Templates for the tests
@@ -97,6 +99,11 @@ impl ModelConfig for TestLlamaConfig {
             cross_attn_v: None,
             cross_attn_o: None,
             cross_attn_norm: None,
+            cross_attn_q_bias: None,
+            cross_attn_k_bias: None,
+            cross_attn_v_bias: None,
+            cross_attn_o_bias: None,
+            cross_attn_norm_bias: None,
         }
     }
 }
@@ -268,21 +275,9 @@ fn test_decoder_attention_matches_multihead_attention() -> Result<()> {
 
     let mask = Array2::<f32>::ones((batch_size, seq_len));
 
-    let (mha_output, _, _) = mha.forward_with_cache(
-        &input,
-        None,
-        Some(&mask),
-        true,
-        None,
-        None,
-    )?;
+    let (mha_output, _, _) = mha.forward_with_cache(&input, None, Some(&mask), true, None, None)?;
 
-    let (da_output, _, _) = da.forward(
-        &input,
-        Some(&mask),
-        None,
-        None,
-    )?;
+    let (da_output, _, _) = da.forward(&input, Some(&mask), None, None)?;
 
     let diff = (&mha_output - &da_output).mapv(|x| x.abs());
     let max_diff = diff.iter().cloned().fold(0.0f32, f32::max);
@@ -303,11 +298,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
     let up_w_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-0.1, 0.1));
     let down_w_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-0.1, 0.1));
 
-    let cpu_ffn = SwiGluFeedForward::new(
-        gate_w_cpu.clone(),
-        up_w_cpu.clone(),
-        down_w_cpu.clone(),
-    );
+    let cpu_ffn = SwiGluFeedForward::new(gate_w_cpu.clone(), up_w_cpu.clone(), down_w_cpu.clone());
 
     let gpu_ffn_weights = GpuSwiGLUFFNWeights::new(
         GpuTensor::from_ndarray(&context, &gate_w_cpu)?,
@@ -345,7 +336,8 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
         &output_gpu_3d,
         "SwiGLU FFN Parity",
         1e-4,
-    ).await;
+    )
+    .await;
 
     Ok(())
 }
@@ -392,7 +384,8 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
         position_offset,
         &mut pool,
         Some(&gpu_rope_instance),
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }
@@ -497,7 +490,7 @@ pub async fn forward_llama_with_debug(
         "attn_block_output",
         tolerance,
     )
-        .await;
+    .await;
     let residual_2_gpu = &attn_block_output_gpu;
     let ln2_out_gpu = temp.get(residual_2_gpu.shape().to_vec());
     gpu_layer.ffn_norm.encode(
@@ -547,7 +540,7 @@ pub async fn forward_llama_with_debug(
         "final_output",
         tolerance,
     )
-        .await;
+    .await;
     log::info!("✓ Step 6: Final layer output matches CPU.");
 
     Ok(final_output_gpu)
@@ -698,7 +691,7 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
         "GpuRepeatKV Kernel vs CPU Logic",
         1e-6, // Use a very small tolerance
     )
-        .await;
+    .await;
 
     println!("✓ GpuRepeatKV kernel is correct!");
 
@@ -845,7 +838,7 @@ async fn test_rope_parity_single_token() -> Result<()> {
         "RoPE single token",
         1e-5,
     )
-        .await;
+    .await;
 
     Ok(())
 }

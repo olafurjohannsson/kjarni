@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         None, // Use default cache dir
         Device::Cpu,
         None, //Some(context.clone()), // No WGPU context needed for CPU
-        Some(d),
+        None,
     )
     .await?;
 

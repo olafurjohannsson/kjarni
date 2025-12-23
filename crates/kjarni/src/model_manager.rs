@@ -41,7 +41,7 @@ impl ModelManager {
         };
 
         if guard.is_none() {
-            *guard = Some(SentenceEncoder::from_registry(model_type, dir, device, context).await?);
+            *guard = Some(SentenceEncoder::from_registry(model_type, dir, device, context, None).await?);
         }
 
         Ok(())
@@ -63,7 +63,7 @@ impl ModelManager {
             None
         };
         if guard.is_none() {
-            *guard = Some(CrossEncoder::from_registry(model_type, dir, device, context).await?);
+            *guard = Some(CrossEncoder::from_registry(model_type, dir, device, context, None).await?);
         }
 
         Ok(())

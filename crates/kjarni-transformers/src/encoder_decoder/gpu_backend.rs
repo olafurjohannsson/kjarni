@@ -11,6 +11,7 @@ use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::GpuFrameContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::Kernel;
+use crate::models::base::ModelInput;
 use crate::prelude::*;
 use crate::WgpuContext;
 use anyhow::anyhow;
@@ -156,12 +157,12 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
         let decoder_hidden_states: GpuCrossDecoderOutput = ops.decoder().forward(
             encoder_cmd,
             pool_ref,
-            DecoderInput::TokensGpu(decoder_input_ids),
+            ModelInput::TokensGpu(decoder_input_ids),
             encoder_hidden_states,
             &attention_mask,
             Some(cache),
             Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
-        )?;
+        ).await?;
 
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
 

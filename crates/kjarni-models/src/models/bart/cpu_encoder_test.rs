@@ -2,15 +2,10 @@ use crate::models::bart::config::BartConfig;
 use crate::models::bart::cpu_encoder::BartCpuEncoder;
 use anyhow::Result;
 use kjarni_transformers::{
-    encoder::{encoder_layer::EncoderLayer, prelude::*},
-    encoder_decoder::traits::CpuCrossDecoder,
-    feedforward::{FeedForward, StdFeedForward},
-    normalization::LayerNorm,
-    traits::{Device, TransformerModel},
-    utils::linear_algebra::{apply_attention_mask, matmul_4d},
-    weights::ModelWeights,
+    encoder::{encoder_layer::EncoderLayer, prelude::*}, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, models::base::ModelLoadConfig, traits::Device, utils::linear_algebra::{apply_attention_mask, matmul_4d}, weights::ModelWeights
 };
 use ndarray::{Array2, Array3, s};
+use tokenizers::Model;
 use std::sync::Arc;
 use std::path::Path;
 
@@ -155,7 +150,7 @@ fn setup_encoder() -> Result<(BartCpuEncoder, Array3<f32>)> {
     let weights = ModelWeights::new(path)?;
     let config_json = std::fs::read_to_string(path.join("config.json"))?;
     let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
-    let encoder = BartCpuEncoder::new(&weights, config)?;
+    let encoder = BartCpuEncoder::new(&weights, config, ModelLoadConfig::default())?;
 
     // First 10 tokens of the test input
     let input_ids_vec = vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];

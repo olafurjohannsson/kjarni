@@ -300,15 +300,15 @@ impl GpuEncoder for GpuTransformerEncoder {
     ) -> Result<GpuTensor> {
         // This logic is also taken directly from your old `forward` method.
         let mut current_states = hidden_states.clone();
-        // for layer in &self.layers[start_layer..end_layer] {
-        //     current_states = layer.forward(
-        //         cmd_encoder,
-        //         &current_states,
-        //         attention_mask,
-        //         self.config.as_ref(),
-        //         pool,
-        //     )?;
-        // }
+        for layer in &self.layers[start_layer..end_layer] {
+            current_states = layer.forward(
+                cmd_encoder,
+                &current_states,
+                attention_mask,
+                &self.metadata,
+                pool,
+            )?;
+        }
         Ok(current_states)
     }
 

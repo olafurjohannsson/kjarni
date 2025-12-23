@@ -8,10 +8,10 @@ const TOLERANCE: f32 = 1e-3;
 #[tokio::test]
 async fn test_torch_sentence_encoder_golden_values() -> Result<()> {
     let cpu_encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let context = WgpuContext::new().await?;
     let gpu_encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context), None)
             .await?;
     let sentence = "ILoveEdgeGPT";
     let output_1 = cpu_encoder.encode(sentence).await?;
@@ -46,10 +46,10 @@ async fn test_torch_sentence_encoder_golden_values() -> Result<()> {
 #[tokio::test]
 async fn test_torch_sentence_encoder_cls_golden_values() -> Result<()> {
     let cpu_encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let context = WgpuContext::new().await?;
     let gpu_encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context))
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Wgpu, Some(context), None)
             .await?;
     let sentence = "ILoveEdgeGPT";
     let output_1 = cpu_encoder
@@ -87,7 +87,7 @@ async fn test_torch_sentence_encoder_cls_golden_values() -> Result<()> {
 #[tokio::test]
 async fn test_encode_raw_unnormalized() -> Result<()> {
     let encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let text = "This is a test sentence.";
     let normalized = encoder.encode(text).await?;
     let raw = encoder.encode_raw(text).await?;
@@ -109,7 +109,7 @@ async fn test_encode_raw_unnormalized() -> Result<()> {
 #[tokio::test]
 async fn test_encode_batch_raw() -> Result<()> {
     let encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let texts = vec!["First sentence", "Second sentence", "Third sentence"];
     let normalized_batch = encoder.encode_batch(&texts).await?;
     let raw_batch = encoder.encode_batch_raw(&texts).await?;
@@ -136,7 +136,7 @@ async fn test_encode_batch_raw() -> Result<()> {
 #[tokio::test]
 async fn test_encode_batch_with_full_control() -> Result<()> {
     let encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let texts = vec!["Sentence one", "Sentence two"];
     let mean_norm = encoder
         .encode_batch_with(&texts, Some("mean"), true)
@@ -161,7 +161,7 @@ async fn test_encode_batch_with_full_control() -> Result<()> {
 #[tokio::test]
 async fn test_encode_with_custom_pooling() -> Result<()> {
     let encoder =
-        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None).await?;
+        SentenceEncoder::from_registry(ModelType::MiniLML6V2, None, Device::Cpu, None, None).await?;
     let text = "This is a test sentence.";
     let mean_embedding = encoder.encode_with(text, Some("mean"), true).await?;
     let cls_embedding = encoder.encode_with(text, Some("cls"), true).await?;

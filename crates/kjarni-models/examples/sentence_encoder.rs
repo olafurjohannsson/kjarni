@@ -13,12 +13,14 @@ async fn main() -> anyhow::Result<()> {
         None, // Use default cache
         Device::Wgpu,
         Some(ctx),
+        None,
     )
         .await?;
     let encpuder_cpu = SentenceEncoder::from_registry(
         ModelType::MiniLML6V2,
         None, // Use default cache
         Device::Cpu,
+        None,
         None,
     )
         .await?;

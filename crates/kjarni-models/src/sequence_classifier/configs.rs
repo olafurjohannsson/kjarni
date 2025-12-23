@@ -1,10 +1,10 @@
 //! Model configurations for cross-encoders
 
 use anyhow::Result;
-
 use kjarni_transformers::activations::Activation;
+use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use serde::Deserialize;
-use std::any::Any;
+
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
 #[derive(Debug, Clone, Deserialize)]
 pub struct MiniLMCrossEncoderConfig {
@@ -31,109 +31,83 @@ impl MiniLMCrossEncoderConfig {
     }
 }
 
-impl LanguageModelConfig for MiniLMCrossEncoderConfig {
-    fn intermediate_size(&self) -> usize {
-        self.intermediate_size
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position_embeddings
-    }
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn transpose_ffn_weights(&self) -> bool {
-        true
-    }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
-    fn activation_function(&self) -> Activation {
-        Activation::GeluNew
-    }
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "bert.embeddings.word_embeddings.weight",
-            "bert.embeddings.position_embeddings.weight",
-            Some("bert.embeddings.token_type_embeddings.weight"),
-        )
-    }
-}
-
-impl TransformerConfig for MiniLMCrossEncoderConfig {
-    fn hidden_size(&self) -> usize {
-        self.hidden_size
+impl ModelConfig for MiniLMCrossEncoderConfig {
+    fn model_type(&self) -> &str {
+        "bert_cross_encoder"
     }
 
-    fn num_hidden_layers(&self) -> usize {
-        self.num_hidden_layers
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.num_attention_heads
-    }
-
-    fn layer_norm_eps(&self) -> f32 {
-        self.layer_norm_eps
-    }
-
-    fn is_causal(&self) -> bool {
-        false
-    }
-
-    fn is_prenorm(&self) -> bool {
-        false
-    }
-}
-
-impl EncoderArchitecture for MiniLMCrossEncoderConfig {
-    // fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-    //     (
-    //         "bert.embeddings.word_embeddings.weight",
-    //         "bert.embeddings.position_embeddings.weight",
-    //         Some("bert.embeddings.token_type_embeddings.weight"),
-    //     )
-    // }
-
-    fn get_embedding_layer_norm_names(&self) -> (&str, &str) {
-        (
-            "bert.embeddings.LayerNorm.weight",
-            "bert.embeddings.LayerNorm.bias",
-        )
-    }
-
-    fn get_attention_names(&self, layer: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!("bert.encoder.layer.{}.attention.self.query.weight", layer),
-            q_bias: format!("bert.encoder.layer.{}.attention.self.query.bias", layer),
-            k_weight: format!("bert.encoder.layer.{}.attention.self.key.weight", layer),
-            k_bias: format!("bert.encoder.layer.{}.attention.self.key.bias", layer),
-            v_weight: format!("bert.encoder.layer.{}.attention.self.value.weight", layer),
-            v_bias: format!("bert.encoder.layer.{}.attention.self.value.bias", layer),
-            output_weight: format!("bert.encoder.layer.{}.attention.output.dense.weight", layer),
-            output_bias: format!("bert.encoder.layer.{}.attention.output.dense.bias", layer),
-            norm_weight: format!(
-                "bert.encoder.layer.{}.attention.output.LayerNorm.weight",
-                layer
-            ),
-            norm_bias: format!(
-                "bert.encoder.layer.{}.attention.output.LayerNorm.bias",
-                layer
-            ),
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: self.hidden_size,
+            num_layers: self.num_hidden_layers,
+            num_attention_heads: self.num_attention_heads,
+            num_kv_heads: self.num_attention_heads, // Standard Encoder
+            head_dim: self.hidden_size / self.num_attention_heads,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position_embeddings,
+            norm_eps: self.layer_norm_eps,
+            activation: match self.hidden_act.as_str() {
+                "gelu" => Activation::Gelu,
+                "gelu_new" => Activation::GeluNew,
+                _ => Activation::Gelu, // BERT default
+            },
+            rope_theta: None,
+            rope_scaling: None,
+            scale_embeddings: false,
+            extra_pos_embeddings: 0,
+            is_prenorm: false, // BERT uses Post-Norm
+            transpose_ffn_weights: true, // MiniLM quirk
+            transpose_attention_weights: false,
         }
     }
 
-    fn get_feed_forward_names(&self, layer: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("bert.encoder.layer.{}.intermediate.dense.weight", layer),
-            intermediate_bias: format!("bert.encoder.layer.{}.intermediate.dense.bias", layer),
-            output_weight: format!("bert.encoder.layer.{}.output.dense.weight", layer),
-            output_bias: format!("bert.encoder.layer.{}.output.dense.bias", layer),
-            norm_weight: format!("bert.encoder.layer.{}.output.LayerNorm.weight", layer),
-            norm_bias: format!("bert.encoder.layer.{}.output.LayerNorm.bias", layer),
-            gate_weight: None,
+    fn layout(&self) -> ModelLayout {
+        ModelLayout {
+            // Root Level Weights
+            token_embedding: "bert.embeddings.word_embeddings.weight".to_string(),
+            position_embedding: Some("bert.embeddings.position_embeddings.weight".to_string()),
+            token_type_embedding: Some("bert.embeddings.token_type_embeddings.weight".to_string()),
+            embedding_norm: Some("bert.embeddings.LayerNorm.weight".to_string()),
+            embedding_norm_bias: Some("bert.embeddings.LayerNorm.bias".to_string()),
+            
+            // For Cross-Encoders, the 'final_norm' is often the Pooler
+            final_norm: "bert.pooler.dense.weight".to_string(),
+            final_norm_bias: None,
+            // The classifier head
+            lm_head: "classifier.weight".to_string(),
+
+            // Attention Templates
+            attn_q: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
+            attn_q_bias: Some("bert.encoder.layer.{}.attention.self.query.bias".to_string()),
+            attn_k: "bert.encoder.layer.{}.attention.self.key.weight".to_string(),
+            attn_k_bias: Some("bert.encoder.layer.{}.attention.self.key.bias".to_string()),
+            attn_v: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
+            attn_v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
+            attn_o: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
+            attn_o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
+            attn_norm: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+            attn_norm_bias: Some("bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
+
+            // FFN Templates
+            ffn_gate: None, // No SwiGLU in MiniLM
+            ffn_up: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
+            ffn_up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
+            ffn_down: "bert.encoder.layer.{}.output.dense.weight".to_string(),
+            ffn_down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
+            ffn_norm: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
+            ffn_norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
+
+            // Cross-attention not used in encoder-only MiniLM
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
+            cross_attn_q_bias: None,
+                cross_attn_k_bias: None,
+                cross_attn_v_bias: None,
+                cross_attn_o_bias: None,
+                cross_attn_norm_bias: None,
         }
     }
 }

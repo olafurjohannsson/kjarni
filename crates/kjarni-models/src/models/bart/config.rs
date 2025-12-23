@@ -1,13 +1,9 @@
 use kjarni_transformers::{
     activations::Activation,
-    encoder_decoder::{TaskSpecificParams},
-    traits::{
-        EncoderDecoderArchitecture, LanguageModelConfig, LayerAttentionNames,
-        LayerFeedForwardNames, TransformerConfig,
-    },
+    encoder_decoder::TaskSpecificParams,
+    traits::{ModelConfig, ModelLayout, ModelMetadata},
 };
 use serde::Deserialize;
-use std::any::Any;
 
 fn default_layer_norm_eps() -> f32 {
     1e-5
@@ -45,10 +41,11 @@ pub struct BartConfig {
     pub bos_token_id: u32,
     pub pad_token_id: u32,
     pub decoder_start_token_id: u32,
+    pub forced_bos_token_id: Option<u32>,
 
     #[serde(alias = "hidden_act", alias = "activation_function")]
     pub activation_function: Option<String>,
-    
+
     #[serde(default)]
     pub extra_pos_embeddings: u32,
     pub is_encoder_decoder: bool,
@@ -56,226 +53,110 @@ pub struct BartConfig {
 
     pub force_bos_token_to_be_generated: Option<bool>,
 
-    #[serde(skip)] 
-    pub shared_embedding_key: Option<String>, 
+    #[serde(skip)]
+    pub shared_embedding_key: Option<String>,
 }
 
 impl BartConfig {
     pub fn from_json(json: &str) -> anyhow::Result<Self> {
         Ok(serde_json::from_str(json)?)
     }
-}
 
-impl TransformerConfig for BartConfig {
-    fn hidden_size(&self) -> usize {
-        self.d_model
-    }
-    fn num_attention_heads(&self) -> usize {
-        self.encoder_attention_heads
-    } // Use encoder's as default
-    fn num_hidden_layers(&self) -> usize {
-        self.encoder_layers
-    } // Use encoder's as default
-    fn layer_norm_eps(&self) -> f32 {
-        self.layer_norm_eps
-    }
-    fn is_causal(&self) -> bool {
-        false
-    } // Not relevant for the top-level config
-    fn is_prenorm(&self) -> bool {
-        false
-    } // BART is post-norm
-    fn extra_pos_embeddings(&self) -> usize {
-        2
+    fn get_shared_weight_name(&self) -> String {
+        self.shared_embedding_key
+            .clone()
+            .unwrap_or_else(|| "model.shared.weight".to_string())
     }
 }
 
-impl LanguageModelConfig for BartConfig {
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        2
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position_embeddings
-    }
-    fn activation_function(&self) -> Activation {
-        self.activation_function
-            .as_ref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(Activation::Gelu) // BART default
-    }
-    fn intermediate_size(&self) -> usize {
-        self.encoder_ffn_dim
-    } // Use encoder's as default
-    fn transpose_ffn_weights(&self) -> bool {
-        false
-    } // PyTorch linear layers need transposing
-    fn transpose_attention_weights(&self) -> bool {
-        true
-    }
-    fn as_any(&self) -> &dyn Any {
-        self // Simply return a reference to self as a `&dyn Any`
-    }
-    fn eos_token_id(&self) -> Option<u32> {
-        Some(self.eos_token_id)
-    }
-    fn bos_token_id(&self) -> Option<u32> {
-        Some(self.bos_token_id)
-    }
-    fn pad_token_id(&self) -> Option<u32> {
-        Some(self.pad_token_id)
-    }
-    fn is_encoder_decoder(&self) -> Option<bool> {
-        Some(self.is_encoder_decoder)
+impl ModelConfig for BartConfig {
+    fn model_type(&self) -> &str {
+        &self.model_type
     }
 
-    fn model_type(&self) -> Option<String> {
-        Some(self.model_type.clone())
-    }
-
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            "model.shared.weight",
-            "model.encoder.embed_positions.weight",
-            None,
-        )
-    }
-    fn scale_embeddings(&self) -> bool {
-        self.scale_embedding
-    }
-    fn forced_bos_token_id(&self) -> Option<u32> {
-        // If force_bos_token_to_be_generated is true, return bos_token_id
-        if self.force_bos_token_to_be_generated.unwrap_or(false) {
-            Some(self.bos_token_id)
-        } else {
-            None
-        }
-    }
-}
-
-impl EncoderDecoderArchitecture for BartConfig {
-    // --- Shared ---
-    fn get_shared_embedding_weight_name(&self) -> &str {
-        // Use the detected key, or fallback to default
-        self.shared_embedding_key.as_deref().unwrap_or("model.shared.weight")
-    }
-    fn get_lm_head_name(&self) -> &str {
-        self.get_shared_embedding_weight_name()
-    } // BART shares embedding and LM head
-    fn get_final_logits_bias_name(&self) -> Option<&str> {
-        Some("final_logits_bias")
-    }
-
-    // fn eos_token_id(&self) -> u32 {
-    //     self.eos_token_id
-    // }
-    // fn decoder_start_token_id(&self) -> u32 {
-    //     self.decoder_start_token_id
-    // }
-
-    fn num_encoder_layers(&self) -> usize {
-        self.encoder_layers
-    }
-    fn num_decoder_layers(&self) -> usize {
-        self.decoder_layers
-    }
-    // fn as_any(&self) -> &dyn Any {
-    //     self // Simply return a reference to self as a `&dyn Any`
-    // }
-
-    // --- Encoder Methods ---
-    fn get_encoder_embedding_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            self.get_shared_embedding_weight_name(), 
-            "model.encoder.embed_positions.weight",
-            None,
-        )
-    }
-    fn get_encoder_embedding_ln_names(&self) -> (&str, &str) {
-        (
-            "model.encoder.layernorm_embedding.weight",
-            "model.encoder.layernorm_embedding.bias",
-        )
-    }
-    fn get_encoder_attention_names(&self, i: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!("model.encoder.layers.{}.self_attn.q_proj.weight", i),
-            q_bias: format!("model.encoder.layers.{}.self_attn.q_proj.bias", i),
-            k_weight: format!("model.encoder.layers.{}.self_attn.k_proj.weight", i),
-            k_bias: format!("model.encoder.layers.{}.self_attn.k_proj.bias", i),
-            v_weight: format!("model.encoder.layers.{}.self_attn.v_proj.weight", i),
-            v_bias: format!("model.encoder.layers.{}.self_attn.v_proj.bias", i),
-            output_weight: format!("model.encoder.layers.{}.self_attn.out_proj.weight", i),
-            output_bias: format!("model.encoder.layers.{}.self_attn.out_proj.bias", i),
-            norm_weight: format!("model.encoder.layers.{}.self_attn_layer_norm.weight", i),
-            norm_bias: format!("model.encoder.layers.{}.self_attn_layer_norm.bias", i),
-        }
-    }
-    fn get_encoder_feed_forward_names(&self, i: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("model.encoder.layers.{}.fc1.weight", i),
-            intermediate_bias: format!("model.encoder.layers.{}.fc1.bias", i),
-            output_weight: format!("model.encoder.layers.{}.fc2.weight", i),
-            output_bias: format!("model.encoder.layers.{}.fc2.bias", i),
-            norm_weight: format!("model.encoder.layers.{}.final_layer_norm.weight", i),
-            norm_bias: format!("model.encoder.layers.{}.final_layer_norm.bias", i),
-            gate_weight: None,
+    fn metadata(&self) -> ModelMetadata {
+        ModelMetadata {
+            hidden_size: self.d_model,
+            num_layers: self.encoder_layers, // Defaults to encoder layers for backbone
+            num_attention_heads: self.encoder_attention_heads,
+            num_kv_heads: self.encoder_attention_heads, // BART is not GQA
+            head_dim: self.d_model / self.encoder_attention_heads,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position_embeddings,
+            norm_eps: self.layer_norm_eps,
+            activation: match self.activation_function.as_deref() {
+                Some("gelu") => Activation::Gelu,
+                Some("gelu_new") => Activation::GeluNew,
+                Some("silu") => Activation::SilU,
+                _ => Activation::Gelu, // BART default
+            },
+            rope_theta: None, // BART uses learned absolute positions
+            rope_scaling: None,
+            scale_embeddings: self.scale_embedding,
+            extra_pos_embeddings: self.extra_pos_embeddings as usize,
+            is_prenorm: false, // BART is Post-Norm
+            transpose_ffn_weights: false,
+            transpose_attention_weights: false,
         }
     }
 
-    // --- Decoder Methods ---
-    fn get_decoder_embedding_names(&self) -> (&str, &str, Option<&str>) {
-        (
-            self.get_shared_embedding_weight_name(),
-            "model.decoder.embed_positions.weight",
-            None,
-        )
-    }
-    fn get_decoder_embedding_ln_names(&self) -> (&str, &str) {
-        (
-            "model.decoder.layernorm_embedding.weight",
-            "model.decoder.layernorm_embedding.bias",
-        )
-    }
-    fn get_decoder_self_attention_names(&self, i: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!("model.decoder.layers.{}.self_attn.q_proj.weight", i),
-            q_bias: format!("model.decoder.layers.{}.self_attn.q_proj.bias", i),
-            k_weight: format!("model.decoder.layers.{}.self_attn.k_proj.weight", i),
-            k_bias: format!("model.decoder.layers.{}.self_attn.k_proj.bias", i),
-            v_weight: format!("model.decoder.layers.{}.self_attn.v_proj.weight", i),
-            v_bias: format!("model.decoder.layers.{}.self_attn.v_proj.bias", i),
-            output_weight: format!("model.decoder.layers.{}.self_attn.out_proj.weight", i),
-            output_bias: format!("model.decoder.layers.{}.self_attn.out_proj.bias", i),
-            norm_weight: format!("model.decoder.layers.{}.self_attn_layer_norm.weight", i),
-            norm_bias: format!("model.decoder.layers.{}.self_attn_layer_norm.bias", i),
-        }
-    }
-    fn get_decoder_cross_attention_names(&self, i: usize) -> LayerAttentionNames {
-        LayerAttentionNames {
-            q_weight: format!("model.decoder.layers.{}.encoder_attn.q_proj.weight", i),
-            q_bias: format!("model.decoder.layers.{}.encoder_attn.q_proj.bias", i),
-            k_weight: format!("model.decoder.layers.{}.encoder_attn.k_proj.weight", i),
-            k_bias: format!("model.decoder.layers.{}.encoder_attn.k_proj.bias", i),
-            v_weight: format!("model.decoder.layers.{}.encoder_attn.v_proj.weight", i),
-            v_bias: format!("model.decoder.layers.{}.encoder_attn.v_proj.bias", i),
-            output_weight: format!("model.decoder.layers.{}.encoder_attn.out_proj.weight", i),
-            output_bias: format!("model.decoder.layers.{}.encoder_attn.out_proj.bias", i),
-            norm_weight: format!("model.decoder.layers.{}.encoder_attn_layer_norm.weight", i),
-            norm_bias: format!("model.decoder.layers.{}.encoder_attn_layer_norm.bias", i),
-        }
-    }
-    fn get_decoder_feed_forward_names(&self, i: usize) -> LayerFeedForwardNames {
-        LayerFeedForwardNames {
-            intermediate_weight: format!("model.decoder.layers.{}.fc1.weight", i),
-            intermediate_bias: format!("model.decoder.layers.{}.fc1.bias", i),
-            output_weight: format!("model.decoder.layers.{}.fc2.weight", i),
-            output_bias: format!("model.decoder.layers.{}.fc2.bias", i),
-            norm_weight: format!("model.decoder.layers.{}.final_layer_norm.weight", i),
-            norm_bias: format!("model.decoder.layers.{}.final_layer_norm.bias", i),
-            gate_weight: None,
+    fn layout(&self) -> ModelLayout {
+        let shared = self.get_shared_weight_name();
+
+        ModelLayout {
+            // --- Shared Embeddings ---
+            token_embedding: shared.clone(),
+            position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
+            token_type_embedding: None,
+            embedding_norm: Some("model.encoder.layernorm_embedding.weight".to_string()),
+            embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
+
+            // BART ties LM Head and Shared Weight
+            lm_head: shared,
+            final_norm: "model.encoder.layernorm_embedding.weight".to_string(), // Simplified
+            final_norm_bias: None,
+
+            // --- Encoder Layer Templates ---
+            attn_q: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
+            attn_q_bias: Some("model.encoder.layers.{}.self_attn.q_proj.bias".to_string()),
+            attn_k: "model.encoder.layers.{}.self_attn.k_proj.weight".to_string(),
+            attn_k_bias: Some("model.encoder.layers.{}.self_attn.k_proj.bias".to_string()),
+            attn_v: "model.encoder.layers.{}.self_attn.v_proj.weight".to_string(),
+            attn_v_bias: Some("model.encoder.layers.{}.self_attn.v_proj.bias".to_string()),
+            attn_o: "model.encoder.layers.{}.self_attn.out_proj.weight".to_string(),
+            attn_o_bias: Some("model.encoder.layers.{}.self_attn.out_proj.bias".to_string()),
+            attn_norm: "model.encoder.layers.{}.self_attn_layer_norm.weight".to_string(),
+            attn_norm_bias: Some("model.encoder.layers.{}.self_attn_layer_norm.bias".to_string()),
+
+            ffn_gate: None,
+            ffn_up: "model.encoder.layers.{}.fc1.weight".to_string(),
+            ffn_up_bias: Some("model.encoder.layers.{}.fc1.bias".to_string()),
+            ffn_down: "model.encoder.layers.{}.fc2.weight".to_string(),
+            ffn_down_bias: Some("model.encoder.layers.{}.fc2.bias".to_string()),
+            ffn_norm: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
+            ffn_norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
+
+            // --- Decoder Cross-Attention Templates ---
+            cross_attn_q: Some("model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string()),
+            cross_attn_q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
+
+            cross_attn_k: Some("model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string()),
+            cross_attn_k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
+
+            cross_attn_v: Some("model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string()),
+            cross_attn_v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
+
+            cross_attn_o: Some("model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string()),
+            cross_attn_o_bias: Some(
+                "model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string(),
+            ),
+
+            cross_attn_norm: Some(
+                "model.decoder.layers.{}.encoder_attn_layer_norm.weight".to_string(),
+            ),
+            cross_attn_norm_bias: Some(
+                "model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string(),
+            ),
         }
     }
 }
@@ -315,100 +196,36 @@ mod tests {
     }"#;
 
     #[test]
-    fn test_distilbart_deserialization() -> Result<(), serde_json::Error> {
-        let config: BartConfig = serde_json::from_str(DISTILBART_CNN_CONFIG_JSON)?;
+    fn test_distilbart_metadata() {
+        let config: BartConfig = serde_json::from_str(DISTILBART_CNN_CONFIG_JSON).unwrap();
+        let meta = config.metadata();
 
-        // Test top-level fields
-        assert_eq!(config.d_model, 1024);
-        assert_eq!(config.hidden_size(), 1024); // Test trait method
-        assert_eq!(config.encoder_layers, 12);
-        assert_eq!(config.decoder_layers, 6);
-        assert_eq!(config.vocab_size, 50264);
-        assert_eq!(config.decoder_start_token_id, 2);
-        assert_eq!(config.eos_token_id, 2);
-        assert!(!config.scale_embedding);
-
-        // Test nested task-specific params (very important!)
-        let params = config
-            .task_specific_params
-            .expect("Task specific params should be present");
-        assert_eq!(params.summarization.num_beams, 4);
-        assert_eq!(params.summarization.max_length, 142);
-        assert_eq!(params.summarization.min_length, 56);
-        assert_eq!(params.summarization.length_penalty, 2.0);
-        assert!(params.summarization.early_stopping);
-
-        Ok(())
+        assert_eq!(meta.hidden_size, 1024);
+        assert_eq!(meta.num_layers, 12);
+        assert_eq!(meta.vocab_size, 50264);
+        assert_eq!(meta.extra_pos_embeddings, 2);
+        assert!(!meta.scale_embeddings);
     }
 
     #[test]
-    fn test_bart_weight_names() {
-        // We can just create a default config for this test
+    fn test_bart_layout_templates() {
         let config: BartConfig = serde_json::from_str(DISTILBART_CNN_CONFIG_JSON).unwrap();
+        let layout = config.layout();
 
-        // --- Shared ---
+        assert_eq!(layout.token_embedding, "model.shared.weight");
         assert_eq!(
-            config.get_shared_embedding_weight_name(),
-            "model.shared.weight"
-        );
-        assert_eq!(config.get_lm_head_name(), "model.shared.weight");
-        assert_eq!(
-            config.get_final_logits_bias_name(),
-            Some("final_logits_bias")
-        );
-
-        // --- Encoder ---
-        let (embed, pos_embed, _) = config.get_encoder_embedding_names();
-        assert_eq!(embed, "model.shared.weight");
-        assert_eq!(pos_embed, "model.encoder.embed_positions.weight");
-
-        let attn_names = config.get_encoder_attention_names(5); // Test an arbitrary layer index
-        assert_eq!(
-            attn_names.q_weight,
+            layout.attn_q.replace("{}", "5"),
             "model.encoder.layers.5.self_attn.q_proj.weight"
         );
         assert_eq!(
-            attn_names.output_bias,
-            "model.encoder.layers.5.self_attn.out_proj.bias"
-        );
-        assert_eq!(
-            attn_names.norm_weight,
-            "model.encoder.layers.5.self_attn_layer_norm.weight"
+            layout.ffn_up.replace("{}", "0"),
+            "model.encoder.layers.0.fc1.weight"
         );
 
-        // --- Decoder ---
-        let (embed, pos_embed, _) = config.get_decoder_embedding_names();
-        assert_eq!(embed, "model.shared.weight");
-        assert_eq!(pos_embed, "model.decoder.embed_positions.weight");
-
-        let self_attn_names = config.get_decoder_self_attention_names(3);
+        let cross_q = layout.cross_attn_q.unwrap();
         assert_eq!(
-            self_attn_names.k_weight,
-            "model.decoder.layers.3.self_attn.k_proj.weight"
-        );
-        assert_eq!(
-            self_attn_names.v_bias,
-            "model.decoder.layers.3.self_attn.v_proj.bias"
-        );
-
-        let cross_attn_names = config.get_decoder_cross_attention_names(1);
-        assert_eq!(
-            cross_attn_names.q_weight,
+            cross_q.replace("{}", "1"),
             "model.decoder.layers.1.encoder_attn.q_proj.weight"
-        );
-        assert_eq!(
-            cross_attn_names.output_weight,
-            "model.decoder.layers.1.encoder_attn.out_proj.weight"
-        );
-
-        let ffn_names = config.get_decoder_feed_forward_names(0);
-        assert_eq!(
-            ffn_names.intermediate_weight,
-            "model.decoder.layers.0.fc1.weight"
-        );
-        assert_eq!(
-            ffn_names.norm_bias,
-            "model.decoder.layers.0.final_layer_norm.bias"
         );
     }
 }

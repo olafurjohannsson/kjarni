@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use kjarni_transformers::traits::EncoderDecoderArchitecture;
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata};
 use ndarray::{Array1, Array3};
 use tokenizers::Tokenizer;
 
@@ -13,19 +14,18 @@ use tokenizers::Tokenizer;
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
     common::{BeamSearchParams, DecodingStrategy, GenerationConfig},
-    encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
+    encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
     gpu_ops::{
-        primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer}, GpuFrameContext,
-        GpuTensor,
+        GpuFrameContext, GpuTensor,
+        primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer},
     },
     linear_layer::LinearLayer,
-    models::{download_model_files, ModelType},
+    models::{ModelType, download_model_files},
     prelude::*,
-    traits::{LanguageModelConfig, TransformerModel},
     weights::ModelWeights,
 };
 
@@ -40,12 +40,12 @@ use crate::models::bart::{
 
 pub struct BartModel {
     // CPU components
-    cpu_encoder: Option<BartCpuEncoder>,
-    cpu_decoder: Option<BartCpuDecoder>,
+    pub cpu_encoder: Option<BartCpuEncoder>,
+    pub cpu_decoder: Option<BartCpuDecoder>,
 
     // GPU components
-    gpu_encoder: Option<BartGpuEncoder>,
-    gpu_decoder: Option<BartGpuDecoder>,
+    pub gpu_encoder: Option<BartGpuEncoder>,
+    pub gpu_decoder: Option<BartGpuDecoder>,
     gpu_lm_head: Option<GpuTensor>,
     gpu_final_logits_bias: Option<GpuTensor>,
     gpu_broadcast_kernel: Option<GpuBroadcast>,
@@ -54,29 +54,31 @@ pub struct BartModel {
     // Shared components
     tokenizer: Tokenizer,
     config: Arc<BartConfig>,
-    lm_head: LinearLayer,                   // Still needed for CPU path
-    final_logits_bias: Option<Array1<f32>>, // Still needed for CPU path
+    lm_head: LinearLayer,
+    final_logits_bias: Option<Array1<f32>>,
     device: Device,
     context: Option<Arc<WgpuContext>>,
+
+    // Cached Data-driven structs
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl BartModel {
-    const SUPPORTED_MODELS: &'static [ModelType] =
-        &[ModelType::BartLargeCnn, ModelType::DistilBartCnn];
     pub fn bart_cpu_decoder(&self) -> Option<&BartCpuDecoder> {
         self.cpu_decoder.as_ref()
     }
-
     pub fn bart_gpu_decoder(&self) -> Option<&BartGpuDecoder> {
         self.gpu_decoder.as_ref()
     }
     pub fn bart_cpu_encoder(&self) -> Option<&BartCpuEncoder> {
         self.cpu_encoder.as_ref()
     }
-
     pub fn bart_gpu_encoder(&self) -> Option<&BartGpuEncoder> {
         self.gpu_encoder.as_ref()
     }
+    const SUPPORTED_MODELS: &'static [ModelType] =
+        &[ModelType::BartLargeCnn, ModelType::DistilBartCnn];
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -97,54 +99,57 @@ impl BartModel {
         log::info!("Loading BART model from {:?}", model_dir);
         download_model_files(&model_dir, &model_type.info().paths).await?;
 
+        // Logic preserved: auto-create context if missing for GPU
         if device.is_gpu() && context.is_none() {
-            Self::from_pretrained(&model_dir, device, Some(WgpuContext::new().await?))
+            Self::from_pretrained(&model_dir, device, Some(WgpuContext::new().await?), None)
         } else {
-            Self::from_pretrained(&model_dir, device, context)
+            Self::from_pretrained(&model_dir, device, context, None)
         }
     }
-
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        load_config: Option<ModelLoadConfig>, // Now uses unified load config
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
+        let load_config = load_config.unwrap_or_default();
         let tokenizer =
             Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
 
-        // let config = Arc::new(BartConfig::from_json(&weights.config_json)?);
-        // 1. Detect the correct embedding key
-        // Check "model.shared.weight" first (standard), then "model.encoder.embed_tokens.weight" (legacy/fairseq)
+        // 1. Detect the correct embedding key (LOGIC PRESERVED)
         let shared_key = if weights.contains("model.shared.weight") {
-            // Assuming ModelWeights has a check method
             "model.shared.weight"
         } else if weights.contains("model.encoder.embed_tokens.weight") {
             "model.encoder.embed_tokens.weight"
         } else if weights.contains("model.decoder.embed_tokens.weight") {
             "model.decoder.embed_tokens.weight"
         } else {
-            return Err(anyhow!(
-                "Could not find shared embedding weights. Checked 'model.shared.weight' and 'model.encoder.embed_tokens.weight'"
-            ));
+            return Err(anyhow!("Could not find shared embedding weights."));
         };
-        println!("Detected shared embedding key: {}", shared_key);
 
-        // 2. Load and Patch Config
+        // 2. Initialize Config and Data Structs
         let mut config_obj = BartConfig::from_json(&weights.config_json)?;
-        config_obj.shared_embedding_key = Some(shared_key.to_string()); // Store the detected key
+        config_obj.shared_embedding_key = Some(shared_key.to_string());
         let config = Arc::new(config_obj);
-        println!("Using LM Head key: {}", config.get_lm_head_name());
-        // Load CPU versions of head/bias regardless, as they are small
 
-        let lm_head = LinearLayer::from_weights(&weights,
-                                                config.get_lm_head_name(), None, None, None)?;
+        let meta = config.metadata();
+        let layout = config.layout();
+
+        // 3. Load Heads (Uses layout.lm_head which was determined by shared_key)
+        let lm_head = LinearLayer::from_weights(
+            &weights,
+            &layout.lm_head,
+            None,
+            load_config.target_dtype,
+            None,
+        )?;
         let final_logits_bias = weights.get_array1("final_logits_bias").ok();
 
         match device {
             Device::Cpu => {
-                let cpu_encoder = BartCpuEncoder::new(&weights, config.clone())?;
-                let cpu_decoder = BartCpuDecoder::new(&weights, config.clone())?;
+                let cpu_encoder = BartCpuEncoder::new(&weights, config.clone(), load_config)?;
+                let cpu_decoder = BartCpuDecoder::new(&weights, config.clone(), load_config)?;
 
                 Ok(Self {
                     cpu_encoder: Some(cpu_encoder),
@@ -161,27 +166,32 @@ impl BartModel {
                     context: None,
                     gpu_broadcast_kernel: None,
                     gpu_linear_kernel: None,
+                    meta,
+                    layout,
                 })
             }
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a WgpuContext"))?;
 
-                log::info!("Loading BART model to GPU...");
-                let gpu_encoder = BartGpuEncoder::new(&ctx, &weights, config.clone())?;
-                let gpu_decoder = BartGpuDecoder::new(&ctx, &weights, config.clone())?;
+                let gpu_encoder = BartGpuEncoder::new(&ctx, &weights, config.clone(), load_config)?;
+                let gpu_decoder = BartGpuDecoder::new(&ctx, &weights, config.clone(), load_config)?;
 
                 // Upload LM head and bias to GPU
                 let gpu_lm_head = Some(GpuTensor::from_raw(
                     &ctx,
-                    &weights.get_raw(config.get_lm_head_name())?,
+                    &weights.get_raw_resolved(&layout.lm_head, load_config.target_dtype)?,
                     "lm_head",
                 )?);
-                let gpu_final_logits_bias =
-                    if let Ok(raw_bias) = weights.get_raw("final_logits_bias") {
-                        Some(GpuTensor::from_raw(&ctx, &raw_bias, "final_logits_bias")?)
-                    } else {
-                        None
-                    };
+
+                let gpu_final_logits_bias = if weights.contains("final_logits_bias") {
+                    Some(GpuTensor::from_raw(
+                        &ctx,
+                        &weights.get_raw("final_logits_bias")?,
+                        "final_logits_bias",
+                    )?)
+                } else {
+                    None
+                };
 
                 Ok(Self {
                     cpu_encoder: None,
@@ -198,6 +208,8 @@ impl BartModel {
                     context: Some(ctx.clone()),
                     gpu_broadcast_kernel: Some(GpuBroadcast::new(&ctx.clone())?),
                     gpu_linear_kernel: Some(GpuLinearLayer::new(&ctx)),
+                    meta,
+                    layout,
                 })
             }
         }
@@ -205,7 +217,7 @@ impl BartModel {
 }
 
 // --- TransformerModel Implementation ---
-impl TransformerModel for BartModel {
+impl InferenceModel for BartModel {
     fn device(&self) -> Device {
         self.device
     }
@@ -256,31 +268,31 @@ impl LanguageModel for BartModel {
         &self.tokenizer
     }
     fn context_size(&self) -> usize {
-        todo!()
+        self.config.metadata().max_seq_len
     }
     fn forced_bos_token_id(&self) -> Option<u32> {
-        todo!()
+        self.config.forced_bos_token_id
     }
     fn pad_token_id(&self) -> Option<u32> {
-        todo!()
+        Some(self.config.pad_token_id)
     }
     fn vocab_size(&self) -> usize {
-        todo!()
+        self.config.metadata().vocab_size
     }
     fn hidden_size(&self) -> usize {
-        todo!()
+        self.config.metadata().hidden_size
     }
     fn num_heads(&self) -> usize {
-        todo!()
+        self.config.metadata().num_attention_heads
     }
     fn num_layers(&self) -> usize {
-        todo!()
+        self.config.metadata().num_layers
     }
     fn eos_token_id(&self) -> Option<u32> {
-        todo!()
+        Some(self.config.eos_token_id)
     }
     fn bos_token_id(&self) -> Option<u32> {
-        todo!()
+        Some(self.config.bos_token_id)
     }
 
     fn new_cache(
@@ -488,7 +500,7 @@ impl EncoderDecoderLanguageModel for BartModel {
 
         // Safe Defaults
         GenerationConfig {
-            max_length: self.config.max_position_embeddings(),
+            max_length: self.meta.max_seq_len,
             min_length: 0,
             no_repeat_ngram_size: 3,
             repetition_penalty: 1.0,

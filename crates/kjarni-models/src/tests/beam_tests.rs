@@ -1,18 +1,23 @@
 
 use crate::models::bart::model::BartModel;
 use anyhow::Result;
-use kjarni_transformers::encoder_decoder::run_beam_search;
+use kjarni_transformers::encoder_decoder::{GpuBackend, run_beam_search};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::common::{DecodingStrategy, BeamSearchParams, GenerationConfig};
 use kjarni_transformers::traits::Device;
-use kjarni_transformers::LanguageModel;
+use kjarni_transformers::{LanguageModel, WgpuContext};
 use kjarni_transformers::encoder_decoder::CpuBackend;
 
 #[tokio::test]
 async fn test_beam_search_full_4_beams() -> Result<()> {
-    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None).await?;
+    
 
+    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None).await?;
     let backend = CpuBackend;
+
+    let context = WgpuContext::new().await?;
+    let gpu_model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Wgpu, Some(context.clone())).await?;
+    let gpu_backend = GpuBackend::new(context)?;
 
     let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
 
@@ -32,6 +37,15 @@ async fn test_beam_search_full_4_beams() -> Result<()> {
 
     let result = run_beam_search(&model, &backend, text, &config).await?;
     let result_trimmed = result.trim();
+
+    let gpu_result = run_beam_search(&gpu_model, &gpu_backend, text, &config).await?;
+    let gpu_result_trimmed = gpu_result.trim();
+
+    assert_eq!(
+        result_trimmed, gpu_result_trimmed,
+        "CPU and GPU beam search outputs do not match.\nCPU: '{}'\nGPU: '{}'",
+        result_trimmed, gpu_result_trimmed
+    );
 
     // The exact output from Hugging Face Transformers (Beam Search)
     let python_golden = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program .";

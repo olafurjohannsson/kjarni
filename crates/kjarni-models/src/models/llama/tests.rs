@@ -12,7 +12,6 @@ use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, Generation
 use kjarni_transformers::models::{LanguageModel, ModelType};
 use kjarni_transformers::prelude::*;
 use kjarni_transformers::decoder::prelude::*;
-use kjarni_transformers::traits::LanguageModelConfig;
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
@@ -124,8 +123,8 @@ fn test_llama_config_parsing_8b() {
     assert_eq!(config.num_attention_heads, 32);
     assert_eq!(config.num_key_value_heads, 8);
     assert_eq!(config.intermediate_size, 14336);
-    assert_eq!(config.head_dim(), 128); // 4096 / 32
-    assert_eq!(config.kv_dim(), 1024); // 8 * 128
+    assert_eq!(config.get_head_dim(), 128); // 4096 / 32
+    assert_eq!(config.get_kv_dim(), 1024); // 8 * 128
     // assert!(config.uses_gqa());
 }
 
@@ -149,8 +148,8 @@ fn test_llama_config_parsing_1b() {
 
     assert_eq!(config.hidden_size, 2048);
     assert_eq!(config.num_hidden_layers, 16);
-    assert_eq!(config.head_dim(), 64); // 2048 / 32
-    assert_eq!(config.kv_dim(), 512); // 8 * 64
+    assert_eq!(config.get_head_dim(), 64); // 2048 / 32
+    assert_eq!(config.get_kv_dim(), 512); // 8 * 64
 }
 
 #[tokio::test]

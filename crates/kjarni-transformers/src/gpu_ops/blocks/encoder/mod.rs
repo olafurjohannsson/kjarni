@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::WgpuContext;
 use crate::activations;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
@@ -9,7 +10,6 @@ use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::ModelMetadata;
-use crate::WgpuContext;
 
 pub struct GpuEncoderLayer {
     self_attn: GpuAttention,
@@ -205,18 +205,18 @@ impl GpuEncoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WgpuContext;
     use crate::activations::Activation;
     use crate::encoder::encoder_layer::EncoderLayer;
     use crate::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
-    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
@@ -401,7 +401,24 @@ mod tests {
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_w)?,
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_b)?,
             )?;
-
+            let mock_meta = ModelMetadata {
+                hidden_size,
+                num_layers: 1,
+                num_attention_heads: num_heads,
+                num_kv_heads: num_heads,
+                head_dim: hidden_size / num_heads,
+                vocab_size: 32000,
+                max_seq_len: 512,
+                norm_eps: eps,
+                activation: Activation::Gelu,
+                rope_theta: None,
+                rope_scaling: None,
+                scale_embeddings: false,
+                extra_pos_embeddings: 0,
+                is_prenorm: false, // BERT/Mock style
+                transpose_ffn_weights: false,
+                transpose_attention_weights: false,
+            };
             GpuEncoderLayer::new(
                 &ctx,
                 self_attn_weights,
@@ -409,11 +426,7 @@ mod tests {
                 ff_weights,
                 ffn_ln_weights,
                 Activation::Gelu,
-                &MockConfig {
-                    hidden_size,
-                    num_heads,
-                    eps,
-                },
+                &mock_meta,
             )?
         };
 
@@ -456,27 +469,80 @@ mod tests {
         eps: f32,
     }
 
-    impl crate::traits::TransformerConfig for MockConfig {
-        fn hidden_size(&self) -> usize {
-            self.hidden_size
+    impl crate::traits::ModelConfig for MockConfig {
+        fn model_type(&self) -> &str {
+            "mock"
         }
-        fn num_attention_heads(&self) -> usize {
-            self.num_heads
+
+        fn metadata(&self) -> crate::traits::ModelMetadata {
+            crate::traits::ModelMetadata {
+                hidden_size: self.hidden_size,
+                num_layers: 1,
+                num_attention_heads: self.num_heads,
+                num_kv_heads: self.num_heads,
+                head_dim: self.hidden_size / self.num_heads,
+                vocab_size: 1000,
+                max_seq_len: 512,
+                norm_eps: self.eps,
+                activation: crate::activations::Activation::SilU,
+                rope_theta: None,
+                rope_scaling: None,
+                scale_embeddings: false,
+                extra_pos_embeddings: 0,
+                is_prenorm: false, // Legacy style post-norm
+                transpose_ffn_weights: false,
+                transpose_attention_weights: false,
+            }
         }
-        // fn num_key_value_heads(&self) -> usize { self.num_heads }
-        fn layer_norm_eps(&self) -> f32 {
-            self.eps
+
+        fn layout(&self) -> crate::traits::ModelLayout {
+            crate::traits::ModelLayout {
+                token_embedding: "embeddings.word_embeddings.weight".to_string(),
+                position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+                token_type_embedding: None,
+                embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
+                embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()), // Now Some
+
+                final_norm: "norm.weight".to_string(),
+                final_norm_bias: None,
+                lm_head: "lm_head.weight".to_string(),
+
+                // Attention Templates
+                attn_q: "layer.{}.attn.q.weight".to_string(),
+                attn_k: "layer.{}.attn.k.weight".to_string(),
+                attn_v: "layer.{}.attn.v.weight".to_string(),
+                attn_o: "layer.{}.attn.o.weight".to_string(),
+                attn_norm: "layer.{}.attn_ln.weight".to_string(),
+
+                // Biases are now Option<String>
+                attn_q_bias: Some("layer.{}.attn.q.bias".to_string()),
+                attn_k_bias: Some("layer.{}.attn.k.bias".to_string()),
+                attn_v_bias: Some("layer.{}.attn.v.bias".to_string()),
+                attn_o_bias: Some("layer.{}.attn.o.bias".to_string()),
+                attn_norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
+
+                // FFN Templates
+                ffn_gate: None, // Standard FFN, no SwiGLU
+                ffn_up: "layer.{}.ffn.up.weight".to_string(),
+                ffn_down: "layer.{}.ffn.down.weight".to_string(),
+                ffn_norm: "layer.{}.ffn_ln.weight".to_string(),
+
+                // Biases are now Option<String>
+                ffn_up_bias: Some("layer.{}.ffn.up.bias".to_string()),
+                ffn_down_bias: Some("layer.{}.ffn.down.bias".to_string()),
+                ffn_norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
+
+                cross_attn_q: None,
+                cross_attn_k: None,
+                cross_attn_v: None,
+                cross_attn_o: None,
+                cross_attn_norm: None,
+                cross_attn_q_bias: None,
+                cross_attn_k_bias: None,
+                cross_attn_v_bias: None,
+                cross_attn_o_bias: None,
+                cross_attn_norm_bias: None,
+            }
         }
-        fn num_hidden_layers(&self) -> usize {
-            1
-        }
-        // fn vocab_size(&self) -> usize { 1000 }
-        // fn max_position_embeddings(&self) -> usize { 512 }
-        fn is_causal(&self) -> bool {
-            false
-        } // Encoder is bidirectional
-        fn is_prenorm(&self) -> bool {
-            false
-        } // BART/BERT style post-norm
     }
 }

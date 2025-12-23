@@ -83,6 +83,7 @@ impl SentenceEncoder {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
+        load_cfg: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         // Validate model type
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
@@ -116,7 +117,7 @@ impl SentenceEncoder {
         download_model_files(&model_dir, &info.paths).await?;
 
         // Load from local path
-        Self::from_pretrained(&model_dir, model_type, device, context)
+        Self::from_pretrained(&model_dir, model_type, device, context, load_cfg)
     }
 
     /// Create encoder from local model directory
@@ -125,7 +126,7 @@ impl SentenceEncoder {
         model_type: ModelType,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        load_cfg: Option<ModelLoadConfig>, // Respect Runtime Config
+        load_cfg: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         // Validate model type
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
@@ -173,9 +174,10 @@ impl SentenceEncoder {
                 )?);
             }
         }
+        
         // Configure tokenizer padding and truncation using the model's config
         let truncation_params = tokenizers::TruncationParams {
-            max_length: config.max_position_embeddings(),
+            max_length: meta.max_seq_len,
             strategy: tokenizers::TruncationStrategy::LongestFirst,
             ..Default::default()
         };
@@ -202,12 +204,12 @@ impl SentenceEncoder {
 
     /// Get the embedding dimension (same as hidden size)
     pub fn embedding_dim(&self) -> usize {
-        self.config.hidden_size()
+        self.meta.hidden_size
     }
 
     /// Get the maximum sequence length
     pub fn max_seq_length(&self) -> usize {
-        self.config.max_position_embeddings()
+        self.meta.max_seq_len
     }
 
     /// Get the model type
@@ -305,7 +307,9 @@ impl LanguageModel for SentenceEncoder {
     fn bos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[CLS]") }
     fn eos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[SEP]") }
     fn pad_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[PAD]") }
-
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
         Err(anyhow!("Sentence Encoders do not use a KV cache."))
     }

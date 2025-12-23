@@ -8,7 +8,7 @@ use tokio;
 #[tokio::test]
 async fn test_torch_cross_encoder_predict() -> Result<()> {
     let cpu_encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let context = WgpuContext::new().await?;
     let gpu_encoder = CrossEncoder::from_registry(
@@ -16,6 +16,7 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
         None,
         Device::Wgpu,
         Some(context),
+        None,
     )
         .await?;
     let cpu_score = cpu_encoder
@@ -36,7 +37,7 @@ async fn test_torch_cross_encoder_predict() -> Result<()> {
 #[tokio::test]
 async fn test_cross_encoder_rerank_simple_validation() -> Result<()> {
     let cpu_encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let ranked = cpu_encoder.rerank("query", &[]).await?;
     assert!(
@@ -63,7 +64,7 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
     ];
     let expected_indices: Vec<usize> = vec![0, 2, 3, 1];
     let cpu_encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let cpu_indices = cpu_encoder.rerank(query, &documents).await?;
     let u: Vec<usize> = cpu_indices.iter().map(|v| v.0).collect();
@@ -77,6 +78,7 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
         None,
         Device::Wgpu,
         Some(context),
+        None,
     )
         .await?;
     let gpu_indices = gpu_encoder.rerank(query, &documents).await?;
@@ -89,7 +91,7 @@ async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_returns_scores() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let query = "machine learning";
     let documents = vec![
@@ -115,7 +117,7 @@ async fn test_rerank_returns_scores() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_indices_backwards_compat() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let query = "machine learning";
     let documents = vec![
@@ -133,7 +135,7 @@ async fn test_rerank_indices_backwards_compat() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_top_k() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let query = "machine learning";
     let documents = vec![
@@ -158,7 +160,7 @@ async fn test_rerank_top_k() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_top_k_indices() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let query = "machine learning";
     let documents = vec![
@@ -178,7 +180,7 @@ async fn test_rerank_top_k_indices() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_empty_documents() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let ranked = encoder.rerank("query", &[]).await?;
     assert!(ranked.is_empty());
@@ -192,7 +194,7 @@ async fn test_rerank_empty_documents() -> Result<()> {
 #[tokio::test]
 async fn test_rerank_top_k_exceeds_document_count() -> Result<()> {
     let encoder =
-        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None)
+        CrossEncoder::from_registry(ModelType::MiniLML6V2CrossEncoder, None, Device::Cpu, None, None)
             .await?;
     let documents = vec!["Doc 1", "Doc 2", "Doc 3"];
     let top_10 = encoder.rerank_top_k("query", &documents, 10).await?;

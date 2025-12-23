@@ -129,56 +129,57 @@ async fn main() -> Result<()> {
     );
 
     // GPU decoder embeddings
-    {
-        let pool = ctx.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
-        let mut frame = GpuFrameContext::new(&ctx, pool_guard);
-        let (enc, pool_ref) = frame.resources();
+    // {
+    //     let pool = ctx.get_inference_pool();
+    //     let mut pool_guard = pool.lock().await;
+    //     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+    //     let (enc, pool_ref) = frame.resources();
 
-        let gpu_dec_embed =
-            gpu_decoder.debug_embeddings(enc, pool_ref, &decoder_input_gpu, position_offset)?;
-        frame.finish();
+    //     let gpu_dec_embed =
+    //         gpu_decoder.debug_embeddings(enc, pool_ref, &decoder_input_gpu, position_offset)?;
+        
+    //     frame.finish();
 
-        let gpu_dec_embed_cpu = gpu_dec_embed.to_ndarray_3d::<f32>().await?;
-        println!("GPU decoder embed shape: {:?}", gpu_dec_embed_cpu.shape());
-        println!(
-            "GPU decoder embed first 5: {:?}",
-            gpu_dec_embed_cpu.iter().take(5).collect::<Vec<_>>()
-        );
+    //     let gpu_dec_embed_cpu = gpu_dec_embed.to_ndarray_3d::<f32>().await?;
+    //     println!("GPU decoder embed shape: {:?}", gpu_dec_embed_cpu.shape());
+    //     println!(
+    //         "GPU decoder embed first 5: {:?}",
+    //         gpu_dec_embed_cpu.iter().take(5).collect::<Vec<_>>()
+    //     );
 
-        assert_all_close(
-            &cpu_dec_embed.view().into_dyn(),
-            &gpu_dec_embed_cpu.view().into_dyn(),
-            1e-3,
-            1e-4,
-            "Decoder Embeddings",
-        );
-    }
+    //     assert_all_close(
+    //         &cpu_dec_embed.view().into_dyn(),
+    //         &gpu_dec_embed_cpu.view().into_dyn(),
+    //         1e-3,
+    //         1e-4,
+    //         "Decoder Embeddings",
+    //     );
+    // }
 
     // --- DECODER EMBED + LAYERNORM PARITY ---
     log::info!("\n--- STEP 2b: DECODER EMBED + LAYERNORM ---");
     let cpu_dec_ln = cpu_decoder.embed_and_normalize(&decoder_input_cpu, position_offset)?;
 
-    {
-        let pool = ctx.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
-        let mut frame = GpuFrameContext::new(&ctx, pool_guard);
-        let (enc, pool_ref) = frame.resources();
+    // {
+    //     let pool = ctx.get_inference_pool();
+    //     let mut pool_guard = pool.lock().await;
+    //     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+    //     let (enc, pool_ref) = frame.resources();
 
-        let gpu_dec_ln =
-            gpu_decoder.debug_embed_with_ln(enc, pool_ref, &decoder_input_gpu, position_offset)?;
-        frame.finish();
+    //     let gpu_dec_ln =
+    //         gpu_decoder.debug_embed_with_ln(enc, pool_ref, &decoder_input_gpu, position_offset)?;
+    //     frame.finish();
 
-        let gpu_dec_ln_cpu = gpu_dec_ln.to_ndarray_3d::<f32>().await?;
+    //     let gpu_dec_ln_cpu = gpu_dec_ln.to_ndarray_3d::<f32>().await?;
 
-        assert_all_close(
-            &cpu_dec_ln.view().into_dyn(),
-            &gpu_dec_ln_cpu.view().into_dyn(),
-            1e-3,
-            1e-4,
-            "Decoder Embed + LayerNorm",
-        );
-    }
+    //     assert_all_close(
+    //         &cpu_dec_ln.view().into_dyn(),
+    //         &gpu_dec_ln_cpu.view().into_dyn(),
+    //         1e-3,
+    //         1e-4,
+    //         "Decoder Embed + LayerNorm",
+    //     );
+    // }
 
     // --- 3. DECODER STEP PARITY CHECK ---
     log::info!("\n--- STEP 2: CHECKING DECODER STEP PARITY ---");

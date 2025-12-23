@@ -8,14 +8,14 @@ use ndarray::{Array1, Array2, Array3, s};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    Embeddings, FeedForward, MultiHeadAttention, Normalization, TransformerConfig,
+    Embeddings, FeedForward, MultiHeadAttention, Normalization,
     cache::{Cache, CpuKVCache},
     decoder::prelude::*,
     feedforward::{LegacyFeedForward, StdFeedForward},
     linear_layer::LinearLayer,
     normalization::LayerNorm,
     tensor::DType,
-    traits::{DecoderArchitecture, LanguageModelConfig},
+    traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 
@@ -26,21 +26,24 @@ use crate::models::gpt2::config::Gpt2Config;
 pub struct Gpt2CpuDecoder {
     pub embeddings: Embeddings,
     pub layers: Vec<GptPreNormDecoderLayer>,
-    pub final_layer_norm: Normalization, // Use generic Normalization enum
+    pub final_layer_norm: Normalization,
     pub config: Arc<Gpt2Config>,
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl Gpt2CpuDecoder {
     pub fn new(weights: &ModelWeights, config: Arc<Gpt2Config>) -> Result<Self> {
         log::info!("Building GPT-2 CPU decoder...");
+        
+        let meta = config.metadata();
+        let layout = config.layout();
 
         // 1. Embeddings
-        let (word_w, pos_w, _) = config.get_embedding_weight_names();
-        let word_embeddings = weights.get_array2(word_w)?;
-
-        let position_embeddings = if !pos_w.is_empty() {
-            debug!("[CPU Decoder] Position embeddings: {}", pos_w);
-            Some(weights.get_array2(pos_w)?)
+        let word_embeddings = weights.get_array2(&layout.token_embedding)?;
+        let position_embeddings = if let Some(pos_name) = &layout.position_embedding {
+            debug!("[CPU Decoder] Position embeddings: {}", pos_name);
+            Some(weights.get_array2(pos_name)?)
         } else {
             debug!("[CPU Decoder] Position embeddings: None");
             None
@@ -53,25 +56,18 @@ impl Gpt2CpuDecoder {
         );
 
         // 2. Final Layer Norm
-        let (norm_w, norm_b) = config.get_final_layer_norm_names();
         debug!("  Loading final layer norm...");
-
+        let final_norm_bias = layout.final_norm_bias.as_deref().unwrap_or("");
         let final_layer_norm =
-            Self::load_normalization(weights, &(norm_w, norm_b), config.layer_norm_eps())?
+            Self::load_normalization(weights, &(&layout.final_norm, final_norm_bias), meta.norm_eps)?
                 .ok_or_else(|| anyhow!("Final layer normalization is required"))?;
 
         // 3. Build decoder layers
-        debug!(
-            "  Building {} decoder layers...",
-            config.num_hidden_layers()
-        );
-        let mut layers = Vec::with_capacity(config.num_hidden_layers());
+        debug!("  Building {} decoder layers...", meta.num_layers);
+        let mut layers = Vec::with_capacity(meta.num_layers);
 
-        // Cast config to trait object for generic layer building
-        let dyn_config = config.clone() as Arc<dyn DecoderArchitecture + Send + Sync>;
-
-        for i in 0..config.num_hidden_layers() {
-            let layer = Self::build_layer(weights, dyn_config.as_ref(), i)?;
+        for i in 0..meta.num_layers {
+            let layer = Self::build_layer(weights, &meta, &layout, i)?;
             layers.push(layer);
         }
 
@@ -82,176 +78,135 @@ impl Gpt2CpuDecoder {
             final_layer_norm,
             layers,
             config,
+            meta,
+            layout,
         })
     }
 
     fn build_layer(
         weights: &ModelWeights,
-        config: &dyn DecoderArchitecture,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
         layer_idx: usize,
     ) -> Result<GptPreNormDecoderLayer> {
-        let attn_names = config.get_attention_names(layer_idx);
-        let ffn_names = config.get_feed_forward_names(layer_idx);
-        let hidden_size = config.hidden_size();
-        let kv_dim = config.kv_dim();
+        let idx = layer_idx.to_string();
+        let name = |t: &String| t.replace("{}", &idx);
+        let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &idx)).unwrap_or_default();
 
-        // Load attention weights (handle combined QKV for GPT-2)
+        let hidden_size = meta.hidden_size;
+        let head_dim = meta.head_dim;
+        let kv_dim = meta.num_kv_heads * head_dim;
+
+        // --- 1. Load Attention Weights ---
+        // GPT-2 uses fused QKV (c_attn). In our layout refactor, we mapped this to attn_q.
+        let qkv_weight_name = name(&layout.attn_q);
+        let qkv_bias_name = opt_name(&layout.attn_q_bias);
+
         let (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias) =
-            if !attn_names.qkv_weight.is_empty() {
+            if !qkv_weight_name.is_empty() {
                 // GPT-2 style: Combined QKV
-                let qkv_weight = weights.get_array2(&attn_names.qkv_weight)?;
-                let qkv_bias = weights.get_array1(&attn_names.qkv_bias)?;
+                let qkv_weight = weights.get_array2(&qkv_weight_name)?;
+                let qkv_bias = weights.get_array1(&qkv_bias_name)?;
 
                 let q_weight = qkv_weight.slice(s![.., 0..hidden_size]).to_owned();
-                let k_weight = qkv_weight
-                    .slice(s![.., hidden_size..2 * hidden_size])
-                    .to_owned();
-                let v_weight = qkv_weight
-                    .slice(s![.., 2 * hidden_size..3 * hidden_size])
-                    .to_owned();
+                let k_weight = qkv_weight.slice(s![.., hidden_size..2 * hidden_size]).to_owned();
+                let v_weight = qkv_weight.slice(s![.., 2 * hidden_size..3 * hidden_size]).to_owned();
 
-                let o_weight = weights.get_array2(&attn_names.output_weight)?;
+                let o_weight = weights.get_array2(&name(&layout.attn_o))?;
 
                 let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
                 let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
-                let v_bias = qkv_bias
-                    .slice(s![2 * hidden_size..3 * hidden_size])
-                    .to_owned();
-                let o_bias = weights.get_array1(&attn_names.output_bias)?;
+                let v_bias = qkv_bias.slice(s![2 * hidden_size..3 * hidden_size]).to_owned();
+                let o_bias = weights.get_array1(&opt_name(&layout.attn_o_bias))?;
 
-                (
-                    q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
-                )
+                (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias)
             } else {
-                // Fallback for separate weights (unlikely for standard GPT-2)
-                let layer_attn_names = config.get_layer_attention_names(layer_idx);
-                let q_weight = weights.get_array2(&layer_attn_names.q_weight)?;
-                let k_weight = weights.get_array2(&layer_attn_names.k_weight)?;
-                let v_weight = weights.get_array2(&layer_attn_names.v_weight)?;
-                let o_weight = weights.get_array2(&layer_attn_names.output_weight)?;
+                // Fallback for separate weights (Llama style, though Gpt2CpuDecoder usually isn't used for Llama)
+                let q_weight = weights.get_array2(&name(&layout.attn_q))?;
+                let k_weight = weights.get_array2(&name(&layout.attn_k))?;
+                let v_weight = weights.get_array2(&name(&layout.attn_v))?;
+                let o_weight = weights.get_array2(&name(&layout.attn_o))?;
 
-                let q_bias =
-                    Self::load_optional_bias(weights, &layer_attn_names.q_bias, hidden_size)?;
-                let k_bias = Self::load_optional_bias(weights, &layer_attn_names.k_bias, kv_dim)?;
-                let v_bias = Self::load_optional_bias(weights, &layer_attn_names.v_bias, kv_dim)?;
-                let o_bias =
-                    Self::load_optional_bias(weights, &layer_attn_names.output_bias, hidden_size)?;
+                let q_bias = Self::load_optional_bias(weights, &opt_name(&layout.attn_q_bias), hidden_size)?;
+                let k_bias = Self::load_optional_bias(weights, &opt_name(&layout.attn_k_bias), kv_dim)?;
+                let v_bias = Self::load_optional_bias(weights, &opt_name(&layout.attn_v_bias), kv_dim)?;
+                let o_bias = Self::load_optional_bias(weights, &opt_name(&layout.attn_o_bias), hidden_size)?;
 
-                (
-                    q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
-                )
+                (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias)
             };
 
         let attention = MultiHeadAttention::new(
             hidden_size,
-            config.num_attention_heads(),
-            q_weight,
-            q_bias,
-            k_weight,
-            k_bias,
-            v_weight,
-            v_bias,
-            o_weight,
-            o_bias,
-            Some(config.num_key_value_heads()),
+            meta.num_attention_heads,
+            q_weight, q_bias,
+            k_weight, k_bias,
+            v_weight, v_bias,
+            o_weight, o_bias,
+            Some(meta.num_kv_heads),
         );
 
-        // Load FFN
+        // --- 2. Load FFN ---
         let feed_forward = {
-            // GPT-2 Standard FFN
-            let intermediate_weight = if config.transpose_ffn_weights() {
-                let arr = weights.get_array2(&ffn_names.intermediate_weight)?;
-                arr.t().as_standard_layout().to_owned()
+            let intermediate_weight = if meta.transpose_ffn_weights {
+                weights.get_array2(&name(&layout.ffn_up))?.t().as_standard_layout().to_owned()
             } else {
-                weights.get_array2(&ffn_names.intermediate_weight)?
+                weights.get_array2(&name(&layout.ffn_up))?
             };
 
-            let output_weight = if config.transpose_ffn_weights() {
-                let arr = weights.get_array2(&ffn_names.output_weight)?;
-                arr.t().as_standard_layout().to_owned()
+            let output_weight = if meta.transpose_ffn_weights {
+                weights.get_array2(&name(&layout.ffn_down))?.t().as_standard_layout().to_owned()
             } else {
-                weights.get_array2(&ffn_names.output_weight)?
+                weights.get_array2(&name(&layout.ffn_down))?
             };
+            let intermediate_size = meta.hidden_size * 4; // GPT-2 standard // todo config
+            let intermediate_bias = Self::load_optional_bias(weights, &opt_name(&layout.ffn_up_bias), intermediate_size)?;
+            let output_bias = Self::load_optional_bias(weights, &opt_name(&layout.ffn_down_bias), hidden_size)?;
 
-            // Layout assertions (Legacy/Standard handling)
-            if config.legacy_ffn_weights() {
-                let expected_inter_shape = [config.hidden_size(), config.intermediate_size()];
-                let expected_out_shape = [config.intermediate_size(), config.hidden_size()];
-                assert_eq!(
-                    intermediate_weight.shape(),
-                    expected_inter_shape,
-                    "FFN Inter shape mismatch"
-                );
-                assert_eq!(
-                    output_weight.shape(),
-                    expected_out_shape,
-                    "FFN Out shape mismatch"
-                );
-            } else {
-                let expected_inter_shape = [config.intermediate_size(), config.hidden_size()];
-                let expected_out_shape = [config.hidden_size(), config.intermediate_size()];
-                assert_eq!(
-                    intermediate_weight.shape(),
-                    expected_inter_shape,
-                    "FFN Inter shape mismatch"
-                );
-                assert_eq!(
-                    output_weight.shape(),
-                    expected_out_shape,
-                    "FFN Out shape mismatch"
-                );
-            }
-
-            let intermediate_bias = Self::load_optional_bias(
-                weights,
-                &ffn_names.intermediate_bias,
-                config.intermediate_size(),
-            )?;
-            let output_bias =
-                Self::load_optional_bias(weights, &ffn_names.output_bias, hidden_size)?;
-
-            if config.legacy_ffn_weights() {
-                FeedForward::Legacy(LegacyFeedForward::new(
+            // Logic to choose between Legacy and Standard FFN path
+            FeedForward::Legacy(LegacyFeedForward::new(
                     intermediate_weight,
                     intermediate_bias,
                     output_weight,
                     output_bias,
-                    config.activation_function(),
+                    meta.activation,
                 ))
-            } else {
-                FeedForward::Standard(StdFeedForward::new(
-                    intermediate_weight,
-                    intermediate_bias,
-                    output_weight,
-                    output_bias,
-                    config.activation_function(),
-                ))
-            }
+            // if meta.model_type == "gpt2" || meta.model_type == "distilgpt2" {
+            //     FeedForward::Legacy(LegacyFeedForward::new(
+            //         intermediate_weight,
+            //         intermediate_bias,
+            //         output_weight,
+            //         output_bias,
+            //         meta.activation,
+            //     ))
+            // } else {
+            //     FeedForward::Standard(StdFeedForward::new(
+            //         intermediate_weight,
+            //         intermediate_bias,
+            //         output_weight,
+            //         output_bias,
+            //         meta.activation,
+            //     ))
+            // }
         };
 
-        // Load Normalization
-        let (attn_norm_name, attn_norm_bias) = if !attn_names.qkv_weight.is_empty() {
-            (
-                attn_names.norm_weight.as_str(),
-                attn_names.norm_bias.as_str(),
-            )
-        } else {
-            unimplemented!()
-        };
+        // --- 3. Load Normalizations ---
+        let attn_norm_name = name(&layout.attn_norm);
+        let attn_norm_bias = opt_name(&layout.attn_norm_bias);
 
         let self_attn_layer_norm = Self::load_normalization(
             weights,
-            &(attn_norm_name, attn_norm_bias),
-            config.layer_norm_eps(),
-        )?
-        .ok_or_else(|| anyhow!("Attn Norm required"))?;
+            &(&attn_norm_name, &attn_norm_bias),
+            meta.norm_eps,
+        )?.ok_or_else(|| anyhow!("Attn Norm required"))?;
+
+        let ffn_norm_name = name(&layout.ffn_norm);
+        let ffn_norm_bias = opt_name(&layout.ffn_norm_bias);
 
         let ffn_layer_norm = Self::load_normalization(
             weights,
-            &(ffn_names.norm_weight.as_str(), ffn_names.norm_bias.as_str()),
-            config.layer_norm_eps(),
-        )?
-        .ok_or_else(|| anyhow!("FFN Norm required"))?;
+            &(&ffn_norm_name, &ffn_norm_bias),
+            meta.norm_eps,
+        )?.ok_or_else(|| anyhow!("FFN Norm required"))?;
 
         Ok(GptPreNormDecoderLayer {
             self_attn: attention,
@@ -286,9 +241,7 @@ impl Gpt2CpuDecoder {
             )))
         } else {
             let bias = weights.get_array1(b_name)?;
-            Ok(Some(Normalization::LayerNorm(LayerNorm::new(
-                weight, bias, eps,
-            ))))
+            Ok(Some(Normalization::LayerNorm(LayerNorm::new(weight, bias, eps))))
         }
     }
 }
@@ -307,7 +260,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
                     &input_ids,
                     None,
                     position_offset,
-                    self.config.scale_embeddings(),
+                    self.meta.scale_embeddings,
                 ))
             }
             DecoderInput::HiddenCpu(hidden) => Ok(hidden.clone()),

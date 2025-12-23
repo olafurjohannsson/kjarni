@@ -3,48 +3,54 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
-    activations::Activation,
-    cache::{Cache, CpuBeamKVCache},
-    embeddings::Embeddings,
-    encoder_decoder::{
+    activations::Activation, cache::{Cache, CpuBeamKVCache}, embeddings::Embeddings, encoder_decoder::{
         DecoderCrossAttention, DecoderSelfAttention,
         decoder_cross_attn_layer::DecoderCrossAttentionLayer,
         traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
-    },
-    feedforward::{FeedForward, LegacyFeedForward},
-    linear_layer::LinearLayer,
-    normalization::LayerNorm,
-    traits::{Device, EncoderDecoderArchitecture, TransformerModel},
-    weights::ModelWeights,
+    }, feedforward::{FeedForward, LegacyFeedForward}, linear_layer::LinearLayer, models::base::ModelLoadConfig, normalization::LayerNorm, traits::{Device, InferenceModel, ModelConfig}, weights::ModelWeights
 };
 
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 pub struct BartCpuDecoder {
-    embeddings: Embeddings,
-    layers: Vec<DecoderCrossAttentionLayer>,
-    embed_layer_norm: LayerNorm,
-    config: Arc<BartConfig>,
+    pub embeddings: Embeddings,
+    pub layers: Vec<DecoderCrossAttentionLayer>,
+    pub embed_layer_norm: LayerNorm,
+    pub config: Arc<BartConfig>,
 }
 
 impl BartCpuDecoder {
-    pub fn new(weights: &ModelWeights, config: Arc<BartConfig>) -> Result<Self> {
-        let word_embeddings = weights.get_array2(config.get_shared_embedding_weight_name())?;
+    pub fn new(
+        weights: &ModelWeights, 
+        config: Arc<BartConfig>, 
+        _load_config: ModelLoadConfig
+    ) -> Result<Self> {
+        let meta = config.metadata();
+        let layout = config.layout();
+
+        // 1. Word Embeddings (Logic preserved: Force dequantize to F32)
+        let word_embeddings = weights.get_array2(&layout.token_embedding)?;
         let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
 
+        // 2. Decoder-Specific Embeddings (Preserving BART-specific naming logic)
         let embeddings = Embeddings::new(
             embed,
             Some(weights.get_array2("model.decoder.embed_positions.weight")?),
             None, // No token_type_embeddings in BART
         );
+
+        // 3. Decoder-Specific Embedding Norm
         let embed_layer_norm = LayerNorm::new(
             weights.get_array1("model.decoder.layernorm_embedding.weight")?,
             weights.get_array1("model.decoder.layernorm_embedding.bias")?,
-            config.layer_norm_eps,
+            meta.norm_eps,
         );
+
+        // 4. Build decoder layers (Using config.decoder_layers as per BART spec)
         let mut layers = Vec::with_capacity(config.decoder_layers);
         for i in 0..config.decoder_layers {
+            // Logic preserved: continues to use the existing load_layer method
             layers.push(Self::load_layer(weights, &config, i)?);
         }
 
@@ -171,7 +177,7 @@ impl BartCpuDecoder {
     }
 }
 
-impl TransformerModel for BartCpuDecoder {
+impl InferenceModel for BartCpuDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
@@ -402,8 +408,8 @@ mod tests {
         let config_json = std::fs::read_to_string(path.join("config.json"))?;
         let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
 
-        let encoder = BartCpuEncoder::new(&weights, config.clone())?;
-        let decoder = BartCpuDecoder::new(&weights, config.clone())?;
+        let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
+        let decoder = BartCpuDecoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
 
         Ok((encoder, decoder, config))
     }

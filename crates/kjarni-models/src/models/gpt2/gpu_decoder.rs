@@ -2,29 +2,23 @@
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{s, Array2};
+use ndarray::{Array2, s};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    cache::GpuKVCache,
-    decoder::prelude::*,
-    embeddings::Embeddings,
-    gpu_ops::{
+    WgpuContext, cache::GpuKVCache, decoder::prelude::*, embeddings::Embeddings, gpu_ops::{
+        GpuTensor, GpuTensorPool,
         blocks::{
-            attention::GpuAttentionWeights,
-            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
-            layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
             GpuFeedForward, GpuFeedForwardStd as GpuStandardFFN, GpuFeedForwardWeights,
             GpuFeedForwardWeightsStd as GpuStandardFFNWeights, GpuNormalization,
             GpuNormalizationWeights,
+            attention::GpuAttentionWeights,
+            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
+            layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
         },
-        GpuTensor, GpuTensorPool,
-    },
-    traits::{DecoderArchitecture, LanguageModelConfig},
-    weights::ModelWeights,
-    TransformerConfig, WgpuContext,
+    }, models::base::ModelLoadConfig, traits::{ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 // --- Crate-Specific ---
@@ -45,6 +39,11 @@ pub struct Gpt2GpuDecoder {
 
     // Option: If using GPU embeddings, this is None
     cpu_embeddings: Option<Embeddings>,
+
+    load_config: ModelLoadConfig,
+
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl Gpt2GpuDecoder {
@@ -57,16 +56,18 @@ impl Gpt2GpuDecoder {
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<Gpt2Config>,
-        load_config: DecoderLoadConfig,
+        load_config: ModelLoadConfig,
     ) -> Result<Self> {
         log::info!("Building GPT-2 GPU decoder...");
+
+        let meta = config.metadata();
+        let layout = config.layout();
 
         let (cpu_embeddings, embedding_weights, embeddings) = if load_config.offload_embeddings {
             log::info!("Optimization: Loading Embedding weights to CPU RAM only.");
 
-            let (word_w, pos_w, _) = config.get_embedding_weight_names();
-            let word_embeddings = weights.get_array2(word_w)?;
-            let position_embeddings_cpu = if !pos_w.is_empty() {
+            let word_embeddings = weights.get_array2(&layout.token_embedding)?;
+            let position_embeddings_cpu = if let Some(pos_w) = &layout.position_embedding {
                 Some(weights.get_array2(pos_w)?)
             } else {
                 None
@@ -81,30 +82,37 @@ impl Gpt2GpuDecoder {
             (Some(cpu_embs), None, None)
         } else {
             log::info!("Loading Embedding weights to VRAM.");
-            let ew = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
+            // Use the direct parameter constructor for GpuEmbeddingWeights
+            let ew = GpuEmbeddingWeights::new(
+                context,
+                weights,
+                &layout.token_embedding,
+                layout.position_embedding.as_deref(),
+                None,
+                load_config.target_dtype,
+            )?;
             let em = GpuEmbeddings::new(context)?;
             (None, Some(ew), Some(em))
         };
 
         // 2. Final Layer Norm (GPT-2 uses standard LayerNorm)
-        let (norm_w_name, norm_b_name) = config.get_final_layer_norm_names();
         let final_layer_norm =
-            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, config.layer_norm_eps()));
+            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
+
         let final_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-            GpuTensor::from_ndarray(context, &weights.get_array1(norm_w_name)?)?,
-            GpuTensor::from_ndarray(context, &weights.get_array1(norm_b_name)?)?,
+            GpuTensor::from_ndarray(context, &weights.get_array1(&layout.final_norm)?)?,
+            GpuTensor::from_ndarray(
+                context,
+                &weights.get_array1(layout.final_norm_bias.as_ref().unwrap())?,
+            )?,
         )?);
 
         // 3. Decoder Layers
-        let mut layers = Vec::with_capacity(config.num_hidden_layers());
-        for i in 0..config.num_hidden_layers() {
-            log::info!(
-                "Building GPT-2 layer {}/{}",
-                i + 1,
-                config.num_hidden_layers()
-            );
-            let dyn_config = config.clone() as Arc<dyn DecoderArchitecture + Send + Sync>;
-            let decoder_layer = Self::build_layer(context.clone(), weights, dyn_config, i)?;
+        let mut layers = Vec::with_capacity(meta.num_layers);
+        for i in 0..meta.num_layers {
+            log::info!("Building GPT-2 layer {}/{}", i + 1, meta.num_layers);
+            let decoder_layer =
+                Self::build_layer(context.clone(), weights, &meta, &layout, i, load_config)?;
             layers.push(decoder_layer);
         }
 
@@ -119,6 +127,9 @@ impl Gpt2GpuDecoder {
             context: context.clone(),
             config,
             cpu_embeddings,
+            load_config,
+            meta,
+            layout,
         })
     }
 
@@ -126,17 +137,21 @@ impl Gpt2GpuDecoder {
     fn build_layer(
         context: Arc<WgpuContext>,
         weights: &ModelWeights,
-        config: Arc<dyn DecoderArchitecture + Send + Sync>,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
         layer_idx: usize,
+        load_config: ModelLoadConfig,
     ) -> Result<GpuPreNormDecoderLayer> {
-        let hidden_size = config.hidden_size();
-        let intermediate_size = config.intermediate_size();
+        let idx = layer_idx.to_string();
+        let name = |t: &String| t.replace("{}", &idx);
+        let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &idx)).unwrap();
 
-        let attn_names = config.get_attention_names(layer_idx);
+        let hidden_size = meta.hidden_size;
+        let intermediate_size = meta.hidden_size * 4; // GPT-2 standard
 
-        // Load COMBINED QKV weight and split it
-        let qkv_weight = weights.get_array2(&attn_names.qkv_weight)?;
-        let qkv_bias = weights.get_array1(&attn_names.qkv_bias)?;
+        // Load COMBINED QKV weight and split it (Mapping attn_q to c_attn)
+        let qkv_weight = weights.get_array2(&name(&layout.attn_q))?;
+        let qkv_bias = weights.get_array1(&opt_name(&layout.attn_q_bias))?;
 
         log::info!(
             "Layer {}: QKV weight shape (file): {:?}, expected [In={}, Out={}]",
@@ -146,7 +161,7 @@ impl Gpt2GpuDecoder {
             3 * hidden_size
         );
 
-        // Split AND transpose: file is [In, Out], GPU needs [Out, In]
+        // Logic Preserved: Split AND transpose: file is [In, Out], GPU needs [Out, In]
         let q_weight = qkv_weight
             .slice(s![.., 0..hidden_size])
             .t()
@@ -163,64 +178,17 @@ impl Gpt2GpuDecoder {
             .as_standard_layout()
             .to_owned();
 
-        // Verify [Out, In] layout for GPU
-        assert_eq!(
-            q_weight.shape(),
-            &[hidden_size, hidden_size],
-            "Q weight must be [Out={}, In={}] for GPU, got {:?}",
-            hidden_size,
-            hidden_size,
-            q_weight.shape()
-        );
-        assert_eq!(
-            k_weight.shape(),
-            &[hidden_size, hidden_size],
-            "K weight must be [Out={}, In={}] for GPU, got {:?}",
-            hidden_size,
-            hidden_size,
-            k_weight.shape()
-        );
-        assert_eq!(
-            v_weight.shape(),
-            &[hidden_size, hidden_size],
-            "V weight must be [Out={}, In={}] for GPU, got {:?}",
-            hidden_size,
-            hidden_size,
-            v_weight.shape()
-        );
-
-        log::info!(
-            "Layer {}: Q/K/V weights transposed to [Out, In]: {:?}",
-            layer_idx,
-            q_weight.shape()
-        );
-
-        // Split biases (no transpose needed for 1D)
+        // Biases preserved
         let q_bias = qkv_bias.slice(s![0..hidden_size]).to_owned();
         let k_bias = qkv_bias.slice(s![hidden_size..2 * hidden_size]).to_owned();
         let v_bias = qkv_bias
             .slice(s![2 * hidden_size..3 * hidden_size])
             .to_owned();
 
-        // Output projection - transpose from [In, Out] to [Out, In]
-        let o_weight_raw = weights.get_array2(&attn_names.output_weight)?;
-        log::info!(
-            "Layer {}: O weight shape (file): {:?}",
-            layer_idx,
-            o_weight_raw.shape()
-        );
-
+        // Output projection logic preserved
+        let o_weight_raw = weights.get_array2(&name(&layout.attn_o))?;
         let o_weight = o_weight_raw.t().as_standard_layout().to_owned();
-        let o_bias = weights.get_array1(&attn_names.output_bias)?;
-
-        assert_eq!(
-            o_weight.shape(),
-            &[hidden_size, hidden_size],
-            "Output weight must be [Out={}, In={}] for GPU, got {:?}",
-            hidden_size,
-            hidden_size,
-            o_weight.shape()
-        );
+        let o_bias = weights.get_array1(&opt_name(&layout.attn_o_bias))?;
 
         let self_attn_weights = GpuAttentionWeights::new(
             GpuTensor::from_ndarray(&context, &q_weight)?,
@@ -233,55 +201,25 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &o_bias)?,
         )?;
 
-        // --- Attention LayerNorm (unchanged) ---
-        let (self_attn_norm, self_attn_norm_weights) = {
-            let gamma = weights.get_array1(&attn_names.norm_weight)?;
-            let beta = weights.get_array1(&attn_names.norm_bias)?;
-            (
-                GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, config.layer_norm_eps())),
-                GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-                    GpuTensor::from_ndarray(&context, &gamma)?,
-                    GpuTensor::from_ndarray(&context, &beta)?,
-                )?),
-            )
-        };
+        // --- Attention LayerNorm logic preserved ---
+        let gamma = weights.get_array1(&name(&layout.attn_norm))?;
+        let beta = weights.get_array1(&opt_name(&layout.attn_norm_bias))?;
+        let self_attn_norm =
+            GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, meta.norm_eps));
+        let self_attn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
+            GpuTensor::from_ndarray(&context, &gamma)?,
+            GpuTensor::from_ndarray(&context, &beta)?,
+        )?);
 
-        // --- FFN weights with transpose ---
-        let ffn_names = config.get_feed_forward_names(layer_idx);
+        // --- FFN weights with transpose logic preserved ---
+        let intermediate_w_raw = weights.get_array2(&name(&layout.ffn_up))?;
+        let output_w_raw = weights.get_array2(&name(&layout.ffn_down))?;
 
-        let intermediate_w_raw = weights.get_array2(&ffn_names.intermediate_weight)?;
-        let output_w_raw = weights.get_array2(&ffn_names.output_weight)?;
-
-        log::info!(
-            "Layer {}: FFN intermediate weight (file): {:?}, output weight (file): {:?}",
-            layer_idx,
-            intermediate_w_raw.shape(),
-            output_w_raw.shape()
-        );
-
-        // Transpose: [In, Out] -> [Out, In]
         let intermediate_w = intermediate_w_raw.t().as_standard_layout().to_owned();
         let output_w = output_w_raw.t().as_standard_layout().to_owned();
 
-        assert_eq!(
-            intermediate_w.shape(),
-            &[intermediate_size, hidden_size],
-            "FFN intermediate must be [Out={}, In={}] for GPU, got {:?}",
-            intermediate_size,
-            hidden_size,
-            intermediate_w.shape()
-        );
-        assert_eq!(
-            output_w.shape(),
-            &[hidden_size, intermediate_size],
-            "FFN output must be [Out={}, In={}] for GPU, got {:?}",
-            hidden_size,
-            intermediate_size,
-            output_w.shape()
-        );
-
-        let intermediate_b = weights.get_array1(&ffn_names.intermediate_bias)?;
-        let output_b = weights.get_array1(&ffn_names.output_bias)?;
+        let intermediate_b = weights.get_array1(&opt_name(&layout.ffn_up_bias))?;
+        let output_b = weights.get_array1(&opt_name(&layout.ffn_down_bias))?;
 
         let ff_weights = GpuFeedForwardWeights::Standard(GpuStandardFFNWeights::new(
             GpuTensor::from_ndarray(&context, &intermediate_w)?,
@@ -290,27 +228,17 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &output_b)?,
         )?);
 
-        let feedforward =
-            GpuFeedForward::Standard(GpuStandardFFN::new(&context, config.activation_function())?);
+        let feedforward = GpuFeedForward::Standard(GpuStandardFFN::new(&context, meta.activation)?);
 
-        // --- FFN LayerNorm (unchanged) ---
+        // --- FFN LayerNorm logic preserved ---
         let ffn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-            GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_weight)?)?,
-            GpuTensor::from_ndarray(&context, &weights.get_array1(&ffn_names.norm_bias)?)?,
+            GpuTensor::from_ndarray(&context, &weights.get_array1(&name(&layout.ffn_norm))?)?,
+            GpuTensor::from_ndarray(
+                &context,
+                &weights.get_array1(&opt_name(&layout.ffn_norm_bias))?,
+            )?,
         )?);
-        let ffn_norm =
-            GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, config.layer_norm_eps()));
-
-        log::info!(
-            "✓ Layer {} built: attn [{}, {}], ffn [{}, {}] → [{}, {}]",
-            layer_idx,
-            hidden_size,
-            hidden_size,
-            intermediate_size,
-            hidden_size,
-            hidden_size,
-            intermediate_size
-        );
+        let ffn_norm = GpuNormalization::LayerNorm(GpuLayerNorm::new(&context, meta.norm_eps));
 
         Ok(GpuPreNormDecoderLayer::new(
             &context,
@@ -321,8 +249,9 @@ impl Gpt2GpuDecoder {
             ff_weights,
             ffn_norm,
             ffn_norm_weights,
-            config,
-            None, // GPT-2 doesn't use RoPE
+            meta.hidden_size,
+            meta.num_attention_heads,
+            meta.num_kv_heads,
         )?)
     }
 }
@@ -348,7 +277,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
                         &input_array,
                         None,
                         position_offset,
-                        self.config.scale_embeddings(),
+                        self.meta.scale_embeddings,
                     );
 
                     GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)
@@ -360,37 +289,43 @@ impl GpuDecoder for Gpt2GpuDecoder {
                         &Array2::from_shape_vec((1, ids.len()), ids.to_vec())?,
                     )?;
 
-                    let gpu_embeds = self.embeddings.as_ref()
+                    let gpu_embeds = self
+                        .embeddings
+                        .as_ref()
                         .ok_or_else(|| anyhow!("Embeddings not loaded on CPU or GPU"))?;
                     let gpu_weights = self.embedding_weights.as_ref().unwrap();
-                    unimplemented!()
-                    // gpu_embeds.encode(
-                    //     encoder,
-                    //     gpu_weights,
-                    //     &tokens_tensor,
-                    //     None,
-                    //     position_offset,
-                    //     self.config.as_ref(),
-                    //     pool,
-                    // )
+                    gpu_embeds.encode(
+                        encoder,
+                        gpu_weights,
+                        &tokens_tensor,
+                        None,
+                        position_offset,
+                        self.meta.hidden_size,
+                        self.meta.extra_pos_embeddings,
+                        self.meta.scale_embeddings,
+                        pool,
+                    )
                 }
             }
             // Case 2: Tokens already on GPU (Optimized Beam Search)
             DecoderInput::TokensGpu(ids_tensor) => {
-                let gpu_embeds = self.embeddings.as_ref()
+                let gpu_embeds = self
+                    .embeddings
+                    .as_ref()
                     .ok_or_else(|| anyhow!("GPU input provided but embeddings are on CPU"))?;
                 let gpu_weights = self.embedding_weights.as_ref().unwrap();
 
-                // gpu_embeds.encode(
-                //     encoder,
-                //     gpu_weights,
-                //     ids_tensor,
-                //     None,
-                //     position_offset,
-                //     self.config.as_ref(),
-                //     pool,
-                // )
-                unimplemented!()
+                gpu_embeds.encode(
+                        encoder,
+                        gpu_weights,
+                        &ids_tensor,
+                        None,
+                        position_offset,
+                        self.meta.hidden_size,
+                        self.meta.extra_pos_embeddings,
+                        self.meta.scale_embeddings,
+                        pool,
+                    )
             }
             // Case 3: Pre-computed Hidden States (Multimodal / Prefix Tuning)
             DecoderInput::HiddenGpu(t) => Ok(t.clone()),
@@ -424,7 +359,9 @@ impl GpuDecoder for Gpt2GpuDecoder {
         let mut current_state = hidden_states.clone();
 
         for i in start_layer..end_layer {
-            if i >= self.layers.len() { break; }
+            if i >= self.layers.len() {
+                break;
+            }
             let layer = &self.layers[i];
 
             // Re-borrow cache mutably
@@ -452,7 +389,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     }
 
     fn hidden_size(&self) -> usize {
-        self.config.hidden_size()
+        self.meta.hidden_size
     }
 
     // Override default forward to include Final Layer Norm
@@ -467,7 +404,9 @@ impl GpuDecoder for Gpt2GpuDecoder {
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
         // 1. Embed
-        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset).await?;
+        let hidden = self
+            .embed_and_normalize(encoder, pool, input, position_offset)
+            .await?;
 
         // 2. Layers
         let mut hidden = self.forward_layers(
@@ -483,12 +422,8 @@ impl GpuDecoder for Gpt2GpuDecoder {
 
         // 3. Final Layer Norm
         let final_ln_output = pool.get(hidden.shape().to_vec());
-        self.final_layer_norm.encode(
-            encoder,
-            &self.final_ln_weights,
-            &hidden,
-            &final_ln_output,
-        );
+        self.final_layer_norm
+            .encode(encoder, &self.final_ln_weights, &hidden, &final_ln_output);
 
         Ok(final_ln_output)
     }

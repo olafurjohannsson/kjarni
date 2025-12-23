@@ -1,5 +1,6 @@
 use crate::models::bart::config::BartConfig;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::embeddings::Embeddings;
 use kjarni_transformers::encoder::config::EncoderLoadConfig;
@@ -8,14 +9,14 @@ use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
-    layer_norm::{GpuLayerNorm, GpuLayerNormWeights}, GpuFeedForwardWeightsStd, GpuNormalization,
-    GpuNormalizationWeights,
+    GpuFeedForwardWeightsStd, GpuNormalization, GpuNormalizationWeights,
+    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
-use kjarni_transformers::traits::EncoderDecoderArchitecture;
-use kjarni_transformers::traits::{LanguageModelConfig, TransformerConfig};
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
-use kjarni_transformers::WgpuContext;
+use tokenizers::Model;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 
@@ -29,7 +30,7 @@ use wgpu::CommandEncoder;
 pub struct BartGpuEncoder {
     context: Arc<WgpuContext>,
     config: Arc<BartConfig>,
-    load_config: EncoderLoadConfig,
+    load_config: ModelLoadConfig,
 
     // --- GPU Kernels ---
     gpu_embeddings: GpuEmbeddings,
@@ -44,6 +45,9 @@ pub struct BartGpuEncoder {
 
     // --- Encoder Layers ---
     layers: Vec<GpuEncoderLayer>,
+
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl BartGpuEncoder {
@@ -58,97 +62,72 @@ impl BartGpuEncoder {
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<BartConfig>,
+        load_config: ModelLoadConfig,
     ) -> Result<Self> {
-        Self::with_config(context, weights, config, EncoderLoadConfig::default())
+        Self::with_config(context, weights, config, ModelLoadConfig::default())
     }
 
-    /// Create a new BART GPU encoder with custom load configuration.
-    ///
-    /// # Arguments
-    /// * `context` - WGPU context
-    /// * `weights` - Model weights
-    /// * `config` - BART model configuration
-    /// * `load_config` - Memory placement and dtype configuration
     pub fn with_config(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
         config: Arc<BartConfig>,
-        load_config: EncoderLoadConfig,
+        load_config: ModelLoadConfig,
     ) -> Result<Self> {
-        let hidden_size = config.hidden_size();
-        let intermediate_size = config.encoder_ffn_dim;
+        let meta = config.metadata();
+        let layout = config.layout();
 
         // ====================================================================
-        // 1. EMBEDDINGS - CPU or GPU based on config
+        // 1. EMBEDDINGS - CPU or GPU based on config (Original Logic)
         // ====================================================================
-        let (cpu_embeddings, gpu_embedding_weights) = if load_config.cpu_embeddings {
-            log::info!(
-                "BART Encoder: Loading embeddings to CPU (VRAM saving mode). \
-                Vocab: {}, Hidden: {}, Saving ~{:.1}MB",
-                config.vocab_size,
-                hidden_size,
-                (config.vocab_size * hidden_size * 4) as f64 / 1_000_000.0
-            );
+        let (cpu_embeddings, gpu_embedding_weights) = if load_config.offload_embeddings {
+            log::info!("BART Encoder: Loading embeddings to CPU (VRAM saving mode).");
 
-            // let word_emb = weights.get_array2(config.get_shared_embedding_weight_name())?;
-            let pos_emb = weights.get_array2("model.encoder.embed_positions.weight")?;
+            let word_embeddings = weights.get_array2(&layout.token_embedding)?;
+            let pos_emb = weights.get_array2(layout.position_embedding.as_ref().unwrap())?;
 
-            let word_embeddings = weights.get_array2(config.get_shared_embedding_weight_name())?;
-
-            log::debug!(
-                "  Word embeddings: {:?}, Position embeddings: {:?}",
-                word_embeddings.shape(),
-                pos_emb.shape()
-            );
             let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
             let cpu_emb = Embeddings::new(embed, Some(pos_emb), None);
             (Some(cpu_emb), None)
         } else {
-            log::info!(
-                "BART Encoder: Loading embeddings to GPU. Vocab: {}, Hidden: {}",
-                config.vocab_size,
-                hidden_size
-            );
+            log::info!("BART Encoder: Loading embeddings to GPU.");
 
-            let gpu_weights = GpuEmbeddingWeights::new(context, weights, config.as_ref())?;
+            // Keeping GpuEmbeddingWeights::new exactly as you had it
+            let gpu_weights = GpuEmbeddingWeights::new(
+                context,
+                weights,
+                &layout.token_embedding,
+                layout.position_embedding.as_deref(),
+                None, // type_name
+                load_config.target_dtype,
+            )?;
             (None, Some(gpu_weights))
         };
 
-        // GPU embedding kernel (needed for GPU path)
         let gpu_embeddings = GpuEmbeddings::new(context)?;
 
         // ====================================================================
-        // 2. EMBEDDING LAYER NORM (always on GPU)
+        // 2. EMBEDDING LAYER NORM (Original Logic)
         // ====================================================================
         let embed_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
             GpuTensor::from_raw(
                 context,
-                &weights.get_raw("model.encoder.layernorm_embedding.weight")?,
+                &weights.get_raw(layout.embedding_norm.as_ref().unwrap())?,
                 "embed_ln_w",
             )?,
             GpuTensor::from_raw(
                 context,
-                &weights.get_raw("model.encoder.layernorm_embedding.bias")?,
+                &weights.get_raw(layout.embedding_norm_bias.as_ref().unwrap())?,
                 "embed_ln_b",
             )?,
         )?);
 
         let embed_layer_norm =
-            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, config.layer_norm_eps));
+            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
 
         // ====================================================================
         // 3. ENCODER LAYERS
         // ====================================================================
-        let layers = Self::build_layers(context, weights, &config, &load_config)?;
-
-        log::info!(
-            "BART Encoder initialized: {} layers, hidden_size={}, intermediate_size={}, \
-            embeddings_on_cpu={}",
-            layers.len(),
-            hidden_size,
-            intermediate_size,
-            load_config.cpu_embeddings
-        );
+        let layers = Self::build_layers(context, weights, &meta, &layout, &load_config)?;
 
         Ok(Self {
             context: context.clone(),
@@ -160,6 +139,8 @@ impl BartGpuEncoder {
             embed_ln_weights,
             cpu_embeddings,
             layers,
+            meta: meta,
+            layout: layout,
         })
     }
 
@@ -175,7 +156,7 @@ impl BartGpuEncoder {
             context,
             weights,
             config,
-            EncoderLoadConfig::offload_embeddings(),
+            ModelLoadConfig::set_offload_embeddings(),
         )
     }
 
@@ -183,163 +164,132 @@ impl BartGpuEncoder {
     // PRIVATE HELPERS
     // ========================================================================
 
-    /// Build all encoder layers.
     fn build_layers(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
-        config: &BartConfig,
-        _load_config: &EncoderLoadConfig,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
+        _load_config: &ModelLoadConfig,
     ) -> Result<Vec<GpuEncoderLayer>> {
-        let hidden_size = config.hidden_size();
-        let intermediate_size = config.encoder_ffn_dim;
-        let num_layers = config.encoder_layers;
+        let mut layers = Vec::with_capacity(meta.num_layers);
 
-        let mut layers = Vec::with_capacity(num_layers);
-
-        for i in 0..num_layers {
-            let prefix = format!("model.encoder.layers.{}", i);
+        for i in 0..meta.num_layers {
+            let idx = i.to_string();
+            let name = |t: &String| t.replace("{}", &idx);
+            let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &idx)).unwrap();
 
             // ================================================================
-            // SELF-ATTENTION WEIGHTS
+            // SELF-ATTENTION WEIGHTS (Original Logic)
             // ================================================================
-            let q_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.self_attn.q_proj.weight", prefix))?,
-                &format!("layer{}_q_w", i),
-            )?;
-            let k_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.self_attn.k_proj.weight", prefix))?,
-                &format!("layer{}_k_w", i),
-            )?;
-            let v_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.self_attn.v_proj.weight", prefix))?,
-                &format!("layer{}_v_w", i),
-            )?;
-            let o_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.self_attn.out_proj.weight", prefix))?,
-                &format!("layer{}_o_w", i),
-            )?;
+            let q_w =
+                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.attn_q))?, "q_w")?;
+            let k_w =
+                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.attn_k))?, "k_w")?;
+            let v_w =
+                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.attn_v))?, "v_w")?;
+            let o_w =
+                GpuTensor::from_raw(context, &weights.get_raw(&name(&layout.attn_o))?, "o_w")?;
 
-            // Validate [Out, In] layout for attention weights
-            Self::validate_weight_shape(&q_w, &[hidden_size, hidden_size], i, "Q")?;
-            Self::validate_weight_shape(&k_w, &[hidden_size, hidden_size], i, "K")?;
-            Self::validate_weight_shape(&v_w, &[hidden_size, hidden_size], i, "V")?;
-            Self::validate_weight_shape(&o_w, &[hidden_size, hidden_size], i, "O")?;
+            Self::validate_weight_shape(&q_w, &[meta.hidden_size, meta.hidden_size], i, "Q")?;
+            Self::validate_weight_shape(&k_w, &[meta.hidden_size, meta.hidden_size], i, "K")?;
+            Self::validate_weight_shape(&v_w, &[meta.hidden_size, meta.hidden_size], i, "V")?;
+            Self::validate_weight_shape(&o_w, &[meta.hidden_size, meta.hidden_size], i, "O")?;
 
             let q_b = GpuTensor::from_raw(
                 context,
-                &weights.get_raw(&format!("{}.self_attn.q_proj.bias", prefix))?,
-                &format!("layer{}_q_b", i),
+                &weights.get_raw(&opt_name(&layout.attn_q_bias))?,
+                "q_b",
             )?;
             let k_b = GpuTensor::from_raw(
                 context,
-                &weights.get_raw(&format!("{}.self_attn.k_proj.bias", prefix))?,
-                &format!("layer{}_k_b", i),
+                &weights.get_raw(&opt_name(&layout.attn_k_bias))?,
+                "k_b",
             )?;
             let v_b = GpuTensor::from_raw(
                 context,
-                &weights.get_raw(&format!("{}.self_attn.v_proj.bias", prefix))?,
-                &format!("layer{}_v_b", i),
+                &weights.get_raw(&opt_name(&layout.attn_v_bias))?,
+                "v_b",
             )?;
             let o_b = GpuTensor::from_raw(
                 context,
-                &weights.get_raw(&format!("{}.self_attn.out_proj.bias", prefix))?,
-                &format!("layer{}_o_b", i),
+                &weights.get_raw(&opt_name(&layout.attn_o_bias))?,
+                "o_b",
             )?;
 
             let self_attn_weights =
                 GpuAttentionWeights::new(q_w, q_b, k_w, k_b, v_w, v_b, o_w, o_b)?;
 
             // ================================================================
-            // SELF-ATTENTION LAYER NORM
+            // SELF-ATTENTION LAYER NORM (Original Logic)
             // ================================================================
             let self_attn_ln_weights = GpuLayerNormWeights::new(
                 GpuTensor::from_raw(
                     context,
-                    &weights.get_raw(&format!("{}.self_attn_layer_norm.weight", prefix))?,
-                    &format!("layer{}_sa_ln_w", i),
+                    &weights.get_raw(&name(&layout.attn_norm))?,
+                    "sa_ln_w",
                 )?,
                 GpuTensor::from_raw(
                     context,
-                    &weights.get_raw(&format!("{}.self_attn_layer_norm.bias", prefix))?,
-                    &format!("layer{}_sa_ln_b", i),
+                    &weights.get_raw(&opt_name(&layout.attn_norm_bias))?,
+                    "sa_ln_b",
                 )?,
             )?;
 
             // ================================================================
-            // FEED-FORWARD WEIGHTS
+            // FEED-FORWARD WEIGHTS (Original Logic: GpuFeedForwardWeightsStd)
             // ================================================================
-            let fc1_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.fc1.weight", prefix))?,
-                &format!("layer{}_fc1_w", i),
-            )?;
-            let fc2_w = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.fc2.weight", prefix))?,
-                &format!("layer{}_fc2_w", i),
-            )?;
+            let raw_inter_w = weights.get_array2(&name(&layout.ffn_up))?;
+            let raw_out_w = weights.get_array2(&name(&layout.ffn_down))?;
 
-            // Validate [Out, In] layout for FFN weights
-            Self::validate_weight_shape(&fc1_w, &[intermediate_size, hidden_size], i, "FC1")?;
-            Self::validate_weight_shape(&fc2_w, &[hidden_size, intermediate_size], i, "FC2")?;
+            let fc1_w = if meta.transpose_ffn_weights {
+                raw_inter_w.t().as_standard_layout().to_owned()
+            } else {
+                raw_inter_w
+            };
+            let fc2_w = if meta.transpose_ffn_weights {
+                raw_out_w.t().as_standard_layout().to_owned()
+            } else {
+                raw_out_w
+            };
 
-            let fc1_b = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.fc1.bias", prefix))?,
-                &format!("layer{}_fc1_b", i),
-            )?;
-            let fc2_b = GpuTensor::from_raw(
-                context,
-                &weights.get_raw(&format!("{}.fc2.bias", prefix))?,
-                &format!("layer{}_fc2_b", i),
-            )?;
+            let fc1_b = weights.get_array1(&opt_name(&layout.ffn_up_bias))?;
+            let fc2_b = weights.get_array1(&opt_name(&layout.ffn_down_bias))?;
 
-            let ff_weights = GpuFeedForwardWeightsStd::new(fc1_w, fc1_b, fc2_w, fc2_b)?;
+            let ff_weights = GpuFeedForwardWeightsStd::new(
+                GpuTensor::from_ndarray(context, &fc1_w)?,
+                GpuTensor::from_ndarray(context, &fc1_b)?,
+                GpuTensor::from_ndarray(context, &fc2_w)?,
+                GpuTensor::from_ndarray(context, &fc2_b)?,
+            )?;
 
             // ================================================================
-            // FFN LAYER NORM
+            // FFN LAYER NORM (Original Logic)
             // ================================================================
             let ffn_ln_weights = GpuLayerNormWeights::new(
                 GpuTensor::from_raw(
                     context,
-                    &weights.get_raw(&format!("{}.final_layer_norm.weight", prefix))?,
-                    &format!("layer{}_ffn_ln_w", i),
+                    &weights.get_raw(&name(&layout.ffn_norm))?,
+                    "ffn_ln_w",
                 )?,
                 GpuTensor::from_raw(
                     context,
-                    &weights.get_raw(&format!("{}.final_layer_norm.bias", prefix))?,
-                    &format!("layer{}_ffn_ln_b", i),
+                    &weights.get_raw(&opt_name(&layout.ffn_norm_bias))?,
+                    "ffn_ln_b",
                 )?,
             )?;
 
             // ================================================================
-            // BUILD LAYER
+            // BUILD LAYER (Original Logic)
             // ================================================================
-            let layer = GpuEncoderLayer::new(
+            layers.push(GpuEncoderLayer::new(
                 context,
                 self_attn_weights,
                 self_attn_ln_weights,
                 ff_weights,
                 ffn_ln_weights,
-                Activation::Gelu,
-                config,
-            )?;
-
-            log::debug!(
-                "  Layer {}: attn [{}, {}], ffn [{} → {} → {}]",
-                i,
-                hidden_size,
-                hidden_size,
-                hidden_size,
-                intermediate_size,
-                hidden_size
-            );
-
-            layers.push(layer);
+                meta.activation,
+                meta,
+            )?);
         }
 
         Ok(layers)
@@ -374,7 +324,7 @@ impl BartGpuEncoder {
     }
 
     /// Get the load configuration.
-    pub fn load_config(&self) -> &EncoderLoadConfig {
+    pub fn load_config(&self) -> &ModelLoadConfig {
         &self.load_config
     }
 
@@ -401,6 +351,7 @@ impl GpuEncoder for BartGpuEncoder {
         input: GpuEncoderInput,
         token_type_ids: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
+        let metadata = &self.meta;
         match input {
             GpuEncoderInput::TokensGpu(input_ids) => {
                 // Full GPU path - requires GPU embedding weights
@@ -411,16 +362,17 @@ impl GpuEncoder for BartGpuEncoder {
                         Use GpuEncoderInput::TokensCpu instead."
                     )
                 })?;
-                unimplemented!()
-                // self.gpu_embeddings.encode(
-                //     cmd_encoder,
-                //     weights,
-                //     input_ids,
-                //     token_type_ids,
-                //     0, // Position offset handled by config.extra_pos_embeddings()
-                //     self.config.as_ref(),
-                //     pool,
-                // )
+                self.gpu_embeddings.encode(
+                    cmd_encoder,
+                    weights,
+                    input_ids,
+                    token_type_ids,
+                    0, // Position offset handled by config.extra_pos_embeddings()
+                    metadata.hidden_size,
+                    metadata.extra_pos_embeddings,
+                    metadata.scale_embeddings,
+                    pool,
+                )
             }
 
             GpuEncoderInput::TokensCpu(input_ids) => {
@@ -434,8 +386,8 @@ impl GpuEncoder for BartGpuEncoder {
                 })?;
 
                 // BART uses position offset of 2 (from config.extra_pos_embeddings())
-                let position_offset = self.config.extra_pos_embeddings();
-                let scale = self.config.scale_embeddings();
+                let position_offset = self.meta.extra_pos_embeddings;
+                let scale = self.meta.scale_embeddings;
 
                 // Perform CPU embedding lookup
                 let hidden = cpu_emb.forward(input_ids, None, position_offset, scale);
@@ -527,7 +479,7 @@ impl GpuEncoder for BartGpuEncoder {
     }
 
     fn hidden_size(&self) -> usize {
-        self.config.hidden_size()
+        self.meta.hidden_size
     }
 
     // forward() uses the default implementation from the trait:

@@ -9,8 +9,9 @@ use kjarni_transformers::{
     encoder_decoder::traits::CpuCrossDecoder,
     feedforward::{FeedForward, StdFeedForward},
     linear_layer::LinearLayer,
+    models::base::ModelLoadConfig,
     normalization::LayerNorm,
-    traits::{Device, EncoderDecoderArchitecture, TransformerConfig, TransformerModel},
+    traits::{Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     utils::linear_algebra::{apply_attention_mask, matmul_4d},
     weights::ModelWeights,
 };
@@ -22,12 +23,22 @@ pub struct BartCpuEncoder {
     embed_layer_norm: LayerNorm,
     pub layers: Vec<EncoderLayer>,
     config: Arc<BartConfig>,
+    pub meta: ModelMetadata,
+    pub layout: ModelLayout,
 }
 
 impl BartCpuEncoder {
-    pub fn new(weights: &ModelWeights, config: Arc<BartConfig>) -> Result<Self> {
+    pub fn new(
+        weights: &ModelWeights,
+        config: Arc<BartConfig>,
+        load_config: ModelLoadConfig,
+    ) -> Result<Self> {
+        let meta = config.metadata();
+        let layout = config.layout();
+
         // 1. Embeddings
-        let word_embeddings = weights.get_array2(config.get_shared_embedding_weight_name())?;
+
+        let word_embeddings = weights.get_array2(&layout.token_embedding)?;
         let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
         let embeddings = Embeddings::new(
             embed,
@@ -128,11 +139,13 @@ impl BartCpuEncoder {
             embed_layer_norm,
             layers,
             config,
+            meta,
+            layout,
         })
     }
 }
 
-impl TransformerModel for BartCpuEncoder {
+impl InferenceModel for BartCpuEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
@@ -188,6 +201,6 @@ impl CpuEncoder for BartCpuEncoder {
 
     /// Hidden size (needed for projection heads)
     fn hidden_size(&self) -> usize {
-        self.config.hidden_size()
+        self.meta.hidden_size
     }
 }

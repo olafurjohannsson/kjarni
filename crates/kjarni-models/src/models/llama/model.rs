@@ -20,7 +20,7 @@ use crate::models::llama::{
     config::LlamaConfig, cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder,
 };
 use kjarni_transformers::models::base::ModelLoadConfig;
-use kjarni_transformers::traits::ModelConfig;
+use kjarni_transformers::traits::{InferenceModel, ModelConfig};
 // --- Workspace Crates ---
 use kjarni_transformers::{
     decoder::prelude::*,
@@ -229,7 +229,7 @@ impl LlamaModel {
     }
 }
 
-impl TransformerModel for LlamaModel {
+impl InferenceModel for LlamaModel {
     fn device(&self) -> Device {
         self.device
     }

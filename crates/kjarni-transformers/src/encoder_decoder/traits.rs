@@ -4,11 +4,11 @@
 //! separating the core compute components from the high-level model container.
 
 use crate::cache::Cache;
+use crate::common::GenerationConfig;
 use crate::decoder::traits::DecoderInput; // Re-use from the decoder module
 use crate::encoder::prelude::{CpuEncoder, EncoderLanguageModel, GpuEncoder};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::{LanguageModel};
-use crate::common::GenerationConfig;
+use crate::models::base::{LanguageModel, ModelInput};
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3, Array4};
@@ -51,7 +51,7 @@ pub trait CpuCrossDecoder: Send + Sync {
         &self,
         encoder_hidden_states: &Array3<f32>,
     ) -> Result<CpuCrossAttentionKVCache>;
-    
+
     fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32>;
 
     /// Compute embeddings + initial normalization.
@@ -123,18 +123,93 @@ pub trait GpuCrossDecoder: Send + Sync {
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
+    
+    // fn embed(
+    //     &self,
+    //     cmd_encoder: &mut wgpu::CommandEncoder,
+    //     pool: &mut GpuTensorPool,
+    //     input: GpuEncoderInput,
+    //     token_type_ids: Option<&GpuTensor>,
+    // ) -> Result<GpuTensor>;
 
     /// Records the GPU commands for a forward pass.
-    fn forward(
+    // fn forward(
+    //     &self,
+    //     encoder: &mut CommandEncoder,
+    //     pool: &mut GpuTensorPool,
+    //     decoder_input: DecoderInput<'_>, // Use the flexible DecoderInput
+    //     encoder_hidden_states: &GpuTensor,
+    //     decoder_attention_mask: &GpuTensor,
+    //     cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
+    // ) -> Result<GpuCrossDecoderOutput>;
+
+    async fn embed(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
-        decoder_input: DecoderInput<'_>, // Use the flexible DecoderInput
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor>;
+
+    /// Step 2: Apply initial normalization.
+    async fn embed_and_normalize(
+        &self,
+        encoder: &mut CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor>;
+
+    /// Step 3: Run the decoder layers with cross-attention.
+    fn forward_layers(
+        &self,
+        encoder: &mut CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+        encoder_hidden_states: &GpuTensor,
+        decoder_attention_mask: &GpuTensor,
+        position_offset: usize,
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<GpuCrossDecoderOutput>;
+
+    fn num_layers(&self) -> usize;
+    fn hidden_size(&self) -> usize;
+
+    /// Default full forward pass.
+    async fn forward(
+        &self,
+        encoder: &mut CommandEncoder,
+        pool: &mut GpuTensorPool,
+        decoder_input: ModelInput<'_>,
         encoder_hidden_states: &GpuTensor,
         decoder_attention_mask: &GpuTensor,
         cache: Option<&mut dyn Cache>,
         cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
-    ) -> Result<GpuCrossDecoderOutput>;
+    ) -> Result<GpuCrossDecoderOutput> {
+        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+
+        // 1 & 2. Embed and Norm
+        let hidden = self.embed_and_normalize(encoder, pool, decoder_input, position_offset).await?;
+
+        // 3. Run Layers
+        self.forward_layers(
+            encoder,
+            pool,
+            &hidden,
+            encoder_hidden_states,
+            decoder_attention_mask,
+            position_offset,
+            cache,
+            cross_kv_cache,
+            0,
+            self.num_layers(),
+        )
+    }
+
 }
 
 // ============================================================================
@@ -190,7 +265,6 @@ pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
     fn decoder_start_token_id(&self) -> u32;
     /// Returns the default generation configuration for this model.
     fn get_default_generation_config(&self) -> GenerationConfig;
-    
 }
 
 // ============================================================================

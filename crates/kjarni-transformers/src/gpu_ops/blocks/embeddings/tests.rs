@@ -3,8 +3,6 @@ use crate::activations::Activation;
 use crate::embeddings::Embeddings;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
-use crate::traits::LanguageModelConfig;
-use crate::traits::TransformerConfig;
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
@@ -17,55 +15,85 @@ struct MockEmbedConfig {
     scale: bool,
 }
 
-impl TransformerConfig for MockEmbedConfig {
-    fn hidden_size(&self) -> usize {
-        self.hidden_size
-    }
-    fn num_attention_heads(&self) -> usize {
-        4
-    }
-    fn num_hidden_layers(&self) -> usize {
-        1
-    }
-    fn layer_norm_eps(&self) -> f32 {
-        1e-5
-    }
-    fn is_causal(&self) -> bool {
-        false
-    }
-    fn is_prenorm(&self) -> bool {
-        false
-    }
-}
-
-impl LanguageModelConfig for MockEmbedConfig {
-    fn vocab_size(&self) -> usize {
-        self.vocab_size
-    }
-    fn max_position_embeddings(&self) -> usize {
-        self.max_position
-    }
-    fn intermediate_size(&self) -> usize {
-        self.hidden_size * 4
+impl crate::traits::ModelConfig for MockEmbedConfig {
+    fn model_type(&self) -> &str {
+        "mock_embed"
     }
 
-    fn get_embedding_weight_names(&self) -> (&str, &str, Option<&str>) {
-        ("word", "pos", None)
+    fn metadata(&self) -> crate::traits::ModelMetadata {
+        crate::traits::ModelMetadata {
+            // --- From Struct ---
+            hidden_size: self.hidden_size,
+            vocab_size: self.vocab_size,
+            max_seq_len: self.max_position,
+            scale_embeddings: self.scale,
+
+            // --- Fixed Defaults for Testing ---
+            num_layers: 1,
+            num_attention_heads: 4,
+            num_kv_heads: 4,
+            head_dim: self.hidden_size / 4,
+            norm_eps: 1e-5,
+            activation: crate::activations::Activation::Gelu,
+            
+            // Absolute position embeddings (implied by "pos" name), so no RoPE
+            rope_theta: None,
+            rope_scaling: None,
+            
+            extra_pos_embeddings: 0,
+            is_prenorm: false,
+            transpose_ffn_weights: false,
+            transpose_attention_weights: false,
+        }
     }
 
-    fn scale_embeddings(&self) -> bool {
-        self.scale
-    }
+    fn layout(&self) -> crate::traits::ModelLayout {
+        crate::traits::ModelLayout {
+            // Mapping the names requested in your old trait: ("word", "pos", None)
+            token_embedding: "word".to_string(),
+            position_embedding: Some("pos".to_string()),
+            token_type_embedding: None,
+            
+            // Embedding LayerNorm (None for this specific mock)
+            embedding_norm: None,
+            embedding_norm_bias: None,
 
-    fn activation_function(&self) -> Activation {
-        Activation::Gelu
-    }
-    fn decoder_start_token_id(&self) -> u32 {
-        0
-    }
+            final_norm: "final_norm.weight".to_string(),
+            final_norm_bias: None,
+            lm_head: "lm_head.weight".to_string(),
 
-    fn as_any(&self) -> &dyn Any {
-        self
+            // Attention Templates (Using Some/None for biases as requested)
+            attn_q: "layer.{}.q.weight".to_string(),
+            attn_q_bias: Some("layer.{}.q.bias".to_string()),
+            attn_k: "layer.{}.k.weight".to_string(),
+            attn_k_bias: Some("layer.{}.k.bias".to_string()),
+            attn_v: "layer.{}.v.weight".to_string(),
+            attn_v_bias: Some("layer.{}.v.bias".to_string()),
+            attn_o: "layer.{}.o.weight".to_string(),
+            attn_o_bias: Some("layer.{}.o.bias".to_string()),
+            attn_norm: "layer.{}.attn_ln.weight".to_string(),
+            attn_norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
+
+            // FFN Templates
+            ffn_gate: None,
+            ffn_up: "layer.{}.up.weight".to_string(),
+            ffn_up_bias: Some("layer.{}.up.bias".to_string()),
+            ffn_down: "layer.{}.down.weight".to_string(),
+            ffn_down_bias: Some("layer.{}.down.bias".to_string()),
+            ffn_norm: "layer.{}.ffn_ln.weight".to_string(),
+            ffn_norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
+
+            cross_attn_q: None,
+            cross_attn_k: None,
+            cross_attn_v: None,
+            cross_attn_o: None,
+            cross_attn_norm: None,
+            cross_attn_q_bias: None,
+                cross_attn_k_bias: None,
+                cross_attn_v_bias: None,
+                cross_attn_o_bias: None,
+                cross_attn_norm_bias: None,
+        }
     }
 }
 
@@ -158,7 +186,9 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
         &input_ids_gpu,
         None,
         0,
-        &config,
+        hidden_size,
+        0,
+        false,
         pool_ref,
     )?;
 
@@ -218,7 +248,9 @@ async fn test_word_plus_position_embeddings() -> Result<()> {
         &input_ids_gpu,
         None,
         0,
-        &config,
+        hidden_size,
+        0,
+        false,
         pool_ref,
     )?;
 
@@ -286,7 +318,9 @@ async fn test_embeddings_with_position_offset() -> Result<()> {
         &input_ids_gpu,
         None,
         position_offset,
-        &config,
+        hidden_size,
+        0,
+        false,
         pool_ref,
     )?;
 
@@ -353,7 +387,9 @@ async fn test_embeddings_with_scaling() -> Result<()> {
         &input_ids_gpu,
         None,
         0,
-        &config,
+        hidden_size,
+        0,
+        config.scale,
         pool_ref,
     )?;
 

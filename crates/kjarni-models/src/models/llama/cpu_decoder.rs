@@ -8,17 +8,7 @@ use ndarray::{s, Array2, Array3, Axis};
 use crate::models::llama::config::LlamaConfig;
 
 use kjarni_transformers::{
-    cache::CpuKVCache,
-    decoder::prelude::*,
-    embeddings::Embeddings,
-    feedforward::SwiGluFeedForward,
-    linear_layer::LinearLayer,
-    normalization::RMSNorm,
-    rope::RoPE,
-    tensor::DType,
-    traits::{Cache, Device, ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
-    WgpuContext,
+    WgpuContext, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, normalization::RMSNorm, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 pub struct LlamaCpuDecoder {
@@ -216,9 +206,7 @@ impl LlamaCpuDecoder {
     }
 }
 
-// --- Trait Impl ---
-
-impl TransformerModel for LlamaCpuDecoder {
+impl InferenceModel for LlamaCpuDecoder {
     fn device(&self) -> Device {
         Device::Cpu
     }

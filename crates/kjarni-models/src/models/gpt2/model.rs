@@ -13,6 +13,8 @@ use std::sync::Arc;
 // --- External Crates ---
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::traits::{InferenceModel, ModelConfig};
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
@@ -25,9 +27,7 @@ use kjarni_transformers::{
     },
     prelude::*,
     tensor::{DType, RawTensor},
-    traits::{DecoderArchitecture, LanguageModelConfig},
     weights::ModelWeights,
-    TransformerConfig,
     WgpuContext,
 };
 
@@ -73,7 +73,7 @@ impl Gpt2Model {
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        decoder_config: Option<DecoderLoadConfig>,
+        decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!("Unsupported GPT-2 model type: {:?}", model_type));
@@ -99,13 +99,13 @@ impl Gpt2Model {
         model_type: ModelType,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        decoder_config: Option<DecoderLoadConfig>,
+        decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
         let tokenizer =
             Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
 
-        let config_arc: Arc<dyn DecoderArchitecture + Send + Sync> = {
+        let config: Arc<Gpt2Config> = {
             let mut cfg = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
             if model_type == ModelType::DistilGpt2 {
                 // Special handling for DistilGPT2's unique weight naming convention.
@@ -114,24 +114,21 @@ impl Gpt2Model {
             Arc::new(cfg)
         };
 
+        let meta = config.metadata();
+        let layout = config.layout();
+
         let lm_head = LinearLayer::from_weights(
             &weights,
-            config_arc.get_lm_head_name(),
+            &layout.lm_head,
             None,
             decoder_config.unwrap_or_default().target_dtype,
             None,
         )?;
 
-        let config = config_arc
-            .as_any()
-            .downcast_ref::<Gpt2Config>()
-            .cloned()
-            .map(Arc::new)
-            .ok_or_else(|| anyhow!("Failed to downcast config to Gpt2Config"))?;
 
         assert_eq!(
             lm_head.shape(),
-            [config.vocab_size, config.hidden_size()],
+            [config.vocab_size, meta.hidden_size],
             "LM head shape mismatch"
         );
 
@@ -186,7 +183,7 @@ impl Gpt2Model {
     }
 }
 
-impl TransformerModel for Gpt2Model {
+impl InferenceModel for Gpt2Model {
     fn device(&self) -> Device {
         self.device
     }
@@ -204,25 +201,25 @@ impl LanguageModel for Gpt2Model {
         &self.tokenizer
     }
     fn context_size(&self) -> usize {
-        todo!()
+        self.config.metadata().max_seq_len
     }
     fn forced_bos_token_id(&self) -> Option<u32> {
-        todo!()
+        None
     }
     fn vocab_size(&self) -> usize {
-        todo!()
+        self.config.metadata().vocab_size
     }
     fn hidden_size(&self) -> usize {
-        todo!()
+        self.config.metadata().hidden_size
     }
     fn num_heads(&self) -> usize {
-        todo!()
+        self.config.metadata().num_attention_heads
     }
     fn num_layers(&self) -> usize {
-        todo!()
+        self.config.metadata().num_layers
     }
     fn eos_token_id(&self) -> Option<u32> {
-        todo!()
+        Some(50256)
     }
 
     fn bos_token_id(&self) -> Option<u32> {

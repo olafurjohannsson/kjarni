@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
         None, // Use default cache
         Device::Wgpu,
         Some(context),
+        None,
     )
         .await?;
 
