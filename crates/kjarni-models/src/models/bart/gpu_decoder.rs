@@ -95,7 +95,7 @@ impl BartGpuDecoder {
             let layer_layout = &decoder_layout.layer;
 
             // --- 3a. Self Attention ---
-            let self_attn_weights = GpuAttentionWeights::from_self_attn_layout(
+            let self_attn_weights = GpuAttentionWeights::from_decoder_self_attn_layout(
                 context, weights, &layout, i, target_dt,
             )?;
 
@@ -309,40 +309,52 @@ impl GpuCrossDecoder for BartGpuDecoder {
             .encode(encoder, &self.embed_ln_weights, &hidden, &ln_output);
         Ok(ln_output)
     }
-
     fn forward_layers(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
-        encoder_hidden_states: &GpuTensor,
+        encoder_hidden_states: &GpuTensor,  // Fallback if no cross_kv_cache
         decoder_attention_mask: &GpuTensor,
         position_offset: usize,
-        mut cache: Option<&mut dyn Cache>,
+        cache: Option<&mut dyn Cache>,
         cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
         start_layer: usize,
         end_layer: usize,
     ) -> Result<GpuCrossDecoderOutput> {
-        let gpu_cache = cache
-            .as_deref_mut()
-            .and_then(|c| c.as_any_mut().downcast_mut::<GpuBeamKVCache>());
+        // Downcast cache to GPU cache
+        let gpu_cache = cache.and_then(|c| c.as_any_mut().downcast_mut::<GpuBeamKVCache>());
+
         let mut current_hidden = hidden_states.clone();
-        let mut new_self_attn_kvs = Vec::with_capacity(self.layers.len());
+        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
 
         for i in start_layer..end_layer {
             let layer = &self.layers[i];
-            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
-            let self_attn_past_kv = gpu_cache.as_ref().and_then(|c| c.get_layer_tensors(i));
 
+            // Get cross-attention KV: use precomputed if available, otherwise compute on the fly
+            let cross_kv_for_layer: (GpuTensor, GpuTensor);
+            let cross_kv_ref = if let Some(cache) = cross_kv_cache {
+                // Fast path: use precomputed
+                &cache.0[i]
+            } else {
+                // Slow path: compute on the fly
+                cross_kv_for_layer = layer.precompute_cross_kv(encoder, encoder_hidden_states, pool);
+                &cross_kv_for_layer
+            };
+
+            // Get self-attention cache for this layer
+            let cached_kv = gpu_cache.as_ref().and_then(|c| c.get_layer_tensors(i));
+            let cache_len = gpu_cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(position_offset);
+
+            // Forward through layer
             let (new_hidden, new_k, new_v) = layer.forward(
                 encoder,
                 &current_hidden,
-                Some(encoder_hidden_states),
+                cross_kv_ref,
                 decoder_attention_mask,
-                None, // Encoder mask
-                self_attn_past_kv,
-                cross_kv_for_layer,
-                position_offset,
+                None,  // encoder_mask - usually None for BART
+                cached_kv,
+                cache_len,
                 pool,
             )?;
 
@@ -350,11 +362,66 @@ impl GpuCrossDecoder for BartGpuDecoder {
             new_self_attn_kvs.push((new_k, new_v));
         }
 
+        // Update self-attention cache
+        if let Some(cache) = gpu_cache {
+            for (i, (new_k, new_v)) in new_self_attn_kvs.iter().enumerate() {
+                let layer_idx = start_layer + i;
+                cache.update(encoder, layer_idx, new_k, new_v)?;
+            }
+        }
+
         Ok(GpuCrossDecoderOutput {
             last_hidden_state: current_hidden,
             new_self_attn_kv: new_self_attn_kvs,
         })
     }
+    // fn forward_layers(
+    //     &self,
+    //     encoder: &mut CommandEncoder,
+    //     pool: &mut GpuTensorPool,
+    //     hidden_states: &GpuTensor,
+    //     encoder_hidden_states: &GpuTensor,
+    //     decoder_attention_mask: &GpuTensor,
+    //     position_offset: usize,
+    //     mut cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
+    //     start_layer: usize,
+    //     end_layer: usize,
+    // ) -> Result<GpuCrossDecoderOutput> {
+    //     let gpu_cache = cache
+    //         .as_deref_mut()
+    //         .and_then(|c| c.as_any_mut().downcast_mut::<GpuBeamKVCache>());
+    //     let mut current_hidden = hidden_states.clone();
+    //     let mut new_self_attn_kvs = Vec::with_capacity(self.layers.len());
+
+    //     for i in start_layer..end_layer {
+    //         let layer = &self.layers[i];
+    //         let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
+    //         let self_attn_past_kv = gpu_cache.as_ref().and_then(|c| c.get_layer_tensors(i));
+
+    //         let (new_hidden, new_k, new_v) = layer.forward(
+    //             encoder,
+    //             &current_hidden,
+    //             Some(encoder_hidden_states),
+    //             decoder_attention_mask,
+    //             None, // Encoder mask
+    //             self_attn_past_kv,
+    //             cross_kv_for_layer,
+    //             position_offset,
+    //             pool,
+    //         )?;
+        
+            
+
+    //         current_hidden = new_hidden;
+    //         new_self_attn_kvs.push((new_k, new_v));
+    //     }
+
+    //     Ok(GpuCrossDecoderOutput {
+    //         last_hidden_state: current_hidden,
+    //         new_self_attn_kv: new_self_attn_kvs,
+    //     })
+    // }
 
     fn num_layers(&self) -> usize {
         self.layers.len()

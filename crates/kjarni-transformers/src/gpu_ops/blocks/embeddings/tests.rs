@@ -28,6 +28,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position,
             scale_embeddings: self.scale,
+            normalize_embedding: false,
 
             // --- Fixed Defaults for Testing ---
             num_layers: 1,

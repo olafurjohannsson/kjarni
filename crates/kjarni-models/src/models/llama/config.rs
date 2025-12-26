@@ -187,6 +187,7 @@ impl ModelConfig for LlamaConfig {
 
             // --- Style Flags ---
             scale_embeddings: false, // Llama does not use sqrt(d) scaling
+            normalize_embedding: false,
             extra_pos_embeddings: 0, // Llama has no position offset
             is_prenorm: true,        // Llama uses Pre-Normalization
             transpose_ffn_weights: false, // Standard Llama weights are [Out, In]

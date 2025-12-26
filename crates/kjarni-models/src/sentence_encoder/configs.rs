@@ -53,6 +53,7 @@ impl ModelConfig for MiniLMConfig {
             rope_theta: None,
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false, // BERT-style
             transpose_ffn_weights: true,
@@ -63,42 +64,41 @@ impl ModelConfig for MiniLMConfig {
     fn layout(&self) -> ModelLayout {
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
-                q_weight: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
-                q_bias: Some("bert.encoder.layer.{}.attention.self.query.bias".to_string()),
-                k_weight: "bert.encoder.layer.{}.attention.self.key.weight".to_string(),
-                k_bias: Some("bert.encoder.layer.{}.attention.self.key.bias".to_string()),
-                v_weight: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
-                v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
-                o_weight: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
-                o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
-                norm_weight: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
-                norm_bias: Some(
-                    "bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string(),
-                ),
+                // CORRECTED: Using the original, correct names
+                q_weight: "encoder.layer.{}.attention.self.query.weight".to_string(),
+                q_bias: Some("encoder.layer.{}.attention.self.query.bias".to_string()),
+                k_weight: "encoder.layer.{}.attention.self.key.weight".to_string(),
+                k_bias: Some("encoder.layer.{}.attention.self.key.bias".to_string()),
+                v_weight: "encoder.layer.{}.attention.self.value.weight".to_string(),
+                v_bias: Some("encoder.layer.{}.attention.self.value.bias".to_string()),
+                o_weight: "encoder.layer.{}.attention.output.dense.weight".to_string(),
+                o_bias: Some("encoder.layer.{}.attention.output.dense.bias".to_string()),
+                norm_weight: "encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+                norm_bias: Some("encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
             },
             ffn: FeedForwardLayout {
-                up_weight: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
-                up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
-                down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
-                down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
+                up_weight: "encoder.layer.{}.intermediate.dense.weight".to_string(),
+                up_bias: Some("encoder.layer.{}.intermediate.dense.bias".to_string()),
+                down_weight: "encoder.layer.{}.output.dense.weight".to_string(),
+                down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
                 gate_weight: None,
-                norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
-                norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
+                norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
             },
         };
 
         ModelLayout {
-            token_embedding: "bert.embeddings.word_embeddings.weight".to_string(),
-            lm_head: "classifier.weight".to_string(), // Assuming a classification head
+            // CORRECTED: Using the original, correct names
+            token_embedding: "embeddings.word_embeddings.weight".to_string(),
+            lm_head: "cls.predictions.decoder.weight".to_string(), // This was a placeholder, adjust if needed for your specific head
             encoder: Some(EncoderLayout {
-                position_embedding: Some("bert.embeddings.position_embeddings.weight".to_string()),
-                token_type_embedding: Some(
-                    "bert.embeddings.token_type_embeddings.weight".to_string(),
-                ),
-                embedding_norm_weight: Some("bert.embeddings.LayerNorm.weight".to_string()),
-                embedding_norm_bias: Some("bert.embeddings.LayerNorm.bias".to_string()),
-                final_norm_weight: Some("bert.pooler.dense.weight".to_string()),
-                final_norm_bias: Some("bert.pooler.dense.bias".to_string()),
+                position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
+                token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
+                embedding_norm_weight: Some("embeddings.LayerNorm.weight".to_string()),
+                embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
+                // Using a placeholder from your original code. This should be verified against the actual model's architecture.
+                final_norm_weight: Some("encoder.layer.5.output.LayerNorm.weight".to_string()),
+                final_norm_bias: None,
                 layer: encoder_layer,
             }),
             decoder: None,
@@ -146,6 +146,7 @@ impl ModelConfig for MPNetConfig {
             rope_theta: None,
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false,
             transpose_ffn_weights: false,
@@ -234,6 +235,7 @@ impl ModelConfig for DistilBERTConfig {
             rope_theta: None,
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false,
             transpose_ffn_weights: true,

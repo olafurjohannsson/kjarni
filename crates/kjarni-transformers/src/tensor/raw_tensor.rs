@@ -6,14 +6,14 @@ use ndarray::{ArrayD, IxDyn};
 
 /// A raw, untyped view into a tensor's bytes, shape, and dtype.
 /// This is the primary output of a file loader before any CPU/GPU-specific processing.
-pub struct RawTensor<'a> {
+pub struct TensorView<'a> {
     pub name: String,
     pub bytes: Cow<'a, [u8]>,
     pub shape: Vec<usize>,
     pub dtype: DType,
 }
 
-impl<'a> RawTensor<'a> {
+impl<'a> TensorView<'a> {
     /// **CPU Compatibility Layer**
     /// Converts raw bytes into a standard `ndarray::ArrayD<f32>`.
     /// This is a slow, memory-intensive operation and should only be used for debugging

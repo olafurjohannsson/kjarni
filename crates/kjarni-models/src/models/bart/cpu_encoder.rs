@@ -174,7 +174,12 @@ impl CpuEncoder for BartCpuEncoder {
         token_type_ids: Option<&Array2<u32>>,
     ) -> Array3<f32> {
         let hidden = self.embed(input_ids, token_type_ids);
-        self.embed_layer_norm.forward_3d(&hidden)
+        if self.config.normalize_embedding {
+            self.embed_layer_norm.forward_3d(&hidden)
+        }
+        else {
+            hidden
+        }
     }
 
     /// Run layers [start_layer, end_layer) on pre-computed hidden states

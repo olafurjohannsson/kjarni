@@ -43,7 +43,18 @@ impl DType {
             _ => Err(anyhow!("Unsupported or unknown GGUF DType: {:?}", dtype)),
         }
     }
-
+pub fn size_in_bytes(&self) -> usize {
+        match self {
+            DType::F32 => 4,
+            DType::F16 => 2,
+            DType::BF16 => 2,
+            DType::U32 => 4,
+            // DType::I32 => 4,
+            DType::Q8_0 => panic!("Q8_0 has variable block size"),
+            DType::Q4_K => panic!("Q4_K has variable block size"),
+            DType::Q6_K => panic!("Q6_K has variable block size"),
+        }
+    }
     /// Calculates the required buffer size in bytes for a tensor of a given shape.
     ///
     /// This is superior to a simple `size_of()` method because it correctly handles

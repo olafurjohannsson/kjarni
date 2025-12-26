@@ -4,43 +4,11 @@ use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decod
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, Axis, Zip};
 use rayon::prelude::*;
+use crate::utils::linear_algebra::{softmax_inplace, apply_attention_mask};
 
 // Standard large negative value for masking (avoids NaN in softmax)
 const MASK_VALUE: f32 = -1e9;
 
-// ============================================================================
-//  Shared Utilities
-// ============================================================================
-
-/// Safe implementation of masking using NDArray Zip (handles memory strides correctly)
-/// This logic matches the "Old Code" apply_padding_mask exactly.
-pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
-    let (batch, heads, seq_q, seq_k) = scores.dim();
-
-    // FIX: Only check Sequence Length match.
-    // We allow Batch size mismatch to support Beam Search broadcasting (e.g., Mask [1, S] -> Scores [4, S])
-    if mask.shape()[1] != seq_k {
-        return scores;
-    }
-
-    // Expand mask: [MaskBatch, SeqK] → [MaskBatch, 1, 1, SeqK]
-    let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
-
-    // Broadcast and apply.
-    // Zip handles non-contiguous memory layouts and broadcasting automatically.
-    if let Some(broadcast_mask) = mask_expanded.broadcast((batch, heads, seq_q, seq_k)) {
-        Zip::from(&mut scores)
-            .and(&broadcast_mask)
-            .par_for_each(|s, &m| {
-                // Assuming mask 0.0 == Padding (Masked out)
-                if m == 0.0 {
-                    *s = MASK_VALUE;
-                }
-            });
-    }
-
-    scores
-}
 
 // ============================================================================
 //  2. Decoder Cross-Attention
@@ -141,7 +109,7 @@ impl DecoderCrossAttention {
             scores = apply_attention_mask(scores, mask);
         }
 
-        self.softmax_inplace(&mut scores);
+        softmax_inplace(&mut scores);
 
         // Context
         let context = if seq_len == 1 {
@@ -161,25 +129,5 @@ impl DecoderCrossAttention {
         let output_3d = output.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?;
 
         Ok(output_3d)
-    }
-
-    fn softmax_inplace(&self, x: &mut Array4<f32>) {
-        for mut batch in x.outer_iter_mut() {
-            for mut head in batch.outer_iter_mut() {
-                for mut row in head.outer_iter_mut() {
-                    let max = row.fold(MASK_VALUE, |a, &b| a.max(b));
-                    let mut sum = 0.0;
-                    for v in row.iter_mut() {
-                        *v = (*v - max).exp();
-                        sum += *v;
-                    }
-                    if sum > 0.0 {
-                        for v in row.iter_mut() {
-                            *v /= sum;
-                        }
-                    }
-                }
-            }
-        }
     }
 }

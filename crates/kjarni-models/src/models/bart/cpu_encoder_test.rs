@@ -1,6 +1,7 @@
 use crate::models::bart::config::BartConfig;
 use crate::models::bart::cpu_encoder::BartCpuEncoder;
 use anyhow::Result;
+use kjarni_transformers::utils::linear_algebra::softmax_inplace;
 use kjarni_transformers::{
     encoder::{encoder_layer::EncoderLayer, prelude::*}, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, models::base::ModelLoadConfig, traits::Device, utils::linear_algebra::{apply_attention_mask, matmul_4d}, weights::ModelWeights
 };
@@ -330,7 +331,7 @@ async fn test_self_attention_scores_and_softmax() -> Result<()> {
 
     // Apply mask & softmax
     scores = apply_attention_mask(scores, &mask);
-    self_attn.softmax_inplace(&mut scores);
+    softmax_inplace(&mut scores);
 
     let softmax_actual: Vec<f32> = scores.slice(s![0, 0, 0, 0..5]).to_vec();
     assert_close(&softmax_actual, &golden::SOFTMAX, 1e-4, "Softmax");

@@ -124,26 +124,6 @@ pub trait GpuCrossDecoder: Send + Sync {
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
     
-    // fn embed(
-    //     &self,
-    //     cmd_encoder: &mut wgpu::CommandEncoder,
-    //     pool: &mut GpuTensorPool,
-    //     input: GpuEncoderInput,
-    //     token_type_ids: Option<&GpuTensor>,
-    // ) -> Result<GpuTensor>;
-
-    /// Records the GPU commands for a forward pass.
-    // fn forward(
-    //     &self,
-    //     encoder: &mut CommandEncoder,
-    //     pool: &mut GpuTensorPool,
-    //     decoder_input: DecoderInput<'_>, // Use the flexible DecoderInput
-    //     encoder_hidden_states: &GpuTensor,
-    //     decoder_attention_mask: &GpuTensor,
-    //     cache: Option<&mut dyn Cache>,
-    //     cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
-    // ) -> Result<GpuCrossDecoderOutput>;
-
     async fn embed(
         &self,
         encoder: &mut CommandEncoder,

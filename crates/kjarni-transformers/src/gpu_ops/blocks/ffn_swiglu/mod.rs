@@ -1,5 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu_ops::Kernel;
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
@@ -47,6 +48,7 @@ pub struct GpuSwiGLUFFN {
     elementwise_pipeline: wgpu::ComputePipeline,
     elementwise_bind_group_layout: wgpu::BindGroupLayout,
     matmul: GpuMatMul,
+    linear_layer: GpuLinearLayer,
     context: Arc<WgpuContext>,
 
     buffer: wgpu::Buffer,
@@ -284,40 +286,12 @@ impl GpuSwiGLUFFN {
             elementwise_pipeline,
             elementwise_bind_group_layout,
             matmul: GpuMatMul::new(context),
+            linear_layer: GpuLinearLayer::new(context),
             context: context.clone(),
             buffer,
         })
     }
 
-    // /// Encodes the SwiGLU FFN operation.
-    // pub fn encode(
-    //     &self,
-    //     encoder: &mut wgpu::CommandEncoder,
-    //     weights: &GpuSwiGLUFFNWeights,
-    //     input: &GpuTensor, // Assumes a 2D tensor [rows, hidden_size]
-    //     output: &GpuTensor,
-    //     pool: &mut GpuTensorPool,
-    // ) {
-    //     let rank = input.rank();
-    //     assert_eq!(rank, 2, "Input tensor for GpuSwiGLUFFN must be 2D");
-    //     let (rows, _) = (input.shape()[0], input.shape()[1]);
-    //     let (_, intermediate_size) = weights.up_proj.linear_layer_dims();
-
-    //     // 1. Gate projection: input @ gate_proj
-    //     let gate_result = pool.get(vec![rows, intermediate_size]);
-    //     self.matmul.encode(encoder, &[input, &weights.gate_proj], &gate_result);
-
-    //     // 2. Up projection: input @ up_proj
-    //     let up_result = pool.get(vec![rows, intermediate_size]);
-    //     self.matmul.encode(encoder, &[input, &weights.up_proj], &up_result);
-
-    //     // 3. Fused SiLU and element-wise multiply: SiLU(gate_result) * up_result
-    //     let intermediate_activated = pool.get(vec![rows, intermediate_size]);
-    //     self.encode_elementwise(encoder, &gate_result, &up_result, &intermediate_activated);
-
-    //     // 4. Down projection: intermediate_activated @ down_proj
-    //     self.matmul.encode(encoder, &[&intermediate_activated, &weights.down_proj], output);
-    // }
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -337,9 +311,8 @@ impl GpuSwiGLUFFN {
         let intermediate = pool.get(vec![rows, intermediate_size]);
         self.encode_fused_gate_up(encoder, input, weights, &intermediate);
 
-        // Step 2: Down projection (still separate matmul)
-        self.matmul
-            .encode(encoder, &[&intermediate, &weights.down_proj], output);
+        self.linear_layer
+            .encode(encoder, &intermediate, &weights.down_proj, output);
     }
     fn encode_fused_gate_up(
         &self,

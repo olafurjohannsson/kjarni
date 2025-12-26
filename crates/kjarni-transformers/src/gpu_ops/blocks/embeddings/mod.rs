@@ -24,13 +24,14 @@
 //! The constructor for `GpuEmbeddingWeights` handles loading the weights to the GPU.
 //! The `GpuEmbeddings` struct is stateless and simply orchestrates the kernels.
 
+use crate::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::lookup::GpuLookup;
+use crate::gpu_ops::primitives::lookup2::GpuLookup2;
 use crate::gpu_ops::primitives::scale::GpuScale;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::tensor::DType;
+use crate::tensor::{DType, TensorView};
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -93,19 +94,19 @@ impl GpuEmbeddingWeights {
         type_name: Option<&str>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
-        // Helper to resolve DType and upload to GPU
-        let load_and_upload = |name: &str, label: &str| -> Result<GpuTensor> {
-            let raw = weights.get_raw_resolved(name, target_dtype)?;
-            GpuTensor::from_raw(context, &raw, label)
-        };
+        
+        
+        // Word Embeddings
+        let word_tensor: TensorView<'_> = weights.get_raw_resolved(word_name, target_dtype)?;
+        let word_embeddings: GpuTensor = GpuTensor::from_raw(context, &word_tensor, "word_embeddings")?;
 
-        // 1. Word Embeddings (Required)
-        let word_embeddings = load_and_upload(word_name, "word_embeddings")?;
 
-        // 2. Position Embeddings (Optional)
+        // Always use F32 for position and type embeddings
         let position_embeddings = if let Some(name) = pos_name {
             if weights.contains(name) {
-                Some(load_and_upload(name, "pos_embeddings")?)
+                // Force F32 for position embeddings (used in addition kernel)
+                let raw = weights.get_raw_resolved(name, Some(DType::F32))?;
+                Some(GpuTensor::from_raw(context, &raw, "pos_embeddings")?)
             } else {
                 None
             }
@@ -113,10 +114,11 @@ impl GpuEmbeddingWeights {
             None
         };
 
-        // 3. Token Type Embeddings (Optional - BERT style)
         let token_type_embeddings = if let Some(name) = type_name {
             if weights.contains(name) {
-                Some(load_and_upload(name, "type_embeddings")?)
+                // Force F32 for type embeddings
+                let raw = weights.get_raw_resolved(name, Some(DType::F32))?;
+                Some(GpuTensor::from_raw(context, &raw, "type_embeddings")?)
             } else {
                 None
             }
@@ -134,7 +136,7 @@ impl GpuEmbeddingWeights {
 
 /// A GPU-accelerated Embeddings block.
 pub struct GpuEmbeddings {
-    pub lookup: GpuLookup,
+    pub lookup: GpuLookup2,
     pub add: GpuAdd,
     pub scale: GpuScale,
     context: Arc<WgpuContext>,
@@ -147,7 +149,7 @@ impl GpuEmbeddings {
     /// the embedding operations on the GPU.
     pub fn new(context: &Arc<WgpuContext>) -> Result<Self> {
         Ok(Self {
-            lookup: GpuLookup::new(context),
+            lookup: GpuLookup2::new(context),
             add: GpuAdd::new(context),
             scale: GpuScale::new(context),
             context: context.clone(),

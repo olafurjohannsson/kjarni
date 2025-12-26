@@ -8,37 +8,27 @@ use ndarray::{Array2, Array3, Axis, s};
 use crate::models::llama::config::LlamaConfig;
 
 use kjarni_transformers::{
-    WgpuContext,
-    cache::CpuKVCache,
-    decoder::prelude::*,
-    embeddings::Embeddings,
-    feedforward::SwiGluFeedForward,
-    linear_layer::LinearLayer,
-    normalization::RMSNorm,
-    rope::RoPE,
-    tensor::DType,
-    traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    WgpuContext, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, models::base::ModelInput, normalization::RMSNorm, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 pub struct LlamaCpuDecoder {
-    embeddings: Embeddings,
-    layers: Vec<LlamaDecoderLayer>,
-    final_norm: RMSNorm,
+    pub embeddings: Embeddings,
+    pub layers: Vec<LlamaDecoderLayer>,
+    pub final_norm: RMSNorm,
     config: Arc<LlamaConfig>,
 }
 
-struct LlamaDecoderLayer {
-    attention: DecoderAttention,
-    feed_forward: SwiGluFeedForward,
-    attention_norm: RMSNorm,
-    ffn_norm: RMSNorm,
-    rope: Arc<RoPE>,
+pub struct LlamaDecoderLayer {
+    pub attention: DecoderAttention,
+    pub feed_forward: SwiGluFeedForward,
+    pub attention_norm: RMSNorm,
+    pub ffn_norm: RMSNorm,
+    pub rope: Arc<RoPE>,
 }
 
 impl LlamaDecoderLayer {
     // Optimized forward pass
-    fn forward(
+    pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
@@ -255,17 +245,17 @@ impl InferenceModel for LlamaCpuDecoder {
 }
 
 impl CpuDecoder for LlamaCpuDecoder {
-    fn embed(&self, input: DecoderInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
+    fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
         match input {
-            DecoderInput::TokensCpu(ids) => {
+            ModelInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
-                let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-
+                // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
+                
                 Ok(self
                     .embeddings
-                    .forward(&input_ids, None, position_offset, false))
+                    .forward(&ids.to_owned(), None, position_offset, false))
             }
-            DecoderInput::HiddenCpu(hidden) => Ok(hidden.clone()),
+            ModelInput::HiddenCpu(hidden) => Ok(hidden.to_owned()),
             _ => Err(anyhow!(
                 "LlamaCpuDecoder received GPU input. Transfer to CPU first."
             )),
@@ -274,7 +264,7 @@ impl CpuDecoder for LlamaCpuDecoder {
 
     fn embed_and_normalize(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<Array3<f32>> {
         // Llama is Pre-Norm (Norm is inside the layer).
@@ -343,7 +333,7 @@ impl CpuDecoder for LlamaCpuDecoder {
 
     fn forward(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,

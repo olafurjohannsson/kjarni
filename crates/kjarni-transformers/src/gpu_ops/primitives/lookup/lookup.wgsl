@@ -5,7 +5,7 @@ struct LookupUniforms {
     input_seq_len: u32,
     vocab_size: u32,
 };
-
+// TODO ADD TEMPLATING FOR BF16 PATH instead of Lookup2
 @group(0) @binding(0) var<uniform> uniforms: LookupUniforms;
 @group(0) @binding(1) var<storage, read> embedding_table: array<f32>;
 @group(0) @binding(2) var<storage, read> input_ids: array<u32>;

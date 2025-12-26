@@ -2,6 +2,7 @@
 //!
 //! This test helps identify where GPU implementation diverges from CPU.
 
+use crate::models::bart::cpu_decoder;
 use crate::models::bart::model::BartModel;
 use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
@@ -294,7 +295,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
 
     let pool = ctx.get_inference_pool();
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -314,7 +315,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_embed_ln = cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -336,7 +337,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_layer0 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 1)?;
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -358,7 +359,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let cpu_layer_n = cpu_encoder.forward_layers(&h, &mask_cpu, 0, n)?;
 
         {
-            let mut pool_guard = pool.lock().await;
+            let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&ctx, pool_guard);
             let (enc, pool_ref) = frame.resources();
             let input_gpu = gpu_encoder.embed_and_normalize(
@@ -407,7 +408,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         cpu_internal_diff
     );
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
         let input_gpu = gpu_encoder.embed_and_normalize(
@@ -444,7 +445,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_full = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -731,7 +732,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
     let pool = ctx.get_inference_pool();
     let gpu_encoder_hidden = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -773,7 +774,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -814,7 +815,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -859,7 +860,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     }
 
     let gpu_cross_kv = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -939,7 +940,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
     // GPU: Get raw Q, K, V
     let (gpu_q, gpu_k, gpu_v) = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -953,21 +954,21 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             .await?;
 
         // Project Q, K, V using the layer's weights
-        let q_out = gpu_layer0.self_attn.project(
+        let q_out = gpu_layer0.self_attn.ops.project(
             enc,
             &gpu_decoder_hidden,
             &gpu_layer0.self_attn_weights.q_weight,
             &gpu_layer0.self_attn_weights.q_bias,
             pool_ref,
         );
-        let k_out = gpu_layer0.self_attn.project(
+        let k_out = gpu_layer0.self_attn.ops.project(
             enc,
             &gpu_decoder_hidden,
             &gpu_layer0.self_attn_weights.k_weight,
             &gpu_layer0.self_attn_weights.k_bias,
             pool_ref,
         );
-        let v_out = gpu_layer0.self_attn.project(
+        let v_out = gpu_layer0.self_attn.ops.project(
             enc,
             &gpu_decoder_hidden,
             &gpu_layer0.self_attn_weights.v_weight,
@@ -1070,11 +1071,20 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     // ============================================================
     println!("--- 4a: Self-Attention Block ---");
 
-    let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = cpu_layer0.self_attention(
-        &decoder_hidden_cpu,
-        Some(&decoder_mask),
-        None, // No past KV
-    )?;
+    // let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = cpu_layer0.self_attention(
+    //     &decoder_hidden_cpu,
+    //     Some(&decoder_mask),
+    //     None, // No past KV
+    // )?;
+    let (attn_out, new_k, new_v) = 
+        cpu_layer0.self_attn.forward(&decoder_hidden_cpu, Some(&decoder_mask), None)?;
+    let hidden_states_after_add = &decoder_hidden_cpu + &attn_out;
+    let final_output = cpu_layer0
+        .self_attn_layer_norm
+        .forward_3d(&hidden_states_after_add);
+    
+    let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = (final_output, (new_k, new_v));
+
     println!(
         "CPU after self-attn+norm shape: {:?}",
         cpu_after_self_attn.shape()
@@ -1085,7 +1095,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     let gpu_after_self_attn = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -1101,7 +1111,16 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         // GPU self-attention: residual + attn + norm
         let residual = &gpu_decoder_hidden;
 
-        let (self_attn_output, _new_k, _new_v) = gpu_layer0.self_attn.forward_seq2seq(
+        // let (self_attn_output, _new_k, _new_v) = gpu_layer0.self_attn.forward_seq2seq(
+        //     enc,
+        //     residual,
+        //     &gpu_layer0.self_attn_weights,
+        //     &decoder_mask_gpu,
+        //     None, // No past KV
+        //     0,    // cache_len
+        //     pool_ref,
+        // )?;
+         let output = gpu_layer0.self_attn.forward(
             enc,
             residual,
             &gpu_layer0.self_attn_weights,
@@ -1110,6 +1129,9 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             0,    // cache_len
             pool_ref,
         )?;
+        let self_attn_output  = output.hidden_states;
+        let _new_k = output.new_k;
+        let _new_v = output.new_v;
 
         // Add residual
         let after_add = pool_ref.get(residual.shape().to_vec());
@@ -1152,20 +1174,16 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             self_attn_diff
         );
     }
-    println!("[PASS] Self-Attention Block\n");
 
-    // ============================================================
-    // STEP 4b: CROSS-ATTENTION ONLY (with residual + norm)
-    // ============================================================
     println!("--- 4b: Cross-Attention Block ---");
-
-    // CPU: Use the output from self-attention as input to cross-attention
-    let cpu_after_cross_attn = cpu_layer0.cross_attention(
+    let cross_attn_output = cpu_layer0.cross_attn.forward(
         &cpu_after_self_attn,
-        &cpu_encoder_hidden,
-        None,                     // cross_mask
-        Some(&cpu_cross_kv.0[0]), // precomputed KV for layer 0
+        &cpu_cross_kv.0[0].0,
+        &cpu_cross_kv.0[0].1,
+        None, // encoder_attn_mask
     )?;
+    let hidden_states_after_add = &cpu_after_self_attn + &cross_attn_output;
+    let cpu_after_cross_attn = cpu_layer0.cross_attn_layer_norm.forward_3d(&hidden_states_after_add);
     println!(
         "CPU after cross-attn+norm shape: {:?}",
         cpu_after_cross_attn.shape()
@@ -1176,7 +1194,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     let gpu_after_cross_attn = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -1192,7 +1210,16 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
         // Redo self-attention to get to the same state
         let residual = &gpu_decoder_hidden;
-        let (self_attn_output, _, _) = gpu_layer0.self_attn.forward_seq2seq(
+        // let (self_attn_output, _, _) = gpu_layer0.self_attn.forward_seq2seq(
+        //     enc,
+        //     residual,
+        //     &gpu_layer0.self_attn_weights,
+        //     &decoder_mask_gpu,
+        //     None,
+        //     0,
+        //     pool_ref,
+        // )?;
+        let self_attn_output = gpu_layer0.self_attn.forward(
             enc,
             residual,
             &gpu_layer0.self_attn_weights,
@@ -1200,7 +1227,8 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             None,
             0,
             pool_ref,
-        )?;
+        )?.hidden_states;
+        
         let after_add1 = pool_ref.get(residual.shape().to_vec());
         gpu_layer0
             .add
@@ -1217,11 +1245,19 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let residual = &after_self_attn_norm;
         let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
 
-        let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
+        // let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
+        //     enc,
+        //     residual,
+        //     gpu_cross_k,
+        //     gpu_cross_v,
+        //     &gpu_layer0.cross_attn_weights,
+        //     None, // encoder_attn_mask
+        //     pool_ref,
+        // );
+        let cross_attn_output = gpu_layer0.cross_attn.forward(
             enc,
             residual,
-            gpu_cross_k,
-            gpu_cross_v,
+            &gpu_cross_kv.0[0],
             &gpu_layer0.cross_attn_weights,
             None, // encoder_attn_mask
             pool_ref,
@@ -1283,7 +1319,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     let gpu_after_ffn = {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -1299,7 +1335,16 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
         // Self-attention
         let residual = &gpu_decoder_hidden;
-        let (self_attn_output, _, _) = gpu_layer0.self_attn.forward_seq2seq(
+        // let (self_attn_output, _, _) = gpu_layer0.self_attn.forward_seq2seq(
+        //     enc,
+        //     residual,
+        //     &gpu_layer0.self_attn_weights,
+        //     &decoder_mask_gpu,
+        //     None,
+        //     0,
+        //     pool_ref,
+        // )?;
+        let self_attn_output = gpu_layer0.self_attn.forward(
             enc,
             residual,
             &gpu_layer0.self_attn_weights,
@@ -1307,7 +1352,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             None,
             0,
             pool_ref,
-        )?;
+        )?.hidden_states;
         let after_add1 = pool_ref.get(residual.shape().to_vec());
         gpu_layer0
             .add
@@ -1322,12 +1367,23 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
         // Cross-attention
         let residual = &after_self_attn_norm;
+        
         let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
-        let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
+
+
+        // let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
+        //     enc,
+        //     residual,
+        //     gpu_cross_k,
+        //     gpu_cross_v,
+        //     &gpu_layer0.cross_attn_weights,
+        //     None,
+        //     pool_ref,
+        // );
+        let cross_attn_output = gpu_layer0.cross_attn.forward(
             enc,
             residual,
-            gpu_cross_k,
-            gpu_cross_v,
+            &gpu_cross_kv.0[0],
             &gpu_layer0.cross_attn_weights,
             None,
             pool_ref,
@@ -1451,7 +1507,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     );
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -1513,7 +1569,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             .await?;
 
         {
-            let mut pool_guard = pool.lock().await;
+            let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&ctx, pool_guard);
             let (enc, pool_ref) = frame.resources();
 
@@ -1606,7 +1662,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     println!("CPU predicted token: {}", cpu_argmax);
 
     {
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 

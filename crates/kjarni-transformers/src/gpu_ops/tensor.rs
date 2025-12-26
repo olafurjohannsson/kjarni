@@ -1,7 +1,7 @@
 use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate root
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::tensor::RawTensor;
+use crate::tensor::TensorView;
 use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
@@ -100,7 +100,7 @@ impl GpuTensor {
                 let typed = weights.get_typed_tensor(name)?;
                 let shape = typed.shape().to_vec(); // Get shape before consuming
 
-                // Create a new RawTensor with an owned, converted byte buffer.
+                // Create a new TensorView with an owned, converted byte buffer.
                 let converted_raw = match typed {
                     t if t.shape().len() == 2 => {
                         let f32_arr = t.to_array2_f32()?;
@@ -118,7 +118,7 @@ impl GpuTensor {
                                 target
                             ),
                         };
-                        RawTensor {
+                        TensorView {
                             name: name.to_string(),
                             bytes: Cow::Owned(converted_bytes),
                             shape,
@@ -141,7 +141,7 @@ impl GpuTensor {
                                 target
                             ),
                         };
-                        RawTensor {
+                        TensorView {
                             name: name.to_string(),
                             bytes: Cow::Owned(converted_bytes),
                             shape,
@@ -161,7 +161,7 @@ impl GpuTensor {
         // Step 4 (No Conversion Path): Upload the borrowed, zero-copy slice directly.
         GpuTensor::from_raw(ctx, &raw, label)
     }
-    pub fn from_raw(ctx: &Arc<WgpuContext>, raw: &RawTensor, label: &str) -> Result<Self> {
+    pub fn from_raw(ctx: &Arc<WgpuContext>, raw: &TensorView, label: &str) -> Result<Self> {
         log::info!(
             "Uploading Tensor '{}': DType={:?}, Shape={:?} ({:.2} MB)",
             label,
@@ -210,7 +210,38 @@ impl GpuTensor {
             id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed), // ✅ New ID
         }
     }
+    /// Creates a GpuTensor from raw bytes with explicit dtype.
+    ///
+    /// This is useful for testing with non-F32 data types.
+    pub fn from_bytes(
+        context: &Arc<WgpuContext>,
+        bytes: &[u8],
+        shape: Vec<usize>,
+        dtype: DType,
+        label: &str,
+    ) -> Result<Self> {
+        // Validate byte count matches shape and dtype
+        let expected_bytes = shape.iter().product::<usize>() * dtype.size_in_bytes();
+        anyhow::ensure!(
+            bytes.len() == expected_bytes,
+            "Byte count mismatch: got {}, expected {} for shape {:?} and dtype {:?}",
+            bytes.len(),
+            expected_bytes,
+            shape,
+            dtype
+        );
 
+        let buffer = context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
+        Ok(Self::new_allocation(Arc::new(buffer), shape, dtype, context.clone()))
+    }
     /// Internal constructor - keeps same ID (view operation)
     fn new_view(
         buffer: Arc<Buffer>,

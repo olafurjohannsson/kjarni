@@ -11,7 +11,7 @@ use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    embeddings::Embeddings,
+    embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings},
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::{
@@ -23,7 +23,7 @@ use kjarni_transformers::{
             layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
         },
     },
-    models::base::ModelLoadConfig,
+    models::base::{ModelInput, ModelLoadConfig},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
@@ -34,8 +34,8 @@ use crate::models::gpt2::config::Gpt2Config;
 /// The GPU-native implementation of the GPT-2 decoder architecture.
 pub struct Gpt2GpuDecoder {
     // Option: If using CPU embeddings, these are None to save VRAM
-    embedding_weights: Option<GpuEmbeddingWeights>,
-    embeddings: Option<GpuEmbeddings>,
+    // embedding_weights: Option<GpuEmbeddingWeights>,
+    // embeddings: Option<GpuEmbeddings>,
 
     layers: Vec<GpuPreNormDecoderLayer>,
     final_layer_norm: GpuNormalization,
@@ -45,12 +45,13 @@ pub struct Gpt2GpuDecoder {
     config: Arc<Gpt2Config>,
 
     // Option: If using GPU embeddings, this is None
-    cpu_embeddings: Option<Embeddings>,
+    // cpu_embeddings: Option<Embeddings>,
 
     load_config: ModelLoadConfig,
 
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
+    embeddings: LoadedEmbeddings,
 }
 
 impl Gpt2GpuDecoder {
@@ -73,37 +74,52 @@ impl Gpt2GpuDecoder {
             .decoder
             .as_ref()
             .expect("GPT-2 layout must have a decoder section");
+        let target_dtype = load_config.target_dtype;
+        let embeddings = LoadedEmbeddings::new(
+            Some(context),  // Option<&Arc<WgpuContext>>
+            weights,
+            EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
+                .position_embedding(
+                    decoder_layout
+                        .position_embedding
+                        .as_ref()
+                        .expect("GPT-2 requires position embeddings")
+                )
+                .build(),
+            false,  // load_cpu
+            true,   // load_gpu
+            target_dtype,
+        )?;
+        // let (cpu_embeddings, embedding_weights, embeddings) = if load_config.offload_embeddings {
+        //     log::info!("Optimization: Loading Embedding weights to CPU RAM only.");
 
-        let (cpu_embeddings, embedding_weights, embeddings) = if load_config.offload_embeddings {
-            log::info!("Optimization: Loading Embedding weights to CPU RAM only.");
+        //     let word_embeddings = weights.get_array2(&layout.token_embedding)?;
+        //     let position_embeddings_cpu = if let Some(pos_w) = &decoder_layout.position_embedding {
+        //         Some(weights.get_array2(pos_w)?)
+        //     } else {
+        //         None
+        //     };
 
-            let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-            let position_embeddings_cpu = if let Some(pos_w) = &decoder_layout.position_embedding {
-                Some(weights.get_array2(pos_w)?)
-            } else {
-                None
-            };
+        //     let cpu_embs = Embeddings::new(
+        //         kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
+        //         position_embeddings_cpu,
+        //         None,
+        //     );
 
-            let cpu_embs = Embeddings::new(
-                kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
-                position_embeddings_cpu,
-                None,
-            );
-
-            (Some(cpu_embs), None, None)
-        } else {
-            log::info!("Loading Embedding weights to VRAM.");
-            let ew = GpuEmbeddingWeights::from_layout(
-                context,
-                weights,
-                &layout.token_embedding,
-                decoder_layout.position_embedding.as_deref(),
-                None,
-                load_config.target_dtype,
-            )?;
-            let em = GpuEmbeddings::new(context)?;
-            (None, Some(ew), Some(em))
-        };
+        //     (Some(cpu_embs), None, None)
+        // } else {
+        //     log::info!("Loading Embedding weights to VRAM.");
+        //     let ew = GpuEmbeddingWeights::from_layout(
+        //         context,
+        //         weights,
+        //         &layout.token_embedding,
+        //         decoder_layout.position_embedding.as_deref(),
+        //         None,
+        //         load_config.target_dtype,
+        //     )?;
+        //     let em = GpuEmbeddings::new(context)?;
+        //     (None, Some(ew), Some(em))
+        // };
 
         // 2. Final Layer Norm
         let final_layer_norm =
@@ -132,17 +148,18 @@ impl Gpt2GpuDecoder {
         log::info!("✓ GPT-2 GPU decoder built successfully");
 
         Ok(Self {
-            embedding_weights,
-            embeddings,
+            // embedding_weights,
+            // embeddings,
             layers,
             final_layer_norm,
             final_ln_weights,
             context: context.clone(),
             config,
-            cpu_embeddings,
+            // cpu_embeddings,
             load_config,
             meta,
             layout,
+            embeddings
         })
     }
 
@@ -283,74 +300,20 @@ impl GpuDecoder for Gpt2GpuDecoder {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
         match input {
-            // Case 1: Tokens on CPU
-            DecoderInput::TokensCpu(ids) => {
-                if let Some(cpu_embeds) = &self.cpu_embeddings {
-                    // 1A. CPU Embeddings Loaded: Compute on CPU, Upload Result
-                    // (Saves VRAM, slower due to upload of float hidden states)
-                    let input_array = Array2::from_shape_vec((1, ids.len()), ids.to_vec())?;
-
-                    let initial_embeddings_cpu = cpu_embeds.forward(
-                        &input_array,
-                        None,
-                        position_offset,
-                        self.meta.scale_embeddings,
-                    );
-
-                    GpuTensor::from_ndarray(&self.context, &initial_embeddings_cpu)
-                } else {
-                    // 1B. GPU Embeddings Loaded: Upload Tokens, Compute on GPU
-                    // (Fastest standard generation path)
-                    let tokens_tensor = GpuTensor::from_ndarray(
-                        &self.context,
-                        &Array2::from_shape_vec((1, ids.len()), ids.to_vec())?,
-                    )?;
-
-                    let gpu_embeds = self
-                        .embeddings
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("Embeddings not loaded on CPU or GPU"))?;
-                    let gpu_weights = self.embedding_weights.as_ref().unwrap();
-                    gpu_embeds.encode(
-                        encoder,
-                        gpu_weights,
-                        &tokens_tensor,
-                        None,
-                        position_offset,
-                        self.meta.hidden_size,
-                        self.meta.extra_pos_embeddings,
-                        self.meta.scale_embeddings,
-                        pool,
-                    )
-                }
+            ModelInput::TokensCpu(ids) => {
+                // Convert view to owned for embedding lookup
+                let ids_owned = ids.to_owned();
+                self.embeddings.forward(encoder, pool, &ids_owned, None, position_offset)
             }
-            // Case 2: Tokens already on GPU (Optimized Beam Search)
-            DecoderInput::TokensGpu(ids_tensor) => {
-                let gpu_embeds = self
-                    .embeddings
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("GPU input provided but embeddings are on CPU"))?;
-                let gpu_weights = self.embedding_weights.as_ref().unwrap();
-
-                gpu_embeds.encode(
-                    encoder,
-                    gpu_weights,
-                    &ids_tensor,
-                    None,
-                    position_offset,
-                    self.meta.hidden_size,
-                    self.meta.extra_pos_embeddings,
-                    self.meta.scale_embeddings,
-                    pool,
-                )
+            ModelInput::TokensGpu(ids_tensor) => {
+                self.embeddings.forward_gpu(encoder, pool, ids_tensor, None, position_offset).await
             }
-            // Case 3: Pre-computed Hidden States (Multimodal / Prefix Tuning)
-            DecoderInput::HiddenGpu(t) => Ok(t.clone()),
-            DecoderInput::HiddenCpu(t) => GpuTensor::from_ndarray(&self.context, t),
+            ModelInput::HiddenGpu(t) => Ok(t.clone()),
+            ModelInput::HiddenCpu(t) => GpuTensor::from_ndarray(&self.context, &t.to_owned()),
         }
     }
 
@@ -358,7 +321,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
         // GPT-2 standard architecture does not have a LayerNorm *before* the first block.
@@ -418,7 +381,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         attention_mask: &GpuTensor,
         position_offset: usize,
         cache: Option<&mut GpuKVCache>,

@@ -62,6 +62,7 @@ impl ModelConfig for Gpt2Config {
             rope_theta: None, // GPT-2 uses absolute learned position embeddings
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: true, // GPT-2 is a Pre-Norm model
             transpose_ffn_weights: false,

@@ -1,11 +1,11 @@
-use super::{gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader, WeightLoader};
+use super::{WeightLoader, gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader};
 use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{
     dtype::DType,
-    raw_tensor::RawTensor,
-    {QuantizedMatrix, TypedCpuTensor},
+    raw_tensor::TensorView,
+    {CpuTensor, QuantizedMatrix},
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
 use serde_json::json;
@@ -65,7 +65,7 @@ impl ModelWeights {
     }
     /// Loads a tensor and ensures it is in the target DType, converting if necessary.
     /// This is used to force F16 on GPU or F32 for specific kernels.
-    pub fn get_raw_resolved(&self, name: &str, target_dt: Option<DType>) -> Result<RawTensor<'_>> {
+    pub fn get_raw_resolved(&self, name: &str, target_dt: Option<DType>) -> Result<TensorView<'_>> {
         let raw = self.get_raw(name)?;
         let current_dt = raw.dtype;
 
@@ -89,10 +89,17 @@ impl ModelWeights {
                             f32_arr.iter().map(|&v| half::f16::from_f32(v)).collect();
                         bytemuck::cast_slice(&f16_data).to_vec()
                     }
+                    DType::BF16 => {
+                        // BF16 -> BF16 is a no-op, but F32 -> BF16 is supported
+                        let f32_arr = typed.to_array1_f32()?;
+                        let bf16_data: Vec<half::bf16> =
+                            f32_arr.iter().map(|&v| half::bf16::from_f32(v)).collect();
+                        bytemuck::cast_slice(&bf16_data).to_vec()
+                    }
                     _ => unimplemented!("Conversion to {:?} not yet implemented", target),
                 };
 
-                Ok(RawTensor {
+                Ok(TensorView {
                     name: name.to_string(),
                     bytes: std::borrow::Cow::Owned(converted_bytes),
                     shape: raw.shape.clone(),
@@ -154,7 +161,7 @@ impl ModelWeights {
     ///
     /// This is a low-level function intended for advanced use cases like direct
     /// GPU DMA transfers where you need a pointer to the raw data in the mmap'd file.
-    pub fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
+    pub fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         self.loader.get_raw(name)
     }
 
@@ -162,7 +169,7 @@ impl ModelWeights {
     ///
     /// This is the primary and most efficient method for loading tensors for CPU computation,
     /// as it avoids unnecessary type conversions and allocations.
-    pub fn get_typed_tensor(&self, name: &str) -> Result<TypedCpuTensor> {
+    pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
         let raw = self.loader.get_raw(name)?;
         raw_to_typed(raw)
     }
@@ -192,7 +199,7 @@ impl ModelWeights {
     }
 }
 
-/// Converts a `RawTensor` into a `TypedCpuTensor`, performing the necessary parsing.
+/// Converts a `TensorView` into a `CpuTensor`, performing the necessary parsing.
 /// Safely cast bytes to a typed slice, handling unaligned data
 fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
@@ -205,46 +212,46 @@ fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     }
 }
 
-fn raw_to_typed(raw: RawTensor<'_>) -> Result<TypedCpuTensor> {
+fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
     match raw.dtype {
         DType::F32 => {
             let data: Vec<f32> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::F32(ArrayD::from_shape_vec(
+            Ok(CpuTensor::F32(ArrayD::from_shape_vec(
                 IxDyn(&raw.shape),
                 data,
             )?))
         }
         DType::F16 => {
             let data: Vec<f16> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::F16(ArrayD::from_shape_vec(
+            Ok(CpuTensor::F16(ArrayD::from_shape_vec(
                 IxDyn(&raw.shape),
                 data,
             )?))
         }
         DType::BF16 => {
             let data: Vec<bf16> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::BF16(ArrayD::from_shape_vec(
+            Ok(CpuTensor::BF16(ArrayD::from_shape_vec(
                 IxDyn(&raw.shape),
                 data,
             )?))
         }
         DType::Q8_0 => {
             let blocks: Vec<BlockQ8_0> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::Q8_0(QuantizedMatrix {
+            Ok(CpuTensor::Q8_0(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))
         }
         DType::Q4_K => {
             let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::Q4_K(QuantizedMatrix {
+            Ok(CpuTensor::Q4_K(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))
         }
         DType::Q6_K => {
             let blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
-            Ok(TypedCpuTensor::Q6_K(QuantizedMatrix {
+            Ok(CpuTensor::Q6_K(QuantizedMatrix {
                 blocks,
                 shape: [raw.shape[0], raw.shape[1]],
             }))

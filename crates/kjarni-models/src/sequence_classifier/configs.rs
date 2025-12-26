@@ -54,6 +54,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             rope_theta: None,
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false,           // BERT uses Post-Norm
             transpose_ffn_weights: true, // MiniLM quirk

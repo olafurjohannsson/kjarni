@@ -1,4 +1,4 @@
-use crate::cache::Cache;
+use crate::{cache::Cache, models::base::ModelInput};
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use anyhow::{anyhow, Result};
@@ -59,7 +59,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 
                 // 3. Forward Pass
                 let decoder_output = ops.decoder().forward(
-                    DecoderInput::TokensCpu(initial_tokens),
+                    ModelInput::from_tokens(initial_tokens),
                     &attention_mask,
                     0, // Position offset is 0 for prefill
                     Some(cache),
@@ -83,7 +83,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
                 // let mask_full = ops.get_attention_mask(prompt_len, 0)?;
                 let mask_full = Array2::ones((1, prompt_len));
                 ops.decoder().forward(
-                    DecoderInput::TokensCpu(initial_tokens),
+                    ModelInput::from_tokens(initial_tokens),
                     &mask_full,
                     0,
                     Some(cache),
@@ -98,7 +98,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
                 let mask_step = ops.get_attention_mask(1, prompt_len)?;
 
                 let decoder_output = ops.decoder().forward(
-                    DecoderInput::TokensCpu(&last_token_slice),
+                    ModelInput::from_tokens(&last_token_slice),
                     &mask_step,
                     prompt_len, // Offset
                     Some(cache),
@@ -127,7 +127,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         // let token_slice = [token_id];
         let token_id = token_tensor[[0, 0]];
         let token_slice = [token_id];
-        let input = DecoderInput::TokensCpu(&token_slice);
+        let input = ModelInput::from_tokens(&token_slice);
 
         // 3. Prepare Mask
         // The model decides the mask shape based on sequence length.

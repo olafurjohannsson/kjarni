@@ -1,26 +1,122 @@
-use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::matmul_4d;
-use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, Axis, Zip};
-use rayon::prelude::*;
+//! Bidirectional self-attention for encoder models.
+//!
+//! This module provides `EncoderSelfAttention`, the CPU implementation of
+//! self-attention for encoder-only and encoder portions of encoder-decoder models.
+//!
+//! # Characteristics
+//!
+//! - **Bidirectional**: Each token can attend to all other tokens (no causal mask).
+//! - **No KV Cache**: Processes the full sequence at once.
+//! - **Optional Position Bias**: Supports T5-style relative position bias.
+//!
+//! # Used By
+//!
+//! - BERT, RoBERTa, DistilBERT (encoder-only)
+//! - BART encoder, T5 encoder (encoder-decoder)
+//! - Sentence transformers
+//!
+//! # Example
+//!
+//! ```rust
+//! use kjarni_transformers::cpu_ops::attention::EncoderSelfAttention;
+//!
+//! let attn = EncoderSelfAttention::new(768, 12, q_proj, k_proj, v_proj, o_proj);
+//!
+//! let output = attn.forward(&hidden_states, &attention_mask, None)?;
+//! ```
 
+use crate::linear_layer::LinearLayer;
+use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d, softmax_inplace};
+use anyhow::Result;
+use ndarray::{Array2, Array3, Array4};
+
+/// Large negative value for masking (avoids NaN in softmax).
 const MASK_VALUE: f32 = -1e9;
 
+/// Bidirectional self-attention for encoder models.
+///
+/// Computes multi-head self-attention where every token can attend to every
+/// other token in the sequence. This is the standard attention used in
+/// encoder-only models like BERT.
+///
+/// # Architecture
+///
+/// ```text
+/// Input [B, S, H]
+///     │
+///     ├──► Q = input @ W_q + b_q
+///     ├──► K = input @ W_k + b_k
+///     └──► V = input @ W_v + b_v
+///           │
+///           ▼
+///     Split into heads: [B, S, H] -> [B, num_heads, S, head_dim]
+///           │
+///           ▼
+///     Scores = Q @ K^T / sqrt(head_dim)
+///           │
+///           ▼
+///     Apply padding mask (optional)
+///           │
+///           ▼
+///     Add position bias (optional, for T5)
+///           │
+///           ▼
+///     Softmax
+///           │
+///           ▼
+///     Context = Scores @ V
+///           │
+///           ▼
+///     Merge heads: [B, num_heads, S, head_dim] -> [B, S, H]
+///           │
+///           ▼
+///     Output = Context @ W_o + b_o
+/// ```
 pub struct EncoderSelfAttention {
+    /// Query projection layer.
     pub q_proj: LinearLayer,
+    /// Key projection layer.
     pub k_proj: LinearLayer,
+    /// Value projection layer.
     pub v_proj: LinearLayer,
+    /// Output projection layer.
     pub out_proj: LinearLayer,
 
+    /// Number of attention heads.
     pub num_heads: usize,
+    /// Dimension of each attention head.
     pub head_dim: usize,
+    /// Scaling factor: 1 / sqrt(head_dim).
     pub scale_factor: f32,
-    pub scale_qk: bool,  // T5 doesn't scale by sqrt(d)
+    /// Whether to scale Q@K by sqrt(head_dim). False for T5.
+    pub scale_qk: bool,
 }
 
 impl EncoderSelfAttention {
-    /// Pure constructor: Takes pre-loaded layers.
-    /// Matches DecoderSelfAttention signature.
+    /// Creates a new encoder self-attention module.
+    ///
+    /// # Arguments
+    ///
+    /// * `hidden_size` - The model's hidden dimension.
+    /// * `num_heads` - Number of attention heads.
+    /// * `q` - Query projection weights.
+    /// * `k` - Key projection weights.
+    /// * `v` - Value projection weights.
+    /// * `o` - Output projection weights.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // BERT-base: 768 hidden, 12 heads
+    /// use kjarni_transformers::encoder::EncoderSelfAttention;
+    /// use kjarni_transformers::linear_layer::LinearLayer;
+    /// use kjarni_transformers::tensor::DType;
+    /// let q_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let k_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let v_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let o_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let attn = EncoderSelfAttention::new(768, 12, q_proj, k_proj, v_proj, o_proj);
+    /// ```
     pub fn new(
         hidden_size: usize,
         num_heads: usize,
@@ -41,18 +137,61 @@ impl EncoderSelfAttention {
             scale_qk: true,
         }
     }
-    // Builder method for T5-style attention (no scaling)
+
+    /// Disables Q@K scaling (for T5-style attention).
+    ///
+    /// T5 uses relative position bias instead of scaled dot-product attention.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use kjarni_transformers::encoder::EncoderSelfAttention;
+    /// use kjarni_transformers::linear_layer::LinearLayer;
+    /// use kjarni_transformers::tensor::DType;
+    /// let q = LinearLayer::new(768, 768, DType::F32);
+    /// let k = LinearLayer::new(768, 768, DType::F32);
+    /// let v = LinearLayer::new(768, 768, DType::F32);
+    /// let o = LinearLayer::new(768, 768, DType::F32);
+    /// let attn = EncoderSelfAttention::new(768, 12, q, k, v, o)
+    ///     .with_no_qk_scaling();
+    /// ```
     pub fn with_no_qk_scaling(mut self) -> Self {
         self.scale_qk = false;
         self
     }
 
-    /// Forward pass with optional position bias
-    /// 
+    /// Performs the forward pass of encoder self-attention.
+    ///
     /// # Arguments
-    /// * `hidden_states` - Input tensor [batch, seq, hidden]
-    /// * `attention_mask` - Padding mask [batch, seq], 0 = masked
-    /// * `position_bias` - Optional relative position bias [1, heads, seq_q, seq_k] (T5/ALiBi)
+    ///
+    /// * `hidden_states` - Input tensor of shape `[batch, seq, hidden]`.
+    /// * `attention_mask` - Padding mask of shape `[batch, seq]` where 1.0 = valid, 0.0 = masked.
+    /// * `position_bias` - Optional relative position bias `[1, heads, seq, seq]` (T5/ALiBi).
+    ///
+    /// # Returns
+    ///
+    /// Output tensor of shape `[batch, seq, hidden]`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // Standard attention (BERT/BART)
+    /// use kjarni_transformers::encoder::EncoderSelfAttention;
+    /// use kjarni_transformers::tensor::DType;
+    /// use kjarni_transformers::linear_layer::LinearLayer;
+    /// let q_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let k_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let v_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let o_proj = LinearLayer::new(768, 768, DType::F32);
+    /// let hidden = Array3::<f32>::zeros((2, 128, 768)); // [batch, seq, hidden]
+    /// let mask = Array2::<f32>::ones((2, 128)); // [batch, seq]
+    /// let position_bias = Array4::<f32>::zeros((1, 12, 128, 128)); // [1, heads, seq, seq]
+    /// let attn = EncoderSelfAttention::new(768, 12, q_proj, k_proj, v_proj, o_proj);
+    /// let output = attn.forward(&hidden, &mask, None)?;
+    ///
+    /// // With position bias (T5)
+    /// let output = attn.forward(&hidden, &mask, Some(&position_bias))?;
+    /// ```
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -63,28 +202,35 @@ impl EncoderSelfAttention {
         let hidden_dim = self.num_heads * self.head_dim;
 
         // 1. Flatten & Project
-        let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq_len, hidden_dim))?;
-        
+        let hidden_2d = hidden_states
+            .view()
+            .into_shape_with_order((batch * seq_len, hidden_dim))?;
+
         let q = self.q_proj.matmul(&hidden_2d);
         let k = self.k_proj.matmul(&hidden_2d);
         let v = self.v_proj.matmul(&hidden_2d);
 
-        // 2. Reshape & Permute
-        let q_heads = q.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]).to_owned();
-        
-        // K transposed for efficient Q@K
-        let k_heads_t = k.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 3, 1]).to_owned();
+        // 2. Reshape & Permute to [B, H, S, D]
+        let q_heads = q
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3])
+            .to_owned();
 
-        let v_heads = v.into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]).to_owned();
+        // K transposed for efficient Q@K^T: [B, H, D, S]
+        let k_heads_t = k
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 3, 1])
+            .to_owned();
 
-        // 3. Scores
+        let v_heads = v
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3])
+            .to_owned();
+
+        // 3. Compute attention scores: Q @ K^T
         let mut scores = matmul_4d(&q_heads, &k_heads_t);
-        
-    
-        // 4. Scale (BERT/RoBERTa/BART) or not (T5)
+
+        // 4. Scale (BERT/BART) or not (T5)
         if self.scale_qk {
             scores.mapv_inplace(|x| x * self.scale_factor);
         }
@@ -95,16 +241,16 @@ impl EncoderSelfAttention {
             scores = scores + bias;
         }
 
-        // 6. Mask
+        // 6. Apply padding mask
         scores = apply_attention_mask(scores, attention_mask);
 
         // 7. Softmax
-        self.softmax_inplace(&mut scores);
+        softmax_inplace(&mut scores);
 
-        // 8. Context
+        // 8. Compute context: Scores @ V
         let context = matmul_4d(&scores, &v_heads);
 
-        // 9. Output
+        // 9. Merge heads and output projection
         let context_flat = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
@@ -115,50 +261,4 @@ impl EncoderSelfAttention {
 
         Ok(output.into_shape_with_order((batch, seq_len, hidden_dim))?)
     }
-
-    pub fn softmax_inplace(&self, x: &mut Array4<f32>) {
-        for mut batch in x.outer_iter_mut() {
-            for mut head in batch.outer_iter_mut() {
-                for mut row in head.outer_iter_mut() {
-                    let max = row.fold(MASK_VALUE, |a, &b| a.max(b));
-                    let mut sum = 0.0;
-                    for v in row.iter_mut() {
-                        *v = (*v - max).exp();
-                        sum += *v;
-                    }
-                    if sum > 0.0 {
-                        for v in row.iter_mut() { *v /= sum; }
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
-    let (batch, heads, seq_q, seq_k) = scores.dim();
-
-    // FIX: Only check Sequence Length match.
-    // We allow Batch size mismatch to support Beam Search broadcasting (e.g., Mask [1, S] -> Scores [4, S])
-    if mask.shape()[1] != seq_k {
-        return scores;
-    }
-
-    // Expand mask: [MaskBatch, SeqK] → [MaskBatch, 1, 1, SeqK]
-    let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
-
-    // Broadcast and apply.
-    // Zip handles non-contiguous memory layouts and broadcasting automatically.
-    if let Some(broadcast_mask) = mask_expanded.broadcast((batch, heads, seq_q, seq_k)) {
-        Zip::from(&mut scores)
-            .and(&broadcast_mask)
-            .par_for_each(|s, &m| {
-                // Assuming mask 0.0 == Padding (Masked out)
-                if m == 0.0 {
-                    *s = MASK_VALUE;
-                }
-            });
-    }
-
-    scores
 }

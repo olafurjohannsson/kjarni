@@ -11,7 +11,7 @@
 
 use crate::gpu_ops::GpuTensor;
 use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
-use crate::tensor::{DType, QuantizedMatrix, RawTensor, TypedCpuTensor};
+use crate::tensor::{DType, QuantizedMatrix, TensorView, CpuTensor};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
 use crate::{WgpuContext, ops};
@@ -48,6 +48,25 @@ pub enum LinearData {
 }
 
 impl LinearLayer {
+    pub fn new(
+        out_features: usize,
+        in_features: usize,
+        dtype: DType,
+    ) -> Self {
+        match dtype {
+            DType::F32 => Self::new_f32(
+                Array2::<f32>::zeros((out_features, in_features)),
+                None,
+            ),
+            DType::BF16 => Self::new_bf16(
+                Array2::<bf16>::zeros((out_features, in_features)),
+                None,
+            ),
+            _ => {
+                panic!("Unsupported dtype for LinearLayer::new: {:?}", dtype);
+            }
+        }
+    }
     /// Creates a new F32 `LinearLayer` from a weight matrix and an optional bias.
     ///
     /// This is a convenience constructor for testing or building models in code.
@@ -90,7 +109,7 @@ impl LinearLayer {
 
         let data = match (typed_tensor, target_dtype) {
             // --- Floating Point Paths ---
-            (TypedCpuTensor::F32(arr), DType::F32) => {
+            (CpuTensor::F32(arr), DType::F32) => {
                 let weights_out_in = arr.into_dimensionality::<Ix2>()?;
                 match strategy {
                     F32MatmulStrategy::Faer => {
@@ -101,23 +120,23 @@ impl LinearLayer {
                     }
                 }
             }
-            (TypedCpuTensor::BF16(arr), DType::BF16) => LinearData::BF16(
+            (CpuTensor::BF16(arr), DType::BF16) => LinearData::BF16(
                 arr.into_dimensionality::<Ix2>()?
                     .as_standard_layout()
                     .to_owned(),
             ),
             // --- Quantized Paths (CORRECTED) ---
-            (TypedCpuTensor::Q8_0(matrix), DType::Q8_0) => {
+            (CpuTensor::Q8_0(matrix), DType::Q8_0) => {
                 // The loader already parsed the blocks. We just take ownership.
                 LinearData::Q8_0(matrix)
             }
-            (TypedCpuTensor::Q4_K(matrix), DType::Q4_K) => {
+            (CpuTensor::Q4_K(matrix), DType::Q4_K) => {
                 // The loader already parsed the blocks. We just take ownership.
                 LinearData::Q4_K(matrix)
             }
-            (TypedCpuTensor::Q6_K(matrix), DType::Q6_K) => LinearData::Q6_K(matrix),
+            (CpuTensor::Q6_K(matrix), DType::Q6_K) => LinearData::Q6_K(matrix),
             // --- Type Conversion Paths ---
-            (TypedCpuTensor::BF16(arr), DType::F32) => {
+            (CpuTensor::BF16(arr), DType::F32) => {
                 let weights_out_in = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
                 match strategy {
                     F32MatmulStrategy::Faer => {
@@ -128,7 +147,7 @@ impl LinearLayer {
                     }
                 }
             }
-            (TypedCpuTensor::F32(arr), DType::BF16) => {
+            (CpuTensor::F32(arr), DType::BF16) => {
                 let weights_bf16 = arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32);
                 LinearData::BF16(weights_bf16.as_standard_layout().to_owned())
             }
@@ -148,8 +167,8 @@ impl LinearLayer {
 
         let bias = if weights.contains(&bias_name_to_load) {
             match weights.get_typed_tensor(&bias_name_to_load)? {
-                TypedCpuTensor::F32(b) => Some(b.into_dimensionality::<Ix1>()?),
-                TypedCpuTensor::BF16(b) => {
+                CpuTensor::F32(b) => Some(b.into_dimensionality::<Ix1>()?),
+                CpuTensor::BF16(b) => {
                     Some(b.mapv(|val| val.to_f32()).into_dimensionality::<Ix1>()?)
                 }
                 _ => {
@@ -295,7 +314,7 @@ impl LinearLayer {
                     .as_slice()
                     .ok_or_else(|| anyhow!("F32 tensor is not contiguous"))?;
 
-                let raw_tensor = RawTensor {
+                let raw_tensor = TensorView {
                     name: label.to_string(),
                     bytes: Cow::Borrowed(bytemuck::cast_slice(slice)),
                     shape: arr.shape().to_vec(),
@@ -310,7 +329,7 @@ impl LinearLayer {
                     .as_slice()
                     .ok_or_else(|| anyhow!("BF16 tensor is not contiguous"))?;
 
-                let raw_tensor = RawTensor {
+                let raw_tensor = TensorView {
                     name: label.to_string(),
                     bytes: Cow::Borrowed(bytemuck::cast_slice(slice)),
                     shape: arr.shape().to_vec(),
@@ -321,7 +340,7 @@ impl LinearLayer {
             LinearData::Q8_0(matrix) => {
                 // For quantized blocks, the data is already a flat Vec of `#[repr(C)]` structs.
                 // We can cast this directly to a byte slice for a true zero-copy upload.
-                let raw_tensor = RawTensor {
+                let raw_tensor = TensorView {
                     name: label.to_string(),
                     bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
                     shape: matrix.shape.to_vec(),
@@ -331,7 +350,7 @@ impl LinearLayer {
             }
             LinearData::Q4_K(matrix) => {
                 // Same logic as Q8_0.
-                let raw_tensor = RawTensor {
+                let raw_tensor = TensorView {
                     name: label.to_string(),
                     bytes: Cow::Borrowed(bytemuck::cast_slice(&matrix.blocks)),
                     shape: matrix.shape.to_vec(),

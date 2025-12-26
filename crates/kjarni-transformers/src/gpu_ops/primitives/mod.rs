@@ -8,6 +8,7 @@ pub mod bmm;
 pub mod layout;
 pub mod scale;
 pub mod lookup;
+pub mod lookup2;
 pub mod repeat_kv;
 pub mod argmax;
 pub mod linear;

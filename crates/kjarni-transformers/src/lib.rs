@@ -27,15 +27,20 @@ pub mod tensor;
 pub mod traits;
 pub mod utils;
 pub mod weights;
-
+pub mod lm_head;
+pub mod execution;
+pub mod pipeline;
 // Re-export commonly used items
 pub use crate::{
     attention::MultiHeadAttention,
     chat::templates::{ChatTemplate, Conversation, Message, Role},
     embeddings::Embeddings,
+    execution::ExecutionPlan,
     feedforward::FeedForward,
+    lm_head::{LMHeadConfig, LoadedLMHead},
     normalization::Normalization,
     pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
+    pipeline::{DecoderPipeline, DecoderPipelineConfig},
 };
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_ops::context::WgpuContext;

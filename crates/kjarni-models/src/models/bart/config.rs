@@ -6,7 +6,7 @@ use kjarni_transformers::{
         FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata,
     },
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 fn default_layer_norm_eps() -> f32 {
     1e-5
@@ -22,7 +22,7 @@ impl BartLikeConfig for BartConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BartConfig {
     pub d_model: usize,
     pub encoder_layers: usize,
@@ -45,6 +45,7 @@ pub struct BartConfig {
     pub pad_token_id: u32,
     pub decoder_start_token_id: u32,
     pub forced_bos_token_id: Option<u32>,
+    pub forced_eos_token_id: Option<u32>,
 
     #[serde(alias = "hidden_act", alias = "activation_function")]
     pub activation_function: Option<String>,
@@ -58,17 +59,32 @@ pub struct BartConfig {
 
     #[serde(skip)]
     pub shared_embedding_key: Option<String>,
+
+    #[serde(default)]
+    pub normalize_embedding: bool,
+
+    #[serde(default)]
+    pub normalize_before: bool,
+
+    /// Static position embeddings (BART uses learned, not static)
+    #[serde(default)]
+    pub static_position_embeddings: bool,
 }
 
 impl BartConfig {
     pub fn from_json(json: &str) -> anyhow::Result<Self> {
         Ok(serde_json::from_str(json)?)
     }
-
+    pub fn get_forced_eos_token_id(&self) -> Option<u32> {
+        self.forced_eos_token_id
+    }
     fn get_shared_weight_name(&self) -> String {
         self.shared_embedding_key
             .clone()
             .unwrap_or_else(|| "model.shared.weight".to_string())
+    }
+    pub fn to_str(&self) -> anyhow::Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
     }
 }
 
@@ -96,6 +112,7 @@ impl ModelConfig for BartConfig {
             rope_theta: None, // BART uses learned absolute positions
             rope_scaling: None,
             scale_embeddings: self.scale_embedding,
+            normalize_embedding: self.normalize_embedding,
             extra_pos_embeddings: self.extra_pos_embeddings as usize,
             is_prenorm: false, // BART is Post-Norm
             transpose_ffn_weights: false,

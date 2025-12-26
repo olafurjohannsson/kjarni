@@ -92,7 +92,7 @@ impl GpuTransformerEncoder {
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
             // --- Attention Weights (using the reusable constructor) ---
-            let self_attn_weights = GpuAttentionWeights::from_self_attn_layout(
+            let self_attn_weights = GpuAttentionWeights::from_encoder_self_attn_layout(
                 &context, weights, &layout, // Pass the whole layout
                 i, target_dt,
             )?;

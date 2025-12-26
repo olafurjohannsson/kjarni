@@ -1,4 +1,4 @@
-use crate::tensor::{DType, RawTensor};
+use crate::tensor::{DType, TensorView};
 // To satisfy the trait bound
 use crate::weights::WeightLoader;
 use anyhow::{anyhow, Context, Result};
@@ -74,10 +74,10 @@ impl<'a> SafeTensorsLoader<'a> {
 }
 
 impl WeightLoader for SafeTensorsLoader<'_> {
-    fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
+    fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let shard_idx = self.tensor_to_shard.get(name).ok_or_else(|| anyhow!("Tensor '{}' not found", name))?;
         let view = self.shards[*shard_idx].tensors.tensor(name)?;
-        Ok(RawTensor {
+        Ok(TensorView {
             name: name.to_string(),
             bytes: Cow::Borrowed(view.data()),
             shape: view.shape().to_vec(),

@@ -26,7 +26,7 @@ use kjarni_transformers::{
         base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
     },
     prelude::*,
-    tensor::{DType, RawTensor},
+    tensor::{DType, TensorView},
     weights::ModelWeights,
     WgpuContext,
 };
@@ -206,6 +206,9 @@ impl LanguageModel for Gpt2Model {
     fn forced_bos_token_id(&self) -> Option<u32> {
         None
     }
+    fn forced_eos_token_id(&self) -> Option<u32> {
+        None
+    }
     fn vocab_size(&self) -> usize {
         self.config.metadata().vocab_size
     }
@@ -305,7 +308,7 @@ impl GpuDecoderOps for Gpt2Model {
         // Upload using Cow::Owned to fix the type mismatch error
         let tensor = GpuTensor::from_raw(
             ctx.context,
-            &RawTensor {
+            &TensorView {
                 bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
                 shape: vec![1, max_len],
                 dtype: DType::F32,

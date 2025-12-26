@@ -1,6 +1,6 @@
 //! Defines the core tensor and data type structures for the engine.
 //!
-//! The central enum is `TypedCpuTensor`, which provides a type-safe container
+//! The central enum is `CpuTensor`, which provides a type-safe container
 //! for different numerical formats, including standard floats and quantized blocks.
 
 // Re-export sub-modules for a clean public API.
@@ -8,7 +8,7 @@ pub mod dtype;
 pub mod raw_tensor;
 
 pub use dtype::DType;
-pub use raw_tensor::RawTensor;
+pub use raw_tensor::TensorView;
 
 use crate::kernels::{
     q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
@@ -30,7 +30,7 @@ pub struct QuantizedMatrix<T> {
 
 /// A generic, typed tensor for CPU computation.
 /// This enum holds the primary representation of tensor data for the engine.
-pub enum TypedCpuTensor {
+pub enum CpuTensor {
     F32(ArrayD<f32>),
     BF16(ArrayD<bf16>),
     F16(ArrayD<f16>),
@@ -40,33 +40,33 @@ pub enum TypedCpuTensor {
     Q6_K(QuantizedMatrix<BlockQ6_K>),
 }
 
-impl TypedCpuTensor {
+impl CpuTensor {
     /// Returns the `DType` of the tensor.
     pub fn dtype(&self) -> DType {
         match self {
-            TypedCpuTensor::F32(_) => DType::F32,
-            TypedCpuTensor::BF16(_) => DType::BF16,
-            TypedCpuTensor::F16(_) => DType::F16,
-            TypedCpuTensor::Q8_0(_) => DType::Q8_0,
-            TypedCpuTensor::Q4_K(_) => DType::Q4_K,
-            TypedCpuTensor::Q6_K(_) => DType::Q6_K,
+            CpuTensor::F32(_) => DType::F32,
+            CpuTensor::BF16(_) => DType::BF16,
+            CpuTensor::F16(_) => DType::F16,
+            CpuTensor::Q8_0(_) => DType::Q8_0,
+            CpuTensor::Q4_K(_) => DType::Q4_K,
+            CpuTensor::Q6_K(_) => DType::Q6_K,
         }
     }
 
     /// Returns the shape of the tensor.
     pub fn shape(&self) -> &[usize] {
         match self {
-            TypedCpuTensor::F32(arr) => arr.shape(),
-            TypedCpuTensor::F16(arr) => arr.shape(),
-            TypedCpuTensor::BF16(arr) => arr.shape(),
-            TypedCpuTensor::Q8_0(q) => &q.shape,
-            TypedCpuTensor::Q4_K(q) => &q.shape,
-            TypedCpuTensor::Q6_K(q) => &q.shape,
+            CpuTensor::F32(arr) => arr.shape(),
+            CpuTensor::F16(arr) => arr.shape(),
+            CpuTensor::BF16(arr) => arr.shape(),
+            CpuTensor::Q8_0(q) => &q.shape,
+            CpuTensor::Q4_K(q) => &q.shape,
+            CpuTensor::Q6_K(q) => &q.shape,
         }
     }
     pub fn to_array2_f32(self) -> Result<Array2<f32>> {
         match self {
-            TypedCpuTensor::F32(arr) => {
+            CpuTensor::F32(arr) => {
                 let shape = arr.shape();
                 // Use only the first two dimensions, effectively squeezing [2048, 128256, 1] into [2048, 128256]
                 Ok(arr
@@ -74,14 +74,14 @@ impl TypedCpuTensor {
                     .into_shape_with_order((shape[0], shape[1]))?
                     .into_dimensionality::<Ix2>()?)
             }
-            TypedCpuTensor::F16(arr) => {
+            CpuTensor::F16(arr) => {
                 let shape = arr.shape();
                 Ok(arr
                     .mapv(|v| v.to_f32())
                     .into_shape_with_order((shape[0], shape[1]))?
                     .into_dimensionality::<Ix2>()?)
             }
-            TypedCpuTensor::BF16(arr) => {
+            CpuTensor::BF16(arr) => {
                 let shape = arr.shape();
                 Ok(arr
                     .mapv(|v| v.to_f32())
@@ -130,7 +130,7 @@ impl TypedCpuTensor {
     /// This is typically used for loading biases or layer normalization weights.
     pub fn to_array1_f32(&self) -> Result<Array1<f32>> {
         match self {
-            TypedCpuTensor::F32(arr) => {
+            CpuTensor::F32(arr) => {
                 let len = arr.len(); // Total elements (e.g., 2048)
                 // .into_shape_with_order(len) flattens [2048, 1] into [2048]
                 Ok(arr
@@ -138,14 +138,14 @@ impl TypedCpuTensor {
                     .into_shape_with_order(len)?
                     .into_dimensionality::<Ix1>()?)
             }
-            TypedCpuTensor::F16(arr) => {
+            CpuTensor::F16(arr) => {
                 let len = arr.len();
                 Ok(arr
                     .mapv(|v| v.to_f32())
                     .into_shape_with_order(len)?
                     .into_dimensionality::<Ix1>()?)
             }
-            TypedCpuTensor::BF16(arr) => {
+            CpuTensor::BF16(arr) => {
                 let len = arr.len();
                 Ok(arr
                     .mapv(|v| v.to_f32())

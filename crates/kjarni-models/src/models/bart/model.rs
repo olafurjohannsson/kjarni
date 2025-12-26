@@ -270,8 +270,25 @@ impl LanguageModel for BartModel {
     fn context_size(&self) -> usize {
         self.config.metadata().max_seq_len
     }
+    fn forced_eos_token_id(&self) -> Option<u32> {
+        // If explicit forced_eos_token_id is set, use it
+        if self.config.forced_eos_token_id.is_some() {
+            return self.config.forced_eos_token_id;
+        }
+        None
+    }
     fn forced_bos_token_id(&self) -> Option<u32> {
-        self.config.forced_bos_token_id
+        // If explicit forced_bos_token_id is set, use it
+        if self.config.forced_bos_token_id.is_some() {
+            return self.config.forced_bos_token_id;
+        }
+
+        // HF behavior: if force_bos_token_to_be_generated is true, use bos_token_id
+        if self.config.force_bos_token_to_be_generated.unwrap_or(false) {
+            return Some(self.config.bos_token_id);
+        }
+
+        None
     }
     fn pad_token_id(&self) -> Option<u32> {
         Some(self.config.pad_token_id)

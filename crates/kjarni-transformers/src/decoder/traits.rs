@@ -26,7 +26,7 @@
 use crate::cache::{Cache, GpuKVCache};
 use crate::common::GenerationConfig;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::{AutoregressiveLoop, LanguageModel};
+use crate::models::base::{AutoregressiveLoop, LanguageModel, ModelInput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
@@ -126,7 +126,7 @@ pub trait GpuDecoder: Send + Sync {
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor>;
 
@@ -136,7 +136,7 @@ pub trait GpuDecoder: Send + Sync {
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor>;
 
@@ -166,7 +166,7 @@ pub trait GpuDecoder: Send + Sync {
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         attention_mask: &GpuTensor,
         position_offset: usize,
         cache: Option<&mut GpuKVCache>,
@@ -190,11 +190,11 @@ pub trait GpuDecoder: Send + Sync {
 /// Defines the synchronous interface for a CPU-native Transformer Decoder.
 /// Mirrors `GpuDecoder` structure for symmetry.
 pub trait CpuDecoder: Send + Sync {
-    fn embed(&self, input: DecoderInput<'_>, position_offset: usize) -> Result<Array3<f32>>;
+    fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>>;
 
     fn embed_and_normalize(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<Array3<f32>>;
 
@@ -212,7 +212,7 @@ pub trait CpuDecoder: Send + Sync {
 
     fn forward(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
@@ -319,7 +319,7 @@ pub trait DecoderLanguageModel: LanguageModel {
         let attention_mask = ops.get_attention_mask(seq_len, 0)?;
 
         let decoder_output = ops.decoder().forward(
-            DecoderInput::TokensCpu(input_ids.as_slice().unwrap()),
+            ModelInput::from_tokens(input_ids.as_slice().unwrap()),
             &attention_mask,
             0,
             None,
@@ -332,8 +332,8 @@ pub trait DecoderLanguageModel: LanguageModel {
     /// Useful for testing, feature extraction, or sanity checks without the Generator.
     async fn get_logits_gpu(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
-        let input_slice = input_ids.as_slice().unwrap();
-        let seq_len = input_slice.len();
+        // let input_slice = input_ids.as_slice().unwrap();
+        let seq_len = input_ids.len();
 
         let ops = self
             .decoder_gpu_ops()
@@ -344,7 +344,7 @@ pub trait DecoderLanguageModel: LanguageModel {
             .ok_or_else(|| anyhow!("Model missing WgpuContext"))?;
 
         let pool = context.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&context, pool_guard);
 
         // 1. Prepare Mask
@@ -359,7 +359,7 @@ pub trait DecoderLanguageModel: LanguageModel {
             .forward(
                 encoder,
                 pool,
-                DecoderInput::TokensCpu(input_slice), // Fix: Pass by value
+                ModelInput::TokensCpu(input_ids.view()), // Fix: Pass by value
                 &attention_mask,
                 0,    // offset
                 None, // no cache

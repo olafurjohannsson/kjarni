@@ -1,31 +1,80 @@
+use crate::gpu_ops::Kernel;
+use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
+use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::traits::ModelMetadata;
+use crate::WgpuContext;
+use crate::activations;
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::WgpuContext;
-use crate::activations;
-use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
-use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
-use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
-use crate::traits::ModelMetadata;
-
+/// A single encoder layer for transformer models.
+///
+/// Supports both pre-norm (LLaMA-style) and post-norm (BERT-style) architectures.
+///
+/// # Architecture (Post-Norm)
+///
+/// ```text
+/// Input
+///   │
+///   ├──────────────────────────┐
+///   ▼                          │ (residual)
+/// Self-Attention               │
+///   │                          │
+///   ▼                          │
+/// Add ◄────────────────────────┘
+///   │
+///   ▼
+/// LayerNorm
+///   │
+///   ├──────────────────────────┐
+///   ▼                          │ (residual)
+/// FFN                          │
+///   │                          │
+///   ▼                          │
+/// Add ◄────────────────────────┘
+///   │
+///   ▼
+/// LayerNorm
+///   │
+///   ▼
+/// Output
+/// ```
 pub struct GpuEncoderLayer {
-    self_attn: GpuAttention,
+    // Attention
+    self_attn: GpuEncoderSelfAttention,
     self_attn_weights: GpuAttentionWeights,
     self_attn_layer_norm: GpuLayerNorm,
     self_attn_ln_weights: GpuLayerNormWeights,
 
+    // Feed-forward
     feedforward: GpuFeedForward,
     ff_weights: GpuFeedForwardWeights,
     ffn_layer_norm: GpuLayerNorm,
     ffn_ln_weights: GpuLayerNormWeights,
 
+    // Primitives
     add: GpuAdd,
 }
 
 impl GpuEncoderLayer {
+    /// Creates a new encoder layer.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - The WGPU context for creating GPU resources.
+    /// * `self_attn_weights` - Pre-loaded attention weights (Q, K, V, O projections).
+    /// * `self_attn_ln_weights` - LayerNorm weights for attention block.
+    /// * `ff_weights` - Pre-loaded feed-forward weights.
+    /// * `ffn_ln_weights` - LayerNorm weights for FFN block.
+    /// * `activation` - Activation function (GELU, ReLU, SiLU, etc.).
+    /// * `meta` - Model metadata containing dimensions and configuration.
+    ///
+    /// # Returns
+    ///
+    /// A configured `GpuEncoderLayer` ready for forward passes.
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
@@ -38,21 +87,17 @@ impl GpuEncoderLayer {
         let hidden_size = meta.hidden_size as u32;
         let num_heads = meta.num_attention_heads as u32;
 
-        // In Encoders, KV heads usually equal Attention heads.
-        // Metadata provides this logic (falling back to num_heads if not specified).
-        let num_kv_heads = meta.num_kv_heads as u32;
+        // Initialize the new clean attention module
+        let self_attn = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
 
-        // 1. Initialize Attention Engine
-        let self_attn = GpuAttention::new(context, hidden_size, num_heads, num_kv_heads);
-
-        // 2. Initialize LayerNorm Engines (using Metadata eps)
+        // LayerNorms
         let self_attn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
         let ffn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
 
-        // 3. Initialize FFN Engine
+        // FFN
         let feedforward = GpuFeedForward::new(context, activation)?;
 
-        // 4. Initialize Math Engine
+        // Primitives
         let add = GpuAdd::new(context);
 
         Ok(Self {
@@ -68,17 +113,29 @@ impl GpuEncoderLayer {
         })
     }
 
+    /// Performs the forward pass through this encoder layer.
+    ///
+    /// Automatically dispatches to pre-norm or post-norm based on model metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `encoder` - The command encoder for recording GPU operations.
+    /// * `hidden_states` - Input tensor of shape `[B, S, H]`.
+    /// * `attention_mask` - Padding mask of shape `[B, S]`.
+    /// * `meta` - Model metadata (used to determine norm style).
+    /// * `pool` - Tensor pool for allocating intermediate tensors.
+    ///
+    /// # Returns
+    ///
+    /// Output tensor of shape `[B, S, H]`.
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
         attention_mask: &GpuTensor,
-        meta: &ModelMetadata, // Use Metadata struct
+        meta: &ModelMetadata,
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
-        // Dispatch based on architectural style defined in metadata
-        // BERT/RoBERTa = Post-Norm (false)
-        // Llama/Modern Encoders = Pre-Norm (true)
         if meta.is_prenorm {
             self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
         } else {
@@ -86,7 +143,10 @@ impl GpuEncoderLayer {
         }
     }
 
-    fn forward_prenorm(
+    /// Forward pass for pre-normalization architecture (LLaMA-style).
+    ///
+    /// Order: Norm → Attention → Add → Norm → FFN → Add
+    pub fn forward_prenorm(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         hidden_states: &GpuTensor,
@@ -95,6 +155,7 @@ impl GpuEncoderLayer {
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
 
+        // 1. Pre-norm before attention
         let ln1_out = pool.get(hidden_states.shape().to_vec());
         self.self_attn_layer_norm.encode(
             encoder,
@@ -103,45 +164,42 @@ impl GpuEncoderLayer {
             &ln1_out,
         );
 
-        let (new_k, new_v) =
-            self.self_attn
-                .project_kv(encoder, &ln1_out, &self.self_attn_weights, 0, pool, None);
-        let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
-        let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
-
-        let attn_out = self.self_attn.attend(
+        // 2. Self-attention (using new clean module)
+        let attn_out = self.self_attn.forward(
             encoder,
-            &ln1_out, // Query
+            &ln1_out,
             &self.self_attn_weights,
-            attention_mask,
-            false,                        // is_causal is false for encoders
-            (&new_k_split, &new_v_split), // K and V are from the input itself
-            0,                            // No position offset
+            Some(attention_mask),
             pool,
         );
 
+        // 3. Residual connection
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual, &attn_out], &attn_block_output);
+        self.add.encode(encoder, &[residual, &attn_out], &attn_block_output);
 
+        // 4. Pre-norm before FFN
         let residual_2 = &attn_block_output;
-
         let ln2_out = pool.get(residual_2.shape().to_vec());
-        self.ffn_layer_norm
-            .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
+        self.ffn_layer_norm.encode(
+            encoder,
+            &self.ffn_ln_weights,
+            residual_2,
+            &ln2_out,
+        );
 
-        let ffn_out = self
-            .feedforward
-            .encode(encoder, &ln2_out, &self.ff_weights, pool);
+        // 5. FFN
+        let ffn_out = self.feedforward.encode(encoder, &ln2_out, &self.ff_weights, pool);
 
+        // 6. Residual connection
         let final_output = pool.get(residual_2.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual_2, &ffn_out], &final_output);
+        self.add.encode(encoder, &[residual_2, &ffn_out], &final_output);
 
         Ok(final_output)
     }
 
-    /// The forward pass logic for a Post-Normalization architecture (e.g., BERT style).
+    /// Forward pass for post-normalization architecture (BERT/BART-style).
+    ///
+    /// Order: Attention → Add → Norm → FFN → Add → Norm
     pub fn forward_postnorm(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -151,28 +209,16 @@ impl GpuEncoderLayer {
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
 
-        let (new_k, new_v) = self.self_attn.project_kv(
+        // 1. Self-attention (using new clean module)
+        let attn_out = self.self_attn.forward(
             encoder,
             hidden_states,
             &self.self_attn_weights,
-            0,
-            pool,
-            None,
-        );
-        let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
-        let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
-
-        let attn_out = self.self_attn.attend(
-            encoder,
-            hidden_states, // Query
-            &self.self_attn_weights,
-            attention_mask,
-            false, // is_causal
-            (&new_k_split, &new_v_split),
-            0,
+            Some(attention_mask),
             pool,
         );
 
+        // 2. Residual + LayerNorm
         let add_1_out = pool.get(hidden_states.shape().to_vec());
         self.add.encode(encoder, &[residual, &attn_out], &add_1_out);
 
@@ -184,23 +230,233 @@ impl GpuEncoderLayer {
             &attn_block_output,
         );
 
+        // 3. FFN
         let residual_2 = &attn_block_output;
+        let ffn_out = self.feedforward.encode(encoder, residual_2, &self.ff_weights, pool);
 
-        let ffn_out = self
-            .feedforward
-            .encode(encoder, residual_2, &self.ff_weights, pool);
-
+        // 4. Residual + LayerNorm
         let add_2_out = pool.get(residual_2.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
+        self.add.encode(encoder, &[residual_2, &ffn_out], &add_2_out);
 
         let final_output = pool.get(residual_2.shape().to_vec());
-        self.ffn_layer_norm
-            .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
+        self.ffn_layer_norm.encode(
+            encoder,
+            &self.ffn_ln_weights,
+            &add_2_out,
+            &final_output,
+        );
 
         Ok(final_output)
     }
 }
+// use anyhow::Result;
+// use std::sync::Arc;
+
+// use crate::WgpuContext;
+// use crate::activations;
+// use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
+// use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
+// use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+// use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
+// use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
+// use crate::gpu_ops::primitives::add::GpuAdd;
+// use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+// use crate::traits::ModelMetadata;
+
+// pub struct GpuEncoderLayer {
+//     self_attn: GpuAttention,
+//     attention: GpuEncoderSelfAttention,
+//     self_attn_weights: GpuAttentionWeights,
+//     self_attn_layer_norm: GpuLayerNorm,
+//     self_attn_ln_weights: GpuLayerNormWeights,
+
+//     feedforward: GpuFeedForward,
+//     ff_weights: GpuFeedForwardWeights,
+//     ffn_layer_norm: GpuLayerNorm,
+//     ffn_ln_weights: GpuLayerNormWeights,
+
+//     add: GpuAdd,
+// }
+
+// impl GpuEncoderLayer {
+//     pub fn new(
+//         context: &Arc<WgpuContext>,
+//         self_attn_weights: GpuAttentionWeights,
+//         self_attn_ln_weights: GpuLayerNormWeights,
+//         ff_weights: GpuFeedForwardWeights,
+//         ffn_ln_weights: GpuLayerNormWeights,
+//         activation: activations::Activation,
+//         meta: &ModelMetadata,
+//     ) -> Result<Self> {
+//         let hidden_size = meta.hidden_size as u32;
+//         let num_heads = meta.num_attention_heads as u32;
+
+//         // In Encoders, KV heads usually equal Attention heads.
+//         // Metadata provides this logic (falling back to num_heads if not specified).
+//         let num_kv_heads = meta.num_kv_heads as u32;
+
+//         // 1. Initialize Attention Engine
+//         let self_attn = GpuAttention::new(context, hidden_size, num_heads, num_kv_heads);
+
+//         // 2. Initialize LayerNorm Engines (using Metadata eps)
+//         let self_attn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
+//         let ffn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
+
+//         // 3. Initialize FFN Engine
+//         let feedforward = GpuFeedForward::new(context, activation)?;
+
+//         // 4. Initialize Math Engine
+//         let add = GpuAdd::new(context);
+
+//         let attention = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
+
+//         Ok(Self {
+//             self_attn,
+//             attention,
+//             self_attn_weights,
+//             self_attn_layer_norm,
+//             self_attn_ln_weights,
+//             feedforward,
+//             ff_weights,
+//             ffn_layer_norm,
+//             ffn_ln_weights,
+//             add,
+//         })
+//     }
+
+//     pub fn forward(
+//         &self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         hidden_states: &GpuTensor,
+//         attention_mask: &GpuTensor,
+//         meta: &ModelMetadata, // Use Metadata struct
+//         pool: &mut GpuTensorPool,
+//     ) -> Result<GpuTensor> {
+//         // Dispatch based on architectural style defined in metadata
+//         // BERT/RoBERTa = Post-Norm (false)
+//         // Llama/Modern Encoders = Pre-Norm (true)
+//         if meta.is_prenorm {
+//             self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
+//         } else {
+//             self.forward_postnorm(encoder, hidden_states, attention_mask, pool)
+//         }
+//     }
+
+//     fn forward_prenorm(
+//         &self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         hidden_states: &GpuTensor,
+//         attention_mask: &GpuTensor,
+//         pool: &mut GpuTensorPool,
+//     ) -> Result<GpuTensor> {
+//         let residual = hidden_states;
+
+//         let ln1_out = pool.get(hidden_states.shape().to_vec());
+//         self.self_attn_layer_norm.encode(
+//             encoder,
+//             &self.self_attn_ln_weights,
+//             hidden_states,
+//             &ln1_out,
+//         );
+
+//         let (new_k, new_v) =
+//             self.self_attn
+//                 .project_kv(encoder, &ln1_out, &self.self_attn_weights, 0, pool, None);
+//         let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
+//         let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
+
+//         let attn_out = self.self_attn.attend(
+//             encoder,
+//             &ln1_out, // Query
+//             &self.self_attn_weights,
+//             attention_mask,
+//             false,                        // is_causal is false for encoders
+//             (&new_k_split, &new_v_split), // K and V are from the input itself
+//             0,                            // No position offset
+//             pool,
+//         );
+
+//         let attn_block_output = pool.get(hidden_states.shape().to_vec());
+//         self.add
+//             .encode(encoder, &[residual, &attn_out], &attn_block_output);
+
+//         let residual_2 = &attn_block_output;
+
+//         let ln2_out = pool.get(residual_2.shape().to_vec());
+//         self.ffn_layer_norm
+//             .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
+
+//         let ffn_out = self
+//             .feedforward
+//             .encode(encoder, &ln2_out, &self.ff_weights, pool);
+
+//         let final_output = pool.get(residual_2.shape().to_vec());
+//         self.add
+//             .encode(encoder, &[residual_2, &ffn_out], &final_output);
+
+//         Ok(final_output)
+//     }
+
+//     /// The forward pass logic for a Post-Normalization architecture (e.g., BERT style).
+//     pub fn forward_postnorm(
+//         &self,
+//         encoder: &mut wgpu::CommandEncoder,
+//         hidden_states: &GpuTensor,
+//         attention_mask: &GpuTensor,
+//         pool: &mut GpuTensorPool,
+//     ) -> Result<GpuTensor> {
+//         let residual = hidden_states;
+
+//         let (new_k, new_v) = self.self_attn.project_kv(
+//             encoder,
+//             hidden_states,
+//             &self.self_attn_weights,
+//             0,
+//             pool,
+//             None,
+//         );
+//         let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
+//         let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
+
+//         let attn_out = self.self_attn.attend(
+//             encoder,
+//             hidden_states, // Query
+//             &self.self_attn_weights,
+//             attention_mask,
+//             false, // is_causal
+//             (&new_k_split, &new_v_split),
+//             0,
+//             pool,
+//         );
+
+//         let add_1_out = pool.get(hidden_states.shape().to_vec());
+//         self.add.encode(encoder, &[residual, &attn_out], &add_1_out);
+
+//         let attn_block_output = pool.get(hidden_states.shape().to_vec());
+//         self.self_attn_layer_norm.encode(
+//             encoder,
+//             &self.self_attn_ln_weights,
+//             &add_1_out,
+//             &attn_block_output,
+//         );
+
+//         let residual_2 = &attn_block_output;
+
+//         let ffn_out = self
+//             .feedforward
+//             .encode(encoder, residual_2, &self.ff_weights, pool);
+
+//         let add_2_out = pool.get(residual_2.shape().to_vec());
+//         self.add
+//             .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
+
+//         let final_output = pool.get(residual_2.shape().to_vec());
+//         self.ffn_layer_norm
+//             .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
+
+//         Ok(final_output)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -414,6 +670,7 @@ mod tests {
                 activation: Activation::Gelu,
                 rope_theta: None,
                 rope_scaling: None,
+                normalize_embedding: false,
                 scale_embeddings: false,
                 extra_pos_embeddings: 0,
                 is_prenorm: false, // BERT/Mock style
@@ -489,6 +746,7 @@ mod tests {
                 rope_theta: None,
                 rope_scaling: None,
                 scale_embeddings: false,
+                normalize_embedding: false,
                 extra_pos_embeddings: 0,
                 is_prenorm: false, // Legacy style post-norm
                 transpose_ffn_weights: false,

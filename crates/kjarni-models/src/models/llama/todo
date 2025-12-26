@@ -1,0 +1,44 @@
+# TODO: Reusable Components for Decoder Models
+
+## P1 - High Impact
+
+### 1. LoadedRoPE
+- [ ] Create `kjarni-transformers/src/rope/loader.rs`
+- [ ] `LoadedRoPE` struct with `cpu_rope: Arc<RoPE>`, `gpu_rope: Option<GpuRoPE>`
+- [ ] `new(ctx, head_dim, max_seq_len, theta, scaling, load_gpu) -> Result<Self>`
+- [ ] Used by: Llama, Mistral, Phi, Gemma, Qwen
+
+### 2. DecoderPipeline Builder
+- [ ] Add `DecoderPipelineBuilder` to `kjarni-transformers/src/pipeline/decoder.rs`
+- [ ] `DecoderPipeline::builder().embeddings(...).lm_head(...).plan_from_device(...).build()`
+- [ ] Auto-create execution plan from device + ModelLoadConfig
+- [ ] Reduce boilerplate in model `from_pretrained`
+
+### 3. DecoderModelLoader Trait
+- [ ] Create `kjarni-transformers/src/pipeline/loader.rs`
+- [ ] Trait with `load_config`, `load_cpu_decoder`, `load_gpu_decoder`
+- [ ] Default impls for `load_embeddings`, `load_lm_head`, `load_tokenizer`
+- [ ] Each model just implements model-specific parts
+
+## P2 - Medium Impact
+
+### 4. TokenizerLoader
+- [ ] Create `kjarni-transformers/src/tokenizer/loader.rs`
+- [ ] `load_tokenizer(path, max_seq_len, padding_config) -> Result<Tokenizer>`
+- [ ] Handle truncation, padding, special tokens uniformly
+- [ ] Used by: All models
+
+### 5. AttentionMaskFactory
+- [ ] Create `kjarni-transformers/src/attention/mask.rs`
+- [ ] `MaskType` enum: `Full`, `SlidingWindow(usize)`, `Alibi`
+- [ ] `create_cpu(seq_len, past_len) -> Array2<f32>`
+- [ ] `create_gpu(ctx, seq_len, max_len) -> Result<GpuTensor>`
+- [ ] Used by: All models (Mistral needs SlidingWindow)
+
+## P3 - Nice to Have
+
+### 6. Fix LoadedEmbeddings API
+- [ ] Make context `Option<&Arc<WgpuContext>>`
+- [ ] Add `load_cpu: bool, load_gpu: bool` params
+- [ ] Add `has_cpu()`, `has_gpu()` methods
+- [ ] Match LoadedLMHead API pattern

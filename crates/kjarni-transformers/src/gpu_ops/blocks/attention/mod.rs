@@ -1,3 +1,32 @@
+//! GPU Attention Modules
+//!
+//! Specialized attention implementations for different transformer architectures.
+//!
+//! # Available Modules
+//!
+//! | Module | Causal | Cache | RoPE | GQA | Use Case |
+//! |--------|--------|-------|------|-----|----------|
+//! | [`GpuEncoderSelfAttention`] | ❌ | ❌ | ❌ | ❌ | BERT, BART encoder |
+//! | [`GpuDecoderSelfAttention`] | ✅ | ✅ | ❌ | ❌ | GPT-2, BART decoder |
+//! | [`GpuCrossAttention`] | ❌ | ❌* | ❌ | ❌ | BART/T5 cross-attention |
+//! | [`GpuRoPEAttention`] | ✅ | ✅ | ✅ | ✅ | LLaMA, Mistral, Phi, Gemma |
+//!
+//! *Cross-attention uses precomputed K/V from encoder.
+//!
+//! # Choosing the Right Module
+//!
+//! ```text
+//! Is it an encoder? ──► GpuEncoderSelfAttention
+//!         │
+//!         ▼ (decoder)
+//! Does it use RoPE? ──► GpuRoPEAttention (LLaMA, Mistral, Phi, Gemma)
+//!         │
+//!         ▼ (no RoPE)
+//! Is it cross-attention? ──► GpuCrossAttention (BART/T5)
+//!         │
+//!         ▼ (self-attention)
+//! GpuDecoderSelfAttention (GPT-2, BART decoder self-attn)
+//! ```
 use crate::WgpuContext;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::kernel::Kernel;
@@ -17,6 +46,18 @@ use crate::traits::{AttentionLayout, ModelLayout};
 use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
+
+mod ops;
+mod encoder_self_attention;
+mod decoder_self_attention;
+mod rope_attention;
+mod cross_decoder_attention;
+
+pub use encoder_self_attention::GpuEncoderSelfAttention;
+pub use decoder_self_attention::{GpuDecoderSelfAttention, DecoderSelfAttentionOutput};
+pub use cross_decoder_attention::{GpuCrossAttention};
+pub use rope_attention::{GpuRoPEAttention, RoPEAttentionOutput};
+pub use ops::AttentionOps;
 
 /// GPU tensors for attention weights.
 pub struct GpuAttentionWeights {
@@ -77,7 +118,7 @@ impl GpuAttentionWeights {
     }
 
     /// High-level constructor for a **decoder's self-attention** block.
-    pub fn from_self_attn_layout(
+    pub fn from_decoder_self_attn_layout(
         ctx: &Arc<WgpuContext>,
         weights: &ModelWeights,
         layout: &ModelLayout,
@@ -95,7 +136,28 @@ impl GpuAttentionWeights {
             &decoder_layout.layer.self_attn,
             layer_index,
             target_dt,
-            &format!("layer{}.self_attn", layer_index),
+            &format!("decoder.layer{}.self_attn", layer_index),
+        )
+    }
+    pub fn from_encoder_self_attn_layout(
+        ctx: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        layout: &ModelLayout,
+        layer_index: usize,
+        target_dt: Option<DType>,
+    ) -> Result<Self> {
+        let encoder_layout = layout
+            .encoder
+            .as_ref()
+            .ok_or_else(|| anyhow!("ModelLayout is missing a decoder layout"))?;
+
+        Self::from_layout(
+            ctx,
+            weights,
+            &encoder_layout.layer.self_attn,
+            layer_index,
+            target_dt,
+            &format!("encoder.layer{}.self_attn", layer_index),
         )
     }
 

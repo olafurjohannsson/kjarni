@@ -1,6 +1,6 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Copy)]
+#[derive(Debug, Clone, Deserialize, Copy, Serialize)]
 #[allow(non_snake_case)] // To allow serde to match the camelCase keys
 pub struct SummarizationParams {
     pub early_stopping: bool,
@@ -11,7 +11,7 @@ pub struct SummarizationParams {
     pub num_beams: usize,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(non_snake_case)]
 pub struct TaskSpecificParams {
     pub summarization: SummarizationParams,

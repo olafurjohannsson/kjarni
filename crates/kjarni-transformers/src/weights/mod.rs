@@ -1,7 +1,7 @@
 //! This module provides the `ModelWeights` struct, a unified, high-performance
 //! loader for model weights, abstracting away the underlying file format.
 
-use crate::tensor::RawTensor;
+use crate::tensor::TensorView;
 use anyhow::{Context, Result};
 
 mod gguf_loader;
@@ -14,7 +14,7 @@ pub use model_weights::ModelWeights;
 /// This allows `ModelWeights` to be agnostic to the file format (safetensors, gguf, etc.).
 pub trait WeightLoader {
     /// Gets a raw, untyped view of a tensor's bytes.
-    fn get_raw(&self, name: &str) -> Result<RawTensor<'_>>;
+    fn get_raw(&self, name: &str) -> Result<TensorView<'_>>;
 
     /// Checks if a tensor with the given name exists.
     fn contains(&self, name: &str) -> bool;

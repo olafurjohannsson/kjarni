@@ -207,11 +207,11 @@ fn create_gpu_layer_from_cpu(
 
     // Assemble the GPU layer (Unchanged)
     Ok(GpuCrossAttentionDecoderLayer {
-        self_attn: GpuAttention::new(context, hidden_size, num_heads, num_heads),
+        self_attn: GpuDecoderSelfAttention::new(context, hidden_size, num_heads),
         self_attn_weights,
         self_attn_norm: GpuNormalization::LayerNorm(GpuLayerNorm::new(context, 1e-5)),
         self_attn_norm_weights,
-        cross_attn: GpuAttention::new(context, hidden_size, num_heads, num_heads),
+        cross_attn: GpuCrossAttention::new(context, hidden_size, num_heads),
         cross_attn_weights,
         cross_attn_norm: GpuNormalization::LayerNorm(GpuLayerNorm::new(context, 1e-5)),
         cross_attn_norm_weights,
@@ -243,18 +243,19 @@ async fn test_gpu_cpu_layer_consistency() -> Result<()> {
     let cpu_encoder_mask = Array2::ones((batch, enc_len));
 
     // 4. RUN CPU FORWARD PASS
+    // First precompute cross KV on CPU
+    let cpu_cross_kv = cpu_layer.precompute_cross_kv(&cpu_encoder_hs)?;
+    
     let (cpu_output, (cpu_k, cpu_v)) = cpu_layer.forward(
         &cpu_decoder_hs,
         &cpu_encoder_hs,
         Some(&cpu_decoder_mask),
         Some(&cpu_encoder_mask),
-        None, // No cache for first step
-        None, // cross KV cache
+        None, // No self-attn cache
+        Some(&cpu_cross_kv), // Pass precomputed cross KV
     )?;
 
     // 5. RUN GPU FORWARD PASS
-    // --- START CORRECTION ---
-    // Create the encoder and pool directly. No FrameContext, no Mutex.
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let mut pool = GpuTensorPool::new(context.clone());
 
@@ -263,23 +264,28 @@ async fn test_gpu_cpu_layer_consistency() -> Result<()> {
     let gpu_decoder_mask = GpuTensor::from_ndarray(&context, &cpu_decoder_mask)?;
     let gpu_encoder_mask = GpuTensor::from_ndarray(&context, &cpu_encoder_mask)?;
 
-    // Pass the raw &mut encoder and &mut pool, which is what the layer expects.
+    // Precompute cross KV on GPU (matches what we do in real inference)
+    let gpu_cross_kv = gpu_layer.precompute_cross_kv(
+        &mut encoder,
+        &gpu_encoder_hs,
+        &mut pool,
+    );
+
+    // Forward pass with precomputed cross KV
     let (gpu_output_t, gpu_k_t, gpu_v_t) = gpu_layer.forward(
         &mut encoder,
         &gpu_decoder_hs,
-        Some(&gpu_encoder_hs),
+        &gpu_cross_kv,           // Required: precomputed cross KV
         &gpu_decoder_mask,
-        Some(&gpu_encoder_mask),
-        None, // No cache
-        None,
-        0, // Cache len is 0
+        Some(&gpu_encoder_mask), // Optional encoder mask
+        None,                    // No self-attn cache
+        0,                       // cache_len = 0
         &mut pool,
     )?;
 
-    // Submit the work and advance the pool frame.
+    // Submit and sync
     context.queue.submit(Some(encoder.finish()));
     pool.next_frame();
-    // --- END CORRECTION ---
 
     let gpu_output = gpu_output_t.to_ndarray_3d().await?;
     let gpu_k = gpu_k_t.to_ndarray_3d().await?;
@@ -329,17 +335,17 @@ async fn test_layer_subcomponent_parity() -> Result<()> {
     // ========================================================================
     println!("--- Testing Self-Attention Block ---");
 
-    // CPU Execution
-    let (cpu_sa_out, (cpu_k, cpu_v)) = cpu_layer.self_attention(
-        &cpu_hidden,
-        Some(&cpu_dec_mask),
-        None, // No cache for this test
-    )?;
+    
+    let (attn_out, new_k, new_v) = 
+        cpu_layer.self_attn.forward(&cpu_hidden, Some(&cpu_dec_mask), None)?;
+    let hidden_states_after_add = &cpu_hidden + &attn_out;
+    let final_output = cpu_layer
+        .self_attn_layer_norm
+        .forward_3d(&hidden_states_after_add);
+    let (cpu_sa_out, (cpu_k, cpu_v)) = (final_output, (new_k, new_v));
 
-    // GPU Execution
-    // We have to manually call the sub-components because `gpu_layer.forward` does it all.
-    // 1. Self Attn
-    let (gpu_sa_attn_out, gpu_k, gpu_v) = gpu_layer.self_attn.forward_seq2seq(
+    
+    let o = gpu_layer.self_attn.forward(
         &mut encoder,
         &gpu_hidden,
         &gpu_layer.self_attn_weights,
@@ -348,6 +354,10 @@ async fn test_layer_subcomponent_parity() -> Result<()> {
         0,    // Cache len
         &mut pool,
     )?;
+    //(gpu_sa_attn_out, gpu_k, gpu_v)
+    let gpu_sa_attn_out = o.hidden_states;
+    let gpu_k = o.new_k;
+    let gpu_v = o.new_v;
 
     // 2. Add (Residual)
     let gpu_sa_add = pool.get(gpu_hidden.shape().to_vec());
@@ -390,20 +400,31 @@ async fn test_layer_subcomponent_parity() -> Result<()> {
     encoder = context.device.create_command_encoder(&Default::default());
     pool.next_frame(); // Reset pool for cleanliness
 
-    // CPU Execution
-    let cpu_ca_out = cpu_layer.cross_attention(
+    let (k, v) = cpu_layer
+                .cross_attn
+                .precompute_encoder_kv(&cpu_encoder_hs)?;
+    let cross_attn_output = cpu_layer.cross_attn.forward(
         &input_for_step_2,
-        &cpu_encoder_hs,
+        &k,
+        &v,
         Some(&cpu_enc_mask),
-        None,
-    )?;
+    );
+    let hidden_states_after_add = &input_for_step_2 + &cross_attn_output?;
+    let final_output = cpu_layer
+        .cross_attn_layer_norm
+        .forward_3d(&hidden_states_after_add);
+    let cpu_ca_out = final_output;
 
-    // GPU Execution
-    // 1. Cross Attn
-    let gpu_ca_attn_out = gpu_layer.cross_attn.forward_cross(
+     let gpu_cross_kv = gpu_layer.precompute_cross_kv(
+        &mut encoder,
+        &gpu_encoder_hs,
+        &mut pool,
+    );
+    let gpu_ca_attn_out = gpu_layer.cross_attn.forward(
         &mut encoder,
         &gpu_input_for_step_2, // Query
-        &gpu_encoder_hs,       // Key/Value
+        &gpu_cross_kv,
+        // &gpu_encoder_hs,       // Key/Value
         &gpu_layer.cross_attn_weights,
         Some(&gpu_enc_mask),
         &mut pool,

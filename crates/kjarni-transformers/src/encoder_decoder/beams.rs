@@ -1,16 +1,16 @@
 use crate::cache::Cache;
-use crate::common::{
-    apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace, get_top_k_from_log_probs, log_softmax_1d,
-    StreamedToken, TokenType,
-};
 use crate::common::{DecodingStrategy, GenerationConfig};
+use crate::common::{
+    StreamedToken, TokenType, apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace,
+    get_top_k_from_log_probs, log_softmax_1d,
+};
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures_core::Stream;
-use ndarray::{s, Array2};
+use ndarray::{Array2, s};
 
 #[derive(Clone, Debug)]
 pub struct BeamHypothesis {
@@ -127,6 +127,7 @@ struct BeamContext<'a, B: EncoderDecoderGenerationBackend> {
     eos_token_id: u32,
     decoder_start_token_id: u32,
     forced_bos_token_id: Option<u32>,
+    forced_eos_token_id: Option<u32>,
     early_stopping: bool,
 }
 
@@ -192,6 +193,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             decoder_start_token_id,
             forced_bos_token_id,
             early_stopping,
+            forced_eos_token_id: model.forced_eos_token_id(),
         })
     }
 }
@@ -330,6 +332,14 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
                     &ctx.beams[i].tokens,
                     ctx.config.no_repeat_ngram_size,
                 );
+            }
+
+            // Force EOS at max_length - 1 (last generation step)
+            if current_len >= ctx.config.max_length - 1 {
+                if let Some(forced_eos_id) = ctx.forced_eos_token_id {
+                    logits_row.fill(f32::NEG_INFINITY);
+                    logits_row[forced_eos_id as usize] = 0.0;
+                }
             }
         });
 
@@ -516,7 +526,7 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
     backend: &'a B,
     input_text: &'a str,
     config: &'a GenerationConfig,
-) -> impl Stream<Item=Result<StreamedToken>> + 'a {
+) -> impl Stream<Item = Result<StreamedToken>> + 'a {
     try_stream! {
         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
 
@@ -695,7 +705,7 @@ mod beam_tests {
                 -0.5, -4.0, -5.0, // Beam 1
             ],
         )
-            .unwrap();
+        .unwrap();
 
         let beams = vec![
             BeamHypothesis {

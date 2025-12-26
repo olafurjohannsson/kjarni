@@ -74,6 +74,7 @@ impl SentenceEncoder {
     ///     None,
     ///     Device::Cpu,
     ///     None,
+    ///     None,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -308,6 +309,9 @@ impl LanguageModel for SentenceEncoder {
     fn eos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[SEP]") }
     fn pad_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[PAD]") }
     fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn forced_eos_token_id(&self) -> Option<u32> {
         None
     }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {

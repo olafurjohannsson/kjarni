@@ -56,6 +56,7 @@ impl ModelConfig for TestLlamaConfig {
             rope_theta: Some(10000.0),
             rope_scaling: None,
             scale_embeddings: false,
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: true,
             transpose_ffn_weights: false,
@@ -147,10 +148,7 @@ async fn create_test_layer_pair(
     let attn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
     let ffn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
 
-    let to_gpu_transposed = |arr: &Array2<f32>| -> Result<GpuTensor> {
-        let transposed = arr.t().as_standard_layout().to_owned();
-        GpuTensor::from_ndarray::<f32, _>(context, &transposed)
-    };
+ 
 
     let to_gpu_native = |arr: &Array2<f32>| -> Result<GpuTensor> {
         GpuTensor::from_ndarray::<f32, _>(context, arr)
@@ -176,7 +174,7 @@ async fn create_test_layer_pair(
     let gpu_ffn_weights = GpuFeedForwardWeights::SwiGLU(GpuSwiGLUFFNWeights::new(
         to_gpu_native(&gate_w)?,
         to_gpu_native(&up_w)?,
-        to_gpu_transposed(&down_w)?,
+        to_gpu_native(&down_w)?,
     )?);
     let gpu_ffn = GpuFeedForward::SwiGLU(GpuSwiGLUFFN::new(context)?);
     let gpu_ffn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, 1e-5));
@@ -302,7 +300,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
     let gpu_ffn_weights = GpuSwiGLUFFNWeights::new(
         GpuTensor::from_ndarray(&context, &gate_w_cpu)?,
         GpuTensor::from_ndarray(&context, &up_w_cpu)?,
-        GpuTensor::from_ndarray(&context, &down_w_cpu.t().as_standard_layout().to_owned())?,
+        GpuTensor::from_ndarray(&context, &down_w_cpu)?,
     )?;
 
     let gpu_ffn_block = GpuSwiGLUFFN::new(&context)?;

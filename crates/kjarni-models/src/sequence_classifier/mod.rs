@@ -456,7 +456,9 @@ impl LanguageModel for SequenceClassifier {
     fn forced_bos_token_id(&self) -> Option<u32> {
         None
     }
-
+fn forced_eos_token_id(&self) -> Option<u32> {
+        None
+    }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
         Err(anyhow!("Sequence Classifiers do not use a KV cache."))
     }

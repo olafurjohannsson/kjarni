@@ -8,15 +8,7 @@ use ndarray::{Array1, Array2, Array3, s};
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    Embeddings, FeedForward, MultiHeadAttention, Normalization,
-    cache::{Cache, CpuKVCache},
-    decoder::prelude::*,
-    feedforward::{LegacyFeedForward, StdFeedForward},
-    linear_layer::LinearLayer,
-    normalization::LayerNorm,
-    tensor::DType,
-    traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::{LegacyFeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelInput, normalization::LayerNorm, tensor::DType, traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 // --- Crate-Specific ---
@@ -287,21 +279,21 @@ impl Gpt2CpuDecoder {
 // --- Trait Implementation ---
 
 impl CpuDecoder for Gpt2CpuDecoder {
-    fn embed(&self, input: DecoderInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
+    fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
         match input {
-            DecoderInput::TokensCpu(ids) => {
+            ModelInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
-                let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
+                // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
 
                 // GPT-2 uses absolute position embeddings, so position_offset matters
                 Ok(self.embeddings.forward(
-                    &input_ids,
+                    &ids.to_owned(),
                     None,
                     position_offset,
                     self.meta.scale_embeddings,
                 ))
             }
-            DecoderInput::HiddenCpu(hidden) => Ok(hidden.clone()),
+            ModelInput::HiddenCpu(hidden) => Ok(hidden.to_owned()),
             _ => Err(anyhow!(
                 "Gpt2CpuDecoder received GPU input. Transfer to CPU first."
             )),
@@ -310,7 +302,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
 
     fn embed_and_normalize(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<Array3<f32>> {
         // GPT-2 is Pre-Norm (norms inside layers). No initial norm.
@@ -370,7 +362,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
 
     fn forward(
         &self,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,

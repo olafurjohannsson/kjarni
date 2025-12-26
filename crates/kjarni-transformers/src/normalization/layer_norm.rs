@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use half::bf16;
 use ndarray::{Array1, Array3, ArrayView3, Axis, Ix1};
 
-use crate::tensor::TypedCpuTensor;
+use crate::tensor::CpuTensor;
 
 /// A data structure holding the learnable parameters for Layer Normalization.
 /// This allows for type-safe handling of different on-disk data types.
@@ -28,16 +28,16 @@ impl LayerNorm {
     ) -> Result<Self> {
         // Small tensors - always convert to F32
         let weight = match weights.get_typed_tensor(weight_name)? {
-            TypedCpuTensor::F32(arr) => arr.into_dimensionality::<Ix1>()?,
-            TypedCpuTensor::F16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
-            TypedCpuTensor::BF16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
+            CpuTensor::F32(arr) => arr.into_dimensionality::<Ix1>()?,
+            CpuTensor::F16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
+            CpuTensor::BF16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
             _ => return Err(anyhow!("Unsupported dtype for LayerNorm weight")),
         };
 
         let bias = match weights.get_typed_tensor(bias_name)? {
-            TypedCpuTensor::F32(arr) => arr.into_dimensionality::<Ix1>()?,
-            TypedCpuTensor::F16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
-            TypedCpuTensor::BF16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
+            CpuTensor::F32(arr) => arr.into_dimensionality::<Ix1>()?,
+            CpuTensor::F16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
+            CpuTensor::BF16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
             _ => return Err(anyhow!("Unsupported dtype for LayerNorm bias")),
         };
 

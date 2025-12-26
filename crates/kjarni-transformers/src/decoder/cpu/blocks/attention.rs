@@ -1,4 +1,5 @@
 use crate::linear_layer::LinearLayer;
+use crate::utils::linear_algebra::{softmax_inplace};
 use crate::rope::RoPE;
 use anyhow::Result;
 use std::time::{Instant, Duration};
@@ -7,10 +8,10 @@ use ndarray::{s, Array2, Array3, Array4, Axis};
 /// Optimized Attention for modern Decoders (Llama, Phi, Qwen, Mistral).
 /// Features: Separate QKV, RoPE, GQA, BF16 support via LinearLayer.
 pub struct DecoderAttention {
-    q_proj: LinearLayer,
-    k_proj: LinearLayer,
-    v_proj: LinearLayer,
-    o_proj: LinearLayer,
+    pub q_proj: LinearLayer,
+    pub k_proj: LinearLayer,
+    pub v_proj: LinearLayer,
+    pub o_proj: LinearLayer,
 
     pub num_heads: usize,
     pub num_kv_heads: usize,
@@ -157,7 +158,7 @@ impl DecoderAttention {
 
 
         // Softmax
-        self.softmax_inplace(&mut scores);
+        softmax_inplace(&mut scores);
 
         let d_softmax = t_softmax.elapsed();
         let t_context = Instant::now();
@@ -252,26 +253,6 @@ impl DecoderAttention {
         }
     }
 
-    fn softmax_inplace(&self, x: &mut Array4<f32>) {
-        // Iterate over Batch
-        for mut batch in x.outer_iter_mut() {
-            // Iterate over Heads
-            for mut head in batch.outer_iter_mut() {
-                // Iterate over Queries (SeqQ) -> This gives us the row [SeqK]
-                for mut row in head.outer_iter_mut() {
-                    let max = row.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-                    let mut sum = 0.0;
-                    for v in row.iter_mut() {
-                        *v = (*v - max).exp();
-                        sum += *v;
-                    }
-                    for v in row.iter_mut() {
-                        *v /= sum;
-                    }
-                }
-            }
-        }
-    }
     fn apply_causal_mask(&self, scores: &mut Array4<f32>, cache_len: usize) {
         let (_, _, seq_q, _) = scores.dim();
         for i in 0..seq_q {

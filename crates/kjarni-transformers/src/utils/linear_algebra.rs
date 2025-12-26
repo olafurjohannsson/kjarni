@@ -285,7 +285,10 @@ pub fn matmul_dequant_q4_k(a: &ArrayView2<f32>, b_weights: &Array3<u8>) -> Array
     unimplemented!("Q4_K matmul not implemented yet");
 }
 
-pub fn matmul_2d_mixed_bf16_new(a: &ArrayView2<f32>, b_weights: &ArrayView2<half::bf16>) -> Array2<f32> {
+pub fn matmul_2d_mixed_bf16_new(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<half::bf16>,
+) -> Array2<f32> {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim();
     assert_eq!(k, k2, "Dim mismatch");
@@ -807,10 +810,10 @@ pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> A
     assert_eq!(k, k2, "Matmul inner dimensions do not match");
 
     let a_flat = a.view().into_shape_with_order((batch * m, k)).unwrap();
-    
+
     // We use the existing matmul_2d_transposed which correctly handles the layout
     let c_flat = matmul_2d_transposed(&a_flat.view(), &b_transposed.view());
-    
+
     c_flat.into_shape_with_order((batch, m, n)).unwrap()
 }
 
@@ -1020,4 +1023,24 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
     }
 
     scores
+}
+
+pub fn softmax_inplace(x: &mut Array4<f32>) {
+    for mut batch in x.outer_iter_mut() {
+        for mut head in batch.outer_iter_mut() {
+            for mut row in head.outer_iter_mut() {
+                let max = row.fold(MASK_VALUE, |a, &b| a.max(b));
+                let mut sum = 0.0;
+                for v in row.iter_mut() {
+                    *v = (*v - max).exp();
+                    sum += *v;
+                }
+                if sum > 0.0 {
+                    for v in row.iter_mut() {
+                        *v /= sum;
+                    }
+                }
+            }
+        }
+    }
 }

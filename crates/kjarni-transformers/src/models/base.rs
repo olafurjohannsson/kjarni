@@ -8,7 +8,7 @@ use crate::{gpu_ops::GpuTensor, traits::InferenceModel};
 use crate::Cache;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::Array2;
+use ndarray::{Array2, ArrayView2, ArrayView3};
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 
@@ -47,7 +47,82 @@ pub enum ModelInput<'a> {
     /// Pre-computed hidden states on CPU. Shape: [batch, seq, hidden]
     HiddenCpu(ndarray::ArrayView3<'a, f32>),
 }
+impl<'a> ModelInput<'a> {
+    /// Creates a `ModelInput` from a slice of token IDs.
+    ///
+    /// Assumes batch size of 1. This is the most common case for inference.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let tokens = vec![1, 2, 3, 4, 5];
+    /// let input = ModelInput::from_tokens(&tokens);
+    /// ```
+    pub fn from_tokens(tokens: &'a [u32]) -> Self {
+        let view = ArrayView2::from_shape((1, tokens.len()), tokens)
+            .expect("Failed to create token view from slice");
+        ModelInput::TokensCpu(view)
+    }
 
+    /// Creates a `ModelInput` from a 2D array of token IDs.
+    ///
+    /// Use this for batched inputs.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let batch = Array2::from_shape_vec((2, 5), tokens)?;
+    /// let input = ModelInput::from_array(batch.view());
+    /// ```
+    pub fn from_array(array: ArrayView2<'a, u32>) -> Self {
+        ModelInput::TokensCpu(array)
+    }
+
+    /// Creates a `ModelInput` from a GPU tensor of token IDs.
+    pub fn from_gpu_tokens(tensor: &'a GpuTensor) -> Self {
+        ModelInput::TokensGpu(tensor)
+    }
+
+    /// Creates a `ModelInput` from pre-computed CPU hidden states.
+    pub fn from_hidden(hidden: ArrayView3<'a, f32>) -> Self {
+        ModelInput::HiddenCpu(hidden)
+    }
+
+    /// Creates a `ModelInput` from pre-computed GPU hidden states.
+    pub fn from_gpu_hidden(tensor: &'a GpuTensor) -> Self {
+        ModelInput::HiddenGpu(tensor)
+    }
+
+    /// Returns the batch size.
+    pub fn batch_size(&self) -> usize {
+        match self {
+            ModelInput::TokensGpu(t) => t.shape()[0],
+            ModelInput::TokensCpu(a) => a.shape()[0],
+            ModelInput::HiddenGpu(t) => t.shape()[0],
+            ModelInput::HiddenCpu(a) => a.shape()[0],
+        }
+    }
+
+    /// Returns the sequence length.
+    pub fn seq_len(&self) -> usize {
+        match self {
+            ModelInput::TokensGpu(t) => t.shape()[1],
+            ModelInput::TokensCpu(a) => a.shape()[1],
+            ModelInput::HiddenGpu(t) => t.shape()[1],
+            ModelInput::HiddenCpu(a) => a.shape()[1],
+        }
+    }
+
+    /// Returns true if this is a token input (vs hidden states).
+    pub fn is_tokens(&self) -> bool {
+        matches!(self, ModelInput::TokensGpu(_) | ModelInput::TokensCpu(_))
+    }
+
+    /// Returns true if this input is on the GPU.
+    pub fn is_gpu(&self) -> bool {
+        matches!(self, ModelInput::TokensGpu(_) | ModelInput::HiddenGpu(_))
+    }
+}
 #[derive(Debug, Clone, Copy)]
 pub struct ModelLoadConfig {
     pub offload_embeddings: bool,
@@ -147,6 +222,7 @@ pub trait LanguageModel: InferenceModel {
     fn eos_token_id(&self) -> Option<u32>;
     fn bos_token_id(&self) -> Option<u32>;
     fn forced_bos_token_id(&self) -> Option<u32>;
+    fn forced_eos_token_id(&self) -> Option<u32>;
     fn pad_token_id(&self) -> Option<u32>;
 
     fn new_cache(

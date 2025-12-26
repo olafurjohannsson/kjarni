@@ -7,6 +7,7 @@ use crate::gpu_ops::Kernel;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::decoder::prelude::*;
+use crate::models::base::ModelInput;
 pub use crate::models::base::{AutoregressiveLoop};
 use crate::common::{GenerationConfig, DecodingStrategy};
 use ndarray::{Array1, Array2};
@@ -33,16 +34,16 @@ impl GpuDecoderBackend {
     async fn forward_and_project(
         &self,
         model: &dyn DecoderLanguageModel,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         // 1. Calculate length BEFORE moving 'input'
         let input_len = match input {
-            DecoderInput::TokensCpu(t) => t.len(),
-            DecoderInput::TokensGpu(t) => t.shape()[1],
-            DecoderInput::HiddenGpu(t) => t.shape()[1],
-            DecoderInput::HiddenCpu(t) => t.shape()[1],
+            ModelInput::TokensCpu(t) => t.len(),
+            ModelInput::TokensGpu(t) => t.shape()[1],
+            ModelInput::HiddenGpu(t) => t.shape()[1],
+            ModelInput::HiddenCpu(t) => t.shape()[1],
         };
 
         // 2. Get Ops & Cache
@@ -103,23 +104,23 @@ impl GpuDecoderBackend {
     async fn forward_only(
         &self,
         model: &dyn DecoderLanguageModel,
-        input: DecoderInput<'_>,
+        input: ModelInput<'_>,
         seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<()> {
         // 1. Calculate length BEFORE moving 'input'
         let input_len = match input {
-            DecoderInput::TokensCpu(t) => t.len(),
-            DecoderInput::TokensGpu(t) => t.shape()[1],
-            DecoderInput::HiddenGpu(t) => t.shape()[1],
-            DecoderInput::HiddenCpu(t) => t.shape()[1],
+            ModelInput::TokensCpu(t) => t.len(),
+            ModelInput::TokensGpu(t) => t.shape()[1],
+            ModelInput::HiddenGpu(t) => t.shape()[1],
+            ModelInput::HiddenCpu(t) => t.shape()[1],
         };
 
         let ops = model.decoder_gpu_ops().ok_or_else(|| anyhow!("No GPU Ops"))?;
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuKVCache>().unwrap();
 
         let pool = self.context.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
 
         let max_len = gpu_cache.max_seq_len();
@@ -208,13 +209,13 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
     ) -> Result<Array1<f32>> {
         if initial_tokens.is_empty() { return Err(anyhow!("Cannot prefill with empty tokens")); }
         let prompt_len = initial_tokens.len();
-
+        let tokens = ndarray::ArrayView2::from_shape((1, prompt_len), initial_tokens).ok().unwrap();
         match model.autoregressive_loop() {
             AutoregressiveLoop::Pipelined => {
                 self.forward_and_project(
-                    model, 
-                    DecoderInput::TokensCpu(initial_tokens), 
-                    prompt_len, 
+                    model,
+                    ModelInput::TokensCpu(tokens),
+                    prompt_len,
                     cache
                 ).await
             }
@@ -222,13 +223,15 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                 let last_idx = prompt_len - 1;
                 let context_tokens = &initial_tokens[..last_idx];
                 let last_token = &initial_tokens[last_idx..];
+                let context_tokens = ndarray::ArrayView2::from_shape((1, context_tokens.len()), context_tokens).ok().unwrap();
+                let last_token = ndarray::ArrayView2::from_shape((1, last_token.len()), last_token).ok().unwrap();
 
                 if !context_tokens.is_empty() {
                     log::info!("Filling cache with {} context tokens", context_tokens.len());
                     log::info!("Forward_only");
                     self.forward_only(
                         model,
-                        DecoderInput::TokensCpu(context_tokens),
+                        ModelInput::TokensCpu(context_tokens),
                         context_tokens.len(),
                         cache,
                     ).await?;
@@ -236,7 +239,7 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                 log::info!("Projecting last token");
                 self.forward_and_project(
                     model,
-                    DecoderInput::TokensCpu(last_token),
+                    ModelInput::TokensCpu(last_token),
                     prompt_len,
                     cache,
                 ).await
@@ -253,7 +256,7 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         // let token_slice = [token_id];
-        let input = DecoderInput::TokensGpu(token_tensor);
+        let input = ModelInput::TokensGpu(token_tensor);
         self.forward_and_project(
             model,
             input,

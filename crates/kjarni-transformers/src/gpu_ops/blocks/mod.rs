@@ -1,5 +1,6 @@
 pub mod attention;
 pub mod cache;
+pub mod decoder_cross_attention;
 pub mod embeddings;
 pub mod encoder;
 pub mod ffn;
@@ -7,15 +8,15 @@ pub mod ffn_swiglu;
 pub mod layer_norm;
 pub mod rms_norm;
 pub mod rope;
-pub mod decoder_cross_attention;
 
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-
 
 pub use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 pub use rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
 
-pub use ffn::{GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd};
+pub use ffn::{
+    GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd,
+};
 pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
 // pub use decoder_cross_attention::GpuCrossAttentionDecoder;
 
@@ -54,6 +55,26 @@ pub enum GpuFeedForwardWeights {
     SwiGLU(GpuSwiGLUFFNWeights),
 }
 
+impl GpuFeedForwardWeights {
+    pub fn up_proj_shape(&self) -> &[usize] {
+        match self {
+            GpuFeedForwardWeights::SwiGLU(s) => s.up_proj.shape(),
+            _ => unimplemented!(),
+        }
+    }
+    pub fn down_proj_shape(&self) -> &[usize] {
+        match self {
+            GpuFeedForwardWeights::SwiGLU(s) => s.down_proj.shape(),
+            _ => unimplemented!(),
+        }
+    }
+    pub fn gate_proj_shape(&self) -> &[usize] {
+        match self {
+            GpuFeedForwardWeights::SwiGLU(s) => s.gate_proj.shape(),
+            _ => unimplemented!(),
+        }
+    }
+}
 pub enum GpuFeedForward {
     Standard(GpuFeedForwardStd),
     SwiGLU(GpuSwiGLUFFN),

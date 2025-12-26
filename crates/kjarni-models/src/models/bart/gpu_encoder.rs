@@ -189,7 +189,7 @@ impl BartGpuEncoder {
             // ================================================================
             // SELF-ATTENTION WEIGHTS (Using the reusable constructor)
             // ================================================================
-            let self_attn_weights = GpuAttentionWeights::from_self_attn_layout(
+            let self_attn_weights = GpuAttentionWeights::from_encoder_self_attn_layout(
                 context, weights, layout, // Pass the whole layout
                 i, target_dt,
             )?;
@@ -451,12 +451,14 @@ impl GpuEncoder for BartGpuEncoder {
 
         // Apply embedding layer normalization
         let ln_output = pool.get(hidden_states.shape().to_vec());
-        self.embed_layer_norm.encode(
-            cmd_encoder,
-            &self.embed_ln_weights,
-            &hidden_states,
-            &ln_output,
-        );
+        if self.config.normalize_embedding {
+            self.embed_layer_norm.encode(
+                cmd_encoder,
+                &self.embed_ln_weights,
+                &hidden_states,
+                &ln_output,
+            );
+        }
 
         Ok(ln_output)
     }

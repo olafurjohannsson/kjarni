@@ -20,6 +20,7 @@ pub mod traits;
 
 pub use cpu::CpuTransformerEncoder;
 pub use gpu::GpuTransformerEncoder;
+pub use encoder_self_attention::EncoderSelfAttention;
 pub use traits::{CpuEncoder, CpuEncoderOps, GpuEncoder, GpuEncoderOps, SentenceEncoderModel};
 
 pub mod prelude {

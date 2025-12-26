@@ -2,7 +2,7 @@ use kjarni_models::models::llama::model::LlamaModel;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::base::ModelLoadConfig;
-use kjarni_transformers::Device;
+use kjarni_transformers::{Device, ModelType, WgpuContext};
 use std::io;
 use std::io::Write;
 
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     // --- Shared Setup ---
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
     let config = GenerationConfig {
-        max_new_tokens: Some(15),
+        max_new_tokens: Some(50),
         strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.2,
         ..Default::default()
@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     println!("\n--- Running Llama 3 on GPU ---");
 
     // Step 0: Create GPU context and tensor pool (needed for the backend)
-    // let context = WgpuContext::new().await?;
+    let context = WgpuContext::new().await?;
     //
     let d = ModelLoadConfig {
         gpu_layers: None,
@@ -75,13 +75,13 @@ async fn main() -> anyhow::Result<()> {
         target_dtype: None,
         ..Default::default()
     };
-    // let model_gpu = LlamaModel::from_registry(
-    //     ModelType::Llama3_2_1B,
-    //     None,
-    //     Device::Wgpu,
-    //     Some(context.clone()),
-    //     Some(d),
-    // ).await?;
+    let model_gpu = LlamaModel::from_registry(
+        ModelType::Llama3_2_1B,
+        None,
+        Device::Wgpu,
+        Some(context.clone()),
+        Some(d),
+    ).await?;
     // let generator_gpu = DecoderGenerator::new(Box::new(model_gpu))?;
     //
     // println!("prompt: {}", prompt);
@@ -105,13 +105,13 @@ async fn main() -> anyhow::Result<()> {
     // ).await?;
     let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/llama-3.2-1b-instruct-q4_k_m.gguf");
 
-    let model_cpu = LlamaModel::from_pretrained(
-        model_path,
-        Device::Cpu,
-        None, // No WgpuContext for CPU
-        None,
-    )?;
-    let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;
+    // let model_cpu = LlamaModel::from_pretrained(
+    //     model_path,
+    //     Device::Cpu,
+    //     None, // No WgpuContext for CPU
+    //     None,
+    // )?;
+    let generator_cpu = DecoderGenerator::new(Box::new(model_gpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config).await?;
     futures_util::pin_mut!(stream_cpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {

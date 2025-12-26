@@ -1,5 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::tensor::DType;
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -10,7 +11,7 @@ struct NormUniforms {
     m: u32, // batch_size * seq_len
     n: u32, // hidden_size
     eps: f32,
-    _padding: u32,
+    is_bf16: u32,
 }
 
 /// Holds the weight tensor for the GpuRMSNorm operation.
@@ -135,12 +136,19 @@ impl GpuRMSNorm {
             input.shape()[rank - 1],
         );
 
+        let is_bf16 = match weights.gamma.dtype() {
+            DType::BF16 => 1u32,
+            DType::F32 => 0u32,
+            other => panic!("Unsupported gamma dtype: {:?}", other),
+        };
+
         let uniforms = NormUniforms {
             m: rows as u32,
             n: cols as u32,
             eps: self.eps,
-            _padding: 0,
+            is_bf16,
         };
+        
         let uniform_buffer =
             self.context
                 .device

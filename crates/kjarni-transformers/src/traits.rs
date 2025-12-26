@@ -65,6 +65,11 @@ pub struct ModelMetadata {
     pub transpose_ffn_weights: bool,
     pub transpose_attention_weights: bool,
     pub is_prenorm: bool,
+    /// Whether to scale embeddings by sqrt(d_model)
+    /// Note: This is DIFFERENT from scale_embeddings!
+    /// - scale_embeddings: embeddings *= sqrt(d_model) (scaling up)
+    /// - normalize_embedding: layer norm after embedding lookup
+    pub normalize_embedding: bool
 }
 
 /// Naming templates for a standard attention block (self- or cross-attention).

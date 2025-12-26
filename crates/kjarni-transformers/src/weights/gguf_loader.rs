@@ -1,4 +1,4 @@
-use crate::tensor::{DType, RawTensor};
+use crate::tensor::{DType, TensorView};
 use crate::weights::WeightLoader;
 use anyhow::{anyhow, Context, Result};
 // Import your gguf-rs components
@@ -156,7 +156,7 @@ impl GgufLoader {
 }
 
 impl WeightLoader for GgufLoader {
-    fn get_raw(&self, name: &str) -> Result<RawTensor<'_>> {
+    fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let gguf_name = self.translate_name(name);
 
         let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
@@ -186,7 +186,7 @@ impl WeightLoader for GgufLoader {
             return Err(anyhow!("Tensor '{}' points outside of file bounds", name));
         }
 
-        Ok(RawTensor {
+        Ok(TensorView {
             name: name.to_string(),
             bytes: Cow::Borrowed(&self.mmap[start..end]),
             shape: info.shape.clone(),
