@@ -9,14 +9,9 @@ use kjarni_transformers::{
     gpu_ops::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
-            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
-            GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
-            attention::{
+            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights, attention::{
                 GpuAttention, GpuAttentionWeights, GpuDecoderSelfAttention, GpuRoPEAttention,
-            },
-            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
-            rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
-            rope::GpuRoPE,
+            }, embeddings::{GpuEmbeddingWeights, GpuEmbeddings}, layers::GpuRoPEDecoderLayer, rms_norm::{GpuRMSNorm, GpuRMSNormWeights}, rope::GpuRoPE
         },
         primitives::add::GpuAdd,
     },
@@ -29,48 +24,46 @@ use std::sync::Arc;
 
 /// The GPU-native implementation of the Llama decoder architecture.
 pub struct LlamaGpuDecoder {
-    // gpu_embeddings: Option<GpuEmbeddings>,
-    // gpu_embedding_weights: Option<GpuEmbeddingWeights>,
-    // cpu_embeddings: Option<Embeddings>,
-    pub layers: Vec<LlamaGpuDecoderLayer>,
+    pub layers: Vec<GpuRoPEDecoderLayer>,
     pub final_layer_norm: GpuNormalization,
     pub final_ln_weights: GpuNormalizationWeights,
-    pub gpu_rope: GpuRoPE,
+    pub gpu_rope: Arc<GpuRoPE>,
     context: Arc<WgpuContext>,
-    config: Arc<LlamaConfig>,
     load_config: ModelLoadConfig,
     embeddings: LoadedEmbeddings,
+    metadata: ModelMetadata,
 }
 
 impl LlamaGpuDecoder {
     pub fn context(&self) -> &Arc<WgpuContext> {
         &self.context
     }
-
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     pub fn new(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
-        config: Arc<LlamaConfig>,
-        gpu_rope: GpuRoPE,
+        meta: ModelMetadata,
+        layout: ModelLayout,
+        gpu_rope: Option<Arc<GpuRoPE>>,
         load_config: ModelLoadConfig,
     ) -> Result<Self> {
-        let meta = config.metadata();
-        let layout = config.layout();
         let decoder_layout = layout
             .decoder
             .as_ref()
             .expect("Llama layout must have a decoder section");
 
         // 1. Unified Embedding Loading
-let target_dtype = load_config.target_dtype;
+        let target_dtype = load_config.target_dtype;
 
         // GPU decoder always loads to GPU, CPU offload is handled at model level
         let embeddings = LoadedEmbeddings::new(
-            Some(context),  // Option<&Arc<WgpuContext>>
+            Some(context), // Option<&Arc<WgpuContext>>
             weights,
             EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size),
-            false,  // load_cpu - GPU decoder doesn't need CPU embeddings
-            true,   // load_gpu - always load to GPU for GPU decoder
+            false, // load_cpu - GPU decoder doesn't need CPU embeddings
+            true,  // load_gpu - always load to GPU for GPU decoder
             target_dtype,
         )?;
 
@@ -94,17 +87,14 @@ let target_dtype = load_config.target_dtype;
                 Self::build_layer(context.clone(), weights, &meta, &layout, i, load_config)?;
             layers.push(decoder_layer);
         }
-
+        let rope = gpu_rope.expect("Llama GPU Decoder requires GPU RoPE");
         Ok(Self {
-            // gpu_embedding_weights: gpu_weights,
-            // gpu_embeddings: gpu_layer,
-            // cpu_embeddings: cpu,
             layers,
             final_layer_norm,
             final_ln_weights,
-            gpu_rope,
+            gpu_rope: rope,
             context: context.clone(),
-            config,
+            metadata: meta,
             load_config,
             embeddings,
         })
@@ -117,7 +107,7 @@ let target_dtype = load_config.target_dtype;
         layout: &ModelLayout,
         i: usize,
         load_config: ModelLoadConfig,
-    ) -> Result<LlamaGpuDecoderLayer> {
+    ) -> Result<GpuRoPEDecoderLayer> {
         // Get the specific nested layouts for the decoder.
         let decoder_layout = layout
             .decoder
@@ -132,7 +122,7 @@ let target_dtype = load_config.target_dtype;
         let target_dt = load_config.target_dtype;
 
         // for now force layers to use F32
-        let layer_dt = Some(DType::BF16);
+        let layer_dt = target_dt;
 
         // --- 1. Attention Weights (Using original GpuTensor::from_raw calls) ---
         let q_t = GpuTensor::from_model_weights(
@@ -236,7 +226,7 @@ let target_dtype = load_config.target_dtype;
         )?);
 
         // --- 3. Construct Dedicated Layer ---
-        LlamaGpuDecoderLayer::new(
+        GpuRoPEDecoderLayer::new(
             &context,
             meta.hidden_size,
             meta.num_attention_heads,
@@ -252,6 +242,9 @@ let target_dtype = load_config.target_dtype;
 
 #[async_trait(?Send)]
 impl GpuDecoder for LlamaGpuDecoder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     async fn embed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -324,7 +317,7 @@ impl GpuDecoder for LlamaGpuDecoder {
     }
 
     fn hidden_size(&self) -> usize {
-        self.config.hidden_size
+        self.metadata.hidden_size
     }
 
     // Override default forward because Llama needs Final Layer Norm
@@ -363,245 +356,4 @@ impl GpuDecoder for LlamaGpuDecoder {
 
         Ok(hidden)
     }
-}
-
-pub struct LlamaGpuDecoderLayer {
-    // pub self_attn: GpuAttention,
-    pub self_attn: GpuRoPEAttention,
-    pub self_attn_weights: GpuAttentionWeights,
-    pub self_attn_norm: GpuNormalization,
-    pub self_attn_norm_weights: GpuNormalizationWeights,
-    pub feedforward: GpuFeedForward,
-    pub ff_weights: GpuFeedForwardWeights,
-    pub ffn_norm: GpuNormalization,
-    pub ffn_norm_weights: GpuNormalizationWeights,
-    pub add: GpuAdd,
-}
-
-impl LlamaGpuDecoderLayer {
-    pub fn new(
-        context: &Arc<WgpuContext>,
-        hidden_size: usize,
-        num_heads: usize,
-        num_kv_heads: usize,
-        self_attn_weights: GpuAttentionWeights,
-        self_attn_norm_weights: GpuNormalizationWeights,
-        ff_weights: GpuFeedForwardWeights,
-        ffn_norm_weights: GpuNormalizationWeights,
-        norm_eps: f32,
-    ) -> Result<Self> {
-        let self_attn = GpuRoPEAttention::new(
-            context,
-            hidden_size as u32,
-            num_heads as u32,
-            num_kv_heads as u32,
-        );
-        let add = GpuAdd::new(context);
-
-        // Llama specific blocks
-        let self_attn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, norm_eps));
-        let ffn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, norm_eps));
-        let feedforward = GpuFeedForward::SwiGLU(GpuSwiGLUFFN::new(context)?);
-
-        Ok(Self {
-            self_attn,
-            self_attn_weights,
-            self_attn_norm,
-            self_attn_norm_weights,
-            feedforward,
-            ff_weights,
-            ffn_norm,
-            ffn_norm_weights,
-            add,
-        })
-    }
-    pub fn forward(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        hidden_states: &GpuTensor,
-        attention_mask: &GpuTensor,
-        layer_idx: usize,
-        position_offset: usize,
-        gpu_cache: Option<&mut GpuKVCache>,
-        pool: &mut GpuTensorPool,
-        rope: &GpuRoPE,
-    ) -> Result<GpuTensor> {
-        // --- 1. Self-Attention Block (Pre-Norm) ---
-        let residual = hidden_states;
-        let ln1_out = pool.get(hidden_states.shape().to_vec());
-        self.self_attn_norm.encode(
-            encoder,
-            &self.self_attn_norm_weights,
-            hidden_states,
-            &ln1_out,
-        );
-
-        // Get cached KV if available (returns Option<(&GpuTensor, &GpuTensor)>)
-        let cached_tensors = gpu_cache.as_ref().and_then(|c| c.get(layer_idx));
-
-        let cached_kv: Option<(&GpuTensor, &GpuTensor)> =
-            cached_tensors.as_ref().map(|(k, v)| (k, v));
-
-        // Single forward call handles: Q/K/V projection, RoPE, GQA, attention, output projection
-        let attn_output = self.self_attn.forward(
-            encoder,
-            &ln1_out,
-            &self.self_attn_weights,
-            rope,
-            attention_mask,
-            cached_kv,
-            position_offset,
-            pool,
-        )?;
-
-        // Update cache with new K/V (need mutable borrow now)
-        if let Some(cache) = gpu_cache {
-            cache.update(
-                encoder,
-                layer_idx,
-                &attn_output.new_k,
-                &attn_output.new_v,
-                position_offset,
-            )?;
-        }
-
-        // Residual add
-        let attn_block_output = pool.get(hidden_states.shape().to_vec());
-        self.add.encode(
-            encoder,
-            &[residual, &attn_output.hidden_states],
-            &attn_block_output,
-        );
-
-        // --- 2. Feed-Forward Block (Pre-Norm) ---
-        let residual_2 = &attn_block_output;
-        let ln2_out = pool.get(residual_2.shape().to_vec());
-        self.ffn_norm
-            .encode(encoder, &self.ffn_norm_weights, residual_2, &ln2_out);
-
-        // FFN (needs 2D input)
-        let (b, s, h) = ln2_out.dims3();
-        let ln2_out_2d = ln2_out.view(vec![b * s, h]);
-        let ffn_out_2d = pool.get(vec![b * s, h]);
-
-        self.feedforward
-            .encode(encoder, &self.ff_weights, &ln2_out_2d, &ffn_out_2d, pool);
-        let ffn_out = ffn_out_2d.view(vec![b, s, h]);
-
-        // Residual add
-        let final_output = pool.get(residual_2.shape().to_vec());
-        self.add
-            .encode(encoder, &[residual_2, &ffn_out], &final_output);
-
-        Ok(final_output)
-    }
-    // pub fn forward(
-    //     &self,
-    //     encoder: &mut wgpu::CommandEncoder,
-    //     hidden_states: &GpuTensor,
-    //     attention_mask: &GpuTensor,
-    //     layer_idx: usize,
-    //     position_offset: usize,
-    //     gpu_cache: Option<&mut GpuKVCache>,
-    //     pool: &mut GpuTensorPool,
-    //     rope: &GpuRoPE, // Llama always uses RoPE
-    // ) -> Result<GpuTensor> {
-    //     // --- 1. Self-Attention Block (Pre-Norm) ---
-    //     let residual = hidden_states;
-    //     let ln1_out = pool.get(hidden_states.shape().to_vec());
-    //     self.self_attn_norm.encode(
-    //         encoder,
-    //         &self.self_attn_norm_weights,
-    //         hidden_states,
-    //         &ln1_out,
-    //     );
-
-    //     // Project Q, K, V
-    //     let q_proj = self.self_attn.project(
-    //         encoder,
-    //         &ln1_out,
-    //         &self.self_attn_weights.q_weight,
-    //         &self.self_attn_weights.q_bias,
-    //         pool,
-    //     );
-    //     let k_proj = self.self_attn.project(
-    //         encoder,
-    //         &ln1_out,
-    //         &self.self_attn_weights.k_weight,
-    //         &self.self_attn_weights.k_bias,
-    //         pool,
-    //     );
-    //     let v_proj = self.self_attn.project(
-    //         encoder,
-    //         &ln1_out,
-    //         &self.self_attn_weights.v_weight,
-    //         &self.self_attn_weights.v_bias,
-    //         pool,
-    //     );
-
-    //     // Split heads
-    //     let q_split = self.self_attn.split_heads(encoder, &q_proj, pool);
-    //     let k_split = self.self_attn.split_heads(encoder, &k_proj, pool);
-    //     let v_split = self.self_attn.split_heads(encoder, &v_proj, pool);
-
-    //     // Apply RoPE
-    //     let q_rotated = pool.get(q_split.shape().to_vec());
-    //     let k_rotated = pool.get(k_split.shape().to_vec());
-    //     rope.encode(encoder, &q_split, &q_rotated, position_offset);
-    //     rope.encode(encoder, &k_split, &k_rotated, position_offset);
-
-    //     // Attention with Cache
-    //     let attn_out = if let Some(cache) = gpu_cache {
-    //         let k_rotated_3d = self.self_attn.merge_heads(encoder, &k_rotated, pool);
-    //         cache.update(encoder, layer_idx, &k_rotated_3d, &v_proj, position_offset)?;
-
-    //         let (cached_k, cached_v) = cache.get(layer_idx).unwrap();
-    //         self.self_attn.llama_attention(
-    //             encoder,
-    //             &q_rotated,
-    //             &cached_k,
-    //             &cached_v,
-    //             attention_mask,
-    //             position_offset,
-    //             pool,
-    //             &self.self_attn_weights,
-    //         )
-    //     } else {
-    //         self.self_attn.llama_attention(
-    //             encoder,
-    //             &q_rotated,
-    //             &k_rotated,
-    //             &v_split,
-    //             attention_mask,
-    //             position_offset,
-    //             pool,
-    //             &self.self_attn_weights,
-    //         )
-    //     };
-
-    //     let attn_block_output = pool.get(hidden_states.shape().to_vec());
-    //     self.add
-    //         .encode(encoder, &[residual, &attn_out], &attn_block_output);
-
-    //     // --- 2. Feed-Forward Block (Pre-Norm) ---
-    //     let residual_2 = &attn_block_output;
-    //     let ln2_out = pool.get(residual_2.shape().to_vec());
-    //     self.ffn_norm
-    //         .encode(encoder, &self.ffn_norm_weights, residual_2, &ln2_out);
-
-    //     // FFN Reshape (Llama needs 2D FFN)
-    //     let (b, s, h) = ln2_out.dims3();
-    //     let ln2_out_2d = ln2_out.view(vec![b * s, h]);
-    //     let ffn_out_2d = pool.get(vec![b * s, h]);
-
-    //     self.feedforward
-    //         .encode(encoder, &self.ff_weights, &ln2_out_2d, &ffn_out_2d, pool);
-    //     let ffn_out = ffn_out_2d.view(vec![b, s, h]);
-
-    //     let final_output = pool.get(residual_2.shape().to_vec());
-    //     self.add
-    //         .encode(encoder, &[residual_2, &ffn_out], &final_output);
-
-    //     Ok(final_output)
-    // }
 }

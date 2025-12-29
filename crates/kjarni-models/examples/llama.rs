@@ -52,10 +52,10 @@ async fn main() -> anyhow::Result<()> {
 
 
     // --- Shared Setup ---
-    let prompt = "The field of Artificial Intelligence has seen a lot of progress";
+    let prompt = "Describe the theory of relativity in simple terms(max 50 words):\n";
     let config = GenerationConfig {
-        max_new_tokens: Some(50),
-        strategy: DecodingStrategy::Greedy,
+        max_new_tokens: Some(150),
+        // strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.2,
         ..Default::default()
     };
@@ -96,14 +96,14 @@ async fn main() -> anyhow::Result<()> {
     // println!();
     //
     // io::stdout().flush().unwrap();
-    // let model_cpu = LlamaModel::from_registry(
-    //     ModelType::Llama3_2_1B,
-    //     None,
-    //     Device::Cpu,
-    //     None,
-    //     Some(d),
-    // ).await?;
-    let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/llama-3.2-1b-instruct-q4_k_m.gguf");
+    let model_cpu = LlamaModel::from_registry(
+        ModelType::Llama3_2_1B_Instruct,
+        None,
+        Device::Cpu,
+        None,
+        Some(d),
+    ).await?;
+    // let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf");
 
     // let model_cpu = LlamaModel::from_pretrained(
     //     model_path,
@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
     //     None, // No WgpuContext for CPU
     //     None,
     // )?;
-    let generator_cpu = DecoderGenerator::new(Box::new(model_gpu))?;
+    let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config).await?;
     futures_util::pin_mut!(stream_cpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {

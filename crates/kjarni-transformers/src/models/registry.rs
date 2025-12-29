@@ -63,6 +63,7 @@ pub enum ModelType {
     Gpt2Large,
     Gpt2XL,
     Llama3_2_1B,
+    Llama3_2_1B_Instruct,
     Llama3_2_3B,
     Llama3_2_3B_Instruct,
     Llama3_8B,
@@ -135,7 +136,7 @@ impl ModelType {
     pub fn is_instruct_model(&self) -> bool {
         matches!(
             self,
-            ModelType::Llama3_2_3B_Instruct | ModelType::Llama3_8B_Instruct
+            ModelType::Llama3_2_1B_Instruct | ModelType::Llama3_2_3B_Instruct | ModelType::Llama3_8B_Instruct
         )
     }
     pub fn is_bart_model(&self) -> bool {
@@ -180,6 +181,7 @@ impl ModelType {
             ModelType::Gpt2XL => "gpt2-xl",
 
             ModelType::Llama3_2_1B => "llama-3.2-1b",
+            ModelType::Llama3_2_1B_Instruct => "llama-3.2-1b-instruct",
             ModelType::Llama3_2_3B => "llama-3.2-3b",
             ModelType::Llama3_2_3B_Instruct => "llama-3.2-3b-instruct",
             ModelType::Llama3_8B => "llama-3-8b",
@@ -350,6 +352,18 @@ impl ModelType {
                     config_url: "https://huggingface.co/meta-llama/Llama-3.2-1B/resolve/main/config.json",
                 },
                 description: "Llama 3.2 1B base model.",
+                size_mb: 2500,
+                params_millions: 1000,
+            },
+
+            ModelType::Llama3_2_1B_Instruct => ModelInfo {
+                architecture: ModelArchitecture::Decoder,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct/resolve/main/config.json",
+                },
+                description: "Llama 3.2 1B instruction-tuned.",
                 size_mb: 2500,
                 params_millions: 1000,
             },

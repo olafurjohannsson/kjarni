@@ -1,6 +1,5 @@
 pub mod attention;
 pub mod cache;
-pub mod decoder_cross_attention;
 pub mod embeddings;
 pub mod encoder;
 pub mod ffn;
@@ -8,7 +7,7 @@ pub mod ffn_swiglu;
 pub mod layer_norm;
 pub mod rms_norm;
 pub mod rope;
-
+pub mod layers;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 
 pub use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
@@ -18,7 +17,7 @@ pub use ffn::{
     GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd,
 };
 pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
-// pub use decoder_cross_attention::GpuCrossAttentionDecoder;
+
 
 pub enum GpuNormalizationWeights {
     LayerNorm(GpuLayerNormWeights),

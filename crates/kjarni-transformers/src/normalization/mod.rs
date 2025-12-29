@@ -18,4 +18,16 @@ impl Normalization {
             Normalization::RMSNorm(rms) => rms.forward_3d(input),
         }
     }
+    pub fn as_rms_norm(&self) -> Option<&RMSNorm> {
+        match self {
+            Normalization::RMSNorm(rms) => Some(rms),
+            _ => None,
+        }
+    }
+    pub fn as_layer_norm(&self) -> Option<&LayerNorm> {
+        match self {
+            Normalization::LayerNorm(ln) => Some(ln),
+            _ => None,
+        }
+    }
 }

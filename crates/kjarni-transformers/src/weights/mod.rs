@@ -9,6 +9,14 @@ mod model_weights;
 mod safetensors_loader;
 
 pub use model_weights::ModelWeights;
+pub use model_weights::raw_to_typed;
+pub use model_weights::cast_or_copy;
+mod gguf_block_reorder;
+pub use gguf_block_reorder::{
+    raw_to_typed_gguf,
+    raw_to_typed_no_reorder
+};
+
 
 /// A trait for a model weight file loader.
 /// This allows `ModelWeights` to be agnostic to the file format (safetensors, gguf, etc.).
@@ -33,3 +41,6 @@ pub trait WeightLoader {
         false
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -11,7 +11,7 @@
 
 use crate::gpu_ops::GpuTensor;
 use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
-use crate::tensor::{DType, QuantizedMatrix, TensorView, CpuTensor};
+use crate::tensor::{CpuTensor, DType, QuantizedMatrix, TensorView};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
 use crate::{WgpuContext, ops};
@@ -48,20 +48,10 @@ pub enum LinearData {
 }
 
 impl LinearLayer {
-    pub fn new(
-        out_features: usize,
-        in_features: usize,
-        dtype: DType,
-    ) -> Self {
+    pub fn new(out_features: usize, in_features: usize, dtype: DType) -> Self {
         match dtype {
-            DType::F32 => Self::new_f32(
-                Array2::<f32>::zeros((out_features, in_features)),
-                None,
-            ),
-            DType::BF16 => Self::new_bf16(
-                Array2::<bf16>::zeros((out_features, in_features)),
-                None,
-            ),
+            DType::F32 => Self::new_f32(Array2::<f32>::zeros((out_features, in_features)), None),
+            DType::BF16 => Self::new_bf16(Array2::<bf16>::zeros((out_features, in_features)), None),
             _ => {
                 panic!("Unsupported dtype for LinearLayer::new: {:?}", dtype);
             }
@@ -150,6 +140,20 @@ impl LinearLayer {
             (CpuTensor::F32(arr), DType::BF16) => {
                 let weights_bf16 = arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32);
                 LinearData::BF16(weights_bf16.as_standard_layout().to_owned())
+            }
+            (tensor @ CpuTensor::Q4_K(_), DType::F32)
+            | (tensor @ CpuTensor::Q6_K(_), DType::F32)
+            | (tensor @ CpuTensor::Q8_0(_), DType::F32) => {
+                log::info!("Dequantizing {:?} to F32 for LinearLayer", tensor.dtype());
+                let f32_arr = tensor.to_array2_f32()?;
+                match strategy {
+                    F32MatmulStrategy::Faer => {
+                        LinearData::F32(f32_arr.t().as_standard_layout().to_owned())
+                    }
+                    F32MatmulStrategy::CustomSimd => {
+                        LinearData::F32(f32_arr.as_standard_layout().to_owned())
+                    }
+                }
             }
             (t, d) => {
                 return Err(anyhow!(

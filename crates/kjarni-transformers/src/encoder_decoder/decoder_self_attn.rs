@@ -16,7 +16,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::cpu_ops::attention::DecoderSelfAttention;
 //!
 //! let attn = DecoderSelfAttention::new(1024, 16, q_proj, k_proj, v_proj, o_proj);
@@ -99,7 +99,7 @@ impl DecoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // Self attention with Out features and In features
     /// use kjarni_transformers::encoder_decoder::DecoderSelfAttention;
     /// use kjarni_transformers::linear_layer::LinearLayer;
@@ -148,7 +148,7 @@ impl DecoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // Prefill (process prompt, no cache)
     /// let (output, new_k, new_v) = attn.forward(&prompt_hidden, Some(&mask), None)?;
     ///

@@ -40,7 +40,7 @@ impl GpuKVCache {
         if capacity == 0 {
             return Err(anyhow!("Cache capacity cannot be zero."));
         }
-        println!(
+        log::info!(
             "[GpuKVCache] Starting new()... batch={}, heads={}, capacity={}",
             batch_size, num_heads, capacity
         );
@@ -49,7 +49,6 @@ impl GpuKVCache {
         let mut v_tensors = Vec::with_capacity(num_layers);
 
         for i in 0..num_layers {
-            println!("[GpuKVCache] Allocating tensor for layer {}", i);
 
             k_tensors.push(GpuTensor::uninitialized(
                 context,
@@ -63,7 +62,6 @@ impl GpuKVCache {
                 crate::gpu_ops::DType::F32,
                 &format!("Layer {} V-Cache", i),
             ));
-            println!("[GpuKVCache] Layer {} allocated.", i);
         }
 
         Ok(Self {

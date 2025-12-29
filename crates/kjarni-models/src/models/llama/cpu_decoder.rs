@@ -8,85 +8,37 @@ use ndarray::{Array2, Array3, Axis, s};
 use crate::models::llama::config::LlamaConfig;
 
 use kjarni_transformers::{
-    WgpuContext, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, models::base::ModelInput, normalization::RMSNorm, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
+    Normalization, WgpuContext,
+    cache::CpuKVCache,
+    decoder::prelude::*,
+    embeddings::Embeddings,
+    feedforward::SwiGluFeedForward,
+    linear_layer::LinearLayer,
+    models::base::ModelInput,
+    normalization::RMSNorm,
+    pipeline::CpuLayerFactory,
+    rope::RoPE,
+    tensor::DType,
+    traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 pub struct LlamaCpuDecoder {
     pub embeddings: Embeddings,
-    pub layers: Vec<LlamaDecoderLayer>,
+    pub layers: Vec<CpuRoPEDecoderLayer>,
     pub final_norm: RMSNorm,
-    config: Arc<LlamaConfig>,
+    pub metadata: ModelMetadata,
 }
 
-pub struct LlamaDecoderLayer {
-    pub attention: DecoderAttention,
-    pub feed_forward: SwiGluFeedForward,
-    pub attention_norm: RMSNorm,
-    pub ffn_norm: RMSNorm,
-    pub rope: Arc<RoPE>,
-}
-
-impl LlamaDecoderLayer {
-    // Optimized forward pass
-    pub fn forward(
-        &self,
-        hidden_states: &Array3<f32>,
-        attention_mask: &Array2<f32>,
-        position_offset: usize,
-        past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
-    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
-        let t_start = std::time::Instant::now();
-
-        // 1. Pre-Norm (RMS)
-        let norm_1 = self.attention_norm.forward_3d(hidden_states);
-
-        let t_norm1 = t_start.elapsed();
-
-        // 2. Attention
-        let (attn_out, new_k, new_v) =
-            self.attention
-                .forward(&norm_1, Some(attention_mask), past_kv, Some(&self.rope))?;
-
-        let t_attn = t_start.elapsed() - t_norm1;
-
-        let residual_1 = hidden_states + &attn_out;
-
-        // 3. Pre-Norm (RMS)
-        let norm_2 = self.ffn_norm.forward_3d(&residual_1);
-
-        let t_norm2 = t_start.elapsed() - t_attn - t_norm1;
-
-        // 4. FeedForward
-        let ffn_out = self.feed_forward.forward(&norm_2)?;
-
-        let t_ffn = t_start.elapsed() - t_norm2 - t_attn - t_norm1;
-
-        let output = residual_1 + ffn_out;
-
-        // Log if slow (> 10ms)
-        if t_start.elapsed().as_millis() > 10 {
-            log::info!(
-                "Layer Perf: Norm1: {:?}, Attn: {:?}, Norm2: {:?}, FFN: {:?}",
-                t_norm1,
-                t_attn,
-                t_norm2,
-                t_ffn
-            );
-        }
-
-        Ok((output, new_k, new_v))
-    }
-}
 
 impl LlamaCpuDecoder {
     pub fn new(
         weights: &ModelWeights,
-        config: Arc<LlamaConfig>,
+        metadata: ModelMetadata,
+        layout: ModelLayout,
         rope: Arc<RoPE>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
-        let metadata = config.metadata();
-        let layout = config.layout();
         let decoder_layout = layout
             .decoder
             .as_ref()
@@ -105,7 +57,7 @@ impl LlamaCpuDecoder {
         );
 
         let mut layers = Vec::with_capacity(metadata.num_layers);
-        for i in 0..config.num_hidden_layers {
+        for i in 0..metadata.num_layers {
             layers.push(Self::build_layer(
                 weights,
                 &metadata,
@@ -120,7 +72,7 @@ impl LlamaCpuDecoder {
             embeddings,
             layers,
             final_norm,
-            config,
+            metadata,
         })
     }
 
@@ -131,98 +83,42 @@ impl LlamaCpuDecoder {
         i: usize,
         rope: Arc<RoPE>,
         target_dtype: Option<DType>,
-    ) -> Result<LlamaDecoderLayer> {
+    ) -> Result<CpuRoPEDecoderLayer> {
         // Get the specific nested layouts for the decoder.
         let decoder_layout = layout
             .decoder
             .as_ref()
             .expect("Llama layout must have a decoder section");
         let layer_layout = &decoder_layout.layer;
-        let self_attn_layout = &layer_layout.self_attn;
-        let ffn_layout = &layer_layout.ffn;
 
-        let idx = i.to_string();
-        let strategy = Some(kjarni_transformers::linear_layer::F32MatmulStrategy::CustomSimd); // Recommended default
-
-        // Helper to replace the index template "{}" with the actual layer index
-        let name = |template: &String| template.replace("{}", &idx);
-
-        // --- 1. Load Attention Weights ---
-        let q = LinearLayer::from_weights(
+        let attention: DecoderAttention = CpuLayerFactory::build_decoder_attention(
             weights,
-            &name(&self_attn_layout.q_weight),
-            None,
+            meta,
+            &decoder_layout.layer.self_attn,
+            i,
             target_dtype,
-            strategy,
-        )?;
-        let k = LinearLayer::from_weights(
-            weights,
-            &name(&self_attn_layout.k_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
-        let v = LinearLayer::from_weights(
-            weights,
-            &name(&self_attn_layout.v_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
-        let o = LinearLayer::from_weights(
-            weights,
-            &name(&self_attn_layout.o_weight),
-            None,
-            target_dtype,
-            strategy,
         )?;
 
-        let attention = DecoderAttention::new(
-            meta.hidden_size,
-            meta.num_attention_heads,
-            q,
-            k,
-            v,
-            o,
-            Some(meta.num_kv_heads),
-        );
+        let feed_forward =
+            CpuLayerFactory::build_swiglu_ffn(weights, &decoder_layout.layer.ffn, i, target_dtype)?;
 
-        // --- 2. Load FFN Weights ---
-        let gate_name = ffn_layout
-            .gate_weight
-            .as_ref()
-            .ok_or_else(|| anyhow!("Llama architecture requires ffn_gate for SwiGLU"))?;
-
-        let gate =
-            LinearLayer::from_weights(weights, &name(gate_name), None, target_dtype, strategy)?;
-        let up = LinearLayer::from_weights(
+        let attention_norm = CpuLayerFactory::build_norm(
             weights,
-            &name(&ffn_layout.up_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
-        let down = LinearLayer::from_weights(
-            weights,
-            &name(&ffn_layout.down_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
-
-        let feed_forward = SwiGluFeedForward::new(gate, up, down);
-
-        // --- 3. Load Norms ---
-        let attention_norm = RMSNorm::new(
-            weights.get_array1(&name(&self_attn_layout.norm_weight))?,
+            &layer_layout.self_attn.norm_weight,
+            &layer_layout.self_attn.norm_bias,
             meta.norm_eps,
-        );
-        let ffn_norm = RMSNorm::new(
-            weights.get_array1(&name(&ffn_layout.norm_weight))?,
-            meta.norm_eps,
-        );
+            i,
+        )?;
 
-        Ok(LlamaDecoderLayer {
+        let ffn_norm = CpuLayerFactory::build_norm(
+            weights,
+            &layer_layout.ffn.norm_weight,
+            &layer_layout.ffn.norm_bias,
+            meta.norm_eps,
+            i,
+        )?;
+
+        Ok(CpuRoPEDecoderLayer {
             attention,
             feed_forward,
             attention_norm,
@@ -245,12 +141,15 @@ impl InferenceModel for LlamaCpuDecoder {
 }
 
 impl CpuDecoder for LlamaCpuDecoder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
         match input {
             ModelInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
                 // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-                
+
                 Ok(self
                     .embeddings
                     .forward(&ids.to_owned(), None, position_offset, false))
@@ -353,5 +252,129 @@ impl CpuDecoder for LlamaCpuDecoder {
         output = self.final_norm.forward_3d(&output);
 
         Ok(output)
+    }
+}
+
+mod llama_test {
+
+    use super::*;
+    use crate::models::llama::config::LlamaConfig;
+    const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct";
+    use kjarni_transformers::{
+        kernels::{
+            dequantize::{dequantize_q4_k_block, dequantize_q6_k_block},
+            q_common::{BlockQ4_K, BlockQ6_K},
+        },
+        linear_layer::LinearData,
+        tensor::CpuTensor,
+        weights::{ModelWeights, cast_or_copy},
+    };
+    use std::path::Path;
+    const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";
+    #[test]
+    fn test_check_all_matrix_sizes_interleaving() {
+        let gguf_path = Path::new(GGUF_PATH);
+        let st_path = Path::new(SAFETENSORS_PATH);
+
+        let gguf_weights = ModelWeights::new(gguf_path).unwrap();
+        let st_weights = ModelWeights::new(st_path).unwrap();
+
+        let tensors_to_check = [
+            ("model.layers.0.self_attn.q_proj.weight", [2048, 2048]), // Q
+            ("model.layers.0.self_attn.k_proj.weight", [512, 2048]),  // K (smaller)
+            ("model.layers.0.self_attn.v_proj.weight", [512, 2048]),  // V (smaller)
+            ("model.layers.0.self_attn.o_proj.weight", [2048, 2048]), // O
+            ("model.layers.0.mlp.gate_proj.weight", [8192, 2048]),    // Gate (larger)
+            ("model.layers.0.mlp.up_proj.weight", [8192, 2048]),      // Up (larger)
+            ("model.layers.0.mlp.down_proj.weight", [2048, 8192]),    // Down
+        ];
+
+        for (name, expected_shape) in tensors_to_check {
+            println!(
+                "\n=== {} [{}, {}] ===",
+                name, expected_shape[0], expected_shape[1]
+            );
+
+            let raw = gguf_weights.get_raw(name).unwrap();
+            println!("Actual shape: {:?}, dtype: {:?}", raw.shape, raw.dtype);
+
+            // Get ST reference (if exists)
+            let st_f32 = match st_weights.get_typed_tensor(name) {
+                Ok(t) => t.to_array2_f32().ok(),
+                Err(_) => None,
+            };
+
+            if st_f32.is_none() {
+                println!("ST tensor not found, skipping");
+                continue;
+            }
+            let st_f32 = st_f32.unwrap();
+
+            // Get ORIGINAL GGUF blocks
+            let blocks_per_row = raw.shape[1] / 256;
+
+            // Check block group mapping for first few groups
+            print!("Block mapping: ");
+
+            match raw.dtype {
+                DType::Q4_K => {
+                    let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
+                    for block_group in [0, 1, 2, 3] {
+                        let block_idx = block_group * blocks_per_row;
+                        if block_idx >= blocks.len() {
+                            continue;
+                        }
+
+                        let mut block_data = [0.0f32; 256];
+                        dequantize_q4_k_block(&blocks[block_idx], &mut block_data);
+
+                        // Find best ST row
+                        let mut best_row = 0;
+                        let mut best_diff = f32::MAX;
+                        for st_row in 0..64.min(raw.shape[0]) {
+                            let diff: f32 = block_data
+                                .iter()
+                                .zip(st_f32.row(st_row).iter().take(256))
+                                .map(|(a, b)| (a - b).abs())
+                                .sum();
+                            if diff < best_diff {
+                                best_diff = diff;
+                                best_row = st_row;
+                            }
+                        }
+                        print!("{}→{} ", block_group, best_row);
+                    }
+                }
+                DType::Q6_K => {
+                    let blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
+                    for block_group in [0, 1, 2, 3] {
+                        let block_idx = block_group * blocks_per_row;
+                        if block_idx >= blocks.len() {
+                            continue;
+                        }
+
+                        let mut block_data = [0.0f32; 256];
+                        dequantize_q6_k_block(&blocks[block_idx], &mut block_data);
+
+                        let mut best_row = 0;
+                        let mut best_diff = f32::MAX;
+                        for st_row in 0..64.min(raw.shape[0]) {
+                            let diff: f32 = block_data
+                                .iter()
+                                .zip(st_f32.row(st_row).iter().take(256))
+                                .map(|(a, b)| (a - b).abs())
+                                .sum();
+                            if diff < best_diff {
+                                best_diff = diff;
+                                best_row = st_row;
+                            }
+                        }
+                        print!("{}→{} ", block_group, best_row);
+                    }
+                }
+                _ => println!("Unsupported dtype"),
+            }
+            println!();
+        }
     }
 }

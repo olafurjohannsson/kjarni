@@ -1,10 +1,10 @@
 use crate::tensor::{DType, TensorView};
 use crate::weights::WeightLoader;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 // Import your gguf-rs components
 use byteorder::{LittleEndian, ReadBytesExt};
 use gguf_rs::{
-    get_gguf_container, ByteOrder, GGUFContainer, GGUFModel, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE,
+    ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer, GGUFModel, get_gguf_container,
 };
 use memmap2::Mmap;
 use serde_json::Value;
@@ -153,12 +153,45 @@ impl GgufLoader {
 
         name.to_string()
     }
+
+    pub fn tensor_names(&self) -> Vec<&str> {
+        self.tensor_map.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Debug: print all tensors with their info
+    pub fn debug_print_tensors(&self) {
+        println!("=== GGUF Tensors ({} total) ===", self.tensor_map.len());
+        let mut names: Vec<_> = self.tensor_map.keys().collect();
+        names.sort();
+        for name in names {
+            let info = &self.tensor_map[name];
+            let dtype_name = match info.kind {
+                0 => "F32",
+                1 => "F16",
+                8 => "Q8_0",
+                12 => "Q4_K",
+                14 => "Q6_K",
+                30 => "BF16",
+                k => &format!("Unknown({})", k),
+            };
+            println!(
+                "  {}: dtype={}, shape={:?}, size={} bytes",
+                name, dtype_name, info.shape, info.size
+            );
+        }
+    }
 }
 
 impl WeightLoader for GgufLoader {
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let gguf_name = self.translate_name(name);
-
+        let gguf_name = if gguf_name == "output.weight" && !self.tensor_map.contains_key(&gguf_name)
+        {
+            log::debug!("LM head not found, using tied embeddings (token_embd.weight)");
+            "token_embd.weight".to_string()
+        } else {
+            gguf_name
+        };
         let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
             anyhow!(
                 "Tensor '{}' (translated to '{}') not found in GGUF",
@@ -215,6 +248,7 @@ impl WeightLoader for GgufLoader {
             .map(|v| v as f32)
     }
     fn contains(&self, name: &str) -> bool {
-        self.tensor_map.contains_key(name)
+        let gguf_name = self.translate_name(name);
+        self.tensor_map.contains_key(gguf_name.as_str())
     }
 }

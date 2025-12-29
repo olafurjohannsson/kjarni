@@ -1,7 +1,7 @@
 // kjarni-transformers/src/execution/plan.rs
 
+use crate::models::base::ModelLoadConfig;
 use crate::prelude::Device;
-
 /// Describes where each stage of inference runs.
 ///
 /// This allows flexible hybrid execution strategies like:
@@ -19,6 +19,31 @@ pub struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
+    pub fn from_load_config(device: Device, config: &ModelLoadConfig) -> Self {
+        match device {
+            Device::Cpu => Self::full_cpu(),
+            Device::Wgpu => {
+                let emb = if config.offload_embeddings {
+                    Device::Cpu
+                } else {
+                    Device::Wgpu
+                };
+                let head = if config.offload_lm_head {
+                    Device::Cpu
+                } else {
+                    Device::Wgpu
+                };
+                // Current engine assumes all transformer layers stay on one device
+                let layers = Device::Wgpu;
+
+                Self {
+                    embeddings: emb,
+                    layers,
+                    lm_head: head,
+                }
+            }
+        }
+    }
     /// All stages on GPU. Best performance when VRAM is sufficient.
     pub fn full_gpu() -> Self {
         Self {
@@ -68,16 +93,14 @@ impl ExecutionPlan {
 
     /// Check if this plan requires GPU components
     pub fn needs_gpu(&self) -> bool {
-        self.embeddings == Device::Wgpu 
-            || self.layers == Device::Wgpu 
+        self.embeddings == Device::Wgpu
+            || self.layers == Device::Wgpu
             || self.lm_head == Device::Wgpu
     }
 
     /// Check if this plan requires CPU components
     pub fn needs_cpu(&self) -> bool {
-        self.embeddings == Device::Cpu 
-            || self.layers == Device::Cpu 
-            || self.lm_head == Device::Cpu
+        self.embeddings == Device::Cpu || self.layers == Device::Cpu || self.lm_head == Device::Cpu
     }
 }
 

@@ -87,7 +87,10 @@ pub use kjarni_transformers::common::{
 };
 
 // Re-export chat
-pub use kjarni_transformers::chat::templates::{ChatTemplate, Conversation, Message, Role};
+pub use kjarni_transformers::chat::{
+    llama3::{Llama2ChatTemplate, Llama3ChatTemplate},
+    templates::{ChatTemplate, Conversation, Message, Role}
+};
 
 pub use kjarni_transformers::decoder::generator::DecoderGenerator;
 pub use kjarni_transformers::decoder::traits::DecoderLanguageModel;
@@ -109,11 +112,13 @@ pub use kjarni_search::{Bm25Index, Chunk, ChunkMetadata, SearchMode, SearchResul
 // Re-export commonly used types from dependencies
 pub use kjarni_transformers::prelude::*;
 
+
+
 pub mod models {
     pub use kjarni_models::models::bart::model::BartModel;
     pub use kjarni_models::models::gpt2::Gpt2Model;
     pub use kjarni_models::models::llama::{
-        Llama2ChatTemplate, Llama3ChatTemplate, LlamaConfig, LlamaModel,
+        LlamaConfig, LlamaModel,
     };
 }
 pub mod registry;
@@ -129,3 +134,5 @@ pub mod prelude {
     pub use kjarni_transformers::models::ModelType;
     pub use kjarni_transformers::prelude::*;
 }
+
+// mod model;

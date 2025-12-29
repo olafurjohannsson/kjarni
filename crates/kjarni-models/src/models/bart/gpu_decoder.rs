@@ -13,7 +13,7 @@ use kjarni_transformers::encoder_decoder::traits::{
 
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
-use kjarni_transformers::gpu_ops::blocks::decoder_cross_attention::GpuCrossAttentionDecoderLayer;
+use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
@@ -42,7 +42,7 @@ pub struct BartGpuDecoder {
     pub embed_ln_weights: GpuNormalizationWeights,
 
     // Layers
-    pub layers: Vec<GpuCrossAttentionDecoderLayer>,
+    pub layers: Vec<GpuCrossDecoderLayer>,
 }
 
 impl BartGpuDecoder {
@@ -203,7 +203,7 @@ impl BartGpuDecoder {
                 )?,
             )?);
 
-            let layer = GpuCrossAttentionDecoderLayer::new(
+            let layer = GpuCrossDecoderLayer::new(
                 context,
                 self_attn_weights,
                 self_attn_norm,

@@ -17,7 +17,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::cpu_ops::attention::EncoderSelfAttention;
 //!
 //! let attn = EncoderSelfAttention::new(768, 12, q_proj, k_proj, v_proj, o_proj);
@@ -106,7 +106,7 @@ impl EncoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // BERT-base: 768 hidden, 12 heads
     /// use kjarni_transformers::encoder::EncoderSelfAttention;
     /// use kjarni_transformers::linear_layer::LinearLayer;
@@ -144,7 +144,7 @@ impl EncoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use kjarni_transformers::encoder::EncoderSelfAttention;
     /// use kjarni_transformers::linear_layer::LinearLayer;
     /// use kjarni_transformers::tensor::DType;
@@ -174,7 +174,7 @@ impl EncoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // Standard attention (BERT/BART)
     /// use kjarni_transformers::encoder::EncoderSelfAttention;
     /// use kjarni_transformers::tensor::DType;

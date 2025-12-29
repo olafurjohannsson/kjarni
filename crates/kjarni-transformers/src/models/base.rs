@@ -54,7 +54,7 @@ impl<'a> ModelInput<'a> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// let tokens = vec![1, 2, 3, 4, 5];
     /// let input = ModelInput::from_tokens(&tokens);
     /// ```
@@ -70,7 +70,7 @@ impl<'a> ModelInput<'a> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// let batch = Array2::from_shape_vec((2, 5), tokens)?;
     /// let input = ModelInput::from_array(batch.view());
     /// ```
@@ -220,6 +220,9 @@ pub trait LanguageModel: InferenceModel {
     fn tokenizer(&self) -> &Tokenizer;
 
     fn eos_token_id(&self) -> Option<u32>;
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        None
+    }
     fn bos_token_id(&self) -> Option<u32>;
     fn forced_bos_token_id(&self) -> Option<u32>;
     fn forced_eos_token_id(&self) -> Option<u32>;

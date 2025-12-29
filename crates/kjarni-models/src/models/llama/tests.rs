@@ -71,7 +71,7 @@ async fn test_llama_trait_config_consistency() -> Result<()> {
 }
 
 fn assert_trait_matches_config(model: &LlamaModel, name: &str) {
-    let config = model.concrete_config();
+    let config = model.config();
 
     assert_eq!(
         model.vocab_size(),
@@ -156,7 +156,7 @@ fn test_llama_config_parsing_1b() {
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     // 1. Arrange: Load the model.
     let model = load_llama_for_test().await?;
-    let config = model.concrete_config();
+    let config = model.config();
 
     // 2. Assert: Check architectural values directly from the config struct.
     assert_eq!(config.vocab_size, 128256);

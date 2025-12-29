@@ -245,6 +245,8 @@ unsafe fn matmul_vec_q6_k_avx2(
         let mut sum_vec = _mm256_setzero_ps();
 
         for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
+            use crate::kernels::dequantize::dequantize_q6_k_block;
+
             let block = &row_blocks[block_idx];
             
             // 1. Dequantize Q6_K block to F32 temp buffer
@@ -268,39 +270,6 @@ unsafe fn matmul_vec_q6_k_avx2(
     }
 }
 
-#[inline(always)]
-fn dequantize_q6_k_block(b: &BlockQ6_K, out: &mut [f32]) {
-    let d = b.d.to_f32();
-    
-    // Q6_K processes 256 elements in groups of 128
-    for i in 0..2 {
-        let ql = &b.ql[i * 64..];
-        let qh = &b.qh[i * 32..];
-        let sc = &b.scales[i * 8..];
-        let out_ptr = &mut out[i * 128..];
-
-        for j in 0..32 {
-            // Unpack scales (GGUF Q6_K uses 8-bit scales)
-            let sc0 = sc[j / 16] as f32; // Simplified scale indexing
-            let sc1 = sc[2 + j / 16] as f32;
-
-            // Reassemble 6-bit values: (ql & 0xF) | ((qh & 3) << 4)
-            // Note: This matches the GGML_TYPE_Q6_K bit manipulation
-            let h = (qh[j % 16] >> (2 * (j / 16))) & 3;
-            
-            let q0 = ((ql[j] & 0xF) as i8 | ((h & 1) << 4) as i8) - 32;
-            let q1 = ((ql[j + 32] & 0xF) as i8 | ((h & 2) << 3) as i8) - 32;
-            let q2 = ((ql[j] >> 4) as i8 | ((h & 1) << 4) as i8) - 32;
-            let q3 = ((ql[j + 32] >> 4) as i8 | ((h & 2) << 3) as i8) - 32;
-
-            out_ptr[j] = d * q0 as f32 * sc0;
-            out_ptr[j + 32] = d * q1 as f32 * sc1;
-            out_ptr[j + 64] = d * q2 as f32 * sc0;
-            out_ptr[j + 96] = d * q3 as f32 * sc1;
-        }
-    }
-}
-
 // Scalar Fallback
 unsafe fn matmul_vec_q6_k_scalar(out: &mut [f32], a: &[f32], b: &[BlockQ6_K], k: usize) {
     let mut temp_w = [0.0f32; QK_K];
@@ -309,7 +278,7 @@ unsafe fn matmul_vec_q6_k_scalar(out: &mut [f32], a: &[f32], b: &[BlockQ6_K], k:
         let row_blocks = &b[i * blocks_per_row..(i + 1) * blocks_per_row];
         let mut sum = 0.0f32;
         for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
-            dequantize_q6_k_block(&row_blocks[block_idx], &mut temp_w);
+            kernels::dequantize::dequantize_q6_k_block(&row_blocks[block_idx], &mut temp_w);
             for j in 0..QK_K {
                 sum += a_chunk[j] * temp_w[j];
             }
@@ -329,42 +298,3 @@ unsafe fn hsum_avx(v: std::arch::x86_64::__m256) -> f32 {
     let vsum = _mm_hadd_ps(vsum, vsum);
     _mm_cvtss_f32(vsum)
 }
-
-// /// Computes `C = A @ B.T` for F32 input `A` and Q4_K quantized weight matrix `B`,
-// /// using on-the-fly quantization of `A`.
-// pub fn matmul_2d_cpu_f32_x_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array2<f32> {
-//     let (m, k) = a.dim();
-//     let k_per_block = crate::kernels::q_common::QK_K;
-//     let n = (b_weights.len() * k_per_block) / k;
-//     assert_eq!(k % k_per_block, 0, "Input features must be a multiple of the QK_K block size");
-
-//     let mut c = Array2::<f32>::zeros((m, n));
-//     let a_s = a.as_standard_layout();
-//     let a_slice = a_s.as_slice().expect("Input tensor 'a' must be contiguous");
-
-//     // 1. Quantize the input vector 'a' once.
-//     let mut a_q8_blocks: Vec<BlockQ8_0> = vec![Default::default(); k / 32];
-//     for (i, a_chunk) in a_slice.chunks_exact(32).enumerate() {
-//         unsafe {
-//             // This should ideally also have a SIMD version.
-//             kernels::x86::q_x_q::quantize_f32_to_q8_0(a_chunk, &mut a_q8_blocks[i]);
-//         }
-//     }
-
-//     // 2. Dispatch to the fused kernel.
-//     if m == 1 {
-//         let out_slice = c.as_slice_mut().unwrap();
-//         // ... (parallelization logic) ...
-//         // Inside the parallel loop:
-//         unsafe {
-//             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//             if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-//                 return kernels::x86::q_x_q::matmul_vec_q8_0_x_q4_k(out_chunk, &a_q8_blocks, b_chunk_blocks, k);
-//             }
-//             // ... scalar fallback ...
-//         }
-//     } else {
-//         // ... batch prefill logic ...
-//     }
-//     c
-// }

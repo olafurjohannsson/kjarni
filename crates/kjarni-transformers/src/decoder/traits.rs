@@ -23,6 +23,7 @@
 //!     -   **Role**: Engine. Executes the heavy Transformer layers.
 //!     -   **Knowledge**: Pure linear algebra. Embed -> Normalize -> Forward Layers.
 
+use crate::ChatTemplate;
 use crate::cache::{Cache, GpuKVCache};
 use crate::common::GenerationConfig;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
@@ -120,6 +121,9 @@ pub trait DecoderGenerationBackend: Send + Sync {
 /// Breaks the forward pass into granular steps for testability and advanced control.
 #[async_trait(?Send)]
 pub trait GpuDecoder: Send + Sync {
+
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Step 1: Compute embeddings.
     /// Handles lookup (Tokens) or passthrough (Hidden).
     async fn embed(
@@ -190,6 +194,11 @@ pub trait GpuDecoder: Send + Sync {
 /// Defines the synchronous interface for a CPU-native Transformer Decoder.
 /// Mirrors `GpuDecoder` structure for symmetry.
 pub trait CpuDecoder: Send + Sync {
+    
+    // fn layers(&self)
+
+    fn as_any(&self) -> &dyn std::any::Any;
+
     fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>>;
 
     fn embed_and_normalize(
@@ -283,6 +292,7 @@ pub trait GpuDecoderOps: Send + Sync {
 //  5. The Model Container
 // ============================================================================
 
+
 /// The primary trait for Decoder-only Language Models (Llama, GPT, Mistral, etc.).
 ///
 /// This trait acts as a "Router", directing the Backend to the correct
@@ -301,6 +311,16 @@ pub trait DecoderLanguageModel: LanguageModel {
     /// Returns the default generation config for this specific model type.
     fn get_default_generation_config(&self) -> GenerationConfig {
         GenerationConfig::default()
+    }
+
+    /// Get the chat template for this model (if it's an instruct model)
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+        None  // Default: no template (base model)
+    }
+    
+    /// Check if this model requires a chat template for proper use
+    fn is_instruct_model(&self) -> bool {
+        self.chat_template().is_some()
     }
 
     // --- Helper Utilities (Direct Forward Pass) ---

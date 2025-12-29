@@ -5,13 +5,13 @@ use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
-use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
     GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor};
+use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
 use crate::rope::RoPE as CpuRoPE;
@@ -25,7 +25,7 @@ use ndarray::{Array, Array1, Array2, Array3, Array4, Ix4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::sync::Arc;
 
-#[path = "../../../../tests/common.rs"]
+#[path = "../../../tests/common.rs"]
 mod common;
 
 // --- Mock Llama Config for testing ---

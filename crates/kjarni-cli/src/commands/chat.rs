@@ -5,20 +5,7 @@ use futures_util::StreamExt;
 use std::io::{self, BufRead, Write};
 
 use kjarni::{
-    registry,
-    models::LlamaModel,
-    models::Llama3ChatTemplate,
-    DecoderGenerator,
-    DecoderLanguageModel,
-    Device,
-    GenerationConfig,
-    DecodingStrategy,
-    SamplingParams,
-    ModelArchitecture,
-    ModelType,
-    TokenType,
-    ChatTemplate,
-    Conversation,
+    ChatTemplate, Conversation, DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig, Llama3ChatTemplate, ModelArchitecture, ModelType, SamplingParams, TokenType, models::LlamaModel, registry
 };
 
 pub async fn run(

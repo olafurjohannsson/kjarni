@@ -1,7 +1,9 @@
 use crate::models::gpt2::Gpt2Model;
+use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
+use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
 use crate::models::llama::{LlamaConfig, LlamaModel};
 use anyhow::Result;
-use kjarni_transformers::WgpuContext;
+use kjarni_transformers::{DecoderPipeline, WgpuContext};
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::{GpuRMSNorm, GpuRMSNormWeights};
@@ -387,26 +389,30 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         Some(config),
     )
     .await?;
+    
+    let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
+    let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
 
-    let cpu_decoder = cpu_model.decoder.as_ref().expect("No CPU decoder");
-    let gpu_decoder = gpu_model.gpu_decoder.as_ref().expect("No GPU decoder");
+    let cpu_decoder = cpu_pipeline.cpu_decoder().expect("No CPU decoder").as_any().downcast_ref::<LlamaCpuDecoder>().expect("Failed to downcast CPU decoder");
+    let gpu_decoder = gpu_pipeline.gpu_decoder().expect("No GPU decoder").as_any().downcast_ref::<LlamaGpuDecoder>().expect("Failed to downcast GPU decoder");
 
-    let config = cpu_model.config.clone();
+    let config = cpu_model.config();
+
     let meta = config.metadata();
-
+    
     println!("Model loaded:");
     println!("  hidden_size: {}", meta.hidden_size);
     println!("  num_layers: {}", meta.num_layers);
     println!("  num_attention_heads: {}", meta.num_attention_heads);
     println!("  num_kv_heads: {}", meta.num_kv_heads);
     println!("  head_dim: {}", meta.head_dim);
-    let ps = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let ps = gpu_decoder.layers[0]
         .ff_weights
         .down_proj_shape();
-    let gs = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let gs = gpu_decoder.layers[0]
         .ff_weights
         .gate_proj_shape();
-    let us = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let us = gpu_decoder.layers[0]
         .ff_weights
         .up_proj_shape();
 
@@ -493,7 +499,7 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         let residual = &layer_input;
 
         // Pre-norm
-        let normed = cpu_layer0.attention_norm.forward_3d(residual);
+        let normed = cpu_layer0.attention_norm.forward(residual);
 
         // Attention
         let (attn_out, _, _) = cpu_layer0.attention.forward(
@@ -584,7 +590,7 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         let residual = &ffn_input;
 
         // Pre-norm
-        let normed = cpu_layer0.ffn_norm.forward_3d(residual);
+        let normed = cpu_layer0.ffn_norm.forward(residual);
 
         // FFN
         let ffn_out = cpu_layer0.feed_forward.forward(&normed)?;
@@ -709,10 +715,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     )
     .await?;
 
-    let cpu_decoder = cpu_model.decoder.as_ref().expect("No CPU decoder");
-    let gpu_decoder = gpu_model.gpu_decoder.as_ref().expect("No GPU decoder");
+    let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
+    let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
+    let config = cpu_model.config();
 
-    let config = cpu_model.config.clone();
+    let cpu_decoder = cpu_pipeline.cpu_decoder().expect("No CPU decoder").as_any().downcast_ref::<LlamaCpuDecoder>().expect("Failed to downcast CPU decoder");
+    let gpu_decoder = gpu_pipeline.gpu_decoder().expect("No GPU decoder").as_any().downcast_ref::<LlamaGpuDecoder>().expect("Failed to downcast GPU decoder");
+    
+
     let meta = config.metadata();
 
     println!("Model loaded:");
@@ -721,13 +731,13 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     println!("  num_attention_heads: {}", meta.num_attention_heads);
     println!("  num_kv_heads: {}", meta.num_kv_heads);
     println!("  head_dim: {}", meta.head_dim);
-    let ps = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let ps = gpu_decoder.layers[0]
         .ff_weights
         .down_proj_shape();
-    let gs = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let gs = gpu_decoder.layers[0]
         .ff_weights
         .gate_proj_shape();
-    let us = gpu_model.gpu_decoder.as_ref().unwrap().layers[0]
+    let us = gpu_decoder.layers[0]
         .ff_weights
         .up_proj_shape();
 
@@ -803,7 +813,7 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // ------------------------------------------------------------------------
     println!("--- Step 2a: RMSNorm (Pre-Attention) ---\n");
 
-    let cpu_rms_out = cpu_layer0.attention_norm.forward_3d(&layer_input);
+    let cpu_rms_out = cpu_layer0.attention_norm.forward(&layer_input);
     println!(
         "CPU RMSNorm first 5: {:?}",
         cpu_rms_out.iter().take(5).collect::<Vec<_>>()

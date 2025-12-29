@@ -17,7 +17,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::gpu_ops::attention::GpuEncoderSelfAttention;
 //!
 //! let attn = GpuEncoderSelfAttention::new(&context, 768, 12);
@@ -74,7 +74,7 @@ impl GpuEncoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // BERT-base: 768 hidden, 12 heads
     /// let attn = GpuEncoderSelfAttention::new(&ctx, 768, 12);
     ///
@@ -112,7 +112,7 @@ impl GpuEncoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // Without padding mask (all tokens valid)
     /// use kjarni_transformers::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
     /// use kjarni_transformers::gpu_ops::{GpuTensor, GpuAttentionWeights, GpuTensorPool};

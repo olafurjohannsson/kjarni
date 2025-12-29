@@ -7,7 +7,6 @@
 
 
 
-pub mod chat_template;
 pub mod config;
 pub mod gpu_decoder;
 pub mod cpu_decoder;
@@ -15,7 +14,6 @@ pub mod model;
 
 pub use model::LlamaModel;
 pub use config::LlamaConfig;
-pub use chat_template::{Llama3ChatTemplate, Llama2ChatTemplate};
 
 #[cfg(test)]
 mod tests;

@@ -12,7 +12,7 @@ pub use raw_tensor::TensorView;
 
 use crate::kernels::{
     q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
-    scalar::{dequantize_q4_k_block, dequantize_q6_k_block},
+    dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block},
 };
 use anyhow::{Result, anyhow};
 use half::{bf16, f16};
@@ -26,6 +26,32 @@ use ndarray::{Array1, Array2, ArrayD, Ix1, Ix2};
 pub struct QuantizedMatrix<T> {
     pub blocks: Vec<T>,
     pub shape: [usize; 2], // [out_features, in_features]
+}
+
+impl<B> QuantizedMatrix<B> {
+    pub fn dequantize(&self) -> Result<Array2<f32>>
+    where
+        B: Dequantizable,
+    {
+        let [rows, cols] = self.shape;
+        let mut output = Array2::zeros((rows, cols));
+
+        // Delegate to block-specific dequantization
+        B::dequantize_blocks(&self.blocks, &mut output, rows, cols)?;
+
+        Ok(output)
+    }
+}
+
+pub trait Dequantizable {
+    fn dequantize_blocks(
+        blocks: &[Self],
+        output: &mut Array2<f32>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<()>
+    where
+        Self: Sized;
 }
 
 /// A generic, typed tensor for CPU computation.
@@ -116,6 +142,19 @@ impl CpuTensor {
                             block,
                             &mut row_slice[b_idx * 256..(b_idx + 1) * 256],
                         );
+                    }
+                }
+                Ok(res)
+            }
+            Self::Q8_0(matrix) => {
+                let mut res = Array2::zeros((matrix.shape[0], matrix.shape[1]));
+                for (row_idx, mut row) in res.axis_iter_mut(ndarray::Axis(0)).enumerate() {
+                    let blocks_per_row = matrix.shape[1] / 32; // Q8_0 has 32 elements per block
+                    let row_blocks =
+                        &matrix.blocks[row_idx * blocks_per_row..(row_idx + 1) * blocks_per_row];
+                    let row_slice = row.as_slice_mut().unwrap();
+                    for (b_idx, block) in row_blocks.iter().enumerate() {
+                        dequantize_q8_0_block(block, &mut row_slice[b_idx * 32..(b_idx + 1) * 32]);
                     }
                 }
                 Ok(res)

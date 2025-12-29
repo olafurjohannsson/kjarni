@@ -25,6 +25,19 @@ pub struct BlockQ8_0 {
     pub qs: [i8; 32],
 }
 
+/// Q8_K block structure for quantized activations
+/// Used as the "right-hand side" in Q4_K × Q8_K dot products
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct BlockQ8_K {
+    /// Scale factor for dequantization
+    pub d: f32,
+    /// Quantized 8-bit values (256 per block)
+    pub qs: [i8; 256],
+    /// Block sums: sum of each 16-element sub-block (16 sums)
+    pub bsums: [i16; 16],
+}
+
 /// A 4-bit "K-Quant" quantization block.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)] // <-- DERIVE THE TRAITS

@@ -6,5 +6,5 @@ pub mod backend;
 pub use backend::CpuDecoderBackend;
 pub use blocks::{
     attention::DecoderAttention,
-    layer::DecoderLayer,
+    layer::{CpuRoPEDecoderLayer, DecoderLayer},
 };

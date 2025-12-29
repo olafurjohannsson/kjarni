@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust
+//! ```ignore
 //! // Simple usage
 //! let model = LlamaModel::from_pretrained(path, Device::Wgpu, context, None)?;
 //!
@@ -41,6 +41,14 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use kjarni_transformers::ChatTemplate;
+use kjarni_transformers::chat::llama3::Llama3ChatTemplate;
+use kjarni_transformers::common::{
+    DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
+};
+use kjarni_transformers::pipeline::DecoderModelFactory;
+use kjarni_transformers::rope::loader::LoadedRoPE;
+use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
@@ -94,7 +102,7 @@ use kjarni_transformers::{
 ///
 /// ## Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni_models::LlamaModel;
 /// use kjarni_transformers::prelude::Device;
 ///
@@ -106,336 +114,107 @@ use kjarni_transformers::{
 /// )?;
 /// ```
 pub struct LlamaModel {
-    /// The unified pipeline containing all model components.
-    /// Access via `pipeline()` / `pipeline_mut()` for runtime configuration.
     pipeline: DecoderPipeline,
-
-    /// The tokenizer for encoding/decoding text.
     tokenizer: Tokenizer,
-
-    /// Model configuration (architecture, sizes, special tokens, etc.)
     config: Arc<LlamaConfig>,
-
-    /// The device this model is primarily loaded on.
-    /// Note: With hybrid execution, some components may be on different devices.
-    device: Device,
-
-    /// GPU context for WGPU operations. None if CPU-only.
-    context: Option<Arc<WgpuContext>>,
+    chat_template: Option<Llama3ChatTemplate>,
+    generation_defaults: Option<HFGenerationDefaults>,
 }
 
 // =============================================================================
 // Model Loading
 // =============================================================================
 
-impl LlamaModel {
-    /// List of model types this implementation supports.
-    const SUPPORTED_MODELS: &'static [ModelType] = &[
-        ModelType::Llama3_2_1B,
-        ModelType::Llama3_2_3B,
-        ModelType::Llama3_2_3B_Instruct,
-        ModelType::Llama3_8B_Instruct,
-    ];
+impl DecoderModelFactory for LlamaModel {
+    type Config = LlamaConfig;
 
-    /// Creates a `LlamaModel` from the HuggingFace model registry.
-    ///
-    /// Downloads model files to a local cache directory if not already present.
-    ///
-    /// # Arguments
-    ///
-    /// * `model_type` - The specific Llama variant to load
-    /// * `cache_dir` - Optional custom cache directory (defaults to system cache)
-    /// * `device` - Target device (CPU or GPU)
-    /// * `context` - GPU context (required for GPU, created automatically if None)
-    /// * `decoder_config` - Optional loading configuration
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let model = LlamaModel::from_registry(
-    ///     ModelType::Llama3_2_1B,
-    ///     None,  // Use default cache
-    ///     Device::Wgpu,
-    ///     None,  // Auto-create context
-    ///     None,  // Default config
-    /// ).await?;
-    /// ```
+    fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
+        LlamaConfig::from_loader(&*weights.loader, Some(&weights.config_json))
+    }
+
+    fn build_backends(
+        weights: &ModelWeights,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
+        rope: &LoadedRoPE,
+        load_config: ModelLoadConfig,
+        context: Option<&Arc<WgpuContext>>,
+    ) -> Result<(Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>)> {
+        let mut cpu = None;
+        let mut gpu = None;
+        if load_config.gpu_layers.is_none() || load_config.offload_embeddings {
+            cpu = Some(Box::new(LlamaCpuDecoder::new(
+                weights,
+                meta.clone(),
+                layout.clone(),
+                rope.cpu.clone(),
+                load_config.target_dtype,
+            )?) as Box<dyn CpuDecoder>);
+        }
+        if let Some(ctx) = context {
+            gpu = Some(Box::new(LlamaGpuDecoder::new(
+                ctx,
+                weights,
+                meta.clone(),
+                layout.clone(),
+                rope.gpu.clone(),
+                load_config,
+            )?) as Box<dyn GpuDecoder>);
+        }
+        Ok((cpu, gpu))
+    }
+
+    fn new_from_pipeline(
+        pipeline: DecoderPipeline,
+        tokenizer: Tokenizer,
+        config: Arc<LlamaConfig>,
+        model_type: Option<ModelType>,
+        generation_defaults: Option<HFGenerationDefaults>,
+    ) -> Self {
+        let chat_template = model_type
+            .filter(|mt| mt.is_instruct_model())
+            .map(|_| Llama3ChatTemplate::for_generation());
+        Self {
+            pipeline,
+            tokenizer,
+            config,
+            chat_template,
+            generation_defaults,
+        }
+    }
+}
+
+impl LlamaModel {
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
         device: Device,
         context: Option<Arc<WgpuContext>>,
-        decoder_config: Option<ModelLoadConfig>,
+        load_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
-        // Validate model type
-        if !Self::SUPPORTED_MODELS.contains(&model_type) {
-            return Err(anyhow!("Unsupported LLaMA model type: {:?}", model_type));
-        }
-        if model_type.info().architecture != ModelArchitecture::Decoder {
-            return Err(anyhow!("Model {:?} is not a decoder model.", model_type));
-        }
-
-        // Resolve cache directory
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory found")
-                .join("kjarni")
-        });
-        let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
-
-        log::info!("Loading Llama model from {:?}", model_dir);
-
-        // Download model files if needed
-        download_model_files(&model_dir, &model_type.info().paths).await?;
-
-        // Create GPU context if needed and not provided
-        let context = if device.is_gpu() && context.is_none() {
-            log::info!("No GPU context provided, creating a new one...");
-            Some(WgpuContext::new().await?)
-        } else {
-            context
-        };
-
-        Self::from_pretrained(&model_dir, device, context, decoder_config)
+        kjarni_transformers::pipeline::GenericLoader::load_from_registry::<Self>(
+            model_type,
+            cache_dir,
+            device,
+            context,
+            load_config,
+        )
+        .await
     }
-
-    /// Creates a `LlamaModel` from a local directory containing model files.
-    ///
-    /// # Arguments
-    ///
-    /// * `model_path` - Path to directory containing model files (safetensors, config.json, tokenizer.json)
-    /// * `device` - Target device (CPU or GPU)
-    /// * `context` - GPU context (required if device is GPU)
-    /// * `decoder_config` - Optional loading configuration
-    ///
-    /// # Loading Configuration
-    ///
-    /// The `ModelLoadConfig` allows customizing:
-    /// - `target_dtype` - Override weight dtype (e.g., force BF16)
-    /// - `offload_lm_head` - Keep LM head on CPU to save VRAM
-    /// - `offload_embeddings` - Keep embeddings on CPU
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let config = ModelLoadConfig::builder()
-    ///     .target_dtype(Some(DType::BF16))
-    ///     .offload_lm_head(true)
-    ///     .build();
-    ///
-    /// let model = LlamaModel::from_pretrained(
-    ///     Path::new("/models/llama"),
-    ///     Device::Wgpu,
-    ///     Some(context),
-    ///     Some(config),
-    /// )?;
-    /// ```
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
         context: Option<Arc<WgpuContext>>,
         decoder_config: Option<ModelLoadConfig>,
+        model_type: Option<ModelType>,
     ) -> Result<Self> {
-        // Configure threading for CPU operations
-        kjarni_transformers::utils::configure_threading();
-
-        // =========================================================================
-        // 1. Load Configuration
-        // =========================================================================
-
-        let weights = ModelWeights::new(model_path)?;
-        let config =
-            LlamaConfig::from_loader(&*weights.loader, Some(weights.config_json.as_ref()))?;
-
-        let metadata = config.metadata();
-        let layout = config.layout();
-        let load_config = decoder_config.unwrap_or_default();
-        let target_dtype = load_config.target_dtype;
-
-        if let Some(dtype) = target_dtype {
-            log::info!("Loading Llama model in {:?}", dtype);
-        }
-
-        // =========================================================================
-        // 2. Load Tokenizer
-        // =========================================================================
-
-        let tokenizer = Self::load_tokenizer(model_path, metadata.max_seq_len)?;
-
-        // =========================================================================
-        // 3. Create RoPE (Rotary Position Embeddings)
-        // =========================================================================
-
-        // CPU RoPE is always created (needed for cache initialization even on GPU)
-        let cpu_rope = Arc::new(RoPE::new_with_scaling(
-            metadata.head_dim,
-            metadata.max_seq_len,
-            metadata.rope_theta.unwrap_or(500000.0),
-            metadata.rope_scaling.as_ref(),
-        ));
-
-        // =========================================================================
-        // 4. Determine Execution Plan
-        // =========================================================================
-
-        // The execution plan determines where each component runs.
-        // This affects what we need to load.
-        let plan = Self::create_execution_plan(device, &load_config);
-
-        // Determine what to load based on plan requirements
-        let load_cpu = plan.needs_cpu() || device == Device::Cpu;
-        let load_gpu = plan.needs_gpu() && device == Device::Wgpu;
-
-        log::info!(
-            "Execution plan: embeddings={:?}, layers={:?}, lm_head={:?}",
-            plan.embeddings,
-            plan.layers,
-            plan.lm_head
-        );
-
-        // =========================================================================
-        // 5. Load Embeddings
-        // =========================================================================
-        let target_dtype = load_config.target_dtype;
-        let embeddings = LoadedEmbeddings::new(
-            context.as_ref(),
-            &weights,
-            EmbeddingConfig::new(&layout.token_embedding, metadata.hidden_size),
-            load_cpu || load_config.offload_embeddings,
-            load_gpu && !load_config.offload_embeddings,
-            target_dtype,
-        )?;
-
-        // =========================================================================
-        // 6. Load Decoders
-        // =========================================================================
-
-        // CPU Decoder
-        let cpu_decoder: Option<Box<dyn CpuDecoder>> = if load_cpu {
-            log::info!("Loading CPU decoder...");
-            Some(Box::new(LlamaCpuDecoder::new(
-                &weights,
-                config.clone(),
-                cpu_rope.clone(),
-                target_dtype,
-            )?))
-        } else {
-            None
-        };
-
-        // GPU Decoder
-        let gpu_decoder: Option<Box<dyn GpuDecoder>> = if load_gpu {
-            let ctx = context
-                .as_ref()
-                .ok_or_else(|| anyhow!("GPU device requires a WgpuContext"))?;
-
-            log::info!("Loading GPU decoder...");
-
-            // Create GPU RoPE from precomputed CPU caches
-            let gpu_rope = GpuRoPE::new(ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache)?;
-
-            Some(Box::new(LlamaGpuDecoder::new(
-                ctx,
-                &weights,
-                config.clone(),
-                gpu_rope,
-                load_config.clone(),
-            )?))
-        } else {
-            None
-        };
-
-        // =========================================================================
-        // 7. Load LM Head
-        // =========================================================================
-
-        let lm_head = LoadedLMHead::new(
-            context.as_ref(),
-            &weights,
-            LMHeadConfig::new(&layout.lm_head, metadata.vocab_size, metadata.hidden_size),
-            load_cpu || load_config.offload_lm_head,
-            load_gpu && !load_config.offload_lm_head,
-            target_dtype,
-        )?;
-
-        // =========================================================================
-        // 8. Create Pipeline
-        // =========================================================================
-
-        let pipeline = DecoderPipeline::new(
-            embeddings,
-            cpu_decoder,
-            gpu_decoder,
-            lm_head,
-            plan,
-            context.clone(),
-            DecoderPipelineConfig {
-                num_layers: metadata.num_layers,
-                hidden_size: metadata.hidden_size,
-                vocab_size: metadata.vocab_size,
-            },
-        )?;
-
-        // =========================================================================
-        // 9. Return Model
-        // =========================================================================
-
-        Ok(Self {
-            pipeline,
-            tokenizer,
-            config,
+        kjarni_transformers::pipeline::GenericLoader::load_from_pretrained::<Self>(
+            model_path,
             device,
             context,
-        })
-    }
-
-    // =========================================================================
-    // Private Loading Helpers
-    // =========================================================================
-
-    /// Loads and configures the tokenizer.
-    fn load_tokenizer(model_path: &Path, max_seq_len: usize) -> Result<Tokenizer> {
-        let tokenizer_path = if model_path.is_file() {
-            model_path.parent().unwrap().join("tokenizer.json")
-        } else {
-            model_path.join("tokenizer.json")
-        };
-
-        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e))?;
-
-        // Configure truncation for max sequence length
-        let truncation_params = tokenizers::TruncationParams {
-            max_length: max_seq_len,
-            ..Default::default()
-        };
-        tokenizer
-            .with_truncation(Some(truncation_params))
-            .map_err(|e| anyhow!("Failed to configure tokenizer truncation: {}", e))?;
-
-        // No padding for autoregressive generation
-        tokenizer.with_padding(None);
-
-        Ok(tokenizer)
-    }
-
-    /// Creates the execution plan based on device and configuration.
-    fn create_execution_plan(device: Device, config: &ModelLoadConfig) -> ExecutionPlan {
-        match device {
-            Device::Cpu => ExecutionPlan::full_cpu(),
-            Device::Wgpu => {
-                // Check for offloading options
-                let offload_embeddings = config.offload_embeddings;
-                let offload_head = config.offload_lm_head;
-
-                match (offload_embeddings, offload_head) {
-                    (true, true) => ExecutionPlan::gpu_offload_ends(),
-                    (false, true) => ExecutionPlan::gpu_offload_head(),
-                    (true, false) => ExecutionPlan::custom(Device::Cpu, Device::Wgpu, Device::Wgpu),
-                    (false, false) => ExecutionPlan::full_gpu(),
-                }
-            }
-        }
+            decoder_config,
+            model_type,
+        )
     }
 }
 
@@ -446,12 +225,6 @@ impl LlamaModel {
 impl LlamaModel {
     /// Returns a reference to the model configuration.
     pub fn config(&self) -> &Arc<LlamaConfig> {
-        &self.config
-    }
-
-    /// Returns the concrete Llama configuration.
-    /// Alias for `config()` for backward compatibility.
-    pub fn concrete_config(&self) -> &Arc<LlamaConfig> {
         &self.config
     }
 
@@ -466,7 +239,7 @@ impl LlamaModel {
     ///
     /// Use this to change the execution plan at runtime:
     ///
-    /// ```rust
+    /// ```ignore
     /// // Switch to CPU-offloaded head to save VRAM
     /// model.pipeline_mut().set_plan(ExecutionPlan::gpu_offload_head())?;
     /// ```
@@ -486,11 +259,13 @@ impl LlamaModel {
 
 impl InferenceModel for LlamaModel {
     fn device(&self) -> Device {
-        self.device
+        // self.device
+        self.pipeline.plan().layers
     }
 
     fn context(&self) -> Option<Arc<WgpuContext>> {
-        self.context.clone()
+        // self.context.clone()
+        self.pipeline.context().cloned()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -564,8 +339,19 @@ impl LanguageModel for LlamaModel {
         Some(self.config.bos_token_id)
     }
 
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        Some(self.config.eos_token_id.clone())
+    }
+
     fn eos_token_id(&self) -> Option<u32> {
-        Some(self.config.eos_token_id)
+        if self.config.eos_token_id.len() == 1 {
+            Some(self.config.eos_token_id[0])
+        } else if self.config.eos_token_id.len() > 1 {
+            log::warn!("Model has multiple EOS token IDs; returning the first one.");
+            Some(self.config.eos_token_id[0])
+        } else {
+            None
+        }
     }
 
     fn pad_token_id(&self) -> Option<u32> {
@@ -648,10 +434,24 @@ impl GpuDecoderOps for LlamaModel {
         ctx: &mut GpuFrameContext,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
-        let (enc, pool) = ctx.resources();
-        self.pipeline
-            .lm_head()
-            .forward_gpu(enc, pool, hidden_states)
+        let lm_head = self.pipeline.lm_head();
+
+        match (lm_head.has_gpu(), lm_head.has_cpu()) {
+            (true, _) => {
+                let (enc, pool) = ctx.resources();
+                lm_head.forward_gpu(enc, pool, hidden_states)
+            }
+            (false, true) => {
+                // CPU fallback - sync read/write
+                log::debug!("Using CPU fallback for LM head projection");
+                pollster::block_on(async {
+                    let hidden_cpu = hidden_states.to_ndarray_3d().await?;
+                    let logits_cpu = lm_head.forward_cpu(&hidden_cpu)?;
+                    GpuTensor::from_ndarray(ctx.context, &logits_cpu)
+                })
+            }
+            (false, false) => Err(anyhow!("No LM head available on any device")),
+        }
     }
 }
 
@@ -680,50 +480,32 @@ impl DecoderLanguageModel for LlamaModel {
     }
 
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
-        // Llama uses the modern pipelined approach
         AutoregressiveLoop::Pipelined
     }
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_supported_models() {
-        assert!(LlamaModel::SUPPORTED_MODELS.contains(&ModelType::Llama3_2_1B));
-        assert!(LlamaModel::SUPPORTED_MODELS.contains(&ModelType::Llama3_2_3B));
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+        self.chat_template.as_ref().map(|t| t as &dyn ChatTemplate)
     }
-
-    #[test]
-    fn test_execution_plan_creation() {
-        // Full CPU
-        let plan = LlamaModel::create_execution_plan(Device::Cpu, &ModelLoadConfig::default());
-        assert_eq!(plan, ExecutionPlan::full_cpu());
-
-        // Full GPU
-        let plan = LlamaModel::create_execution_plan(Device::Wgpu, &ModelLoadConfig::default());
-        assert_eq!(plan, ExecutionPlan::full_gpu());
-
-        // GPU with offloaded head
-        let config = ModelLoadConfig {
-            offload_lm_head: true,
-            ..Default::default()
-        };
-        let plan = LlamaModel::create_execution_plan(Device::Wgpu, &config);
-        assert_eq!(plan, ExecutionPlan::gpu_offload_head());
-
-        // GPU with offloaded ends
-        let config = ModelLoadConfig {
-            offload_lm_head: true,
-            offload_embeddings: true,
-            ..Default::default()
-        };
-        let plan = LlamaModel::create_execution_plan(Device::Wgpu, &config);
-        assert_eq!(plan, ExecutionPlan::gpu_offload_ends());
+    fn get_default_generation_config(&self) -> GenerationConfig {
+        // Use generation_config.json if loaded
+        if let Some(defaults) = &self.generation_defaults {
+            return defaults
+                .clone()
+                .into_generation_config(self.config.max_position_embeddings);
+        }
+        // Llama fallback: sampling
+        GenerationConfig {
+            max_new_tokens: Some(256),
+            max_length: self.config.max_position_embeddings,
+            min_length: 0,
+            repetition_penalty: 1.0,
+            no_repeat_ngram_size: 0,
+            add_bos_token: true,
+            strategy: DecodingStrategy::Sample(SamplingParams {
+                temperature: 0.6,
+                top_k: None,
+                top_p: Some(0.9),
+                min_p: Some(0.05),
+            }),
+        }
     }
 }

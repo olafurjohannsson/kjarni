@@ -130,13 +130,13 @@ fn create_mock_cpu_layer(
     }
 }
 
-/// Creates a GPU GpuCrossAttentionDecoderLayer from a CPU layer's weights.
+/// Creates a GPU GpuCrossDecoderLayer from a CPU layer's weights.
 fn create_gpu_layer_from_cpu(
     context: &Arc<WgpuContext>,
     cpu_layer: &CpuDecoderLayer, // Assuming this now uses your new DecoderSelfAttention struct
     hidden_size: u32,
     num_heads: u32,
-) -> Result<GpuCrossAttentionDecoderLayer> {
+) -> Result<GpuCrossDecoderLayer> {
     // --- HELPER: Extracts Weight and Bias from LinearLayer for GPU ---
     let load_linear = |layer: &LinearLayer| -> Result<(GpuTensor, GpuTensor)> {
         // 1. Weight: Use your existing to_gpu() method which handles BF16->F32 and Transposing
@@ -206,7 +206,7 @@ fn create_gpu_layer_from_cpu(
     )?);
 
     // Assemble the GPU layer (Unchanged)
-    Ok(GpuCrossAttentionDecoderLayer {
+    Ok(GpuCrossDecoderLayer {
         self_attn: GpuDecoderSelfAttention::new(context, hidden_size, num_heads),
         self_attn_weights,
         self_attn_norm: GpuNormalization::LayerNorm(GpuLayerNorm::new(context, 1e-5)),

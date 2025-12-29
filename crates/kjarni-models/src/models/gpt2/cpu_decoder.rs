@@ -299,7 +299,9 @@ impl CpuDecoder for Gpt2CpuDecoder {
             )),
         }
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn embed_and_normalize(
         &self,
         input: ModelInput<'_>,

@@ -24,7 +24,7 @@ pub struct GpuPreNormDecoderLayer {
     pub ff_weights: GpuFeedForwardWeights,
     pub ffn_norm: GpuNormalization,
     pub ffn_norm_weights: GpuNormalizationWeights,
-    add: GpuAdd,
+    pub add: GpuAdd,
     concat: GpuConcatenate,
 }
 
@@ -309,6 +309,3 @@ impl GpuPreNormDecoderLayer {
         Ok((final_output, (new_k, new_v)))
     }
 }
-
-#[cfg(test)]
-mod tests;

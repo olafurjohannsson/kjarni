@@ -13,8 +13,11 @@
 //! - Parallel over vocab chunks
 //!
 #![allow(unsafe_code)]
-pub(crate) mod q_common;
-pub(crate) mod scalar;
+pub mod q_common;
+// pub(crate) mod q_common;
+// pub(crate) mod scalar;
+pub mod scalar;
+pub mod dequantize;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(crate) mod x86;

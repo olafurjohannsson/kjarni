@@ -103,6 +103,25 @@ impl LoadedLMHead {
         })
     }
 
+    /// Creates an LM Head by aliasing existing weights (used for tied embedding models).
+    pub fn from_shared_weights(
+        ctx: Option<&Arc<WgpuContext>>,
+        cpu_weights: Option<LinearLayer>,
+        gpu_weights: Option<GpuTensor>,
+        config: LMHeadConfig,
+    ) -> Self {
+        let gpu_kernel = gpu_weights.as_ref().map(|_| GpuLinearLayer::new(ctx.unwrap()));
+        
+        Self {
+            cpu_weights,
+            gpu_weights,
+            gpu_kernel,
+            vocab_size: config.vocab_size,
+            hidden_size: config.hidden_size,
+            context: ctx.cloned(),
+        }
+    }
+
     pub fn vocab_size(&self) -> usize {
         self.vocab_size
     }

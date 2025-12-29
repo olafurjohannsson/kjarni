@@ -4,7 +4,7 @@ use crate::common::{
 };
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
-use crate::prelude::*;
+use crate::{Conversation, prelude::*};
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures_core::stream::Stream;
@@ -60,6 +60,63 @@ impl DecoderGenerator {
         Ok(Self { model, backend })
     }
 
+    /// Generate a response for a conversation, using the model's chat template if available
+    pub async fn chat(
+        &self,
+        conversation: &Conversation,
+        config: &GenerationConfig,
+    ) -> Result<String> {
+        let prompt = self.format_conversation(conversation)?;
+        self.generate(&prompt, config).await
+    }
+
+    /// Convenience: encode and stream
+    pub async fn generate_stream(
+        &self,
+        prompt: &str,
+        config: &GenerationConfig,
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+        let tokens = self.encode(prompt, config)?;
+        self.generate_stream_from_tokens(tokens, config).await
+    }
+
+    /// Chat with conversation
+    pub async fn chat_stream(
+        &self,
+        conversation: &Conversation,
+        config: &GenerationConfig,
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+        let prompt = self.format_conversation(conversation)?;
+        let tokens = self.encode(&prompt, config)?;
+        self.generate_stream_from_tokens(tokens, config).await
+    }
+
+    /// Format a conversation using the model's template (or fallback)
+    pub fn format_conversation(&self, conversation: &Conversation) -> Result<String> {
+        if let Some(template) = self.model.chat_template() {
+            Ok(template.apply(conversation))
+        } else {
+            // Fallback for base models: just use the last user message
+            conversation
+                .last()
+                .map(|m| m.content.clone())
+                .ok_or_else(|| anyhow!("Conversation is empty"))
+        }
+    }
+
+    /// Check if this generator's model requires a chat template
+    pub fn requires_template(&self) -> bool {
+        self.model.is_instruct_model()
+    }
+
+    /// Get stop sequences from the template
+    pub fn stop_sequences(&self) -> Vec<String> {
+        self.model
+            .chat_template()
+            .map(|t| t.stop_sequences())
+            .unwrap_or_default()
+    }
+
     /// Generates a complete string of text.
     ///
     /// This is a convenience method that collects all tokens from the stream
@@ -74,6 +131,25 @@ impl DecoderGenerator {
 
         let text: String = results.iter().map(|v| v.text.as_str()).collect();
         Ok(text)
+    }
+
+    pub fn encode(&self, prompt: &str, config: &GenerationConfig) -> Result<Vec<u32>> {
+        let tokenizer = self.model.tokenizer();
+        let mut tokens = tokenizer
+            .encode(prompt, false)
+            .map_err(|e| anyhow!(e))?
+            .get_ids()
+            .to_vec();
+
+        if config.add_bos_token {
+            if let Some(bos) = self.model.bos_token_id() {
+                if tokens.first() != Some(&bos) {
+                    tokens.insert(0, bos);
+                }
+            }
+        }
+
+        Ok(tokens)
     }
 
     /// Generates a stream of tokens based on a prompt.
@@ -95,41 +171,23 @@ impl DecoderGenerator {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn generate_stream(
+    pub async fn generate_stream_from_tokens(
         &self,
-        prompt: &str,
+        input_tokens: Vec<u32>, // Owned
         config: &GenerationConfig,
     ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
-        debug!("Starting generation for prompt: '{}'", prompt);
-
-        // Encode the prompt and handle special tokens
-        let tokenizer = self.model.tokenizer();
-        let mut tokens = tokenizer
-            .encode(prompt, false)
-            .map_err(|e| anyhow!(e))?
-            .get_ids()
-            .to_vec();
-
-        if config.add_bos_token {
-            if let Some(bos_token_id) = self.model.bos_token_id() {
-                if tokens.first() != Some(&bos_token_id) {
-                    tokens.insert(0, bos_token_id);
-                }
-            } else {
-                warn!("Config requested BOS token, but model has no BOS ID defined.");
-            }
-        }
-
         // Store prompt tokens to echo them back in the stream later
-        let prompt_tokens = tokens.clone();
-        let prompt_len = tokens.len();
-
+        let prompt_tokens = input_tokens.clone();
+        let prompt_len = prompt_tokens.len();
+        let mut tokens = input_tokens;
         // Determine generation limits and cache size
         let max_len = if let Some(new_tokens) = config.max_new_tokens {
             prompt_len + new_tokens
         } else {
             config.max_length
         };
+
+        // TODO: might have to add BOS token because it was trained with BOS
 
         // Legacy loops (like GPT-2) need +1 capacity for the calculation step
         let cache_capacity = match self.model.autoregressive_loop() {
@@ -157,7 +215,7 @@ impl DecoderGenerator {
 
         let context_limit = self.model.context_size();
         let stop_tokens = self.model.stop_token_ids();
-
+        let tokenizer = self.model.tokenizer();
         Ok(try_stream! {
             // yield the prompt tokens
             for &token_id in &prompt_tokens {
@@ -256,7 +314,7 @@ impl DecoderGenerator {
 
             if tokens_generated > 0 && total_generation_time.as_secs_f64() > 0.0 {
                 let tokens_per_sec = tokens_generated as f64 / total_generation_time.as_secs_f64();
-                
+
                 // Calculate average time per token for each stage
                 let avg_total_per_token = total_generation_time / tokens_generated;
                 let avg_sampling_per_token = total_sampling_time / tokens_generated;

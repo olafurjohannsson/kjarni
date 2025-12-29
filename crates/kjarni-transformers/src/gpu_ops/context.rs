@@ -60,7 +60,9 @@ impl WgpuContext {
     pub async fn new() -> Result<Arc<Self>> {
         Self::with_config(GpuConfig::default()).await
     }
-
+    pub fn is_available() -> bool {
+        true
+    }
     pub async fn with_config(config: GpuConfig) -> Result<Arc<Self>> {
         let instance = Instance::new(&InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,

@@ -5,6 +5,7 @@ use crate::tensor::{
     raw_tensor::TensorView,
     {CpuTensor, QuantizedMatrix},
 };
+use crate::weights::raw_to_typed_gguf;
 use anyhow::{Context, Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
@@ -17,9 +18,11 @@ use std::path::Path;
 pub struct ModelWeights {
     pub loader: Box<dyn WeightLoader>,
     pub config_json: String,
+    pub is_gguf: bool,
 }
 
 impl ModelWeights {
+
     pub fn new(path: &Path) -> Result<Self> {
         // 1. Check if the path is a direct GGUF file
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
@@ -38,6 +41,7 @@ impl ModelWeights {
                 return Ok(Self {
                     loader,
                     config_json,
+                    is_gguf: false,
                 });
             }
 
@@ -63,53 +67,7 @@ impl ModelWeights {
         let raw = self.get_raw(tensor_name)?;
         Ok(raw.dtype)
     }
-    /// Loads a tensor and ensures it is in the target DType, converting if necessary.
-    /// This is used to force F16 on GPU or F32 for specific kernels.
-    pub fn get_raw_resolved(&self, name: &str, target_dt: Option<DType>) -> Result<TensorView<'_>> {
-        let raw = self.get_raw(name)?;
-        let current_dt = raw.dtype;
-
-        match target_dt {
-            Some(target) if target != current_dt => {
-                log::trace!(
-                    "Converting tensor '{}' from {:?} to {:?}",
-                    name,
-                    current_dt,
-                    target
-                );
-                // We must dequantize/convert to an owned buffer
-                let typed = self.get_typed_tensor(name)?;
-                let converted_bytes = match target {
-                    DType::F32 => {
-                        bytemuck::cast_slice(&typed.to_array1_f32()?.as_slice().unwrap()).to_vec()
-                    }
-                    DType::F16 => {
-                        let f32_arr = typed.to_array1_f32()?;
-                        let f16_data: Vec<half::f16> =
-                            f32_arr.iter().map(|&v| half::f16::from_f32(v)).collect();
-                        bytemuck::cast_slice(&f16_data).to_vec()
-                    }
-                    DType::BF16 => {
-                        // BF16 -> BF16 is a no-op, but F32 -> BF16 is supported
-                        let f32_arr = typed.to_array1_f32()?;
-                        let bf16_data: Vec<half::bf16> =
-                            f32_arr.iter().map(|&v| half::bf16::from_f32(v)).collect();
-                        bytemuck::cast_slice(&bf16_data).to_vec()
-                    }
-                    _ => unimplemented!("Conversion to {:?} not yet implemented", target),
-                };
-
-                Ok(TensorView {
-                    name: name.to_string(),
-                    bytes: std::borrow::Cow::Owned(converted_bytes),
-                    shape: raw.shape.clone(),
-                    dtype: target,
-                })
-            }
-            _ => Ok(raw), // No override or same type, return zero-copy borrow
-        }
-    }
-
+    
     /// Internal helper to load a GGUF and synthesize its configuration metadata.
     fn from_gguf_file(path: &Path) -> Result<Self> {
         let loader = GgufLoader::new(path)?;
@@ -122,6 +80,7 @@ impl ModelWeights {
         Ok(Self {
             loader: Box::new(loader),
             config_json,
+            is_gguf: true,
         })
     }
 
@@ -132,7 +91,17 @@ impl ModelWeights {
 
         // These keys are standard in Llama GGUF files.
         let arch = loader.get_string("general.architecture").unwrap_or("llama");
-
+        let rope_scaling = if loader.get_string(&format!("{}.rope.scaling.type", arch)).is_some() {
+            Some(json!({
+                "rope_type": loader.get_string(&format!("{}.rope.scaling.type", arch)).unwrap_or("llama3"),
+                "factor": loader.get_f32(&format!("{}.rope.scaling.factor", arch)).unwrap_or(32.0),
+                "low_freq_factor": loader.get_f32(&format!("{}.rope.scaling.low_freq_factor", arch)).unwrap_or(1.0),
+                "high_freq_factor": loader.get_f32(&format!("{}.rope.scaling.high_freq_factor", arch)).unwrap_or(4.0),
+                "original_max_position_embeddings": loader.get_u32(&format!("{}.rope.scaling.orig_ctx_len", arch)).unwrap_or(8192),
+            }))
+        } else {
+            None
+        };
         // Map GGUF keys to HF JSON keys
         let config = json!({
             "architecture": arch,
@@ -142,14 +111,16 @@ impl ModelWeights {
             "num_hidden_layers": loader.get_u32(&format!("{}.block_count", arch)),
             "num_key_value_heads": loader.get_u32(&format!("{}.attention.head_count_kv", arch)),
             "max_position_embeddings": loader.get_u32(&format!("{}.context_length", arch)),
-            "rope_theta": loader.get_f32(&format!("{}.attention.layer_norm_rms_epsilon", arch)).unwrap_or(1e-5), // Some map to eps
+            "rope_theta": loader.get_f32(&format!("{}.rope.freq_base", arch)).unwrap_or(1e-5), // Some map to eps
+            "rope_scaling": rope_scaling,
             "rms_norm_eps": loader.get_f32(&format!("{}.attention.layer_norm_rms_epsilon", arch)).unwrap_or(1e-5),
             "vocab_size": 128256, // Usually safe to hardcode or find in metadata
             "bos_token_id": 128000,
             "eos_token_id": 128001,
         });
-
-        Ok(config.to_string())
+        let json_str = config.to_string();
+        println!("Synthesized GGUF config: {}", json_str);
+        Ok(json_str)
     }
 
     /// Checks if a tensor with the given name exists in the model files.
@@ -170,6 +141,10 @@ impl ModelWeights {
     /// This is the primary and most efficient method for loading tensors for CPU computation,
     /// as it avoids unnecessary type conversions and allocations.
     pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
+        if self.is_gguf {
+            let raw = self.loader.get_raw(name)?;
+            return raw_to_typed_gguf(raw, true);
+        }
         let raw = self.loader.get_raw(name)?;
         raw_to_typed(raw)
     }
@@ -201,7 +176,7 @@ impl ModelWeights {
 
 /// Converts a `TensorView` into a `CpuTensor`, performing the necessary parsing.
 /// Safely cast bytes to a typed slice, handling unaligned data
-fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
+pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
         slice.to_vec()
     } else {
@@ -212,7 +187,7 @@ fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     }
 }
 
-fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
+pub fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
     match raw.dtype {
         DType::F32 => {
             let data: Vec<f32> = cast_or_copy(&raw.bytes);

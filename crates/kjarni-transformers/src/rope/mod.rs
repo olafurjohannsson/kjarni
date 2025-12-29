@@ -8,7 +8,7 @@
 //! - No learned parameters (purely geometric)
 //! - Applied to Q and K, not V
 //! - Different rotation frequencies for different dimensions
-
+pub mod loader;
 use crate::models::base::RopeScalingConfig;
 use ndarray::{s, Array1, Array2, Array3, Array4};
 use std::f32::consts::PI;

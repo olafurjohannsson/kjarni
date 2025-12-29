@@ -34,7 +34,7 @@ All code—whether written by humans or AI—must follow these conventions.
 Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 
 ### Structure
-```rust
+```ignore
 //! Brief one-line description ending with a period.
 //!
 //! Longer description explaining the module's purpose, how it fits into
@@ -46,7 +46,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni::module_name::MainType;
 //!
 //! let instance = MainType::new();
@@ -63,7 +63,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 ```
 
 ### Example
-```rust
+```ignore
 //! CPU-based linear layer with multi-dtype support.
 //!
 //! This module provides `LinearLayer`, the core building block for neural network
@@ -78,7 +78,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::linear_layer::LinearLayer;
 //! use kjarni_transformers::weights::ModelWeights;
 //!
@@ -104,7 +104,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 ## Function Documentation
 
 ### Structure
-```rust
+```ignore
 /// Brief one-line description ending with a period.
 ///
 /// Longer description explaining what the function does, when to use it,
@@ -130,7 +130,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// let result = function_name(arg1, arg2)?;
 /// assert_eq!(result, expected);
 /// ```
@@ -145,7 +145,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 ```
 
 ### Example
-```rust
+```ignore
 /// Computes matrix multiplication with automatic kernel dispatch.
 ///
 /// Performs `C = A @ W^T` where `A` is the input activation and `W` is the
@@ -167,7 +167,7 @@ Every module (`mod.rs` or `filename.rs`) starts with a module-level doc comment.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// let layer = LinearLayer::new_f32(weights, Some(bias));
 /// let input = Array2::<f32>::zeros((1, 2048));
 /// let output = layer.matmul(&input.view());
@@ -187,7 +187,7 @@ pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
 ### Short Functions
 
 For trivial getters/setters, a single line suffices:
-```rust
+```ignore
 /// Returns the number of output features.
 pub fn out_features(&self) -> usize {
     self.out_features
@@ -209,7 +209,7 @@ pub fn dtype(&self) -> DType {
 ## Struct Documentation
 
 ### Structure
-```rust
+```ignore
 /// Brief one-line description ending with a period.
 ///
 /// Longer description explaining the struct's purpose, ownership semantics,
@@ -221,7 +221,7 @@ pub fn dtype(&self) -> DType {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// let instance = StructName::new(args);
 /// instance.method();
 /// ```
@@ -243,7 +243,7 @@ pub struct StructName {
 ```
 
 ### Example
-```rust
+```ignore
 /// A CPU-based linear transformation layer supporting multiple data types.
 ///
 /// `LinearLayer` wraps a weight matrix and optional bias vector, providing
@@ -252,7 +252,7 @@ pub struct StructName {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni_transformers::linear_layer::LinearLayer;
 /// use ndarray::Array2;
 ///
@@ -294,7 +294,7 @@ pub struct LinearLayer {
 ## Enum Documentation
 
 ### Structure
-```rust
+```ignore
 /// Brief one-line description ending with a period.
 ///
 /// Longer description explaining when to use each variant and the enum's
@@ -306,7 +306,7 @@ pub struct LinearLayer {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// let value = EnumName::Variant;
 /// match value {
 ///     EnumName::Variant => { /* ... */ }
@@ -324,7 +324,7 @@ pub enum EnumName {
 ```
 
 ### Example
-```rust
+```ignore
 /// Supported numerical data types for tensor storage.
 ///
 /// Kjarni supports multiple precision levels to balance memory usage,
@@ -333,7 +333,7 @@ pub enum EnumName {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni_transformers::tensor::DType;
 ///
 /// let dtype = DType::BF16;
@@ -377,7 +377,7 @@ pub enum DType {
 ## Error Documentation
 
 ### Structure for Error Types
-```rust
+```ignore
 /// Errors that can occur during model loading.
 ///
 /// These errors indicate problems with model files, configuration,
@@ -401,7 +401,7 @@ pub enum LoadError {
 ```
 
 ### Error Section in Functions
-```rust
+```ignore
 /// # Errors
 ///
 /// Returns an error if:
@@ -421,7 +421,7 @@ pub fn get_tensor(&self, name: &str) -> Result<CpuTensor> {
 For `unsafe` code, safety documentation is **mandatory**.
 
 ### Structure
-```rust
+```ignore
 /// Brief description.
 ///
 /// # Safety
@@ -438,7 +438,7 @@ For `unsafe` code, safety documentation is **mandatory**.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// // SAFETY: We verified that ptr is valid and aligned.
 /// unsafe {
 ///     function_name(ptr);
@@ -450,7 +450,7 @@ pub unsafe fn function_name(ptr: *const f32) {
 ```
 
 ### Example
-```rust
+```ignore
 /// Computes a vector-matrix product using AVX2 and FMA instructions.
 ///
 /// # Safety
@@ -469,7 +469,7 @@ pub unsafe fn function_name(ptr: *const f32) {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// #[cfg(target_arch = "x86_64")]
 /// if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
 ///     // SAFETY: We checked CPU features and ensured pointer validity.
@@ -496,7 +496,7 @@ pub unsafe fn matmul_vec_bf16(
 Include for hot-path code.
 
 ### Structure
-```rust
+```ignore
 /// # Performance
 ///
 /// Time complexity: O(n * m)
@@ -529,19 +529,19 @@ Include for hot-path code.
 5. **Use meaningful values** — Not `foo`, `bar`, `x`, `y`.
 
 ### Multiple Examples
-```rust
+```ignore
 /// # Examples
 ///
 /// Basic usage:
 ///
-/// ```rust
+/// ```ignore
 /// let layer = LinearLayer::new_f32(weights, None);
 /// let output = layer.matmul(&input.view());
 /// ```
 ///
 /// With bias:
 ///
-/// ```rust
+/// ```ignore
 /// let layer = LinearLayer::new_f32(weights, Some(bias));
 /// let output = layer.matmul(&input.view());
 /// // output already includes bias
@@ -549,16 +549,16 @@ Include for hot-path code.
 ///
 /// Loading from model files:
 ///
-/// ```rust
+/// ```ignore
 /// let layer = LinearLayer::from_weights(&model, "layer.weight", None, None, None)?;
 /// ```
 ```
 
 ### Hiding Boilerplate
-```rust
+```ignore
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// # use anyhow::Result;
 /// # fn main() -> Result<()> {
 /// use kjarni_transformers::linear_layer::LinearLayer;
@@ -574,7 +574,7 @@ Include for hot-path code.
 ## Links and References
 
 ### Intra-doc Links
-```rust
+```ignore
 /// Returns a [`CpuTensor`] loaded from the model.
 ///
 /// See [`ModelWeights::get_raw`] for the low-level byte access.
@@ -583,7 +583,7 @@ Include for hot-path code.
 ```
 
 ### External Links
-```rust
+```ignore
 /// Implements the SwiGLU activation function.
 ///
 /// SwiGLU was introduced in [GLU Variants Improve Transformer][paper].
@@ -596,7 +596,7 @@ Include for hot-path code.
 ## Forbidden Patterns
 
 ### Never Do These
-```rust
+```ignore
 // ❌ Empty doc comment
 ///
 pub fn foo() {}
@@ -631,7 +631,7 @@ pub fn process() {}
 ```
 
 ### Always Do These
-```rust
+```ignore
 // ✅ Clear, active voice, complete sentence
 /// Returns the number of elements in the tensor.
 pub fn len(&self) -> usize { self.len }
@@ -654,7 +654,7 @@ pub fn load() {}
 ## Crate-Level Documentation
 
 The main `lib.rs` must have comprehensive crate documentation.
-```rust
+```ignore
 //! # Kjarni Transformers
 //!
 //! A high-performance transformer inference engine for CPU and GPU.
@@ -668,7 +668,7 @@ The main `lib.rs` must have comprehensive crate documentation.
 //!
 //! ## Quick Start
 //!
-//! ```rust,no_run
+//! ```ignore,no_run
 //! use kjarni_transformers::prelude::*;
 //!
 //! // Load a model

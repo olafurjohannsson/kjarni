@@ -2,7 +2,7 @@
 //!
 //! Formats conversations according to Llama 3's expected format.
 
-use kjarni_transformers::{ChatTemplate, Conversation, Role, Message};
+use crate::{ChatTemplate, Conversation, Role, Message};
 
 /// Chat template for Llama 3 Instruct models
 ///

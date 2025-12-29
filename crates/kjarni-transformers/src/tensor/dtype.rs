@@ -21,6 +21,9 @@ pub enum DType {
 }
 
 impl DType {
+    pub fn is_quantized(&self) -> bool {
+        matches!(self, DType::Q8_0 | DType::Q4_K | DType::Q6_K)
+    }
     /// Maps a `safetensors::Dtype` to our internal `DType`.
     pub fn from_safetensors(dtype: safetensors::Dtype) -> Result<Self> {
         match dtype {

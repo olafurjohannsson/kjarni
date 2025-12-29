@@ -24,6 +24,7 @@ pub mod prelude {
         cpu::{
             DecoderAttention,
             DecoderLayer,
+            CpuRoPEDecoderLayer,
             CpuDecoderBackend,
         },
         gpu::{

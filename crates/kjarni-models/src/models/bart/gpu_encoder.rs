@@ -111,7 +111,7 @@ impl BartGpuEncoder {
         } else {
             log::info!("Encoder: Loading embeddings to GPU.");
 
-            let gpu_weights = GpuEmbeddingWeights::from_layout(
+            let gpu_weights = GpuEmbeddingWeights::new(
                 context,
                 weights,
                 &layout.token_embedding,

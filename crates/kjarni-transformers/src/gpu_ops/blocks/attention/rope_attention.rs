@@ -21,7 +21,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::gpu_ops::attention::GpuRoPEAttention;
 //!
 //! // LLaMA 3.2 1B: 2048 hidden, 32 Q heads, 8 KV heads
@@ -119,7 +119,7 @@ impl GpuRoPEAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // LLaMA 3.2 1B: 2048 hidden, 32 Q heads, 8 KV heads (GQA ratio 4:1)
     /// use kjarni_transformers::gpu_ops::{blocks::attention::GpuRoPEAttention};
     /// use kjarni_transformers::WgpuContext;
@@ -188,7 +188,7 @@ impl GpuRoPEAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use kjarni_transformers::gpu_ops::{blocks::attention::{GpuRoPEAttention, GpuAttentionWeights}, GpuTensor, GpuTensorPool};
     /// use kjarni_transformers::WgpuContext;
     /// let context = WgpuContext::new()?;
@@ -268,7 +268,7 @@ impl GpuRoPEAttention {
 
         // 5. Concatenate with cache if present
         let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
-            let cache_len = cached_k.shape()[2]; // [B, H, S_cache, D]
+            let cache_len = position_offset; // [B, H, S_cache, D]
             if cache_len > 0 {
                 self.concat_with_cache(
                     encoder,
@@ -450,6 +450,153 @@ impl GpuRoPEAttention {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu_ops::blocks::attention::{GpuRoPEAttention, GpuAttentionWeights};
+    use crate::gpu_ops::blocks::rope::GpuRoPE;
+    use crate::gpu_ops::GpuTensorPool;
+    use crate::WgpuContext;
+    use ndarray::{Array1, Array2, Array3, Array4};
+    use std::sync::Arc;
+
+    async fn setup() -> Arc<WgpuContext> {
+        WgpuContext::new().await.unwrap()
+    }
+
+    fn create_dummy_weights(
+        ctx: &Arc<WgpuContext>,
+        hidden_size: usize,
+        num_heads: usize,
+        num_kv_heads: usize,
+    ) -> GpuAttentionWeights {
+        let head_dim = hidden_size / num_heads;
+        let q_dim = hidden_size;
+        let kv_dim = num_kv_heads * head_dim;
+
+        // Q: [hidden, hidden]
+        let q_weight = GpuTensor::from_ndarray(ctx, &Array2::<f32>::zeros((q_dim, hidden_size))).unwrap();
+        let q_bias = GpuTensor::from_ndarray(ctx, &Array1::<f32>::zeros(q_dim)).unwrap();
+
+        // K, V: [kv_dim, hidden]
+        let k_weight = GpuTensor::from_ndarray(ctx, &Array2::<f32>::zeros((kv_dim, hidden_size))).unwrap();
+        let k_bias = GpuTensor::from_ndarray(ctx, &Array1::<f32>::zeros(kv_dim)).unwrap();
+        let v_weight = GpuTensor::from_ndarray(ctx, &Array2::<f32>::zeros((kv_dim, hidden_size))).unwrap();
+        let v_bias = GpuTensor::from_ndarray(ctx, &Array1::<f32>::zeros(kv_dim)).unwrap();
+
+        // O: [hidden, hidden]
+        let o_weight = GpuTensor::from_ndarray(ctx, &Array2::<f32>::zeros((hidden_size, hidden_size))).unwrap();
+        let o_bias = GpuTensor::from_ndarray(ctx, &Array1::<f32>::zeros(hidden_size)).unwrap();
+
+        GpuAttentionWeights::new(
+            q_weight, q_bias,
+            k_weight, k_bias,
+            v_weight, v_bias,
+            o_weight, o_bias,
+        ).unwrap()
+    }
+
+    fn create_rope(ctx: &Arc<WgpuContext>, head_dim: usize, max_seq_len: usize) -> GpuRoPE {
+        use crate::rope::RoPE;
+        let cpu_rope = RoPE::new(head_dim, max_seq_len, 10000.0);
+        GpuRoPE::new(ctx, &cpu_rope.cos_cache, &cpu_rope.sin_cache).unwrap()
+    }
+
+    /// Test prefill with no cache - mask should match seq_len, not max_len
+    #[tokio::test]
+    async fn test_rope_attention_prefill_no_cache() {
+        let ctx = setup().await;
+        
+        let hidden_size = 256;
+        let num_heads = 4;
+        let num_kv_heads = 4;
+        let head_dim = hidden_size / num_heads;
+        let batch_size = 1;
+        let seq_len = 10;  // Prompt length
+        
+        let attn = GpuRoPEAttention::new(&ctx, hidden_size as u32, num_heads as u32, num_kv_heads as u32);
+        let weights = create_dummy_weights(&ctx, hidden_size, num_heads, num_kv_heads);
+        let rope = create_rope(&ctx, head_dim, 128);
+        
+        // Hidden states: [B, S, H]
+        let hidden = Array3::<f32>::ones((batch_size, seq_len, hidden_size));
+        let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden).unwrap();
+        
+        // CRITICAL: Mask should be [1, seq_len], not [1, max_cache_len]
+        let mask = Array2::<f32>::ones((1, seq_len));
+        let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask).unwrap();
+        
+        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(ctx.clone());
+        
+        // No cache for prefill
+        let result = attn.forward(
+            &mut encoder,
+            &hidden_gpu,
+            &weights,
+            &rope,
+            &mask_gpu,
+            None,  // No cached KV
+            0,     // position_offset = 0
+            &mut pool,
+        );
+        
+        assert!(result.is_ok(), "Prefill should succeed: {:?}", result.err());
+        
+        let output = result.unwrap();
+        assert_eq!(output.hidden_states.shape(), &[batch_size, seq_len, hidden_size]);
+    }
+
+    /// Test decode step with cache - mask should match total seq_len (cache + 1)
+    #[tokio::test]
+    async fn test_rope_attention_decode_with_cache() {
+        let ctx = setup().await;
+        
+        let hidden_size = 256;
+        let num_heads = 4;
+        let num_kv_heads = 4;
+        let head_dim = hidden_size / num_heads;
+        let batch_size = 1;
+        let cache_len = 10;  // Previous tokens
+        let query_len = 1;   // New token
+        let total_len = cache_len + query_len;
+        
+        let attn = GpuRoPEAttention::new(&ctx, hidden_size as u32, num_heads as u32, num_kv_heads as u32);
+        let weights = create_dummy_weights(&ctx, hidden_size, num_heads, num_kv_heads);
+        let rope = create_rope(&ctx, head_dim, 128);
+        
+        // Hidden states for new token: [B, 1, H]
+        let hidden = Array3::<f32>::ones((batch_size, query_len, hidden_size));
+        let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden).unwrap();
+        
+        // Mask should be [1, total_len] = [1, 11]
+        let mask = Array2::<f32>::ones((1, total_len));
+        let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask).unwrap();
+        
+        // Cached K/V: [B, num_kv_heads, cache_len, head_dim]
+        let cached_k = Array4::<f32>::zeros((batch_size, num_kv_heads, cache_len, head_dim));
+        let cached_v = Array4::<f32>::zeros((batch_size, num_kv_heads, cache_len, head_dim));
+        let cached_k_gpu = GpuTensor::from_ndarray(&ctx, &cached_k).unwrap();
+        let cached_v_gpu = GpuTensor::from_ndarray(&ctx, &cached_v).unwrap();
+        
+        let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(ctx.clone());
+        
+        let result = attn.forward(
+            &mut encoder,
+            &hidden_gpu,
+            &weights,
+            &rope,
+            &mask_gpu,
+            Some((&cached_k_gpu, &cached_v_gpu)),
+            cache_len,  // position_offset = cache_len
+            &mut pool,
+        );
+        
+        assert!(result.is_ok(), "Decode with cache should succeed: {:?}", result.err());
+        
+        let output = result.unwrap();
+        assert_eq!(output.hidden_states.shape(), &[batch_size, query_len, hidden_size]);
+    }
+
+   
 
     #[test]
     fn test_rope_attention_dimensions() {

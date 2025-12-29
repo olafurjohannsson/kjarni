@@ -50,7 +50,7 @@ impl GpuTransformerEncoder {
         )?;
 
         // 3. Load Embeddings for GPU
-        let embedding_weights = GpuEmbeddingWeights::from_layout(
+        let embedding_weights = GpuEmbeddingWeights::new(
             &context,
             weights,
             &layout.token_embedding,

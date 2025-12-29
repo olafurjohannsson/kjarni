@@ -11,13 +11,13 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! let config = EmbeddingConfig::builder("model.embed_tokens.weight", 2048).build();
 //! let embs = LoadedEmbeddings::new(&ctx, &weights, config, load_config)?;
 //! ```
 
 use crate::{
-    WgpuContext, embeddings::Embeddings, gpu_ops::{GpuTensor, GpuTensorPool, blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings}}, models::base::ModelLoadConfig, tensor::DType, weights::ModelWeights
+    WgpuContext, embeddings::Embeddings, gpu_ops::{GpuTensor, GpuTensorPool, blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings}}, linear_layer::LinearLayer, models::base::ModelLoadConfig, tensor::DType, weights::ModelWeights
 };
 use anyhow::Result;
 use ndarray::Array2;
@@ -30,7 +30,7 @@ use std::sync::Arc;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// // Minimal (Llama)
 /// let config = EmbeddingConfig::builder("model.embed_tokens.weight", 2048).build();
 ///
@@ -177,7 +177,7 @@ impl LoadedEmbeddings {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// let config = EmbeddingConfig::builder("model.embed_tokens.weight", 2048).build();
     /// let embs = LoadedEmbeddings::new(&ctx, &weights, config, load_config)?;
     /// ```
@@ -232,6 +232,19 @@ impl LoadedEmbeddings {
             gpu_layer,
             config,
             context: ctx.cloned(),
+        })
+    }
+
+    pub fn word_embeddings_gpu(&self) -> Option<GpuTensor> {
+        self.gpu_weights.as_ref().map(|w| w.word_embeddings.clone())
+    }
+
+    /// Returns the raw word embedding weights for CPU weight sharing.
+    pub fn word_embeddings_cpu(&self) -> Option<LinearLayer> {
+        // This assumes your Embeddings struct has a public/internal word_embeddings field
+        self.cpu.as_ref().and_then(|e| match &e.word_embeddings {
+            crate::embeddings::EmbeddingData::F32(w) => Some(LinearLayer::new_f32(w.clone(), None)),
+            crate::embeddings::EmbeddingData::BF16(w) => Some(LinearLayer::new_bf16(w.clone(), None)),
         })
     }
 

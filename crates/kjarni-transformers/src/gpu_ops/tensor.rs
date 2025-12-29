@@ -85,7 +85,60 @@ impl GpuTensor {
         // Step 1: Get the raw, zero-copy view of the tensor from the file.
         let raw = weights.get_raw(name)?;
         let current_dt = raw.dtype;
+        if current_dt.is_quantized() {
+            log::info!("Tensor '{}' is quantized as {:?}. Dequantizing for GPU upload.", name, current_dt);
+            let target = target_dt.unwrap_or(DType::F32);
+            log::info!(
+                "Dequantizing tensor '{}' from {:?} to {:?} for GPU upload",
+                name,
+                current_dt,
+                target
+            );
 
+            // Use get_typed_tensor which handles dequantization
+            let typed = weights.get_typed_tensor(name)?;
+            let shape = typed.shape().to_vec();
+
+            // Dequantize to f32 first
+            let f32_data = match typed {
+                t if t.shape().len() == 2 => t.to_array2_f32()?,
+                t if t.shape().len() == 1 => {
+                    let arr1 = t.to_array1_f32()?;
+                    // Reshape 1D to 2D for consistency
+                    ndarray::Array2::from_shape_vec((1, arr1.len()), arr1.to_vec())?
+                }
+                _ => anyhow::bail!("Unsupported tensor rank for dequantization"),
+            };
+
+            // Convert to target dtype
+            let converted_bytes = match target {
+                DType::F32 => bytemuck::cast_slice(f32_data.as_slice().unwrap()).to_vec(),
+                DType::BF16 => {
+                    let bf16_data: Vec<u16> = f32_data
+                        .iter()
+                        .map(|&v| half::bf16::from_f32(v).to_bits())
+                        .collect();
+                    bytemuck::cast_slice(&bf16_data).to_vec()
+                }
+                DType::F16 => {
+                    let f16_data: Vec<u16> = f32_data
+                        .iter()
+                        .map(|&v| half::f16::from_f32(v).to_bits())
+                        .collect();
+                    bytemuck::cast_slice(&f16_data).to_vec()
+                }
+                _ => anyhow::bail!("Cannot convert to {:?} for GPU", target),
+            };
+
+            let converted_raw = TensorView {
+                name: name.to_string(),
+                bytes: Cow::Owned(converted_bytes),
+                shape,
+                dtype: target,
+            };
+
+            return GpuTensor::from_raw(ctx, &converted_raw, label);
+        }
         // Step 2: Check if a conversion is needed.
         if let Some(target) = target_dt {
             if target != current_dt {
@@ -240,7 +293,12 @@ impl GpuTensor {
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
             });
-        Ok(Self::new_allocation(Arc::new(buffer), shape, dtype, context.clone()))
+        Ok(Self::new_allocation(
+            Arc::new(buffer),
+            shape,
+            dtype,
+            context.clone(),
+        ))
     }
     /// Internal constructor - keeps same ID (view operation)
     fn new_view(

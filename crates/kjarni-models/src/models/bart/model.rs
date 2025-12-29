@@ -177,9 +177,11 @@ impl BartModel {
                 let gpu_decoder = BartGpuDecoder::new(&ctx, &weights, config.clone(), load_config)?;
 
                 // Upload LM head and bias to GPU
-                let gpu_lm_head = Some(GpuTensor::from_raw(
+                let gpu_lm_head = Some(GpuTensor::from_model_weights(
                     &ctx,
-                    &weights.get_raw_resolved(&layout.lm_head, load_config.target_dtype)?,
+                    &weights,
+                    &layout.lm_head,
+                    load_config.target_dtype,
                     "lm_head",
                 )?);
 

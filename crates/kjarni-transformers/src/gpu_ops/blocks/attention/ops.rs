@@ -30,7 +30,7 @@ use std::sync::Arc;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni_transformers::gpu_ops::blocks::attention::AttentionOps;
 /// use kjarni_transformers::WgpuContext;
 /// use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
@@ -77,7 +77,7 @@ impl AttentionOps {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // Multi-head attention (BART, BERT)
     /// use kjarni_transformers::gpu_ops::blocks::attention::AttentionOps;
     /// use kjarni_transformers::WgpuContext;

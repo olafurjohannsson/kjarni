@@ -8,6 +8,10 @@ use anyhow::Result;
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
+pub mod rope_decoder_layer;
+
+pub use rope_decoder_layer::CpuRoPEDecoderLayer;
+
 #[cfg(test)]
 mod tests;
 

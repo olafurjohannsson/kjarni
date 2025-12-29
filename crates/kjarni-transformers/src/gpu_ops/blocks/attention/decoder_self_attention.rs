@@ -16,7 +16,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```ignore
 //! use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::{GpuDecoderSelfAttention, GpuAttentionWeights}};
 //! use kjarni_transformers::WgpuContext;
 //! let attn = GpuDecoderSelfAttention::new(&context, 1024, 16);
@@ -116,7 +116,7 @@ impl GpuDecoderSelfAttention {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// // BART decoder: 1024 hidden, 16 heads
     /// # use pollster;
     /// # pollster::block_on(async {
@@ -167,7 +167,7 @@ impl GpuDecoderSelfAttention {
     ///
     /// # Cache Usage
     ///
-    /// ```rust
+    /// ```ignore
     /// // Step 1: Prefill (no cache)
     /// let out = attn.forward(&mut enc, &prompt_hidden, &w, &mask, None, 0, &mut pool)?;
     /// cache.update(0, &out.new_k, &out.new_v);

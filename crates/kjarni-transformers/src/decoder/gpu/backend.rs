@@ -55,12 +55,28 @@ impl GpuDecoderBackend {
 
         // 3. Setup Frame Context
         let pool = self.context.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
 
         // 4. Ask Model for Mask
-        let max_len = gpu_cache.max_seq_len();
-        let attention_mask = ops.get_attention_mask(&mut frame, seq_len, max_len)?;
+        // let max_len = gpu_cache.max_seq_len();
+        // let attention_mask = ops.get_attention_mask(&mut frame, seq_len, max_len)?;
+        let cache_len = gpu_cache.get_seq_length();
+    let logical_key_len = cache_len + input_len;
+    
+    // Determine mask size based on model type
+    let mask_size = match model.autoregressive_loop() {
+        AutoregressiveLoop::Pipelined => logical_key_len,  // Llama: mask matches actual keys
+        AutoregressiveLoop::Legacy => gpu_cache.max_seq_len(),  // GPT-2: mask matches cache capacity
+    };
+
+    log::info!(
+        "Mask creation: cache_len={}, input_len={}, logical_key_len={}, mask_size={}, loop={:?}",
+        cache_len, input_len, logical_key_len, mask_size, model.autoregressive_loop()
+    );
+    
+    let attention_mask = ops.get_attention_mask(&mut frame, logical_key_len, mask_size)?;
+
 
         // 5. Run Decoder Stack
         let (encoder, pool) = frame.resources();
@@ -123,8 +139,18 @@ impl GpuDecoderBackend {
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
 
-        let max_len = gpu_cache.max_seq_len();
-        let attention_mask = ops.get_attention_mask(&mut frame, seq_len, max_len)?;
+        // let max_len = gpu_cache.max_seq_len();
+        // let attention_mask = ops.get_attention_mask(&mut frame, seq_len, max_len)?;
+        let cache_len = gpu_cache.get_seq_length();
+    let logical_key_len = cache_len + input_len;
+    
+    let mask_size = match model.autoregressive_loop() {
+        AutoregressiveLoop::Pipelined => logical_key_len,
+        AutoregressiveLoop::Legacy => gpu_cache.max_seq_len(),
+    };
+    
+    let attention_mask = ops.get_attention_mask(&mut frame, logical_key_len, mask_size)?;
+
 
         let (encoder, pool) = frame.resources();
         let _ = ops.decoder().forward(
@@ -171,7 +197,7 @@ impl GpuDecoderBackend {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(MapMode::Read, move |v| { let _ = tx.send(v); });
         
-        self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
         
         let data = slice.get_mapped_range();

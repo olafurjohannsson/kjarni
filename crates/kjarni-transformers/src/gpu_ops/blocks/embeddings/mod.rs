@@ -43,47 +43,6 @@ pub struct GpuEmbeddingWeights {
 }
 
 impl GpuEmbeddingWeights {
-    pub fn from_layout(
-        context: &Arc<WgpuContext>,
-        weights: &ModelWeights,
-        word_name: &str,
-        pos_name: Option<&str>,
-        type_name: Option<&str>,
-        target_dtype: Option<DType>,
-    ) -> Result<Self> {
-        let load_resolved = |name: &str, label: &str| -> Result<GpuTensor> {
-            let resolved_raw = weights.get_raw_resolved(name, target_dtype)?;
-            GpuTensor::from_raw(context, &resolved_raw, label)
-        };
-
-        let word_embeddings = load_resolved(word_name, "word_embeddings")?;
-
-        let position_embeddings = if let Some(n) = pos_name {
-            if weights.contains(n) {
-                Some(load_resolved(n, "pos_embeddings")?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let token_type_embeddings = if let Some(n) = type_name {
-            if weights.contains(n) {
-                Some(load_resolved(n, "type_embeddings")?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        Ok(Self {
-            word_embeddings,
-            position_embeddings,
-            token_type_embeddings,
-        })
-    }
 
     /// Creates and uploads embedding weights to the GPU from CPU-side ndarrays.
     pub fn new(
@@ -94,19 +53,24 @@ impl GpuEmbeddingWeights {
         type_name: Option<&str>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
-        
-        
-        // Word Embeddings
-        let word_tensor: TensorView<'_> = weights.get_raw_resolved(word_name, target_dtype)?;
-        let word_embeddings: GpuTensor = GpuTensor::from_raw(context, &word_tensor, "word_embeddings")?;
+        // Use from_model_weights - it handles quantized dequantization automatically
+        let word_embeddings = GpuTensor::from_model_weights(
+            context, 
+            weights, 
+            word_name, 
+            target_dtype, 
+            "word_embeddings"
+        )?;
 
-
-        // Always use F32 for position and type embeddings
         let position_embeddings = if let Some(name) = pos_name {
             if weights.contains(name) {
-                // Force F32 for position embeddings (used in addition kernel)
-                let raw = weights.get_raw_resolved(name, Some(DType::F32))?;
-                Some(GpuTensor::from_raw(context, &raw, "pos_embeddings")?)
+                Some(GpuTensor::from_model_weights(
+                    context,
+                    weights,
+                    name,
+                    Some(DType::F32), // Position embeddings use F32
+                    "pos_embeddings",
+                )?)
             } else {
                 None
             }
@@ -116,9 +80,13 @@ impl GpuEmbeddingWeights {
 
         let token_type_embeddings = if let Some(name) = type_name {
             if weights.contains(name) {
-                // Force F32 for type embeddings
-                let raw = weights.get_raw_resolved(name, Some(DType::F32))?;
-                Some(GpuTensor::from_raw(context, &raw, "type_embeddings")?)
+                Some(GpuTensor::from_model_weights(
+                    context,
+                    weights,
+                    name,
+                    Some(DType::F32),
+                    "type_embeddings",
+                )?)
             } else {
                 None
             }
@@ -132,6 +100,7 @@ impl GpuEmbeddingWeights {
             token_type_embeddings,
         })
     }
+
 }
 
 /// A GPU-accelerated Embeddings block.

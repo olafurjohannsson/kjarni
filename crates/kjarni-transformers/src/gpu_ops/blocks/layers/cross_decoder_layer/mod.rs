@@ -10,7 +10,7 @@ use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 
-pub struct GpuCrossAttentionDecoderLayer {
+pub struct GpuCrossDecoderLayer {
     pub self_attn: GpuDecoderSelfAttention,
     pub self_attn_weights: GpuAttentionWeights,
     pub self_attn_norm: GpuNormalization,
@@ -26,7 +26,7 @@ pub struct GpuCrossAttentionDecoderLayer {
     pub add: GpuAdd,
 }
 
-impl GpuCrossAttentionDecoderLayer {
+impl GpuCrossDecoderLayer {
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,

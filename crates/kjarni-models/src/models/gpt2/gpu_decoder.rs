@@ -90,38 +90,7 @@ impl Gpt2GpuDecoder {
             true,   // load_gpu
             target_dtype,
         )?;
-        // let (cpu_embeddings, embedding_weights, embeddings) = if load_config.offload_embeddings {
-        //     log::info!("Optimization: Loading Embedding weights to CPU RAM only.");
 
-        //     let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        //     let position_embeddings_cpu = if let Some(pos_w) = &decoder_layout.position_embedding {
-        //         Some(weights.get_array2(pos_w)?)
-        //     } else {
-        //         None
-        //     };
-
-        //     let cpu_embs = Embeddings::new(
-        //         kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
-        //         position_embeddings_cpu,
-        //         None,
-        //     );
-
-        //     (Some(cpu_embs), None, None)
-        // } else {
-        //     log::info!("Loading Embedding weights to VRAM.");
-        //     let ew = GpuEmbeddingWeights::from_layout(
-        //         context,
-        //         weights,
-        //         &layout.token_embedding,
-        //         decoder_layout.position_embedding.as_deref(),
-        //         None,
-        //         load_config.target_dtype,
-        //     )?;
-        //     let em = GpuEmbeddings::new(context)?;
-        //     (None, Some(ew), Some(em))
-        // };
-
-        // 2. Final Layer Norm
         let final_layer_norm =
             GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
 
@@ -296,6 +265,9 @@ impl Gpt2GpuDecoder {
 
 #[async_trait(?Send)]
 impl GpuDecoder for Gpt2GpuDecoder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     async fn embed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
