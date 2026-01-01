@@ -101,3 +101,26 @@
 - [ ] Example: Streaming generation
 - [ ] Example: Cancellation handling
 - [ ] Example: Custom model loading
+
+
+
+
+🏆 The Optimization Priority Matrix
+Priority	Component	Optimization	Impact	Complexity	Why it fixes "Large Models"
+1	Attention	Zero-Copy KV Update	🛑 Critical	Medium	Currently, forward_2 copies the entire history every token. On 7B models, this copy takes longer than the math.
+2	Kernels	AVX2 RoPE (In-Place)	🔥 High	Low	Allocating k_rope (size Batch*Seq*Dim) every step creates allocation jitter.
+3	Kernels	AVX2 SwiGLU Fusion	🔥 High	Medium	Fusing Gate * Sigmoid(Gate) * Up into one loop keeps data in L1 cache.
+4	Kernels	AVX2 RMSNorm	⚡ Medium	Low	Scalar RMSNorm is bandwidth-bound. AVX2 makes it instant.
+5	Logic	Pre-Scaling Q	⚡ Medium	Very Low	Changes 
+O
+(
+N
+)
+O(N)
+ math to 
+O
+(
+1
+)
+O(1)
+ math in the attention loop.

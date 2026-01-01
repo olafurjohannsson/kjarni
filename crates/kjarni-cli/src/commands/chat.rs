@@ -5,7 +5,9 @@ use futures_util::StreamExt;
 use std::io::{self, BufRead, Write};
 
 use kjarni::{
-    ChatTemplate, Conversation, DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig, Llama3ChatTemplate, ModelArchitecture, ModelType, SamplingParams, TokenType, models::LlamaModel, registry
+    
+    ChatTemplate, Conversation, DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig, Llama3ChatTemplate, ModelArchitecture, ModelType, SamplingParams, TokenType, 
+    models::{QwenModel, LlamaModel}, registry
 };
 
 pub async fn run(
@@ -71,7 +73,10 @@ pub async fn run(
 
     let loaded_model: Box<dyn DecoderLanguageModel> = if model_type.is_llama_model() {
         Box::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
-    } else {
+    } else if model_type.is_qwen_model() {
+        Box::new(QwenModel::from_registry(model_type, None, device, None, None).await?)
+    }
+    else {
         return Err(anyhow!(
             "Model '{}' not yet supported for chat. Try: llama-3.2-3b-instruct",
             model

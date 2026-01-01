@@ -3,13 +3,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-use crate::WgpuContext;
+use crate::chat::chatml::ChatMLTemplate;
+use crate::chat::llama3::Llama3ChatTemplate;
+use crate::chat::mistral::MistralChatTemplate;
+use crate::{ChatTemplate, WgpuContext};
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::models::base::ModelLoadConfig;
+use crate::models::registry::WeightsFormat;
 use crate::models::{ModelArchitecture, ModelType, download_model_files};
 use crate::pipeline::{DecoderPipeline, DecoderPipelineBuilder};
 use crate::rope::loader::LoadedRoPE;
+use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 
@@ -33,6 +38,7 @@ pub trait DecoderModelFactory: Sized {
         config: Arc<Self::Config>,
         model_type: Option<ModelType>,
         generation_defaults: Option<HFGenerationDefaults>,
+        chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self;
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>>;
 }
@@ -55,7 +61,22 @@ impl GenericLoader {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        download_model_files(&model_dir, &info.paths).await?;
+        let config = load_config.clone().unwrap_or_default();
+
+        // Logic: If user asked for Q4/Q6/Q8, OR explicitly set a GGUF flag (if you have one),
+        // and the model supports it, download GGUF.
+        let is_quantized_request = matches!(
+            config.target_dtype,
+            Some(DType::Q4_K) | Some(DType::Q6_K) | Some(DType::Q8_0)
+        );
+        let format = if is_quantized_request && info.paths.gguf_url.is_some() {
+            log::info!("Configuration requests quantization. Preferring GGUF format.");
+            WeightsFormat::GGUF
+        } else {
+            WeightsFormat::SafeTensors
+        };
+
+        download_model_files(&model_dir, &info.paths, format).await?;
 
         let context = if device.is_gpu() && context.is_none() {
             Some(WgpuContext::new().await?)
@@ -118,10 +139,35 @@ impl GenericLoader {
             .with_backends(cpu_decoder, gpu_decoder)
             .with_context_opt(context)
             .build()?;
+        // Auto-detect template based on ModelType
+        let chat_template: Option<Box<dyn ChatTemplate>> = model_type.and_then(|mt| {
+            if !mt.is_instruct_model() {
+                return None;
+            }
 
+            match mt.architecture() {
+                ModelArchitecture::Llama => {
+                    Some(Box::new(Llama3ChatTemplate::for_generation()) as Box<dyn ChatTemplate>)
+                }
+                ModelArchitecture::Qwen2 => {
+                    Some(Box::new(ChatMLTemplate::new()) as Box<dyn ChatTemplate>)
+                }
+                ModelArchitecture::Mistral => {
+                    Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
+                }
+
+                // Fallback
+                _ => None,
+            }
+        });
         // 5. Wrap in the specific model struct
         Ok(M::new_from_pipeline(
-            pipeline, tokenizer, config, model_type, generation_defaults
+            pipeline,
+            tokenizer,
+            config,
+            model_type,
+            generation_defaults,
+            chat_template,
         ))
     }
 

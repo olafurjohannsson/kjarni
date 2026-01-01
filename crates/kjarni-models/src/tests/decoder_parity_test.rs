@@ -15,6 +15,7 @@ use kjarni_transformers::rope::RoPE;
 use kjarni_transformers::tensor::{DType, dtype};
 use kjarni_transformers::traits::{Device, ModelConfig};
 use ndarray::{Array1, Array2, Array3, Array4, s};
+use std::path::Path;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -363,23 +364,29 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
 
     println!("=== Loading Llama Models ===\n");
 
-    let model_type = ModelType::Llama3_2_1B;
 
     let config = ModelLoadConfig {
         target_dtype: Some(dtype),
         ..Default::default()
     };
 
-    let cpu_model =
-        LlamaModel::from_registry(model_type, None, Device::Cpu, None, Some(config)).await?;
-    let gpu_model = LlamaModel::from_registry(
-        model_type,
+    
+    let cpu_model = LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        Device::Cpu,
         None,
+        Some(config),
+        None
+    )?;
+
+    let gpu_model = LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
         Device::Wgpu,
         Some(ctx.clone()),
         Some(config),
-    )
-    .await?;
+        None
+    )?;
+
     
     let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
     let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
@@ -701,23 +708,28 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
 
     println!("=== Loading Llama Models ===\n");
 
-    let model_type = ModelType::Llama3_2_1B;
 
     let config = ModelLoadConfig {
         target_dtype: Some(dtype),
         ..Default::default()
     };
 
-    let cpu_model =
-        LlamaModel::from_registry(model_type, None, Device::Cpu, None, Some(config)).await?;
-    let gpu_model = LlamaModel::from_registry(
-        model_type,
+
+    let cpu_model = LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        Device::Cpu,
         None,
+        Some(config),
+        None
+    )?;
+
+    let gpu_model = LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
         Device::Wgpu,
         Some(ctx.clone()),
         Some(config),
-    )
-    .await?;
+        None
+    )?;
 
     let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
     let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
@@ -1039,10 +1051,34 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // STEP 2d: Full Layer 0
     // ------------------------------------------------------------------------
     println!("--- Step 2d: Full Layer 0 ---\n");
-
+    // pub fn forward(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     attention_mask: &Array2<f32>,
+    //     position_offset: usize,
+    //     // Changed: Explicit split views instead of Option<Tuple>
+    //     past_k: ndarray::ArrayView3<f32>,
+    //     past_v: ndarray::ArrayView3<f32>,
+    //     dest_k: ndarray::ArrayViewMut3<f32>,
+    //     dest_v: ndarray::ArrayViewMut3<f32>,
     // CPU full layer
-    let (cpu_layer0_out, _, _) =
-        cpu_layer0.forward(&layer_input, &attention_mask, position_offset, None)?;
+    let kv_dim = cpu_layer0.attention.num_kv_heads * cpu_layer0.attention.head_dim;
+    let seq_len = layer_input.shape()[1];
+    let (batch_size, _, _) = layer_input.dim();
+
+    let mut temp_k = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+    let mut temp_v = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+
+    // Empty history views
+    let empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
+    let cpu_layer0_out = cpu_layer0.forward(
+        &layer_input, &attention_mask, position_offset,
+        empty_arr.view(), empty_arr.view(),
+        temp_k.view_mut(), temp_v.view_mut()
+    )?;
+
+    // let (cpu_layer0_out, _, _) =
+    //     cpu_layer0.forward(&layer_input, &attention_mask, position_offset, None)?;
 
     println!(
         "CPU layer 0 output first 5: {:?}",

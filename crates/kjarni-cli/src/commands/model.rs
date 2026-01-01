@@ -6,7 +6,7 @@ use kjarni::{ModelArchitecture, ModelType};
 pub async fn run(action: ModelCommands) -> Result<()> {
     match action {
         ModelCommands::List { arch } => list(arch),
-        ModelCommands::Download { name } => download(&name).await,
+        ModelCommands::Download { name, gguf } => download(&name, gguf).await,
         ModelCommands::Info { name } => info(&name),
         ModelCommands::Search { query } => search(&query),
     }
@@ -51,59 +51,60 @@ pub fn format_params(millions: usize) -> String {
         format!("{}M", millions)
     }
 }
-
-
-fn list(arch_filter: Option<String>) -> Result<()> {
+fn list(filter_arg: Option<String>) -> Result<()> {
     let models = registry::list_models();
+    let filter = filter_arg.as_deref().map(|s| s.to_lowercase());
 
-    let arch_filter: Option<ModelArchitecture> = match arch_filter.as_deref() {
-        Some("encoder") => Some(ModelArchitecture::Encoder),
-        Some("decoder") => Some(ModelArchitecture::Decoder),
-        Some("encoder-decoder") => Some(ModelArchitecture::EncoderDecoder),
-        Some("cross-encoder") => Some(ModelArchitecture::CrossEncoder),
-        Some(other) => {
-            return Err(anyhow!(
-                "Unknown architecture: '{}'. Use: encoder, decoder, encoder-decoder, cross-encoder",
-                other
-            ))
-        }
-        None => None,
-    };
-
-    let architectures = [
-        ModelArchitecture::Decoder,
-        ModelArchitecture::Encoder,
-        ModelArchitecture::EncoderDecoder,
-        ModelArchitecture::CrossEncoder,
+    // Define the display order
+    let groups = [
+        "LLM (Decoder)",
+        "Seq2Seq",
+        "Embedding",
+        "Re-Ranker",     // <-- Now clearly separated
+        "Classifier",    // <-- Now clearly separated
     ];
 
     println!();
     println!("Cache: {}", registry::cache_dir().display());
     println!();
 
-    for arch in architectures {
-        if let Some(filter) = arch_filter {
-            if arch != filter {
-                continue;
+    for group in groups {
+        // Filter models by their semantic group
+        let group_models: Vec<_> = models.iter().filter(|m| {
+            let m_group = m.model_type.display_group(); // Use the new helper
+            
+            // 1. Must match current group loop
+            if m_group != group { return false; }
+
+            // 2. Apply User Filter (flexible matching)
+            if let Some(f) = &filter {
+                // Allow filtering by group name (e.g. "classifier")
+                if m_group.to_lowercase().contains(f) { return true; }
+                
+                // Allow filtering by specific architecture (e.g. "bert")
+                let arch = format!("{:?}", m.architecture).to_lowercase();
+                if arch.contains(f) { return true; }
+                
+                return false;
             }
-        }
+            true
+        }).collect();
 
-        let arch_models: Vec<_> = models.iter().filter(|m| m.architecture == arch).collect();
+        if group_models.is_empty() { continue; }
 
-        if arch_models.is_empty() {
-            continue;
-        }
+        println!("{}", group.to_uppercase());
+        println!("{}", "-".repeat(85));
 
-        println!("{}", arch.display_name().to_uppercase());
-        println!("{}", "-".repeat(78));
-
-        for m in arch_models {
+        for m in group_models {
             let status = if m.downloaded { "✓" } else { " " };
+            let gguf_tag = if m.has_gguf { "[GGUF]" } else { "" };
+            
             println!(
-                "  {} {:<28} {:>8}  {}",
+                "  {} {:<28} {:>8} {:<6} {}",
                 status,
                 m.cli_name,
                 m.params,
+                gguf_tag,
                 truncate(&m.description, 35)
             );
         }
@@ -116,8 +117,8 @@ fn list(arch_filter: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn download(name: &str) -> Result<()> {
-    registry::download_model(name).await
+async fn download(name: &str, prefer_gguf: bool ) -> Result<()> {
+    registry::download_model(name, prefer_gguf).await
 }
 
 fn info(name: &str) -> Result<()> {

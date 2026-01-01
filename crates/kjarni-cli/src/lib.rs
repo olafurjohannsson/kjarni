@@ -341,7 +341,7 @@ pub enum ModelCommands {
     },
 
     /// Download a model
-    Download { name: String },
+    Download { name: String, gguf: bool, },
 
     /// Show detailed info about a model
     Info { name: String },

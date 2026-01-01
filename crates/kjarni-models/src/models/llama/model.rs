@@ -170,10 +170,8 @@ impl DecoderModelFactory for LlamaModel {
         config: Arc<LlamaConfig>,
         model_type: Option<ModelType>,
         generation_defaults: Option<HFGenerationDefaults>,
+        chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self {
-        let chat_template = model_type
-            .filter(|mt| mt.is_instruct_model())
-            .map(|_| Llama3ChatTemplate::for_generation());
         Self {
             pipeline,
             tokenizer,

@@ -17,7 +17,7 @@ pub struct CpuRoPEDecoderLayer {
 }
 
 impl CpuRoPEDecoderLayer {
-    pub fn forward_2(
+    pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
@@ -76,14 +76,14 @@ impl CpuRoPEDecoderLayer {
 
         Ok(output)
     }
-    // Optimized forward pass
-    pub fn forward(
+   pub fn forward_new(
         &self,
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
-        past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
-    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        mut k_cache: ndarray::ArrayViewMut3<f32>,
+        mut v_cache: ndarray::ArrayViewMut3<f32>,
+    ) -> Result<Array3<f32>> { // Changed: Returns only hidden states
         let t_start = std::time::Instant::now();
 
         // 1. Pre-Norm (RMS)
@@ -91,10 +91,16 @@ impl CpuRoPEDecoderLayer {
 
         let t_norm1 = t_start.elapsed();
 
-        // 2. Attention
-        let (attn_out, new_k, new_v) =
-            self.attention
-                .forward(&norm_1, Some(attention_mask), past_kv, Some(&self.rope))?;
+        // 2. Attention (In-Place Write)
+        // We pass the destinations; attention writes to them and returns only attn_out
+        let attn_out = self.attention.forward_new(
+            &norm_1,
+            Some(attention_mask),
+            k_cache,
+            v_cache,
+            position_offset,
+            Some(&self.rope),
+        )?;
 
         let t_attn = t_start.elapsed() - t_norm1;
 
@@ -123,6 +129,6 @@ impl CpuRoPEDecoderLayer {
             );
         }
 
-        Ok((output, new_k, new_v))
+        Ok(output)
     }
 }

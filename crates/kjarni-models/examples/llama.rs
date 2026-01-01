@@ -1,4 +1,5 @@
 use kjarni_models::models::llama::model::LlamaModel;
+use kjarni_models::models::qwen::QwenModel;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::base::ModelLoadConfig;
@@ -102,6 +103,13 @@ async fn main() -> anyhow::Result<()> {
     GenerationStats::enable();
     // let model_cpu = LlamaModel::from_registry(
     //     ModelType::Llama3_2_3B_Instruct,
+    //     None,
+    //     Device::Cpu,
+    //     None,
+    //     Some(d),
+    // ).await?;
+    //  let qwen_cpu = QwenModel::from_registry(
+    //     ModelType::Qwen2,
     //     None,
     //     Device::Cpu,
     //     None,

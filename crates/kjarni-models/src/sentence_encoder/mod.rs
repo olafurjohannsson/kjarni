@@ -5,6 +5,7 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use kjarni_transformers::models::registry::WeightsFormat;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -25,9 +26,10 @@ use kjarni_transformers::{
 };
 
 mod configs;
-pub use configs::{DistilBERTConfig, MPNetConfig, MiniLMConfig};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata};
+
+use crate::sentence_encoder::configs::BertConfig;
 
 /// Sentence encoder for semantic similarity tasks
 ///
@@ -46,10 +48,12 @@ pub struct SentenceEncoder {
 
 impl SentenceEncoder {
     /// Supported encoder model types
-    const SUPPORTED_MODELS: &'static [ModelType] = &[
+const SUPPORTED_MODELS: &'static [ModelType] = &[
         ModelType::MiniLML6V2,
-        ModelType::MpnetBaseV2,
-        ModelType::DistilBertBaseCased,
+        ModelType::NomicEmbedText, // New! THIS NEEDS ROPE
+        ModelType::BgeM3,          // New!
+        // ModelType::MpnetBaseV2, // Add if you kept this in your registry
+        // distilbertcased?
     ];
 
     /// Create encoder from HuggingFace model registry
@@ -96,13 +100,20 @@ impl SentenceEncoder {
         }
 
         let info = model_type.info();
-
-        if info.architecture != ModelArchitecture::Encoder {
-            return Err(anyhow!(
-                "Model {:?} is not an encoder (architecture: {:?})",
-                model_type,
-                info.architecture
-            ));
+        
+        // 2. Validate Architecture
+        // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
+        match info.architecture {
+            ModelArchitecture::Bert | ModelArchitecture::NomicBert => {
+                // These are valid encoders
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Model {:?} is not an encoder (architecture: {:?})",
+                    model_type,
+                    info.architecture
+                ));
+            }
         }
 
         // Determine cache directory
@@ -115,7 +126,7 @@ impl SentenceEncoder {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download model files if needed
-        download_model_files(&model_dir, &info.paths).await?;
+        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors).await?;
 
         // Load from local path
         Self::from_pretrained(&model_dir, model_type, device, context, load_cfg)
@@ -141,11 +152,11 @@ impl SentenceEncoder {
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         let config: Arc<dyn ModelConfig> = match model_type {
-            ModelType::MiniLML6V2 => Arc::new(MiniLMConfig::from_json(&weights.config_json)?),
-            ModelType::MpnetBaseV2 => Arc::new(MPNetConfig::from_json(&weights.config_json)?),
-            ModelType::DistilBertBaseCased => {
-                Arc::new(DistilBERTConfig::from_json(&weights.config_json)?)
-            }
+            
+            // todo UPDATE
+
+            ModelType::MiniLML6V2 => Arc::new(BertConfig::from_json(&weights.config_json)?),
+
             _ => return Err(anyhow!("Unsupported encoder model: {:?}", model_type)),
         };
         let meta = config.metadata();

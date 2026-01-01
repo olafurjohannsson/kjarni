@@ -44,129 +44,246 @@ impl DecoderAttention {
         }
     }
 
-    
-pub fn forward_2(
-    &self,
-    hidden_states: &Array3<f32>,
-    attention_mask: Option<&Array2<f32>>,
-    past_k: ndarray::ArrayView3<f32>,
-    past_v: ndarray::ArrayView3<f32>,
-    mut dest_k: ndarray::ArrayViewMut3<f32>,
-    mut dest_v: ndarray::ArrayViewMut3<f32>,
-    rope: Option<&RoPE>,
-) -> Result<Array3<f32>> {
-    let (batch_size, seq_len, _) = hidden_states.dim();
-    let is_decode_step = seq_len == 1;
+    pub fn forward_new(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: Option<&Array2<f32>>,
+        // The FULL active cache (0 .. current + new)
+        mut k_cache: ndarray::ArrayViewMut3<f32>,
+        mut v_cache: ndarray::ArrayViewMut3<f32>,
+        position_offset: usize,
+        rope: Option<&RoPE>,
+    ) -> Result<Array3<f32>> {
+        let (batch, seq_len, _) = hidden_states.dim();
+        let total_len = k_cache.shape()[1]; // This is (History + Seq_Len)
+        let is_decode = seq_len == 1;
 
-    // 1. QKV Projection
-    let hidden_2d = hidden_states
-        .view()
-        .into_shape_with_order((batch_size * seq_len, self.num_heads * self.head_dim))?;
-
-    let q = self.q_proj.matmul(&hidden_2d);
-    let k = self.k_proj.matmul(&hidden_2d);
-    let v = self.v_proj.matmul(&hidden_2d);
-
-    let q_3d = q.into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?;
-    let k_3d = k.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
-    let v_3d = v.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
-
-    // 2. Apply Rotary Positional Embedding (RoPE)
-    let cache_len = past_k.shape()[1];
-    let (q_rope, k_rope) = if let Some(r) = rope {
-        r.apply_3d(&q_3d, &k_3d, self.num_heads, self.num_kv_heads, cache_len)?
-    } else {
-        (q_3d, k_3d)
-    };
-
-    // 3. ZERO-COPY CACHE WRITE
-    // Write the newly computed K and V tensors directly into their destination slices in the cache.
-    // This is the primary optimization, as it avoids allocating and returning these tensors.
-    dest_k.assign(&k_rope);
-    dest_v.assign(&v_3d);
-
-    // 4. PREPARE UNIFIED K/V FOR ATTENTION
-    // **CRITICAL FIX**: Instead of computing on separate history/current views, we create
-    // temporary, contiguous arrays representing the *full* sequence (history + current).
-    // This ensures the memory layout is correct for the high-performance matmul operations.
-    // While `concatenate!` involves a copy, it's a smaller, localized copy than what the
-    // original working code did, thus still providing a significant performance gain.
-    let full_k = ndarray::concatenate![Axis(1), past_k, k_rope.view()];
-    let full_v = ndarray::concatenate![Axis(1), past_v, v_3d.view()];
-
-    // 5. Prepare Q for Attention Heads
-    let q_heads = q_rope
-        .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-        .permuted_axes([0, 2, 1, 3])
-        .to_owned(); // .to_owned() is cheap for seq_len=1 and ensures standard layout
-
-    let n_rep = self.num_heads / self.num_kv_heads;
-
-    // 6. Compute Attention Scores (Q @ K^T)
-    // The logic is now simplified to use the unified `full_k` and `full_v`,
-    // just like in the original working code.
-    let mut scores = if is_decode_step {
-        // --- FAST PATH (Decoding) ---
-        let k_view = full_k
+        // 1. Projection (Compute Q, K, V for NEW tokens only)
+        let hidden_2d = hidden_states
             .view()
-            .into_shape_with_order((
-                batch_size,
-                full_k.shape()[1],
+            .into_shape_with_order((batch * seq_len, self.num_heads * self.head_dim))?;
+
+        let q = self.q_proj.matmul(&hidden_2d);
+        let mut q_3d = q.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?;
+
+        // 2. Write K/V into the END of the cache
+        // We assume the matmul outputs standard layout.
+        // We slice the cache to get the "Write Slot" (the last `seq_len` tokens).
+        let start_write = total_len - seq_len;
+
+        // K Projection -> Write directly to Cache slice
+        let k_new = self.k_proj.matmul(&hidden_2d);
+        k_cache
+            .slice_mut(s![.., start_write.., ..])
+            .assign(&k_new.into_shape((batch, seq_len, self.num_kv_heads * self.head_dim))?);
+
+        // V Projection -> Write directly to Cache slice
+        let v_new = self.v_proj.matmul(&hidden_2d);
+        v_cache
+            .slice_mut(s![.., start_write.., ..])
+            .assign(&v_new.into_shape((batch, seq_len, self.num_kv_heads * self.head_dim))?);
+
+        // 3. Apply RoPE
+        if let Some(r) = rope {
+            // Apply to Q (Local variable)
+            // You need to ensure your RoPE has a method for ViewMut or use assignment
+            // Assuming your RoPE::apply_3d returns new tensors, we do:
+            // (Optimize this later to be in-place)
+            let k_temp_owned = k_cache.slice(s![.., start_write.., ..]).to_owned();
+
+            let (q_rot, k_rot) = r.apply_3d(
+                &q_3d,          // &Array3 (Good)
+                &k_temp_owned,  // &Array3 (Good)
+                self.num_heads,
                 self.num_kv_heads,
-                self.head_dim,
-            ))?
-            .permuted_axes([0, 2, 3, 1]); // Permute for matmul: [B, KV_H, D, T]
+                position_offset
+            )?;
 
-        crate::utils::linear_algebra::matmul_4d_decode_gqa(&q_heads, &k_view, n_rep)
-    } else {
-        // --- SLOW PATH (Prefill) ---
-        let k_heads = self.prepare_kv_heads(&full_k, batch_size)?;
-        let k_t = k_heads.permuted_axes([0, 1, 3, 2]);
-        crate::utils::linear_algebra::matmul_4d(&q_heads, &k_t)
-    };
+            // Write rotated results back
+            q_3d.assign(&q_rot);
+            // Write K back into the cache
+            k_cache.slice_mut(s![.., start_write.., ..]).assign(&k_rot);
+        }
 
-    // 7. Apply Scaling, Masking, and Softmax
-    scores.mapv_inplace(|x| x * self.scale_factor);
-    if let Some(mask) = attention_mask {
-        scores = crate::utils::linear_algebra::apply_attention_mask(scores, mask);
+        // 4. Attention on the FULL Cache
+        // CRITICAL: We use `k_cache` directly. It is contiguous! No concatenation!
+
+        let q_heads = q_3d
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3])
+            .to_owned(); // [Batch, Heads, Seq, Dim]
+
+        let n_rep = self.num_heads / self.num_kv_heads;
+
+        let mut scores = if is_decode {
+            // --- FAST PATH ---
+            // k_cache includes history AND the token we just wrote.
+            // Permute: [Batch, Total_Len, KV_Heads, Dim] -> [Batch, KV_Heads, Dim, Total_Len]
+            let k_view = k_cache
+                .view()
+                .into_shape((batch, total_len, self.num_kv_heads, self.head_dim))?
+                .permuted_axes([0, 2, 3, 1]);
+
+            crate::utils::linear_algebra::matmul_4d_decode_gqa(&q_heads, &k_view, n_rep)
+        } else {
+            // --- PREFILL PATH ---
+            let k_heads = self.prepare_kv_heads(&k_cache.view().into_owned(), batch)?;
+            let k_t = k_heads.permuted_axes([0, 1, 3, 2]);
+            crate::utils::linear_algebra::matmul_4d(&q_heads, &k_t)
+        };
+
+        // 5. Scale & Softmax
+        scores.mapv_inplace(|x| x * self.scale_factor);
+
+        if let Some(mask) = attention_mask {
+            scores = crate::utils::linear_algebra::apply_attention_mask(scores, mask);
+        }
+
+        // Only apply causal mask if not single-token decode
+        if !is_decode {
+            self.apply_causal_mask(&mut scores, start_write);
+        }
+
+        crate::utils::linear_algebra::softmax_inplace(&mut scores);
+
+        // 6. Context (Scores @ V)
+        let context = if is_decode {
+            let v_view = v_cache
+                .view()
+                .into_shape((batch, total_len, self.num_kv_heads, self.head_dim))?
+                .permuted_axes([0, 2, 1, 3]);
+
+            crate::utils::linear_algebra::matmul_4d_context_gqa(&scores, &v_view, n_rep)
+        } else {
+            let v_heads = self.prepare_kv_heads(&v_cache.view().into_owned(), batch)?;
+            crate::utils::linear_algebra::matmul_4d(&scores, &v_heads)
+        };
+
+        // 7. Output Projection
+        let context_flat = context
+            .permuted_axes([0, 2, 1, 3])
+            .as_standard_layout()
+            .into_shape((batch * seq_len, self.num_heads * self.head_dim))?
+            .to_owned();
+
+        let output = self.o_proj.matmul(&context_flat.view());
+        Ok(output.into_shape((batch, seq_len, self.num_heads * self.head_dim))?)
     }
-    // The causal mask offset `cache_len` ensures we don't attend to future tokens
-    self.apply_causal_mask(&mut scores, cache_len);
-    crate::utils::linear_algebra::softmax_inplace(&mut scores);
+    pub fn forward_2(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: Option<&Array2<f32>>,
+        past_k: ndarray::ArrayView3<f32>,
+        past_v: ndarray::ArrayView3<f32>,
+        mut dest_k: ndarray::ArrayViewMut3<f32>,
+        mut dest_v: ndarray::ArrayViewMut3<f32>,
+        rope: Option<&RoPE>,
+    ) -> Result<Array3<f32>> {
+        let (batch_size, seq_len, _) = hidden_states.dim();
+        let is_decode_step = seq_len == 1;
 
-    // 8. Compute Context Vector (Scores @ V)
-    let context = if is_decode_step {
-        // --- FAST PATH (Decoding) ---
-        let v_view = full_v
+        // 1. QKV Projection
+        let hidden_2d = hidden_states
             .view()
-            .into_shape_with_order((
-                batch_size,
-                full_v.shape()[1],
-                self.num_kv_heads,
-                self.head_dim,
-            ))?
-            .permuted_axes([0, 2, 1, 3]); // [B, KV_H, T, D]
+            .into_shape_with_order((batch_size * seq_len, self.num_heads * self.head_dim))?;
 
-        crate::utils::linear_algebra::matmul_4d_context_gqa(&scores, &v_view, n_rep)
-    } else {
-        // --- SLOW PATH (Prefill) ---
-        let v_heads = self.prepare_kv_heads(&full_v, batch_size)?;
-        crate::utils::linear_algebra::matmul_4d(&scores, &v_heads)
-    };
+        let q = self.q_proj.matmul(&hidden_2d);
+        let k = self.k_proj.matmul(&hidden_2d);
+        let v = self.v_proj.matmul(&hidden_2d);
 
-    // 9. Final Output Projection
-    let context_flat = context
-        .permuted_axes([0, 2, 1, 3])
-        .as_standard_layout()
-        .into_shape_with_order((batch_size * seq_len, self.num_heads * self.head_dim))?
-        .to_owned();
+        let q_3d =
+            q.into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?;
+        let k_3d =
+            k.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
+        let v_3d =
+            v.into_shape_with_order((batch_size, seq_len, self.num_kv_heads * self.head_dim))?;
 
-    let output = self.o_proj.matmul(&context_flat.view());
-    let output_3d =
-        output.into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?;
+        // 2. Apply Rotary Positional Embedding (RoPE)
+        let cache_len = past_k.shape()[1];
+        let (q_rope, k_rope) = if let Some(r) = rope {
+            r.apply_3d(&q_3d, &k_3d, self.num_heads, self.num_kv_heads, cache_len)?
+        } else {
+            (q_3d, k_3d)
+        };
 
-    Ok(output_3d)
-}
+        dest_k.assign(&k_rope);
+        dest_v.assign(&v_3d);
+        let full_k = ndarray::concatenate![Axis(1), past_k, k_rope.view()];
+        let full_v = ndarray::concatenate![Axis(1), past_v, v_3d.view()];
+
+        // 5. Prepare Q for Attention Heads
+        let q_heads = q_rope
+            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
+            .permuted_axes([0, 2, 1, 3])
+            .to_owned(); // .to_owned() is cheap for seq_len=1 and ensures standard layout
+
+        let n_rep = self.num_heads / self.num_kv_heads;
+
+        // 6. Compute Attention Scores (Q @ K^T)
+        // The logic is now simplified to use the unified `full_k` and `full_v`,
+        // just like in the original working code.
+        let mut scores = if is_decode_step {
+            // --- FAST PATH (Decoding) ---
+            let k_view = full_k
+                .view()
+                .into_shape_with_order((
+                    batch_size,
+                    full_k.shape()[1],
+                    self.num_kv_heads,
+                    self.head_dim,
+                ))?
+                .permuted_axes([0, 2, 3, 1]); // Permute for matmul: [B, KV_H, D, T]
+
+            crate::utils::linear_algebra::matmul_4d_decode_gqa(&q_heads, &k_view, n_rep)
+        } else {
+            // --- SLOW PATH (Prefill) ---
+            let k_heads = self.prepare_kv_heads(&full_k, batch_size)?;
+            let k_t = k_heads.permuted_axes([0, 1, 3, 2]);
+            crate::utils::linear_algebra::matmul_4d(&q_heads, &k_t)
+        };
+
+        // 7. Apply Scaling, Masking, and Softmax
+        scores.mapv_inplace(|x| x * self.scale_factor);
+        if let Some(mask) = attention_mask {
+            scores = crate::utils::linear_algebra::apply_attention_mask(scores, mask);
+        }
+        // The causal mask offset `cache_len` ensures we don't attend to future tokens
+        self.apply_causal_mask(&mut scores, cache_len);
+        crate::utils::linear_algebra::softmax_inplace(&mut scores);
+
+        // 8. Compute Context Vector (Scores @ V)
+        let context = if is_decode_step {
+            // --- FAST PATH (Decoding) ---
+            let v_view = full_v
+                .view()
+                .into_shape_with_order((
+                    batch_size,
+                    full_v.shape()[1],
+                    self.num_kv_heads,
+                    self.head_dim,
+                ))?
+                .permuted_axes([0, 2, 1, 3]); // [B, KV_H, T, D]
+
+            crate::utils::linear_algebra::matmul_4d_context_gqa(&scores, &v_view, n_rep)
+        } else {
+            // --- SLOW PATH (Prefill) ---
+            let v_heads = self.prepare_kv_heads(&full_v, batch_size)?;
+            crate::utils::linear_algebra::matmul_4d(&scores, &v_heads)
+        };
+
+        // 9. Final Output Projection
+        let context_flat = context
+            .permuted_axes([0, 2, 1, 3])
+            .as_standard_layout()
+            .into_shape_with_order((batch_size * seq_len, self.num_heads * self.head_dim))?
+            .to_owned();
+
+        let output = self.o_proj.matmul(&context_flat.view());
+        let output_3d =
+            output.into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?;
+
+        Ok(output_3d)
+    }
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,

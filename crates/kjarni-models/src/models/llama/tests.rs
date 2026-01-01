@@ -5,6 +5,8 @@
 //!
 //! The actual text generation is handled by the generic `Generator` struct.
 
+use std::path::Path;
+
 use crate::models::llama::config::LlamaConfig;
 use crate::models::llama::model::LlamaModel;
 use anyhow::Result;
@@ -15,11 +17,23 @@ use kjarni_transformers::decoder::prelude::*;
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
-    LlamaModel::from_registry(ModelType::Llama3_2_1B, None, Device::Cpu, None, None).await
+    LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        Device::Cpu,
+        None,
+        None,
+        None
+    )
 }
 
 async fn load_llama_8b_for_test() -> Result<LlamaModel> {
-    LlamaModel::from_registry(ModelType::Llama3_8B_Instruct, None, Device::Cpu, None, None).await
+        LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-8B-Instruct"),
+        Device::Cpu,
+        None,
+        None,
+        None
+    )
 }
 
 //
@@ -207,7 +221,13 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     // decoder_layer::tests::test_decoder_layer_with_rope_and_gqa
 
     // 2. Load model and create the generator.
-    let llama_model = LlamaModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
+    let llama_model =     LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        Device::Cpu,
+        None,
+        None,
+        None
+    )?;
 
     let generator = DecoderGenerator::new(Box::new(llama_model))?;
 

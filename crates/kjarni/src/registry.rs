@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use kjarni_transformers::models::{
     download_model_files, format_params, format_size, get_default_cache_dir, ModelArchitecture,
-    ModelType,
+    ModelType, WeightsFormat, // Make sure WeightsFormat is exported from your models module
 };
 use std::path::PathBuf;
 
@@ -19,6 +19,7 @@ pub struct ModelEntry {
     pub size: String,
     pub params: String,
     pub downloaded: bool,
+    pub has_gguf: bool, // New field!
 }
 
 /// List all available models with their download status
@@ -36,6 +37,7 @@ pub fn list_models() -> Vec<ModelEntry> {
                 size: format_size(info.size_mb),
                 params: format_params(info.params_millions),
                 downloaded: model_type.is_downloaded(&cache_dir),
+                has_gguf: info.paths.gguf_url.is_some(), // Check for GGUF
             }
         })
         .collect()
@@ -65,11 +67,13 @@ pub fn get_model_info(name: &str) -> Result<ModelEntry> {
         size: format_size(info.size_mb),
         params: format_params(info.params_millions),
         downloaded: model_type.is_downloaded(&cache_dir),
+        has_gguf: info.paths.gguf_url.is_some(),
     })
 }
 
 /// Download a model by CLI name
-pub async fn download_model(name: &str) -> Result<()> {
+/// Updated to accept format preference
+pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
     let model_type = ModelType::from_cli_name(name)
         .ok_or_else(|| anyhow!("Unknown model: '{}'. Run 'kjarni model list' to see available models.", name))?;
 
@@ -77,13 +81,24 @@ pub async fn download_model(name: &str) -> Result<()> {
     let model_dir = model_type.cache_dir(&cache_dir);
     let info = model_type.info();
 
+    // Determine format
+    let format = if prefer_gguf && info.paths.gguf_url.is_some() {
+        WeightsFormat::GGUF
+    } else {
+        if prefer_gguf {
+            println!("! GGUF requested but not available for this model. Downloading SafeTensors.");
+        }
+        WeightsFormat::SafeTensors
+    };
+
     println!("Downloading {}...", model_type.cli_name());
     println!("  Repository: {}", model_type.repo_id());
-    println!("  Size: {}", format_size(info.size_mb));
+    println!("  Format:     {}", if matches!(format, WeightsFormat::GGUF) { "GGUF (Optimized)" } else { "SafeTensors (Standard)" });
+    println!("  Size:       ~{}", format_size(info.size_mb)); // Note: GGUF size might differ slightly
     println!("  Destination: {}", model_dir.display());
     println!();
 
-    download_model_files(&model_dir, &info.paths).await?;
+    download_model_files(&model_dir, &info.paths, format).await?;
 
     println!();
     println!("✓ Download complete!");
@@ -100,12 +115,10 @@ pub fn is_model_downloaded(name: &str) -> Result<bool> {
     Ok(model_type.is_downloaded(&cache_dir))
 }
 
-/// Get the cache directory path
 pub fn cache_dir() -> PathBuf {
     get_default_cache_dir()
 }
 
-/// Get the path where a model is/would be stored
 pub fn model_path(name: &str) -> Result<PathBuf> {
     let model_type = ModelType::from_cli_name(name)
         .ok_or_else(|| anyhow!("Unknown model: '{}'", name))?;

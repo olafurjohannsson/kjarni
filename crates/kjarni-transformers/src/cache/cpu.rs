@@ -183,10 +183,7 @@ impl CpuKVCache {
 
     /// Returns the maximum sequence length this cache can hold.
     pub fn max_len(&self) -> usize {
-        self.layers
-            .first()
-            .map(|(k, _)| k.shape()[1])
-            .unwrap_or(0)
+        self.layers.first().map(|(k, _)| k.shape()[1]).unwrap_or(0)
     }
 
     /// Returns the number of decoder layers.
@@ -196,18 +193,12 @@ impl CpuKVCache {
 
     /// Returns the batch size.
     pub fn batch_size(&self) -> usize {
-        self.layers
-            .first()
-            .map(|(k, _)| k.shape()[0])
-            .unwrap_or(0)
+        self.layers.first().map(|(k, _)| k.shape()[0]).unwrap_or(0)
     }
 
     /// Returns the hidden size (num_heads × head_dim).
     pub fn hidden_size(&self) -> usize {
-        self.layers
-            .first()
-            .map(|(k, _)| k.shape()[2])
-            .unwrap_or(0)
+        self.layers.first().map(|(k, _)| k.shape()[2]).unwrap_or(0)
     }
 
     /// Returns a reference to the underlying layer storage.
@@ -380,24 +371,55 @@ impl CpuKVCache {
 
         self.layers = reordered_layers;
     }
-
-    /// Returns a mutable view of the current timestep slot (for writing)
-    /// AND an immutable view of the history (for reading).
-    /// 
-    /// Returns: (History_K, History_V, Current_Slot_K, Current_Slot_V)
-    /// History shapes: [Batch, Current_Len, Hidden]
-    /// Current shapes: [Batch, New_Len, Hidden]
-    pub fn get_split_view(
-        &mut self, 
-        layer_idx: usize, 
-        new_tokens: usize
-    ) -> anyhow::Result<(ArrayViewMut3<f32>, ArrayViewMut3<f32>, ArrayViewMut3<f32>, ArrayViewMut3<f32>)> {
+    /// Returns a mutable view of the cache spanning (0 .. current_len + new_tokens).
+    ///
+    /// This allows the caller to:
+    /// 1. Slice the end to write new tokens.
+    /// 2. Read the *entire* sequence as a contiguous block for attention.
+    pub fn get_context_view_mut(
+        &mut self,
+        layer_idx: usize,
+        new_tokens: usize,
+    ) -> anyhow::Result<(ArrayViewMut3<f32>, ArrayViewMut3<f32>)> {
         if layer_idx >= self.layers.len() {
             anyhow::bail!("Layer index out of bounds");
         }
 
         let (k_cache, v_cache) = &mut self.layers[layer_idx];
-        
+        let total_len = self.current_len + new_tokens;
+
+        if total_len > k_cache.shape()[1] {
+            anyhow::bail!("Cache overflow: {} > capacity", total_len);
+        }
+
+        // Return a view of the ENTIRE active region [Batch, 0..Total, Hidden]
+        let k_view = k_cache.slice_mut(s![.., 0..total_len, ..]);
+        let v_view = v_cache.slice_mut(s![.., 0..total_len, ..]);
+
+        Ok((k_view, v_view))
+    }
+    /// Returns a mutable view of the current timestep slot (for writing)
+    /// AND an immutable view of the history (for reading).
+    ///
+    /// Returns: (History_K, History_V, Current_Slot_K, Current_Slot_V)
+    /// History shapes: [Batch, Current_Len, Hidden]
+    /// Current shapes: [Batch, New_Len, Hidden]
+    pub fn get_split_view(
+        &mut self,
+        layer_idx: usize,
+        new_tokens: usize,
+    ) -> anyhow::Result<(
+        ArrayViewMut3<f32>,
+        ArrayViewMut3<f32>,
+        ArrayViewMut3<f32>,
+        ArrayViewMut3<f32>,
+    )> {
+        if layer_idx >= self.layers.len() {
+            anyhow::bail!("Layer index out of bounds");
+        }
+
+        let (k_cache, v_cache) = &mut self.layers[layer_idx];
+
         let end_write = self.current_len + new_tokens;
         if end_write > k_cache.shape()[1] {
             anyhow::bail!("Cache overflow");
@@ -408,14 +430,12 @@ impl CpuKVCache {
             s![.., 0..self.current_len, ..],
             s![.., self.current_len..end_write, ..],
         ));
-        
+
         let (v_hist, v_new) = v_cache.multi_slice_mut((
             s![.., 0..self.current_len, ..],
             s![.., self.current_len..end_write, ..],
         ));
 
-        // Return them all as mutable. 
-        // We don't need to convert them here; the caller will just take a read-only .view() of the history.
         Ok((k_hist, v_hist, k_new, v_new))
     }
 

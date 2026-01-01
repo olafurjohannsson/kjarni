@@ -120,6 +120,10 @@ pub mod models {
     pub use kjarni_models::models::llama::{
         LlamaConfig, LlamaModel,
     };
+    pub use kjarni_models::models::qwen::{
+        QwenModel,
+        QwenConfig
+    };
 }
 pub mod registry;
 
