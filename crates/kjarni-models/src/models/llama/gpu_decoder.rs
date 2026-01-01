@@ -10,8 +10,8 @@ use kjarni_transformers::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
             GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights, attention::{
-                GpuAttention, GpuAttentionWeights, GpuDecoderSelfAttention, GpuRoPEAttention,
-            }, embeddings::{GpuEmbeddingWeights, GpuEmbeddings}, layers::GpuRoPEDecoderLayer, rms_norm::{GpuRMSNorm, GpuRMSNormWeights}, rope::GpuRoPE
+                GpuAttention, GpuAttentionWeights, GpuDecoderSelfAttention, 
+            }, embeddings::{GpuEmbeddingWeights, GpuEmbeddings}, rms_norm::{GpuRMSNorm, GpuRMSNormWeights}, rope::GpuRoPE
         },
         primitives::add::GpuAdd,
     },

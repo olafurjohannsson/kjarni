@@ -38,8 +38,9 @@ async fn test_distilgpt2_generation_parity() -> Result<()> {
         ..Default::default()
     };
 
-    let generated_text = generator.generate(prompt, &config).await?;
-    assert_eq!(generated_text.trim(), expected_output.trim());
+    let generated_text = generator.generate(prompt, &config, None).await?;
+    let concat_prompt = prompt.to_string() + "" + &generated_text;
+    assert_eq!(concat_prompt.trim(), expected_output.trim());
 
     Ok(())
 }
@@ -100,11 +101,10 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
     let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
 
     // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-    let generated_text = generator.generate(prompt, &config).await?;
+    let generated_text = generator.generate(prompt, &config, None).await?;
 
-    // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-    //    We trim both strings to avoid any potential whitespace differences at the end.
-    assert_eq!(generated_text.trim(), expected_output.trim());
+    let concat_prompt = prompt.to_string() + "" + &generated_text;
+    assert_eq!(concat_prompt.trim(), expected_output.trim());
 
     Ok(())
 }
@@ -134,12 +134,12 @@ async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
     let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
 
     // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-    let generated_text = generator.generate(prompt, &config).await?;
+    let generated_text = generator.generate(prompt, &config, None).await?;
 
     let ctx = WgpuContext::new().await?;
     let gpt2_model_2 = Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
     let generator_2 = DecoderGenerator::new(Box::new(gpt2_model_2))?;
-    let generated_text_2 = generator_2.generate(prompt, &config).await?;
+    let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
 
     // 4. Assert that the generated output is bit-for-bit identical to the golden value.
     //    We trim both strings to avoid any potential whitespace differences at the end.

@@ -7,10 +7,77 @@
 
 #[cfg(target_arch = "x86_64")]
 use crate::kernels::q_common::BlockQ6_K;
-use crate::kernels::{self, q_common::{BlockQ4_K, BlockQ8_0, QK_K}};
+use crate::{kernels::{self, q_common::{BlockQ4_K, BlockQ8_0, QK_K}, quantize::quantize_row_q8_k}, weights::gguf_block_group_for_row};
+
+use crate::kernels::scalar::vec_dot_q4k_q8k_scalar;
+
+#[cfg(target_arch = "x86_64")]
+use crate::kernels::x86::q4k_q8k::vec_dot_q4k_q8k_avx2;
+
 use half::bf16;
 use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
+
+
+
+// TPS 13.5
+
+pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array2<f32> {
+    let (m, k) = a.dim();
+    let k_per_block = 32; // Q8_0 has 32 values per block
+    let num_blocks = b_weights.len();
+    let n = (num_blocks * k_per_block) / k;
+    assert_eq!(k % k_per_block, 0, "Input features must be a multiple of the block size");
+
+    let mut c = Array2::<f32>::zeros((m, n));
+    let a_s = a.as_standard_layout();
+
+    if m == 1 { // Decode Path
+        let a_slice = a_s.as_slice().unwrap();
+        let out_slice = c.as_slice_mut().unwrap();
+        let num_threads = rayon::current_num_threads();
+        let chunk_size = (n + num_threads - 1) / num_threads;
+
+        out_slice.par_chunks_mut(chunk_size).enumerate().for_each(|(chunk_idx, out_chunk)| {
+            let num_blocks_per_row = k / k_per_block;
+            let b_block_start_idx = chunk_idx * chunk_size * num_blocks_per_row;
+            let num_blocks_for_chunk = out_chunk.len() * num_blocks_per_row;
+            let b_blocks_chunk = &b_weights[b_block_start_idx..b_block_start_idx + num_blocks_for_chunk];
+
+            unsafe {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    // Make sure you have created and imported this kernel
+                    return kernels::x86::q8_0::matmul_vec_q8_0_avx2(
+                        out_chunk,
+                        a_slice.as_ptr(),
+                        b_blocks_chunk,
+                        k,
+                    );
+                }
+                kernels::scalar::matmul_vec_q8_0_scalar(out_chunk, a_slice, b_blocks_chunk, k);
+            }
+        });
+    } else { // Prefill Path
+        c.outer_iter_mut().into_par_iter().zip(a.outer_iter()).for_each(|(mut c_row, a_row)| {
+            let a_row_slice = a_row.as_slice().unwrap();
+            let out_slice = c_row.as_slice_mut().unwrap();
+            unsafe {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    return kernels::x86::q8_0::matmul_vec_q8_0_avx2(
+                        out_slice,
+                        a_row_slice.as_ptr(),
+                        b_weights,
+                        k,
+                    );
+                }
+                kernels::scalar::matmul_vec_q8_0_scalar(out_slice, a_row_slice, b_weights, k);
+            }
+        });
+    }
+    c
+}
 
 /// Computes `C = A @ B.T` for F32 input `A` and BF16 weight matrix `B`.
 pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> Array2<f32> {
@@ -124,177 +191,171 @@ pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Ar
     c
 }
 
-/// Computes `C = A @ B.T` for F32 input `A` and Q8_0 quantized weight matrix `B`.
-pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array2<f32> {
-    let (m, k) = a.dim();
-    let k_per_block = std::mem::size_of_val(&b_weights[0].qs);
-    let n = (b_weights.len() * k_per_block) / k;
-    assert_eq!(k % k_per_block, 0, "Input features must be a multiple of the block size");
 
-    let mut c = Array2::<f32>::zeros((m, n));
-    let a_s = a.as_standard_layout();
-    let a_slice = a_s.as_slice().expect("Input tensor 'a' must be contiguous");
 
-    if m == 1 {
-        let out_slice = c.as_slice_mut().unwrap();
-        let num_threads = rayon::current_num_threads();
-        let chunk_size = (n + num_threads - 1) / num_threads;
-
-        out_slice.par_chunks_mut(chunk_size).enumerate().for_each(|(chunk_idx, out_chunk)| {
-            let b_block_start_idx = chunk_idx * chunk_size * (k / k_per_block);
-            let b_blocks = &b_weights[b_block_start_idx..];
-            
-            // NOTE: No unsafe block needed here if the scalar function is safe
-            kernels::scalar::matmul_vec_q8_0_scalar(out_chunk, a_slice, b_blocks, k);
-        });
-    } else {
-        c.outer_iter_mut().into_par_iter().zip(a.outer_iter()).for_each(|(mut c_row, a_row)| {
-            let a_row_slice = a_row.as_slice().unwrap();
-            let out_slice = c_row.as_slice_mut().unwrap();
-            kernels::scalar::matmul_vec_q8_0_scalar(out_slice, a_row_slice, b_weights, k);
-        });
-    }
-    c
-}
-
-/// Computes `C = A @ B.T` for F32 input `A` and Q4_K quantized weight matrix `B`.
 pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array2<f32> {
     let (m, k) = a.dim();
-    let k_per_block = crate::kernels::q_common::QK_K;
+    let k_per_block = QK_K;
     let n = (b_weights.len() * k_per_block) / k;
-    assert_eq!(k % k_per_block, 0, "Input features must be a multiple of the QK_K block size");
-
+    
     let mut c = Array2::<f32>::zeros((m, n));
     let a_s = a.as_standard_layout();
-    let a_slice = a_s.as_slice().expect("Input tensor 'a' must be contiguous");
 
-    if m == 1 {
+    if m == 1 { // Decode Path
+        let a_slice = a_s.as_slice().unwrap();
         let out_slice = c.as_slice_mut().unwrap();
         let num_threads = rayon::current_num_threads();
         let chunk_size = (n + num_threads - 1) / num_threads;
 
         out_slice.par_chunks_mut(chunk_size).enumerate().for_each(|(chunk_idx, out_chunk)| {
-            let b_block_start_idx = chunk_idx * chunk_size * (k / k_per_block);
-            let b_blocks = &b_weights[b_block_start_idx..];
-            
-            kernels::scalar::matmul_vec_q4_k_scalar(out_chunk, a_slice, b_blocks, k);
+            let num_blocks_per_row = k / k_per_block;
+            let b_block_start_idx = chunk_idx * chunk_size * num_blocks_per_row;
+            let num_blocks_for_chunk = out_chunk.len() * num_blocks_per_row;
+            let b_blocks_chunk = &b_weights[b_block_start_idx..b_block_start_idx + num_blocks_for_chunk];
+
+            unsafe {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    // Make sure this path points to your new kernel
+                    return kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                        out_chunk,
+                        a_slice.as_ptr(),
+                        b_blocks_chunk,
+                        k,
+                    );
+                }
+                // Add a scalar fallback here if needed
+            }
         });
-    } else {
+    } else { // Prefill Path
+        let b_slice = b_weights; // Use the whole slice
         c.outer_iter_mut().into_par_iter().zip(a.outer_iter()).for_each(|(mut c_row, a_row)| {
             let a_row_slice = a_row.as_slice().unwrap();
             let out_slice = c_row.as_slice_mut().unwrap();
-            kernels::scalar::matmul_vec_q4_k_scalar(out_slice, a_row_slice, b_weights, k);
+            unsafe {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    return kernels::x86::q4_k::matmul_vec_q4_k_avx2(
+                        out_slice,
+                        a_row_slice.as_ptr(),
+                        b_slice,
+                        k,
+                    );
+                }
+            }
         });
     }
     c
 }
 
 /// Dispatcher for Q6_K 2D MatMul
+pub fn matmul_2d_cpu_q6_k2(
+    input: &ArrayView2<f32>,
+    weights: &[BlockQ6_K],
+) -> Array2<f32> {
+    let (m, k) = input.dim();
+    let num_blocks_per_row = k / 256;
+    let out_features = weights.len() / num_blocks_per_row;
+    let mut output = Array2::zeros((m, out_features));
+
+    // Notice: No quantize_row_q8_k calls anymore!
+    
+    if m == 1 { // Decode Path
+        let r = input.row(0);
+        let a_slice = r.as_slice().unwrap();
+        let out_slice = output.as_slice_mut().unwrap();
+
+        // 64 is a good chunk size for Q6 because it is computationally heavy
+        out_slice.par_chunks_mut(64).enumerate().for_each(|(chunk_idx, out_chunk)| {
+            unsafe {
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    // Offset calculation
+                    let start_row = chunk_idx * 64;
+                    let block_start = start_row * num_blocks_per_row;
+                    let block_count = out_chunk.len() * num_blocks_per_row;
+                    
+                    return kernels::x86::q6_k::matmul_vec_q6_k_avx2(
+                        out_chunk,
+                        a_slice.as_ptr(),
+                        &weights[block_start..block_start+block_count],
+                        k
+                    );
+                }
+                
+                // Fallback (requires re-quantizing if you kept the old scalar kernel)
+                // Or just implement a slow F32 scalar fallback here
+            }
+            
+        });
+    } else { 
+        output.outer_iter_mut().into_par_iter().zip(input.outer_iter()).for_each(|(mut out_row, in_row)| {
+            let a_slice = in_row.as_slice().unwrap();
+            let a_q8 = quantize_row_q8_k(a_slice);
+            
+            let out_slice = out_row.as_slice_mut().unwrap();
+            for (i, out_val) in out_slice.iter_mut().enumerate() {
+                let start = i * num_blocks_per_row;
+                let end = start + num_blocks_per_row;
+                let w_row = &weights[start..end];
+                *out_val = kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, &a_q8);
+            }
+        });
+    }
+
+    output
+}
 pub fn matmul_2d_cpu_q6_k(
     input: &ArrayView2<f32>,
     weights: &[BlockQ6_K],
 ) -> Array2<f32> {
-    let (batch_size, k) = input.dim();
+    let (m, k) = input.dim();
     let num_blocks_per_row = k / QK_K;
     let out_features = weights.len() / num_blocks_per_row;
 
-    let mut output = Array2::zeros((batch_size, out_features));
+    let mut output = Array2::zeros((m, out_features));
 
-    // Parallelize over the batch and output features
-    output.axis_iter_mut(ndarray::Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(b_idx, mut out_row)| {
-            let b = input.row(b_idx);
-            let input_row = b.as_slice().unwrap();
-            let out_slice = out_row.as_slice_mut().unwrap();
+    if m == 1 { // Decode Path
+        let r = input.row(0);
+        let a_slice = r.as_slice().unwrap();
+        let out_slice = output.as_slice_mut().unwrap();
 
-            unsafe {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                        matmul_vec_q6_k_avx2(out_slice, input_row, weights, k);
-                        return;
-                    }
+        // Pre-quantize the input vector once.
+        let a_q8 = quantize_row_q8_k(a_slice);
+
+        let num_threads = rayon::current_num_threads();
+        let chunk_size = (out_features + num_threads - 1) / num_threads;
+
+        // Use the winning `par_chunks_mut` strategy.
+        out_slice
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_idx, out_chunk)| {
+                for (j, out_val) in out_chunk.iter_mut().enumerate() {
+                    let i = chunk_idx * chunk_size + j;
+                    let start = i * num_blocks_per_row;
+                    let end = start + num_blocks_per_row;
+                    let w_row = &weights[start..end];
+                    
+                    // Call the existing scalar kernel.
+                    *out_val = kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, &a_q8);
                 }
-                
-                // Fallback to scalar
-                matmul_vec_q6_k_scalar(out_slice, input_row, weights, k);
+            });
+    } else { // Prefill Path
+        output.outer_iter_mut().into_par_iter().zip(input.outer_iter()).for_each(|(mut out_row, in_row)| {
+            let a_slice = in_row.as_slice().unwrap();
+            let a_q8 = quantize_row_q8_k(a_slice);
+            
+            let out_slice = out_row.as_slice_mut().unwrap();
+            for (i, out_val) in out_slice.iter_mut().enumerate() {
+                let start = i * num_blocks_per_row;
+                let end = start + num_blocks_per_row;
+                let w_row = &weights[start..end];
+                *out_val = kernels::scalar::vec_dot_q6k_q8k_scalar(k, w_row, &a_q8);
             }
         });
+    }
 
     output
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2", enable = "fma")]
-unsafe fn matmul_vec_q6_k_avx2(
-    out_chunk: &mut [f32],
-    a: &[f32],
-    b_blocks: &[BlockQ6_K],
-    k: usize,
-) {
-    use std::arch::x86_64::*;
-
-    use crate::kernels::q_common::QK_K;
-    let blocks_per_row = k / QK_K;
-    let mut temp_w = [0.0f32; QK_K]; // Stack buffer for dequantized weights
-
-    for (i, out_val) in out_chunk.iter_mut().enumerate() {
-        let row_blocks = &b_blocks[i * blocks_per_row..(i + 1) * blocks_per_row];
-        let mut sum_vec = _mm256_setzero_ps();
-
-        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
-            use crate::kernels::dequantize::dequantize_q6_k_block;
-
-            let block = &row_blocks[block_idx];
-            
-            // 1. Dequantize Q6_K block to F32 temp buffer
-            dequantize_q6_k_block(block, &mut temp_w);
-
-            // 2. Perform AVX2 Dot Product
-            let mut a_ptr = a_chunk.as_ptr();
-            let mut w_ptr = temp_w.as_ptr();
-            for _ in 0..32 { // 256 elements / 8 per YMM = 32 iterations
-                let av = _mm256_loadu_ps(a_ptr);
-                let wv = _mm256_loadu_ps(w_ptr);
-                sum_vec = _mm256_fmadd_ps(av, wv, sum_vec);
-                a_ptr = a_ptr.add(8);
-                w_ptr = w_ptr.add(8);
-            }
-        }
-        
-        // 3. Horizontal sum
-        let mut res = hsum_avx(sum_vec);
-        *out_val = res;
-    }
-}
-
-// Scalar Fallback
-unsafe fn matmul_vec_q6_k_scalar(out: &mut [f32], a: &[f32], b: &[BlockQ6_K], k: usize) {
-    let mut temp_w = [0.0f32; QK_K];
-    let blocks_per_row = k / QK_K;
-    for (i, out_val) in out.iter_mut().enumerate() {
-        let row_blocks = &b[i * blocks_per_row..(i + 1) * blocks_per_row];
-        let mut sum = 0.0f32;
-        for (block_idx, a_chunk) in a.chunks_exact(QK_K).enumerate() {
-            kernels::dequantize::dequantize_q6_k_block(&row_blocks[block_idx], &mut temp_w);
-            for j in 0..QK_K {
-                sum += a_chunk[j] * temp_w[j];
-            }
-        }
-        *out_val = sum;
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
-unsafe fn hsum_avx(v: std::arch::x86_64::__m256) -> f32 {
-    use std::arch::x86_64::*;
-    let vlow = _mm256_castps256_ps128(v);
-    let vhigh = _mm256_extractf128_ps(v, 1);
-    let vsum = _mm_add_ps(vlow, vhigh);
-    let vsum = _mm_hadd_ps(vsum, vsum);
-    let vsum = _mm_hadd_ps(vsum, vsum);
-    _mm_cvtss_f32(vsum)
-}

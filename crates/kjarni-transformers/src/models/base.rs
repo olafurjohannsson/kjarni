@@ -129,6 +129,7 @@ pub struct ModelLoadConfig {
     pub offload_lm_head: bool,
     pub gpu_layers: Option<usize>,
     pub target_dtype: Option<DType>, // User override
+    pub quantize_lm_head: Option<DType>,
     pub gpu_layer_range: Option<(usize, usize)>,
     pub max_batch_size: Option<usize>,
     pub max_sequence_length: Option<usize>,
@@ -141,6 +142,7 @@ impl Default for ModelLoadConfig {
             offload_lm_head: false,
             gpu_layers: None,
             target_dtype: None, // Default to "detect from file"
+            quantize_lm_head: None,
             gpu_layer_range: None,
             max_batch_size: None,
             max_sequence_length: None,
@@ -176,6 +178,11 @@ impl ModelLoadConfig {
             gpu_layer_range: Some((start, end)),
             ..Default::default()
         }
+    }
+
+    pub fn with_quantized_lm_head(mut self, dtype: DType) -> Self {
+        self.quantize_lm_head = Some(dtype);
+        self
     }
 
     // Builder methods

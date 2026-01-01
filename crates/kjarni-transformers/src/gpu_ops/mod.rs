@@ -9,6 +9,7 @@ pub mod tensor;
 mod tensor_pool;
 pub mod uniforms;
 pub mod utils;
+pub mod timeout;
 
 pub use kernel::Kernel;
 pub use tensor::{DType, GpuTensor};

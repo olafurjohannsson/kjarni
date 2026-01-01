@@ -1,11 +1,10 @@
-use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
 
 pub mod reorder;
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -109,20 +108,19 @@ impl GpuUpdateCache {
                 ],
             });
 
-        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        //     label: Some("Update Cache Pass"),
-        //     timestamp_writes: None,
-        // });
-        let label = format!("UpdateCache");
-        self.context.profiler.profile(encoder, &label, |compute_pass| {
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-
-            let workgroups_x = (d as u32 + 15) / 16;
-            let workgroups_y = (s_new as u32 + 15) / 16;
-            let workgroups_z = (b * h) as u32;
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-        });
+        gpu_profile!(
+            self.context,
+            encoder,
+            "UpdateCache",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let workgroups_x = (d as u32 + 15) / 16;
+                let workgroups_y = (s_new as u32 + 15) / 16;
+                let workgroups_z = (b * h) as u32;
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            }
+        );
     }
 }
 
@@ -202,7 +200,6 @@ fn compile_update_cache_pipeline(context: &WgpuContext) -> (ComputePipeline, Bin
     });
     (pipeline, bind_group_layout)
 }
-
 
 #[cfg(test)]
 mod tests;

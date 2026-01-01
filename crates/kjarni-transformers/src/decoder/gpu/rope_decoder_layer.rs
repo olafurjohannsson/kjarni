@@ -2,15 +2,13 @@ use anyhow::{Context, Result};
 use crate::{
     WgpuContext,
     cache::GpuKVCache,
-    decoder::prelude::*,
+    decoder::{gpu::GpuRoPEAttention, prelude::*},
     gpu_ops::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
             GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
             GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
-            attention::{
-                GpuAttention, GpuAttentionWeights, GpuDecoderSelfAttention, GpuRoPEAttention,
-            },
+            attention::GpuAttentionWeights,
             embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
             rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
             rope::GpuRoPE,

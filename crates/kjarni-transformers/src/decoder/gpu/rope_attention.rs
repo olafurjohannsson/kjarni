@@ -39,7 +39,7 @@
 //! )?;
 //! ```
 
-use super::ops::AttentionOps;
+use crate::gpu_ops::blocks::attention::ops::AttentionOps;
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
@@ -450,7 +450,7 @@ impl GpuRoPEAttention {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu_ops::blocks::attention::{GpuRoPEAttention, GpuAttentionWeights};
+    use crate::gpu_ops::blocks::attention::{GpuAttentionWeights};
     use crate::gpu_ops::blocks::rope::GpuRoPE;
     use crate::gpu_ops::GpuTensorPool;
     use crate::WgpuContext;

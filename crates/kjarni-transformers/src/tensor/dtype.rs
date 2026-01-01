@@ -16,13 +16,13 @@ pub enum DType {
     Q8_0,
     /// 4-bit block-quantized with K-quants (from GGUF)
     Q4_K,
-
+    Q5_K,
     Q6_K
 }
 
 impl DType {
     pub fn is_quantized(&self) -> bool {
-        matches!(self, DType::Q8_0 | DType::Q4_K | DType::Q6_K)
+        matches!(self, DType::Q8_0 | DType::Q4_K | DType::Q5_K | DType::Q6_K)
     }
     /// Maps a `safetensors::Dtype` to our internal `DType`.
     pub fn from_safetensors(dtype: safetensors::Dtype) -> Result<Self> {
@@ -55,6 +55,7 @@ pub fn size_in_bytes(&self) -> usize {
             // DType::I32 => 4,
             DType::Q8_0 => panic!("Q8_0 has variable block size"),
             DType::Q4_K => panic!("Q4_K has variable block size"),
+            DType::Q5_K => panic!("Q5_K has variable block size"),
             DType::Q6_K => panic!("Q6_K has variable block size"),
         }
     }
@@ -87,6 +88,9 @@ pub fn size_in_bytes(&self) -> usize {
             DType::Q6_K => {
                 unimplemented!()
             }
+            DType::Q5_K => {
+                unimplemented!()
+            }
         }
     }
 
@@ -99,7 +103,7 @@ pub fn size_in_bytes(&self) -> usize {
             DType::F16 => 2,
             DType::BF16 => 2,
             DType::U32 => 4,
-            DType::Q8_0 | DType::Q4_K | DType::Q6_K => {
+            DType::Q8_0 | DType::Q4_K | DType::Q6_K | DType::Q5_K => {
                 panic!(
                     "DType::size_of() is not defined for block-quantized types like {:?}. Use buffer_size_for_shape() instead.",
                     self

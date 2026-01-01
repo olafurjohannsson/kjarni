@@ -11,6 +11,14 @@ use half::{bf16, f16};
 use ndarray::{Array1, Array2, ArrayD, IxDyn};
 use serde_json::json;
 use std::path::Path;
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttentionLayout {
+    pub n_heads: usize,
+    pub n_kv_heads: usize,
+    pub head_dim: usize,
+}
+
 /// High-level interface for loading model weights from a directory.
 ///
 /// This struct detects the weight format (`.safetensors`, `.gguf`, etc.) and provides
@@ -22,7 +30,6 @@ pub struct ModelWeights {
 }
 
 impl ModelWeights {
-
     pub fn new(path: &Path) -> Result<Self> {
         // 1. Check if the path is a direct GGUF file
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
@@ -67,10 +74,11 @@ impl ModelWeights {
         let raw = self.get_raw(tensor_name)?;
         Ok(raw.dtype)
     }
-    
+
     /// Internal helper to load a GGUF and synthesize its configuration metadata.
     fn from_gguf_file(path: &Path) -> Result<Self> {
         let loader = GgufLoader::new(path)?;
+        loader.debug_print_tensors();
 
         // GGUF stores configuration in its metadata.
         // We synthesize a JSON string that matches the LlamaConfig expected format.
@@ -91,7 +99,10 @@ impl ModelWeights {
 
         // These keys are standard in Llama GGUF files.
         let arch = loader.get_string("general.architecture").unwrap_or("llama");
-        let rope_scaling = if loader.get_string(&format!("{}.rope.scaling.type", arch)).is_some() {
+        let rope_scaling = if loader
+            .get_string(&format!("{}.rope.scaling.type", arch))
+            .is_some()
+        {
             Some(json!({
                 "rope_type": loader.get_string(&format!("{}.rope.scaling.type", arch)).unwrap_or("llama3"),
                 "factor": loader.get_f32(&format!("{}.rope.scaling.factor", arch)).unwrap_or(32.0),
@@ -114,13 +125,22 @@ impl ModelWeights {
             "rope_theta": loader.get_f32(&format!("{}.rope.freq_base", arch)).unwrap_or(1e-5), // Some map to eps
             "rope_scaling": rope_scaling,
             "rms_norm_eps": loader.get_f32(&format!("{}.attention.layer_norm_rms_epsilon", arch)).unwrap_or(1e-5),
-            "vocab_size": 128256, // Usually safe to hardcode or find in metadata
-            "bos_token_id": 128000,
-            "eos_token_id": 128001,
+            "vocab_size": loader.get_u32(&format!("{}.vocab_size", arch)).unwrap_or(128256),
+
+            "bos_token_id": loader.get_u32(&format!("{}.bos_token_id", arch)).unwrap_or(128000),
+            "eos_token_id": loader.get_u32(&format!("{}.eos_token_id", arch)).unwrap_or(128001),
         });
         let json_str = config.to_string();
         println!("Synthesized GGUF config: {}", json_str);
         Ok(json_str)
+    }
+
+    fn parsed_vocab_size(&self) -> usize {
+        serde_json::from_str::<serde_json::Value>(&self.config_json)
+            .ok()
+            .and_then(|v| v["vocab_size"].as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(128256) // Fallback if parsing fails
     }
 
     /// Checks if a tensor with the given name exists in the model files.
@@ -141,11 +161,17 @@ impl ModelWeights {
     /// This is the primary and most efficient method for loading tensors for CPU computation,
     /// as it avoids unnecessary type conversions and allocations.
     pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
-        if self.is_gguf {
-            let raw = self.loader.get_raw(name)?;
-            return raw_to_typed_gguf(raw, true);
-        }
         let raw = self.loader.get_raw(name)?;
+        if self.is_gguf {
+            let attn = self
+                .loader
+                .as_any()
+                .downcast_ref::<GgufLoader>()
+                .and_then(|g| g.attention_layout());
+
+            return raw_to_typed_gguf(raw, true, self.parsed_vocab_size(), attn);
+        }
+        
         raw_to_typed(raw)
     }
 

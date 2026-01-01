@@ -1,34 +1,42 @@
 use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::embeddings::{EmbeddingConfig, LoadedEmbeddings};
+use crate::encoder::{CpuEncoder, GpuEncoder};
+use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use crate::execution::ExecutionPlan;
 use crate::lm_head::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;
-use crate::pipeline::{DecoderPipeline, DecoderPipelineConfig};
+use crate::pipeline::{
+    DecoderPipeline, DecoderPipelineConfig, EncoderDecoderPipeline, EncoderDecoderPipelineConfig,
+};
 use crate::rope::loader::LoadedRoPE;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use anyhow::{Context, Result, anyhow};
 use std::sync::Arc;
 
-pub struct DecoderPipelineBuilder<'a> {
+pub struct EncoderDecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
     config: Arc<dyn ModelConfig>,
     load_config: ModelLoadConfig,
     context: Option<Arc<WgpuContext>>,
-    cpu_backend: Option<Box<dyn CpuDecoder>>,
-    gpu_backend: Option<Box<dyn GpuDecoder>>,
+    cpu_encoder_backend: Option<Box<dyn CpuEncoder>>,
+    gpu_encoder_backend: Option<Box<dyn GpuEncoder>>,
+    cpu_decoder_backend: Option<Box<dyn CpuCrossDecoder>>,
+    gpu_decoder_backend: Option<Box<dyn GpuCrossDecoder>>,
 }
 
-impl<'a> DecoderPipelineBuilder<'a> {
+impl<'a> EncoderDecoderPipelineBuilder<'a> {
     pub fn new(weights: &'a ModelWeights, config: Arc<dyn ModelConfig>) -> Self {
         Self {
             weights,
             config,
             load_config: ModelLoadConfig::default(),
             context: None,
-            cpu_backend: None,
-            gpu_backend: None,
+            cpu_encoder_backend: None,
+            gpu_encoder_backend: None,
+            cpu_decoder_backend: None,
+            gpu_decoder_backend: None,
         }
     }
 
@@ -42,17 +50,27 @@ impl<'a> DecoderPipelineBuilder<'a> {
         self
     }
 
-    pub fn with_backends(
+    pub fn with_decoder_backends(
         mut self,
-        cpu: Option<Box<dyn CpuDecoder>>,
-        gpu: Option<Box<dyn GpuDecoder>>,
+        cpu_decoder: Option<Box<dyn CpuCrossDecoder>>,
+        gpu_decoder: Option<Box<dyn GpuCrossDecoder>>,
     ) -> Self {
-        self.cpu_backend = cpu;
-        self.gpu_backend = gpu;
+        self.cpu_decoder_backend = cpu_decoder;
+        self.gpu_decoder_backend = gpu_decoder;
         self
     }
 
-    pub fn build(self) -> Result<DecoderPipeline> {
+    pub fn with_encoder_backends(
+        mut self,
+        cpu_encoder: Option<Box<dyn CpuEncoder>>,
+        gpu_encoder: Option<Box<dyn GpuEncoder>>,
+    ) -> Self {
+        self.cpu_encoder_backend = cpu_encoder;
+        self.gpu_encoder_backend = gpu_encoder;
+        self
+    }
+
+    pub fn build(self) -> Result<EncoderDecoderPipeline> {
         let meta = self.config.metadata();
         let layout = self.config.layout();
         let ctx = self.context.as_ref();
@@ -65,10 +83,6 @@ impl<'a> DecoderPipelineBuilder<'a> {
             Device::Cpu
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
-
-        // 2. Load RoPE (Unified Manager)
-        // Passes load_gpu=true if any part of the plan requires GPU
-        let rope = LoadedRoPE::new(ctx, &meta, plan.needs_gpu())?;
 
         // 3. Extract Decoder Layout
         let dec_layout = layout
@@ -109,7 +123,8 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 embeddings.word_embeddings_cpu(),
                 embeddings.word_embeddings_gpu(),
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
-            )
+                None,
+            )?
         } else {
             LoadedLMHead::new(
                 ctx,
@@ -126,14 +141,17 @@ impl<'a> DecoderPipelineBuilder<'a> {
         // This is where you call build_backends from the GenericLoader
 
         // Return dummy/empty backends for now; the GenericLoader will populate these
-        DecoderPipeline::new(
+        EncoderDecoderPipeline::new(
             embeddings,
-            self.cpu_backend,
-            self.gpu_backend,
+            self.cpu_decoder_backend,
+            self.gpu_decoder_backend,
+            self.cpu_encoder_backend,
+            self.gpu_encoder_backend,
             lm_head,
+            None,
             plan,
             self.context.clone(),
-            DecoderPipelineConfig {
+            EncoderDecoderPipelineConfig {
                 num_layers: meta.num_layers,
                 hidden_size: meta.hidden_size,
                 vocab_size: meta.vocab_size,

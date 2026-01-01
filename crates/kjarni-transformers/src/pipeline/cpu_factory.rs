@@ -51,23 +51,23 @@ impl CpuLayerFactory {
         // 2. Load the 3 Linear Layers
         // SwiGLU variants typically do not use biases, so we pass None
         let gate =
-            LinearLayer::from_weights(weights, &name(gate_name), None, target_dtype, strategy)?;
+            LinearLayer::builder(weights, &name(gate_name))
+                .with_target_dtype(target_dtype)
+                .with_f32_strategy(strategy)
+                .with_optional_bias(None)
+                .build()?;
 
-        let up = LinearLayer::from_weights(
-            weights,
-            &name(&layout.up_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
+        let up = LinearLayer::builder(weights, &name(&layout.up_weight))
+            .with_target_dtype(target_dtype)
+            .with_f32_strategy(strategy)
+            .with_optional_bias(None)
+            .build()?;
 
-        let down = LinearLayer::from_weights(
-            weights,
-            &name(&layout.down_weight),
-            None,
-            target_dtype,
-            strategy,
-        )?;
+        let down = LinearLayer::builder(weights, &name(&layout.down_weight))
+            .with_target_dtype(target_dtype)
+            .with_f32_strategy(strategy)
+            .with_optional_bias(None)
+            .build()?;
 
         // 3. Construct the SwiGluFeedForward brick
         Ok(SwiGluFeedForward::new(gate, up, down))
@@ -88,37 +88,37 @@ impl CpuLayerFactory {
 
         // 1. Load the 4 Linear Layers
         // LinearLayer::from_weights handles the bias automatically if opt_name returns Some
-        let q = LinearLayer::from_weights(
+        let q = LinearLayer::builder(
             weights,
-            &name(&layout.q_weight),
-            opt_name(&layout.q_bias).as_deref(),
-            target_dt,
-            strategy,
-        )?;
+            &name(&layout.q_weight))
+            .with_optional_bias(opt_name(&layout.q_bias).as_deref())
+            .with_target_dtype(target_dt)
+            .with_f32_strategy(strategy)
+            .build()?;
 
-        let k = LinearLayer::from_weights(
+        let k = LinearLayer::builder(
             weights,
-            &name(&layout.k_weight),
-            opt_name(&layout.k_bias).as_deref(),
-            target_dt,
-            strategy,
-        )?;
+            &name(&layout.k_weight))
+            .with_optional_bias(opt_name(&layout.k_bias).as_deref())
+            .with_target_dtype(target_dt)
+            .with_f32_strategy(strategy)
+            .build()?;
 
-        let v = LinearLayer::from_weights(
+        let v = LinearLayer::builder(
             weights,
-            &name(&layout.v_weight),
-            opt_name(&layout.v_bias).as_deref(),
-            target_dt,
-            strategy,
-        )?;
+            &name(&layout.v_weight))
+            .with_optional_bias(opt_name(&layout.v_bias).as_deref())
+            .with_target_dtype(target_dt)
+            .with_f32_strategy(strategy)
+            .build()?;
 
-        let o = LinearLayer::from_weights(
+        let o = LinearLayer::builder(
             weights,
-            &name(&layout.o_weight),
-            opt_name(&layout.o_bias).as_deref(),
-            target_dt,
-            strategy,
-        )?;
+            &name(&layout.o_weight))
+            .with_optional_bias(opt_name(&layout.o_bias).as_deref())
+            .with_target_dtype(target_dt)
+            .with_f32_strategy(strategy)
+            .build()?;
 
         // 2. Construct the DecoderAttention brick
         Ok(DecoderAttention::new(

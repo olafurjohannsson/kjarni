@@ -3,11 +3,20 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
-    activations::Activation, cache::{Cache, CpuBeamKVCache}, embeddings::Embeddings, encoder_decoder::{
+    activations::Activation,
+    cache::{Cache, CpuBeamKVCache},
+    embeddings::Embeddings,
+    encoder_decoder::{
         DecoderCrossAttention, DecoderSelfAttention,
         decoder_cross_attn_layer::DecoderCrossAttentionLayer,
         traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
-    }, feedforward::{FeedForward, LegacyFeedForward}, linear_layer::LinearLayer, models::base::ModelLoadConfig, normalization::LayerNorm, traits::{Device, InferenceModel, ModelConfig}, weights::ModelWeights
+    },
+    feedforward::{FeedForward, LegacyFeedForward},
+    linear_layer::LinearLayer,
+    models::base::ModelLoadConfig,
+    normalization::LayerNorm,
+    traits::{Device, InferenceModel, ModelConfig},
+    weights::ModelWeights,
 };
 
 use ndarray::{Array2, Array3};
@@ -22,9 +31,9 @@ pub struct BartCpuDecoder {
 
 impl BartCpuDecoder {
     pub fn new(
-        weights: &ModelWeights, 
-        config: Arc<BartConfig>, 
-        _load_config: ModelLoadConfig
+        weights: &ModelWeights,
+        config: Arc<BartConfig>,
+        _load_config: ModelLoadConfig,
     ) -> Result<Self> {
         let meta = config.metadata();
         let layout = config.layout();
@@ -74,34 +83,22 @@ impl BartCpuDecoder {
         let self_attn = DecoderSelfAttention::new(
             config.d_model,
             config.decoder_attention_heads,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.q_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.k_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.v_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.out_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
+            LinearLayer::builder(weights, &format!("{}.self_attn.q_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.self_attn.k_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.self_attn.v_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.self_attn.out_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
         );
         let self_attn_norm = LayerNorm::new(
             weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
@@ -113,34 +110,22 @@ impl BartCpuDecoder {
         let cross_attn = DecoderCrossAttention::new(
             config.d_model,
             config.decoder_attention_heads,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.encoder_attn.q_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.encoder_attn.k_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.encoder_attn.v_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &format!("{}.encoder_attn.out_proj.weight", prefix),
-                None,
-                dtype,
-                None,
-            )?,
+            LinearLayer::builder(weights, &format!("{}.encoder_attn.q_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.encoder_attn.k_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.encoder_attn.v_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &format!("{}.encoder_attn.out_proj.weight", prefix))
+                .with_optional_bias(None)
+                .with_target_dtype(dtype)
+                .build()?,
         );
         let cross_attn_norm = LayerNorm::new(
             weights.get_array1(&format!("{}.encoder_attn_layer_norm.weight", prefix))?,
@@ -468,7 +453,7 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
+        let lm_head = LinearLayer::builder(&weights, "model.shared.weight").build()?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // Encode
@@ -523,7 +508,9 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
+        let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
+            .with_optional_bias(None)
+            .build()?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // 1. Encode
@@ -590,7 +577,9 @@ mod tests {
         let (encoder, decoder, _config) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
+        let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
+            .with_optional_bias(None)
+            .build()?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         // Full input (93 tokens as Python used)
@@ -704,7 +693,9 @@ mod tests {
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         // Load LM head
-        let lm_head = LinearLayer::from_weights(&weights, "model.shared.weight", None, None, None)?;
+        let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
+            .with_optional_bias(None)
+            .build()?;
         // final_logits_bias is [1, vocab_size], squeeze to 1D
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 

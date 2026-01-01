@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::tensor::DType;
-use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::tensor::DType;
+use crate::{WgpuContext, gpu_profile};
 
 /// Uniforms for the lookup shader.
 #[repr(C)]
@@ -19,7 +19,7 @@ struct LookupUniforms {
     input_seq_len: u32,
     vocab_size: u32,
     hidden_size: u32,
-    is_bf16: u32,  // 0 = F32, 1 = BF16
+    is_bf16: u32, // 0 = F32, 1 = BF16
     _padding: u32,
 }
 
@@ -65,15 +65,26 @@ impl GpuLookup2 {
         let seq_len = output_shape[1];
         let hidden_size = output_shape[2];
 
-        assert_eq!(batch_size, input_ids.shape()[0], "Batch dimensions must match");
+        assert_eq!(
+            batch_size,
+            input_ids.shape()[0],
+            "Batch dimensions must match"
+        );
         assert_eq!(seq_len, input_ids.shape()[1], "Sequence length must match");
-        assert_eq!(hidden_size, embedding_table.shape()[1], "Hidden size must match");
+        assert_eq!(
+            hidden_size,
+            embedding_table.shape()[1],
+            "Hidden size must match"
+        );
 
         // Determine if BF16
         let is_bf16 = match embedding_table.dtype() {
             DType::BF16 => 1u32,
             DType::F32 => 0u32,
-            other => panic!("Unsupported embedding dtype: {:?}. Expected F32 or BF16.", other),
+            other => panic!(
+                "Unsupported embedding dtype: {:?}. Expected F32 or BF16.",
+                other
+            ),
         };
 
         let uniforms = LookupUniforms {
@@ -87,43 +98,52 @@ impl GpuLookup2 {
             _padding: 0,
         };
 
-        let uniform_buffer = self.context.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Lookup Uniforms"),
-                contents: bytemuck::cast_slice(&[uniforms]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            },
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Lookup Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Lookup Bind Group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: embedding_table.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: input_ids.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: output.buffer().as_entire_binding(),
+                    },
+                ],
+            });
+
+        gpu_profile!(
+            self.context,
+            encoder,
+            "EmbeddingLookup",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let workgroups = (uniforms.output_size + 255) / 256;
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
         );
-
-        let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Lookup Bind Group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: embedding_table.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: input_ids.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: output.buffer().as_entire_binding(),
-                },
-            ],
-        });
-
-        self.context.profiler.profile(encoder, "Embedding Lookup", |pass| {
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let workgroups = (uniforms.output_size + 255) / 256;
-            pass.dispatch_workgroups(workgroups, 1, 1);
-        });
     }
 }
 
@@ -133,77 +153,78 @@ fn compile_lookup_pipeline(
     let shader = context
         .device
         .create_shader_module(wgpu::include_wgsl!("lookup2.wgsl"));
-        
-    let bind_group_layout = context.device.create_bind_group_layout(
-        &wgpu::BindGroupLayoutDescriptor {
-            label: Some("Lookup Bind Group Layout"),
-            entries: &[
-                // Uniforms @binding(0)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // Embedding Table @binding(1) - array<u32> to support both F32 and BF16
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // Input IDs (u32) @binding(2)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // Output (f32) @binding(3)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        },
-    );
 
-    let pipeline_layout = context.device.create_pipeline_layout(
-        &wgpu::PipelineLayoutDescriptor {
+    let bind_group_layout =
+        context
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Lookup Bind Group Layout"),
+                entries: &[
+                    // Uniforms @binding(0)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Embedding Table @binding(1) - array<u32> to support both F32 and BF16
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Input IDs (u32) @binding(2)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Output (f32) @binding(3)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+    let pipeline_layout = context
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Lookup Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
-        },
-    );
+        });
 
-    let pipeline = context.device.create_compute_pipeline(
-        &wgpu::ComputePipelineDescriptor {
+    let pipeline = context
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Lookup Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: Some("main"),
             compilation_options: Default::default(),
             cache: None,
-        },
-    );
+        });
 
     (pipeline, bind_group_layout)
 }

@@ -133,20 +133,16 @@ impl SequenceClassifier {
             )
         })?;
         // Note: For BERT-style classification, we use the final_norm (Pooler) and lm_head (Classifier)
-        let pooler = LinearLayer::from_weights(
-            &weights,
-            &encoder_layout.final_norm_weight.as_deref().unwrap(),
-            None,
-            load_cfg.target_dtype,
-            None,
-        )?;
-        let classifier = LinearLayer::from_weights(
-            &weights,
-            &layout.lm_head,
-            None,
-            load_cfg.target_dtype,
-            None,
-        )?;
+        let name = encoder_layout.final_norm_weight.as_deref().unwrap();
+        let pooler = LinearLayer::builder(&weights, name)
+            .with_target_dtype(load_cfg.target_dtype)
+            .with_optional_bias(None)
+            .build()?;
+
+        let classifier = LinearLayer::builder(&weights, &layout.lm_head)
+            .with_optional_bias(None)
+            .with_target_dtype(load_cfg.target_dtype)
+            .build()?;
 
         let mut cpu_encoder = None;
         let mut gpu_encoder = None;
@@ -456,7 +452,7 @@ impl LanguageModel for SequenceClassifier {
     fn forced_bos_token_id(&self) -> Option<u32> {
         None
     }
-fn forced_eos_token_id(&self) -> Option<u32> {
+    fn forced_eos_token_id(&self) -> Option<u32> {
         None
     }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {

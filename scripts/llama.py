@@ -4,7 +4,7 @@ import sys
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # --- CONFIGURATION TO MATCH RUST ---
-model_path = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct"
+model_path = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct"
 prompt = "Describe the theory of relativity in simple terms(max 50 words):\n"
 REPETITION_PENALTY = 1.2
 MAX_NEW_TOKENS = 150

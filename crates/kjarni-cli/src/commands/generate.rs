@@ -101,10 +101,10 @@ pub async fn run(
 
     // 5. Generate
     if no_stream {
-        let output = generator.generate(&prompt_text, &config).await?;
+        let output = generator.generate(&prompt_text, &config, None).await?;
         println!("{}", output);
     } else {
-        let stream = generator.generate_stream(&prompt_text, &config).await?;
+        let stream = generator.generate_stream(&prompt_text, &config, None).await?;
         futures_util::pin_mut!(stream);
 
         let mut stdout = io::stdout();

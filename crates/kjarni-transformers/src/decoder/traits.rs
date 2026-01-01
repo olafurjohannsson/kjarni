@@ -34,37 +34,7 @@ use ndarray::{Array1, Array2, Array3};
 use wgpu::CommandEncoder;
 
 // ============================================================================
-//  1. Unified Data Types
-// ============================================================================
-
-/// Flexible input for the Decoder.
-///
-/// This enum enables hybrid execution strategies. The backend or decoder implementation
-/// can choose to auto-upload CPU data or use resident GPU data.
-///
-/// It also supports `Hidden` variants, allowing for Multimodal inputs (e.g., Image Encoders)
-/// or Prefix Tuning where embeddings are pre-computed.
-#[derive(Debug)]
-pub enum DecoderInput<'a> {
-    /// Standard case: Token IDs resident on GPU (Fastest for Loop).
-    /// Shape: `[batch, seq]`
-    TokensGpu(&'a GpuTensor),
-
-    /// Standard case: Token IDs on CPU. Decoder handles upload.
-    /// Shape: `[batch, seq]`
-    TokensCpu(&'a [u32]),
-
-    /// Advanced: Pre-computed hidden states on GPU.
-    /// Shape: `[batch, seq, hidden]`
-    HiddenGpu(&'a GpuTensor),
-
-    /// Advanced: Pre-computed hidden states on CPU.
-    /// Shape: `[batch, seq, hidden]`
-    HiddenCpu(&'a Array3<f32>),
-}
-
-// ============================================================================
-//  2. The Generation Backend (The Controller)
+//  The Generation Backend
 // ============================================================================
 
 /// Defines the low-level orchestration for the generation loop.
@@ -113,7 +83,7 @@ pub trait DecoderGenerationBackend: Send + Sync {
 }
 
 // ============================================================================
-//  3. Compute Components (The Stack)
+//  Compute Components
 // ============================================================================
 
 /// Defines the asynchronous interface for a GPU-native Transformer Decoder.
@@ -239,7 +209,7 @@ pub trait CpuDecoder: Send + Sync {
 }
 
 // ============================================================================
-//  4. Operations Strategy (The Model Logic)
+//  Ops
 // ============================================================================
 
 /// Logic specific to CPU execution.

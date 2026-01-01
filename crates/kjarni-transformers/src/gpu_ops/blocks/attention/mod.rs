@@ -47,16 +47,14 @@ use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
-mod ops;
+pub mod ops;
 mod encoder_self_attention;
 mod decoder_self_attention;
-mod rope_attention;
 mod cross_decoder_attention;
 
 pub use encoder_self_attention::GpuEncoderSelfAttention;
 pub use decoder_self_attention::{GpuDecoderSelfAttention, DecoderSelfAttentionOutput};
 pub use cross_decoder_attention::{GpuCrossAttention};
-pub use rope_attention::{GpuRoPEAttention, RoPEAttentionOutput};
 pub use ops::AttentionOps;
 
 /// GPU tensors for attention weights.

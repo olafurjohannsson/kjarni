@@ -1,24 +1,50 @@
 # TODO: Reusable Components for Decoder Models
 
+## P0 - Production Hardening ✅ NEW
+
+### 1. Cancellation Tokens ✅
+- [x] Create `kjarni-transformers/src/common/cancellation.rs`
+- [x] `CancellationToken` + `CancellationHandle` pair
+- [x] `generate_cancellable()` methods in `DecoderGenerator`
+- [x] Cancellation checks in generation loop
+
+### 2. GPU Timeout Handling ✅
+- [x] Create `kjarni-transformers/src/gpu_ops/timeout.rs`
+- [x] `GpuTimeoutConfig` with configurable timeout/poll interval
+- [x] `poll_with_timeout_async()` for buffer mapping
+- [x] Timeout-aware `read_logits_from_staging()`
+
+### 3. Generation Statistics ✅
+- [x] Create `kjarni-transformers/src/stats.rs`
+- [x] `GenerationStats` with prefill/decode TPS tracking
+- [x] Global enable/disable via `GenerationStats::enable()`
+- [x] Integrated into `DecoderGenerator`
+
 ## P1 - High Impact
 
-### 1. LoadedRoPE
-- [ ] Create `kjarni-transformers/src/rope/loader.rs`
-- [ ] `LoadedRoPE` struct with `cpu_rope: Arc<RoPE>`, `gpu_rope: Option<GpuRoPE>`
-- [ ] `new(ctx, head_dim, max_seq_len, theta, scaling, load_gpu) -> Result<Self>`
-- [ ] Used by: Llama, Mistral, Phi, Gemma, Qwen
+### 1. LoadedRoPE ✅ (Verify)
+- [x] Create `kjarni-transformers/src/rope/loader.rs`
+- [x] `LoadedRoPE` struct with `cpu_rope: Arc<RoPE>`, `gpu_rope: Option<GpuRoPE>`
+- [x] `new(ctx, head_dim, max_seq_len, theta, scaling, load_gpu) -> Result<Self>`
+- [x] Used by: Llama, Mistral, Phi, Gemma, Qwen
 
-### 2. DecoderPipeline Builder
-- [ ] Add `DecoderPipelineBuilder` to `kjarni-transformers/src/pipeline/decoder.rs`
-- [ ] `DecoderPipeline::builder().embeddings(...).lm_head(...).plan_from_device(...).build()`
-- [ ] Auto-create execution plan from device + ModelLoadConfig
-- [ ] Reduce boilerplate in model `from_pretrained`
+### 2. DecoderPipeline Builder ✅ (Verify)
+- [x] Add `DecoderPipelineBuilder` to `kjarni-transformers/src/pipeline/decoder.rs`
+- [x] `DecoderPipeline::builder().embeddings(...).lm_head(...).plan_from_device(...).build()`
+- [x] Auto-create execution plan from device + ModelLoadConfig
+- [x] Reduce boilerplate in model `from_pretrained`
 
-### 3. DecoderModelLoader Trait
-- [ ] Create `kjarni-transformers/src/pipeline/loader.rs`
-- [ ] Trait with `load_config`, `load_cpu_decoder`, `load_gpu_decoder`
-- [ ] Default impls for `load_embeddings`, `load_lm_head`, `load_tokenizer`
-- [ ] Each model just implements model-specific parts
+### 3. DecoderModelFactory Trait ✅ (Verify)
+- [x] Create `kjarni-transformers/src/pipeline/loader.rs`
+- [x] Trait with `load_config`, `build_backends`
+- [x] `GenericLoader::load_from_pretrained<M: DecoderModelFactory>()`
+- [x] Each model just implements model-specific parts
+
+### 4. CpuLayerFactory ✅ (Verify)
+- [x] Create `kjarni-transformers/src/pipeline/factory.rs`
+- [x] `build_norm()`, `build_swiglu_ffn()`, `build_decoder_attention()`
+- [x] Layout-driven weight loading
+- [x] Used by: Llama layers
 
 ## P2 - Medium Impact
 
@@ -35,10 +61,43 @@
 - [ ] `create_gpu(ctx, seq_len, max_len) -> Result<GpuTensor>`
 - [ ] Used by: All models (Mistral needs SlidingWindow)
 
+### 6. Seq2SeqPipeline
+- [ ] Create `kjarni-transformers/src/pipeline/seq2seq.rs`
+- [ ] `Seq2SeqPipeline` with encoder + decoder backends
+- [ ] `Seq2SeqPipelineBuilder` (similar pattern to decoder)
+- [ ] `Seq2SeqModelFactory` trait
+- [ ] Refactor BART to use it
+
 ## P3 - Nice to Have
 
-### 6. Fix LoadedEmbeddings API
+### 7. Fix LoadedEmbeddings API
 - [ ] Make context `Option<&Arc<WgpuContext>>`
 - [ ] Add `load_cpu: bool, load_gpu: bool` params
 - [ ] Add `has_cpu()`, `has_gpu()` methods
 - [ ] Match LoadedLMHead API pattern
+
+### 8. Batch Generation
+- [ ] Add `generate_batch()` to `DecoderGenerator`
+- [ ] Batch-aware KV cache
+- [ ] Batch prefill/decode in backends
+- [ ] ~2-3 days effort
+
+### 9. Backpressure Handling
+- [ ] Bounded channel between generation and stream yield
+- [ ] `StreamConfig` with buffer size
+- [ ] ~4-8 hours effort
+
+## Documentation
+
+### 10. Backend Documentation ✅
+- [x] `GpuDecoderBackend` - Full module docs + method docs
+- [x] `CpuDecoderBackend` - Full module docs + method docs
+- [x] `AnyDecoderBackend` - Type erasure explanation
+- [x] `DecoderGenerator` - Usage examples + architecture diagram
+
+### 11. README & Examples
+- [ ] Main README with supported models, formats, performance
+- [ ] Example: Basic chat generation
+- [ ] Example: Streaming generation
+- [ ] Example: Cancellation handling
+- [ ] Example: Custom model loading

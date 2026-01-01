@@ -76,34 +76,23 @@ impl CpuTransformerEncoder {
         let self_attn = EncoderSelfAttention::new(
             meta.hidden_size,
             meta.num_attention_heads,
-            LinearLayer::from_weights(
-                weights,
-                &name(&encoder_layout.layer.self_attn.q_weight),
-                Some(&name(q_bias)),
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &name(&encoder_layout.layer.self_attn.k_weight),
-                Some(&name(k_bias)),
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &name(&encoder_layout.layer.self_attn.v_weight),
-                Some(&name(v_bias)),
-                dtype,
-                None,
-            )?,
-            LinearLayer::from_weights(
-                weights,
-                &name(&encoder_layout.layer.self_attn.o_weight),
-                Some(&name(o_bias)),
-                dtype,
-                None,
-            )?,
+
+            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.q_weight))
+                .with_optional_bias(Some(&name(q_bias)))
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.k_weight))
+                .with_optional_bias(Some(&name(k_bias)))
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.v_weight))
+                .with_optional_bias(Some(&name(v_bias)))
+                .with_target_dtype(dtype)
+                .build()?,
+            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.o_weight))
+                .with_optional_bias(Some(&name(o_bias)))
+                .with_target_dtype(dtype)
+                .build()?,
         );
 
         // 5. Load FFN weights (Paths updated)

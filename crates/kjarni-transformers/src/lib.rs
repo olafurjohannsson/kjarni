@@ -30,6 +30,8 @@ pub mod weights;
 pub mod lm_head;
 pub mod execution;
 pub mod pipeline;
+pub mod stats;
+
 // Re-export commonly used items
 pub use crate::{
     attention::MultiHeadAttention,

@@ -1,20 +1,22 @@
 //! This module provides the `ModelWeights` struct, a unified, high-performance
 //! loader for model weights, abstracting away the underlying file format.
 
+use std::any::Any;
+
 use crate::tensor::TensorView;
 use anyhow::{Context, Result};
 
-mod gguf_loader;
-mod model_weights;
-mod safetensors_loader;
-
+pub mod gguf_loader;
+pub mod model_weights;
+pub mod safetensors_loader;
+pub use gguf_block_reorder::gguf_block_group_for_row;
 pub use model_weights::ModelWeights;
+
 pub use model_weights::raw_to_typed;
 pub use model_weights::cast_or_copy;
 mod gguf_block_reorder;
 pub use gguf_block_reorder::{
     raw_to_typed_gguf,
-    raw_to_typed_no_reorder
 };
 
 
@@ -40,6 +42,8 @@ pub trait WeightLoader {
     fn has_metadata(&self) -> bool {
         false
     }
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[cfg(test)]

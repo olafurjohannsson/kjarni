@@ -5,7 +5,6 @@
 
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
-use crate::decoder::traits::DecoderInput; // Re-use from the decoder module
 use crate::encoder::prelude::{CpuEncoder, EncoderLanguageModel, GpuEncoder};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput};

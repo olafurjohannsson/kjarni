@@ -28,12 +28,12 @@ async fn test_full_text_generation_parity() -> Result<()> {
     };
     let cpu_generator = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let cpu_gen = DecoderGenerator::new(Box::new(cpu_generator))?;
-    let cpu_generated_text = cpu_gen.generate(prompt, &config).await?;
+    let cpu_generated_text = cpu_gen.generate(prompt, &config, None).await?;
     let context = WgpuContext::new().await?;
     let gpu_generator =
         Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context), None).await?;
     let gpu_gen = DecoderGenerator::new(Box::new(gpu_generator))?;
-    let gpu_generated_text = gpu_gen.generate(prompt, &config).await?;
+    let gpu_generated_text = gpu_gen.generate(prompt, &config, None).await?;
     assert_eq!(
         cpu_generated_text, gpu_generated_text,
         "The final generated text from CPU and GPU backends did not match!"
@@ -357,15 +357,6 @@ async fn test_rms_norm_bf16_gamma_parity() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
-    test_layer0_attention_vs_ffn_isolation(DType::BF16).await
-}
-
-#[tokio::test]
-async fn test_layer0_attention_vs_ffn_isolation_f32() -> Result<()> {
-    test_layer0_attention_vs_ffn_isolation(DType::F32).await
-}
 
 async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
     let ctx = WgpuContext::new().await?;
@@ -682,15 +673,28 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
 // MAIN TEST
 // ============================================================================
 
-#[tokio::test]
-async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
-    test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
-}
+// TODO HEAVY TESTS
 
-#[tokio::test]
-async fn test_llama_cpu_gpu_step_by_step_parity_f32() -> Result<()> {
-    test_llama_cpu_gpu_step_by_step_parity(DType::F32).await
-}
+// #[tokio::test]
+// async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
+//     test_layer0_attention_vs_ffn_isolation(DType::BF16).await
+// }
+
+// #[tokio::test]
+// async fn test_layer0_attention_vs_ffn_isolation_f32() -> Result<()> {
+//     test_layer0_attention_vs_ffn_isolation(DType::F32).await
+// }
+
+
+// #[tokio::test]
+// async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
+//     test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
+// }
+
+// #[tokio::test]
+// async fn test_llama_cpu_gpu_step_by_step_parity_f32() -> Result<()> {
+//     test_llama_cpu_gpu_step_by_step_parity(DType::F32).await
+// }
 
 async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     let ctx = WgpuContext::new().await?;

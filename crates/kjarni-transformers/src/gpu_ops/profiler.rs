@@ -3,6 +3,30 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use wgpu::util::DeviceExt;
 
+/// Conditionally profile a compute pass.
+/// 
+/// In release builds without `profiling` feature, this compiles to
+/// a plain compute pass with zero overhead.
+#[cfg(feature = "profiling")]
+#[macro_export]
+macro_rules! gpu_profile {
+    ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
+        $ctx.profiler.profile($encoder, $label, |pass: &mut wgpu::ComputePass<'a>| $body(pass))
+    }};
+}
+
+#[cfg(not(feature = "profiling"))]
+#[macro_export]
+macro_rules! gpu_profile {
+    ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
+        let mut pass: wgpu::ComputePass<'_> = $encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some($label),
+            timestamp_writes: None,
+        });
+        $body(&mut pass)
+    }};
+}
+
 pub struct GpuProfiler {
     query_set: wgpu::QuerySet,
     resolve_buffer: wgpu::Buffer,

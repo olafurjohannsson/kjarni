@@ -188,7 +188,7 @@ pub async fn run(
         let prompt = template.apply(&conversation);
 
         // Generate response
-        let stream = generator.generate_stream(&prompt, &config).await?;
+        let stream = generator.generate_stream(&prompt, &config, None).await?;
         futures_util::pin_mut!(stream);
 
         let mut response = String::new();

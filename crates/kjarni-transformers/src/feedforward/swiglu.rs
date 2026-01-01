@@ -1,4 +1,3 @@
-
 use crate::linear_layer::{LinearData, LinearLayer};
 use crate::ops; // Use the new, clean 'ops' module for computations
 use anyhow::Result;
@@ -66,30 +65,12 @@ impl SwiGluFeedForward {
 
         // --- Step 1: Call the clean, safe, fused kernel dispatcher from the `ops` module ---
         let t_gate_up = Instant::now();
-        let (mut gate_out, up_out) = match (&self.gate.data, &self.up.data) {
-            (LinearData::BF16(gate_w), LinearData::BF16(up_w)) => {
-                ops::swiglu_fused::gate_up_fused_bf16(&hidden_2d, &gate_w.view(), &up_w.view())?
-            }
-            (LinearData::F32(_gate_w), LinearData::F32(_up_w)) => {
-                // This path will be enabled once the F32 fused kernel is implemented in ops/kernels
-                log::warn!(
-                    "Falling back to rayon::join in SwiGLU F32 decode path (fused kernel not yet implemented)."
-                );
-                rayon::join(
-                    || self.gate.matmul(&hidden_2d),
-                    || self.up.matmul(&hidden_2d),
-                )
-            }
-            _ => {
-                log::warn!(
-                    "Falling back to rayon::join in SwiGLU decode path due to mismatched dtypes."
-                );
-                rayon::join(
-                    || self.gate.matmul(&hidden_2d),
-                    || self.up.matmul(&hidden_2d),
-                )
-            }
-        };
+
+        let (mut gate_out, up_out) = rayon::join(
+            || self.gate.matmul(&hidden_2d),
+            || self.up.matmul(&hidden_2d),
+        );
+
         let d_gate_up = t_gate_up.elapsed();
 
         // --- Step 2: Activation & Element-wise Ops ---

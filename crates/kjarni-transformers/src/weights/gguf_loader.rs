@@ -1,5 +1,6 @@
 use crate::tensor::{DType, TensorView};
 use crate::weights::WeightLoader;
+use crate::weights::model_weights::AttentionLayout;
 use anyhow::{Context, Result, anyhow};
 // Import your gguf-rs components
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -8,6 +9,7 @@ use gguf_rs::{
 };
 use memmap2::Mmap;
 use serde_json::Value;
+use std::any::Any;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -22,6 +24,9 @@ pub struct GgufLoader {
     pub architecture: String,
     data_start_offset: u64,
 }
+pub trait GgufHfMapper {
+    fn gguf_to_hf_name(&self, gguf_name: &str) -> Option<String>;
+}
 
 struct GgufTensorInfo {
     kind: u32,
@@ -30,6 +35,82 @@ struct GgufTensorInfo {
     shape: Vec<usize>,
 }
 
+impl GgufLoader {
+    pub fn get_raw_from_gguf_name(&self, gguf_name: &str) -> Result<TensorView<'_>> {
+        let info = self.tensor_map.get(gguf_name).ok_or_else(|| {
+            anyhow!(
+                "Tensor with GGUF name '{}' not found in tensor map",
+                gguf_name
+            )
+        })?;
+
+        // Mapping GGML Type IDs to your internal DType
+        let dtype = match info.kind {
+            0 => DType::F32,
+            1 => DType::F16,
+            8 => DType::Q8_0,
+            12 => DType::Q4_K,
+            14 => DType::Q6_K,
+            30 => DType::BF16,
+            other => return Err(anyhow!("GGUF Loader: Unsupported GGML type ID {}", other)),
+        };
+
+        let start = (self.data_start_offset + info.offset) as usize;
+        let end = start + info.size as usize;
+
+        if end > self.mmap.len() {
+            return Err(anyhow!(
+                "Tensor '{}' points outside of file bounds",
+                gguf_name
+            ));
+        }
+
+        Ok(TensorView {
+            name: gguf_name.to_string(),
+            bytes: Cow::Borrowed(&self.mmap[start..end]),
+            shape: info.shape.clone(),
+            dtype,
+        })
+    }
+}
+
+impl GgufHfMapper for GgufLoader {
+    fn gguf_to_hf_name(&self, gguf_name: &str) -> Option<String> {
+        // This is the inverse of your `translate_name` function.
+        if gguf_name == "token_embd.weight" {
+            return Some("model.embed_tokens.weight".to_string());
+        }
+        if gguf_name == "output_norm.weight" {
+            return Some("model.norm.weight".to_string());
+        }
+        if gguf_name == "output.weight" {
+            return Some("lm_head.weight".to_string());
+        }
+
+        if gguf_name.starts_with("blk.") {
+            let parts: Vec<&str> = gguf_name.split('.').collect();
+            if parts.len() >= 3 {
+                let layer_idx = parts[1];
+                let suffix = parts[2..].join(".");
+
+                let hf_suffix = match suffix.as_str() {
+                    "attn_norm.weight" => "input_layernorm.weight",
+                    "attn_q.weight" => "self_attn.q_proj.weight",
+                    "attn_k.weight" => "self_attn.k_proj.weight",
+                    "attn_v.weight" => "self_attn.v_proj.weight",
+                    "attn_output.weight" => "self_attn.o_proj.weight",
+                    "ffn_norm.weight" => "post_attention_layernorm.weight",
+                    "ffn_gate.weight" => "mlp.gate_proj.weight",
+                    "ffn_up.weight" => "mlp.up_proj.weight",
+                    "ffn_down.weight" => "mlp.down_proj.weight",
+                    _ => return None,
+                };
+                return Some(format!("model.layers.{}.{}", layer_idx, hf_suffix));
+            }
+        }
+        None
+    }
+}
 impl GgufLoader {
     pub fn new(path: &Path) -> Result<Self> {
         // 1. Open the file for header parsing
@@ -107,7 +188,19 @@ impl GgufLoader {
             data_start_offset,
         })
     }
+    pub fn attention_layout(&self) -> Option<AttentionLayout> {
+        let arch = &self.architecture;
 
+        let n_heads = self.get_u32(&format!("{}.attention.head_count", arch))? as usize;
+        let n_kv_heads = self.get_u32(&format!("{}.attention.head_count_kv", arch))? as usize;
+        let embed = self.get_u32(&format!("{}.embedding_length", arch))? as usize;
+
+        Some(AttentionLayout {
+            n_heads,
+            n_kv_heads,
+            head_dim: embed / n_heads,
+        })
+    }
     /// Generic getter that prepends the architecture prefix automatically
     pub fn get_arch_u32(&self, key: &str) -> Option<u32> {
         self.get_u32(&format!("{}.{}", self.architecture, key))
@@ -183,6 +276,9 @@ impl GgufLoader {
 }
 
 impl WeightLoader for GgufLoader {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let gguf_name = self.translate_name(name);
         let gguf_name = if gguf_name == "output.weight" && !self.tensor_map.contains_key(&gguf_name)

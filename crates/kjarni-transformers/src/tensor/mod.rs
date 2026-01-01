@@ -79,6 +79,10 @@ impl CpuTensor {
         }
     }
 
+    pub fn is_quantized(&self) -> bool {
+        matches!(self, CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q6_K(_))
+    }
+
     /// Returns the shape of the tensor.
     pub fn shape(&self) -> &[usize] {
         match self {

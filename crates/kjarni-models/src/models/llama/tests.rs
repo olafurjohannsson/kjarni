@@ -212,11 +212,10 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     let generator = DecoderGenerator::new(Box::new(llama_model))?;
 
     // 3. Execute the generation.
-    let generated_text = generator.generate(prompt, &config).await?;
+    let generated_text = generator.generate(prompt, &config, None).await?;
 
-    // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-    //    We trim both strings to avoid any potential whitespace differences at the end.
-    assert_eq!(generated_text.trim(), expected_output.trim());
+    let concat_prompt = prompt.to_string() + "" + &generated_text;
+    assert_eq!(concat_prompt.trim(), expected_output.trim());
 
     Ok(())
 }

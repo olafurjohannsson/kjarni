@@ -10,6 +10,7 @@ members = [
 
 resolver = "2"
 
+
 [workspace.package]
 version = "0.1.0"
 authors = ["Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>"]
@@ -65,3 +66,5 @@ lto = "fat"         # Enable Link Time Optimization (Cross-crate optimization)
 codegen-units = 1   # Reduce parallel compilation to allow better optimization
 panic = "abort"     # Remove stack unwinding (smaller, slightly faster binaries)
 strip = true        # Remove symbols (smaller binary)
+
+

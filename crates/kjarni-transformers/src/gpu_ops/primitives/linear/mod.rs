@@ -1,4 +1,4 @@
-use crate::WgpuContext;
+use crate::{WgpuContext, gpu_profile};
 use crate::gpu_ops::GpuTensor;
 use crate::tensor::DType;
 use std::sync::Arc;
@@ -35,15 +35,60 @@ impl GpuLinearLayer {
             label: Some("Linear Layer Layout"),
             entries: &[
                 // 0: Info
-                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // 1: A (Input)
-                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // 2: B_F32 (Weights)
-                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // 3: B_BF16 (Weights)
-                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // 4: Output
-                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -90,9 +135,9 @@ impl GpuLinearLayer {
         weights: &GpuTensor,
         output: &GpuTensor,
     ) {
-        let m = (input.num_elements() / input.shape().last().unwrap()) as u32; 
-        let k = weights.shape()[1] as u32; 
-        let n = weights.shape()[0] as u32; 
+        let m = (input.num_elements() / input.shape().last().unwrap()) as u32;
+        let k = weights.shape()[1] as u32;
+        let n = weights.shape()[0] as u32;
 
         let is_bf16 = weights.dtype() == DType::BF16;
         let is_gemv = m == 1;
@@ -114,11 +159,14 @@ impl GpuLinearLayer {
         };
 
         let uniforms = LinearInfo { m, k, n };
-        let uniform_buffer = self.context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Linear Uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let uniform_buffer =
+            self.context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Linear Uniforms"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
         let (b_f32, b_bf16) = if is_bf16 {
             (&self.buffer, weights.buffer())
@@ -126,46 +174,67 @@ impl GpuLinearLayer {
             (weights.buffer(), &self.buffer)
         };
 
-        let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Linear BindGroup"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: input.buffer().as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: b_f32.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: b_bf16.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: output.buffer().as_entire_binding() },
-            ],
-        });
+        let bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Linear BindGroup"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: input.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: b_f32.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: b_bf16.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: output.buffer().as_entire_binding(),
+                    },
+                ],
+            });
 
         let label = format!("Linear [{}x{} @ {}]", m, k, n);
-        
-        // Optional Profiler
-        self.context.profiler.profile(encoder, &label, |pass| {
-            // let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(&label), timestamp_writes: None });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
 
-            if use_wide_kernel {
-                // FIX: Dispatch 2D grid if N > 65535
-                let max_dim = 65535;
-                if n > max_dim {
-                    let grid_x = max_dim;
-                    let grid_y = (n + max_dim - 1) / max_dim;
-                    pass.dispatch_workgroups(grid_x, grid_y, 1);
+        gpu_profile!(
+            self.context,
+            encoder,
+            &label,
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+
+                if use_wide_kernel {
+                    // Dispatch 2D grid if N > 65535
+                    let max_dim = 65535;
+                    if n > max_dim {
+                        let grid_x = max_dim;
+                        let grid_y = (n + max_dim - 1) / max_dim;
+                        pass.dispatch_workgroups(grid_x, grid_y, 1);
+                    } else {
+                        pass.dispatch_workgroups(n, 1, 1);
+                    }
+                } else if is_gemv {
+                    // Standard GEMV: 1 Thread per Output Neuron
+                    let groups = (n + 255) / 256;
+                    pass.dispatch_workgroups(groups, 1, 1);
                 } else {
-                    pass.dispatch_workgroups(n, 1, 1);
+                    // BMM: 2D Tiles
+                    let groups_x = (n + 15) / 16;
+                    let groups_y = (m + 15) / 16;
+                    pass.dispatch_workgroups(groups_x, groups_y, 1);
                 }
-            } else if is_gemv {
-                // Standard GEMV: 1 Thread per Output Neuron
-                let groups = (n + 255) / 256;
-                pass.dispatch_workgroups(groups, 1, 1);
-            } else {
-                // BMM: 2D Tiles
-                let groups_x = (n + 15) / 16;
-                let groups_y = (m + 15) / 16;
-                pass.dispatch_workgroups(groups_x, groups_y, 1);
             }
-        });
+        );
     }
 }

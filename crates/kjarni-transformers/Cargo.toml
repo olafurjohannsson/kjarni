@@ -50,3 +50,7 @@ strum_macros = "0.26"
 
 [dev-dependencies]
 env_logger = "0.10"
+
+[features]
+default = []
+profiling = []

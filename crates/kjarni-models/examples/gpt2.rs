@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";;
     println!("\n--- Streaming text ---");
     
-    let stream = generator_gpu.generate_stream(prompt, &config).await?;
+    let stream = generator_gpu.generate_stream(prompt, &config, None).await?;
 
     futures_util::pin_mut!(stream);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream).await? {

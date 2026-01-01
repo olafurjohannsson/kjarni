@@ -137,13 +137,10 @@ impl BartModel {
         let layout = config.layout();
 
         // 3. Load Heads (Uses layout.lm_head which was determined by shared_key)
-        let lm_head = LinearLayer::from_weights(
-            &weights,
-            &layout.lm_head,
-            None,
-            load_config.target_dtype,
-            None,
-        )?;
+        let lm_head = LinearLayer::builder(&weights, &layout.lm_head)
+            .with_target_dtype(load_config.target_dtype)
+            .with_optional_bias(None)
+            .build()?;
         let final_logits_bias = weights.get_array1("final_logits_bias").ok();
 
         match device {

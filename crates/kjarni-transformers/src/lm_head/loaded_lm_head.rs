@@ -1,14 +1,15 @@
 // kjarni-transformers/src/lm_head/loader.rs
 
+use crate::WgpuContext;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
-use ndarray::{s, Array1, Array3};
+use anyhow::{Result, anyhow};
+use ndarray::{Array1, Array3, s};
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Configuration for the LM head.
 pub struct LMHeadConfig {
@@ -31,15 +32,15 @@ impl LMHeadConfig {
 pub struct LoadedLMHead {
     // CPU components
     pub cpu_weights: Option<LinearLayer>,
-    
+
     // GPU components
     pub gpu_weights: Option<GpuTensor>,
     pub gpu_kernel: Option<GpuLinearLayer>,
-    
+
     // Metadata
     pub vocab_size: usize,
     pub hidden_size: usize,
-    
+
     // Context for transfers
     pub context: Option<Arc<WgpuContext>>,
 }
@@ -64,13 +65,11 @@ impl LoadedLMHead {
     ) -> Result<Self> {
         let cpu_weights = if load_cpu {
             log::info!("Loading LM head to CPU");
-            Some(LinearLayer::from_weights(
-                weights,
-                &config.weight_name,
-                None,
-                target_dtype,
-                None,
-            )?)
+            Some(
+                LinearLayer::builder(weights, &config.weight_name)
+                    .with_target_dtype(target_dtype)
+                    .build()?,
+            )
         } else {
             None
         };
@@ -109,17 +108,38 @@ impl LoadedLMHead {
         cpu_weights: Option<LinearLayer>,
         gpu_weights: Option<GpuTensor>,
         config: LMHeadConfig,
-    ) -> Self {
-        let gpu_kernel = gpu_weights.as_ref().map(|_| GpuLinearLayer::new(ctx.unwrap()));
-        
-        Self {
-            cpu_weights,
+        quantize_dtype: Option<DType>,
+    ) -> Result<Self> {
+        let gpu_kernel = if let (Some(context), Some(_)) = (ctx, &gpu_weights) {
+            Some(GpuLinearLayer::new(context))
+        } else {
+            None
+        };
+
+        // --- NEW LOGIC FOR CPU WEIGHTS ---
+        // Handle the "quantize on demand" for the tied CPU weights.
+        let final_cpu_weights = if let Some(cpu_emb) = cpu_weights {
+            if let Some(dtype) = quantize_dtype {
+                log::info!(
+                    "Creating quantized ({:?}) copy of tied LM head weights.",
+                    dtype
+                );
+                Some(cpu_emb.clone_as_quantized(dtype)?)
+            } else {
+                // Original behavior: just clone the layer.
+                Some(cpu_emb)
+            }
+        } else {
+            None
+        };
+        Ok(Self {
+            cpu_weights: final_cpu_weights,
             gpu_weights,
             gpu_kernel,
             vocab_size: config.vocab_size,
             hidden_size: config.hidden_size,
             context: ctx.cloned(),
-        }
+        })
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -140,7 +160,11 @@ impl LoadedLMHead {
 
     /// Project hidden states to logits on CPU.
     pub fn forward_cpu(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        let cpu_weights = self.cpu_weights.as_ref()
+        let t_total = Instant::now();
+
+        let cpu_weights = self
+            .cpu_weights
+            .as_ref()
             .ok_or_else(|| anyhow!("CPU LM head not loaded"))?;
 
         let (batch, seq, hidden) = hidden_states.dim();
@@ -149,11 +173,28 @@ impl LoadedLMHead {
             .view()
             .into_shape_with_order((batch * seq, hidden))?;
 
+        // Time the heavy matmul specifically
+        let t_matmul = Instant::now();
         let logits_2d = cpu_weights.matmul(&hidden_2d);
+        let d_matmul = t_matmul.elapsed();
 
-        logits_2d
+        let result = logits_2d
             .into_shape_with_order((batch, seq, self.vocab_size))
-            .map_err(|e| anyhow!("Shape error: {}", e))
+            .map_err(|e| anyhow!("Shape error: {}", e));
+
+        let d_total = t_total.elapsed();
+
+        // Log if it takes more than 1ms (to avoid spamming on tiny inputs)
+        if d_total.as_millis() > 1 {
+            log::info!(
+                "[LM Head Perf] Total: {:?}, Matmul: {:?}, Overhead: {:?}",
+                d_total,
+                d_matmul,
+                d_total.saturating_sub(d_matmul)
+            );
+        }
+
+        result
     }
 
     /// Project hidden states to logits on GPU.
@@ -163,7 +204,9 @@ impl LoadedLMHead {
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
-        let gpu_weights = self.gpu_weights.as_ref()
+        let gpu_weights = self
+            .gpu_weights
+            .as_ref()
             .ok_or_else(|| anyhow!("GPU LM head not loaded"))?;
         let gpu_kernel = self.gpu_kernel.as_ref().unwrap();
 

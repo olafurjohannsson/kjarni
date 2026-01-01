@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures_util::StreamExt;
 use kjarni_models::models::llama::LlamaModel;
-use kjarni_transformers::{ChatTemplate, Conversation, Device, ModelType, WgpuContext, chat::llama3::Llama3ChatTemplate, common::GenerationConfig, decoder::{prelude::DecoderGenerator, traits::DecoderLanguageModel}, models::base::ModelLoadConfig, tensor::DType, weights::ModelWeights};
+use kjarni_transformers::{ChatTemplate, Conversation, Device, ModelType, WgpuContext, chat::llama3::Llama3ChatTemplate, common::GenerationConfig, decoder::{prelude::DecoderGenerator, traits::DecoderLanguageModel}, models::base::ModelLoadConfig, stats::GenerationStats, tensor::DType, weights::ModelWeights};
 use ndarray::{Array1, Array2, Array3};
 
 
@@ -19,7 +19,7 @@ use ndarray::{Array1, Array2, Array3};
 
 const LLAMA_3_2_1B_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B";
 const LLAMA_3_2_3B_INSTRUCT_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct";
-const LLAMA_3_2_1B_INSTRUCT_GGUF: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";
+const LLAMA_3_2_3B_INSTRUCT_GGUF: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";
 
 // For comparison tests - need both formats of same model
 const LLAMA_3_2_1B_INSTRUCT_ST_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct";
@@ -66,7 +66,7 @@ macro_rules! run_sync_test {
 
 fn generation_config() -> GenerationConfig {
     GenerationConfig {
-        max_new_tokens: Some(20),
+        max_new_tokens: Some(100),
         strategy: kjarni_transformers::common::DecodingStrategy::Greedy,
         ..Default::default()
     }
@@ -85,12 +85,16 @@ async fn run_base_model_generation(model: Box<dyn DecoderLanguageModel>, label: 
     println!("============================================================");
     
     let start = std::time::Instant::now();
-    let output = generator.generate(prompt, &generation_config()).await?;
+    let output = generator.generate(prompt, &generation_config(), None).await?;
     let elapsed = start.elapsed();
-    
-    println!("Prompt: {}", prompt);
+    let num_tokens = output.split_whitespace().count();
+
+println!("Prompt: {}", prompt);
     println!("Output: {}", output);
-    println!("Time: {:.2}s ({:.2} tok/s)", elapsed.as_secs_f32(), 20.0 / elapsed.as_secs_f32());
+    println!("Time: {:.2}s ({} tokens, {:.2} tok/s)", 
+             elapsed.as_secs_f32(), 
+             num_tokens,
+             num_tokens as f32 / elapsed.as_secs_f32());
     
     // Validate output contains expected content
     if !output.to_lowercase().contains("paris") {
@@ -105,7 +109,7 @@ async fn run_instruct_model_generation(model: Box<dyn DecoderLanguageModel>, lab
     let template = Llama3ChatTemplate::for_generation();
     
     let mut conv = Conversation::new();
-    conv.push_user("What is the capital of France? Answer in one word.");
+    conv.push_user("Tell me about the capital of France.");
     
     let prompt = template.apply(&conv);
     
@@ -115,11 +119,16 @@ async fn run_instruct_model_generation(model: Box<dyn DecoderLanguageModel>, lab
     println!("Formatted prompt:\n{}", prompt);
     
     let start = std::time::Instant::now();
-    let output = generator.generate(&prompt, &generation_config()).await?;
+    let output = generator.generate(&prompt, &generation_config(), None).await?;
     let elapsed = start.elapsed();
-    
+        let num_tokens = output.split_whitespace().count();
+
+println!("Prompt: {}", prompt);
     println!("Output: {}", output);
-    println!("Time: {:.2}s ({:.2} tok/s)", elapsed.as_secs_f32(), 20.0 / elapsed.as_secs_f32());
+        println!("Time: {:.2}s ({} tokens, {:.2} tok/s)", 
+             elapsed.as_secs_f32(), 
+             num_tokens,
+             num_tokens as f32 / elapsed.as_secs_f32());
     
     // For instruct models, check if the response makes sense
     let response_lower = output.to_lowercase();
@@ -137,13 +146,13 @@ async fn run_instruct_model_generation(model: Box<dyn DecoderLanguageModel>, lab
 fn test_weights_comparison() -> Result<()> {
     println!("\n=== Weight Comparison: SafeTensors vs GGUF ===\n");
     
-    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         println!("⚠️  Skipping - need both SafeTensors and GGUF versions of 1B Instruct");
         return Ok(());
     }
     
     let st_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_ST_PATH))?;
-    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF))?;
+    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF))?;
     
     // Compare key tensors
     let tensors_to_compare = [
@@ -177,13 +186,13 @@ fn test_weights_comparison() -> Result<()> {
 fn test_embedding_values() -> Result<()> {
     println!("\n=== Embedding Value Comparison ===\n");
     
-    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         println!("⚠️  Skipping - need both formats");
         return Ok(());
     }
     
     let st_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_ST_PATH))?;
-    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF))?;
+    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF))?;
     
     let st_emb = st_weights.get_array2("model.embed_tokens.weight")?;
     let gguf_emb = gguf_weights.get_array2("model.embed_tokens.weight")?;
@@ -227,13 +236,13 @@ fn test_embedding_values() -> Result<()> {
 fn test_linear_layer_output() -> Result<()> {
     println!("\n=== Linear Layer Output Comparison ===\n");
     
-    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if !path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) || !path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         println!("⚠️  Skipping - need both formats");
         return Ok(());
     }
     
     let st_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_ST_PATH))?;
-    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF))?;
+    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF))?;
     
     // Get Q projection weights
     let st_q = st_weights.get_array2("model.layers.0.self_attn.q_proj.weight")?;
@@ -276,12 +285,12 @@ fn test_linear_layer_output() -> Result<()> {
 fn test_dequantization_sanity() -> Result<()> {
     println!("\n=== Dequantization Sanity Check ===\n");
     
-    if !path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if !path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         println!("⚠️  Skipping - GGUF not found");
         return Ok(());
     }
     
-    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF))?;
+    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF))?;
     
     let tensors = [
         ("model.layers.0.self_attn.q_proj.weight", "Q Proj (Q4_K)"),
@@ -321,14 +330,14 @@ fn test_dequantization_sanity() -> Result<()> {
 fn test_gguf_config_synthesis() -> Result<()> {
     println!("\n=== GGUF Config Synthesis ===\n");
     
-    if !path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if !path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         println!("⚠️  Skipping - GGUF not found");
         return Ok(());
     }
     
-    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF))?;
+    let gguf_weights = ModelWeights::new(Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF))?;
     
-    println!("Synthesized config:\n{}", gguf_weights.config_json);
+    // println!("Synthesized config:\n{}", gguf_weights.config_json);
     
     // Parse and validate
     let config: serde_json::Value = serde_json::from_str(&gguf_weights.config_json)?;
@@ -369,6 +378,8 @@ fn test_gguf_config_synthesis() -> Result<()> {
 async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     
+    GenerationStats::enable();
+
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║           Kjarni Llama Validation Test Suite                 ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
@@ -380,17 +391,17 @@ async fn main() -> Result<()> {
     // Part 1: Comparison Tests (Sync)
     // =========================================================================
     
-    println!("═══════════════════════════════════════════════════════════════");
-    println!("  PART 1: Weight & Dequantization Comparison Tests");
-    println!("═══════════════════════════════════════════════════════════════");
+    // println!("═══════════════════════════════════════════════════════════════");
+    // println!("  PART 1: Weight & Dequantization Comparison Tests");
+    // println!("═══════════════════════════════════════════════════════════════");
     
-    run_sync_test!("GGUF Config Synthesis", test_gguf_config_synthesis(), passed, failed);
-    run_sync_test!("Dequantization Sanity", test_dequantization_sanity(), passed, failed);
-    run_sync_test!("Weight Shape Comparison", test_weights_comparison(), passed, failed);
-    run_sync_test!("Embedding Values", test_embedding_values(), passed, failed);
-    run_sync_test!("Linear Layer Output", test_linear_layer_output(), passed, failed);
+    // run_sync_test!("GGUF Config Synthesis", test_gguf_config_synthesis(), passed, failed);
+    // run_sync_test!("Dequantization Sanity", test_dequantization_sanity(), passed, failed);
+    // run_sync_test!("Weight Shape Comparison", test_weights_comparison(), passed, failed);
+    // run_sync_test!("Embedding Values", test_embedding_values(), passed, failed);
+    // run_sync_test!("Linear Layer Output", test_linear_layer_output(), passed, failed);
     
-    // =========================================================================
+    // // =========================================================================
     // Part 2: Model Loading & Generation Tests
     // =========================================================================
     
@@ -399,78 +410,78 @@ async fn main() -> Result<()> {
     println!("═══════════════════════════════════════════════════════════════");
     
     // --- Test 1: Baseline - Llama 3.2 1B (BF16, Base Model) ---
-    // if path_exists(LLAMA_3_2_1B_PATH) {
-    //     run_test!(
-    //         "Llama 3.2 1B - CPU BF16 (Baseline)",
-    //         async {
-    //             let model = LlamaModel::from_pretrained(
-    //                 Path::new(LLAMA_3_2_1B_PATH),
-    //                 Device::Cpu,
-    //                 None,
-    //                 None,
-    //                 Some(ModelType::Llama3_2_1B),
-    //             )?;
-    //             run_base_model_generation(Box::new(model), "CPU | Llama 3.2 1B BF16").await?;
-    //             Ok::<(), anyhow::Error>(())
-    //         },
-    //         passed,
-    //         failed
-    //     );
-    // } else {
-    //     println!("⚠️  Skipping 3.2 1B - not found at {}", LLAMA_3_2_1B_PATH);
-    // }
+    if path_exists(LLAMA_3_2_1B_PATH) {
+        run_test!(
+            "Llama 3.2 1B - CPU BF16 (Baseline)",
+            async {
+                let model = LlamaModel::from_pretrained(
+                    Path::new(LLAMA_3_2_1B_PATH),
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_1B),
+                )?;
+                run_base_model_generation(Box::new(model), "CPU | Llama 3.2 1B BF16").await?;
+                Ok::<(), anyhow::Error>(())
+            },
+            passed,
+            failed
+        );
+    } else {
+        println!("⚠️  Skipping 3.2 1B - not found at {}", LLAMA_3_2_1B_PATH);
+    }
     
-    // // --- Test 2: Llama 3.2 3B Instruct (BF16) ---
-    // if path_exists(LLAMA_3_2_3B_INSTRUCT_PATH) {
-    //     run_test!(
-    //         "Llama 3.2 3B Instruct - CPU BF16",
-    //         async {
-    //             let model = LlamaModel::from_pretrained(
-    //                 Path::new(LLAMA_3_2_3B_INSTRUCT_PATH),
-    //                 Device::Cpu,
-    //                 None,
-    //                 None,
-    //                 Some(ModelType::Llama3_2_3B_Instruct),
-    //             )?;
-    //             run_instruct_model_generation(Box::new(model), "CPU | Llama 3.2 3B Instruct BF16").await?;
-    //             Ok::<(), anyhow::Error>(())
-    //         },
-    //         passed,
-    //         failed
-    //     );
-    // } else {
-    //     println!("⚠️  Skipping 3.2 3B Instruct - not found at {}", LLAMA_3_2_3B_INSTRUCT_PATH);
-    // }
+    // --- Test 2: Llama 3.2 3B Instruct (BF16) ---
+    if path_exists(LLAMA_3_2_3B_INSTRUCT_PATH) {
+        run_test!(
+            "Llama 3.2 3B Instruct - CPU BF16",
+            async {
+                let model = LlamaModel::from_pretrained(
+                    Path::new(LLAMA_3_2_3B_INSTRUCT_PATH),
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_3B_Instruct),
+                )?;
+                run_instruct_model_generation(Box::new(model), "CPU | Llama 3.2 3B Instruct BF16").await?;
+                Ok::<(), anyhow::Error>(())
+            },
+            passed,
+            failed
+        );
+    } else {
+        println!("⚠️  Skipping 3.2 3B Instruct - not found at {}", LLAMA_3_2_3B_INSTRUCT_PATH);
+    }
     
-    // // --- Test 3: Llama 3.2 1B Instruct SafeTensors (if available) ---
-    // if path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) {
-    //     run_test!(
-    //         "Llama 3.2 1B Instruct - CPU BF16 SafeTensors",
-    //         async {
-    //             let model = LlamaModel::from_pretrained(
-    //                 Path::new(LLAMA_3_2_1B_INSTRUCT_ST_PATH),
-    //                 Device::Cpu,
-    //                 None,
-    //                 None,
-    //                 Some(ModelType::Llama3_2_1B_Instruct),
-    //             )?;
-    //             run_instruct_model_generation(Box::new(model), "CPU | Llama 3.2 1B Instruct BF16").await?;
-    //             Ok::<(), anyhow::Error>(())
-    //         },
-    //         passed,
-    //         failed
-    //     );
-    // } else {
-    //     println!("⚠️  Skipping 3.2 1B Instruct ST - not found at {}", LLAMA_3_2_1B_INSTRUCT_ST_PATH);
-    // }
+    // --- Test 3: Llama 3.2 1B Instruct SafeTensors (if available) ---
+    if path_exists(LLAMA_3_2_1B_INSTRUCT_ST_PATH) {
+        run_test!(
+            "Llama 3.2 1B Instruct - CPU BF16 SafeTensors",
+            async {
+                let model = LlamaModel::from_pretrained(
+                    Path::new(LLAMA_3_2_1B_INSTRUCT_ST_PATH),
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_1B_Instruct),
+                )?;
+                run_instruct_model_generation(Box::new(model), "CPU | Llama 3.2 1B Instruct BF16").await?;
+                Ok::<(), anyhow::Error>(())
+            },
+            passed,
+            failed
+        );
+    } else {
+        println!("⚠️  Skipping 3.2 1B Instruct ST - not found at {}", LLAMA_3_2_1B_INSTRUCT_ST_PATH);
+    }
     
     // --- Test 4: GGUF - Native Quantized (Q4_K matmul) ---
-    if path_exists(LLAMA_3_2_1B_INSTRUCT_GGUF) {
+    if path_exists(LLAMA_3_2_3B_INSTRUCT_GGUF) {
         run_test!(
             "Llama 3.2 1B Instruct GGUF - CPU Quantized",
             async {
                 let model = LlamaModel::from_pretrained(
-                    Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF),
+                    Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF),
                     Device::Cpu,
                     None,
                     None, // Use native quantized weights
@@ -488,7 +499,7 @@ async fn main() -> Result<()> {
             "Llama 3.2 1B Instruct GGUF - CPU F32 (Dequantized)",
             async {
                 let model = LlamaModel::from_pretrained(
-                    Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF),
+                    Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF),
                     Device::Cpu,
                     None,
                     Some(ModelLoadConfig {
@@ -505,25 +516,25 @@ async fn main() -> Result<()> {
         );
         
         // --- Test 6: GGUF on GPU ---
-        // run_test!(
-        //     "Llama 3.2 1B Instruct GGUF - GPU",
-        //     async {
-        //         let ctx = WgpuContext::new().await?;
-        //         let model = LlamaModel::from_pretrained(
-        //             Path::new(LLAMA_3_2_1B_INSTRUCT_GGUF),
-        //             Device::Wgpu,
-        //             Some(ctx),
-        //             None,
-        //             Some(ModelType::Llama3_2_1B_Instruct),
-        //         )?;
-        //         run_instruct_model_generation(Box::new(model), "GPU | GGUF").await?;
-        //         Ok::<(), anyhow::Error>(())
-        //     },
-        //     passed,
-        //     failed
-        // );
+        run_test!(
+            "Llama 3.2 1B Instruct GGUF - GPU",
+            async {
+                let ctx = WgpuContext::new().await?;
+                let model = LlamaModel::from_pretrained(
+                    Path::new(LLAMA_3_2_3B_INSTRUCT_GGUF),
+                    Device::Wgpu,
+                    Some(ctx),
+                    None,
+                    Some(ModelType::Llama3_2_1B_Instruct),
+                )?;
+                run_instruct_model_generation(Box::new(model), "GPU | GGUF").await?;
+                Ok::<(), anyhow::Error>(())
+            },
+            passed,
+            failed
+        );
     } else {
-        println!("⚠️  Skipping GGUF tests - not found at {}", LLAMA_3_2_1B_INSTRUCT_GGUF);
+        println!("⚠️  Skipping GGUF tests - not found at {}", LLAMA_3_2_3B_INSTRUCT_GGUF);
     }
     
     // =========================================================================

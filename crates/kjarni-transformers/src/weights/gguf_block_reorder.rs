@@ -2,8 +2,9 @@ use anyhow::{Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{ArrayD, IxDyn};
 
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
+use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix, TensorView};
+use crate::weights::model_weights::AttentionLayout;
 
 /// Safely cast bytes to a typed slice, handling unaligned data.
 pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
@@ -59,7 +60,7 @@ const HALF_TILE: usize = 32;
 /// - Logical rows 0-31 of each super-tile are stored in even block groups
 /// - Logical rows 32-63 of each super-tile are stored in odd block groups
 #[inline]
-fn gguf_block_group_for_row(logical_row: usize) -> usize {
+pub fn gguf_block_group_for_row(logical_row: usize) -> usize {
     let super_tile = logical_row / SUPER_TILE_SIZE;
     let within_tile = logical_row % SUPER_TILE_SIZE;
 
@@ -94,7 +95,246 @@ fn reorder_q4k_blocks(blocks: Vec<BlockQ4_K>, rows: usize, cols: usize) -> Vec<B
 
     reordered
 }
+pub fn reorder_q_k_blocks3(
+    blocks: Vec<BlockQ6_K>,
+    rows: usize,
+    cols: usize,
+    head_dim: usize, // <--- Pass 64 for 1B, 128 for 3B
+) -> Vec<BlockQ6_K> {
+    let blocks_per_row = cols / QK_K; // QK_K usually 256 for Q6_K logic, check your constants
 
+    // Sanity check
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row);
+    debug_assert_eq!(
+        rows % head_dim,
+        0,
+        "Rows must be a multiple of head dimension"
+    );
+
+    let mut reordered = vec![blocks[0]; blocks.len()];
+
+    for r in 0..rows {
+        // Calculate where this logical row actually lives in the GGUF file
+        let src_r = get_gguf_src_row(r, head_dim);
+
+        let dst_base = r * blocks_per_row;
+        let src_base = src_r * blocks_per_row;
+
+        reordered[dst_base..dst_base + blocks_per_row]
+            .copy_from_slice(&blocks[src_base..src_base + blocks_per_row]);
+    }
+
+    reordered
+}
+/// Generalized reorder for Q4_K blocks that works for both 1B and 3B models
+pub fn reorder_q4k_blocks3(
+    blocks: Vec<BlockQ4_K>,
+    rows: usize,
+    cols: usize,
+    head_dim: usize, // <--- CRITICAL: 64 for 1B, 128 for 3B
+) -> Vec<BlockQ4_K> {
+    // Q4_K blocks are always 256 elements wide
+    let blocks_per_row = cols / 256;
+
+    // Safety checks
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row, "Block count mismatch");
+    debug_assert_eq!(rows % head_dim, 0, "Rows must align with head dimension");
+
+    // Allocate target vector
+    let mut reordered = Vec::with_capacity(blocks.len());
+    // (Or use vec![blocks[0]; blocks.len()] if BlockQ4_K implements Clone/Copy)
+    // unsafe { reordered.set_len(blocks.len()) }; // Optimization if you prefer
+
+    // Iterate through logical rows (0, 1, 2...)
+    for r in 0..rows {
+        // Find which row in the GGUF data holds this logical row's data
+        let src_r = get_gguf_src_row(r, head_dim);
+
+        let src_base = src_r * blocks_per_row;
+
+        // Copy the entire row of blocks
+        for b in 0..blocks_per_row {
+            reordered.push(blocks[src_base + b].clone());
+        }
+    }
+
+    reordered
+}
+#[inline]
+fn get_gguf_src_row(logical_row: usize, head_dim: usize) -> usize {
+    let half_dim = head_dim / 2;
+
+    // Which head does this row belong to?
+    let tile = logical_row / head_dim;
+    // Which row inside that head?
+    let within_tile = logical_row % head_dim;
+
+    if within_tile < half_dim {
+        // First half of the head maps to even rows in GGUF
+        tile * head_dim + within_tile * 2
+    } else {
+        // Second half of the head maps to odd rows in GGUF
+        tile * head_dim + (within_tile - half_dim) * 2 + 1
+    }
+}
+pub fn reorder_q4k_blocks2(blocks: Vec<BlockQ4_K>, rows: usize, cols: usize) -> Vec<BlockQ4_K> {
+    let blocks_per_row = cols / QK_K;
+
+    if rows <= 32 {
+        return blocks;
+    }
+
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row);
+
+    let mut reordered = vec![blocks[0]; blocks.len()];
+
+    for r in 0..rows {
+        let src_r = interleave_64(r);
+
+        let dst_base = r * blocks_per_row;
+        let src_base = src_r * blocks_per_row;
+
+        reordered[dst_base..dst_base + blocks_per_row]
+            .copy_from_slice(&blocks[src_base..src_base + blocks_per_row]);
+    }
+
+    reordered
+}
+
+#[inline]
+fn interleave_64(r: usize) -> usize {
+    let tile = r / 64;
+    let in_tile = r % 64;
+
+    if in_tile < 32 {
+        tile * 64 + in_tile * 2
+    } else {
+        tile * 64 + (in_tile - 32) * 2 + 1
+    }
+}
+
+pub fn reorder_q6k_blocks2(blocks: Vec<BlockQ6_K>, rows: usize, cols: usize) -> Vec<BlockQ6_K> {
+    let blocks_per_row = cols / QK_K;
+
+    // GGUF Q/K/V interleave applies only for tiles > 32 rows
+    if rows <= 32 {
+        return blocks;
+    }
+
+    debug_assert_eq!(blocks.len(), rows * blocks_per_row);
+    debug_assert_eq!(rows % 64, 0);
+
+    let mut reordered = vec![blocks[0]; blocks.len()];
+
+    for r in 0..rows {
+        let src_r = interleave_64(r);
+
+        let dst_base = r * blocks_per_row;
+        let src_base = src_r * blocks_per_row;
+
+        reordered[dst_base..dst_base + blocks_per_row]
+            .copy_from_slice(&blocks[src_base..src_base + blocks_per_row]);
+    }
+
+    reordered
+}
+/// Reorder Q4_K blocks from GGUF GQA layout to row-major.
+pub fn reorder_q4k_blocks_gqa(
+    blocks: Vec<BlockQ4_K>,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    cols: usize,
+) -> Vec<BlockQ4_K> {
+    let blocks_per_row = cols / 256;
+    let num_block_rows = blocks.len() / blocks_per_row;
+
+    if num_block_rows <= 32 {
+        return blocks;
+    }
+
+    let mut reordered = blocks.clone();
+
+    for r in 0..num_block_rows {
+        let head = r % n_heads;
+        let row_in_head = r / n_heads;
+        let src_r = std::cmp::min(
+            (head % n_kv_heads) * head_dim + row_in_head * n_kv_heads + (head / n_kv_heads),
+            num_block_rows - 1,
+        );
+
+        let dst_base = r * blocks_per_row;
+        let src_base = src_r * blocks_per_row;
+
+        reordered[dst_base..dst_base + blocks_per_row]
+            .copy_from_slice(&blocks[src_base..src_base + blocks_per_row]);
+    }
+
+    reordered
+}
+
+/// Reorder Q6_K blocks from GGUF GQA layout to row-major.
+pub fn reorder_q6k_blocks_gqa(
+    blocks: Vec<BlockQ6_K>,
+    n_heads: usize,
+    n_kv_heads: usize,
+    head_dim: usize,
+    cols: usize,
+) -> Vec<BlockQ6_K> {
+    let blocks_per_row = cols / 256;
+    let num_block_rows = blocks.len() / blocks_per_row;
+
+    if num_block_rows <= 32 {
+        return blocks;
+    }
+
+    let mut reordered = blocks.clone();
+
+    for r in 0..num_block_rows {
+        let head = r % n_heads;
+        let row_in_head = r / n_heads;
+        let src_r = std::cmp::min(
+            (head % n_kv_heads) * head_dim + row_in_head * n_kv_heads + (head / n_kv_heads),
+            num_block_rows - 1,
+        );
+
+        let dst_base = r * blocks_per_row;
+        let src_base = src_r * blocks_per_row;
+
+        reordered[dst_base..dst_base + blocks_per_row]
+            .copy_from_slice(&blocks[src_base..src_base + blocks_per_row]);
+    }
+
+    reordered
+}
+pub fn reorder_with_map<B: Clone>(
+    blocks: Vec<B>,
+    rows: usize,
+    cols: usize,
+    block_size: usize,
+    map: &[usize],
+) -> Vec<B> {
+    let blocks_per_row = cols / block_size;
+    if map.len() < rows {
+        // Map is incomplete, can't reorder safely
+        return blocks;
+    }
+
+    let mut reordered = Vec::with_capacity(blocks.len());
+
+    // For each logical row we want to construct...
+    for logical_row in 0..rows {
+        // ...find which physical row in the GGUF file contains its data.
+        let physical_row = map[logical_row];
+
+        // Copy the blocks from that physical row.
+        let start_idx = physical_row * blocks_per_row;
+        for b in 0..blocks_per_row {
+            reordered.push(blocks[start_idx + b].clone());
+        }
+    }
+    reordered
+}
 /// Reorders Q6_K blocks from GGUF interleaved layout to row-major.
 pub fn reorder_q6k_blocks(blocks: Vec<BlockQ6_K>, rows: usize, cols: usize) -> Vec<BlockQ6_K> {
     let blocks_per_row = cols / 256;
@@ -142,12 +382,89 @@ fn reorder_q8_0_blocks(blocks: Vec<BlockQ8_0>, rows: usize, cols: usize) -> Vec<
 
     reordered
 }
-fn needs_gguf_reordering(name: &str, rows: usize) -> bool {
-    // Must have enough rows to be interleaved (> 32)
-    if rows <= HALF_TILE {
+
+/// Robust check for GGUF interleaving.
+///
+/// Instead of guessing based on names ("q_proj"), we check the structural properties.
+/// If a tensor is Q4_K, 2D, large enough, and NOT the vocab embedding,
+/// it is almost certainly interleaved by llama.cpp.
+pub fn should_reorder_gguf(
+    dtype: DType,
+    shape: &[usize],
+    vocab_size: usize, // Passed from ModelConfig
+) -> bool {
+    // 1. Check DType: Only specific K-Quants are interleaved
+    let is_interleaved_type = match dtype {
+        DType::Q4_K | DType::Q5_K => true, // Q2_K, Q3_K also if you support them
+        _ => false,                        // Q6_K, Q8_0, F16, F32 are NEVER interleaved
+    };
+
+    if !is_interleaved_type {
         return false;
     }
 
+    // 2. Check Dimensions: Must be 2D weight matrix
+    if shape.len() != 2 {
+        return false;
+    }
+
+    let rows = shape[0];
+
+    // 3. Check Size: Must be at least one super-block (64 rows)
+    // The interleaving logic requires groups of 64.
+    if rows < 64 {
+        return false;
+    }
+
+    // 4. Exclusion: Do not reorder Token Embeddings or Output Head
+    // These matrices have a dimension equal to vocab_size (e.g., 128256).
+    // Note: We use a fuzzy match because sometimes vocab is padded.
+    if rows == vocab_size || (rows > 0 && vocab_size > 0 && rows.abs_diff(vocab_size) < 256) {
+        log::debug!("Skipping reorder for vocab-sized tensor (rows={})", rows);
+        return false;
+    }
+
+    // If it passed all checks, it's a Linear Layer (Attention or MLP)
+    // that uses Q4_K, so it IS interleaved.
+    true
+}
+
+fn needs_gguf_reordering2(name: &str, rows: usize) -> bool {
+    if rows <= 32 {
+        return false;
+    }
+
+    let name_lower = name.to_lowercase();
+
+    // Must be in attention context (not random "q" somewhere)
+    let is_attention = name_lower.contains("attn")
+        || name_lower.contains("self_attn")
+        || name_lower.contains("attention");
+
+    // Check for Q or K projection specifically
+    let is_q = name_lower.contains("q_proj")
+        || name_lower.contains("attn_q")
+        || name_lower.contains(".wq.");
+
+    let is_k = name_lower.contains("k_proj")
+        || name_lower.contains("attn_k")
+        || name_lower.contains(".wk.");
+
+    // Either explicit Q/K pattern, or attention + contains just "q"/"k"
+    is_q || is_k || (is_attention && (name_lower.contains(".q.") || name_lower.contains(".k.")))
+}
+
+fn needs_gguf_reordering(name: &str, rows: usize) -> bool {
+    // Must have enough rows to be interleaved (> 32)
+    // if rows <= HALF_TILE {
+    //     return false;
+    // }
+    // name.contains("q_proj")
+    // || name.contains("k_proj")
+    // || name.contains("v_proj")
+    // || name.contains("attn_q")
+    // || name.contains("attn_k")
+    // || name.contains("attn_v")
     // Only Q and K projections are interleaved
     name.contains("q_proj")
         || name.contains("k_proj")
@@ -170,7 +487,12 @@ fn needs_gguf_reordering(name: &str, rows: usize) -> bool {
 /// - Row-major matmul kernels work correctly
 ///
 /// See module-level documentation for the full story on why this is needed.
-pub fn raw_to_typed_gguf(raw: TensorView<'_>, is_gguf: bool) -> Result<CpuTensor> {
+pub fn raw_to_typed_gguf(
+    raw: TensorView<'_>,
+    tied_embeddings: bool,
+    vocab_size: usize,
+    attn: Option<AttentionLayout>,
+) -> Result<CpuTensor> {
     match raw.dtype {
         DType::F32 => {
             let data: Vec<f32> = cast_or_copy(&raw.bytes);
@@ -197,54 +519,96 @@ pub fn raw_to_typed_gguf(raw: TensorView<'_>, is_gguf: bool) -> Result<CpuTensor
             let blocks: Vec<BlockQ8_0> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            let blocks =
-                if is_gguf && raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, shape[0]) {
-                    log::debug!(
-                        "Reordering Q8_0 blocks for '{}' [{}, {}]",
-                        raw.name,
-                        shape[0],
-                        shape[1]
-                    );
-                    reorder_q8_0_blocks(blocks, shape[0], shape[1])
-                } else {
-                    blocks
-                };
+            let blocks = if raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, raw.shape[0]) {
+                log::error!(
+                    "Reordering Q8_0 blocks for '{}' [{}, {}]",
+                    raw.name,
+                    shape[0],
+                    shape[1]
+                );
+                reorder_q8_0_blocks(blocks, shape[0], shape[1])
+            } else {
+                blocks
+            };
 
             Ok(CpuTensor::Q8_0(QuantizedMatrix { blocks, shape }))
         }
         DType::Q4_K => {
-            let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
+            let mut blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            let blocks =
-                if is_gguf && raw.shape.len() == 2 && needs_gguf_reordering(&raw.name, shape[0]) {
-                    log::debug!(
-                        "Reordering Q4_K blocks for '{}' [{}, {}]",
-                        raw.name,
-                        shape[0],
-                        shape[1]
+            if let Some(attn) = attn {
+                if needs_gguf_reordering(&raw.name, raw.shape[0]) {
+                    // blocks = reorder_q4k_blocks2(
+                    //     blocks,
+                    //     raw.shape[0], // ← ALWAYS THIS
+                    //     raw.shape[1],
+                    // );
+                    let head_dim = attn.head_dim;
+                    assert!(head_dim == 64 || head_dim == 128, "Unexpected head_dim {}", head_dim);
+                    blocks = reorder_q4k_blocks3(
+                        blocks,
+                        raw.shape[0],
+                        raw.shape[1],
+                        head_dim, // Pass the calculated dimension here
                     );
-                    reorder_q4k_blocks(blocks, shape[0], shape[1])
-                } else {
-                    blocks
-                };
+                }
+            }
 
             Ok(CpuTensor::Q4_K(QuantizedMatrix { blocks, shape }))
         }
+        // DType::Q4_K => {
+        //     let mut blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
+        //     let shape = [raw.shape[0], raw.shape[1]];
+
+        //     if let Some(attn) = attn {
+        //         if needs_gguf_reordering(&raw.name, raw.shape[0]) {
+        //             let gguf_rows = attn.n_kv_heads * attn.head_dim;
+
+        //             blocks = reorder_q4k_blocks_gqa(
+        //                 blocks,
+        //                 attn.n_heads,
+        //                 attn.n_kv_heads,
+        //                 attn.head_dim,
+        //                 raw.shape[1],
+        //             );
+        //             // blocks = reorder_q4k_blocks(blocks, shape[0], shape[1]);
+        //         }
+        //     }
+
+        //     Ok(CpuTensor::Q4_K(QuantizedMatrix { blocks, shape }))
+        // }
+        // DType::Q6_K => {
+        //     let mut blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
+        //     let shape = [raw.shape[0], raw.shape[1]];
+
+        //     if let Some(attn) = attn {
+        //         let gguf_rows = attn.n_kv_heads * attn.head_dim;
+        //         if needs_gguf_reordering(&raw.name, shape[0]) {
+        //             blocks = reorder_q6k_blocks_gqa(
+        //                 blocks,
+        //                 attn.n_heads,
+        //                 attn.n_kv_heads,
+        //                 attn.head_dim,
+        //                 raw.shape[1],
+        //             );
+        //         }
+        //     }
+
+        //     Ok(CpuTensor::Q6_K(QuantizedMatrix { blocks, shape }))
+        // }
         DType::Q6_K => {
-            let blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
+            let mut blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
             let shape = [raw.shape[0], raw.shape[1]];
 
-            // Q6_K tensors (v_proj, down_proj, embeddings) are NOT interleaved
-            // No reordering needed!
+            if let Some(attn) = attn {
+                if needs_gguf_reordering(&raw.name, shape[0]) {
+                    blocks = reorder_q_k_blocks3(blocks, shape[0], shape[1], attn.head_dim);
+                }
+            }
 
             Ok(CpuTensor::Q6_K(QuantizedMatrix { blocks, shape }))
         }
         _ => Err(anyhow!("Unsupported dtype: {:?}", raw.dtype)),
     }
-}
-
-/// Legacy function - assumes non-GGUF source (no reordering).
-pub fn raw_to_typed_no_reorder(raw: TensorView<'_>) -> Result<CpuTensor> {
-    raw_to_typed_gguf(raw, false)
 }

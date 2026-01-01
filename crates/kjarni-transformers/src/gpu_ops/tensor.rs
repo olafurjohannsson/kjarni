@@ -717,6 +717,7 @@ impl GpuTensor {
             DType::Q4_K => "q4_k",
             DType::Q8_0 => "q8_0",
             DType::Q6_K => "q6_k",
+            DType::Q5_K => "q5_k",
         }
     }
 }

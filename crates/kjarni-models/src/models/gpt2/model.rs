@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig};
@@ -20,15 +20,16 @@ use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    decoder::prelude::*, gpu_ops::{primitives::linear::GpuLinearLayer, GpuFrameContext, GpuTensor},
+    WgpuContext,
+    decoder::prelude::*,
+    gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
     linear_layer::LinearLayer,
     models::{
-        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
+        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
     tensor::{DType, TensorView},
     weights::ModelWeights,
-    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -117,14 +118,10 @@ impl Gpt2Model {
         let meta = config.metadata();
         let layout = config.layout();
 
-        let lm_head = LinearLayer::from_weights(
-            &weights,
-            &layout.lm_head,
-            None,
-            decoder_config.unwrap_or_default().target_dtype,
-            None,
-        )?;
-
+        let lm_head = LinearLayer::builder(&weights, &layout.lm_head)
+            .with_target_dtype(decoder_config.unwrap_or_default().target_dtype)
+            .with_optional_bias(None)
+            .build()?;
 
         assert_eq!(
             lm_head.shape(),
@@ -383,29 +380,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_distilgpt2_generation_parity() -> Result<()> {
-        // This test verifies deterministic (greedy) generation output.
-        let model = load_distilgpt2_for_test().await?;
-        let generator = DecoderGenerator::new(Box::new(model))?;
-
-        let prompt = "The field of Artificial Intelligence has seen a lot of progress";
-        let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
-
-        let config = GenerationConfig {
-            max_new_tokens: Some(20),
-            add_bos_token: false,
-            strategy: DecodingStrategy::Greedy,
-            repetition_penalty: 1.1,
-            ..Default::default()
-        };
-
-        let generated_text = generator.generate(prompt, &config).await?;
-        assert_eq!(generated_text.trim(), expected_output.trim());
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_distilgpt2_architectural_properties() -> Result<()> {
         // 1. Arrange: Load the model.
         let model = load_distilgpt2_for_test().await?;
@@ -462,11 +436,12 @@ mod tests {
         let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-        let generated_text = generator.generate(prompt, &config).await?;
+        let generated_text = generator.generate(prompt, &config, None).await?;
 
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.
         //    We trim both strings to avoid any potential whitespace differences at the end.
-        assert_eq!(generated_text.trim(), expected_output.trim());
+        let concat_prompt = prompt.to_string() + "" + &generated_text;
+        assert_eq!(concat_prompt.trim(), expected_output.trim());
 
         Ok(())
     }
@@ -497,13 +472,13 @@ mod tests {
         let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-        let generated_text = generator.generate(prompt, &config).await?;
+        let generated_text = generator.generate(prompt, &config, None).await?;
 
         let ctx = WgpuContext::new().await?;
         let gpt2_model_2 =
             Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
         let generator_2 = DecoderGenerator::new(Box::new(gpt2_model_2))?;
-        let generated_text_2 = generator_2.generate(prompt, &config).await?;
+        let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
 
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.
         //    We trim both strings to avoid any potential whitespace differences at the end.

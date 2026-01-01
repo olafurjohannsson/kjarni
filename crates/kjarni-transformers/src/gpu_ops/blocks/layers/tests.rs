@@ -14,6 +14,7 @@ use crate::gpu_ops::blocks::{
 use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
+
 use crate::rope::RoPE as CpuRoPE;
 use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata};
 // New Traits
@@ -111,7 +112,7 @@ impl ModelConfig for TestLlamaConfig {
 async fn create_test_layer_pair(
     context: &Arc<WgpuContext>,
     config: &TestLlamaConfig,
-) -> Result<(GpuPreNormDecoderLayer, DecoderLayer)> {
+) -> Result<(GpuPreNormDecoderLayer, crate::decoder::prelude::DecoderLayer)> {
     let head_dim = config.hidden_size / config.num_attention_heads;
     let kv_dim = config.num_key_value_heads * head_dim;
 
@@ -214,7 +215,7 @@ async fn create_test_layer_pair(
     let cpu_ffn_norm = Normalization::RMSNorm(RMSNorm::new(ffn_norm_w, 1e-5));
     let cpu_rope = Arc::new(CpuRoPE::new(head_dim, 1024, 10000.0));
 
-    let cpu_layer = DecoderLayer {
+    let cpu_layer = crate::decoder::prelude::DecoderLayer {
         self_attn: cpu_attn,
         self_attn_layer_norm: cpu_attn_norm,
         feedforward: cpu_ffn,
@@ -390,7 +391,7 @@ pub async fn forward_llama_with_debug(
     // MODIFIED: Takes context directly, manages its own encoder
     context: &Arc<WgpuContext>,
     gpu_layer: &GpuPreNormDecoderLayer,
-    cpu_layer: &DecoderLayer, // Pass the CPU layer for comparison
+    cpu_layer: &crate::decoder::prelude::DecoderLayer, // Pass the CPU layer for comparison
     hidden_states_gpu: &GpuTensor,
     hidden_states_cpu: &Array3<f32>, // Pass the initial CPU hidden states
     attention_mask_gpu: &GpuTensor,

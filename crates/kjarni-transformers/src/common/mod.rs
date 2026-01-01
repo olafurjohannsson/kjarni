@@ -1,15 +1,18 @@
-
-
-
+pub mod cancellation;
 pub mod sampling;
 pub mod stream;
 
-pub use sampling::*;
-pub use stream::*;
+pub use cancellation::{CancellationError, CancellationHandle, CancellationToken};
+pub use sampling::{
+    apply_no_repeat_ngram, apply_no_repeat_ngram_inplace, apply_repetition_penalty,
+    apply_repetition_penalty_inplace, apply_repetition_penalty_mut, get_top_k_from_log_probs,
+    log_softmax_1d, min_p_filtering, sample_from_probs, sample_token, softmax_1d, top_k_filtering,
+    top_p_filtering,
+};
+pub use stream::{StreamedToken, TokenType};
 
 use serde::Deserialize;
 use serde_json;
-
 
 /// Parameters for sampling-based decoding (Top-K, Top-P, Temperature).
 #[derive(Clone, Debug)]
@@ -92,7 +95,6 @@ impl Default for GenerationConfig {
     }
 }
 
-
 // For Llama-style models with generation_config.json
 #[derive(Debug, Clone, Deserialize)]
 pub struct HFGenerationDefaults {
@@ -112,13 +114,15 @@ pub struct HFGenerationDefaults {
     pub repetition_penalty: Option<f32>,
 }
 
-fn default_temperature() -> f32 { 1.0 }
+fn default_temperature() -> f32 {
+    1.0
+}
 
 impl HFGenerationDefaults {
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
-    
+
     pub fn into_generation_config(self, max_seq_len: usize) -> GenerationConfig {
         let strategy = if self.do_sample {
             DecodingStrategy::Sample(SamplingParams {

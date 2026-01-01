@@ -2,10 +2,10 @@
 use std::sync::Arc;
 
 // --- External Crates ---
+use crate::models::llama::config::LlamaConfig;
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3, Axis, s};
-
-use crate::models::llama::config::LlamaConfig;
+use std::time::Instant;
 
 use kjarni_transformers::{
     Normalization, WgpuContext,
@@ -18,6 +18,7 @@ use kjarni_transformers::{
     normalization::RMSNorm,
     pipeline::CpuLayerFactory,
     rope::RoPE,
+    stats::GenerationStats,
     tensor::DType,
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
@@ -29,7 +30,6 @@ pub struct LlamaCpuDecoder {
     pub final_norm: RMSNorm,
     pub metadata: ModelMetadata,
 }
-
 
 impl LlamaCpuDecoder {
     pub fn new(
@@ -140,6 +140,83 @@ impl InferenceModel for LlamaCpuDecoder {
     }
 }
 
+impl LlamaCpuDecoder {
+    pub fn forward_layers_2(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        mut cache: Option<&mut dyn Cache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<Array3<f32>> {
+        let mut hidden = hidden_states.clone();
+        let seq_len = hidden.shape()[1];
+        let (batch_size, _, _) = hidden.dim();
+
+        // 1. Downcast to CpuKVCache
+        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
+
+        for i in start_layer..end_layer {
+            if i >= self.layers.len() {
+                break;
+            }
+            let layer = &self.layers[i];
+
+            if let Some(ref mut c) = cpu_cache_opt {
+                // --- OPTIMIZED PATH (Zero-Copy) ---
+
+                // 1. Get disjoint views from cache:
+                // k_hist/v_hist: Mutable view of 0..current_len (History)
+                // k_dest/v_dest: Mutable view of current_len..end (Write Destination)
+                let (k_hist_mut, v_hist_mut, k_dest, v_dest) = c.get_split_view(i, seq_len)?;
+
+                // 2. Forward passing the views
+                // We call .view() on the history parts to downgrade them to read-only ArrayView3
+                // The layer will write new keys/values directly into k_dest/v_dest
+                hidden = layer.forward_2(
+                    &hidden,
+                    attention_mask,
+                    position_offset,
+                    k_hist_mut.view(),
+                    v_hist_mut.view(),
+                    k_dest,
+                    v_dest,
+                )?;
+            } else {
+                // --- FALLBACK PATH (No Cache) ---
+                // We must allocate temporary buffers because layer.forward expects mutable destinations.
+                // This preserves functionality for non-cached inference (slower, but safe).
+
+                let kv_dim = layer.attention.num_kv_heads * layer.attention.head_dim;
+
+                let mut temp_k = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+                let mut temp_v = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+
+                // Empty history views
+                let empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
+
+                hidden = layer.forward_2(
+                    &hidden,
+                    attention_mask,
+                    position_offset,
+                    empty_arr.view(),
+                    empty_arr.view(),
+                    temp_k.view_mut(),
+                    temp_v.view_mut(),
+                )?;
+            }
+        }
+
+        // 3. Increment Cache Length (Once per step, after all layers are updated)
+        if let Some(c) = cpu_cache_opt {
+            c.increment_len(seq_len);
+        }
+
+        Ok(hidden)
+    }
+}
+
 impl CpuDecoder for LlamaCpuDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -237,10 +314,16 @@ impl CpuDecoder for LlamaCpuDecoder {
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Array3<f32>> {
+        let t_start = Instant::now();
+
+        // 1. Embed & Normalize
+        let t_embed = Instant::now();
         let hidden = self.embed_and_normalize(input, position_offset)?;
+        let d_embed = t_embed.elapsed();
 
         // 2. Run Layers
-        let mut output = self.forward_layers(
+        let t_layers = Instant::now();
+        let mut output = self.forward_layers_2(
             &hidden,
             attention_mask,
             position_offset,
@@ -248,8 +331,25 @@ impl CpuDecoder for LlamaCpuDecoder {
             0,
             self.num_layers(),
         )?;
+        let d_layers = t_layers.elapsed();
 
+        // 3. Final Norm
+        let t_norm = Instant::now();
         output = self.final_norm.forward_3d(&output);
+        let d_norm = t_norm.elapsed();
+
+        let d_total = t_start.elapsed();
+
+        if d_total.as_millis() > 1 {
+            log::info!(
+                "[Model Forward Perf] Total: {:?}, Embed: {:?}, Layers (x{}): {:?}, Final Norm: {:?}",
+                d_total,
+                d_embed,
+                self.num_layers(),
+                d_layers,
+                d_norm
+            );
+        }
 
         Ok(output)
     }
@@ -258,19 +358,23 @@ impl CpuDecoder for LlamaCpuDecoder {
 mod llama_test {
 
     use super::*;
-    use crate::models::llama::config::LlamaConfig;
-    const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct";
+    use crate::models::llama::{LlamaModel, config::LlamaConfig};
+    const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct";
     use kjarni_transformers::{
+        ModelType,
         kernels::{
             dequantize::{dequantize_q4_k_block, dequantize_q6_k_block},
             q_common::{BlockQ4_K, BlockQ6_K},
         },
         linear_layer::LinearData,
         tensor::CpuTensor,
-        weights::{ModelWeights, cast_or_copy},
+        weights::{
+            ModelWeights, cast_or_copy, gguf_loader::GgufLoader,
+            safetensors_loader::SafeTensorsLoader,
+        },
     };
     use std::path::Path;
-    const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";
+    const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf";
     #[test]
     fn test_check_all_matrix_sizes_interleaving() {
         let gguf_path = Path::new(GGUF_PATH);
@@ -319,8 +423,10 @@ mod llama_test {
             match raw.dtype {
                 DType::Q4_K => {
                     let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
-                    for block_group in [0, 1, 2, 3] {
-                        let block_idx = block_group * blocks_per_row;
+                    // let arr = [0.0usize; blocks.len()]; // Dummy array for type inference
+
+                    for (i, block) in blocks.iter().enumerate().take(256) {
+                        let block_idx = i * blocks_per_row;
                         if block_idx >= blocks.len() {
                             continue;
                         }
@@ -342,7 +448,7 @@ mod llama_test {
                                 best_row = st_row;
                             }
                         }
-                        print!("{}→{} ", block_group, best_row);
+                        print!("{}→{} ", i, best_row);
                     }
                 }
                 DType::Q6_K => {
@@ -377,4 +483,191 @@ mod llama_test {
             println!();
         }
     }
+
+    // #[test]
+    // fn test_gguf_and_safetensors_load_identical_configs() -> Result<()> {
+    //     println!("--- Comparing GGUF vs Safetensors configs for 1B and 3B models ---");
+
+    //     // --- Test 1B Model ---
+    //     {
+    //         println!("\n[1] Testing Llama 3.2 1B Instruct...");
+    //         let model_gguf = LlamaModel::from_pretrained(
+    //             Path::new(
+    //                 "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    //             ),
+    //             Device::Cpu,
+    //             None,
+    //             None,
+    //             Some(ModelType::Llama3_2_1B_Instruct),
+    //         )?;
+    //         let model_st = LlamaModel::from_pretrained(
+    //             Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct"),
+    //             Device::Cpu,
+    //             None,
+    //             None,
+    //             Some(ModelType::Llama3_2_1B_Instruct),
+    //         )?;
+
+    //         let config_gguf = model_gguf.config();
+    //         let config_st = model_st.config();
+
+    //         println!("   ... Comparing all parameters for 1B model...");
+    //         assert_eq!(
+    //             config_gguf.hidden_size, config_st.hidden_size,
+    //             "1B: hidden_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+    //             "1B: num_hidden_layers"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_attention_heads, config_st.num_attention_heads,
+    //             "1B: num_attention_heads"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+    //             "1B: num_key_value_heads"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.intermediate_size, config_st.intermediate_size,
+    //             "1B: intermediate_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.vocab_size, config_st.vocab_size,
+    //             "1B: vocab_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+    //             "1B: max_position_embeddings"
+    //         );
+
+    //         // Use a tolerance for floating point comparisons
+    //         assert!(
+    //             (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+    //             "1B: rms_norm_eps"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.hidden_act, config_st.hidden_act,
+    //             "1B: hidden_act"
+    //         );
+
+    //         assert!(
+    //             (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+    //             "1B: rope_theta"
+    //         );
+
+    //         // assert_eq!(
+    //         //     config_gguf.bos_token_id, config_st.bos_token_id,
+    //         //     "1B: bos_token_id"
+    //         // );
+    //         // assert_eq!(
+    //         //     config_gguf.eos_token_id, config_st.eos_token_id,
+    //         //     "1B: eos_token_id"
+    //         // );
+    //         assert_eq!(
+    //             config_gguf.pad_token_id, config_st.pad_token_id,
+    //             "1B: pad_token_id"
+    //         );
+
+    //         assert_eq!(
+    //             config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+    //             "1B: tie_word_embeddings"
+    //         );
+
+    //         println!("   ... ✓ 1B model configs match perfectly.");
+    //     }
+
+    //     // --- Test 3B Model ---
+    //     {
+    //         println!("\n[2] Testing Llama 3.2 3B Instruct...");
+    //         let model_gguf = LlamaModel::from_pretrained(
+    //             Path::new(
+    //                 "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    //             ),
+    //             Device::Cpu,
+    //             None,
+    //             None,
+    //             Some(ModelType::Llama3_2_3B_Instruct),
+    //         )?;
+    //         let model_st = LlamaModel::from_pretrained(
+    //             Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct"),
+    //             Device::Cpu,
+    //             None,
+    //             None,
+    //             Some(ModelType::Llama3_2_3B_Instruct),
+    //         )?;
+
+    //         let config_gguf = model_gguf.config();
+    //         let config_st = model_st.config();
+
+    //         println!("   ... Comparing all parameters for 3B model...");
+    //         assert_eq!(
+    //             config_gguf.hidden_size, config_st.hidden_size,
+    //             "3B: hidden_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+    //             "3B: num_hidden_layers"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_attention_heads, config_st.num_attention_heads,
+    //             "3B: num_attention_heads"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+    //             "3B: num_key_value_heads"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.intermediate_size, config_st.intermediate_size,
+    //             "3B: intermediate_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.vocab_size, config_st.vocab_size,
+    //             "3B: vocab_size"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+    //             "3B: max_position_embeddings"
+    //         );
+
+    //         assert!(
+    //             (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+    //             "3B: rms_norm_eps"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.hidden_act, config_st.hidden_act,
+    //             "3B: hidden_act"
+    //         );
+
+    //         assert!(
+    //             (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+    //             "3B: rope_theta"
+    //         );
+
+    //         assert_eq!(
+    //             config_gguf.bos_token_id, config_st.bos_token_id,
+    //             "3B: bos_token_id"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.eos_token_id, config_st.eos_token_id,
+    //             "3B: eos_token_id"
+    //         );
+    //         assert_eq!(
+    //             config_gguf.pad_token_id, config_st.pad_token_id,
+    //             "3B: pad_token_id"
+    //         );
+
+    //         assert_eq!(
+    //             config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+    //             "3B: tie_word_embeddings"
+    //         );
+
+    //         println!("   ... ✓ 3B model configs match perfectly.");
+    //     }
+
+    //     println!(
+    //         "\n✓ SUCCESS: All GGUF configurations correctly match their SafeTensors counterparts."
+    //     );
+    //     Ok(())
+    // }
 }

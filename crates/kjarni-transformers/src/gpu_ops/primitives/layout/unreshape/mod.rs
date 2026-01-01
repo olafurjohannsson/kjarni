@@ -1,5 +1,5 @@
-use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::{WgpuContext, gpu_profile};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, CommandEncoder, ComputePipeline};
@@ -89,21 +89,21 @@ impl GpuUnreshape {
                 ],
             });
 
-        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        //     label: Some("Unreshape Pass"),
-        //     timestamp_writes: None,
-        // });
-        let label = format!("Unreshape");
-        self.context.profiler.profile(encoder, &label, |compute_pass| {
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
+        gpu_profile!(
+            self.context,
+            encoder,
+            "Unreshape",
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
 
-            // Dispatch a 3D grid that matches the shader's logic
-            let workgroups_x = (s as u32 + 15) / 16;
-            let workgroups_y = (h as u32 + 15) / 16;
-            let workgroups_z = b as u32;
-            compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
-        });
+                // Dispatch a 3D grid that matches the shader's logic
+                let workgroups_x = (s as u32 + 15) / 16;
+                let workgroups_y = (h as u32 + 15) / 16;
+                let workgroups_z = b as u32;
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
+            }
+        );
     }
 }
 
@@ -164,7 +164,6 @@ fn compile_unreshape_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGr
     });
     (pipeline, bind_group_layout)
 }
-
 
 #[cfg(test)]
 mod tests;

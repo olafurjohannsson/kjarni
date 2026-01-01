@@ -1,4 +1,4 @@
-use crate::WgpuContext;
+use crate::{WgpuContext, gpu_profile};
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
@@ -413,19 +413,23 @@ impl GpuSwiGLUFFN {
         };
 
         let label = format!("Fused SwiGLU [{}x{} -> {}]", m, k, n);
-        self.context.profiler.profile(encoder, &label, |pass| {
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
+        gpu_profile!(
+            self.context,
+            encoder,
+            &label,
+            |pass: &mut wgpu::ComputePass<'_>| {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
 
-            if is_gemv {
-                let groups = (n + 255) / 256;
-                pass.dispatch_workgroups(n, 1, 1);
-            } else {
-                let groups_x = (n + 15) / 16;
-                let groups_y = (m + 15) / 16;
-                pass.dispatch_workgroups(groups_x, groups_y, 1);
+                if is_gemv {
+                    pass.dispatch_workgroups(n, 1, 1);
+                } else {
+                    let groups_x = (n + 15) / 16;
+                    let groups_y = (m + 15) / 16;
+                    pass.dispatch_workgroups(groups_x, groups_y, 1);
+                }
             }
-        });
+        );
     }
     /// Encodes the element-wise part of the SwiGLU operation.
     fn encode_elementwise(

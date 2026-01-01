@@ -30,7 +30,7 @@ pub mod prelude {
         gpu::{
             GpuDecoderBackend,
             GpuPreNormDecoderLayer,
-
+            GpuRoPEDecoderLayer,
         },
         backend::AnyDecoderBackend,
         generator::{
@@ -41,7 +41,6 @@ pub mod prelude {
             GpuDecoder,
             DecoderGenerationBackend,
             DecoderLanguageModel,
-            DecoderInput,
             CpuDecoderOps,
             GpuDecoderOps,
         },

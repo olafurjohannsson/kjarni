@@ -59,34 +59,22 @@ impl BartCpuEncoder {
             let prefix = format!("model.encoder.layers.{}", i);
 
             // 1. Load LinearLayers externally
-            let q_proj = LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.q_proj.weight", prefix),
-                Some(&format!("{}.self_attn.q_proj.bias", prefix)),
-                None,
-                None,
-            )?;
-            let k_proj = LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.k_proj.weight", prefix),
-                Some(&format!("{}.self_attn.k_proj.bias", prefix)),
-                None,
-                None,
-            )?;
-            let v_proj = LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.v_proj.weight", prefix),
-                Some(&format!("{}.self_attn.v_proj.bias", prefix)),
-                None,
-                None,
-            )?;
-            let out_proj = LinearLayer::from_weights(
-                weights,
-                &format!("{}.self_attn.out_proj.weight", prefix),
-                Some(&format!("{}.self_attn.out_proj.bias", prefix)),
-                None,
-                None,
-            )?;
+            let q_proj =
+                LinearLayer::builder(weights, &format!("{}.self_attn.q_proj.weight", prefix))
+                    .with_optional_bias(Some(&format!("{}.self_attn.q_proj.bias", prefix)))
+                    .build()?;
+            let k_proj =
+                LinearLayer::builder(weights, &format!("{}.self_attn.k_proj.weight", prefix))
+                    .with_optional_bias(Some(&format!("{}.self_attn.k_proj.bias", prefix)))
+                    .build()?;
+            let v_proj =
+                LinearLayer::builder(weights, &format!("{}.self_attn.v_proj.weight", prefix))
+                    .with_optional_bias(Some(&format!("{}.self_attn.v_proj.bias", prefix)))
+                    .build()?;
+            let out_proj =
+                LinearLayer::builder(weights, &format!("{}.self_attn.out_proj.weight", prefix))
+                    .with_optional_bias(Some(&format!("{}.self_attn.out_proj.bias", prefix)))
+                    .build()?;
 
             assert!(q_proj.has_bias());
             assert!(k_proj.has_bias());
@@ -176,8 +164,7 @@ impl CpuEncoder for BartCpuEncoder {
         let hidden = self.embed(input_ids, token_type_ids);
         if self.config.normalize_embedding {
             self.embed_layer_norm.forward_3d(&hidden)
-        }
-        else {
+        } else {
             hidden
         }
     }
