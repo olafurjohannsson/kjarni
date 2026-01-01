@@ -284,7 +284,7 @@ pub trait DecoderLanguageModel: LanguageModel {
     }
 
     /// Get the chat template for this model (if it's an instruct model)
-    fn chat_template(&self) -> Option<Box<dyn ChatTemplate>> {
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
         None  // Default: no template (base model)
     }
     

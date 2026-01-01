@@ -120,7 +120,7 @@ impl MistralModel {
         decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         kjarni_transformers::pipeline::GenericLoader::load_from_pretrained::<Self>(
-            model_path, device, context, decoder_config, Some(ModelType::Mistral)
+            model_path, device, context, decoder_config, Some(ModelType::Mistral7B_v0_3_Instruct)
         )
     }
     pub fn config(&self) -> &Arc<MistralConfig> { &self.config }
@@ -170,8 +170,9 @@ impl DecoderLanguageModel for MistralModel {
         if self.pipeline.gpu_decoder().is_some() { Some(self) } else { None }
     }
     fn autoregressive_loop(&self) -> AutoregressiveLoop { AutoregressiveLoop::Pipelined }
-    fn chat_template(&self) -> Option<Box<dyn ChatTemplate>> {
-        self.chat_template
+
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+        self.chat_template.as_deref()
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
         GenerationConfig {

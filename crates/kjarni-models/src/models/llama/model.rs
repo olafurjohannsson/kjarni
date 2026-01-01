@@ -480,8 +480,8 @@ impl DecoderLanguageModel for LlamaModel {
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
     }
-    fn chat_template(&self) -> Option<Box<dyn ChatTemplate>> {
-        self.chat_template
+fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+        self.chat_template.as_deref()
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
         // Use generation_config.json if loaded
