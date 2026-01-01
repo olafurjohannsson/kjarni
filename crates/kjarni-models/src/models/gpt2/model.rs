@@ -58,9 +58,9 @@ impl Gpt2Model {
     const SUPPORTED_MODELS: &'static [ModelType] = &[
         ModelType::DistilGpt2,
         ModelType::Gpt2,
-        ModelType::Gpt2Medium,
-        ModelType::Gpt2Large,
-        ModelType::Gpt2XL,
+        // ModelType::Gpt2Medium,
+        // ModelType::Gpt2Large,
+        // ModelType::Gpt2XL,
     ];
     pub fn concrete_config(&self) -> &Arc<Gpt2Config> {
         &self.config
@@ -79,8 +79,24 @@ impl Gpt2Model {
         if !Self::SUPPORTED_MODELS.contains(&model_type) {
             return Err(anyhow!("Unsupported GPT-2 model type: {:?}", model_type));
         }
-        if model_type.info().architecture != ModelArchitecture::Decoder {
-            return Err(anyhow!("Model {:?} is not a decoder model.", model_type));
+        // if model_type.info().architecture != ModelArchitecture::Decoder {
+        //     return Err(anyhow!("Model {:?} is not a decoder model.", model_type));
+        // }
+        let info = model_type.info();
+        
+        // 2. Validate Architecture
+        // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
+        match info.architecture {
+            ModelArchitecture::GPT => {
+                // These are valid encoders
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Model {:?} is not an GPT (architecture: {:?})",
+                    model_type,
+                    info.architecture
+                ));
+            }
         }
 
         let cache_dir = cache_dir.unwrap_or_else(|| {
@@ -90,7 +106,7 @@ impl Gpt2Model {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        download_model_files(&model_dir, &model_type.info().paths).await?;
+        download_model_files(&model_dir, &model_type.info().paths, kjarni_transformers::models::registry::WeightsFormat::SafeTensors).await?;
         Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 

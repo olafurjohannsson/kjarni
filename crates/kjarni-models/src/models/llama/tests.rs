@@ -203,7 +203,7 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     // for a deterministic (greedy) generation task.
 
     // 1. Setup: Define the model, prompt, and expected output.
-    let model_type = ModelType::Llama3_2_1B;
+    // let model_type = ModelType::Llama3_2_1B;
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
     // The "golden" output string for generating 5 new tokens, based on previous correct runs.

@@ -69,16 +69,31 @@ impl SequenceClassifier {
                 Self::SUPPORTED_MODELS
             ));
         }
-
         let info = model_type.info();
-
-        if info.architecture != ModelArchitecture::CrossEncoder {
-            return Err(anyhow!(
-                "Model {:?} is not a cross-encoder (architecture: {:?})",
-                model_type,
-                info.architecture
-            ));
+        
+        // 2. Validate Architecture
+        // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
+        match info.architecture {
+            ModelArchitecture::Bert => {
+                // These are valid encoders
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Model {:?} is not an GPT (architecture: {:?})",
+                    model_type,
+                    info.architecture
+                ));
+            }
         }
+        // let info = model_type.info();
+
+        // if info.architecture != ModelArchitecture::CrossEncoder {
+        //     return Err(anyhow!(
+        //         "Model {:?} is not a cross-encoder (architecture: {:?})",
+        //         model_type,
+        //         info.architecture
+        //     ));
+        // }
 
         let cache_dir = cache_dir.unwrap_or_else(|| {
             dirs::cache_dir()
@@ -89,7 +104,7 @@ impl SequenceClassifier {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download files
-        download_model_files(&model_dir, &info.paths).await?;
+        download_model_files(&model_dir, &info.paths, kjarni_transformers::models::registry::WeightsFormat::SafeTensors).await?;
 
         // Load from local path
         Self::from_pretrained(&model_dir, model_type, device, context, load_cfg)

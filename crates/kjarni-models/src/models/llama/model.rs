@@ -117,7 +117,7 @@ pub struct LlamaModel {
     pipeline: DecoderPipeline,
     tokenizer: Tokenizer,
     config: Arc<LlamaConfig>,
-    chat_template: Option<Llama3ChatTemplate>,
+    chat_template: Option<Box<dyn ChatTemplate>>,
     generation_defaults: Option<HFGenerationDefaults>,
 }
 
@@ -480,8 +480,8 @@ impl DecoderLanguageModel for LlamaModel {
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
     }
-    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
-        self.chat_template.as_ref().map(|t| t as &dyn ChatTemplate)
+    fn chat_template(&self) -> Option<Box<dyn ChatTemplate>> {
+        self.chat_template
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
         // Use generation_config.json if loaded

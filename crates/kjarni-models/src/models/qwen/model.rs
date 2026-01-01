@@ -256,8 +256,8 @@ impl DecoderLanguageModel for QwenModel {
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
     }
-    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
-        self.chat_template.as_ref().map(|t| t.as_ref())
+    fn chat_template(&self) -> Option<Box<dyn ChatTemplate>> {
+        self.chat_template
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
         if let Some(d) = &self.generation_defaults {

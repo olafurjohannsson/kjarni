@@ -97,7 +97,7 @@ impl BartModel {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         log::info!("Loading BART model from {:?}", model_dir);
-        download_model_files(&model_dir, &model_type.info().paths).await?;
+        download_model_files(&model_dir, &model_type.info().paths, kjarni_transformers::models::registry::WeightsFormat::SafeTensors).await?;
 
         // Logic preserved: auto-create context if missing for GPU
         if device.is_gpu() && context.is_none() {
