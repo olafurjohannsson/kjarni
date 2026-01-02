@@ -284,7 +284,7 @@ impl CpuDecoderOps for Gpt2Model {
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden) = hidden_states.dim();
-        let hidden_2d = hidden_states.view().into_shape((batch * seq, hidden))?;
+        let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq, hidden))?;
         let logits_2d = self.lm_head.matmul(&hidden_2d);
 
         logits_2d
@@ -359,7 +359,7 @@ impl GpuDecoderOps for Gpt2Model {
 }
 
 // --- 3. Implement Main Trait ---
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderLanguageModel for Gpt2Model {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         if self.device == Device::Cpu {

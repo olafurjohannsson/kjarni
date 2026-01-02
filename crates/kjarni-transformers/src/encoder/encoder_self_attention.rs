@@ -25,7 +25,6 @@
 //! let output = attn.forward(&hidden_states, &attention_mask, None)?;
 //! ```
 
-use std::sync::Arc;
 
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;

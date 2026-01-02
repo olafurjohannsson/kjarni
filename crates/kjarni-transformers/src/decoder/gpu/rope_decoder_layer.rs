@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use crate::{
     WgpuContext,
     cache::GpuKVCache,
@@ -7,18 +7,13 @@ use crate::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
             GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
-            GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
+            GpuSwiGLUFFN,
             attention::GpuAttentionWeights,
-            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
-            rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
+            rms_norm::{GpuRMSNorm},
             rope::GpuRoPE,
         },
         primitives::add::GpuAdd,
-    },
-    models::base::{ModelInput, ModelLoadConfig},
-    tensor::DType,
-    traits::{ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    }
 };
 use std::sync::Arc;
 

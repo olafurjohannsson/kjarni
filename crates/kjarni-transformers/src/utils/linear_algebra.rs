@@ -262,18 +262,20 @@ unsafe fn compute_chunk_fallback(
     k: usize,
 ) {
     for val in out_chunk.iter_mut() {
-        let mut sum = 0.0;
-        let mut a_ptr = a_ptr_base;
-        let mut b_ptr = b_row_start;
-        for _ in 0..k {
-            let val_a = *a_ptr;
-            let val_b = f32::from_bits((*b_ptr as u32) << 16);
-            sum += val_a * val_b;
-            a_ptr = a_ptr.add(1);
-            b_ptr = b_ptr.add(1);
+        unsafe {
+            let mut sum = 0.0;
+            let mut a_ptr = a_ptr_base;
+            let mut b_ptr = b_row_start;
+            for _ in 0..k {
+                let val_a = *a_ptr;
+                let val_b = f32::from_bits((*b_ptr as u32) << 16);
+                sum += val_a * val_b;
+                a_ptr = a_ptr.add(1);
+                b_ptr = b_ptr.add(1);
+            }
+            *val = sum;
+            b_row_start = b_row_start.add(k);
         }
-        *val = sum;
-        b_row_start = b_row_start.add(k);
     }
 }
 
@@ -281,7 +283,7 @@ unsafe fn compute_chunk_fallback(
 //  SECTION 2: DISPATCHER
 // =========================================================================
 
-pub fn matmul_dequant_q4_k(a: &ArrayView2<f32>, b_weights: &Array3<u8>) -> Array2<f32> {
+pub fn matmul_dequant_q4_k(_a: &ArrayView2<f32>, _b_weights: &Array3<u8>) -> Array2<f32> {
     unimplemented!("Q4_K matmul not implemented yet");
 }
 
@@ -626,24 +628,26 @@ unsafe fn compute_chunk_avx2_f32(
         let mut n = k;
 
         while n >= 32 {
-            let a0 = _mm256_loadu_ps(a_ptr);
-            let a1 = _mm256_loadu_ps(a_ptr.add(8));
-            let a2 = _mm256_loadu_ps(a_ptr.add(16));
-            let a3 = _mm256_loadu_ps(a_ptr.add(24));
+            unsafe {
+                let a0 = _mm256_loadu_ps(a_ptr);
+                let a1 = _mm256_loadu_ps(a_ptr.add(8));
+                let a2 = _mm256_loadu_ps(a_ptr.add(16));
+                let a3 = _mm256_loadu_ps(a_ptr.add(24));
 
-            let b0 = _mm256_loadu_ps(b_ptr);
-            let b1 = _mm256_loadu_ps(b_ptr.add(8));
-            let b2 = _mm256_loadu_ps(b_ptr.add(16));
-            let b3 = _mm256_loadu_ps(b_ptr.add(24));
+                let b0 = _mm256_loadu_ps(b_ptr);
+                let b1 = _mm256_loadu_ps(b_ptr.add(8));
+                let b2 = _mm256_loadu_ps(b_ptr.add(16));
+                let b3 = _mm256_loadu_ps(b_ptr.add(24));
 
-            sum0 = _mm256_fmadd_ps(a0, b0, sum0);
-            sum1 = _mm256_fmadd_ps(a1, b1, sum1);
-            sum2 = _mm256_fmadd_ps(a2, b2, sum2);
-            sum3 = _mm256_fmadd_ps(a3, b3, sum3);
+                sum0 = _mm256_fmadd_ps(a0, b0, sum0);
+                sum1 = _mm256_fmadd_ps(a1, b1, sum1);
+                sum2 = _mm256_fmadd_ps(a2, b2, sum2);
+                sum3 = _mm256_fmadd_ps(a3, b3, sum3);
 
-            a_ptr = a_ptr.add(32);
-            b_ptr = b_ptr.add(32);
-            n -= 32;
+                a_ptr = a_ptr.add(32);
+                b_ptr = b_ptr.add(32);
+                n -= 32;
+            }
         }
 
         sum0 = _mm256_add_ps(sum0, sum1);
@@ -724,15 +728,17 @@ unsafe fn compute_chunk_fallback_f32(
 ) {
     for val in out_chunk.iter_mut() {
         let mut sum = 0.0;
-        let mut a_ptr = a_ptr_base;
-        let mut b_ptr = b_row_start;
-        for _ in 0..k {
-            sum += *a_ptr * *b_ptr;
-            a_ptr = a_ptr.add(1);
-            b_ptr = b_ptr.add(1);
+        unsafe {
+            let mut a_ptr = a_ptr_base;
+            let mut b_ptr = b_row_start;
+            for _ in 0..k {
+                sum += *a_ptr * *b_ptr;
+                a_ptr = a_ptr.add(1);
+                b_ptr = b_ptr.add(1);
+            }
+            *val = sum;
+            b_row_start = b_row_start.add(k);
         }
-        *val = sum;
-        b_row_start = b_row_start.add(k);
     }
 }
 

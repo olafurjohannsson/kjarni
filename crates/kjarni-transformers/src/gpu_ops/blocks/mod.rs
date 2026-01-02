@@ -14,7 +14,7 @@ pub use layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 pub use rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
 
 pub use ffn::{
-    GpuFeedForward as GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd,
+    GpuFeedForwardStd, GpuFeedForwardWeights as GpuFeedForwardWeightsStd,
 };
 pub use ffn_swiglu::{GpuSwiGLUFFN, GpuSwiGLUFFNWeights};
 

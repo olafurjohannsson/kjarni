@@ -7,10 +7,9 @@ use crate::execution::ExecutionPlan;
 use crate::lm_head::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;
 use crate::pipeline::{
-    DecoderPipeline, DecoderPipelineConfig, EncoderDecoderPipeline, EncoderDecoderPipelineConfig,
+    EncoderDecoderPipeline, EncoderDecoderPipelineConfig,
 };
-use crate::rope::loader::LoadedRoPE;
-use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
+use crate::traits::{Device, ModelConfig};
 use crate::weights::ModelWeights;
 use anyhow::{Context, Result, anyhow};
 use std::sync::Arc;

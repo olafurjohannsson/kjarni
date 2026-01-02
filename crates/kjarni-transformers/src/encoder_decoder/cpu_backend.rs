@@ -1,9 +1,7 @@
 use crate::cache::{Cache, CpuBeamKVCache};
 use crate::encoder_decoder::traits::CpuCrossDecoderOutput;
-use crate::prelude::*;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bytemuck;
 use ndarray::{Array2, Array3};
 
 use crate::encoder_decoder::{
@@ -24,7 +22,7 @@ pub enum CpuSeq2SeqState {
 
 pub struct CpuBackend;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl EncoderDecoderGenerationBackend for CpuBackend {
     type Tensor = CpuSeq2SeqState;
 
@@ -90,7 +88,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             Some(&attention_mask),
             Some(cache),
             Some(cross_kv),
-        ).await?;
+        )?;
 
         let cpu_cache = cache.as_any_mut().downcast_mut::<CpuBeamKVCache>().ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
         for (i, (k, v)) in decoder_output.new_self_attn_kv.into_iter().enumerate() {

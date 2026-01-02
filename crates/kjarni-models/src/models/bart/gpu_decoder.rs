@@ -1,12 +1,9 @@
 use crate::models::bart::config::BartConfig;
-use anyhow::anyhow;
-// IMPORTANT: You will need to create this generic layer component.
-// Its structure is implied by the usage here.
 use anyhow::Result;
-use async_trait::async_trait;
-use kjarni_transformers::activations::Activation;
 use kjarni_transformers::cache::Cache;
 use kjarni_transformers::cache::GpuBeamKVCache;
+use kjarni_transformers::embeddings::EmbeddingConfig;
+use kjarni_transformers::embeddings::LoadedEmbeddings;
 use kjarni_transformers::encoder_decoder::traits::{
     GpuCrossAttentionKVCache, GpuCrossDecoder, GpuCrossDecoderOutput,
 };
@@ -33,15 +30,13 @@ pub struct BartGpuDecoder {
     context: Arc<WgpuContext>,
     config: Arc<BartConfig>,
 
-    // Kernels
-    pub embeddings: GpuEmbeddings,
+    // Unified Embeddings (CPU/GPU/Hybrid)
+    pub embeddings: LoadedEmbeddings,
+    
+    // Decoder-specific Norm
     pub embed_layer_norm: GpuNormalization,
-
-    // Weights
-    pub embedding_weights: GpuEmbeddingWeights,
     pub embed_ln_weights: GpuNormalizationWeights,
 
-    // Layers
     pub layers: Vec<GpuCrossDecoderLayer>,
 }
 
@@ -58,24 +53,40 @@ impl BartGpuDecoder {
         let target_dt = load_config.target_dtype;
 
         // --- 1. Embeddings - MANUALLY load with decoder-specific paths (Preserved Logic) ---
-        let word_emb = GpuTensor::from_raw(
-            context,
-            &weights.get_raw(&layout.token_embedding)?,
-            "decoder_word_emb",
-        )?;
+        // let word_emb = GpuTensor::from_raw(
+        //     context,
+        //     &weights.get_raw(&layout.token_embedding)?,
+        //     "decoder_word_emb",
+        // )?;
 
-        // BART uses a specific separate position table for the decoder
-        let pos_emb = GpuTensor::from_raw(
-            context,
-            &weights.get_raw("model.decoder.embed_positions.weight")?,
-            "decoder_pos_emb",
-        )?;
+        // // BART uses a specific separate position table for the decoder
+        // let pos_emb = GpuTensor::from_raw(
+        //     context,
+        //     &weights.get_raw("model.decoder.embed_positions.weight")?,
+        //     "decoder_pos_emb",
+        // )?;
 
-        let embedding_weights = GpuEmbeddingWeights {
-            word_embeddings: word_emb,
-            position_embeddings: Some(pos_emb),
-            token_type_embeddings: None,
-        };
+        // let embedding_weights = GpuEmbeddingWeights {
+        //     word_embeddings: word_emb,
+        //     position_embeddings: Some(pos_emb),
+        //     token_type_embeddings: None,
+        // };
+        let embed_layer_norm =
+            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
+        let embedding_config = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
+            .position_embedding("model.decoder.embed_positions.weight") // BART Decoder specific
+            .position_offset(2)
+            .scale_embeddings(true)
+            .build();
+
+        let embeddings = LoadedEmbeddings::new(
+            Some(context),
+            weights,
+            embedding_config,
+            load_config.offload_embeddings, // CPU offload pref
+            true,                           // Always load GPU weights if not offloading
+            target_dt,
+        )?;
 
         // --- 2. Initial LayerNorm (Preserved Logic) ---
         // Using specific BART decoder naming convention
@@ -220,16 +231,11 @@ impl BartGpuDecoder {
             layers.push(layer);
         }
 
-        // --- 4. Instantiate Kernels ---
-        let embeddings = GpuEmbeddings::new(context)?;
-        let embed_layer_norm =
-            GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
 
-        Ok(Self {
+      Ok(Self {
             context: context.clone(),
             config,
             embeddings,
-            embedding_weights,
             embed_layer_norm,
             embed_ln_weights,
             layers,

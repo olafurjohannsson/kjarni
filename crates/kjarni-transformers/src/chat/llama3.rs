@@ -2,7 +2,7 @@
 //!
 //! Formats conversations according to Llama 3's expected format.
 
-use crate::{ChatTemplate, Conversation, Role, Message};
+use crate::{ChatTemplate, Conversation, Role};
 
 /// Chat template for Llama 3 Instruct models
 ///
@@ -251,6 +251,8 @@ impl ChatTemplate for Llama2ChatTemplate {
 
 #[cfg(test)]
 mod tests {
+    use crate::Message;
+
     use super::*;
 
     #[test]

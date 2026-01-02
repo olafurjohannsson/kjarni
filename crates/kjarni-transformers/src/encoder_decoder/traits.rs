@@ -43,7 +43,7 @@ pub struct GpuCrossDecoderOutput {
 }
 
 /// Defines the synchronous interface for a CPU-native decoder that uses cross-attention.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait CpuCrossDecoder: Send + Sync {
     /// Pre-computes the Key and Value matrices for cross-attention from the encoder's output.
     fn precompute_cross_attention_kv(
@@ -64,7 +64,7 @@ pub trait CpuCrossDecoder: Send + Sync {
     ///
     /// # Arguments
     /// * `hidden_states` - Input states from embedding or previous layer block.
-    async fn forward_layers(
+    fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
@@ -84,7 +84,7 @@ pub trait CpuCrossDecoder: Send + Sync {
     // --- High-level Default Implementation ---
 
     /// Performs a full forward pass through the cross-attention decoder stack.
-    async fn forward(
+    fn forward(
         &self,
         decoder_input_ids: &Array2<u32>,
         encoder_hidden_states: &Array3<f32>,
@@ -108,11 +108,10 @@ pub trait CpuCrossDecoder: Send + Sync {
             0,
             self.num_layers(),
         )
-        .await
     }
 }
 
-/// Defines the interface for a GPU-native decoder that uses cross-attention.
+#[async_trait]
 pub trait GpuCrossDecoder: Send + Sync {
     /// Pre-computes the Key and Value matrices for cross-attention.
     fn precompute_cross_attention_kv(
@@ -195,7 +194,7 @@ pub trait GpuCrossDecoder: Send + Sync {
 // ============================================================================
 
 /// Defines the CPU-specific computational graph for an encoder-decoder model.
-pub trait CpuEncoderDecoderOps {
+pub trait CpuEncoderDecoderOps: Send + Sync {
     // fn encoder(&self) -> &dyn CpuEncoder;
     fn decoder(&self) -> &dyn CpuCrossDecoder;
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
@@ -207,7 +206,7 @@ pub trait CpuEncoderDecoderOps {
 }
 
 /// Defines the GPU-specific computational graph for an encoder-decoder model.
-pub trait GpuEncoderDecoderOps {
+pub trait GpuEncoderDecoderOps: Send + Sync {
     // fn encoder(&self) -> &dyn GpuEncoder;
     fn decoder(&self) -> &dyn GpuCrossDecoder;
     fn project_to_logits(
@@ -251,7 +250,7 @@ pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
 
 /// Defines the low-level orchestration for the encoder-decoder generation loop.
 /// This will be refactored to be "dumb".
-#[async_trait(?Send)]
+#[async_trait]
 pub trait EncoderDecoderGenerationBackend: Send + Sync {
     type Tensor: Send + Sync;
 

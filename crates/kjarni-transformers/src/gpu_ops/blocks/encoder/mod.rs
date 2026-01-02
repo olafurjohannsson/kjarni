@@ -2,9 +2,9 @@ use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm};
 use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
-use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::blocks::ffn::{GpuFeedForwardStd};
 use crate::traits::ModelMetadata;
 use crate::WgpuContext;
 use crate::activations;
@@ -111,7 +111,7 @@ impl GpuEncoderLayer {
         let ffn_layer_norm = create_norm(&ffn_ln_weights);
 
         // Initialize FFN (Enum handles dispatch internally)
-        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForward::new(context, activation)?);
+        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForwardStd::new(context, activation)?);
 
         // Primitives
         let add = GpuAdd::new(context);

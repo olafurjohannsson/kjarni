@@ -25,70 +25,73 @@ pub(crate) unsafe fn matmul_vec_bf16(
     k: usize,
 ) {
     let mut b_row_ptr = b_row_start;
+    unsafe {
+        for val in out_chunk.iter_mut() {
+            let mut a_chunk_ptr = a_ptr;
+            let mut b_chunk_ptr = b_row_ptr;
 
-    for val in out_chunk.iter_mut() {
-        let mut a_chunk_ptr = a_ptr;
-        let mut b_chunk_ptr = b_row_ptr;
+            // Accumulators for the dot product, unrolled by 4 to hide FMA latency.
+            let mut sum0 = _mm256_setzero_ps();
+            let mut sum1 = _mm256_setzero_ps();
+            let mut sum2 = _mm256_setzero_ps();
+            let mut sum3 = _mm256_setzero_ps();
 
-        // Accumulators for the dot product, unrolled by 4 to hide FMA latency.
-        let mut sum0 = _mm256_setzero_ps();
-        let mut sum1 = _mm256_setzero_ps();
-        let mut sum2 = _mm256_setzero_ps();
-        let mut sum3 = _mm256_setzero_ps();
+            let mut n = k;
+            while n >= 32 {
+                // Prefetching can sometimes help, especially with large K.
+                _mm_prefetch(b_chunk_ptr.add(128) as *const i8, _MM_HINT_T0);
 
-        let mut n = k;
-        while n >= 32 {
-            // Prefetching can sometimes help, especially with large K.
-            _mm_prefetch(b_chunk_ptr.add(128) as *const i8, _MM_HINT_T0);
+                // Load 32 floats from the input vector 'a'
+                let a0 = _mm256_loadu_ps(a_chunk_ptr);
+                let a1 = _mm256_loadu_ps(a_chunk_ptr.add(8));
+                let a2 = _mm256_loadu_ps(a_chunk_ptr.add(16));
+                let a3 = _mm256_loadu_ps(a_chunk_ptr.add(24));
 
-            // Load 32 floats from the input vector 'a'
-            let a0 = _mm256_loadu_ps(a_chunk_ptr);
-            let a1 = _mm256_loadu_ps(a_chunk_ptr.add(8));
-            let a2 = _mm256_loadu_ps(a_chunk_ptr.add(16));
-            let a3 = _mm256_loadu_ps(a_chunk_ptr.add(24));
+                // Load 32 bf16s (as u16) from the weight matrix 'b'
+                let b0_u16 = _mm_loadu_si128(b_chunk_ptr as *const __m128i);
+                let b1_u16 = _mm_loadu_si128(b_chunk_ptr.add(8) as *const __m128i);
+                let b2_u16 = _mm_loadu_si128(b_chunk_ptr.add(16) as *const __m128i);
+                let b3_u16 = _mm_loadu_si128(b_chunk_ptr.add(24) as *const __m128i);
 
-            // Load 32 bf16s (as u16) from the weight matrix 'b'
-            let b0_u16 = _mm_loadu_si128(b_chunk_ptr as *const __m128i);
-            let b1_u16 = _mm_loadu_si128(b_chunk_ptr.add(8) as *const __m128i);
-            let b2_u16 = _mm_loadu_si128(b_chunk_ptr.add(16) as *const __m128i);
-            let b3_u16 = _mm_loadu_si128(b_chunk_ptr.add(24) as *const __m128i);
+                // Convert bf16 vectors to f32 vectors
+                let b0_f =
+                    _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b0_u16), 16));
+                let b1_f =
+                    _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b1_u16), 16));
+                let b2_f =
+                    _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b2_u16), 16));
+                let b3_f =
+                    _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b3_u16), 16));
 
-            // Convert bf16 vectors to f32 vectors
-            let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b0_u16), 16));
-            let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b1_u16), 16));
-            let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b2_u16), 16));
-            let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(b3_u16), 16));
+                // Fused multiply-add
+                sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
+                sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
+                sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
+                sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
 
-            // Fused multiply-add
-            sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
-            sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
-            sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
-            sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
+                a_chunk_ptr = a_chunk_ptr.add(32);
+                b_chunk_ptr = b_chunk_ptr.add(32);
+                n -= 32;
+            }
 
-            a_chunk_ptr = a_chunk_ptr.add(32);
-            b_chunk_ptr = b_chunk_ptr.add(32);
-            n -= 32;
+            // Combine the four accumulators
+            sum0 = _mm256_add_ps(_mm256_add_ps(sum0, sum1), _mm256_add_ps(sum2, sum3));
+
+            // Horizontally sum the final vector efficiently
+            let mut sum = hsum_ps_avx(sum0);
+
+            // Handle the remainder of the dot product
+            while n > 0 {
+                let val_a = *a_chunk_ptr;
+                let val_b = f32::from_bits((*b_chunk_ptr as u32) << 16);
+                sum += val_a * val_b;
+                a_chunk_ptr = a_chunk_ptr.add(1);
+                b_chunk_ptr = b_chunk_ptr.add(1);
+                n -= 1;
+            }
+
+            *val = sum;
+            b_row_ptr = b_row_ptr.add(k); // Move to the start of the next row in the weight matrix
         }
-
-        // Combine the four accumulators
-        sum0 = _mm256_add_ps(_mm256_add_ps(sum0, sum1), _mm256_add_ps(sum2, sum3));
-
-        // Horizontally sum the final vector efficiently
-        let mut sum = hsum_ps_avx(sum0);
-
-        // Handle the remainder of the dot product
-        while n > 0 {
-            let val_a = *a_chunk_ptr;
-            let val_b = f32::from_bits((*b_chunk_ptr as u32) << 16);
-            sum += val_a * val_b;
-            a_chunk_ptr = a_chunk_ptr.add(1);
-            b_chunk_ptr = b_chunk_ptr.add(1);
-            n -= 1;
-        }
-
-        *val = sum;
-        b_row_ptr = b_row_ptr.add(k); // Move to the start of the next row in the weight matrix
     }
 }
-
-

@@ -1,11 +1,11 @@
 use crate::decoder::prelude::DecoderAttention;
-use crate::feedforward::{FeedForward, LegacyFeedForward, SwiGluFeedForward};
+use crate::feedforward::{SwiGluFeedForward};
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::tensor::DType;
-use crate::traits::{AttentionLayout, FeedForwardLayout, ModelLayout, ModelMetadata};
+use crate::traits::{AttentionLayout, FeedForwardLayout, ModelMetadata};
 use crate::weights::ModelWeights;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 
 pub struct CpuLayerFactory;
 

@@ -3,21 +3,17 @@ use async_trait::async_trait;
 use ndarray::s;
 use std::sync::Arc;
 
-use crate::Embeddings;
 use crate::WgpuContext;
 use crate::embeddings::EmbeddingConfig;
 use crate::embeddings::LoadedEmbeddings;
 use crate::encoder::traits::{GpuEncoder};
-use crate::gpu_ops::blocks::GpuFeedForward;
 use crate::gpu_ops::blocks::GpuNormalization;
 use crate::gpu_ops::blocks::GpuNormalizationWeights;
 use crate::gpu_ops::blocks::GpuRMSNorm;
 use crate::gpu_ops::blocks::GpuRMSNormWeights;
 use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-use crate::gpu_ops::blocks::ffn::GpuFeedForwardWeights;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
@@ -219,20 +215,20 @@ impl GpuTransformerEncoder {
                 let down_w = load_transposed(&down_name)?;
 
                 // Biases (Nomic has none, but handled if present)
-                let (gate_b, up_b) =
-                    if let Some(b_name) = resolve_bias(&encoder_layout.layer.ffn.up_bias) {
-                        let fused_b = weights.get_array1(&b_name)?;
-                        (
-                            Some(fused_b.slice(s![0..half_dim]).to_owned()),
-                            Some(fused_b.slice(s![half_dim..]).to_owned()),
-                        )
-                    } else {
-                        (None, None)
-                    };
+                // let (gate_b, up_b) =
+                //     if let Some(b_name) = resolve_bias(&encoder_layout.layer.ffn.up_bias) {
+                //         let fused_b = weights.get_array1(&b_name)?;
+                //         (
+                //             Some(fused_b.slice(s![0..half_dim]).to_owned()),
+                //             Some(fused_b.slice(s![half_dim..]).to_owned()),
+                //         )
+                //     } else {
+                //         (None, None)
+                //     };
 
-                let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
-                    .map(|s| weights.get_array1(&s))
-                    .transpose()?;
+                // let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
+                //     .map(|s| weights.get_array1(&s))
+                //     .transpose()?;
 
                 let swiglu_weights = GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,

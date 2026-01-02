@@ -237,7 +237,7 @@ impl LanguageModel for QwenModel {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderLanguageModel for QwenModel {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         if self.pipeline.cpu_decoder().is_some() {

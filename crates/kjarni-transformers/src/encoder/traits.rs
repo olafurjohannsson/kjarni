@@ -111,7 +111,7 @@ pub trait EncoderLanguageModel: LanguageModel {
 ///
 /// This trait provides methods to convert raw hidden states into final, pooled,
 /// and normalized sentence embeddings.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait SentenceEncoderModel: EncoderLanguageModel {
     /// Encode a batch of texts into embedding vectors.
     async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>>;
@@ -129,7 +129,7 @@ pub trait SentenceEncoderModel: EncoderLanguageModel {
 
 // Now, we provide a GENERIC implementation that works for ANY EncoderLanguageModel.
 // This is the key to reusability.
-#[async_trait(?Send)]
+#[async_trait]
 impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
     async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
@@ -282,7 +282,7 @@ pub struct GpuEncoderOutput {
 /// GPU-based transformer encoder trait.
 ///
 /// Provides methods for embedding lookup, normalization, and layer execution
-/// on GPU with support for hybrid CPU/GPU workflows through `GpuEncoderInput`.
+/// on GPU with support for hybrid CPU/GPU workflows through `ModelInput`.
 ///
 
 pub trait GpuEncoder: Send + Sync {
@@ -293,7 +293,7 @@ pub trait GpuEncoder: Send + Sync {
     /// # Arguments
     /// * `cmd_encoder` - WGPU command encoder for recording GPU commands
     /// * `pool` - Tensor pool for intermediate allocations
-    /// * `input` - Token IDs or hidden states (see `GpuEncoderInput`)
+    /// * `input` - Token IDs or hidden states (see `ModelInput`)
     /// * `token_type_ids` - Optional token type IDs on GPU
     ///
     /// # Returns

@@ -171,7 +171,7 @@ impl InferenceModel for BartCpuDecoder {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl CpuCrossDecoder for BartCpuDecoder {
     fn num_layers(&self) -> usize {
         self.layers.len()
@@ -208,7 +208,7 @@ impl CpuCrossDecoder for BartCpuDecoder {
         // 2. LayerNorm
         Ok(self.embed_layer_norm.forward_3d(&hidden))
     }
-    async fn forward_layers(
+    fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
@@ -422,15 +422,13 @@ mod tests {
 
         // 2. Decode step 0 (BOS token = 2)
         let decoder_input_ids = Array2::from_shape_vec((1, 1), vec![2u32])?;
-        let decoder_output = decoder
-            .forward(
-                &decoder_input_ids,
-                &encoder_output.last_hidden_state,
-                None,
-                None,
-                None,
-            )
-            .await?;
+        let decoder_output = decoder.forward(
+            &decoder_input_ids,
+            &encoder_output.last_hidden_state,
+            None,
+            None,
+            None,
+        )?;
 
         let dec_actual: Vec<f32> = decoder_output
             .last_hidden_state
@@ -466,15 +464,13 @@ mod tests {
 
         // Step 0: BOS token
         let dec_input = Array2::from_shape_vec((1, 1), vec![2u32])?;
-        let decoder_output = decoder
-            .forward(
-                &dec_input,
-                &encoder_output.last_hidden_state,
-                None,
-                None,
-                None,
-            )
-            .await?;
+        let decoder_output = decoder.forward(
+            &dec_input,
+            &encoder_output.last_hidden_state,
+            None,
+            None,
+            None,
+        )?;
 
         let hidden = &decoder_output.last_hidden_state;
         let hidden_2d = hidden
@@ -530,15 +526,13 @@ mod tests {
         for step in 0..10 {
             let dec_input = Array2::from_shape_vec((1, decoder_ids.len()), decoder_ids.clone())?;
 
-            let decoder_output = decoder
-                .forward(
-                    &dec_input,
-                    &encoder_output.last_hidden_state,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
+            let decoder_output = decoder.forward(
+                &dec_input,
+                &encoder_output.last_hidden_state,
+                None,
+                None,
+                None,
+            )?;
 
             // Get last position logits
             let hidden = &decoder_output.last_hidden_state;
@@ -627,15 +621,13 @@ mod tests {
         for step in 0..30 {
             let dec_input = Array2::from_shape_vec((1, decoder_ids.len()), decoder_ids.clone())?;
 
-            let decoder_output = decoder
-                .forward(
-                    &dec_input,
-                    &encoder_output.last_hidden_state,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
+            let decoder_output = decoder.forward(
+                &dec_input,
+                &encoder_output.last_hidden_state,
+                None,
+                None,
+                None,
+            )?;
 
             let hidden = &decoder_output.last_hidden_state;
             let last_hidden = hidden.slice(s![0, -1.., ..]).to_owned();
@@ -709,15 +701,13 @@ mod tests {
 
         // 2. Decode step 0
         let decoder_input_ids = Array2::from_shape_vec((1, 1), vec![2u32])?;
-        let decoder_output = decoder
-            .forward(
-                &decoder_input_ids,
-                &encoder_output.last_hidden_state,
-                None,
-                None,
-                None,
-            )
-            .await?;
+        let decoder_output = decoder.forward(
+            &decoder_input_ids,
+            &encoder_output.last_hidden_state,
+            None,
+            None,
+            None,
+        )?;
 
         // 3. LM head + bias
         let hidden = &decoder_output.last_hidden_state;

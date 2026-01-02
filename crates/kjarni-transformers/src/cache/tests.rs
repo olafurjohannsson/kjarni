@@ -137,12 +137,12 @@ async fn test_cache_symmetry() -> Result<()> {
     // CPU data needs to be reshaped to match the GPU's head-split layout for comparison.
     let cpu_k_reshaped = cpu_k_final_view
         .to_owned()
-        .into_shape((batch_size, final_len, num_heads, head_dim))?
+        .into_shape_with_order((batch_size, final_len, num_heads, head_dim))?
         .permuted_axes([0, 2, 1, 3]);
 
     let cpu_v_reshaped = cpu_v_final_view
         .to_owned()
-        .into_shape((batch_size, final_len, num_heads, head_dim))?
+        .into_shape_with_order((batch_size, final_len, num_heads, head_dim))?
         .permuted_axes([0, 2, 1, 3]);
 
     // Compare K caches
@@ -298,7 +298,7 @@ async fn test_gpu_kv_cache_update_and_readback() -> anyhow::Result<()> {
     // --- 3. Assert ---
     // Reshape the original CPU data to match the cache layout for comparison
     let new_k_cpu_reshaped = new_k_cpu
-        .into_shape((batch_size, new_seq_len, num_heads, head_dim))?
+        .into_shape_with_order((batch_size, new_seq_len, num_heads, head_dim))?
         .permuted_axes([0, 2, 1, 3]);
 
     // Check that the data was written to the correct slice
@@ -497,10 +497,10 @@ async fn test_cache_reorder_parity() -> Result<()> {
         // CRITICAL: Reshape GPU data from [beam, head, seq, dim] to [beam, seq, hidden] to match CPU layout
         let gpu_k_reshaped =
             p1.as_standard_layout()
-                .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
+                .into_shape_with_order((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
         let gpu_v_reshaped =
             p2.as_standard_layout()
-                .into_shape((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
+                .into_shape_with_order((NUM_BEAMS, CAPACITY, HIDDEN_SIZE))?;
 
         // Compare only the active parts of the cache
         let active_slice = s![.., 0..NUM_STEPS_TO_POPULATE, ..];

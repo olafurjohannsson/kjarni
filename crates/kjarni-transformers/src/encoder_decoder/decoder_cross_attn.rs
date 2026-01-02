@@ -2,8 +2,7 @@
 use crate::linear_layer::LinearLayer;
 use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decode};
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, Axis, Zip};
-use rayon::prelude::*;
+use ndarray::{Array2, Array3, Array4};
 use crate::utils::linear_algebra::{softmax_inplace, apply_attention_mask};
 
 // Standard large negative value for masking (avoids NaN in softmax)
@@ -54,7 +53,7 @@ impl DecoderCrossAttention {
         let (batch, seq_len, _) = encoder_hidden_states.dim();
         let enc_2d = encoder_hidden_states
             .view()
-            .into_shape((batch * seq_len, self.num_heads * self.head_dim))?;
+            .into_shape_with_order((batch * seq_len, self.num_heads * self.head_dim))?;
 
         let k = self.k_proj.matmul(&enc_2d);
         let v = self.v_proj.matmul(&enc_2d);

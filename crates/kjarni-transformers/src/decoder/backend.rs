@@ -92,7 +92,7 @@ impl AnyDecoderBackend {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderGenerationBackend for AnyDecoderBackend {
     /// Type-erased tensor that can hold either CPU or GPU tensors.
     ///

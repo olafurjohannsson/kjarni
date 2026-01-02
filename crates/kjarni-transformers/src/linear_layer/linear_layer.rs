@@ -12,13 +12,13 @@
 use crate::gpu_ops::GpuTensor;
 use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::linear_layer::LinearLayerBuilder;
-use crate::tensor::{CpuTensor, DType, QuantizedMatrix, TensorView};
+use crate::tensor::{DType, QuantizedMatrix, TensorView};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
 use crate::{WgpuContext, ops};
 use anyhow::{Result, anyhow};
 use half::bf16;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayView2};
 use std::borrow::Cow;
 use std::sync::Arc;
 

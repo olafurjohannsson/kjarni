@@ -146,7 +146,6 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
             ),
             DecodingStrategy::Greedy | DecodingStrategy::Sample(_) => (1, 1.0, false),
 
-            _ => return Err(anyhow!("Unsupported strategy for Beam Search runner")),
         };
 
         let encoding = model

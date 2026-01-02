@@ -6,7 +6,6 @@ use ndarray::{Array2, Array3, s};
 use crate::Normalization;
 use crate::encoder::CpuEncoder;
 use crate::encoder::encoder_self_attention::EncoderSelfAttention;
-use crate::feedforward::LegacyFeedForward;
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
 use crate::normalization::RMSNorm;

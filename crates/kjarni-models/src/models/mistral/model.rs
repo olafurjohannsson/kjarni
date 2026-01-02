@@ -161,7 +161,7 @@ impl LanguageModel for MistralModel {
     fn forced_eos_token_id(&self) -> Option<u32> { None }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderLanguageModel for MistralModel {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         if self.pipeline.cpu_decoder().is_some() { Some(self) } else { None }

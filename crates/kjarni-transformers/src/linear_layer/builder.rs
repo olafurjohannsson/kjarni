@@ -60,7 +60,6 @@ impl<'a> LinearLayerBuilder<'a> {
         let target_dtype = self.target_dtype.unwrap_or_else(|| typed_tensor.dtype());
 
         let data = match (typed_tensor, target_dtype) {
-            // --- Direct Paths (No Conversion) ---
             (CpuTensor::F32(arr), DType::F32) => LinearData::F32(arr.into_dimensionality::<Ix2>()?),
             (CpuTensor::BF16(arr), DType::BF16) => {
                 LinearData::BF16(arr.into_dimensionality::<Ix2>()?)
@@ -69,7 +68,6 @@ impl<'a> LinearLayerBuilder<'a> {
             (CpuTensor::Q4_K(m), DType::Q4_K) => LinearData::Q4_K(m),
             (CpuTensor::Q6_K(m), DType::Q6_K) => LinearData::Q6_K(m),
 
-            // --- Conversion Paths ---
             (CpuTensor::BF16(arr), DType::F32) => {
                 LinearData::F32(arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32()))
             }
@@ -77,13 +75,11 @@ impl<'a> LinearLayerBuilder<'a> {
                 LinearData::BF16(arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32))
             }
 
-            // --- Dequantization Path ---
             (tensor, DType::F32) if tensor.is_quantized() => {
                 log::info!("Dequantizing {:?} to F32 for LinearLayer", tensor.dtype());
                 LinearData::F32(tensor.to_array2_f32()?)
             }
 
-            // --- Quantization Paths (New) ---
             (CpuTensor::F32(arr), DType::Q8_0) => {
                 log::info!("Quantizing F32 to Q8_0 for LinearLayer");
                 let w = arr.into_dimensionality::<Ix2>()?;

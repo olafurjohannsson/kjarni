@@ -1,5 +1,4 @@
-use crate::linear_layer::{LinearData, LinearLayer};
-use crate::ops; // Use the new, clean 'ops' module for computations
+use crate::linear_layer::{LinearLayer};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 use rayon::prelude::*;
@@ -95,13 +94,13 @@ impl SwiGluFeedForward {
             );
         }
 
-        Ok(output_2d.into_shape((batch, seq, self.down.out_features()))?)
+        Ok(output_2d.into_shape_with_order((batch, seq, self.down.out_features()))?)
     }
 
     /// Parallel path for the prefill step (seq > 1).
     fn forward_prefill(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden_dim) = hidden.dim();
-        let hidden_2d = hidden.view().into_shape((batch * seq, hidden_dim))?;
+        let hidden_2d = hidden.view().into_shape_with_order((batch * seq, hidden_dim))?;
 
         let t_total = Instant::now();
 
@@ -132,7 +131,7 @@ impl SwiGluFeedForward {
             );
         }
 
-        Ok(output_2d.into_shape((batch, seq, self.down.out_features()))?)
+        Ok(output_2d.into_shape_with_order((batch, seq, self.down.out_features()))?)
     }
 }
 

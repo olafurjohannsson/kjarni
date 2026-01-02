@@ -2,10 +2,8 @@ use crate::tensor::{DType, TensorView};
 use crate::weights::WeightLoader;
 use crate::weights::model_weights::AttentionLayout;
 use anyhow::{Context, Result, anyhow};
-// Import your gguf-rs components
-use byteorder::{LittleEndian, ReadBytesExt};
 use gguf_rs::{
-    ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer, GGUFModel, get_gguf_container,
+    ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer
 };
 use memmap2::Mmap;
 use serde_json::Value;
@@ -14,7 +12,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Read};
 use std::path::Path;
 
 pub struct GgufLoader {

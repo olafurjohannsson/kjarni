@@ -1,4 +1,4 @@
-use crate::{ChatTemplate, Conversation, Role, Message};
+use crate::{ChatTemplate, Conversation, Role};
 
 
 /// Mistral Instruct Template (v0.1, v0.2, v0.3)

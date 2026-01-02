@@ -26,9 +26,4 @@ pub(crate) mod x86;
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod aarch64;
 
-use half::bf16;
-use ndarray::{Array1, ArrayView1, ArrayView2};
-use rayon::prelude::*;
 
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;

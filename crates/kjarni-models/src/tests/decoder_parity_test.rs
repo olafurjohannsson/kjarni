@@ -1,22 +1,21 @@
 use crate::models::gpt2::Gpt2Model;
+use crate::models::llama::LlamaModel;
 use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
-use crate::models::llama::{LlamaConfig, LlamaModel};
 use anyhow::Result;
-use kjarni_transformers::{DecoderPipeline, WgpuContext};
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::{GpuRMSNorm, GpuRMSNormWeights};
-use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
+use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::normalization::RMSNorm;
 use kjarni_transformers::rope::RoPE;
-use kjarni_transformers::tensor::{DType, dtype};
+use kjarni_transformers::tensor::DType;
 use kjarni_transformers::traits::{Device, ModelConfig};
+use kjarni_transformers::{DecoderPipeline, WgpuContext};
 use ndarray::{Array1, Array2, Array3, Array4, s};
 use std::path::Path;
-use std::sync::Arc;
 
 #[tokio::test]
 async fn test_full_text_generation_parity() -> Result<()> {
@@ -358,25 +357,22 @@ async fn test_rms_norm_bf16_gamma_parity() -> Result<()> {
     Ok(())
 }
 
-
 async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
     let ctx = WgpuContext::new().await?;
 
     println!("=== Loading Llama Models ===\n");
-
 
     let config = ModelLoadConfig {
         target_dtype: Some(dtype),
         ..Default::default()
     };
 
-    
     let cpu_model = LlamaModel::from_pretrained(
         Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
         Device::Cpu,
         None,
         Some(config),
-        None
+        None,
     )?;
 
     let gpu_model = LlamaModel::from_pretrained(
@@ -384,35 +380,38 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         Device::Wgpu,
         Some(ctx.clone()),
         Some(config),
-        None
+        None,
     )?;
 
-    
     let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
     let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
 
-    let cpu_decoder = cpu_pipeline.cpu_decoder().expect("No CPU decoder").as_any().downcast_ref::<LlamaCpuDecoder>().expect("Failed to downcast CPU decoder");
-    let gpu_decoder = gpu_pipeline.gpu_decoder().expect("No GPU decoder").as_any().downcast_ref::<LlamaGpuDecoder>().expect("Failed to downcast GPU decoder");
+    let cpu_decoder = cpu_pipeline
+        .cpu_decoder()
+        .expect("No CPU decoder")
+        .as_any()
+        .downcast_ref::<LlamaCpuDecoder>()
+        .expect("Failed to downcast CPU decoder");
+    let gpu_decoder = gpu_pipeline
+        .gpu_decoder()
+        .expect("No GPU decoder")
+        .as_any()
+        .downcast_ref::<LlamaGpuDecoder>()
+        .expect("Failed to downcast GPU decoder");
 
     let config = cpu_model.config();
 
     let meta = config.metadata();
-    
+
     println!("Model loaded:");
     println!("  hidden_size: {}", meta.hidden_size);
     println!("  num_layers: {}", meta.num_layers);
     println!("  num_attention_heads: {}", meta.num_attention_heads);
     println!("  num_kv_heads: {}", meta.num_kv_heads);
     println!("  head_dim: {}", meta.head_dim);
-    let ps = gpu_decoder.layers[0]
-        .ff_weights
-        .down_proj_shape();
-    let gs = gpu_decoder.layers[0]
-        .ff_weights
-        .gate_proj_shape();
-    let us = gpu_decoder.layers[0]
-        .ff_weights
-        .up_proj_shape();
+    let ps = gpu_decoder.layers[0].ff_weights.down_proj_shape();
+    let gs = gpu_decoder.layers[0].ff_weights.gate_proj_shape();
+    let us = gpu_decoder.layers[0].ff_weights.up_proj_shape();
 
     println!("  FFN down_proj shape: {:?}", ps);
     println!("  FFN gate_proj shape: {:?}", gs);
@@ -449,14 +448,12 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let emb = gpu_decoder
-            .embed(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let emb = gpu_decoder.embed(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&input_ids_gpu),
+            position_offset,
+        )?;
 
         frame.finish();
         emb.to_ndarray_3d::<f32>().await?
@@ -692,7 +689,6 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
 //     test_layer0_attention_vs_ffn_isolation(DType::F32).await
 // }
 
-
 // #[tokio::test]
 // async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
 //     test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
@@ -708,19 +704,17 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
 
     println!("=== Loading Llama Models ===\n");
 
-
     let config = ModelLoadConfig {
         target_dtype: Some(dtype),
         ..Default::default()
     };
-
 
     let cpu_model = LlamaModel::from_pretrained(
         Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
         Device::Cpu,
         None,
         Some(config),
-        None
+        None,
     )?;
 
     let gpu_model = LlamaModel::from_pretrained(
@@ -728,16 +722,25 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         Device::Wgpu,
         Some(ctx.clone()),
         Some(config),
-        None
+        None,
     )?;
 
     let cpu_pipeline: &DecoderPipeline = cpu_model.pipeline();
     let gpu_pipeline: &DecoderPipeline = gpu_model.pipeline();
     let config = cpu_model.config();
 
-    let cpu_decoder = cpu_pipeline.cpu_decoder().expect("No CPU decoder").as_any().downcast_ref::<LlamaCpuDecoder>().expect("Failed to downcast CPU decoder");
-    let gpu_decoder = gpu_pipeline.gpu_decoder().expect("No GPU decoder").as_any().downcast_ref::<LlamaGpuDecoder>().expect("Failed to downcast GPU decoder");
-    
+    let cpu_decoder = cpu_pipeline
+        .cpu_decoder()
+        .expect("No CPU decoder")
+        .as_any()
+        .downcast_ref::<LlamaCpuDecoder>()
+        .expect("Failed to downcast CPU decoder");
+    let gpu_decoder = gpu_pipeline
+        .gpu_decoder()
+        .expect("No GPU decoder")
+        .as_any()
+        .downcast_ref::<LlamaGpuDecoder>()
+        .expect("Failed to downcast GPU decoder");
 
     let meta = config.metadata();
 
@@ -747,15 +750,9 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     println!("  num_attention_heads: {}", meta.num_attention_heads);
     println!("  num_kv_heads: {}", meta.num_kv_heads);
     println!("  head_dim: {}", meta.head_dim);
-    let ps = gpu_decoder.layers[0]
-        .ff_weights
-        .down_proj_shape();
-    let gs = gpu_decoder.layers[0]
-        .ff_weights
-        .gate_proj_shape();
-    let us = gpu_decoder.layers[0]
-        .ff_weights
-        .up_proj_shape();
+    let ps = gpu_decoder.layers[0].ff_weights.down_proj_shape();
+    let gs = gpu_decoder.layers[0].ff_weights.gate_proj_shape();
+    let us = gpu_decoder.layers[0].ff_weights.up_proj_shape();
 
     println!("  FFN down_proj shape: {:?}", ps);
     println!("  FFN gate_proj shape: {:?}", gs);
@@ -792,14 +789,12 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let emb = gpu_decoder
-            .embed(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let emb = gpu_decoder.embed(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&input_ids_gpu),
+            position_offset,
+        )?;
 
         frame.finish();
         emb.to_ndarray_3d::<f32>().await?
@@ -871,7 +866,7 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // CPU projections
     let rms_2d = cpu_rms_out
         .view()
-        .into_shape((seq_len, hidden_size))
+        .into_shape_with_order((seq_len, hidden_size))
         .unwrap();
 
     let cpu_q = cpu_layer0.attention.q_proj.matmul(&rms_2d);
@@ -932,15 +927,15 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // Reshape CPU to 3D for comparison
     let cpu_q_3d = cpu_q
         .clone()
-        .into_shape((1, seq_len, num_heads * head_dim))
+        .into_shape_with_order((1, seq_len, num_heads * head_dim))
         .unwrap();
     let cpu_k_3d = cpu_k
         .clone()
-        .into_shape((1, seq_len, num_kv_heads * head_dim))
+        .into_shape_with_order((1, seq_len, num_kv_heads * head_dim))
         .unwrap();
     let cpu_v_3d = cpu_v
         .clone()
-        .into_shape((1, seq_len, num_kv_heads * head_dim))
+        .into_shape_with_order((1, seq_len, num_kv_heads * head_dim))
         .unwrap();
 
     assert_close_3d(&cpu_q_3d, &gpu_q, 1e-3, "Q Projection");
@@ -955,14 +950,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // CPU: Split heads and apply RoPE
     let cpu_q_heads = cpu_q
         .clone()
-        .into_shape((1, seq_len, num_heads, head_dim))
+        .into_shape_with_order((1, seq_len, num_heads, head_dim))
         .unwrap()
         .permuted_axes([0, 2, 1, 3])
         .to_owned();
 
     let cpu_k_heads = cpu_k
         .clone()
-        .into_shape((1, seq_len, num_kv_heads, head_dim))
+        .into_shape_with_order((1, seq_len, num_kv_heads, head_dim))
         .unwrap()
         .permuted_axes([0, 2, 1, 3])
         .to_owned();
@@ -1072,9 +1067,13 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     // Empty history views
     let empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
     let cpu_layer0_out = cpu_layer0.forward(
-        &layer_input, &attention_mask, position_offset,
-        empty_arr.view(), empty_arr.view(),
-        temp_k.view_mut(), temp_v.view_mut()
+        &layer_input,
+        &attention_mask,
+        position_offset,
+        empty_arr.view(),
+        empty_arr.view(),
+        temp_k.view_mut(),
+        temp_v.view_mut(),
     )?;
 
     // let (cpu_layer0_out, _, _) =
@@ -1183,17 +1182,15 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let out = gpu_decoder
-            .forward(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&input_ids_gpu),
-                &attention_mask_gpu,
-                position_offset,
-                None,
-                None,
-            )
-            .await?;
+        let out = gpu_decoder.forward(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&input_ids_gpu),
+            &attention_mask_gpu,
+            position_offset,
+            None,
+            None,
+        )?;
 
         frame.finish();
         out.to_ndarray_3d::<f32>().await?

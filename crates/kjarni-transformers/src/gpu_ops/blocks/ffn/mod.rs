@@ -168,12 +168,12 @@ impl GpuFeedForwardWeights {
 }
 
 /// A GPU-accelerated Feed-Forward Network block.
-pub struct GpuFeedForward {
+pub struct GpuFeedForwardStd {
     pipelines: FfnPipelines,
     context: Arc<WgpuContext>,
 }
 
-impl GpuFeedForward {
+impl GpuFeedForwardStd {
     /// Creates a new `GpuFeedForward` block from pre-prepared weights.
     pub fn new(context: &Arc<WgpuContext>, activation: Activation) -> Result<Self> {
         match activation {
@@ -181,7 +181,7 @@ impl GpuFeedForward {
             Activation::GeluNew => (),
             _ => {
                 return Err(anyhow::anyhow!(
-                    "GpuFeedForward's fused kernel currently only supports gelu and gelu_new."
+                    "GpuFeedForward's fused kernel currently only supports gelu and gelu_new. Requested {:?}", activation
                 ));
             }
         }

@@ -1,10 +1,8 @@
-use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::GpuTensorPool;
-use anyhow::{anyhow, Result};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use anyhow::{Result};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use wgpu::{
     Adapter, DeviceDescriptor, Features, Instance, InstanceDescriptor, Limits, PowerPreference,

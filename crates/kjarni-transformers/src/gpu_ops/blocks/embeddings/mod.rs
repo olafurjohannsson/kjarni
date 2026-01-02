@@ -26,11 +26,10 @@
 
 use crate::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::primitives::lookup::GpuLookup;
 use crate::gpu_ops::primitives::lookup2::GpuLookup2;
 use crate::gpu_ops::primitives::scale::GpuScale;
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::tensor::{DType, TensorView};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::tensor::{DType};
 use crate::weights::ModelWeights;
 use anyhow::Result;
 use std::sync::Arc;

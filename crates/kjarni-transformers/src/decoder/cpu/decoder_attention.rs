@@ -75,13 +75,13 @@ impl DecoderAttention {
         let k_new = self.k_proj.matmul(&hidden_2d);
         k_cache
             .slice_mut(s![.., start_write.., ..])
-            .assign(&k_new.into_shape((batch, seq_len, self.num_kv_heads * self.head_dim))?);
+            .assign(&k_new.into_shape_with_order((batch, seq_len, self.num_kv_heads * self.head_dim))?);
 
         // V Projection -> Write directly to Cache slice
         let v_new = self.v_proj.matmul(&hidden_2d);
         v_cache
             .slice_mut(s![.., start_write.., ..])
-            .assign(&v_new.into_shape((batch, seq_len, self.num_kv_heads * self.head_dim))?);
+            .assign(&v_new.into_shape_with_order((batch, seq_len, self.num_kv_heads * self.head_dim))?);
 
         // 3. Apply RoPE
         if let Some(r) = rope {
@@ -121,7 +121,7 @@ impl DecoderAttention {
             // Permute: [Batch, Total_Len, KV_Heads, Dim] -> [Batch, KV_Heads, Dim, Total_Len]
             let k_view = k_cache
                 .view()
-                .into_shape((batch, total_len, self.num_kv_heads, self.head_dim))?
+                .into_shape_with_order((batch, total_len, self.num_kv_heads, self.head_dim))?
                 .permuted_axes([0, 2, 3, 1]);
 
             crate::utils::linear_algebra::matmul_4d_decode_gqa(&q_heads, &k_view, n_rep)
@@ -150,7 +150,7 @@ impl DecoderAttention {
         let context = if is_decode {
             let v_view = v_cache
                 .view()
-                .into_shape((batch, total_len, self.num_kv_heads, self.head_dim))?
+                .into_shape_with_order((batch, total_len, self.num_kv_heads, self.head_dim))?
                 .permuted_axes([0, 2, 1, 3]);
 
             crate::utils::linear_algebra::matmul_4d_context_gqa(&scores, &v_view, n_rep)
@@ -163,11 +163,11 @@ impl DecoderAttention {
         let context_flat = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
-            .into_shape((batch * seq_len, self.num_heads * self.head_dim))?
+            .into_shape_with_order((batch * seq_len, self.num_heads * self.head_dim))?
             .to_owned();
 
         let output = self.o_proj.matmul(&context_flat.view());
-        Ok(output.into_shape((batch, seq_len, self.num_heads * self.head_dim))?)
+        Ok(output.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?)
     }
     pub fn forward_2(
         &self,

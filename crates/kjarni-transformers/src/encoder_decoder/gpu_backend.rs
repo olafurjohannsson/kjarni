@@ -35,6 +35,7 @@ pub enum GpuSeq2SeqState {
     },
 }
 
+#[async_trait]
 impl EncoderDecoderGenerationBackend for GpuBackend {
     type Tensor = GpuSeq2SeqState;
 

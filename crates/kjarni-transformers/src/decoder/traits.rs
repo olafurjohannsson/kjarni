@@ -41,7 +41,7 @@ use wgpu::CommandEncoder;
 ///
 /// Implementations (e.g., `GpuDecoderBackend`) manage the state of the "current token"
 /// and coordinate the `prefill` (prompt processing) and `decode_one` (token generation) phases.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait DecoderGenerationBackend: Send + Sync {
     /// The specific tensor type used to hold the generated token sequence.
     /// This allows the backend to keep tokens on CPU (`Array2`) or GPU (`GpuTensor`).
@@ -266,7 +266,7 @@ pub trait GpuDecoderOps: Send + Sync {
 ///
 /// This trait acts as a "Router", directing the Backend to the correct
 /// Operations implementation (`CpuDecoderOps` or `GpuDecoderOps`).
-#[async_trait(?Send)]
+#[async_trait]
 pub trait DecoderLanguageModel: LanguageModel {
     /// Access CPU operations strategy. Returns `None` if model is GPU-only.
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps>;

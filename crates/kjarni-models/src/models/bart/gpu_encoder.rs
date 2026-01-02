@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::activations::Activation;
-use kjarni_transformers::embeddings::Embeddings;
+use kjarni_transformers::embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
 use kjarni_transformers::encoder::config::EncoderLoadConfig;
 use kjarni_transformers::encoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
@@ -47,6 +47,8 @@ pub struct BartGpuEncoder {
 
     // --- Encoder Layers ---
     layers: Vec<GpuEncoderLayer>,
+
+    pub embeddings: LoadedEmbeddings,
 
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
@@ -96,7 +98,7 @@ impl BartGpuEncoder {
             .encoder
             .as_ref()
             .expect("Model layout must have an encoder section");
-
+        let target_dt = load_config.target_dtype;
         // ====================================================================
         // 1. EMBEDDINGS - CPU or GPU based on config (Original Logic)
         // ====================================================================
@@ -125,6 +127,27 @@ impl BartGpuEncoder {
         };
 
         let gpu_embeddings = GpuEmbeddings::new(context)?;
+
+        let position_embedding = encoder_layout.position_embedding.as_ref().unwrap();
+
+        let embedding_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
+            .position_embedding(position_embedding) // BART Encoder specific
+            .with_token_type_embedding(encoder_layout.token_type_embedding.clone())
+            .position_offset(2)
+            .scale_embeddings(true);
+
+        // if let(Some(type_embedding)) = &encoder_layout.token_type_embedding {
+        //    embedding_builder.type_embedding(type_embedding);
+        // };
+        let embedding_config = embedding_builder.build();
+        let embeddings = LoadedEmbeddings::new(
+            Some(context),
+            weights,
+            embedding_config,
+            load_config.offload_embeddings, // CPU offload pref
+            true,                           // Always load GPU weights if not offloading
+            target_dt,
+        )?;
 
         // ====================================================================
         // 2. EMBEDDING LAYER NORM (Original Logic)
@@ -166,6 +189,7 @@ impl BartGpuEncoder {
             layers,
             meta,
             layout,
+            embeddings,
         })
     }
 
@@ -388,11 +412,11 @@ impl GpuEncoder for BartGpuEncoder {
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
         self.embeddings.embed(
-            encoder, 
-            pool, 
-            input, 
-            token_type_ids, 
-            0 // position_offset (always 0 for Encoders)
+            encoder,
+            pool,
+            input,
+            token_type_ids,
+            0, // position_offset (always 0 for Encoders)
         )
     }
 

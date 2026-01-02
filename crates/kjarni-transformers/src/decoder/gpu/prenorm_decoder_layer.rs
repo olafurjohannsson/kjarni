@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN,
-    GpuSwiGLUFFNWeights,
+    GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights
 };
 
 pub struct GpuPreNormDecoderLayer {

@@ -153,7 +153,7 @@ impl ModelConfig for BertConfig {
             extra_pos_embeddings: 0,
             is_prenorm: false, 
             // Nomic (SwiGlu) weights usually match LinearLayer expectation better
-            transpose_ffn_weights: !self.is_nomic(), 
+            transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
         }

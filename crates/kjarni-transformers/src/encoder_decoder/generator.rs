@@ -21,7 +21,7 @@ pub enum AnyEncoderDecoderBackend {
     Gpu(GpuBackend),
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
     // The associated Tensor type remains the same, using Box<dyn Any> for type erasure.
     type Tensor = Box<dyn Any + Send + Sync>;

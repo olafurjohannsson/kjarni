@@ -376,7 +376,7 @@ impl CpuEncoderDecoderOps for BartModel {
     // This is the logic moved from the old CpuBackend
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden) = hidden_states.dim();
-        let hidden_2d = hidden_states.view().into_shape((batch * seq, hidden))?;
+        let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq, hidden))?;
 
         // Use the model's own lm_head LinearLayer
         let mut logits_2d = self.lm_head.matmul(&hidden_2d.view());
@@ -386,7 +386,7 @@ impl CpuEncoderDecoderOps for BartModel {
         }
 
         logits_2d
-            .into_shape((batch, seq, self.vocab_size()))
+            .into_shape_with_order((batch, seq, self.vocab_size()))
             .map_err(|e| anyhow!(e))
     }
 }

@@ -61,13 +61,13 @@ impl T5EncoderLayer {
 
         // Reshape for multi-head attention: [batch, seq, heads, head_dim] -> [batch, heads, seq, head_dim]
         let q = q
-            .into_shape((batch, seq_len, self.num_heads, self.head_dim))?
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
         let k = k
-            .into_shape((batch, seq_len, self.num_heads, self.head_dim))?
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
         let v = v
-            .into_shape((batch, seq_len, self.num_heads, self.head_dim))?
+            .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
 
         // Attention scores: Q @ K^T / sqrt(d_k)
@@ -96,7 +96,7 @@ impl T5EncoderLayer {
         // Reshape back: [batch, heads, seq, head_dim] -> [batch, seq, hidden]
         let attn_output = attn_output
             .permuted_axes([0, 2, 1, 3])
-            .into_shape((batch, seq_len, hidden_size))?
+            .into_shape_with_order((batch, seq_len, hidden_size))?
             .as_standard_layout()
             .to_owned();
 

@@ -2,16 +2,13 @@
 //!
 //! This test helps identify where GPU implementation diverges from CPU.
 
-use crate::models::bart::cpu_decoder;
 use crate::models::bart::model::BartModel;
 use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
 use kjarni_transformers::encoder::prelude::*;
 use kjarni_transformers::encoder::traits::CpuEncoder;
 use kjarni_transformers::encoder_decoder::EncoderDecoderLanguageModel;
-use kjarni_transformers::encoder_decoder::traits::{
-    CpuCrossAttentionKVCache, CpuCrossDecoder, GpuCrossAttentionKVCache, GpuCrossDecoder,
-};
+use kjarni_transformers::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::ModelInput;
@@ -299,12 +296,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_embed = gpu_encoder.embed(
-            enc,
-            pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
-            None,
-        )?;
+        let gpu_embed =
+            gpu_encoder.embed(enc, pool_ref, ModelInput::TokensGpu(&input_ids_gpu), None)?;
         frame.finish();
 
         let gpu_embed_cpu = gpu_embed.to_ndarray_3d::<f32>().await?;
@@ -322,7 +315,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let gpu_embed_ln = gpu_encoder.embed_and_normalize(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            ModelInput::TokensGpu(&input_ids_gpu),
             None,
         )?;
         frame.finish();
@@ -344,7 +337,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let input_gpu = gpu_encoder.embed_and_normalize(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            ModelInput::TokensGpu(&input_ids_gpu),
             None,
         )?;
 
@@ -365,7 +358,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
             let input_gpu = gpu_encoder.embed_and_normalize(
                 enc,
                 pool_ref,
-                GpuEncoderInput::TokensGpu(&input_ids_gpu),
+                ModelInput::TokensGpu(&input_ids_gpu),
                 None,
             )?;
             let gpu_layer_n =
@@ -414,7 +407,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let input_gpu = gpu_encoder.embed_and_normalize(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            ModelInput::TokensGpu(&input_ids_gpu),
             None,
         )?;
         let gpu_debug_12 =
@@ -422,7 +415,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let gpu_forward = gpu_encoder.forward(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            ModelInput::TokensGpu(&input_ids_gpu),
             &mask_gpu,
             None,
         )?;
@@ -452,7 +445,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let gpu_full = gpu_encoder.forward(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&input_ids_gpu),
+            ModelInput::TokensGpu(&input_ids_gpu),
             &mask_gpu,
             None,
         )?;
@@ -739,7 +732,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let output = gpu_encoder.forward(
             enc,
             pool_ref,
-            GpuEncoderInput::TokensGpu(&encoder_input_ids_gpu),
+            ModelInput::TokensGpu(&encoder_input_ids_gpu),
             &encoder_mask_gpu,
             None,
         )?;
@@ -778,14 +771,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_embed = gpu_decoder
-            .embed(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_embed = gpu_decoder.embed(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
         frame.finish();
 
         let gpu_decoder_embed_cpu = gpu_decoder_embed.to_ndarray_3d::<f32>().await?;
@@ -819,14 +810,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_embed_ln = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_embed_ln = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
         frame.finish();
 
         let gpu_decoder_embed_ln_cpu = gpu_decoder_embed_ln.to_ndarray_3d::<f32>().await?;
@@ -912,18 +901,24 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         cpu_decoder.embed_and_normalize(&decoder_input_ids, position_offset)?;
 
     // CPU: Get raw Q, K, V (before split heads)
-    let cpu_q = cpu_layer0
-        .self_attn
-        .q_proj
-        .matmul(&decoder_hidden_cpu.view().into_shape((1, 1024)).unwrap());
-    let cpu_k = cpu_layer0
-        .self_attn
-        .k_proj
-        .matmul(&decoder_hidden_cpu.view().into_shape((1, 1024)).unwrap());
-    let cpu_v = cpu_layer0
-        .self_attn
-        .v_proj
-        .matmul(&decoder_hidden_cpu.view().into_shape((1, 1024)).unwrap());
+    let cpu_q = cpu_layer0.self_attn.q_proj.matmul(
+        &decoder_hidden_cpu
+            .view()
+            .into_shape_with_order((1, 1024))
+            .unwrap(),
+    );
+    let cpu_k = cpu_layer0.self_attn.k_proj.matmul(
+        &decoder_hidden_cpu
+            .view()
+            .into_shape_with_order((1, 1024))
+            .unwrap(),
+    );
+    let cpu_v = cpu_layer0.self_attn.v_proj.matmul(
+        &decoder_hidden_cpu
+            .view()
+            .into_shape_with_order((1, 1024))
+            .unwrap(),
+    );
 
     println!(
         "CPU Q first 5: {:?}",
@@ -944,14 +939,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         // Project Q, K, V using the layer's weights
         let q_out = gpu_layer0.self_attn.ops.project(
@@ -1043,11 +1036,11 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
     let cpu_q_heads = cpu_q
         .view()
-        .into_shape((1, num_heads, 1, head_dim))
+        .into_shape_with_order((1, num_heads, 1, head_dim))
         .unwrap();
     let cpu_k_heads = cpu_k
         .view()
-        .into_shape((1, num_heads, 1, head_dim))
+        .into_shape_with_order((1, num_heads, 1, head_dim))
         .unwrap();
 
     // For single token: scores = Q @ K^T = [1, 16, 1, 64] @ [1, 16, 64, 1] = [1, 16, 1, 1]
@@ -1076,13 +1069,15 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     //     Some(&decoder_mask),
     //     None, // No past KV
     // )?;
-    let (attn_out, new_k, new_v) = 
-        cpu_layer0.self_attn.forward(&decoder_hidden_cpu, Some(&decoder_mask), None)?;
+    let (attn_out, new_k, new_v) =
+        cpu_layer0
+            .self_attn
+            .forward(&decoder_hidden_cpu, Some(&decoder_mask), None)?;
     let hidden_states_after_add = &decoder_hidden_cpu + &attn_out;
     let final_output = cpu_layer0
         .self_attn_layer_norm
         .forward_3d(&hidden_states_after_add);
-    
+
     let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = (final_output, (new_k, new_v));
 
     println!(
@@ -1099,14 +1094,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         // GPU self-attention: residual + attn + norm
         let residual = &gpu_decoder_hidden;
@@ -1120,7 +1113,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         //     0,    // cache_len
         //     pool_ref,
         // )?;
-         let output = gpu_layer0.self_attn.forward(
+        let output = gpu_layer0.self_attn.forward(
             enc,
             residual,
             &gpu_layer0.self_attn_weights,
@@ -1129,7 +1122,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             0,    // cache_len
             pool_ref,
         )?;
-        let self_attn_output  = output.hidden_states;
+        let self_attn_output = output.hidden_states;
         let _new_k = output.new_k;
         let _new_v = output.new_v;
 
@@ -1183,7 +1176,9 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         None, // encoder_attn_mask
     )?;
     let hidden_states_after_add = &cpu_after_self_attn + &cross_attn_output;
-    let cpu_after_cross_attn = cpu_layer0.cross_attn_layer_norm.forward_3d(&hidden_states_after_add);
+    let cpu_after_cross_attn = cpu_layer0
+        .cross_attn_layer_norm
+        .forward_3d(&hidden_states_after_add);
     println!(
         "CPU after cross-attn+norm shape: {:?}",
         cpu_after_cross_attn.shape()
@@ -1199,14 +1194,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let (enc, pool_ref) = frame.resources();
 
         // Recreate GPU state up to this point
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         // Redo self-attention to get to the same state
         let residual = &gpu_decoder_hidden;
@@ -1219,16 +1212,19 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         //     0,
         //     pool_ref,
         // )?;
-        let self_attn_output = gpu_layer0.self_attn.forward(
-            enc,
-            residual,
-            &gpu_layer0.self_attn_weights,
-            &decoder_mask_gpu,
-            None,
-            0,
-            pool_ref,
-        )?.hidden_states;
-        
+        let self_attn_output = gpu_layer0
+            .self_attn
+            .forward(
+                enc,
+                residual,
+                &gpu_layer0.self_attn_weights,
+                &decoder_mask_gpu,
+                None,
+                0,
+                pool_ref,
+            )?
+            .hidden_states;
+
         let after_add1 = pool_ref.get(residual.shape().to_vec());
         gpu_layer0
             .add
@@ -1324,14 +1320,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let (enc, pool_ref) = frame.resources();
 
         // Recreate GPU state up to cross-attention output
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         // Self-attention
         let residual = &gpu_decoder_hidden;
@@ -1344,15 +1338,18 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         //     0,
         //     pool_ref,
         // )?;
-        let self_attn_output = gpu_layer0.self_attn.forward(
-            enc,
-            residual,
-            &gpu_layer0.self_attn_weights,
-            &decoder_mask_gpu,
-            None,
-            0,
-            pool_ref,
-        )?.hidden_states;
+        let self_attn_output = gpu_layer0
+            .self_attn
+            .forward(
+                enc,
+                residual,
+                &gpu_layer0.self_attn_weights,
+                &decoder_mask_gpu,
+                None,
+                0,
+                pool_ref,
+            )?
+            .hidden_states;
         let after_add1 = pool_ref.get(residual.shape().to_vec());
         gpu_layer0
             .add
@@ -1367,9 +1364,8 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
         // Cross-attention
         let residual = &after_self_attn_norm;
-        
-        let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
 
+        let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
 
         // let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
         //     enc,
@@ -1450,17 +1446,15 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     println!("--- 4d: Full Layer 0 Forward (should match 4c) ---");
 
     // CPU full forward (what we had before)
-    let cpu_layer0_full = cpu_decoder
-        .forward_layers(
-            &decoder_hidden_cpu,
-            &cpu_encoder_hidden,
-            Some(&decoder_mask),
-            None,
-            Some(&cpu_cross_kv),
-            0,
-            1,
-        )
-        .await?;
+    let cpu_layer0_full = cpu_decoder.forward_layers(
+        &decoder_hidden_cpu,
+        &cpu_encoder_hidden,
+        Some(&decoder_mask),
+        None,
+        Some(&cpu_cross_kv),
+        0,
+        1,
+    )?;
 
     let full_vs_step_diff = cpu_layer0_full
         .last_hidden_state
@@ -1482,17 +1476,15 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     println!("=== DECODER STEP 4: FORWARD LAYER 0 (no self-attn cache) ===");
     let decoder_hidden = cpu_decoder.embed_and_normalize(&decoder_input_ids, position_offset)?;
 
-    let cpu_layer0_output = cpu_decoder
-        .forward_layers(
-            &decoder_hidden,
-            &cpu_encoder_hidden,
-            Some(&decoder_mask),
-            None, // No cache
-            Some(&cpu_cross_kv),
-            0,
-            1, // Layer 0 only
-        )
-        .await?;
+    let cpu_layer0_output = cpu_decoder.forward_layers(
+        &decoder_hidden,
+        &cpu_encoder_hidden,
+        Some(&decoder_mask),
+        None, // No cache
+        Some(&cpu_cross_kv),
+        0,
+        1, // Layer 0 only
+    )?;
     println!(
         "CPU layer 0 output shape: {:?}",
         cpu_layer0_output.last_hidden_state.shape()
@@ -1511,14 +1503,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         let gpu_layer0_output = gpu_decoder.forward_layers(
             enc,
@@ -1556,31 +1546,27 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     let num_layers = cpu_decoder.num_layers();
 
     for n in 1..=num_layers {
-        let cpu_layer_n = cpu_decoder
-            .forward_layers(
-                &decoder_hidden,
-                &cpu_encoder_hidden,
-                Some(&decoder_mask),
-                None,
-                Some(&cpu_cross_kv),
-                0,
-                n,
-            )
-            .await?;
+        let cpu_layer_n = cpu_decoder.forward_layers(
+            &decoder_hidden,
+            &cpu_encoder_hidden,
+            Some(&decoder_mask),
+            None,
+            Some(&cpu_cross_kv),
+            0,
+            n,
+        )?;
 
         {
             let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&ctx, pool_guard);
             let (enc, pool_ref) = frame.resources();
 
-            let gpu_decoder_hidden = gpu_decoder
-                .embed_and_normalize(
-                    enc,
-                    pool_ref,
-                    ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                    position_offset,
-                )
-                .await?;
+            let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+                enc,
+                pool_ref,
+                ModelInput::TokensGpu(&decoder_input_ids_gpu),
+                position_offset,
+            )?;
 
             let gpu_layer_n = gpu_decoder.forward_layers(
                 enc,
@@ -1635,8 +1621,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             Some(&cpu_cross_kv),
             0,
             num_layers,
-        )
-        .await?
+        )?
         .last_hidden_state;
 
     // Use the model's project_to_logits
@@ -1666,14 +1651,12 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_decoder_hidden = gpu_decoder
-            .embed_and_normalize(
-                enc,
-                pool_ref,
-                ModelInput::TokensGpu(&decoder_input_ids_gpu),
-                position_offset,
-            )
-            .await?;
+        let gpu_decoder_hidden = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_ids_gpu),
+            position_offset,
+        )?;
 
         let gpu_final_hidden = gpu_decoder
             .forward_layers(

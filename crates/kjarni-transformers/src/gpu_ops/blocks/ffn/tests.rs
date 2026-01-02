@@ -49,7 +49,7 @@ async fn test_fc1_kernel_parity() -> Result<()> {
         &dummy_fc2_b_cpu,
     )?;
 
-    let gpu_ffn_partial = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
+    let gpu_ffn_partial = GpuFeedForwardStd::new(&context, crate::activations::Activation::Gelu)?;
     let gpu_intermediate = GpuTensor::uninitialized(
         &context,
         vec![batch_size, seq_len, intermediate_size],
@@ -106,7 +106,7 @@ async fn test_fc2_kernel_parity() -> Result<()> {
         &cpu_fc2_b,
     )?;
 
-    let gpu_ffn_partial = GpuFeedForward::new(&context, crate::activations::Activation::Gelu)?;
+    let gpu_ffn_partial = GpuFeedForwardStd::new(&context, crate::activations::Activation::Gelu)?;
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![batch_size, seq_len, hidden_size],
@@ -171,7 +171,7 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
         &cpu_fc2_b,
     )?;
 
-    let gpu_ffn = GpuFeedForward::new(&context, crate::activations::Activation::GeluNew)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, crate::activations::Activation::GeluNew)?;
     let cpu_input = Array::random((batch_size, seq_len, hidden_size), Uniform::new(-1.0, 1.0));
     let gpu_input = GpuTensor::from_ndarray(&context, &cpu_input)?;
     let gpu_intermediate = GpuTensor::uninitialized(
@@ -244,7 +244,7 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
         fc2_b_cpu.clone(),
         activation,
     );
-    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
@@ -301,7 +301,7 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
         fc2_b_cpu.clone(),
         activation,
     );
-    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
@@ -357,7 +357,7 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         fc2_b_cpu.clone(),
         activation,
     );
-    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
     let fc2_w_gpu_transposed = GpuTensor::from_ndarray(&context, &fc2_w_cpu.t().to_owned())?;
 
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
@@ -493,7 +493,7 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
         (i + j) as f32 * -0.01
     });
     let fc2_b_cpu = Array1::from_shape_fn(hidden_size, |i| i as f32 * -0.01);
-    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
     let fc1_w_cpu = Array2::<f32>::zeros((hidden_size, intermediate_size));
     let fc1_b_cpu = Array1::<f32>::zeros(intermediate_size);
 
@@ -537,7 +537,7 @@ async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
         (i + j) as f32 * 0.01
     });
     let fc1_b_cpu = Array1::from_shape_fn(intermediate_size, |i| i as f32 * 0.01);
-    let gpu_ffn = GpuFeedForward::new(&context, activation)?;
+    let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
     let dummy_fc2_w_cpu = Array2::<f32>::zeros((intermediate_size, hidden_size));
     let dummy_fc2_b_cpu = Array1::<f32>::zeros(hidden_size);
 

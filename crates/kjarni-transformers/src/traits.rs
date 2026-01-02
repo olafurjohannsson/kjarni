@@ -78,10 +78,6 @@ pub struct ModelMetadata {
     pub normalization_strategy: NormalizationStrategy,
 }
 
-fn default_normalization_strategy() -> NormalizationStrategy {
-    NormalizationStrategy::LayerNorm
-}
-
 /// Naming templates for a standard attention block (self- or cross-attention).
 #[derive(Debug, Clone)]
 pub struct AttentionLayout {

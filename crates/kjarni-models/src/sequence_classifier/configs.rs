@@ -57,7 +57,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false,           // BERT uses Post-Norm
-            transpose_ffn_weights: true, // MiniLM quirk
+            transpose_ffn_weights: false, // true, // MiniLM quirk
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
         }

@@ -1,9 +1,7 @@
-use std::sync::Arc;
 
 use crate::rope::RoPE;
 use crate::{Normalization, encoder::encoder_self_attention::EncoderSelfAttention};
 use crate::feedforward::FeedForward;
-use crate::normalization::LayerNorm;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
 
@@ -121,6 +119,7 @@ mod tests {
     use super::*;
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
+    use crate::normalization::LayerNorm;
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
 

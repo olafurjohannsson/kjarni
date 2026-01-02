@@ -1,4 +1,4 @@
-use crate::{ChatTemplate, Conversation, Role, Message};
+use crate::{ChatTemplate, Conversation, Role};
 
 /// ChatML Template (Used by Qwen 2/2.5, Yi, etc.)
 ///

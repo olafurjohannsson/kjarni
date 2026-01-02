@@ -457,7 +457,7 @@ impl GpuDecoderOps for LlamaModel {
 // DecoderLanguageModel Implementation
 // =============================================================================
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderLanguageModel for LlamaModel {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         // Return self if CPU decoder is available

@@ -124,7 +124,7 @@ use std::time::Instant;
 /// ```
 pub struct CpuDecoderBackend;
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderGenerationBackend for CpuDecoderBackend {
     /// Token tensor type for CPU: 2D ndarray with shape `[batch=1, seq_len]`.
     ///

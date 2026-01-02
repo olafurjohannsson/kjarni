@@ -1,7 +1,7 @@
-use crate::activations::{self, Activation, apply_activation, apply_activation_2d};
+use crate::activations::{Activation, apply_activation_2d};
 use crate::linear_layer::LinearLayer;
 use anyhow::Result;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array3};
 
 pub struct StdFeedForwardNew {
     fc1: LinearLayer,

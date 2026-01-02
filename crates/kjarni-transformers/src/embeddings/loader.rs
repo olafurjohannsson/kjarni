@@ -24,7 +24,7 @@ use crate::{
         blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
     },
     linear_layer::LinearLayer,
-    models::base::{ModelInput, ModelLoadConfig},
+    models::base::{ModelInput},
     tensor::DType,
     weights::ModelWeights,
 };
@@ -133,6 +133,11 @@ impl EmbeddingConfigBuilder {
     /// Sets the position embedding weight name.
     pub fn position_embedding(mut self, name: impl Into<String>) -> Self {
         self.position_embedding = Some(name.into());
+        self
+    }
+
+    pub fn with_token_type_embedding(mut self, name: Option<String>) -> Self {
+        self.type_embedding = name;
         self
     }
 

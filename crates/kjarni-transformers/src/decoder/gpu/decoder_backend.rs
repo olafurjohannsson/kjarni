@@ -47,10 +47,9 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, MapMode};
 
 use crate::WgpuContext;
 use crate::cache::{Cache, GpuKVCache};
-use crate::common::{CancellationToken, DecodingStrategy, GenerationConfig};
 use crate::decoder::prelude::*;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
-use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError, poll_with_timeout_async};
+use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 pub use crate::models::base::AutoregressiveLoop;
 use crate::models::base::ModelInput;
@@ -434,7 +433,7 @@ impl GpuDecoderBackend {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl DecoderGenerationBackend for GpuDecoderBackend {
     type Tensor = GpuTensor;
 

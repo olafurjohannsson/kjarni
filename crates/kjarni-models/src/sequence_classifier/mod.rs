@@ -17,7 +17,7 @@ use kjarni_transformers::{
     encoder::{
         CpuEncoder, CpuTransformerEncoder, GpuEncoder, GpuTransformerEncoder,
         classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
-        traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderInput, GpuEncoderOps},
+        traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderOps},
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
@@ -27,7 +27,7 @@ use kjarni_transformers::{
 };
 mod configs;
 pub use configs::MiniLMCrossEncoderConfig;
-use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata};
 
 /// A generic sequence classifier for running models like BERT and RoBERTa on classification tasks.
@@ -340,9 +340,9 @@ impl SequenceClassifier {
                 .forward(
                     encoder_cmd,
                     pool_ref,
-                    GpuEncoderInput::TokensGpu(&input_ids_gpu),
+                    ModelInput::TokensGpu(&input_ids_gpu),
                     &attention_mask_gpu,
-                    Some(&token_type_ids_gpu),
+                    Some(ModelInput::TokensGpu(&token_type_ids_gpu)),
                 )?
                 .last_hidden_state;
 
