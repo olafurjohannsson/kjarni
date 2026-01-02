@@ -196,13 +196,13 @@ impl Gpt2GpuDecoder {
 
         let self_attn_weights = GpuAttentionWeights::new(
             GpuTensor::from_ndarray(&context, &q_weight)?,
-            GpuTensor::from_ndarray(&context, &q_bias)?,
+            Some(GpuTensor::from_ndarray(&context, &q_bias)?),
             GpuTensor::from_ndarray(&context, &k_weight)?,
-            GpuTensor::from_ndarray(&context, &k_bias)?,
+            Some(GpuTensor::from_ndarray(&context, &k_bias)?),
             GpuTensor::from_ndarray(&context, &v_weight)?,
-            GpuTensor::from_ndarray(&context, &v_bias)?,
+            Some(GpuTensor::from_ndarray(&context, &v_bias)?),
             GpuTensor::from_ndarray(&context, &o_weight)?,
-            GpuTensor::from_ndarray(&context, &o_bias)?,
+            Some(GpuTensor::from_ndarray(&context, &o_bias)?),
         )?;
 
         // --- Attention LayerNorm logic preserved ---

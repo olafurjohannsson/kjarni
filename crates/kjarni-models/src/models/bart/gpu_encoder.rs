@@ -1,5 +1,6 @@
 use crate::models::bart::config::BartConfig;
 use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::embeddings::Embeddings;
@@ -13,7 +14,7 @@ use kjarni_transformers::gpu_ops::blocks::{
     layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
-use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
 use std::sync::Arc;
@@ -377,66 +378,33 @@ impl BartGpuEncoder {
 impl GpuEncoder for BartGpuEncoder {
     fn embed(
         &self,
-        cmd_encoder: &mut CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: GpuEncoderInput,
-        token_type_ids: Option<&GpuTensor>,
+        input: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        let metadata = &self.meta;
+        // Helper to map enums
+        let map_input = |i| match i {
+            ModelInput::TokensCpu(t) => kjarni_transformers::embeddings::EmbeddingInput::Cpu(t),
+            ModelInput::TokensGpu(t) => kjarni_transformers::embeddings::EmbeddingInput::Gpu(t),
+            _ => panic!("Invalid input for embedding"),
+        };
+
+        // Handle pre-computed hidden states
         match input {
-            GpuEncoderInput::TokensGpu(input_ids) => {
-                // Full GPU path - requires GPU embedding weights
-                let weights = self.gpu_embedding_weights.as_ref().ok_or_else(|| {
-                    anyhow!(
-                        "GPU embedding weights not loaded. \
-                        Model was created with cpu_embeddings=true. \
-                        Use GpuEncoderInput::TokensCpu instead."
-                    )
-                })?;
-                self.gpu_embeddings.encode(
-                    cmd_encoder,
-                    weights,
-                    input_ids,
-                    token_type_ids,
-                    0, // Position offset handled by config.extra_pos_embeddings()
-                    metadata.hidden_size,
-                    metadata.extra_pos_embeddings,
-                    metadata.scale_embeddings,
-                    pool,
-                )
-            }
-
-            GpuEncoderInput::TokensCpu(input_ids) => {
-                // CPU embedding path - requires CPU embeddings
-                let cpu_emb = self.cpu_embeddings.as_ref().ok_or_else(|| {
-                    anyhow!(
-                        "CPU embeddings not loaded. \
-                        Model was created with cpu_embeddings=false. \
-                        Use GpuEncoderInput::TokensGpu instead."
-                    )
-                })?;
-
-                // BART uses position offset of 2 (from config.extra_pos_embeddings())
-                let position_offset = self.meta.extra_pos_embeddings;
-                let scale = self.meta.scale_embeddings;
-
-                // Perform CPU embedding lookup
-                let hidden = cpu_emb.forward(input_ids, None, position_offset, scale);
-
-                // Upload to GPU
-                GpuTensor::from_ndarray(&self.context, &hidden)
-            }
-
-            GpuEncoderInput::HiddenGpu(hidden) => {
-                // Already on GPU - just clone the reference
-                Ok(hidden.clone())
-            }
-
-            GpuEncoderInput::HiddenCpu(hidden) => {
-                // Upload pre-computed hidden states to GPU
-                GpuTensor::from_ndarray(&self.context, hidden)
-            }
+            ModelInput::HiddenGpu(t) => return Ok(t.clone()),
+            ModelInput::HiddenCpu(t) => return GpuTensor::from_ndarray(&self.context, t),
+            _ => {}
         }
+
+        // Handle Tokens
+        self.embeddings.encode(
+            encoder,
+            pool,
+            map_input(input),
+            token_type_ids.map(map_input),
+            0, // offset
+        )
     }
 
     fn embed_and_normalize(

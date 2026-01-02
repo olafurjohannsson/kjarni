@@ -179,7 +179,7 @@ impl GpuTransformerEncoder {
                 target_dt,
                 "o",
             )?;
-            
+
             let o_b = resolve_bias(&encoder_layout.layer.self_attn.o_bias)
                 .map(|s| GpuTensor::from_model_weights(&context, weights, &s, target_dt, "o_b"))
                 .transpose()?;
@@ -256,7 +256,7 @@ impl GpuTransformerEncoder {
                 let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
                     .map(|s| weights.get_array1(&s))
                     .transpose()?;
-                let gate_b = None; // Usually implicit or shared?
+                // let gate_b = None; // Usually implicit or shared?
 
                 let swiglu_weights = crate::gpu_ops::blocks::ffn_swiglu::GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,
@@ -361,49 +361,49 @@ impl InferenceModel for GpuTransformerEncoder {
     }
 }
 
-#[async_trait(?Send)]
 impl GpuEncoder for GpuTransformerEncoder {
-    async fn embed(
+    fn embed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
-        token_type_ids: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        match input {
-            ModelInput::TokensCpu(ids) => {
-                // Convert view to owned for embedding lookup
-                let ids_owned = ids.to_owned();
-                
-                if let Some(token_type_ids) = token_type_ids {
-                    let token_type_ids_cpu = token_type_ids.to_ndarray_2d().await?;
+        // Helper to map enums
+        let map_input = |i| match i {
+            ModelInput::TokensCpu(t) => crate::embeddings::EmbeddingInput::Cpu(&t.to_owned().clone()),
+            ModelInput::TokensGpu(t) => crate::embeddings::EmbeddingInput::Gpu(t),
+            _ => panic!("Invalid input for embedding"),
+        };
 
-                    self.embeddings
-                        .forward(encoder, pool, &ids_owned, Some(&token_type_ids_cpu), 0)
-                } else {
-                    self.embeddings
-                        .forward(encoder, pool, &ids_owned, None, 0)
-                }
+        // Handle pre-computed hidden states
+        match input {
+            ModelInput::HiddenGpu(t) => return Ok(t.clone()),
+            ModelInput::HiddenCpu(t) => {
+                return GpuTensor::from_ndarray(&self.context, &t.to_owned());
             }
-            ModelInput::TokensGpu(ids_tensor) => {
-                self.embeddings
-                    .forward_gpu(encoder, pool, ids_tensor, token_type_ids, 0)
-                    .await
-            }
-            ModelInput::HiddenGpu(t) => Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => GpuTensor::from_ndarray(&self.context, &t.to_owned()),
+            _ => {}
         }
+
+        // Handle Tokens
+        self.embeddings.encode(
+            encoder,
+            pool,
+            map_input(input),
+            token_type_ids.map(map_input),
+            0, // offset
+        )
     }
 
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
-        token_type_ids: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
         // This logic is taken directly from your old `forward` method.
-        let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids).await?;
+        let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids)?;
 
         // This logic correctly handles post-norm models like BERT/BART.
         // For a pre-norm model, this would just return `hidden_states`.

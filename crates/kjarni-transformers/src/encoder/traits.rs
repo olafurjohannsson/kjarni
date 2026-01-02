@@ -16,7 +16,7 @@ use ndarray::{Array2, Array3};
 /// Trait for encoder-only language models (BERT, RoBERTa, etc.)
 ///
 /// These models encode text into fixed-size embeddings.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait EncoderLanguageModel: LanguageModel {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps>;
 
@@ -91,7 +91,7 @@ pub trait EncoderLanguageModel: LanguageModel {
                 ModelInput::TokensGpu(&input_ids_gpu),
                 &attention_mask_gpu,
                 None, // token_type_ids can be added here
-            ).await?;
+            )?;
 
             frame.finish();
 
@@ -111,7 +111,7 @@ pub trait EncoderLanguageModel: LanguageModel {
 ///
 /// This trait provides methods to convert raw hidden states into final, pooled,
 /// and normalized sentence embeddings.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait SentenceEncoderModel: EncoderLanguageModel {
     /// Encode a batch of texts into embedding vectors.
     async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>>;
@@ -129,7 +129,7 @@ pub trait SentenceEncoderModel: EncoderLanguageModel {
 
 // Now, we provide a GENERIC implementation that works for ANY EncoderLanguageModel.
 // This is the key to reusability.
-#[async_trait]
+#[async_trait(?Send)]
 impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
     async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
@@ -316,7 +316,7 @@ pub struct GpuEncoderOutput {
 /// Provides methods for embedding lookup, normalization, and layer execution
 /// on GPU with support for hybrid CPU/GPU workflows through `GpuEncoderInput`.
 ///
-#[async_trait(?Send)]
+
 pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only (handles CPU/GPU input).
     ///
@@ -330,12 +330,12 @@ pub trait GpuEncoder: Send + Sync {
     ///
     /// # Returns
     /// Hidden states on GPU `[batch_size, sequence_length, hidden_size]`
-    async fn embed(
+    fn embed(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
-        token_type_ids: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor>;
 
     /// Compute embeddings + initial normalization.
@@ -350,12 +350,12 @@ pub trait GpuEncoder: Send + Sync {
     ///
     /// # Returns
     /// Normalized hidden states on GPU
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
-        token_type_ids: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor>;
 
     /// Run layers `[start_layer, end_layer)` on hidden states.
@@ -389,15 +389,15 @@ pub trait GpuEncoder: Send + Sync {
     /// Full forward pass through the encoder.
     ///
     /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
-    async fn forward(
+    fn forward(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         attention_mask: &GpuTensor,
-        token_type_ids: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuEncoderOutput> {
-        let hidden = self.embed_and_normalize(cmd_encoder, pool, input, token_type_ids).await?;
+        let hidden = self.embed_and_normalize(cmd_encoder, pool, input, token_type_ids)?;
         let output = self.forward_layers(
             cmd_encoder,
             pool,

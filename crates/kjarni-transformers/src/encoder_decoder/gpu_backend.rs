@@ -78,7 +78,7 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
                     ModelInput::TokensGpu(&input_ids_gpu),
                     &attention_mask_gpu,
                     None,
-                ).await?
+                )?
                 .last_hidden_state
         };
 

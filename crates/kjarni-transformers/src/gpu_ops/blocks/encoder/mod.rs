@@ -52,8 +52,8 @@ pub struct GpuEncoderLayer {
     self_attn_ln_weights: GpuNormalizationWeights,
 
     // Feed-forward (Enum: Standard vs SwiGlu)
-    feedforward: GpuFeedForward,
-    ff_weights: GpuFeedForwardWeights,
+    feedforward: crate::gpu_ops::blocks::GpuFeedForward,
+    ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights,
     ffn_layer_norm: GpuNormalization,
     ffn_ln_weights: GpuNormalizationWeights,
 
@@ -82,7 +82,7 @@ impl GpuEncoderLayer {
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
         self_attn_ln_weights: GpuNormalizationWeights, // Changed to Enum
-        ff_weights: GpuFeedForwardWeights,             // Changed to Enum
+        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights,             // Changed to Enum
         ffn_ln_weights: GpuNormalizationWeights,       // Changed to Enum
         activation: activations::Activation,
         meta: &ModelMetadata,
@@ -111,7 +111,7 @@ impl GpuEncoderLayer {
         let ffn_layer_norm = create_norm(&ffn_ln_weights);
 
         // Initialize FFN (Enum handles dispatch internally)
-        let feedforward = GpuFeedForward::new(context, activation)?;
+        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForward::new(context, activation)?);
 
         // Primitives
         let add = GpuAdd::new(context);
@@ -203,7 +203,8 @@ impl GpuEncoderLayer {
         );
 
         // 5. FFN
-        let ffn_out = self.feedforward.encode(encoder, &ln2_out, &self.ff_weights, pool);
+        let ffn_out = GpuTensorPool::get(pool, ln2_out.shape().to_vec());
+        self.feedforward.encode(encoder, &self.ff_weights, &ln2_out, &ffn_out, pool);
 
         // 6. Residual connection
         let final_output = pool.get(residual_2.shape().to_vec());
@@ -247,7 +248,8 @@ impl GpuEncoderLayer {
 
         // 3. FFN
         let residual_2 = &attn_block_output;
-        let ffn_out = self.feedforward.encode(encoder, residual_2, &self.ff_weights, pool);
+        let ffn_out = GpuTensorPool::get(pool, residual_2.shape().to_vec());
+        self.feedforward.encode(encoder, &self.ff_weights, residual_2, &ffn_out, pool);
 
         // 4. Residual + LayerNorm
         let add_2_out = pool.get(residual_2.shape().to_vec());
@@ -657,22 +659,22 @@ mod tests {
                 Some(GpuTensor::from_ndarray(&ctx, &o_b)?),
             )?;
 
-            let self_attn_ln_weights = GpuLayerNormWeights::new(
+            let self_attn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                 GpuTensor::from_ndarray(&ctx, &attn_ln_w)?,
                 GpuTensor::from_ndarray(&ctx, &attn_ln_b)?,
-            )?;
+            )?);
 
-            let ff_weights = GpuFeedForwardWeightsStd::new(
+            let ff_weights = crate::gpu_ops::blocks::GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::new(
                 GpuTensor::from_ndarray(&ctx, &fc1_w)?,
                 GpuTensor::from_ndarray(&ctx, &fc1_b)?,
                 GpuTensor::from_ndarray(&ctx, &fc2_w)?,
                 GpuTensor::from_ndarray(&ctx, &fc2_b)?,
-            )?;
+            )?);
 
-            let ffn_ln_weights = GpuLayerNormWeights::new(
+            let ffn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_w)?,
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_b)?,
-            )?;
+            )?);
             let mock_meta = ModelMetadata {
                 hidden_size,
                 num_layers: 1,

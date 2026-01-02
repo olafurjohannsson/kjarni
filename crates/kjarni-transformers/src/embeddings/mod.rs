@@ -7,7 +7,7 @@ use half::bf16;
 use ndarray::{Array2, Array3, Axis, s};
 use rayon::prelude::*;
 
-pub use loader::{EmbeddingConfig, EmbeddingConfigBuilder, LoadedEmbeddings};
+pub use loader::{EmbeddingConfig, EmbeddingConfigBuilder, LoadedEmbeddings, EmbeddingInput};
 
 /// An enum to hold the word embeddings table in its native, memory-efficient format.
 pub enum EmbeddingData {
