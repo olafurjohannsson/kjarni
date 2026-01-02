@@ -460,7 +460,7 @@ async fn load_encoder(model: &str, gpu: bool, quiet: bool) -> Result<SentenceEnc
         anyhow!(msg)
     })?;
 
-    if model_type.architecture() != ModelArchitecture::Encoder {
+    if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!(
             "Model '{}' is not an encoder. Use an encoder model like minilm-l6-v2.",
             model
@@ -471,7 +471,7 @@ async fn load_encoder(model: &str, gpu: bool, quiet: bool) -> Result<SentenceEnc
         if !quiet {
             eprintln!("Downloading model '{}'...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
     }
 
     if !quiet {

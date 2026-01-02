@@ -44,7 +44,7 @@ pub async fn run(
     })?;
 
     // Validate architecture
-    if model_type.architecture() != ModelArchitecture::SequenceClassifier {
+    if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!(
             "Model '{}' is not a sequence classifier.\n\
              Use a classifier model like distilbert-sentiment or bert-base-emotion.",
@@ -56,7 +56,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Downloading model '{}'...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
     }
 
     if !quiet {

@@ -36,7 +36,7 @@ pub async fn run(
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!("Unknown model: '{}'. Run 'kjarni model list --arch encoder' to see available models.", model))?;
 
-    if model_type.architecture() != ModelArchitecture::Encoder {
+    if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!(
             "Model '{}' is not an encoder. Use an encoder model for embedding.",
             model

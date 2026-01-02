@@ -105,13 +105,13 @@ impl GpuAttentionWeights {
 
         Self::new(
             load(&attn_layout.q_weight, "q_w")?,
-            load_opt(&attn_layout.q_bias, "q_b")?,
+            Some(load_opt(&attn_layout.q_bias, "q_b")?),
             load(&attn_layout.k_weight, "k_w")?,
-            load_opt(&attn_layout.k_bias, "k_b")?,
+            Some(load_opt(&attn_layout.k_bias, "k_b")?),
             load(&attn_layout.v_weight, "v_w")?,
-            load_opt(&attn_layout.v_bias, "v_b")?,
+            Some(load_opt(&attn_layout.v_bias, "v_b")?),
             load(&attn_layout.o_weight, "o_w")?,
-            load_opt(&attn_layout.o_bias, "o_b")?,
+            Some(load_opt(&attn_layout.o_bias, "o_b")?),
         )
     }
 
@@ -188,51 +188,71 @@ impl GpuAttentionWeights {
     }
     pub fn new(
         q_weight: GpuTensor,
-        q_bias: GpuTensor,
+        q_bias: Option<GpuTensor>, // Updated to Option
         k_weight: GpuTensor,
-        k_bias: GpuTensor,
+        k_bias: Option<GpuTensor>, // Updated to Option
         v_weight: GpuTensor,
-        v_bias: GpuTensor,
+        v_bias: Option<GpuTensor>, // Updated to Option
         output_weight: GpuTensor,
-        output_bias: GpuTensor,
+        output_bias: Option<GpuTensor>, // Updated to Option
     ) -> Result<Self> {
+        // --- 1. Bias Resolution ---
+        // If a bias is None (e.g. Nomic), create a Zero-Filled tensor of the correct shape.
+        let resolve_bias = |w: &GpuTensor, b: Option<GpuTensor>, label: &str| -> Result<GpuTensor> {
+            match b {
+                Some(tensor) => Ok(tensor),
+                None => {
+                    // Standard Linear Layout is [Out, In]. Bias should be [Out].
+                    let out_features = w.shape()[0];
+                    GpuTensor::zeros(w.context(), vec![out_features], w.dtype(), label)
+                }
+            }
+        };
+
+        let q_b = resolve_bias(&q_weight, q_bias, "q_bias_zero")?;
+        let k_b = resolve_bias(&k_weight, k_bias, "k_bias_zero")?;
+        let v_b = resolve_bias(&v_weight, v_bias, "v_bias_zero")?;
+        let o_b = resolve_bias(&output_weight, output_bias, "o_bias_zero")?;
+
+        // --- 2. Assertions (Preserved) ---
+        
         // Q
         assert_eq!(q_weight.rank(), 2, "Q weight must be 2D");
-        assert_eq!(q_bias.rank(), 1, "Q bias must be 1D");
+        assert_eq!(q_b.rank(), 1, "Q bias must be 1D");
         let (q_in, q_out) = q_weight.linear_layer_dims();
         assert_eq!(
             q_out,
-            q_bias.shape()[0],
+            q_b.shape()[0],
             "Q weight's output dim must match its bias size"
         );
 
         // K
         assert_eq!(k_weight.rank(), 2, "K weight must be 2D");
-        assert_eq!(k_bias.rank(), 1, "K bias must be 1D");
+        assert_eq!(k_b.rank(), 1, "K bias must be 1D");
         let (k_in, k_out) = k_weight.linear_layer_dims();
         assert_eq!(
             k_out,
-            k_bias.shape()[0],
+            k_b.shape()[0],
             "K weight's output dim must match its bias size"
         );
 
         // V
         assert_eq!(v_weight.rank(), 2, "V weight must be 2D");
-        assert_eq!(v_bias.rank(), 1, "V bias must be 1D");
+        assert_eq!(v_b.rank(), 1, "V bias must be 1D");
         let (v_in, v_out) = v_weight.linear_layer_dims();
         assert_eq!(
             v_out,
-            v_bias.shape()[0],
+            v_b.shape()[0],
             "V weight's output dim must match its bias size"
         );
 
         // Output
         assert_eq!(output_weight.rank(), 2, "Output weight must be 2D");
-        assert_eq!(output_bias.rank(), 1, "Output bias must be 1D");
+        assert_eq!(o_b.rank(), 1, "Output bias must be 1D");
         let (o_in, o_out) = output_weight.linear_layer_dims();
         assert_eq!(
             o_out,
-            output_bias.shape()[0],
+            o_b.shape()[0],
             "Output weight's output dim must match its bias size"
         );
 
@@ -249,7 +269,9 @@ impl GpuAttentionWeights {
             "V weight input dim must match Q weight input dim"
         );
 
-        // Output projection input must match Q projection output
+        // Output projection input must match Q projection output (the head_dim * heads)
+        // Note: For Multi-Head Attention, q_out is usually the same as hidden_size,
+        // but physically it is the concat of heads.
         assert_eq!(
             o_in, q_out,
             "Output projection input dim must match Q projection output dim"
@@ -263,13 +285,13 @@ impl GpuAttentionWeights {
 
         Ok(Self {
             q_weight,
-            q_bias,
+            q_bias: q_b,
             k_weight,
-            k_bias,
+            k_bias: k_b,
             v_weight,
-            v_bias,
-            output_weight,
-            output_bias,
+            v_bias: v_b,
+            output_weight: output_weight,
+            output_bias: o_b,
         })
     }
 }

@@ -12,7 +12,7 @@ use ndarray::{Array2, ArrayView2, ArrayView3};
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RopeScalingConfig {
     pub factor: f32,
     pub high_freq_factor: f32,

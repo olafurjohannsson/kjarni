@@ -212,6 +212,7 @@ impl ModelConfig for QwenConfig {
             is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: kjarni_transformers::traits::NormalizationStrategy::RMSNorm,
         }
     }
 

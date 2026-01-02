@@ -166,13 +166,13 @@ impl LlamaGpuDecoder {
 
         let self_attn_weights = GpuAttentionWeights::new(
             q_t,
-            q_bias.clone(),
+            Some(q_bias.clone()),
             k_t,
-            k_bias.clone(),
+            Some(k_bias.clone()),
             v_t,
-            k_bias,
+            Some(k_bias),
             o_t,
-            q_bias,
+            Some(q_bias),
         )?;
 
         let self_attn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(

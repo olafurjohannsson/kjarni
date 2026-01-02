@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use kjarni_transformers::models::{
     download_model_files, format_params, format_size, get_default_cache_dir, ModelArchitecture,
-    ModelType, WeightsFormat, // Make sure WeightsFormat is exported from your models module
+    ModelType, registry::WeightsFormat, // Make sure WeightsFormat is exported from your models module
 };
 use std::path::PathBuf;
 

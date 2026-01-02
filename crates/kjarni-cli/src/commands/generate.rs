@@ -10,7 +10,7 @@ use kjarni::{
     registry,
 };
 
-use super::util::{resolve_input, model_not_found_error};
+use super::util::{model_not_found_error, resolve_input};
 
 pub async fn run(
     prompt: Option<&str>,
@@ -40,7 +40,11 @@ pub async fn run(
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!(model_not_found_error(model, Some("decoder"))))?;
 
-    if model_type.architecture() != ModelArchitecture::Decoder {
+    if model_type.architecture() != ModelArchitecture::GPT
+        || model_type.architecture() != ModelArchitecture::Llama
+        || model_type.architecture() != ModelArchitecture::Mistral
+        || model_type.architecture() != ModelArchitecture::Qwen2
+    {
         return Err(anyhow!(
             "Model '{}' is not a decoder. Use a decoder model for generation.",
             model
@@ -52,7 +56,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
         if !quiet {
             eprintln!();
         }
@@ -104,7 +108,9 @@ pub async fn run(
         let output = generator.generate(&prompt_text, &config, None).await?;
         println!("{}", output);
     } else {
-        let stream = generator.generate_stream(&prompt_text, &config, None).await?;
+        let stream = generator
+            .generate_stream(&prompt_text, &config, None)
+            .await?;
         futures_util::pin_mut!(stream);
 
         let mut stdout = io::stdout();

@@ -175,7 +175,7 @@ async fn test_layer0_self_attention() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None)?;
+    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
     let actual: Vec<f32> = attn_out.slice(s![0, 0, 0..10]).to_vec();
 
     assert_close(&actual, &golden::ATTN_OUT, 1e-4, "Self-Attention Output");
@@ -188,10 +188,10 @@ async fn test_layer0_post_attn_layernorm() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None)?;
+    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
-        .forward_3d(&(&hidden + &attn_out));
+        .forward(&(&hidden + &attn_out));
     let actual: Vec<f32> = post_attn.slice(s![0, 0, 0..10]).to_vec();
 
     assert_close(
@@ -209,10 +209,10 @@ async fn test_layer0_fc1_only() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None)?;
+    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
-        .forward_3d(&(&hidden + &attn_out));
+        .forward(&(&hidden + &attn_out));
 
     let fc1_out = match &encoder.layers[0].feedforward {
         FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
@@ -231,10 +231,10 @@ async fn test_layer0_fc1_gelu() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None)?;
+    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
-        .forward_3d(&(&hidden + &attn_out));
+        .forward(&(&hidden + &attn_out));
 
     let mut fc1_out = match &encoder.layers[0].feedforward {
         FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
@@ -259,10 +259,10 @@ async fn test_layer0_ffn() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None)?;
+    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
-        .forward_3d(&(&hidden + &attn_out));
+        .forward(&(&hidden + &attn_out));
 
     let ffn_out = encoder.layers[0].feedforward.forward(&post_attn)?;
     let actual: Vec<f32> = ffn_out.slice(s![0, 0, 0..10]).to_vec();
@@ -277,7 +277,7 @@ async fn test_layer0_full_output() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let layer0_out = encoder.layers[0].forward(hidden, &mask, None, false)?;
+    let layer0_out = encoder.layers[0].forward(hidden, &mask, None, false, None)?;
     let actual: Vec<f32> = layer0_out.slice(s![0, 0, 0..10]).to_vec();
 
     assert_close(&actual, &golden::LAYER0_OUTPUT, 1e-4, "Layer 0 Output");

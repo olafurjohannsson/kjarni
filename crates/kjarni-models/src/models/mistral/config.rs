@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use kjarni_transformers::models::base::RopeScalingConfig;
+use kjarni_transformers::traits::NormalizationStrategy;
 use kjarni_transformers::{
     activations::Activation,
     traits::{
@@ -174,6 +175,7 @@ impl ModelConfig for MistralConfig {
             is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: NormalizationStrategy::RMSNorm,
         }
     }
 

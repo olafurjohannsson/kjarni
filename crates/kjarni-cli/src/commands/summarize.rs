@@ -45,7 +45,7 @@ pub async fn run(
     })?;
 
     // Validate it's an encoder-decoder model
-    if model_type.architecture() != ModelArchitecture::EncoderDecoder {
+    if model_type.architecture() != ModelArchitecture::Bart {
         return Err(anyhow!(
             "Model '{}' is not an encoder-decoder model. Summarization requires models like distilbart-cnn or bart-large-cnn.",
             model
@@ -57,7 +57,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
         if !quiet {
             eprintln!();
         }

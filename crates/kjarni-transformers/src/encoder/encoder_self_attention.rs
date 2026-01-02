@@ -25,7 +25,10 @@
 //! let output = attn.forward(&hidden_states, &attention_mask, None)?;
 //! ```
 
+use std::sync::Arc;
+
 use crate::linear_layer::LinearLayer;
+use crate::rope::RoPE;
 use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d, softmax_inplace};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
@@ -197,6 +200,7 @@ impl EncoderSelfAttention {
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_bias: Option<&Array4<f32>>,
+        rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
         let (batch, seq_len, _) = hidden_states.dim();
         let hidden_dim = self.num_heads * self.head_dim;
@@ -210,16 +214,33 @@ impl EncoderSelfAttention {
         let k = self.k_proj.matmul(&hidden_2d);
         let v = self.v_proj.matmul(&hidden_2d);
 
+        let mut q_3d = q.into_shape_with_order((batch, seq_len, hidden_dim))?;
+        let mut k_3d = k.into_shape_with_order((batch, seq_len, hidden_dim))?;
+
+        if let Some(r) = rope {
+            // Apply to the full sequence (offset 0 for Encoder)
+            // Note: Encoders (like Nomic) don't use GQA, so kv_heads == num_heads
+            let (q_rot, k_rot) = r.apply_3d(
+                &q_3d,
+                &k_3d,
+                self.num_heads,
+                self.num_heads, // kv_heads same as heads
+                0,              // position_offset
+            )?;
+            q_3d = q_rot;
+            k_3d = k_rot;
+        }
+
         // 2. Reshape & Permute to [B, H, S, D]
-        let q_heads = q
+        let q_heads = q_3d
             .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3])
             .to_owned();
 
-        // K transposed for efficient Q@K^T: [B, H, D, S]
-        let k_heads_t = k
+        // K: [Batch, Seq, Hidden] -> [Batch, Seq, Heads, Dim] -> [Batch, Heads, Dim, Seq] (Transposed)
+        let k_heads_t = k_3d
             .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 3, 1])
+            .permuted_axes([0, 2, 3, 1]) // 3 (Dim) before 1 (Seq) = Transpose
             .to_owned();
 
         let v_heads = v

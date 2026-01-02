@@ -61,7 +61,7 @@ pub async fn run(
     })?;
 
     // Validate it's a cross-encoder
-    if model_type.architecture() != ModelArchitecture::CrossEncoder {
+    if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!(
             "Model '{}' is not a cross-encoder. Reranking requires a cross-encoder model like minilm-l6-v2-cross-encoder.",
             model
@@ -73,7 +73,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
         if !quiet {
             eprintln!();
         }

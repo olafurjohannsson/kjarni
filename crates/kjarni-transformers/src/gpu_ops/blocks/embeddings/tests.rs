@@ -46,6 +46,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
             is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
         }
     }
 

@@ -3,7 +3,7 @@ use kjarni_transformers::{
     encoder_decoder::TaskSpecificParams,
     traits::{
         AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout,
-        FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata,
+        FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -117,6 +117,7 @@ impl ModelConfig for BartConfig {
             is_prenorm: false, // BART is Post-Norm
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: NormalizationStrategy::LayerNorm,
         }
     }
 

@@ -86,7 +86,7 @@ async fn get_query_embedding(
     let model_type = ModelType::from_cli_name(model)
         .ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
 
-    if model_type.architecture() != ModelArchitecture::Encoder {
+    if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!("Model '{}' is not an encoder.", model));
     }
 
@@ -94,7 +94,7 @@ async fn get_query_embedding(
         if !quiet {
             eprintln!("Downloading model '{}'...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
     }
 
     if !quiet {

@@ -62,6 +62,7 @@ impl ModelConfig for TestLlamaConfig {
             is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: crate::traits::NormalizationStrategy::RMSNorm,
         }
     }
 
@@ -158,13 +159,13 @@ async fn create_test_layer_pair(
     // --- Build GPU Layer ---
     let gpu_attn_weights = GpuAttentionWeights::new(
         q_w.to_gpu(context)?,
-        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?,
+        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?),
         k_w.to_gpu(context)?,
-        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?,
+        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?),
         v_w.to_gpu(context)?,
-        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?,
+        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?),
         o_w.to_gpu(context)?,
-        GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?,
+        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?),
     )?;
 
     let gpu_attn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, 1e-5));

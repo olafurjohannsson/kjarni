@@ -1,13 +1,14 @@
 //! Interactive chat command
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures_util::StreamExt;
 use std::io::{self, BufRead, Write};
 
 use kjarni::{
-    
-    ChatTemplate, Conversation, DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig, Llama3ChatTemplate, ModelArchitecture, ModelType, SamplingParams, TokenType, 
-    models::{QwenModel, LlamaModel}, registry
+    ChatTemplate, Conversation, DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device,
+    GenerationConfig, Llama3ChatTemplate, ModelArchitecture, ModelType, SamplingParams, TokenType,
+    models::{LlamaModel, QwenModel},
+    registry,
 };
 
 pub async fn run(
@@ -38,7 +39,10 @@ pub async fn run(
         anyhow!(msg)
     })?;
 
-    if model_type.architecture() != ModelArchitecture::Decoder {
+    if model_type.architecture() != ModelArchitecture::Llama
+        || model_type.architecture() != ModelArchitecture::Qwen2
+        || model_type.architecture() != ModelArchitecture::Mistral
+    {
         return Err(anyhow!(
             "Model '{}' is not a decoder. Chat requires a decoder model.",
             model
@@ -60,7 +64,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
-        registry::download_model(model).await?;
+        registry::download_model(model, false).await?;
         if !quiet {
             eprintln!();
         }
@@ -75,8 +79,7 @@ pub async fn run(
         Box::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
     } else if model_type.is_qwen_model() {
         Box::new(QwenModel::from_registry(model_type, None, device, None, None).await?)
-    }
-    else {
+    } else {
         return Err(anyhow!(
             "Model '{}' not yet supported for chat. Try: llama-3.2-3b-instruct",
             model
@@ -87,11 +90,11 @@ pub async fn run(
 
     // 3. Setup chat template and conversation
     let template = Llama3ChatTemplate::for_generation();
-    
-    let default_system = template.default_system_prompt().unwrap_or(
-        "You are a helpful, harmless, and honest assistant."
-    );
-    
+
+    let default_system = template
+        .default_system_prompt()
+        .unwrap_or("You are a helpful, harmless, and honest assistant.");
+
     let mut conversation = match system_prompt {
         Some(prompt) => Conversation::with_system(prompt),
         None => Conversation::with_system(default_system),
@@ -180,7 +183,10 @@ pub async fn run(
                     continue;
                 }
                 _ => {
-                    eprintln!("Unknown command: {}. Type '/help' for available commands.", input);
+                    eprintln!(
+                        "Unknown command: {}. Type '/help' for available commands.",
+                        input
+                    );
                     continue;
                 }
             }
@@ -251,21 +257,21 @@ fn print_history(conversation: &Conversation) {
     eprintln!();
     eprintln!("Conversation history ({} messages):", conversation.len());
     eprintln!("{}", "-".repeat(40));
-    
+
     for msg in conversation.messages() {
         let role = match msg.role {
             kjarni::Role::System => "System",
             kjarni::Role::User => "User",
             kjarni::Role::Assistant => "Assistant",
         };
-        
+
         // Truncate long messages
         let content = if msg.content.len() > 100 {
             format!("{}...", &msg.content[..100])
         } else {
             msg.content.clone()
         };
-        
+
         eprintln!("[{}]: {}", role, content);
     }
     eprintln!();

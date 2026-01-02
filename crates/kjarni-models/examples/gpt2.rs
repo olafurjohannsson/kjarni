@@ -17,14 +17,7 @@ use kjarni_transformers::decoder::prelude::*;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let context = WgpuContext::new().await?;
-    // let pool = Arc::new(Mutex::new(GpuTensorPool::new(context.clone())));
-    let d = DecoderLoadConfig {
-        gpu_layers: None,
-        offload_embeddings: false,
-        offload_lm_head: false,
-        target_dtype: None,
-    };
+
     let gpt2_model = Gpt2Model::from_registry(
         ModelType::DistilGpt2,
         None, // Use default cache dir

@@ -1,7 +1,7 @@
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::traits::{
     AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
-    ModelLayout, ModelMetadata,
+    ModelLayout, ModelMetadata, NormalizationStrategy,
 };
 use serde::Deserialize;
 
@@ -67,6 +67,7 @@ impl ModelConfig for Gpt2Config {
             is_prenorm: true, // GPT-2 is a Pre-Norm model
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            normalization_strategy: NormalizationStrategy::LayerNorm,
         }
     }
 

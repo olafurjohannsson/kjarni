@@ -486,10 +486,10 @@ mod tests {
         let o_bias = GpuTensor::from_ndarray(ctx, &Array1::<f32>::zeros(hidden_size)).unwrap();
 
         GpuAttentionWeights::new(
-            q_weight, q_bias,
-            k_weight, k_bias,
-            v_weight, v_bias,
-            o_weight, o_bias,
+            q_weight, Some(q_bias),
+            k_weight, Some(k_bias),
+            v_weight, Some(v_bias),
+            o_weight, Some(o_bias),
         ).unwrap()
     }
 

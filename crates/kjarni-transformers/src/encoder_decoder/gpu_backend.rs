@@ -75,10 +75,10 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
                 .forward(
                     encoder_cmd,
                     pool_ref,
-                    GpuEncoderInput::TokensGpu(&input_ids_gpu),
+                    ModelInput::TokensGpu(&input_ids_gpu),
                     &attention_mask_gpu,
                     None,
-                )?
+                ).await?
                 .last_hidden_state
         };
 

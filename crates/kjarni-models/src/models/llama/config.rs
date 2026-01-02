@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use kjarni_transformers::models::base::RopeScalingConfig;
+use kjarni_transformers::traits::NormalizationStrategy;
 use kjarni_transformers::{
     activations::Activation,
     traits::{ModelConfig, ModelLayout, ModelMetadata, DecoderLayout, DecoderLayerLayout, AttentionLayout, FeedForwardLayout},
@@ -280,6 +281,7 @@ impl ModelConfig for LlamaConfig {
             is_prenorm: true,        // Llama uses Pre-Normalization
             transpose_ffn_weights: false, // Standard Llama weights are [Out, In]
             transpose_attention_weights: false,
+            normalization_strategy: NormalizationStrategy::RMSNorm,
         }
     }
 

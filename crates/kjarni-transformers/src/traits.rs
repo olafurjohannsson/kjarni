@@ -46,8 +46,13 @@ pub trait InferenceModel: Send + Sync {
 //  2. The Unified Blueprint
 // ============================================================================
 
-/// The mathematical "Ground Truth" of a model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum NormalizationStrategy {
+    LayerNorm,
+    RMSNorm,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelMetadata {
     pub hidden_size: usize,
     pub num_layers: usize,
@@ -69,7 +74,12 @@ pub struct ModelMetadata {
     /// Note: This is DIFFERENT from scale_embeddings!
     /// - scale_embeddings: embeddings *= sqrt(d_model) (scaling up)
     /// - normalize_embedding: layer norm after embedding lookup
-    pub normalize_embedding: bool
+    pub normalize_embedding: bool,
+    pub normalization_strategy: NormalizationStrategy,
+}
+
+fn default_normalization_strategy() -> NormalizationStrategy {
+    NormalizationStrategy::LayerNorm
 }
 
 /// Naming templates for a standard attention block (self- or cross-attention).

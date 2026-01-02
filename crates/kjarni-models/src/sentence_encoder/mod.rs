@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use kjarni_transformers::models::registry::WeightsFormat;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokenizers::Tokenizer;
+use tokenizers::{Model, Tokenizer};
 
 use kjarni_transformers::{
     encoder::{
@@ -156,6 +156,8 @@ const SUPPORTED_MODELS: &'static [ModelType] = &[
             // todo UPDATE
 
             ModelType::MiniLML6V2 => Arc::new(BertConfig::from_json(&weights.config_json)?),
+
+            ModelType::NomicEmbedText => Arc::new(BertConfig::from_json(&weights.config_json)?),
 
             _ => return Err(anyhow!("Unsupported encoder model: {:?}", model_type)),
         };

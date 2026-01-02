@@ -1,4 +1,5 @@
 use crate::gpu_ops::Kernel;
+use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
@@ -46,18 +47,20 @@ pub struct GpuEncoderLayer {
     // Attention
     self_attn: GpuEncoderSelfAttention,
     self_attn_weights: GpuAttentionWeights,
-    self_attn_layer_norm: GpuLayerNorm,
-    self_attn_ln_weights: GpuLayerNormWeights,
+    // Use Enum for Normalization (LayerNorm vs RMSNorm)
+    self_attn_layer_norm: GpuNormalization, 
+    self_attn_ln_weights: GpuNormalizationWeights,
 
-    // Feed-forward
+    // Feed-forward (Enum: Standard vs SwiGlu)
     feedforward: GpuFeedForward,
     ff_weights: GpuFeedForwardWeights,
-    ffn_layer_norm: GpuLayerNorm,
-    ffn_ln_weights: GpuLayerNormWeights,
+    ffn_layer_norm: GpuNormalization,
+    ffn_ln_weights: GpuNormalizationWeights,
 
     // Primitives
     add: GpuAdd,
 }
+
 
 impl GpuEncoderLayer {
     /// Creates a new encoder layer.
@@ -78,23 +81,36 @@ impl GpuEncoderLayer {
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
-        self_attn_ln_weights: GpuLayerNormWeights,
-        ff_weights: GpuFeedForwardWeights,
-        ffn_ln_weights: GpuLayerNormWeights,
+        self_attn_ln_weights: GpuNormalizationWeights, // Changed to Enum
+        ff_weights: GpuFeedForwardWeights,             // Changed to Enum
+        ffn_ln_weights: GpuNormalizationWeights,       // Changed to Enum
         activation: activations::Activation,
         meta: &ModelMetadata,
     ) -> Result<Self> {
         let hidden_size = meta.hidden_size as u32;
         let num_heads = meta.num_attention_heads as u32;
 
-        // Initialize the new clean attention module
+        // Initialize Attention
         let self_attn = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
 
-        // LayerNorms
-        let self_attn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
-        let ffn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
+        // Initialize Normalization (Logic to pick LayerNorm vs RMSNorm moved to caller usually, 
+        // but if passed as Enum weights, we need matching Enum compute).
+        // Note: The Weights Enum usually dictates the Compute Enum type.
+        // Assuming caller passed correct weights, we create matching compute ops.
+        
+        let create_norm = |w: &GpuNormalizationWeights| -> GpuNormalization {
+            match w {
+                GpuNormalizationWeights::LayerNorm(_) => 
+                    GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps)),
+                GpuNormalizationWeights::RMSNorm(_) => 
+                    GpuNormalization::RMSNorm(crate::gpu_ops::blocks::rms_norm::GpuRMSNorm::new(context, meta.norm_eps)),
+            }
+        };
 
-        // FFN
+        let self_attn_layer_norm = create_norm(&self_attn_ln_weights);
+        let ffn_layer_norm = create_norm(&ffn_ln_weights);
+
+        // Initialize FFN (Enum handles dispatch internally)
         let feedforward = GpuFeedForward::new(context, activation)?;
 
         // Primitives
@@ -112,7 +128,6 @@ impl GpuEncoderLayer {
             add,
         })
     }
-
     /// Performs the forward pass through this encoder layer.
     ///
     /// Automatically dispatches to pre-norm or post-norm based on model metadata.
@@ -615,7 +630,7 @@ mod tests {
                 LinearLayer::new_f32(v_w.clone(), Some(v_b.clone())),
                 LinearLayer::new_f32(o_w.clone(), Some(o_b.clone())),
             );
-            let self_attn_ln = LayerNorm::new(attn_ln_w.clone(), attn_ln_b.clone(), eps);
+            let self_attn_ln = crate::Normalization::LayerNorm(LayerNorm::new(attn_ln_w.clone(), attn_ln_b.clone(), eps));
 
             let ffn = FeedForward::Standard(StdFeedForward::new(
                 fc1_w.clone(),
@@ -624,7 +639,7 @@ mod tests {
                 fc2_b.clone(),
                 Activation::Gelu,
             ));
-            let ffn_ln = LayerNorm::new(ffn_ln_w.clone(), ffn_ln_b.clone(), eps);
+            let ffn_ln = crate::Normalization::LayerNorm(LayerNorm::new(ffn_ln_w.clone(), ffn_ln_b.clone(), eps));
 
             EncoderLayer::new(self_attn, self_attn_ln, ffn, ffn_ln)
         };
@@ -633,13 +648,13 @@ mod tests {
         let gpu_layer = {
             let self_attn_weights = GpuAttentionWeights::new(
                 GpuTensor::from_ndarray(&ctx, &q_w)?,
-                GpuTensor::from_ndarray(&ctx, &q_b)?,
+                Some(GpuTensor::from_ndarray(&ctx, &q_b)?),
                 GpuTensor::from_ndarray(&ctx, &k_w)?,
-                GpuTensor::from_ndarray(&ctx, &k_b)?,
+                Some(GpuTensor::from_ndarray(&ctx, &k_b)?),
                 GpuTensor::from_ndarray(&ctx, &v_w)?,
-                GpuTensor::from_ndarray(&ctx, &v_b)?,
+                Some(GpuTensor::from_ndarray(&ctx, &v_b)?),
                 GpuTensor::from_ndarray(&ctx, &o_w)?,
-                GpuTensor::from_ndarray(&ctx, &o_b)?,
+                Some(GpuTensor::from_ndarray(&ctx, &o_b)?),
             )?;
 
             let self_attn_ln_weights = GpuLayerNormWeights::new(
@@ -676,6 +691,7 @@ mod tests {
                 is_prenorm: false, // BERT/Mock style
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
+                normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
             };
             GpuEncoderLayer::new(
                 &ctx,
@@ -695,7 +711,7 @@ mod tests {
         let mask = Array2::<f32>::ones((batch_size, seq_len));
 
         // === Run CPU ===
-        let cpu_output = cpu_layer.forward(input.clone(), &mask, None, false)?; // post-norm
+        let cpu_output = cpu_layer.forward(input.clone(), &mask, None, false, None)?; // post-norm
 
         // === Run GPU ===
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
@@ -751,6 +767,7 @@ mod tests {
                 is_prenorm: false, // Legacy style post-norm
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
+                normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
             }
         }
 

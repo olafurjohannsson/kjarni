@@ -163,6 +163,15 @@ impl ModelType {
     pub fn architecture(&self) -> ModelArchitecture {
         self.info().architecture
     }
+    pub fn is_llama_model(&self) -> bool {
+        matches!(self.architecture(), ModelArchitecture::Llama)
+    }
+    pub fn is_gpt2_model(&self) -> bool {
+        matches!(self, Self::DistilGpt2 | Self::Gpt2)
+    }
+    pub fn is_qwen_model(&self) -> bool {
+        matches!(self.architecture(), ModelArchitecture::Qwen2)
+    }
     /// Get the CLI-friendly slug (e.g., "llama3.2-1b")
     pub fn cli_name(&self) -> &'static str {
         match self {
@@ -565,6 +574,26 @@ impl ModelType {
     pub fn find_similar(query: &str) -> Vec<(String, f32)> {
         let all_names: Vec<&str> = ModelType::all().map(|m| m.cli_name()).collect();
         levenshtein::find_similar(query, &all_names, 3, 0.4)
+    }
+
+        /// Get the local cache directory for this model
+    pub fn cache_dir(&self, base_dir: &Path) -> PathBuf {
+        base_dir.join(self.repo_id().replace('/', "_"))
+    }
+
+    /// Check if this model is downloaded in the given cache directory
+    pub fn is_downloaded(&self, base_dir: &Path) -> bool {
+        let model_dir = self.cache_dir(base_dir);
+
+        // Check for essential files
+        let config_exists = model_dir.join("config.json").exists();
+        let tokenizer_exists = model_dir.join("tokenizer.json").exists();
+
+        // Weights can be either single file or sharded
+        let weights_exist = model_dir.join("model.safetensors").exists()
+            || model_dir.join("model.safetensors.index.json").exists();
+
+        config_exists && tokenizer_exists && weights_exist
     }
 
     pub fn search(query: &str) -> Vec<(ModelType, f32)> {

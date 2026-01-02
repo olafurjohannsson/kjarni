@@ -84,6 +84,19 @@ impl EmbeddingConfig {
         }
     }
 
+    pub fn with_position_embedding(
+        mut self,
+        position_embedding: Option<String>,
+    ) -> Self {
+        self.position_embedding = position_embedding;
+        self
+    }
+
+    pub fn with_type_embedding(mut self, type_embedding: Option<String>) -> Self {
+        self.type_embedding = type_embedding;
+        self
+    }
+
     /// Creates a builder for more complex configurations.
     pub fn builder(word_embedding: impl Into<String>, hidden_size: usize) -> EmbeddingConfigBuilder {
         EmbeddingConfigBuilder {

@@ -162,7 +162,7 @@ fn create_gpu_layer_from_cpu(
     let (vw, vb) = load_linear(&cpu_layer.self_attn.v_proj)?;
     let (ow, ob) = load_linear(&cpu_layer.self_attn.o_proj)?;
 
-    let self_attn_weights = GpuAttentionWeights::new(qw, qb, kw, kb, vw, vb, ow, ob)?;
+    let self_attn_weights = GpuAttentionWeights::new(qw, Some(qb), kw, Some(kb), vw, Some(vb), ow, Some(ob))?;
 
     // (Assuming you haven't refactored LayerNorm yet, keep this as is)
     let self_attn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
@@ -176,7 +176,7 @@ fn create_gpu_layer_from_cpu(
     let (xvw, xvb) = load_linear(&cpu_layer.cross_attn.v_proj)?;
     let (xow, xob) = load_linear(&cpu_layer.cross_attn.o_proj)?;
 
-    let cross_attn_weights = GpuAttentionWeights::new(xqw, xqb, xkw, xkb, xvw, xvb, xow, xob)?;
+    let cross_attn_weights = GpuAttentionWeights::new(xqw, Some(xqb), xkw, Some(xkb), xvw, Some(xvb), xow, Some(xob))?;
 
     let cross_attn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
         GpuTensor::from_ndarray(context, &cpu_layer.cross_attn_layer_norm.weight)?,

@@ -5,7 +5,8 @@
 
 use crate::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::LanguageModel;
+use crate::{last_token_pool, max_pool};
+use crate::models::base::{LanguageModel, ModelInput};
 use crate::pooling::mean_pool;
 
 use anyhow::{anyhow, Result};
@@ -87,10 +88,10 @@ pub trait EncoderLanguageModel: LanguageModel {
             let gpu_output = ops.encoder().forward(
                 encoder_cmd,
                 pool_ref,
-                GpuEncoderInput::TokensGpu(&input_ids_gpu),
+                ModelInput::TokensGpu(&input_ids_gpu),
                 &attention_mask_gpu,
                 None, // token_type_ids can be added here
-            )?;
+            ).await?;
 
             frame.finish();
 
@@ -146,12 +147,8 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
                 hidden_states.slice(ndarray::s![.., 0, ..]).to_owned()
             }
             PoolingStrategy::Mean => mean_pool(&hidden_states, &attention_mask)?,
-            PoolingStrategy::LastToken => {
-                unimplemented!()
-            }
-            PoolingStrategy::Max => {
-                unimplemented!()
-            }
+            PoolingStrategy::LastToken => last_token_pool(&hidden_states, &attention_mask)?,
+            PoolingStrategy::Max => max_pool(&hidden_states, &attention_mask)?,
             _ => {
                 return Err(anyhow!(
                     "Unknown pooling strategy: {}",
@@ -319,7 +316,7 @@ pub struct GpuEncoderOutput {
 /// Provides methods for embedding lookup, normalization, and layer execution
 /// on GPU with support for hybrid CPU/GPU workflows through `GpuEncoderInput`.
 ///
-
+#[async_trait(?Send)]
 pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only (handles CPU/GPU input).
     ///
@@ -333,11 +330,11 @@ pub trait GpuEncoder: Send + Sync {
     ///
     /// # Returns
     /// Hidden states on GPU `[batch_size, sequence_length, hidden_size]`
-    fn embed(
+    async fn embed(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: GpuEncoderInput,
+        input: ModelInput<'_>,
         token_type_ids: Option<&GpuTensor>,
     ) -> Result<GpuTensor>;
 
@@ -353,11 +350,11 @@ pub trait GpuEncoder: Send + Sync {
     ///
     /// # Returns
     /// Normalized hidden states on GPU
-    fn embed_and_normalize(
+    async fn embed_and_normalize(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: GpuEncoderInput,
+        input: ModelInput<'_>,
         token_type_ids: Option<&GpuTensor>,
     ) -> Result<GpuTensor>;
 
@@ -392,15 +389,15 @@ pub trait GpuEncoder: Send + Sync {
     /// Full forward pass through the encoder.
     ///
     /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
-    fn forward(
+    async fn forward(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: GpuEncoderInput,
+        input: ModelInput<'_>,
         attention_mask: &GpuTensor,
         token_type_ids: Option<&GpuTensor>,
     ) -> Result<GpuEncoderOutput> {
-        let hidden = self.embed_and_normalize(cmd_encoder, pool, input, token_type_ids)?;
+        let hidden = self.embed_and_normalize(cmd_encoder, pool, input, token_type_ids).await?;
         let output = self.forward_layers(
             cmd_encoder,
             pool,

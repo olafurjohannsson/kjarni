@@ -7,7 +7,6 @@
 //! traits and types.
 
 // Public modules for the library's public API
-pub mod config;
 pub mod traits;
 pub mod generator;
 pub mod backend;
@@ -20,7 +19,6 @@ mod gpu;
 
 pub mod prelude {
     pub use crate::decoder::{
-        config::DecoderLoadConfig,
         cpu::{
             DecoderAttention,
             DecoderLayer,

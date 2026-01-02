@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use kjarni_transformers::activations::Activation;
-use kjarni_transformers::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata};
+use kjarni_transformers::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy};
 use serde::Deserialize;
 
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
@@ -59,6 +59,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             is_prenorm: false,           // BERT uses Post-Norm
             transpose_ffn_weights: true, // MiniLM quirk
             transpose_attention_weights: false,
+            normalization_strategy: NormalizationStrategy::LayerNorm,
         }
     }
 

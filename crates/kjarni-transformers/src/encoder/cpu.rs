@@ -1,15 +1,20 @@
-use anyhow::{Context, Result};
-use ndarray::{Array2, Array3};
+use std::sync::Arc;
 
-use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+use anyhow::{Context, Result};
+use ndarray::{Array2, Array3, s};
+
+use crate::Normalization;
 use crate::encoder::CpuEncoder;
+use crate::encoder::encoder_self_attention::EncoderSelfAttention;
 use crate::feedforward::LegacyFeedForward;
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
-use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata};
+use crate::normalization::RMSNorm;
+use crate::rope::RoPE;
+use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
 use crate::{
-    encoder::encoder_layer::EncoderLayer, normalization::LayerNorm, Embeddings, FeedForward,
+    Embeddings, FeedForward, encoder::encoder_layer::EncoderLayer, normalization::LayerNorm,
 };
 
 pub struct CpuTransformerEncoder {
@@ -17,136 +22,234 @@ pub struct CpuTransformerEncoder {
     embeddings_layer_norm: LayerNorm,
     layers: Vec<EncoderLayer>,
     pub metadata: ModelMetadata,
+    pub rope: Option<Arc<RoPE>>,
 }
 
 impl CpuTransformerEncoder {
     pub fn new(
-    weights: &ModelWeights,
-    meta: ModelMetadata,
-    layout: ModelLayout,
-    load_cfg: ModelLoadConfig,
-) -> Result<Self> {
-    let dtype = load_cfg.target_dtype;
+        weights: &ModelWeights,
+        meta: ModelMetadata,
+        layout: ModelLayout,
+        load_cfg: ModelLoadConfig,
+    ) -> Result<Self> {
+        let dtype = load_cfg.target_dtype;
 
-    // Step 1: Get the specific encoder layout from the top-level model layout.
-    // This is the main change that enables all other fixes.
-    let encoder_layout = layout.encoder.as_ref().context("ModelLayout is missing the required 'encoder' layout")?;
+        // 1. Get Encoder Layout
+        let encoder_layout = layout
+            .encoder
+            .as_ref()
+            .context("ModelLayout is missing the required 'encoder' layout")?;
 
-    // 2. Embeddings (Paths updated to use the encoder_layout)
-    let embeddings = Embeddings::from_weights(
-        weights,
-        &layout.token_embedding,
-        encoder_layout.position_embedding.as_deref(),
-        encoder_layout.token_type_embedding.as_deref(),
-    )?;
+        // 2. Embeddings
+        let embeddings = Embeddings::from_weights(
+            weights,
+            &layout.token_embedding,
+            encoder_layout.position_embedding.as_deref(),
+            encoder_layout.token_type_embedding.as_deref(),
+        )?;
 
-    // 3. Embedding LayerNorm (Paths updated)
-    let emb_norm_w = encoder_layout
-        .embedding_norm_weight
-        .as_ref()
-        .context("Encoder layout requires embedding_norm_weight")?;
-    let emb_norm_b = encoder_layout
-        .embedding_norm_bias
-        .as_ref()
-        .context("Encoder layout requires embedding_norm_bias")?;
-    let embeddings_layer_norm = LayerNorm::new(
-        weights.get_array1(emb_norm_w)?,
-        weights.get_array1(emb_norm_b)?,
-        meta.norm_eps,
-    );
+        // 3. Embedding LayerNorm
+        let emb_norm_w = encoder_layout
+            .embedding_norm_weight
+            .as_ref()
+            .context("Encoder layout requires embedding_norm_weight")?;
+        let emb_norm_b = encoder_layout
+            .embedding_norm_bias
+            .as_ref()
+            .context("Encoder layout requires embedding_norm_bias")?;
 
-    // NOTE: The following `unwrap()` calls are preserved from your original logic.
-    // A more robust implementation might handle these Options more gracefully.
-    let q_bias = &encoder_layout.layer.self_attn.q_bias.as_ref().unwrap();
-    let k_bias = &encoder_layout.layer.self_attn.k_bias.as_ref().unwrap();
-    let v_bias = &encoder_layout.layer.self_attn.v_bias.as_ref().unwrap();
-    let o_bias = &encoder_layout.layer.self_attn.o_bias.as_ref().unwrap();
-    let attn_norm_bias = &encoder_layout.layer.self_attn.norm_bias.as_ref().unwrap();
-    
-    let ffn_up_bias = &encoder_layout.layer.ffn.up_bias.as_ref().unwrap();
-    let ffn_down_bias = &encoder_layout.layer.ffn.down_bias.as_ref().unwrap();
-    let ffn_norm_bias = &encoder_layout.layer.ffn.norm_bias.as_ref().unwrap();
-
-    // 4. Build Layers
-    let mut layers = Vec::with_capacity(meta.num_layers);
-    for i in 0..meta.num_layers {
-        let idx = i.to_string();
-        let name = |template: &String| template.replace("{}", &idx);
-
-        let self_attn = EncoderSelfAttention::new(
-            meta.hidden_size,
-            meta.num_attention_heads,
-
-            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.q_weight))
-                .with_optional_bias(Some(&name(q_bias)))
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.k_weight))
-                .with_optional_bias(Some(&name(k_bias)))
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.v_weight))
-                .with_optional_bias(Some(&name(v_bias)))
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.o_weight))
-                .with_optional_bias(Some(&name(o_bias)))
-                .with_target_dtype(dtype)
-                .build()?,
-        );
-
-        // 5. Load FFN weights (Paths updated)
-        let raw_up_w = weights.get_array2(&name(&encoder_layout.layer.ffn.up_weight))?;
-        let raw_down_w = weights.get_array2(&name(&encoder_layout.layer.ffn.down_weight))?;
-
-        let up_w = if meta.transpose_ffn_weights {
-            raw_up_w.t().as_standard_layout().to_owned()
-        } else {
-            raw_up_w
-        };
-
-        let down_w = if meta.transpose_ffn_weights {
-            raw_down_w.t().as_standard_layout().to_owned()
-        } else {
-            raw_down_w
-        };
-
-        let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
-            up_w,
-            weights.get_array1(&name(ffn_up_bias))?,
-            down_w,
-            weights.get_array1(&name(ffn_down_bias))?,
-            meta.activation,
-        ));
-
-        // 6. Layer Norms (Paths updated)
-        let self_attn_layer_norm = LayerNorm::new(
-            weights.get_array1(&name(&encoder_layout.layer.self_attn.norm_weight))?,
-            weights.get_array1(&name(attn_norm_bias))?,
+        let embeddings_layer_norm = LayerNorm::new(
+            weights.get_array1(emb_norm_w)?,
+            weights.get_array1(emb_norm_b)?,
             meta.norm_eps,
         );
 
-        let ffn_layer_norm = LayerNorm::new(
-            weights.get_array1(&name(&encoder_layout.layer.ffn.norm_weight))?,
-            weights.get_array1(&name(ffn_norm_bias))?,
-            meta.norm_eps,
-        );
+        // 4. Build Layers
+        let mut layers = Vec::with_capacity(meta.num_layers);
 
-        layers.push(EncoderLayer {
-            self_attn,
-            self_attn_layer_norm,
-            feedforward,
-            ffn_layer_norm,
-        });
+        for i in 0..meta.num_layers {
+            let idx = i.to_string();
+            let name = |template: &String| template.replace("{}", &idx);
+
+            // Helper to resolve optional bias names safely
+            let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
+
+            // --- ATTENTION LOADING (Fused vs Standard) ---
+
+            let q_name = name(&encoder_layout.layer.self_attn.q_weight);
+            let k_name = name(&encoder_layout.layer.self_attn.k_weight);
+            let v_name = name(&encoder_layout.layer.self_attn.v_weight);
+
+            let q_bias = resolve_bias(&encoder_layout.layer.self_attn.q_bias);
+            let k_bias = resolve_bias(&encoder_layout.layer.self_attn.k_bias);
+            let v_bias = resolve_bias(&encoder_layout.layer.self_attn.v_bias);
+
+            // Check for Fused QKV (Nomic/Mosaic Style)
+            // If Q, K, and V all point to the same tensor file, we slice it.
+            let (q_proj, k_proj, v_proj) = if q_name == k_name && k_name == v_name {
+                let hidden = meta.hidden_size;
+
+                // 1. Load the raw fused weights [3 * Hidden, Hidden]
+                let fused_w = weights.get_array2(&q_name)?;
+
+                // 2. Slice weights
+                let q_w = fused_w.slice(s![0..hidden, ..]).to_owned();
+                let k_w = fused_w.slice(s![hidden..2 * hidden, ..]).to_owned();
+                let v_w = fused_w.slice(s![2 * hidden..3 * hidden, ..]).to_owned();
+
+                // 3. Handle Fused Bias (if present)
+                let (q_b, k_b, v_b) = if let Some(b_name) = &q_bias {
+                    let fused_b = weights.get_array1(b_name)?;
+                    (
+                        Some(fused_b.slice(s![0..hidden]).to_owned()),
+                        Some(fused_b.slice(s![hidden..2 * hidden]).to_owned()),
+                        Some(fused_b.slice(s![2 * hidden..3 * hidden]).to_owned()),
+                    )
+                } else {
+                    (None, None, None)
+                };
+
+                (
+                    LinearLayer::new_f32(q_w, q_b),
+                    LinearLayer::new_f32(k_w, k_b),
+                    LinearLayer::new_f32(v_w, v_b),
+                )
+            } else {
+                // Standard Separate Loading (BERT/MiniLM)
+                (
+                    LinearLayer::builder(weights, &q_name)
+                        .with_optional_bias(q_bias.as_deref())
+                        .with_target_dtype(dtype)
+                        .build()?,
+                    LinearLayer::builder(weights, &k_name)
+                        .with_optional_bias(k_bias.as_deref())
+                        .with_target_dtype(dtype)
+                        .build()?,
+                    LinearLayer::builder(weights, &v_name)
+                        .with_optional_bias(v_bias.as_deref())
+                        .with_target_dtype(dtype)
+                        .build()?,
+                )
+            };
+
+            let out_proj =
+                LinearLayer::builder(weights, &name(&encoder_layout.layer.self_attn.o_weight))
+                    .with_optional_bias(
+                        resolve_bias(&encoder_layout.layer.self_attn.o_bias).as_deref(),
+                    )
+                    .with_target_dtype(dtype)
+                    .build()?;
+
+            let self_attn = EncoderSelfAttention::new(
+                meta.hidden_size,
+                meta.num_attention_heads,
+                q_proj,
+                k_proj,
+                v_proj,
+                out_proj,
+            );
+
+            // --- FEED FORWARD LOADING ---
+
+            let up_proj = LinearLayer::builder(weights, &name(&encoder_layout.layer.ffn.up_weight))
+                .with_optional_bias(resolve_bias(&encoder_layout.layer.ffn.up_bias).as_deref())
+                .with_target_dtype(dtype)
+                .build()?;
+
+            let down_proj =
+                LinearLayer::builder(weights, &name(&encoder_layout.layer.ffn.down_weight))
+                    .with_optional_bias(
+                        resolve_bias(&encoder_layout.layer.ffn.down_bias).as_deref(),
+                    )
+                    .with_target_dtype(dtype)
+                    .build()?;
+
+            // Handle Gate (Optional, for SwiGLU models like Nomic)
+            let gate_proj = if let Some(gate_name) = &encoder_layout.layer.ffn.gate_weight {
+                Some(
+                    LinearLayer::builder(weights, &name(gate_name))
+                        .with_target_dtype(dtype)
+                        .build()?,
+                )
+            } else {
+                None
+            };
+
+            let feedforward = if let Some(gate) = gate_proj {
+                // If we have a Gate layer, it's SwiGLU (Nomic/Llama)
+                FeedForward::SwiGLU(crate::feedforward::SwiGluFeedForward::new(
+                    gate,      // Gate
+                    up_proj,   // Up
+                    down_proj, // Down
+                ))
+            } else {
+                // If no Gate, it's Standard (BERT/MiniLM/DistilBERT)
+                FeedForward::StandardNew(crate::feedforward::StdFeedForwardNew::new(
+                    up_proj,         // FC1
+                    down_proj,       // FC2
+                    meta.activation, // Gelu/Relu
+                ))
+            };
+
+            // --- NORMALIZATION ---
+
+            let attn_norm_w = name(&encoder_layout.layer.self_attn.norm_weight);
+            let attn_norm_b = resolve_bias(&encoder_layout.layer.self_attn.norm_bias);
+
+            let self_attn_layer_norm =
+                if meta.normalization_strategy == NormalizationStrategy::LayerNorm {
+                    Normalization::LayerNorm(LayerNorm::new(
+                        weights.get_array1(&attn_norm_w)?,
+                        weights.get_array1(&attn_norm_b.unwrap())?, // LayerNorm usually requires bias
+                        meta.norm_eps,
+                    ))
+                } else {
+                    Normalization::RMSNorm(RMSNorm::new(
+                        weights.get_array1(&attn_norm_w)?,
+                        meta.norm_eps,
+                    ))
+                };
+
+            let ffn_norm_w = name(&encoder_layout.layer.ffn.norm_weight);
+            let ffn_norm_b = resolve_bias(&encoder_layout.layer.ffn.norm_bias);
+
+            let ffn_layer_norm = if meta.normalization_strategy == NormalizationStrategy::LayerNorm
+            {
+                Normalization::LayerNorm(LayerNorm::new(
+                    weights.get_array1(&ffn_norm_w)?,
+                    weights.get_array1(&ffn_norm_b.unwrap())?,
+                    meta.norm_eps,
+                ))
+            } else {
+                Normalization::RMSNorm(RMSNorm::new(
+                    weights.get_array1(&ffn_norm_w)?,
+                    meta.norm_eps,
+                ))
+            };
+
+            layers.push(EncoderLayer {
+                self_attn,
+                self_attn_layer_norm,
+                feedforward,
+                ffn_layer_norm,
+            });
+        }
+
+        // 5. Initialize RoPE (If Metadata says so)
+        let rope = if let Some(theta) = meta.rope_theta {
+            Some(Arc::new(RoPE::new(meta.head_dim, meta.max_seq_len, theta)))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            embeddings,
+            embeddings_layer_norm,
+            layers,
+            metadata: meta,
+            rope,
+        })
     }
-
-    Ok(Self {
-        embeddings,
-        embeddings_layer_norm,
-        layers,
-        metadata: meta,
-    })
-}
 }
 
 impl InferenceModel for CpuTransformerEncoder {
@@ -187,7 +290,13 @@ impl CpuEncoder for CpuTransformerEncoder {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
         for layer in &self.layers[start_layer..end_layer] {
-            hidden = layer.forward(hidden, attention_mask, None, is_prenorm)?;
+            hidden = layer.forward(
+                hidden,
+                attention_mask,
+                None,
+                is_prenorm,
+                self.rope.as_deref(),
+            )?;
         }
         Ok(hidden)
     }
