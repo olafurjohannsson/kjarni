@@ -30,7 +30,7 @@ pub mod prelude {
         encoder_self_attention::EncoderSelfAttention,
         pooler::{CpuPooler, GpuPooler, StandardCpuPooler},
         traits::{
-            CpuEncoder, CpuEncoderOutput, EncoderLanguageModel, GpuEncoder, GpuEncoderInput,
+            CpuEncoder, CpuEncoderOutput, EncoderLanguageModel, GpuEncoder,
             GpuEncoderOutput,
         },
     };

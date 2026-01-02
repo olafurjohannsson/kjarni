@@ -16,7 +16,7 @@ use ndarray::{Array2, Array3};
 /// Trait for encoder-only language models (BERT, RoBERTa, etc.)
 ///
 /// These models encode text into fixed-size embeddings.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait EncoderLanguageModel: LanguageModel {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps>;
 
@@ -271,38 +271,6 @@ pub trait CpuEncoder: Send + Sync {
 // GPU ENCODER
 // ============================================================================
 
-/// Flexible input for GPU encoder - supports hybrid execution.
-///
-/// This enum allows the encoder to accept input in various forms,
-/// enabling efficient hybrid CPU/GPU workflows.
-pub enum GpuEncoderInput<'a> {
-    /// Token IDs already on GPU.
-    ///
-    /// Use when: Full GPU path, token IDs already uploaded.
-    /// Shape: `[batch_size, sequence_length]` u32
-    TokensGpu(&'a GpuTensor),
-
-    /// Token IDs on CPU - will do CPU embedding lookup, upload hidden states.
-    ///
-    /// Use when: VRAM saving mode with cpu_embeddings=true.
-    /// The encoder will:
-    /// 1. Perform embedding lookup on CPU
-    /// 2. Upload resulting hidden states to GPU
-    /// 3. Continue with GPU layers
-    TokensCpu(&'a Array2<u32>),
-
-    /// Pre-computed hidden states on GPU (skip embedding).
-    ///
-    /// Use when: Continuing from partial GPU execution or external embedding.
-    /// Shape: `[batch_size, sequence_length, hidden_size]` f32
-    HiddenGpu(&'a GpuTensor),
-
-    /// Pre-computed hidden states on CPU - will upload.
-    ///
-    /// Use when: Continuing from CPU encoder/layers to GPU.
-    /// The encoder will upload the hidden states and continue with GPU layers.
-    HiddenCpu(&'a Array3<f32>),
-}
 
 /// Output from GPU encoder.
 #[derive(Debug)]

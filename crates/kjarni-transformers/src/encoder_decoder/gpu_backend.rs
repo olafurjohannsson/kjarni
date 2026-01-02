@@ -35,7 +35,6 @@ pub enum GpuSeq2SeqState {
     },
 }
 
-#[async_trait(?Send)]
 impl EncoderDecoderGenerationBackend for GpuBackend {
     type Tensor = GpuSeq2SeqState;
 
@@ -158,7 +157,7 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
             &attention_mask,
             Some(cache),
             Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
-        ).await?;
+        )?;
 
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
 

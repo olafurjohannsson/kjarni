@@ -7,7 +7,7 @@ use crate::Embeddings;
 use crate::WgpuContext;
 use crate::embeddings::EmbeddingConfig;
 use crate::embeddings::LoadedEmbeddings;
-use crate::encoder::traits::{GpuEncoder, GpuEncoderInput};
+use crate::encoder::traits::{GpuEncoder};
 use crate::gpu_ops::blocks::GpuFeedForward;
 use crate::gpu_ops::blocks::GpuNormalization;
 use crate::gpu_ops::blocks::GpuNormalizationWeights;
@@ -369,29 +369,12 @@ impl GpuEncoder for GpuTransformerEncoder {
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        // Helper to map enums
-        let map_input = |i| match i {
-            ModelInput::TokensCpu(t) => crate::embeddings::EmbeddingInput::Cpu(&t.to_owned().clone()),
-            ModelInput::TokensGpu(t) => crate::embeddings::EmbeddingInput::Gpu(t),
-            _ => panic!("Invalid input for embedding"),
-        };
-
-        // Handle pre-computed hidden states
-        match input {
-            ModelInput::HiddenGpu(t) => return Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => {
-                return GpuTensor::from_ndarray(&self.context, &t.to_owned());
-            }
-            _ => {}
-        }
-
-        // Handle Tokens
-        self.embeddings.encode(
-            encoder,
-            pool,
-            map_input(input),
-            token_type_ids.map(map_input),
-            0, // offset
+        self.embeddings.embed(
+            encoder, 
+            pool, 
+            input, 
+            token_type_ids,
+            0
         )
     }
 

@@ -9,6 +9,7 @@ use kjarni_transformers::encoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
+use kjarni_transformers::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForwardWeightsStd, GpuNormalization, GpuNormalizationWeights,
     layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
@@ -198,32 +199,34 @@ impl BartGpuEncoder {
             // ================================================================
             // SELF-ATTENTION LAYER NORM (Original Logic, corrected names)
             // ================================================================
-            let self_attn_ln_weights = GpuLayerNormWeights::new(
-                GpuTensor::from_model_weights(
-                    context,
-                    weights,
-                    &encoder_layout
-                        .layer
-                        .self_attn
-                        .norm_weight
-                        .replace("{}", &i.to_string()),
-                    target_dt,
-                    "sa_ln_w",
-                )?,
-                GpuTensor::from_model_weights(
-                    context,
-                    weights,
-                    &encoder_layout
-                        .layer
-                        .self_attn
-                        .norm_bias
-                        .as_ref()
-                        .unwrap()
-                        .replace("{}", &i.to_string()),
-                    target_dt,
-                    "sa_ln_b",
-                )?,
-            )?;
+
+            let self_attn_ln_weights =
+                GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
+                    GpuTensor::from_model_weights(
+                        context,
+                        weights,
+                        &encoder_layout
+                            .layer
+                            .self_attn
+                            .norm_weight
+                            .replace("{}", &i.to_string()),
+                        target_dt,
+                        "sa_ln_w",
+                    )?,
+                    GpuTensor::from_model_weights(
+                        context,
+                        weights,
+                        &encoder_layout
+                            .layer
+                            .self_attn
+                            .norm_bias
+                            .as_ref()
+                            .unwrap()
+                            .replace("{}", &i.to_string()),
+                        target_dt,
+                        "sa_ln_b",
+                    )?,
+                )?);
 
             // ================================================================
             // FEED-FORWARD WEIGHTS (Original Logic, corrected names)
@@ -273,17 +276,18 @@ impl BartGpuEncoder {
                     .replace("{}", &i.to_string()),
             )?;
 
-            let ff_weights = GpuFeedForwardWeightsStd::new(
+            let ff_weights = GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::new(
                 GpuTensor::from_ndarray(context, &fc1_w)?,
                 GpuTensor::from_ndarray(context, &fc1_b)?,
                 GpuTensor::from_ndarray(context, &fc2_w)?,
                 GpuTensor::from_ndarray(context, &fc2_b)?,
-            )?;
+            )?);
 
             // ================================================================
             // FFN LAYER NORM (Original Logic, corrected names)
             // ================================================================
-            let ffn_ln_weights = GpuLayerNormWeights::new(
+
+            let ffn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                 GpuTensor::from_model_weights(
                     context,
                     weights,
@@ -308,7 +312,7 @@ impl BartGpuEncoder {
                     target_dt,
                     "ffn_ln_b",
                 )?,
-            )?;
+            )?);
 
             // ================================================================
             // BUILD LAYER (Original Logic)
@@ -383,27 +387,12 @@ impl GpuEncoder for BartGpuEncoder {
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        // Helper to map enums
-        let map_input = |i| match i {
-            ModelInput::TokensCpu(t) => kjarni_transformers::embeddings::EmbeddingInput::Cpu(t),
-            ModelInput::TokensGpu(t) => kjarni_transformers::embeddings::EmbeddingInput::Gpu(t),
-            _ => panic!("Invalid input for embedding"),
-        };
-
-        // Handle pre-computed hidden states
-        match input {
-            ModelInput::HiddenGpu(t) => return Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => return GpuTensor::from_ndarray(&self.context, t),
-            _ => {}
-        }
-
-        // Handle Tokens
-        self.embeddings.encode(
-            encoder,
-            pool,
-            map_input(input),
-            token_type_ids.map(map_input),
-            0, // offset
+        self.embeddings.embed(
+            encoder, 
+            pool, 
+            input, 
+            token_type_ids, 
+            0 // position_offset (always 0 for Encoders)
         )
     }
 
@@ -411,8 +400,8 @@ impl GpuEncoder for BartGpuEncoder {
         &self,
         cmd_encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: GpuEncoderInput,
-        token_type_ids: Option<&GpuTensor>,
+        input: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
         // First, get hidden states on GPU (handles all input variants)
         let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids)?;

@@ -24,11 +24,11 @@ use crate::{
         blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
     },
     linear_layer::LinearLayer,
-    models::base::ModelLoadConfig,
+    models::base::{ModelInput, ModelLoadConfig},
     tensor::DType,
     weights::ModelWeights,
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use ndarray::Array2;
 use std::sync::Arc;
 
@@ -301,20 +301,157 @@ impl LoadedEmbeddings {
     pub fn hidden_size(&self) -> usize {
         self.config.hidden_size
     }
-    pub fn is_cpu_loaded(&self) -> bool { self.cpu.is_some() }
-    pub fn is_gpu_loaded(&self) -> bool { self.gpu_weights.is_some() }
+    pub fn is_cpu_loaded(&self) -> bool {
+        self.cpu.is_some()
+    }
+    pub fn is_gpu_loaded(&self) -> bool {
+        self.gpu_weights.is_some()
+    }
+    /// The "Universal" embedding function.
+    ///
+    /// Automatically handles data movement and compute placement.
+    /// - Returns `GpuTensor` (hidden states ready for the first layer).
+    /// - Fully Synchronous (safe for CommandEncoder).
+    pub fn embed(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        let ctx = self
+            .context
+            .as_ref()
+            .ok_or_else(|| anyhow!("No GPU context for embeddings"))?;
 
-    /// The "One Stop Shop" for embedding. 
+        // 1. Handle Pre-computed Hidden States (Pass-through)
+        match input {
+            ModelInput::HiddenGpu(t) => return Ok(t.clone()),
+            ModelInput::HiddenCpu(view) => {
+                // Sync Upload
+                return GpuTensor::from_ndarray(ctx, &view.as_standard_layout().to_owned());
+            }
+            _ => {} // Continue to token processing
+        }
+
+        // 2. Handle Token Inputs
+        match input {
+            ModelInput::TokensCpu(ids) => {
+                // === CPU INPUT PATH ===
+
+                // OPTION A: Hybrid (Weights on CPU) -> Compute CPU, Upload Result
+                if let Some(cpu_layer) = &self.cpu {
+                    // 1. Resolve Aux Types to an OWNED variable (Option<Array2>)
+                    // We need to own the data here so it lives long enough for the forward call.
+                    let cpu_types_storage: Option<Array2<u32>> = match token_type_ids {
+                        Some(ModelInput::TokensCpu(t)) => Some(t.to_owned()),
+                        None => None,
+                        _ => {
+                            return Err(anyhow::anyhow!(
+                                "Hybrid Error: Input is CPU but TokenTypes are GPU"
+                            ));
+                        }
+                    };
+
+                    // 2. Prepare Input IDs (Owned)
+                    let ids_owned = ids.to_owned();
+
+                    // 3. Compute
+                    // .as_ref() converts Option<Array2> -> Option<&Array2>
+                    let hidden = cpu_layer.forward(
+                        &ids_owned,
+                        cpu_types_storage.as_ref(),
+                        position_offset + self.config.position_offset,
+                        self.config.scale_embeddings,
+                    );
+
+                    // 4. Sync Upload
+                    return GpuTensor::from_ndarray(ctx, &hidden);
+                }
+
+                // OPTION B: Upload (Weights on GPU) -> Upload Input, Compute GPU
+                if let Some(gpu_layer) = &self.gpu_layer {
+                    // Upload Tokens
+                    let ids_gpu = GpuTensor::from_ndarray(ctx, &ids.to_owned())?;
+
+                    // Upload Types
+                    let types_gpu = match token_type_ids {
+                        Some(ModelInput::TokensCpu(t)) => {
+                            Some(GpuTensor::from_ndarray(ctx, &t.to_owned())?)
+                        }
+                        None => None,
+                        _ => {
+                            return Err(anyhow!(
+                                "Upload Error: Input is CPU but TokenTypes are GPU"
+                            ));
+                        }
+                    };
+
+                    return gpu_layer.encode(
+                        encoder,
+                        self.gpu_weights.as_ref().unwrap(),
+                        &ids_gpu,
+                        types_gpu.as_ref(),
+                        position_offset,
+                        self.config.hidden_size,
+                        self.config.position_offset,
+                        self.config.scale_embeddings,
+                        pool,
+                    );
+                }
+            }
+
+            ModelInput::TokensGpu(ids) => {
+                // === GPU INPUT PATH ===
+                if let Some(gpu_layer) = &self.gpu_layer {
+                    // Resolve Aux (Must be GPU)
+                    let types_gpu = match token_type_ids {
+                        Some(ModelInput::TokensGpu(t)) => Some(t),
+                        None => None,
+                        _ => {
+                            return Err(anyhow!(
+                                "Pure GPU Error: Input is GPU but TokenTypes are CPU"
+                            ));
+                        }
+                    };
+
+                    return gpu_layer.encode(
+                        encoder,
+                        self.gpu_weights.as_ref().unwrap(),
+                        ids,
+                        types_gpu,
+                        position_offset,
+                        self.config.hidden_size,
+                        self.config.position_offset,
+                        self.config.scale_embeddings,
+                        pool,
+                    );
+                } else {
+                    return Err(anyhow!(
+                        "Invalid Config: Tokens on GPU but Embeddings are CPU-only. Cannot compute synchronously."
+                    ));
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        Err(anyhow!("No embeddings loaded!"))
+    }
+    /// The "One Stop Shop" for embedding.
     /// Handles CPU/GPU location mismatch automatically.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
-        input: EmbeddingInput, 
-        token_type_ids: Option<EmbeddingInput>, 
+        input: EmbeddingInput,
+        token_type_ids: Option<EmbeddingInput>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        let ctx = self.context.as_ref().ok_or_else(|| anyhow::anyhow!("No GPU context"))?;
+        let ctx = self
+            .context
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No GPU context"))?;
 
         // CASE 1: CPU Input Tokens
         if let EmbeddingInput::Cpu(cpu_ids) = input {
@@ -324,7 +461,11 @@ impl LoadedEmbeddings {
                 let cpu_types = match token_type_ids {
                     Some(EmbeddingInput::Cpu(t)) => Some(t),
                     None => None,
-                    _ => return Err(anyhow::anyhow!("Cannot mix CPU tokens with GPU token_types in Hybrid mode")),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "Cannot mix CPU tokens with GPU token_types in Hybrid mode"
+                        ));
+                    }
                 };
 
                 let hidden = cpu_layer.forward(
@@ -333,11 +474,11 @@ impl LoadedEmbeddings {
                     position_offset + self.config.position_offset,
                     self.config.scale_embeddings,
                 );
-                
+
                 // Synchronous Upload of result
                 return GpuTensor::from_ndarray(ctx, &hidden);
             }
-            
+
             // B. Upload Path: Weights on GPU -> Upload Tokens -> Compute GPU
             // (We fall through to GPU logic below)
         }
@@ -358,7 +499,7 @@ impl LoadedEmbeddings {
         // CASE 2: GPU Computation
         if let Some(gpu_layer) = &self.gpu_layer {
             let gpu_weights = self.gpu_weights.as_ref().unwrap();
-            
+
             return gpu_layer.encode(
                 encoder,
                 gpu_weights,
@@ -372,7 +513,9 @@ impl LoadedEmbeddings {
             );
         }
 
-        Err(anyhow::anyhow!("Invalid state: Tokens on GPU but Embeddings only on CPU. Cannot compute synchronously."))
+        Err(anyhow::anyhow!(
+            "Invalid state: Tokens on GPU but Embeddings only on CPU. Cannot compute synchronously."
+        ))
     }
     pub fn encode_cpu(
         &self,

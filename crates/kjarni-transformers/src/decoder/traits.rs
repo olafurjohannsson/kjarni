@@ -89,14 +89,13 @@ pub trait DecoderGenerationBackend: Send + Sync {
 /// Defines the asynchronous interface for a GPU-native Transformer Decoder.
 ///
 /// Breaks the forward pass into granular steps for testability and advanced control.
-#[async_trait(?Send)]
 pub trait GpuDecoder: Send + Sync {
 
     fn as_any(&self) -> &dyn std::any::Any;
 
     /// Step 1: Compute embeddings.
     /// Handles lookup (Tokens) or passthrough (Hidden).
-    async fn embed(
+    fn embed(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -106,7 +105,7 @@ pub trait GpuDecoder: Send + Sync {
 
     /// Step 2: Apply initial normalization (Pre-Norm).
     /// Used by Llama, Mistral, etc.
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -136,7 +135,7 @@ pub trait GpuDecoder: Send + Sync {
 
     /// Default full forward pass.
     /// Chains `embed_and_normalize` -> `forward_layers`.
-    async fn forward(
+    fn forward(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -146,7 +145,7 @@ pub trait GpuDecoder: Send + Sync {
         cache: Option<&mut GpuKVCache>,
         _encoder_hidden_states: Option<&GpuTensor>, // Reserved for future Seq2Seq reuse
     ) -> Result<GpuTensor> {
-        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset).await?;
+        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
         self.forward_layers(
             encoder,
@@ -354,8 +353,7 @@ pub trait DecoderLanguageModel: LanguageModel {
                 0,    // offset
                 None, // no cache
                 None, // no encoder hidden
-            )
-            .await?;
+            )?;
 
         // 3. Project
         // Borrow of `frame` is available again here

@@ -113,7 +113,6 @@ pub trait CpuCrossDecoder: Send + Sync {
 }
 
 /// Defines the interface for a GPU-native decoder that uses cross-attention.
-#[async_trait(?Send)]
 pub trait GpuCrossDecoder: Send + Sync {
     /// Pre-computes the Key and Value matrices for cross-attention.
     fn precompute_cross_attention_kv(
@@ -123,7 +122,7 @@ pub trait GpuCrossDecoder: Send + Sync {
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
     
-    async fn embed(
+    fn embed(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -132,7 +131,7 @@ pub trait GpuCrossDecoder: Send + Sync {
     ) -> Result<GpuTensor>;
 
     /// Step 2: Apply initial normalization.
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -159,7 +158,7 @@ pub trait GpuCrossDecoder: Send + Sync {
     fn hidden_size(&self) -> usize;
 
     /// Default full forward pass.
-    async fn forward(
+    fn forward(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -172,7 +171,7 @@ pub trait GpuCrossDecoder: Send + Sync {
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
 
         // 1 & 2. Embed and Norm
-        let hidden = self.embed_and_normalize(encoder, pool, decoder_input, position_offset).await?;
+        let hidden = self.embed_and_normalize(encoder, pool, decoder_input, position_offset)?;
 
         // 3. Run Layers
         self.forward_layers(

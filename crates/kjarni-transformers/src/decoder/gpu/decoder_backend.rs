@@ -225,8 +225,7 @@ impl GpuDecoderBackend {
                 gpu_cache.get_seq_length(),
                 Some(gpu_cache),
                 None,
-            )
-            .await?;
+            )?;
 
         // 6. Extract last token's hidden state
         //
@@ -321,8 +320,7 @@ impl GpuDecoderBackend {
                 gpu_cache.get_seq_length(),
                 Some(gpu_cache),
                 None,
-            )
-            .await?;
+            )?;
 
         frame.finish();
         gpu_cache.increment_len(input_len);

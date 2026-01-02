@@ -237,73 +237,31 @@ impl BartGpuDecoder {
     }
 }
 
-#[async_trait(?Send)]
 impl GpuCrossDecoder for BartGpuDecoder {
-    async fn embed(
+    fn embed(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        let meta = self.config.metadata();
-        let cpu_embeddings = false; // todo modelLoadConfig
-        match input {
-            ModelInput::TokensCpu(ids) => {
-                // If BART has CPU embeddings offloaded
-                let ids = ids.as_standard_layout().to_owned();
-                let ids_gpu = GpuTensor::from_ndarray(&self.context, &ids)?;
-                self.embeddings.encode(
-                    encoder,
-                    &self.embedding_weights,
-                    &ids_gpu,
-                    None,
-                    position_offset,
-                    meta.hidden_size,
-                    meta.extra_pos_embeddings,
-                    meta.scale_embeddings,
-                    pool,
-                )
-                // if let Some(cpu_embeds) = &self.cpu_embeddings {
-                //     let input_array = Array2::from_shape_vec((1, ids.len()), ids.to_vec())?;
-                //     let hidden_cpu = cpu_embeds.forward(
-                //         &input_array, None, position_offset, meta.scale_embeddings
-                //     );
-                //     GpuTensor::from_ndarray(&self.context, &hidden_cpu)
-                // } else {
-                //     let ids_gpu = GpuTensor::from_ndarray(&self.context, &Array2::from_shape_vec((1, ids.len()), ids.to_vec())?)?;
-                //     self.embeddings.encode(
-                //         encoder, &self.embedding_weights, &ids_gpu, None,
-                //         position_offset, meta.hidden_size, meta.extra_pos_embeddings, meta.scale_embeddings, pool
-                //     )
-                // }
-            }
-            ModelInput::TokensGpu(ids_gpu) => self.embeddings.encode(
-                encoder,
-                &self.embedding_weights,
-                ids_gpu,
-                None,
-                position_offset,
-                meta.hidden_size,
-                meta.extra_pos_embeddings,
-                meta.scale_embeddings,
-                pool,
-            ),
-            ModelInput::HiddenGpu(t) => Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => {
-                GpuTensor::from_ndarray(&self.context, &t.as_standard_layout().to_owned())
-            }
-        }
+        self.embeddings.embed(
+            encoder, 
+            pool, 
+            input, 
+            None, // Decoders usually don't use token_type_ids
+            position_offset
+        )
     }
 
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        let hidden = self.embed(encoder, pool, input, position_offset).await?;
+        let hidden = self.embed(encoder, pool, input, position_offset)?;
         let ln_output = pool.get(hidden.shape().to_vec());
         self.embed_layer_norm
             .encode(encoder, &self.embed_ln_weights, &hidden, &ln_output);

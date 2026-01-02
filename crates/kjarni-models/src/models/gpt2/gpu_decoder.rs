@@ -263,33 +263,27 @@ impl Gpt2GpuDecoder {
     }
 }
 
-#[async_trait(?Send)]
 impl GpuDecoder for Gpt2GpuDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    async fn embed(
+    fn embed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
         input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        match input {
-            ModelInput::TokensCpu(ids) => {
-                // Convert view to owned for embedding lookup
-                let ids_owned = ids.to_owned();
-                self.embeddings.forward(encoder, pool, &ids_owned, None, position_offset)
-            }
-            ModelInput::TokensGpu(ids_tensor) => {
-                self.embeddings.forward_gpu(encoder, pool, ids_tensor, None, position_offset).await
-            }
-            ModelInput::HiddenGpu(t) => Ok(t.clone()),
-            ModelInput::HiddenCpu(t) => GpuTensor::from_ndarray(&self.context, &t.to_owned()),
-        }
+        self.embeddings.embed(
+            encoder, 
+            pool, 
+            input, 
+            None, // Decoders usually don't use token_type_ids
+            position_offset
+        )
     }
 
-    async fn embed_and_normalize(
+    fn embed_and_normalize(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -298,7 +292,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     ) -> Result<GpuTensor> {
         // GPT-2 standard architecture does not have a LayerNorm *before* the first block.
         // It only has norms inside blocks (Pre-Norm) and a final norm.
-        self.embed(encoder, pool, input, position_offset).await
+        self.embed(encoder, pool, input, position_offset)
     }
 
     fn forward_layers(
@@ -349,7 +343,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     }
 
     // Override default forward to include Final Layer Norm
-    async fn forward(
+    fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -361,8 +355,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
     ) -> Result<GpuTensor> {
         // 1. Embed
         let hidden = self
-            .embed_and_normalize(encoder, pool, input, position_offset)
-            .await?;
+            .embed_and_normalize(encoder, pool, input, position_offset)?;
 
         // 2. Layers
         let mut hidden = self.forward_layers(
