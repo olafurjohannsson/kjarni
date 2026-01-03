@@ -124,7 +124,7 @@ impl LoadedLMHead {
                     "Creating quantized ({:?}) copy of tied LM head weights.",
                     dtype
                 );
-                Some(cpu_emb.clone_as_quantized(dtype)?)
+                Some(cpu_emb.to_quantized(dtype)?)
             } else {
                 // Original behavior: just clone the layer.
                 Some(cpu_emb)

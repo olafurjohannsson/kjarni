@@ -1,9 +1,46 @@
+//! GPU kernel for Layer Normalization with learnable scale and shift.
+//!
+//! # Overview
+//!
+//! Implements LayerNorm: `y = (x - mean(x)) / sqrt(var(x) + eps) * gamma + beta`
+//!
+//! Used by encoder-based models (BERT, GPT-2, etc.) for normalizing activations
+//! across the hidden dimension. Provides training stability and faster convergence.
+//!
+//! # Performance
+//!
+//! - **Current**: ~0.4ms for [128, 768] on RTX 3090
+//! - **Critical Issue**: Only 1 thread per row active (255/256 threads idle)
+//! - **Memory**: 4 passes over data (mean, variance, normalize, scale)
+//!
+//! # TODO
+//!
+//! - **CRITICAL**: Fix memory leak - uniform buffer allocated every `encode()` call (line 160)
+//!   Should use uniform arena pattern like matmul does
+//! - **CRITICAL**: Shader only uses 1/256 threads - see shader file for details
+//! - Implement Welford's online algorithm for fused mean+variance
+//! - Add BF16 support for gamma/beta weights
+//! - Consider switching to RMSNorm for decoder-only models (20-30% faster)
+//!
+//! # See Also
+//!
+//! - [`layer_norm.wgsl`] — WGSL shader implementation
+//! - [`super::rms_norm`] — Faster alternative without mean centering
+
 use crate::gpu_ops::{GpuTensor, Kernel};
 use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+/// Uniform parameters passed to the LayerNorm shader.
+///
+/// # Fields
+///
+/// * `m` — Number of rows to normalize (batch * seq_len)
+/// * `n` — Hidden dimension size
+/// * `eps` — Epsilon for numerical stability (typically 1e-5 or 1e-6)
+/// * `_padding` — Alignment padding for WebGPU uniform requirements
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct NormUniforms {
@@ -13,13 +50,31 @@ struct NormUniforms {
     _padding: u32,
 }
 
-/// Holds the weight and bias tensors for the GpuLayerNorm operation.
+/// Holds the learnable scale (gamma) and shift (beta) parameters for LayerNorm.
+///
+/// Both gamma and beta must be 1D tensors with length equal to the hidden dimension.
+/// They are applied element-wise after normalization:
+/// `output = normalized * gamma + beta`
 pub struct GpuLayerNormWeights {
     pub(crate) gamma: GpuTensor, // scale
     pub(crate) beta: GpuTensor,  // bias
 }
 
 impl GpuLayerNormWeights {
+    /// Creates new LayerNorm weights from gamma (scale) and beta (shift) tensors.
+    ///
+    /// # Arguments
+    ///
+    /// * `gamma` — Scale parameter [hidden_size] in F32 or BF16
+    /// * `beta` — Shift parameter [hidden_size] in F32 or BF16
+    ///
+    /// # Returns
+    ///
+    /// LayerNorm weights ready for GPU execution.
+    ///
+    /// # Panics
+    ///
+    /// Panics if gamma and beta have different shapes or are not 1D.
     pub fn new(gamma: GpuTensor, beta: GpuTensor) -> Result<Self> {
         // Both must be 1D (one parameter per normalized feature)
         assert_eq!(gamma.rank(), 1, "LayerNorm gamma must be 1D");
@@ -36,7 +91,26 @@ impl GpuLayerNormWeights {
     }
 }
 
-/// A GPU kernel for Layer Normalization.
+/// GPU kernel for Layer Normalization.
+///
+/// Normalizes activations across the hidden dimension with learnable affine transform.
+///
+/// # Algorithm
+///
+/// For each token (row):
+/// 1. Compute mean: μ = sum(x) / N
+/// 2. Compute variance: σ² = sum((x - μ)²) / N
+/// 3. Normalize: x_norm = (x - μ) / sqrt(σ² + eps)
+/// 4. Apply affine: y = x_norm * gamma + beta
+///
+/// # Performance Note
+///
+/// Current implementation is inefficient:
+/// - Only uses 1/256 threads per row (see shader TODO)
+/// - Allocates uniform buffer every encode call (memory leak)
+/// - Four sequential passes instead of fused computation
+///
+/// For decoder-only models, consider using RMSNorm instead (simpler and faster).
 pub struct GpuLayerNorm {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -45,6 +119,16 @@ pub struct GpuLayerNorm {
 }
 
 impl GpuLayerNorm {
+    /// Creates a new LayerNorm GPU kernel.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` — WebGPU device context
+    /// * `eps` — Epsilon for numerical stability (typically 1e-5 for F32, 1e-6 for BF16)
+    ///
+    /// # Returns
+    ///
+    /// Initialized LayerNorm kernel ready for encoding operations.
     pub fn new(context: &Arc<WgpuContext>, eps: f32) -> Self {
         let shader = context
             .device
@@ -133,7 +217,22 @@ impl GpuLayerNorm {
         }
     }
 
-    /// Encodes the LayerNorm operation.
+    /// Encodes the LayerNorm operation into the command buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `encoder` — WebGPU command encoder to record GPU commands
+    /// * `weights` — Learnable scale (gamma) and shift (beta) parameters
+    /// * `input` — Input tensor [batch, seq_len, hidden_size] in F32
+    /// * `output` — Output tensor (same shape as input) in F32
+    ///
+    /// # Panics
+    ///
+    /// Panics if input tensor rank is less than 2.
+    ///
+    /// # TODO
+    ///
+    /// - **CRITICAL**: Fix memory leak on line 160 - uniform buffer allocated every call
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,

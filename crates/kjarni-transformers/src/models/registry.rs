@@ -1,7 +1,50 @@
-//! Pretrained model registry with metadata.
+//! Pretrained model registry with metadata and download utilities.
 //!
-//! This module acts as the "App Store" for the inference engine, defining
-//! supported architectures, canonical URLs, and task types.
+//! This module acts as the "App Store" for the Kjarni inference engine, defining
+//! all supported model architectures, their download URLs, task types, and metadata.
+//! It provides a curated list of pretrained models optimized for edge deployment,
+//! along with utilities for downloading and caching model files.
+//!
+//! # Overview
+//!
+//! The registry system consists of several key components:
+//!
+//! - [`ModelType`] — Enum of all supported pretrained models
+//! - [`ModelArchitecture`] — The structural family (Llama, BERT, T5, etc.)
+//! - [`ModelTask`] — Primary use case (Chat, Embedding, Seq2Seq, etc.)
+//! - [`ModelInfo`] — Complete metadata including URLs and descriptions
+//! - [`ModelPaths`] — Download URLs for model files
+//!
+//! # Example
+//!
+//! ```ignore
+//! use kjarni_transformers::models::registry::{ModelType, get_default_cache_dir};
+//!
+//! // Get model metadata
+//! let info = ModelType::Llama3_2_1B_Instruct.info();
+//! println!("Model: {}", info.description);
+//! println!("Size: {}", format_size(info.size_mb));
+//!
+//! // Download model files
+//! let cache_dir = get_default_cache_dir();
+//! let model_dir = ModelType::Llama3_2_1B_Instruct.cache_dir(&cache_dir);
+//! download_model_files(&model_dir, &info.paths, WeightsFormat::GGUF).await?;
+//! ```
+//!
+//! # Model Categories
+//!
+//! Models are organized by task:
+//!
+//! - **Embeddings** — Vector embeddings for RAG and semantic search
+//! - **Chat** — Interactive conversation and instruction following
+//! - **Reasoning** — Deep logical reasoning and chain-of-thought
+//! - **Seq2Seq** — Translation, summarization, and text-to-text
+//! - **Classification** — Sentiment analysis and zero-shot classification
+//!
+//! # See Also
+//!
+//! - [`crate::models::base::LanguageModel`] — Core model trait
+//! - [`crate::weights::ModelWeights`] — Low-level weight loading
 
 use crate::utils::levenshtein;
 use anyhow::{Result, anyhow};
@@ -9,45 +52,143 @@ use tokenizers::Model;
 use std::path::{Path, PathBuf};
 use strum_macros::EnumIter;
 
+/// Model weight storage format for loading and inference.
+///
+/// Kjarni supports two primary weight formats with different trade-offs between
+/// precision, file size, and loading speed.
+///
+/// # Variants
+///
+/// * [`SafeTensors`](WeightsFormat::SafeTensors) — High-precision, standard format.
+/// * [`GGUF`](WeightsFormat::GGUF) — Quantized, optimized format for edge devices.
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::WeightsFormat;
+///
+/// // Use GGUF for reduced memory footprint
+/// let format = WeightsFormat::GGUF;
+///
+/// // Use SafeTensors for maximum precision
+/// let format = WeightsFormat::SafeTensors;
+/// ```
 pub enum WeightsFormat {
-    SafeTensors, // Default
-    GGUF,        // Optimized
+    /// SafeTensors format with high precision (default).
+    ///
+    /// Standard format using full precision (F32, BF16) weights. Provides
+    /// maximum accuracy but larger file sizes. Compatible with Hugging Face.
+    SafeTensors,
+
+    /// GGUF format with quantization optimizations.
+    ///
+    /// Optimized format supporting aggressive quantization (Q4_K, Q8_0).
+    /// Reduces memory usage by 4-8x with minimal quality loss.
+    GGUF,
 }
 
-/// Defines the specific structural family of the model.
+/// Defines the specific structural family of a model architecture.
 ///
-/// This determines which `Config` struct and `Decoder` implementation
-/// will be used to load the model.
+/// Each architecture variant represents a distinct transformer design with
+/// specific positional encoding, normalization, and attention mechanisms.
+/// This determines which config struct and implementation will be used to
+/// load and run the model.
+///
+/// # Architecture Categories
+///
+/// - **Decoders** — Autoregressive LLMs for text generation
+/// - **Encoders** — Bidirectional models for embeddings and classification
+/// - **Seq2Seq** — Encoder-decoder models for translation and summarization
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::ModelArchitecture;
+///
+/// let arch = ModelArchitecture::Llama;
+/// assert_eq!(arch.category(), "decoder");
+/// println!("{}", arch.display_name());
+/// ```
+///
+/// # See Also
+///
+/// - [`ModelType`] — Specific pretrained model instances
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelArchitecture {
-    // === Decoders ===
-    /// Standard Llama architecture (RoPE, SwiGLU, RMSNorm).
-    /// Used by: Llama 2/3, Alpaca, Vicuna, TinyLlama.
+    // === Decoders (LLMs) ===
+
+    /// Standard Llama architecture with RoPE, SwiGLU, and RMSNorm.
+    ///
+    /// Used by: Llama 2/3, Alpaca, Vicuna, TinyLlama. The most widely-adopted
+    /// open source architecture for decoder-only language models.
     Llama,
-    /// Qwen2 family (Llama-like but adds Bias to QKV/Output).
+
+    /// Qwen2 family with bias terms in attention projections.
+    ///
+    /// Similar to Llama but adds bias to QKV and output projections.
+    /// Used by Qwen/Qwen2.5 models.
     Qwen2,
-    /// Mistral family (Llama-like but adds Sliding Window Attention).
+
+    /// Mistral family with sliding window attention.
+    ///
+    /// Extends Llama with efficient sliding window attention for long contexts.
+    /// Used by Mistral-7B and derived models.
     Mistral,
-    /// Phi-3 family (Llama-like but uses LongRoPE scaling).
+
+    /// Phi-3 family with LongRoPE scaling.
+    ///
+    /// Microsoft's compact architecture using advanced RoPE scaling for
+    /// extended context lengths. Used by Phi-3 Mini/Small/Medium.
     Phi3,
 
     // === Encoders ===
-    /// BERT family (Absolute Positional Embeddings).
+
+    /// BERT family with absolute positional embeddings.
+    ///
+    /// The classic bidirectional encoder. Used for embeddings, classification,
+    /// and named entity recognition.
     Bert,
-    /// NomicBERT (Uses RoPE in an Encoder).
+
+    /// NomicBERT with rotary position embeddings.
+    ///
+    /// Modern encoder using RoPE instead of learned positional embeddings.
+    /// Provides better long-context performance for embedding tasks.
     NomicBert,
 
-    // === Seq2Seq ===
-    /// T5/FLAN family (Relative Positional Buckets).
+    // === Seq2Seq (Encoder-Decoder) ===
+
+    /// T5/FLAN family with relative positional buckets.
+    ///
+    /// Text-to-text encoder-decoder using relative position biases.
+    /// Excels at instruction following and translation.
     T5,
-    /// BART family (Learned Positional Embeddings).
+
+    /// BART family with learned positional embeddings.
+    ///
+    /// Facebook's encoder-decoder with absolute learned positions.
+    /// Strong performance on summarization and generation tasks.
     Bart,
 
-    // Legacy
+    /// GPT family (legacy).
+    ///
+    /// Original GPT-2 architecture. Included for compatibility but largely
+    /// superseded by Llama-based models.
     GPT,
 }
 
 impl ModelArchitecture {
+    /// Returns a human-readable display name for the architecture.
+    ///
+    /// # Returns
+    ///
+    /// A static string describing the architecture with key features.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let arch = ModelArchitecture::Llama;
+    /// assert_eq!(arch.display_name(), "Llama (Standard)");
+    /// ```
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Llama => "Llama (Standard)",
@@ -61,7 +202,23 @@ impl ModelArchitecture {
             Self::GPT => "GPT",
         }
     }
-    /// Returns the broad category of the architecture for filtering/display.
+
+    /// Returns the broad category of the architecture.
+    ///
+    /// Architectures are categorized as decoders (LLMs), encoders (embeddings),
+    /// or encoder-decoders (seq2seq). Useful for filtering and display grouping.
+    ///
+    /// # Returns
+    ///
+    /// One of: `"decoder"`, `"encoder"`, or `"encoder-decoder"`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// assert_eq!(ModelArchitecture::Llama.category(), "decoder");
+    /// assert_eq!(ModelArchitecture::Bert.category(), "encoder");
+    /// assert_eq!(ModelArchitecture::T5.category(), "encoder-decoder");
+    /// ```
     pub fn category(&self) -> &'static str {
         match self {
             // Decoders (LLMs)
@@ -76,28 +233,126 @@ impl ModelArchitecture {
     }
 }
 
-/// Defines the primary intended use case for the model.
+/// Defines the primary intended use case for a model.
+///
+/// Each model in the registry is tagged with its primary task, which determines
+/// the optimal input format, output interpretation, and performance characteristics.
+/// This allows users to quickly filter models by their intended application.
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::{ModelType, ModelTask};
+///
+/// let info = ModelType::NomicEmbedText.info();
+/// assert_eq!(info.task, ModelTask::Embedding);
+///
+/// let info = ModelType::Llama3_2_1B_Instruct.info();
+/// assert_eq!(info.task, ModelTask::Chat);
+/// ```
+///
+/// # See Also
+///
+/// - [`ModelType`] — Specific pretrained models
+/// - [`ModelArchitecture`] — Structural model families
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelTask {
-    /// Vector embeddings for RAG/Search.
+    /// Vector embeddings for retrieval-augmented generation (RAG) and semantic search.
+    ///
+    /// These models convert text into dense vector representations that capture
+    /// semantic meaning. Used for similarity search, clustering, and retrieval.
     Embedding,
-    /// Reranking search results.
+
+    /// Reranking search results for improved relevance.
+    ///
+    /// Cross-encoder models that score query-document pairs. Used as a second-stage
+    /// reranker after initial retrieval to improve result quality.
     ReRanking,
+
     /// Interactive chat and instruction following.
+    ///
+    /// General-purpose conversational models optimized for following instructions,
+    /// answering questions, and engaging in dialogue. Balanced for speed and quality.
     Chat,
-    /// Deep reasoning and logic (Chain of Thought).
+
+    /// Deep reasoning and logical inference.
+    ///
+    /// Models optimized for chain-of-thought reasoning, mathematical problem solving,
+    /// and complex logical tasks. Often slower but more accurate on reasoning tasks.
     Reasoning,
-    /// Detecting positive/negative sentiment.
+
+    /// Detecting positive/negative sentiment in text.
+    ///
+    /// Classification models that predict emotional tone or polarity (positive,
+    /// negative, neutral). Fast and specialized for sentiment analysis.
     SentimentAnalysis,
-    /// Classifying text into arbitrary labels.
+
+    /// Classifying text into arbitrary user-defined labels.
+    ///
+    /// Models that can classify text into any set of labels provided at inference time,
+    /// without requiring task-specific fine-tuning. Extremely flexible.
     ZeroShotClassification,
-    /// Translation or Text-to-Text generation.
+
+    /// Translation, summarization, and text-to-text generation.
+    ///
+    /// Encoder-decoder models for transforming input text to output text.
+    /// Includes translation, summarization, and instruction-following tasks.
     Seq2Seq,
 
+    /// General text generation (legacy).
+    ///
+    /// Basic autoregressive generation without instruction tuning.
+    /// Mostly superseded by Chat and Reasoning models.
     Generation,
 }
 
-/// The curated list of supported models.
+/// The curated list of pretrained models supported by Kjarni.
+///
+/// This enum defines all models that can be loaded and run in the Kjarni
+/// inference engine. Each variant represents a specific pretrained model with
+/// known-good weights, tokenizer, and configuration hosted on Hugging Face.
+///
+/// # Model Selection Guide
+///
+/// **For Embeddings (RAG/Search):**
+/// - [`NomicEmbedText`](ModelType::NomicEmbedText) — Modern standard, 8K context
+/// - [`MiniLML6V2`](ModelType::MiniLML6V2) — Fastest, legacy option
+/// - [`BgeM3`](ModelType::BgeM3) — Multilingual, state-of-the-art
+///
+/// **For Chat (< 4GB VRAM):**
+/// - [`Llama3_2_1B_Instruct`](ModelType::Llama3_2_1B_Instruct) — Fast, balanced
+/// - [`Llama3_2_3B_Instruct`](ModelType::Llama3_2_3B_Instruct) — Better quality
+/// - [`Phi3_5_Mini_Instruct`](ModelType::Phi3_5_Mini_Instruct) — Best reasoning
+///
+/// **For Chat (8GB+ VRAM):**
+/// - [`Llama3_1_8B_Instruct`](ModelType::Llama3_1_8B_Instruct) — Production standard
+/// - [`DeepSeek_R1_Distill_Llama_8B`](ModelType::DeepSeek_R1_Distill_Llama_8B) — SOTA reasoning
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::ModelType;
+///
+/// // Access model metadata
+/// let model = ModelType::Llama3_2_1B_Instruct;
+/// let info = model.info();
+///
+/// println!("Name: {}", model.cli_name());
+/// println!("Description: {}", info.description);
+/// println!("Size: {} MB", info.size_mb);
+/// println!("Parameters: {} M", info.params_millions);
+///
+/// // Check if model is downloaded
+/// let cache_dir = get_default_cache_dir();
+/// if model.is_downloaded(&cache_dir) {
+///     println!("Model already cached!");
+/// }
+/// ```
+///
+/// # See Also
+///
+/// - [`ModelInfo`] — Complete metadata for a model
+/// - [`download_model_files`] — Download model weights and config
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum ModelType {
     // === Embeddings & Reranking ===
@@ -134,28 +389,94 @@ pub enum ModelType {
     Gpt2,
 }
 
+/// Download URLs for all required model files.
+///
+/// Contains URLs for weights, tokenizer, and configuration files. Models can
+/// be available in multiple formats (SafeTensors, GGUF), and this struct tracks
+/// URLs for both variants when available.
+///
+/// # Fields
+///
+/// * `weights_url` — URL to model.safetensors or model.safetensors.index.json.
+/// * `tokenizer_url` — URL to tokenizer.json (always required).
+/// * `config_url` — URL to config.json (always required).
+/// * `gguf_url` — Optional URL to quantized .gguf file (e.g., Q4_K_M variant).
+///
+/// # Example
+///
+/// ```ignore
+/// let info = ModelType::Llama3_2_1B_Instruct.info();
+/// let paths = &info.paths;
+///
+/// println!("SafeTensors: {}", paths.weights_url);
+/// if let Some(gguf) = paths.gguf_url {
+///     println!("GGUF: {}", gguf);
+/// }
+/// ```
+///
+/// # See Also
+///
+/// - [`download_model_files`] — Download utility using these paths
+/// - [`WeightsFormat`] — Format selection for downloading
 #[derive(Debug, Clone)]
 pub struct ModelPaths {
-    // === Standard / Base Model (SafeTensors) ===
-    /// URL to model.safetensors or model.safetensors.index.json
+    /// URL to SafeTensors weights file or index.
+    ///
+    /// Points to either a single `model.safetensors` file or a
+    /// `model.safetensors.index.json` for sharded models.
     pub weights_url: &'static str,
-    /// URL to tokenizer.json (Always used)
+
+    /// URL to tokenizer configuration.
+    ///
+    /// Always required. Contains vocabulary and tokenization rules.
     pub tokenizer_url: &'static str,
-    /// URL to config.json (Always used)
+
+    /// URL to model configuration.
+    ///
+    /// Always required. Contains hyperparameters like hidden size, number of layers, etc.
     pub config_url: &'static str,
 
-    // === GGUF Optimization (Optional) ===
-    /// Direct URL to the recommended .gguf file (e.g. Q4_K_M)
+    /// Optional URL to quantized GGUF file.
+    ///
+    /// When available, points to a recommended quantized variant (typically Q4_K_M).
+    /// Provides 4-8x memory savings with minimal quality loss.
     pub gguf_url: Option<&'static str>,
 }
 
+/// Complete metadata for a pretrained model.
+///
+/// Contains all information needed to understand, download, and load a model,
+/// including architecture type, task specialization, file URLs, and size metrics.
+///
+/// # Example
+///
+/// ```ignore
+/// let info = ModelType::Llama3_2_1B_Instruct.info();
+///
+/// println!("Architecture: {:?}", info.architecture);
+/// println!("Task: {:?}", info.task);
+/// println!("Description: {}", info.description);
+/// println!("Size: {} MB ({} M params)", info.size_mb, info.params_millions);
+/// ```
+///
+/// # See Also
+///
+/// - [`ModelType::info`] — Get info for a specific model
+/// - [`format_size`] — Format size_mb for display
+/// - [`format_params`] — Format params_millions for display
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
+    /// The model's structural architecture family.
     pub architecture: ModelArchitecture,
+    /// The model's primary intended use case.
     pub task: ModelTask,
+    /// Download URLs for all model files.
     pub paths: ModelPaths,
+    /// Human-readable description of the model's capabilities.
     pub description: &'static str,
+    /// Approximate disk size in megabytes (SafeTensors format).
     pub size_mb: usize,
+    /// Number of parameters in millions.
     pub params_millions: usize,
 }
 
@@ -631,8 +952,58 @@ impl ModelType {
     }
 }
 
-// --- Download Helpers (Standardized) ---
+// =============================================================================
+// Download Utilities
+// =============================================================================
 
+/// Downloads all required files for a model to the specified directory.
+///
+/// Fetches weights, tokenizer, and config files from Hugging Face Hub. Supports
+/// both SafeTensors (high precision) and GGUF (quantized) formats. Files are
+/// cached locally and reused on subsequent calls.
+///
+/// # Arguments
+///
+/// * `model_dir` - Local directory to store downloaded files.
+/// * `paths` - Model file URLs from [`ModelInfo`].
+/// * `format` - Desired weights format (SafeTensors or GGUF).
+///
+/// # Returns
+///
+/// Path to the downloaded weights file (either .safetensors or .gguf).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Network request fails.
+/// - File writing fails.
+/// - GGUF format requested but not available for this model.
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::{
+///     ModelType, WeightsFormat, download_model_files, get_default_cache_dir
+/// };
+///
+/// let model = ModelType::Llama3_2_1B_Instruct;
+/// let info = model.info();
+/// let cache_dir = get_default_cache_dir();
+/// let model_dir = model.cache_dir(&cache_dir);
+///
+/// // Download with GGUF quantization
+/// let weights_path = download_model_files(&model_dir, &info.paths, WeightsFormat::GGUF).await?;
+/// println!("Downloaded to: {:?}", weights_path);
+/// ```
+///
+/// # Environment Variables
+///
+/// - `HF_TOKEN` - Optional Hugging Face access token for private models.
+///
+/// # See Also
+///
+/// - [`get_default_cache_dir`] — Get system cache directory
+/// - [`ModelType::cache_dir`] — Get model-specific cache directory
 pub async fn download_model_files(
     model_dir: &Path,
     paths: &ModelPaths,
@@ -737,7 +1108,42 @@ async fn download_sharded_weights(model_dir: &Path, index_url: &str) -> Result<(
 // Utility Functions
 // =============================================================================
 
-/// Get the default cache directory, respecting KJARNI_CACHE_DIR env var.
+/// Returns the default cache directory for Kjarni models.
+///
+/// Determines the appropriate system cache location following platform conventions.
+/// Can be overridden with the `KJARNI_CACHE_DIR` environment variable.
+///
+/// # Platform Paths
+///
+/// - **Linux:** `~/.cache/kjarni`
+/// - **macOS:** `~/Library/Caches/kjarni`
+/// - **Windows:** `{FOLDERID_LocalAppData}/kjarni`
+///
+/// # Returns
+///
+/// Path to the cache directory.
+///
+/// # Panics
+///
+/// Panics if the system does not provide a standard cache directory location.
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::get_default_cache_dir;
+///
+/// let cache = get_default_cache_dir();
+/// println!("Models cached at: {:?}", cache);
+/// ```
+///
+/// # Environment Variables
+///
+/// - `KJARNI_CACHE_DIR` - Override default cache location.
+///
+/// # See Also
+///
+/// - [`ModelType::cache_dir`] — Get model-specific subdirectory
+/// - [`ModelType::is_downloaded`] — Check if model exists in cache
 pub fn get_default_cache_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KJARNI_CACHE_DIR") {
         PathBuf::from(dir)
@@ -752,7 +1158,28 @@ pub fn get_default_cache_dir() -> PathBuf {
     }
 }
 
-/// Format parameter count in a human-readable way (e.g., "1.5B", "345M").
+/// Formats parameter count in human-readable form.
+///
+/// Converts millions of parameters to billions (B) or millions (M) with
+/// appropriate precision for display.
+///
+/// # Arguments
+///
+/// * `millions` - Parameter count in millions.
+///
+/// # Returns
+///
+/// Formatted string like "1.5B" or "345M".
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::format_params;
+///
+/// assert_eq!(format_params(1500), "1.5B");
+/// assert_eq!(format_params(345), "345M");
+/// assert_eq!(format_params(8030), "8.0B");
+/// ```
 pub fn format_params(millions: usize) -> String {
     if millions >= 1000 {
         format!("{:.1}B", millions as f64 / 1000.0)
@@ -761,7 +1188,28 @@ pub fn format_params(millions: usize) -> String {
     }
 }
 
-/// Format file size in a human-readable way (e.g., "1.6 GB", "420 MB").
+/// Formats file size in human-readable form.
+///
+/// Converts megabytes to gigabytes (GB) or megabytes (MB) with appropriate
+/// precision for display.
+///
+/// # Arguments
+///
+/// * `mb` - File size in megabytes.
+///
+/// # Returns
+///
+/// Formatted string like "1.6 GB" or "420 MB".
+///
+/// # Example
+///
+/// ```ignore
+/// use kjarni_transformers::models::registry::format_size;
+///
+/// assert_eq!(format_size(1600), "1.6 GB");
+/// assert_eq!(format_size(420), "420 MB");
+/// assert_eq!(format_size(2500), "2.5 GB");
+/// ```
 pub fn format_size(mb: usize) -> String {
     if mb >= 1000 {
         format!("{:.1} GB", mb as f64 / 1000.0)

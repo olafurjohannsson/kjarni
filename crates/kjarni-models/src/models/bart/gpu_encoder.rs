@@ -197,6 +197,7 @@ impl BartGpuEncoder {
     // PRIVATE HELPERS
     // ========================================================================
 
+    
     fn build_layers(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
