@@ -45,14 +45,12 @@ use std::sync::Arc;
 
 // --- External Crates ---
 use crate::models::llama::config::LlamaConfig;
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, Axis, s};
+use anyhow::{anyhow, Result};
+use ndarray::{s, Array2, Array3, Axis};
 use std::time::Instant;
 
 use kjarni_transformers::{
-    Normalization, WgpuContext,
-    cache::CpuKVCache,
-    decoder::prelude::*,
+    cache::CpuKVCache, decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
@@ -64,6 +62,8 @@ use kjarni_transformers::{
     tensor::DType,
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
+    Normalization,
+    WgpuContext,
 };
 
 /// CPU-based Llama decoder implementation with RoPE and SwiGLU.
@@ -221,63 +221,6 @@ impl LlamaCpuDecoder {
             rope,
         })
     }
-
-    fn forward_layers_new(
-        &self,
-        hidden_states: &Array3<f32>,
-        attention_mask: &Array2<f32>,
-        position_offset: usize,
-        mut cache: Option<&mut dyn Cache>, // ... args
-        start_layer: usize,
-        end_layer: usize,
-    ) -> Result<Array3<f32>> {
-        let mut hidden = hidden_states.clone();
-        let seq_len = hidden.shape()[1]; // The "new" tokens count
-
-        // Downcast to CpuKVCache
-        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
-
-        for i in start_layer..end_layer {
-            let layer = &self.layers[i];
-
-            if let Some(ref mut c) = cpu_cache_opt {
-                // OPTIMIZATION: Get the FULL contiguous view (History + New Slot)
-                let (k_full_mut, v_full_mut) = c.get_context_view_mut(i, seq_len)?;
-
-                // Pass this full view to the layer
-                hidden = layer.forward_new(
-                    &hidden,
-                    attention_mask,
-                    position_offset,
-                    k_full_mut,
-                    v_full_mut,
-                )?;
-            } else {
-                // Fallback (No cache): Allocate temporary buffers
-                let kv_dim = layer.attention.num_kv_heads * layer.attention.head_dim;
-                let (b, s, _) = hidden.dim();
-
-                // Allocate exact size needed for this step
-                let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
-                let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
-
-                hidden = layer.forward_new(
-                    &hidden,
-                    attention_mask,
-                    position_offset,
-                    temp_k.view_mut(),
-                    temp_v.view_mut(),
-                )?;
-            }
-        }
-
-        // Increment once at the end
-        if let Some(c) = cpu_cache_opt {
-            c.increment_len(seq_len);
-        }
-
-        Ok(hidden)
-    }
 }
 
 impl InferenceModel for LlamaCpuDecoder {
@@ -328,69 +271,51 @@ impl CpuDecoder for LlamaCpuDecoder {
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
-        mut cache: Option<&mut dyn Cache>,
+        mut cache: Option<&mut dyn Cache>, // ... args
         start_layer: usize,
         end_layer: usize,
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
-        let seq_len = hidden.shape()[1];
-        let (batch_size, _, _) = hidden.dim();
+        let seq_len = hidden.shape()[1]; // The "new" tokens count
 
-        // 1. Downcast to CpuKVCache
+        // Downcast to CpuKVCache
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
         for i in start_layer..end_layer {
-            if i >= self.layers.len() {
-                break;
-            }
             let layer = &self.layers[i];
 
             if let Some(ref mut c) = cpu_cache_opt {
-                // --- OPTIMIZED PATH (Zero-Copy) ---
+                // OPTIMIZATION: Get the FULL contiguous view (History + New Slot)
+                let (k_full_mut, v_full_mut) = c.get_context_view_mut(i, seq_len)?;
 
-                // 1. Get disjoint views from cache:
-                // k_hist/v_hist: Mutable view of 0..current_len (History)
-                // k_dest/v_dest: Mutable view of current_len..end (Write Destination)
-                let (k_hist_mut, v_hist_mut, k_dest, v_dest) = c.get_split_view(i, seq_len)?;
-
-                // 2. Forward passing the views
-                // We call .view() on the history parts to downgrade them to read-only ArrayView3
-                // The layer will write new keys/values directly into k_dest/v_dest
+                // Pass this full view to the layer
                 hidden = layer.forward(
                     &hidden,
                     attention_mask,
                     position_offset,
-                    k_hist_mut.view(),
-                    v_hist_mut.view(),
-                    k_dest,
-                    v_dest,
+                    k_full_mut,
+                    v_full_mut,
                 )?;
             } else {
-                // --- FALLBACK PATH (No Cache) ---
-                // We must allocate temporary buffers because layer.forward expects mutable destinations.
-                // This preserves functionality for non-cached inference (slower, but safe).
-
+                // Fallback (No cache): Allocate temporary buffers
                 let kv_dim = layer.attention.num_kv_heads * layer.attention.head_dim;
+                let (b, s, _) = hidden.dim();
 
-                let mut temp_k = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
-                let mut temp_v = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
-
-                // Empty history views
-                let empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
+                // Allocate exact size needed for this step
+                let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
+                let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
 
                 hidden = layer.forward(
                     &hidden,
                     attention_mask,
                     position_offset,
-                    empty_arr.view(),
-                    empty_arr.view(),
                     temp_k.view_mut(),
                     temp_v.view_mut(),
                 )?;
             }
         }
 
-        // 3. Increment Cache Length (Once per step, after all layers are updated)
+        // Increment once at the end
         if let Some(c) = cpu_cache_opt {
             c.increment_len(seq_len);
         }
@@ -418,7 +343,7 @@ impl CpuDecoder for LlamaCpuDecoder {
 
         // 2. Run Layers
         let t_layers = Instant::now();
-        let mut output = self.forward_layers_new(
+        let mut output = self.forward_layers(
             &hidden,
             attention_mask,
             position_offset,
@@ -451,22 +376,21 @@ impl CpuDecoder for LlamaCpuDecoder {
 }
 
 mod llama_test {
-
     use super::*;
-    use crate::models::llama::{LlamaModel, config::LlamaConfig};
+    use crate::models::llama::LlamaModel;
     const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct";
     use kjarni_transformers::{
-        ModelType,
         kernels::{
             dequantize::{dequantize_q4_k_block, dequantize_q6_k_block},
             q_common::{BlockQ4_K, BlockQ6_K},
         },
-        linear_layer::LinearData,
-        tensor::CpuTensor,
         weights::{
-            ModelWeights, cast_or_copy, gguf_loader::GgufLoader,
-            safetensors_loader::SafeTensorsLoader,
-        },
+            cast_or_copy, ModelWeights
+            ,
+        }
+
+        ,
+        ModelType,
     };
     use std::path::Path;
     const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf";

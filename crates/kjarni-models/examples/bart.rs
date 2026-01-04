@@ -134,19 +134,19 @@ async fn main() -> Result<()> {
     //     let mut pool_guard = pool.lock().await;
     //     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
     //     let (enc, pool_ref) = frame.resources();
-
+    //
     //     let gpu_dec_embed =
     //         gpu_decoder.debug_embeddings(enc, pool_ref, &decoder_input_gpu, position_offset)?;
-        
+    //
     //     frame.finish();
-
+    //
     //     let gpu_dec_embed_cpu = gpu_dec_embed.to_ndarray_3d::<f32>().await?;
     //     println!("GPU decoder embed shape: {:?}", gpu_dec_embed_cpu.shape());
     //     println!(
     //         "GPU decoder embed first 5: {:?}",
     //         gpu_dec_embed_cpu.iter().take(5).collect::<Vec<_>>()
     //     );
-
+    //
     //     assert_all_close(
     //         &cpu_dec_embed.view().into_dyn(),
     //         &gpu_dec_embed_cpu.view().into_dyn(),

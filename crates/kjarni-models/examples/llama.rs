@@ -1,53 +1,12 @@
 use kjarni_models::models::llama::model::LlamaModel;
-use kjarni_models::models::qwen::QwenModel;
-use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
+use kjarni_transformers::common::GenerationConfig;
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::stats::GenerationStats;
-use kjarni_transformers::tensor::DType;
 use kjarni_transformers::{Device, ModelType, WgpuContext};
 use std::io;
 use std::io::Write;
 
-fn bench_matmul_bf16() {
-    let m = 1;
-    let k = 2048;
-    let n = 8192;  // FFN up/gate projection
-
-    let a = ndarray::Array2::<f32>::ones((m, k));
-    let b = ndarray::Array2::<u16>::zeros((n, k));  // BF16 weights
-
-    let start = std::time::Instant::now();
-    for _ in 0..100 {
-        let _ = kjarni_transformers::utils::linear_algebra::matmul_2d_mixed_bf16(&a.view(), &b.view());
-    }
-    let elapsed = start.elapsed();
-
-    println!("100 iters: {:?}", elapsed);
-    println!("Per iter: {:?}", elapsed / 100);
-    println!("GFLOPS: {:.2}", (m * k * n * 2 * 100) as f64 / elapsed.as_secs_f64() / 1e9);
-}
-fn bench_down_projection() {
-    kjarni_transformers::utils::configure_threading();
-
-    // Down projection: [1, 8192] @ [2048, 8192]
-    let m = 1;
-    let k = 8192;
-    let n = 2048;  // This was hitting serial path!
-
-    let a = ndarray::Array2::<f32>::ones((m, k));
-    let b = ndarray::Array2::<u16>::zeros((n, k));
-
-    let start = std::time::Instant::now();
-    for _ in 0..100 {
-        let _ = kjarni_transformers::utils::linear_algebra::matmul_2d_mixed_bf16(&a.view(), &b.view());
-    }
-    let elapsed = start.elapsed();
-
-    println!("Down projection: 100 iters: {:?}", elapsed);
-    println!("Per iter: {:?}", elapsed / 100);
-    println!("GFLOPS: {:.2}", (m * k * n * 2 * 100) as f64 / elapsed.as_secs_f64() / 1e9);
-}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // It's good practice to use a logger for backend info
@@ -76,7 +35,8 @@ async fn main() -> anyhow::Result<()> {
         offload_embeddings: false,
         offload_lm_head: false,
         target_dtype: None,
-        quantize_lm_head: Some(DType::Q8_0),
+        quantize_lm_head: None, // Some(DType::Q8_0),
+        use_gguf: true,
         ..Default::default()
     };
     // let model_gpu = LlamaModel::from_registry(
@@ -121,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         model_path,
         Device::Cpu,
         None, // No WgpuContext for CPU
-        None,
+        Some(d),
         Some(ModelType::Llama3_2_3B_Instruct),
     )?;
     let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;

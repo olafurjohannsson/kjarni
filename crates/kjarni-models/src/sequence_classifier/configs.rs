@@ -2,8 +2,12 @@
 
 use anyhow::Result;
 use kjarni_transformers::activations::Activation;
-use kjarni_transformers::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy};
+use kjarni_transformers::traits::{
+    AttentionLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig,
+    ModelLayout, ModelMetadata, NormalizationStrategy,
+};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 /// Configuration for MiniLM cross-encoder (ms-marco-MiniLM-L-6-v2)
 #[derive(Debug, Clone, Deserialize)]
@@ -19,6 +23,11 @@ pub struct MiniLMCrossEncoderConfig {
     pub layer_norm_eps: f32,
     #[serde(default = "default_num_labels")]
     pub num_labels: usize, // Typically 1 for ranking
+    #[serde(default)]
+    pub id2label: Option<HashMap<String, String>>,
+
+    #[serde(skip)]
+    labels_vec: Option<Vec<String>>,
 }
 
 fn default_num_labels() -> usize {
@@ -27,7 +36,19 @@ fn default_num_labels() -> usize {
 
 impl MiniLMCrossEncoderConfig {
     pub fn from_json(json: &str) -> Result<Self> {
-        Ok(serde_json::from_str(json)?)
+        let mut config: Self = serde_json::from_str(json)?;
+
+        // Convert HashMap to sorted Vec
+        if let Some(ref map) = config.id2label {
+            let mut labels: Vec<(usize, String)> = map
+                .iter()
+                .filter_map(|(k, v)| k.parse::<usize>().ok().map(|idx| (idx, v.clone())))
+                .collect();
+            labels.sort_by_key(|(idx, _)| *idx);
+            config.labels_vec = Some(labels.into_iter().map(|(_, v)| v).collect());
+        }
+
+        Ok(config)
     }
 }
 
@@ -35,7 +56,9 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
     fn model_type(&self) -> &str {
         "bert_cross_encoder"
     }
-
+    fn id2label(&self) -> Option<&[String]> {
+        self.labels_vec.as_deref()
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.hidden_size,
@@ -56,7 +79,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: false,           // BERT uses Post-Norm
+            is_prenorm: false,            // BERT uses Post-Norm
             transpose_ffn_weights: false, // true, // MiniLM quirk
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,

@@ -1,14 +1,11 @@
 use crate::cache::{Cache, GpuBeamKVCache};
-use crate::encoder::prelude::*;
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
 use crate::encoder_decoder::traits::{GpuCrossAttentionKVCache, GpuCrossDecoderOutput};
 use crate::gpu_ops::GpuFrameContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::Kernel;
 use crate::models::base::ModelInput;
-use crate::prelude::*;
 use crate::WgpuContext;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -16,6 +13,7 @@ use async_trait::async_trait;
 use bytemuck;
 use ndarray::{Array1, Array2, Array3};
 use std::sync::Arc;
+
 pub struct GpuBackend {
     pub context: Arc<WgpuContext>,
 }

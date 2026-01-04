@@ -45,10 +45,8 @@
 //!
 //! - [`crate::models::base::LanguageModel`] — Core model trait
 //! - [`crate::weights::ModelWeights`] — Low-level weight loading
-
 use crate::utils::levenshtein;
-use anyhow::{Result, anyhow};
-use tokenizers::Model;
+use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use strum_macros::EnumIter;
 
@@ -116,7 +114,6 @@ pub enum WeightsFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelArchitecture {
     // === Decoders (LLMs) ===
-
     /// Standard Llama architecture with RoPE, SwiGLU, and RMSNorm.
     ///
     /// Used by: Llama 2/3, Alpaca, Vicuna, TinyLlama. The most widely-adopted
@@ -142,7 +139,6 @@ pub enum ModelArchitecture {
     Phi3,
 
     // === Encoders ===
-
     /// BERT family with absolute positional embeddings.
     ///
     /// The classic bidirectional encoder. Used for embeddings, classification,
@@ -156,7 +152,6 @@ pub enum ModelArchitecture {
     NomicBert,
 
     // === Seq2Seq (Encoder-Decoder) ===
-
     /// T5/FLAN family with relative positional buckets.
     ///
     /// Text-to-text encoder-decoder using relative position biases.
@@ -269,6 +264,12 @@ pub enum ModelTask {
     /// reranker after initial retrieval to improve result quality.
     ReRanking,
 
+    /// Text → Class label for sentiment, topics, intent.
+    ///
+    /// Models: DistilBERT-SST2 (sentiment), BART-MNLI (zero-shot)
+    /// Output: Label with confidence score
+    Classification,
+
     /// Interactive chat and instruction following.
     ///
     /// General-purpose conversational models optimized for following instructions,
@@ -304,6 +305,25 @@ pub enum ModelTask {
     /// Basic autoregressive generation without instruction tuning.
     /// Mostly superseded by Chat and Reasoning models.
     Generation,
+
+    // =========================================================================
+    // ENCODER-DECODER (Seq2Seq, output: transformed text)
+    // =========================================================================
+    /// Long text → Concise summary.
+    ///
+    /// Models: BART-CNN, DistilBART, Pegasus
+    Summarization,
+
+    /// Text in language A → Text in language B.
+    ///
+    /// Models: NLLB, mBART, MarianMT, FLAN-T5
+    Translation,
+
+    /// General text-to-text transformation.
+    ///
+    /// Models: FLAN-T5 (instruction-tuned T5)
+    /// Use for: When model does multiple seq2seq tasks
+    TextToText,
 }
 
 /// The curated list of pretrained models supported by Kjarni.
@@ -371,9 +391,9 @@ pub enum ModelType {
     // === The "Edge" Kings (< 4GB VRAM/RAM) ===
     Qwen2_5_0_5B_Instruct, // Tiny Logic
     Qwen2_5_1_5B_Instruct,
-    Llama3_2_1B_Instruct,  // Fast Chat
-    Llama3_2_3B_Instruct,  // Balanced Chat
-    Phi3_5_Mini_Instruct,  // Logic Powerhouse (3.8B)
+    Llama3_2_1B_Instruct, // Fast Chat
+    Llama3_2_3B_Instruct, // Balanced Chat
+    Phi3_5_Mini_Instruct, // Logic Powerhouse (3.8B)
 
     // === The "Workhorse" Tier (8GB+ RAM) ===
     Mistral7B_v0_3_Instruct,      // 7B Standard
@@ -502,6 +522,11 @@ impl ModelType {
             Self::MiniLML6V2 => "minilm-l6-v2",
             Self::NomicEmbedText => "nomic-embed-text",
             Self::BgeM3 => "bge-m3",
+            Self::MpnetBaseV2 => "mpnet-base-v2", // Fixed: was empty
+            Self::DistilBertBaseCased => "distilbert-base", // Fixed: was empty
+
+            // Reranker
+            Self::MiniLML6V2CrossEncoder => "minilm-reranker", // Fixed: was empty
 
             // Classifiers
             Self::DistilBertSST2 => "sentiment-distilbert",
@@ -509,29 +534,25 @@ impl ModelType {
 
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b",
-            Self::Qwen2_5_1_5B_Instruct => "wen2.5-1.5b",
+            Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b", // Fixed: was "wen2.5-1.5b"
             Self::Llama3_2_1B_Instruct => "llama3.2-1b",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini",
 
             // Workhorse LLMs
-            Self::Mistral7B_v0_3_Instruct => "mistral-v0.3",
+            Self::Mistral7B_v0_3_Instruct => "mistral-7b", // Changed for clarity
             Self::Llama3_1_8B_Instruct => "llama3.1-8b",
             Self::DeepSeek_R1_Distill_Llama_8B => "deepseek-r1-8b",
 
             // Seq2Seq
             Self::FlanT5Base => "flan-t5-base",
             Self::FlanT5Large => "flan-t5-large",
+            Self::DistilBartCnn => "distilbart-cnn", // Changed for consistency
+            Self::BartLargeCnn => "bart-large-cnn",
 
-
+            // Legacy
             Self::DistilGpt2 => "distilgpt2",
             Self::Gpt2 => "gpt2",
-
-            Self::DistilBartCnn => "distilbartcnn",
-            Self::BartLargeCnn => "bart-large-cnn",
-            Self::MiniLML6V2CrossEncoder => "",
-            Self::DistilBertBaseCased => "",
-            Self::MpnetBaseV2 => "",
         }
     }
 
@@ -541,7 +562,10 @@ impl ModelType {
             ModelTask::Chat | ModelTask::Reasoning => "LLM (Decoder)",
 
             // Group 2: Translation/Summary
-            ModelTask::Seq2Seq => "Seq2Seq",
+            ModelTask::Seq2Seq
+            | ModelTask::Summarization
+            | ModelTask::Translation
+            | ModelTask::TextToText => "Seq2Seq",
 
             // Group 3: Vector Search
             ModelTask::Embedding => "Embedding",
@@ -550,9 +574,11 @@ impl ModelType {
             ModelTask::ReRanking => "Re-Ranker",
 
             // Group 5: Classification
-            ModelTask::SentimentAnalysis | ModelTask::ZeroShotClassification => "Classifier",
+            ModelTask::SentimentAnalysis
+            | ModelTask::ZeroShotClassification
+            | ModelTask::Classification => "Classifier",
 
-            ModelTask::Generation => "Generation (Decoder)"
+            ModelTask::Generation => "Generation (Decoder)",
         }
     }
 
@@ -710,9 +736,9 @@ impl ModelType {
                         "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
                     ),
                 },
-                description: "",
-                size_mb: 0,
-                params_millions: 0,
+                description: "Balanced edge model. Good reasoning in a small package.", // Fixed
+                size_mb: 3100,         // Fixed: ~3.1 GB
+                params_millions: 1540, // Fixed: 1.54B params
             },
             Self::Llama3_2_1B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Llama,
@@ -905,7 +931,7 @@ impl ModelType {
         ModelType::iter().find(|m| m.cli_name() == normalized)
     }
 
-    pub fn all() -> impl Iterator<Item = ModelType> {
+    pub fn all() -> impl Iterator<Item=ModelType> {
         use strum::IntoEnumIterator;
         ModelType::iter()
     }
@@ -915,7 +941,7 @@ impl ModelType {
         levenshtein::find_similar(query, &all_names, 3, 0.4)
     }
 
-        /// Get the local cache directory for this model
+    /// Get the local cache directory for this model
     pub fn cache_dir(&self, base_dir: &Path) -> PathBuf {
         base_dir.join(self.repo_id().replace('/', "_"))
     }

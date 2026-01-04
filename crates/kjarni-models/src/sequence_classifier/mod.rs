@@ -3,7 +3,7 @@
 //! Takes two texts as input and outputs a relevance score.
 //! Used for reranking search results or computing pairwise similarity.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ndarray::Array2;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,18 +12,18 @@ use tokenizers::Tokenizer;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
-    WgpuContext,
     cache::Cache,
     encoder::{
-        CpuEncoder, CpuTransformerEncoder, GpuEncoder, GpuTransformerEncoder,
-        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
-        traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderOps},
+        classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead}, traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderOps}, CpuEncoder, CpuTransformerEncoder,
+        GpuEncoder,
+        GpuTransformerEncoder,
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
-    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
+    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
     traits::Device,
     weights::ModelWeights,
+    WgpuContext,
 };
 mod configs;
 pub use configs::MiniLMCrossEncoderConfig;
@@ -70,7 +70,7 @@ impl SequenceClassifier {
             ));
         }
         let info = model_type.info();
-        
+
         // 2. Validate Architecture
         // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
         match info.architecture {
@@ -226,6 +226,69 @@ impl SequenceClassifier {
         })
     }
 
+    /// Returns the label names for this classifier (if available from config).
+    pub fn labels(&self) -> Option<&[String]> {
+        self.config.id2label()
+    }
+
+    /// Classify a single text, returning (label, score) pairs sorted by score.
+    pub async fn classify(&self, text: &str, top_k: usize) -> Result<Vec<(String, f32)>> {
+        let logits = self.predict(&[text]).await?;
+        let scores = &logits[0];
+
+        // Apply softmax
+        let softmax_scores = softmax(scores);
+
+        // Map to labels
+        let labels = self.labels().ok_or_else(|| {
+            anyhow!("Model has no label mapping. Use classify_with_scores() instead.")
+        })?;
+
+        let mut results: Vec<(String, f32)> = labels
+            .iter()
+            .zip(softmax_scores.iter())
+            .map(|(label, &score)| (label.clone(), score))
+            .collect();
+
+        // Sort by score descending
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+
+        Ok(results)
+    }
+
+    /// Classify returning raw scores without label names.
+    pub async fn classify_with_scores(&self, text: &str) -> Result<Vec<f32>> {
+        let logits = self.predict(&[text]).await?;
+        Ok(softmax(&logits[0]))
+    }
+
+    /// Batch classify multiple texts.
+    pub async fn classify_batch(&self, texts: &[&str], top_k: usize) -> Result<Vec<Vec<(String, f32)>>> {
+        let logits = self.predict(texts).await?;
+        let labels = self.labels().ok_or_else(|| {
+            anyhow!("Model has no label mapping.")
+        })?;
+
+        let mut all_results = Vec::with_capacity(texts.len());
+
+        for scores in logits {
+            let softmax_scores = softmax(&scores);
+
+            let mut results: Vec<(String, f32)> = labels
+                .iter()
+                .zip(softmax_scores.iter())
+                .map(|(label, &score)| (label.clone(), score))
+                .collect();
+
+            results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            results.truncate(top_k);
+            all_results.push(results);
+        }
+
+        Ok(all_results)
+    }
+
     /// Predicts classification scores for a batch of single texts (e.g., sentiment analysis).
     ///
     /// # Arguments
@@ -319,17 +382,14 @@ impl SequenceClassifier {
                 )?
                 .last_hidden_state;
 
-            // b) Pass the full hidden states to the classification head.
-            // The head knows how to extract the CLS token and do the rest.
             self.cpu_head.as_ref().unwrap().forward(&hidden_states)?
         } else if let Some(ops) = self.encoder_gpu_ops() {
-            // --- GPU PATH ---
             let context = self.context.as_ref().unwrap();
             let pool = context.get_inference_pool();
-            let mut pool_guard = pool.lock().await;
+            let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(context, pool_guard);
 
-            // a) Upload data and get hidden states from the encoder component.
+
             let input_ids_gpu = GpuTensor::from_ndarray(context, &batch_input_ids)?;
             let attention_mask_gpu = GpuTensor::from_ndarray(context, &batch_attention_mask)?;
             let token_type_ids_gpu = GpuTensor::from_ndarray(context, &batch_token_type_ids)?;
@@ -346,7 +406,6 @@ impl SequenceClassifier {
                 )?
                 .last_hidden_state;
 
-            // b) Pass the full hidden states to the GPU classification head.
             let logits_gpu = self
                 .gpu_head
                 .as_ref()
@@ -355,13 +414,11 @@ impl SequenceClassifier {
 
             frame.finish();
 
-            // c) Download the final result.
             logits_gpu.to_ndarray_2d().await?
         } else {
             return Err(anyhow!("No backend available"));
         };
 
-        // 3. Extract the single score column.
         Ok(logits.column(0).to_vec())
     }
 
@@ -520,5 +577,13 @@ impl EncoderLanguageModel for SequenceClassifier {
         }
     }
 }
+// todo use activations::softmax ?
+/// Simple softmax implementation
+fn softmax(logits: &[f32]) -> Vec<f32> {
+    let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f32 = logits.iter().map(|x| (x - max).exp()).sum();
+    logits.iter().map(|x| (x - max).exp() / exp_sum).collect()
+}
+
 #[cfg(test)]
 mod tests;

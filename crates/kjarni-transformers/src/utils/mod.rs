@@ -1,15 +1,14 @@
 //! Utility modules
 
+pub mod levenshtein;
 pub mod linear_algebra;
 pub mod masks;
-pub mod levenshtein;
 pub mod tensor_ops;
+pub use levenshtein::{distance, find_similar, find_within_distance, similarity};
 pub use masks::*;
-pub use levenshtein::{find_similar, find_within_distance, distance, similarity};
 
 #[cfg(test)]
 mod tests;
-
 
 #[cfg(target_os = "linux")]
 fn set_thread_affinity(num_cores: usize) {
@@ -71,15 +70,17 @@ fn is_intel_hybrid() -> bool {
 
         // Method 2: Check CPU model name
         if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
-            let model = cpuinfo.lines()
+            let model = cpuinfo
+                .lines()
                 .find(|l| l.starts_with("model name"))
                 .unwrap_or("");
 
             // Intel 12th, 13th, 14th gen are hybrid
-            if model.contains("12th Gen Intel") ||
-                model.contains("13th Gen Intel") ||
-                model.contains("14th Gen Intel") ||
-                model.contains("Core Ultra") {
+            if model.contains("12th Gen Intel")
+                || model.contains("13th Gen Intel")
+                || model.contains("14th Gen Intel")
+                || model.contains("Core Ultra")
+            {
                 return true;
             }
         }
@@ -109,14 +110,21 @@ fn get_p_core_count() -> Option<usize> {
 
         // Fallback: known configurations
         if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
-            let model = cpuinfo.lines()
+            let model = cpuinfo
+                .lines()
                 .find(|l| l.starts_with("model name"))
                 .unwrap_or("");
 
             // Common hybrid configs (P-cores only, no HT count)
-            if model.contains("i5-12") || model.contains("i5-13") { return Some(6); }
-            if model.contains("i7-12") || model.contains("i7-13") { return Some(8); }
-            if model.contains("i9-12") || model.contains("i9-13") { return Some(8); }
+            if model.contains("i5-12") || model.contains("i5-13") {
+                return Some(6);
+            }
+            if model.contains("i7-12") || model.contains("i7-13") {
+                return Some(8);
+            }
+            if model.contains("i9-12") || model.contains("i9-13") {
+                return Some(8);
+            }
         }
     }
     None

@@ -52,7 +52,9 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             encoder_output
         };
 
-        let cross_cache = seq2seq_ops.decoder().precompute_cross_attention_kv(&final_state)?;
+        let cross_cache = seq2seq_ops
+            .decoder()
+            .precompute_cross_attention_kv(&final_state)?;
 
         Ok(CpuSeq2SeqState::EncoderState {
             hidden_states: final_state,
@@ -77,7 +79,8 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let CpuSeq2SeqState::EncoderState {
             hidden_states: enc_state,
             cross_attention_kv_cache: cross_kv,
-        } = encoder_state else {
+        } = encoder_state
+        else {
             return Err(anyhow!("Invalid tensor type for encoder_state"));
         };
         let attention_mask = Array2::ones(tokens.dim());
@@ -90,7 +93,10 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             Some(cross_kv),
         )?;
 
-        let cpu_cache = cache.as_any_mut().downcast_mut::<CpuBeamKVCache>().ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
+        let cpu_cache = cache
+            .as_any_mut()
+            .downcast_mut::<CpuBeamKVCache>()
+            .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
         for (i, (k, v)) in decoder_output.new_self_attn_kv.into_iter().enumerate() {
             cpu_cache.update(i, &k, &v)?;
         }

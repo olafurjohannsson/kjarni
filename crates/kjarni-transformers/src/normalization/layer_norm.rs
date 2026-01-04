@@ -1,7 +1,6 @@
 //! Layer normalization implementation
 
-use anyhow::{Result, anyhow};
-use half::bf16;
+use anyhow::{anyhow, Result};
 use ndarray::{Array1, Array3, ArrayView3, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
@@ -15,7 +14,6 @@ pub struct LayerNorm {
     pub bias: Array1<f32>,
     pub eps: f32,
 }
-
 impl LayerNorm {
     pub fn new(weight: Array1<f32>, bias: Array1<f32>, eps: f32) -> Self {
         Self { weight, bias, eps }
@@ -141,7 +139,7 @@ mod tests {
                 6.0, 8.0, // batch 1, pos 1: mean=7, var=1
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let output = layer_norm.forward_3d(&hidden);
 

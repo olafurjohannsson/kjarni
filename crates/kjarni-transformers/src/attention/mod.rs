@@ -113,7 +113,7 @@ impl MultiHeadAttention {
         }
 
         // 2. Reshape Q, K, V to [batch, num_heads, seq, head_dim]
-        let mut q_reshaped = q
+        let q_reshaped = q
             .to_owned()
             .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3]);
@@ -237,7 +237,6 @@ impl MultiHeadAttention {
         rope: Option<&RoPE>, // New parameter
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
         let batch_size = query.shape()[0];
-        let seq_len = query.shape()[1];
 
         // 1. Project new K and V
         let kv_source = key_value.unwrap_or(query);

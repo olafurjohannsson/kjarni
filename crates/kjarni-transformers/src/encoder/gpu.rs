@@ -1,26 +1,25 @@
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use ndarray::s;
 use std::sync::Arc;
 
-use crate::WgpuContext;
 use crate::embeddings::EmbeddingConfig;
 use crate::embeddings::LoadedEmbeddings;
-use crate::encoder::traits::{GpuEncoder};
+use crate::encoder::traits::GpuEncoder;
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
+use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
+use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::blocks::GpuNormalization;
 use crate::gpu_ops::blocks::GpuNormalizationWeights;
 use crate::gpu_ops::blocks::GpuRMSNorm;
 use crate::gpu_ops::blocks::GpuRMSNormWeights;
 use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
-use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
-use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
 use crate::models::base::ModelLoadConfig;
 use crate::traits::NormalizationStrategy;
 use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
+use crate::WgpuContext;
 
 pub struct GpuTransformerEncoder {
     embeddings: LoadedEmbeddings,
@@ -365,13 +364,8 @@ impl GpuEncoder for GpuTransformerEncoder {
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        self.embeddings.embed(
-            encoder, 
-            pool, 
-            input, 
-            token_type_ids,
-            0
-        )
+        self.embeddings
+            .embed(encoder, pool, input, token_type_ids, 0)
     }
 
     fn embed_and_normalize(

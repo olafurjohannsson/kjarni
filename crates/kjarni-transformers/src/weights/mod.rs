@@ -12,13 +12,10 @@ pub mod safetensors_loader;
 pub use gguf_block_reorder::gguf_block_group_for_row;
 pub use model_weights::ModelWeights;
 
-pub use model_weights::raw_to_typed;
 pub use model_weights::cast_or_copy;
+pub use model_weights::raw_to_typed;
 mod gguf_block_reorder;
-pub use gguf_block_reorder::{
-    raw_to_typed_gguf,
-};
-
+pub use gguf_block_reorder::raw_to_typed_gguf;
 
 /// A trait for a model weight file loader.
 /// This allows `ModelWeights` to be agnostic to the file format (safetensors, gguf, etc.).

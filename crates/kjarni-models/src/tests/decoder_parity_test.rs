@@ -1,20 +1,20 @@
 use crate::models::gpt2::Gpt2Model;
-use crate::models::llama::LlamaModel;
 use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+use crate::models::llama::LlamaModel;
 use anyhow::Result;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::{GpuRMSNorm, GpuRMSNormWeights};
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
-use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
+use kjarni_transformers::models::ModelType;
 use kjarni_transformers::normalization::RMSNorm;
 use kjarni_transformers::rope::RoPE;
 use kjarni_transformers::tensor::DType;
 use kjarni_transformers::traits::{Device, ModelConfig};
 use kjarni_transformers::{DecoderPipeline, WgpuContext};
-use ndarray::{Array1, Array2, Array3, Array4, s};
+use ndarray::{s, Array1, Array2, Array3, Array4};
 use std::path::Path;
 
 #[tokio::test]
@@ -59,7 +59,6 @@ fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32)
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
 
 fn assert_close_4d(cpu: &Array4<f32>, gpu: &Array4<f32>, atol: f32, name: &str) {
     assert_eq!(cpu.shape(), gpu.shape(), "[{}] Shape mismatch", name);
@@ -445,15 +444,19 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
     // CPU: attention block
     let cpu_attn_block_out = {
         let residual = &layer_input;
-
+        let kv_dim = meta.num_kv_heads * meta.head_dim; // 32
         // Pre-norm
         let normed = cpu_layer0.attention_norm.forward(residual);
-
+        let (b, s, _) = normed.dim();
+        let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
+        let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
         // Attention
-        let (attn_out, _, _) = cpu_layer0.attention.forward(
+        let attn_out = cpu_layer0.attention.forward(
             &normed,
             Some(&attention_mask),
-            None,
+            temp_k.view_mut(),
+            temp_v.view_mut(),
+            0,
             Some(&cpu_layer0.rope),
         )?;
 
@@ -1018,13 +1021,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     let mut temp_v = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
 
     // Empty history views
-    let empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
+    let mut empty_arr = Array3::<f32>::zeros((batch_size, 0, kv_dim));
+    let (b, s, _) = layer_input.dim();
+    let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
+    let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
     let cpu_layer0_out = cpu_layer0.forward(
         &layer_input,
         &attention_mask,
         position_offset,
-        empty_arr.view(),
-        empty_arr.view(),
         temp_k.view_mut(),
         temp_v.view_mut(),
     )?;

@@ -341,13 +341,24 @@ pub enum ModelCommands {
     },
 
     /// Download a model
-    Download { name: String, gguf: bool, },
+    Download {
+        name: String,
+        gguf: bool,
+    },
+
+    Remove {
+        name: String,
+    },
 
     /// Show detailed info about a model
-    Info { name: String },
+    Info {
+        name: String,
+    },
 
     /// Search for models by name or description
-    Search { query: String },
+    Search {
+        query: String,
+    },
 }
 
 #[derive(Subcommand)]

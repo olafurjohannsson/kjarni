@@ -5,12 +5,12 @@
 
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
-use crate::encoder::prelude::{CpuEncoder, EncoderLanguageModel, GpuEncoder};
+use crate::encoder::prelude::EncoderLanguageModel;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::{LanguageModel, ModelInput};
+use crate::models::base::ModelInput;
 use anyhow::Result;
 use async_trait::async_trait;
-use ndarray::{Array1, Array2, Array3, Array4};
+use ndarray::{Array2, Array3, Array4};
 use wgpu::CommandEncoder;
 
 // ============================================================================
@@ -120,7 +120,7 @@ pub trait GpuCrossDecoder: Send + Sync {
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
-    
+
     fn embed(
         &self,
         encoder: &mut CommandEncoder,
@@ -186,7 +186,6 @@ pub trait GpuCrossDecoder: Send + Sync {
             self.num_layers(),
         )
     }
-
 }
 
 // ============================================================================

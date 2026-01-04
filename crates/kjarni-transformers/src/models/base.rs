@@ -36,8 +36,8 @@
 //! - [`crate::models::registry`] — Pretrained model metadata
 
 pub use crate::tensor::DType;
-use crate::{gpu_ops::GpuTensor, traits::InferenceModel};
 use crate::Cache;
+use crate::{gpu_ops::GpuTensor, traits::InferenceModel};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, ArrayView2, ArrayView3};
@@ -325,6 +325,8 @@ pub struct ModelLoadConfig {
     pub max_batch_size: Option<usize>,
     /// Pre-allocate KV cache for this sequence length.
     pub max_sequence_length: Option<usize>,
+    /// Use gguf
+    pub use_gguf: bool,
 }
 
 impl Default for ModelLoadConfig {
@@ -338,6 +340,7 @@ impl Default for ModelLoadConfig {
             gpu_layer_range: None,
             max_batch_size: None,
             max_sequence_length: None,
+            use_gguf: false,
         }
     }
 }

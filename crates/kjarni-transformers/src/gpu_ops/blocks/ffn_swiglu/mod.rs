@@ -1,13 +1,12 @@
-use crate::{WgpuContext, gpu_profile};
-use crate::gpu_ops::Kernel;
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
+use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
+use crate::{gpu_profile, WgpuContext};
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FusedInfo {

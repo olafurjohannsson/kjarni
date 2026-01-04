@@ -9,6 +9,7 @@
 //! - Applied to Q and K, not V
 //! - Different rotation frequencies for different dimensions
 pub mod loader;
+use crate::kernels::x86::rope_avx2;
 use crate::models::base::RopeScalingConfig;
 use ndarray::{s, Array1, Array2, Array3, Array4};
 use std::f32::consts::PI;
@@ -130,7 +131,41 @@ impl RoPE {
         }
         (cos_cache, sin_cache)
     }
+    /// Optimized in-place rotation using SIMD when available.
     fn rotate_4d_in_place(&self, x: &mut Array4<f32>, position_offset: usize) {
+        let (batch, num_heads, seq_len, head_dim) = x.dim();
+
+        // Check if we can use the fast path
+        // Requires contiguous memory layout (standard for ndarray)
+        if x.is_standard_layout() {
+            let x_slice = x.as_slice_mut().expect("Array should be contiguous");
+            let cos_slice = self.cos_cache.as_slice().expect("Cache should be contiguous");
+            let sin_slice = self.sin_cache.as_slice().expect("Cache should be contiguous");
+
+            #[cfg(target_arch = "x86_64")]
+            if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                unsafe {
+                    rope_avx2::rotate_4d_avx2(
+                        x_slice,
+                        cos_slice,
+                        sin_slice,
+                        batch,
+                        num_heads,
+                        seq_len,
+                        head_dim,
+                        self.cos_cache.ncols(), // cache stride
+                        position_offset,
+                    );
+                }
+                return;
+            }
+        }
+
+        // Fallback to scalar implementation
+        self.rotate_4d_in_place_scalar(x, position_offset);
+    }
+
+    fn rotate_4d_in_place_scalar(&self, x: &mut Array4<f32>, position_offset: usize) {
         let (batch, num_heads, seq_len, head_dim) = x.dim();
         let half_dim = head_dim / 2;
 

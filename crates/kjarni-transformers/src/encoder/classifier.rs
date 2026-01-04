@@ -9,8 +9,8 @@ use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::{linear::GpuLinearLayer, tanh::GpuTanh};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::linear_layer::LinearLayer;
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, s};
+use anyhow::{anyhow, Result};
+use ndarray::{s, Array2, Array3};
 
 // ============================================================================
 //  CPU Sequence Classification Head
@@ -44,7 +44,7 @@ impl CpuSequenceClassificationHead {
     /// # Returns
     /// * Logits with shape `[batch, num_classes]`.
     pub fn forward(&self, encoder_hidden_states: &Array3<f32>) -> Result<Array2<f32>> {
-        let (batch, seq_len, hidden_size) = encoder_hidden_states.dim();
+        let (batch, seq_len, _hidden_size) = encoder_hidden_states.dim();
 
         if batch == 0 || seq_len == 0 {
             return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
@@ -188,7 +188,7 @@ impl GpuSequenceClassificationHead {
 mod tests {
     use super::*;
     use crate::linear_layer::LinearLayer;
-    use ndarray::{Array1, Array2, Array3, array};
+    use ndarray::{array, Array1, Array2, Array3};
 
     fn make_linear_layer(in_features: usize, out_features: usize) -> LinearLayer {
         let mut weight = Array2::<f32>::zeros((out_features, in_features));

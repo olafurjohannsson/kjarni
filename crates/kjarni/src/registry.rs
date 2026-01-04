@@ -4,8 +4,13 @@
 
 use anyhow::{anyhow, Result};
 use kjarni_transformers::models::{
-    download_model_files, format_params, format_size, get_default_cache_dir, ModelArchitecture,
-    ModelType, registry::WeightsFormat, // Make sure WeightsFormat is exported from your models module
+    download_model_files,
+    format_params, // Make sure WeightsFormat is exported from your models module
+    format_size,
+    get_default_cache_dir,
+    registry::WeightsFormat,
+    ModelArchitecture,
+    ModelType,
 };
 use std::path::PathBuf;
 
@@ -27,6 +32,7 @@ pub fn list_models() -> Vec<ModelEntry> {
     let cache_dir = get_default_cache_dir();
 
     ModelType::all()
+        .filter(|model_type| !model_type.cli_name().is_empty())  // Skip internal models
         .map(|model_type| {
             let info = model_type.info();
             ModelEntry {
@@ -37,7 +43,7 @@ pub fn list_models() -> Vec<ModelEntry> {
                 size: format_size(info.size_mb),
                 params: format_params(info.params_millions),
                 downloaded: model_type.is_downloaded(&cache_dir),
-                has_gguf: info.paths.gguf_url.is_some(), // Check for GGUF
+                has_gguf: info.paths.gguf_url.is_some(),
             }
         })
         .collect()
@@ -53,8 +59,12 @@ pub fn list_models_by_architecture(arch: ModelArchitecture) -> Vec<ModelEntry> {
 
 /// Get detailed info about a specific model
 pub fn get_model_info(name: &str) -> Result<ModelEntry> {
-    let model_type = ModelType::from_cli_name(name)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'. Run 'kjarni model list' to see available models.", name))?;
+    let model_type = ModelType::from_cli_name(name).ok_or_else(|| {
+        anyhow!(
+            "Unknown model: '{}'. Run 'kjarni model list' to see available models.",
+            name
+        )
+    })?;
 
     let cache_dir = get_default_cache_dir();
     let info = model_type.info();
@@ -74,8 +84,12 @@ pub fn get_model_info(name: &str) -> Result<ModelEntry> {
 /// Download a model by CLI name
 /// Updated to accept format preference
 pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
-    let model_type = ModelType::from_cli_name(name)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'. Run 'kjarni model list' to see available models.", name))?;
+    let model_type = ModelType::from_cli_name(name).ok_or_else(|| {
+        anyhow!(
+            "Unknown model: '{}'. Run 'kjarni model list' to see available models.",
+            name
+        )
+    })?;
 
     let cache_dir = get_default_cache_dir();
     let model_dir = model_type.cache_dir(&cache_dir);
@@ -93,7 +107,14 @@ pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
 
     println!("Downloading {}...", model_type.cli_name());
     println!("  Repository: {}", model_type.repo_id());
-    println!("  Format:     {}", if matches!(format, WeightsFormat::GGUF) { "GGUF (Optimized)" } else { "SafeTensors (Standard)" });
+    println!(
+        "  Format:     {}",
+        if matches!(format, WeightsFormat::GGUF) {
+            "GGUF (Optimized)"
+        } else {
+            "SafeTensors (Standard)"
+        }
+    );
     println!("  Size:       ~{}", format_size(info.size_mb)); // Note: GGUF size might differ slightly
     println!("  Destination: {}", model_dir.display());
     println!();
@@ -108,8 +129,8 @@ pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
 
 /// Check if a model is downloaded
 pub fn is_model_downloaded(name: &str) -> Result<bool> {
-    let model_type = ModelType::from_cli_name(name)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'", name))?;
+    let model_type =
+        ModelType::from_cli_name(name).ok_or_else(|| anyhow!("Unknown model: '{}'", name))?;
 
     let cache_dir = get_default_cache_dir();
     Ok(model_type.is_downloaded(&cache_dir))
@@ -120,8 +141,8 @@ pub fn cache_dir() -> PathBuf {
 }
 
 pub fn model_path(name: &str) -> Result<PathBuf> {
-    let model_type = ModelType::from_cli_name(name)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'", name))?;
+    let model_type =
+        ModelType::from_cli_name(name).ok_or_else(|| anyhow!("Unknown model: '{}'", name))?;
 
     let cache_dir = get_default_cache_dir();
     Ok(model_type.cache_dir(&cache_dir))

@@ -1,10 +1,10 @@
 //! Core model traits and data structures for the Kjarni Inference Engine.
 //! This is the unified interface for Encoders, Decoders, and Seq2Seq models.
 
-use crate::WgpuContext;
 use crate::activations::Activation;
 pub use crate::cache::Cache;
 use crate::models::base::RopeScalingConfig;
+use crate::WgpuContext;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -185,13 +185,16 @@ pub trait ModelConfig: Send + Sync {
     fn activation(&self) -> Activation {
         self.metadata().activation
     }
+    /// Returns label mapping for classification models (index -> label name)
+    fn id2label(&self) -> Option<&[String]> {
+        None
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_device_methods() {

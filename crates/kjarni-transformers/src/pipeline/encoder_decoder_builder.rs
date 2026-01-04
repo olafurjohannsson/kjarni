@@ -1,4 +1,3 @@
-use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::embeddings::{EmbeddingConfig, LoadedEmbeddings};
 use crate::encoder::{CpuEncoder, GpuEncoder};
@@ -6,14 +5,12 @@ use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use crate::execution::ExecutionPlan;
 use crate::lm_head::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;
-use crate::pipeline::{
-    EncoderDecoderPipeline, EncoderDecoderPipelineConfig,
-};
+use crate::pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig};
 use crate::traits::{Device, ModelConfig};
 use crate::weights::ModelWeights;
-use anyhow::{Context, Result, anyhow};
+use crate::WgpuContext;
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
-
 pub struct EncoderDecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
     config: Arc<dyn ModelConfig>,

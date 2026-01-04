@@ -1,14 +1,12 @@
-use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
+use crate::WgpuContext;
 use std::borrow::Cow;
-use wgpu::util::DeviceExt;
 
 pub struct GpuArgMax {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     context: std::sync::Arc<WgpuContext>,
 }
-
 impl GpuArgMax {
     pub fn new(context: &std::sync::Arc<WgpuContext>) -> Self {
         let shader = context
@@ -66,7 +64,7 @@ impl GpuArgMax {
                 module: &shader,
                 entry_point: Some("main"),
                 cache: None,
-                compilation_options: Default::default()
+                compilation_options: Default::default(),
             });
 
         Self {

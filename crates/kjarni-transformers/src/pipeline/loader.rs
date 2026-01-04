@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -6,17 +6,17 @@ use tokenizers::Tokenizer;
 use crate::chat::chatml::ChatMLTemplate;
 use crate::chat::llama3::Llama3ChatTemplate;
 use crate::chat::mistral::MistralChatTemplate;
-use crate::{ChatTemplate, WgpuContext};
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::models::base::ModelLoadConfig;
 use crate::models::registry::WeightsFormat;
-use crate::models::{ModelArchitecture, ModelType, download_model_files};
+use crate::models::{download_model_files, ModelArchitecture, ModelType};
 use crate::pipeline::{DecoderPipeline, DecoderPipelineBuilder};
 use crate::rope::loader::LoadedRoPE;
 use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
+use crate::{ChatTemplate, WgpuContext};
 
 /// The Factory trait that every model (Llama, Phi, etc.) implements to
 /// plug into the generic loading pipeline.
@@ -68,7 +68,7 @@ impl GenericLoader {
         let is_quantized_request = matches!(
             config.target_dtype,
             Some(DType::Q4_K) | Some(DType::Q6_K) | Some(DType::Q8_0)
-        );
+        ) || config.use_gguf;
         let format = if is_quantized_request && info.paths.gguf_url.is_some() {
             log::info!("Configuration requests quantization. Preferring GGUF format.");
             WeightsFormat::GGUF
@@ -108,6 +108,9 @@ impl GenericLoader {
         } else {
             model_path.join("tokenizer.json")
         };
+        if !tokenizer_path.exists() {
+            return Err(anyhow!("Tokenizer not found at {:?}", tokenizer_path));
+        }
         let mut tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {

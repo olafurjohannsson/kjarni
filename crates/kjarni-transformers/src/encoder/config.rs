@@ -1,5 +1,4 @@
 //! Encoder configuration types
-use crate::tensor::DType;
 use std::fmt;
 
 /// Pooling strategies for sequence outputs
@@ -53,7 +52,6 @@ impl fmt::Display for EncodingConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensor::DType;
 
     #[test]
     fn test_pooling_strategy_display() {

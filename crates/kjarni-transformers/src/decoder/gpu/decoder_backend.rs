@@ -39,13 +39,12 @@
 //! - **Memory**: KV cache grows linearly with sequence length
 //! - **Sync Point**: One GPU→CPU transfer per generated token (logits only)
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2};
 use std::sync::Arc;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, MapMode};
 
-use crate::WgpuContext;
 use crate::cache::{Cache, GpuKVCache};
 use crate::decoder::prelude::*;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
@@ -53,6 +52,7 @@ use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 pub use crate::models::base::AutoregressiveLoop;
 use crate::models::base::ModelInput;
+use crate::WgpuContext;
 
 /// GPU-accelerated backend for autoregressive decoder generation.
 ///
@@ -173,7 +173,6 @@ impl GpuDecoderBackend {
         seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
-        // 1. Calculate input length BEFORE moving 'input' (ownership transfer)
         let input_len = match input {
             ModelInput::TokensCpu(t) => t.len(),
             ModelInput::TokensGpu(t) => t.shape()[1],
@@ -214,17 +213,15 @@ impl GpuDecoderBackend {
         // 5. Execute transformer decoder stack
         let (encoder, pool) = frame.resources();
 
-        let hidden_states = ops
-            .decoder()
-            .forward(
-                encoder,
-                pool,
-                input,
-                &attention_mask,
-                gpu_cache.get_seq_length(),
-                Some(gpu_cache),
-                None,
-            )?;
+        let hidden_states = ops.decoder().forward(
+            encoder,
+            pool,
+            input,
+            &attention_mask,
+            gpu_cache.get_seq_length(),
+            Some(gpu_cache),
+            None,
+        )?;
 
         // 6. Extract last token's hidden state
         //
@@ -309,17 +306,15 @@ impl GpuDecoderBackend {
         let attention_mask = ops.get_attention_mask(&mut frame, logical_key_len, mask_size)?;
 
         let (encoder, pool) = frame.resources();
-        let _ = ops
-            .decoder()
-            .forward(
-                encoder,
-                pool,
-                input,
-                &attention_mask,
-                gpu_cache.get_seq_length(),
-                Some(gpu_cache),
-                None,
-            )?;
+        let _ = ops.decoder().forward(
+            encoder,
+            pool,
+            input,
+            &attention_mask,
+            gpu_cache.get_seq_length(),
+            Some(gpu_cache),
+            None,
+        )?;
 
         frame.finish();
         gpu_cache.increment_len(input_len);
@@ -387,8 +382,8 @@ impl GpuDecoderBackend {
 
         loop {
             // Poll GPU
-            // let _ = self.context.device.poll(wgpu::PollType::Poll);
-            match self.context.device.poll(wgpu::PollType::Poll) { // todo?
+            match self.context.device.poll(wgpu::PollType::Poll) {
+                // todo?
                 Ok(status) => println!("GPU Poll OK: {:?}", status),
                 Err(e) => panic!("GPU Poll Failed: {:?}", e),
             }
@@ -415,7 +410,7 @@ impl GpuDecoderBackend {
                     elapsed,
                     timeout: self.timeout_config.timeout,
                 }
-                .into());
+                    .into());
             }
 
             // Yield to runtime
@@ -521,7 +516,7 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
                         context_tokens.len(),
                         cache,
                     )
-                    .await?;
+                        .await?;
                 }
 
                 // Phase 2: Get logits from last token

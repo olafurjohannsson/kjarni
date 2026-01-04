@@ -1,18 +1,73 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use kjarni::registry;
+use kjarni::ModelType;
 use kjarni_cli::ModelCommands;
-use kjarni::{ModelArchitecture, ModelType};
+use std::path::Path;
 
 pub async fn run(action: ModelCommands) -> Result<()> {
     match action {
         ModelCommands::List { arch } => list(arch),
         ModelCommands::Download { name, gguf } => download(&name, gguf).await,
+        ModelCommands::Remove { name } => remove(&name),
         ModelCommands::Info { name } => info(&name),
         ModelCommands::Search { query } => search(&query),
     }
 }
 
+fn remove(name: &str) -> Result<()> {
+    let model_path = registry::model_path(name)?;
 
+    if !model_path.exists() {
+        println!("Model '{}' is not downloaded.", name);
+        return Ok(());
+    }
+
+    // Show what will be deleted
+    let size = dir_size(&model_path)?;
+    println!();
+    println!("This will delete:");
+    println!("  Model: {}", name);
+    println!("  Path:  {}", model_path.display());
+    println!("  Size:  {}", format_bytes(size));
+    println!();
+
+    // Confirm
+    print!("Are you sure? [y/N] ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+
+    if input.trim().to_lowercase() == "y" {
+        std::fs::remove_dir_all(&model_path)?;
+        println!("✓ Removed {}", name);
+    } else {
+        println!("Cancelled.");
+    }
+
+    Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const GB: u64 = 1024 * 1024 * 1024;
+    const MB: u64 = 1024 * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    }
+}
+fn dir_size(path: &Path) -> Result<u64> {
+    let mut size = 0;
+    for entry in walkdir::WalkDir::new(path) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            size += entry.metadata()?.len();
+        }
+    }
+    Ok(size)
+}
 fn search(query: &str) -> Result<()> {
     let results = ModelType::search(query);
 
@@ -51,93 +106,170 @@ pub fn format_params(millions: usize) -> String {
         format!("{}M", millions)
     }
 }
+
 fn list(filter_arg: Option<String>) -> Result<()> {
     let models = registry::list_models();
     let filter = filter_arg.as_deref().map(|s| s.to_lowercase());
 
-    // Define the display order
     let groups = [
         "LLM (Decoder)",
         "Seq2Seq",
         "Embedding",
-        "Re-Ranker",     // <-- Now clearly separated
-        "Classifier",    // <-- Now clearly separated
+        "Re-Ranker",
+        "Classifier",
     ];
+
+    // Calculate totals
+    let downloaded_count = models.iter().filter(|m| m.downloaded).count();
+    let total_count = models.len();
 
     println!();
     println!("Cache: {}", registry::cache_dir().display());
+    println!("Models: {}/{} downloaded", downloaded_count, total_count);
     println!();
 
     for group in groups {
-        // Filter models by their semantic group
-        let group_models: Vec<_> = models.iter().filter(|m| {
-            let m_group = m.model_type.display_group(); // Use the new helper
-            
-            // 1. Must match current group loop
-            if m_group != group { return false; }
+        let group_models: Vec<_> = models
+            .iter()
+            .filter(|m| {
+                let m_group = m.model_type.display_group();
+                if m_group != group {
+                    return false;
+                }
+                if let Some(f) = &filter {
+                    // Handle special filters
+                    if f == "downloaded" {
+                        return m.downloaded;
+                    }
+                    if m_group.to_lowercase().contains(f) {
+                        return true;
+                    }
+                    let arch = format!("{:?}", m.architecture).to_lowercase();
+                    if arch.contains(f) {
+                        return true;
+                    }
+                    return false;
+                }
+                true
+            })
+            .collect();
 
-            // 2. Apply User Filter (flexible matching)
-            if let Some(f) = &filter {
-                // Allow filtering by group name (e.g. "classifier")
-                if m_group.to_lowercase().contains(f) { return true; }
-                
-                // Allow filtering by specific architecture (e.g. "bert")
-                let arch = format!("{:?}", m.architecture).to_lowercase();
-                if arch.contains(f) { return true; }
-                
-                return false;
-            }
-            true
-        }).collect();
-
-        if group_models.is_empty() { continue; }
+        if group_models.is_empty() {
+            continue;
+        }
 
         println!("{}", group.to_uppercase());
-        println!("{}", "-".repeat(85));
+        println!("{}", "-".repeat(90));
 
         for m in group_models {
-            let status = if m.downloaded { "✓" } else { " " };
-            let gguf_tag = if m.has_gguf { "[GGUF]" } else { "" };
-            
+            // Show download status with format info
+            let status = if m.downloaded {
+                if has_gguf_downloaded(&m.model_type) {
+                    "✓ gguf"
+                } else {
+                    "✓ st  "  // safetensors
+                }
+            } else {
+                "      "
+            };
+
+            let gguf_tag = if m.has_gguf { "[GGUF]" } else { "      " };
+
             println!(
-                "  {} {:<28} {:>8} {:<6} {}",
+                "  {} {:<28} {:>8} {} {}",
                 status,
                 m.cli_name,
                 m.params,
                 gguf_tag,
-                truncate(&m.description, 35)
+                truncate(&m.description, 30)
             );
         }
         println!();
     }
 
-    println!("✓ = downloaded");
+    println!("Legend: ✓ gguf = GGUF downloaded, ✓ st = SafeTensors downloaded");
+    println!("        [GGUF] = GGUF format available for download");
+    println!();
+    println!("Commands:");
+    println!("  kjarni model download <name>        Download SafeTensors");
+    println!("  kjarni model download <name> --gguf Download GGUF (smaller)");
+    println!("  kjarni model info <name>            Show details");
+    println!("  kjarni model remove <name>          Delete from disk");
     println!();
 
     Ok(())
 }
 
-async fn download(name: &str, prefer_gguf: bool ) -> Result<()> {
+fn has_gguf_downloaded(model_type: &ModelType) -> bool {
+    let cache_dir = registry::cache_dir();
+    let model_dir = model_type.cache_dir(&cache_dir);
+    model_dir.join("model.gguf").exists()
+}
+
+async fn download(name: &str, prefer_gguf: bool) -> Result<()> {
     registry::download_model(name, prefer_gguf).await
 }
 
 fn info(name: &str) -> Result<()> {
     let model = registry::get_model_info(name)?;
+    let model_path = registry::model_path(name)?;
 
     println!();
-    println!("Model: {}", model.cli_name);
-    println!("{}", "-".repeat(40));
-    println!("Architecture:  {}", model.architecture.display_name());
-    println!("Parameters:    {}", model.params);
-    println!("Size:          {}", model.size);
-    println!("Downloaded:    {}", if model.downloaded { "Yes" } else { "No" });
-    println!("Path:          {}", registry::model_path(&model.cli_name)?.display());
+    println!("┌─────────────────────────────────────────┐");
+    println!("│  {}  ", pad_center(&model.cli_name, 37));
+    println!("└─────────────────────────────────────────┘");
     println!();
-    println!("Description:");
-    println!("  {}", model.description);
+    println!("  Architecture:  {}", model.architecture.display_name());
+    println!("  Parameters:    {}", model.params);
+    println!("  Size (est):    {}", model.size);
+    println!();
+
+    // Download status section
+    println!("  Download Status:");
+
+    let st_path = model_path.join("model.safetensors");
+    let st_index_path = model_path.join("model.safetensors.index.json");
+    let gguf_path = model_path.join("model.gguf");
+
+    if st_path.exists() || st_index_path.exists() {
+        let size = if st_path.exists() {
+            st_path.metadata().map(|m| m.len()).unwrap_or(0)
+        } else {
+            dir_size(&model_path).unwrap_or(0)
+        };
+        println!("    ✓ SafeTensors  {}", format_bytes(size));
+    } else {
+        println!("    ○ SafeTensors  (not downloaded)");
+    }
+
+    if gguf_path.exists() {
+        let size = gguf_path.metadata().map(|m| m.len()).unwrap_or(0);
+        println!("    ✓ GGUF         {}", format_bytes(size));
+    } else if model.has_gguf {
+        println!("    ○ GGUF         (available, use --gguf to download)");
+    } else {
+        println!("    ✗ GGUF         (not available for this model)");
+    }
+
+    println!();
+    println!("  Path: {}", model_path.display());
+    println!();
+    println!("  Description:");
+    println!("    {}", model.description);
     println!();
 
     Ok(())
+}
+
+fn pad_center(s: &str, width: usize) -> String {
+    if s.len() >= width {
+        s.to_string()
+    } else {
+        let padding = width - s.len();
+        let left = padding / 2;
+        let right = padding - left;
+        format!("{}{}{}", " ".repeat(left), s, " ".repeat(right))
+    }
 }
 
 fn truncate(s: &str, max_len: usize) -> String {

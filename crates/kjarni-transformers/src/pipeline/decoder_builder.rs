@@ -1,4 +1,3 @@
-use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::embeddings::{EmbeddingConfig, LoadedEmbeddings};
 use crate::execution::ExecutionPlan;
@@ -7,9 +6,9 @@ use crate::models::base::ModelLoadConfig;
 use crate::pipeline::{DecoderPipeline, DecoderPipelineConfig};
 use crate::traits::{Device, ModelConfig};
 use crate::weights::ModelWeights;
-use anyhow::{Context, Result, anyhow};
+use crate::WgpuContext;
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
-
 pub struct DecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
     config: Arc<dyn ModelConfig>,
@@ -97,11 +96,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
         )?;
 
         // 5. Load LM Head (The "Tied" Check)
-        
-        // Load LM head as Q8_0 is gguf if not already set 
 
-       
-        
+        // Load LM head as Q8_0 is gguf if not already set
+
         log::warn!("FORCING LM HEAD TO USE Q8_0 QUANTIZATION FOR PERFORMANCE TEST");
 
         let lm_head = if tied_weights {
@@ -123,7 +120,6 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 self.load_config.quantize_lm_head,
             )?
         };
-        
 
         // 6. Build Model Backends (Handover RoPE and DType)
         // We resolve backends here using the specific model's factory logic

@@ -34,15 +34,24 @@ pub struct Message {
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: Role::System, content: content.into() }
+        Self {
+            role: Role::System,
+            content: content.into(),
+        }
     }
 
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into() }
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into() }
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
     }
 }
 
@@ -117,7 +126,10 @@ impl Conversation {
 
     /// Count messages (excluding system)
     pub fn turn_count(&self) -> usize {
-        self.messages.iter().filter(|m| m.role != Role::System).count()
+        self.messages
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .count()
     }
 
     /// Check if empty
@@ -147,7 +159,7 @@ pub trait ChatTemplate: Send + Sync {
     }
 
     /// Validate if a conversation is properly formatted for this template
-    fn validate(&self, conversation: &Conversation) -> Result<(), String> {
+    fn validate(&self, _conversation: &Conversation) -> Result<(), String> {
         // Default: no validation
         Ok(())
     }

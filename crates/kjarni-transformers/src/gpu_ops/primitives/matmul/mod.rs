@@ -45,12 +45,12 @@
 //! - [`super::bmm`] — Batched matrix multiplication
 //! - [`super::linear`] — Fused linear layer (matmul + bias)
 
+use crate::gpu_ops::{GpuTensor, Kernel};
 use crate::tensor::DType;
 use crate::WgpuContext;
-use crate::gpu_ops::{GpuTensor, Kernel};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 /// Uniform parameters passed to matmul shaders.
 #[repr(C)]
@@ -97,13 +97,34 @@ impl GpuMatMul {
         let bind_group_layout = create_bind_group_layout(&context.device);
 
         // 2. Compile F32 Pipeline
-        let shader_f32 = context.device.create_shader_module(wgpu::include_wgsl!("./matmul_tiled.wgsl"));
-        let pipeline_f32 = create_pipeline(&context.device, &bind_group_layout, &shader_f32, "Matmul F32");
-        let shader_gemv = context.device.create_shader_module(wgpu::include_wgsl!("./gemv_bf16.wgsl"));
+        let shader_f32 = context
+            .device
+            .create_shader_module(wgpu::include_wgsl!("./matmul_tiled.wgsl"));
+        let pipeline_f32 = create_pipeline(
+            &context.device,
+            &bind_group_layout,
+            &shader_f32,
+            "Matmul F32",
+        );
+        let shader_gemv = context
+            .device
+            .create_shader_module(wgpu::include_wgsl!("./gemv_bf16.wgsl"));
         // 3. Compile BF16 Pipeline
-        let shader_bf16 = context.device.create_shader_module(wgpu::include_wgsl!("./matmul_bf16.wgsl"));
-        let pipeline_bf16 = create_pipeline(&context.device, &bind_group_layout, &shader_bf16, "Matmul BF16");
-        let pipeline_gemv = create_pipeline(&context.device, &bind_group_layout, &shader_gemv, "GEMV BF16");
+        let shader_bf16 = context
+            .device
+            .create_shader_module(wgpu::include_wgsl!("./matmul_bf16.wgsl"));
+        let pipeline_bf16 = create_pipeline(
+            &context.device,
+            &bind_group_layout,
+            &shader_bf16,
+            "Matmul BF16",
+        );
+        let pipeline_gemv = create_pipeline(
+            &context.device,
+            &bind_group_layout,
+            &shader_gemv,
+            "GEMV BF16",
+        );
 
         let uniform_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("MatMul Persistent Uniforms"),
@@ -157,11 +178,15 @@ impl Kernel for GpuMatMul {
                 let k = a.shape()[1] as u32;
                 let n = b.shape()[1] as u32;
                 (&self.pipeline_f32, m, k, n)
-            },
+            }
             DType::BF16 => {
                 // Implicit Transpose Logic: [M, K] @ [N, K] -> [M, N]
                 // B is physically [N, K] (Transposed in VRAM), logical is [K, N]
-                assert_eq!(a.shape()[1], b.shape()[1], "BF16: A cols must match B cols (Implicit Transpose)");
+                assert_eq!(
+                    a.shape()[1],
+                    b.shape()[1],
+                    "BF16: A cols must match B cols (Implicit Transpose)"
+                );
                 let m = a.shape()[0] as u32;
                 let k = a.shape()[1] as u32;
                 let n = b.shape()[0] as u32; // Note: N comes from dimension 0 here!
@@ -173,7 +198,7 @@ impl Kernel for GpuMatMul {
                     // SLOW PATH: Tiled MatMul (Prefill phase)
                     (&self.pipeline_bf16, m, k, n)
                 }
-            },
+            }
             dtype => panic!("Unsupported MatMul weight type: {:?}", dtype),
         };
 
@@ -258,7 +283,7 @@ fn create_pipeline(
     device: &wgpu::Device,
     layout: &BindGroupLayout,
     module: &wgpu::ShaderModule,
-    label: &str
+    label: &str,
 ) -> ComputePipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{} Layout", label)),
@@ -290,7 +315,12 @@ fn run_internal_matmul(
     n: u32,
 ) {
     let device = &context.device;
-    let uniforms = MatmulUniforms { m, k, n, _padding: 0 };
+    let uniforms = MatmulUniforms {
+        m,
+        k,
+        n,
+        _padding: 0,
+    };
 
     let offset = context.uniform_arena.write(&context.queue, &uniforms);
 
@@ -303,12 +333,24 @@ fn run_internal_matmul(
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: context.uniform_arena.buffer(),
                     offset: 0, // MUST BE 0. Dynamic offset adds to this.
-                    size: Some(std::num::NonZeroU64::new(std::mem::size_of::<MatmulUniforms>() as u64).unwrap()),
+                    size: Some(
+                        std::num::NonZeroU64::new(std::mem::size_of::<MatmulUniforms>() as u64)
+                            .unwrap(),
+                    ),
                 }),
             },
-            wgpu::BindGroupEntry { binding: 1, resource: a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: c.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: c.as_entire_binding(),
+            },
         ],
     });
     let label = format!("MatMul [{}x{} @ {}]", m, n, k);

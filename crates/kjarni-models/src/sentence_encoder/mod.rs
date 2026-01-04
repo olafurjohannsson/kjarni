@@ -48,7 +48,7 @@ pub struct SentenceEncoder {
 
 impl SentenceEncoder {
     /// Supported encoder model types
-const SUPPORTED_MODELS: &'static [ModelType] = &[
+    const SUPPORTED_MODELS: &'static [ModelType] = &[
         ModelType::MiniLML6V2,
         ModelType::NomicEmbedText, // New! THIS NEEDS ROPE
         ModelType::BgeM3,          // New!
@@ -100,7 +100,7 @@ const SUPPORTED_MODELS: &'static [ModelType] = &[
         }
 
         let info = model_type.info();
-        
+
         // 2. Validate Architecture
         // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
         match info.architecture {
@@ -152,7 +152,7 @@ const SUPPORTED_MODELS: &'static [ModelType] = &[
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
         let config: Arc<dyn ModelConfig> = match model_type {
-            
+
             // todo UPDATE
 
             ModelType::MiniLML6V2 => Arc::new(BertConfig::from_json(&weights.config_json)?),
@@ -188,7 +188,7 @@ const SUPPORTED_MODELS: &'static [ModelType] = &[
                 )?);
             }
         }
-        
+
         // Configure tokenizer padding and truncation using the model's config
         let truncation_params = tokenizers::TruncationParams {
             max_length: meta.max_seq_len,
@@ -224,6 +224,10 @@ const SUPPORTED_MODELS: &'static [ModelType] = &[
     /// Get the maximum sequence length
     pub fn max_seq_length(&self) -> usize {
         self.meta.max_seq_len
+    }
+
+    pub fn hidden_size(&self) -> usize {
+        self.meta.hidden_size
     }
 
     /// Get the model type

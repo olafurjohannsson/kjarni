@@ -61,16 +61,8 @@
 
 mod config;
 mod config_utils;
-mod cross_encoder_api;
-mod edge_gpt;
-mod kjarni;
-mod model_manager;
-mod sentence_encoder_api;
 mod utils;
 // Re-export main API
-pub use cross_encoder_api::CrossEncoderAPI;
-pub use edge_gpt::{EdgeGPT, EdgeGPTBuilder};
-pub use sentence_encoder_api::SentenceEncoderAPI;
 pub use utils::*;
 
 pub use kjarni_models::cross_encoder::CrossEncoder;
@@ -78,7 +70,7 @@ pub use kjarni_models::sentence_encoder::SentenceEncoder;
 pub use kjarni_models::SequenceClassifier;
 
 // Re-export core types
-pub use kjarni_transformers::models::{ModelArchitecture, ModelType};
+pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
 
 // Re-export generation
@@ -89,7 +81,7 @@ pub use kjarni_transformers::common::{
 // Re-export chat
 pub use kjarni_transformers::chat::{
     llama3::{Llama2ChatTemplate, Llama3ChatTemplate},
-    templates::{ChatTemplate, Conversation, Message, Role}
+    templates::{ChatTemplate, Conversation, Message, Role},
 };
 
 pub use kjarni_transformers::decoder::generator::DecoderGenerator;
@@ -112,31 +104,23 @@ pub use kjarni_search::{Bm25Index, Chunk, ChunkMetadata, SearchMode, SearchResul
 // Re-export commonly used types from dependencies
 pub use kjarni_transformers::prelude::*;
 
-
-
 pub mod models {
     pub use kjarni_models::models::bart::model::BartModel;
     pub use kjarni_models::models::gpt2::Gpt2Model;
-    pub use kjarni_models::models::llama::{
-        LlamaConfig, LlamaModel,
-    };
-    pub use kjarni_models::models::qwen::{
-        QwenModel,
-        QwenConfig
-    };
+    pub use kjarni_models::models::llama::{LlamaConfig, LlamaModel};
+    pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
 }
 pub mod registry;
 
 // FFI module (feature-gated and public)
+mod classifier;
+mod encoder;
 #[cfg(any(feature = "python", feature = "c-bindings"))]
 pub mod ffi;
 
 // Prelude
 pub mod prelude {
-    pub use crate::edge_gpt::{EdgeGPT, EdgeGPTBuilder};
     pub use crate::utils::*;
     pub use kjarni_transformers::models::ModelType;
     pub use kjarni_transformers::prelude::*;
 }
-
-// mod model;

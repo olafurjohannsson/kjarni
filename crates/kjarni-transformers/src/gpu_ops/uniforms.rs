@@ -1,6 +1,4 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use wgpu::util::DeviceExt;
 
 /// Manages a large persistent buffer for uniforms to avoid per-frame allocation.
 pub struct GpuUniformBuffer {
@@ -10,12 +8,11 @@ pub struct GpuUniformBuffer {
     alignment: u64,
     label: String,
 }
-
 impl GpuUniformBuffer {
     pub fn new(device: &wgpu::Device, size: u64, label: &str) -> Self {
         let limits = device.limits();
         let alignment = limits.min_uniform_buffer_offset_alignment as u64;
-        
+
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size,
@@ -44,35 +41,40 @@ impl GpuUniformBuffer {
         // e.g. if size is 16 and alignment is 256, we effectively consume 256 bytes
         // because the NEXT allocation must start at 256.
         // Wait, dynamic offsets require the START to be aligned.
-        
+
         // 1. Get current position
         let current = self.cursor.load(Ordering::Relaxed);
-        
+
         // 2. Align current position (it should already be aligned from previous step, but safe check)
         let aligned_start = (current + self.alignment - 1) / self.alignment * self.alignment;
-        
+
         // 3. Calculate new cursor position
         let new_cursor = aligned_start + size; // Actual data end
-        
+
         // 4. Update cursor (atomically if needed, but we are usually single-threaded encoder)
-        // Note: fetch_add is tricky because we need the aligned logic. 
+        // Note: fetch_add is tricky because we need the aligned logic.
         // Let's assume single-threaded encoding for now or use a Mutex if shared.
         // For simple atomic bump:
-        // We can just bump by `max(size, alignment)`. 
+        // We can just bump by `max(size, alignment)`.
         // If size < alignment, we bump by alignment.
         // If size > alignment, we bump by ceil(size/alignment)*alignment.
-        
+
         let allocation_size = (size + self.alignment - 1) / self.alignment * self.alignment;
         let offset = self.cursor.fetch_add(allocation_size, Ordering::Relaxed);
-        
+
         if offset + size > self.capacity {
             // Panic or handle resize. For V1, Panic is acceptable if sizing is generous.
-            panic!("GpuUniformBuffer '{}' overflow! Capacity: {}, Requested: {}", self.label, self.capacity, offset + size);
+            panic!(
+                "GpuUniformBuffer '{}' overflow! Capacity: {}, Requested: {}",
+                self.label,
+                self.capacity,
+                offset + size
+            );
         }
 
         // Write data
         queue.write_buffer(&self.buffer, offset, bytemuck::bytes_of(data));
-        
+
         offset as u32
     }
 

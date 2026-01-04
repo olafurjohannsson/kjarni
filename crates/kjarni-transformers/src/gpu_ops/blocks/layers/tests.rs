@@ -1,4 +1,3 @@
-use crate::WgpuContext;
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
@@ -11,16 +10,18 @@ use crate::gpu_ops::blocks::{
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
+use crate::WgpuContext;
 
 use crate::rope::RoPE as CpuRoPE;
-use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata};
+use crate::traits::{
+    AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
+    ModelLayout, ModelMetadata,
+};
 // New Traits
 use anyhow::Result;
-use common::{
-    assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context,
-};
+use common::{assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context};
 use ndarray::{Array, Array1, Array2, Array3, Array4};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use ndarray_rand::{rand_distr::Uniform, RandomExt};
 use std::sync::Arc;
 
 #[path = "../../../tests/common.rs"]
@@ -110,7 +111,10 @@ impl ModelConfig for TestLlamaConfig {
 async fn create_test_layer_pair(
     context: &Arc<WgpuContext>,
     config: &TestLlamaConfig,
-) -> Result<(GpuPreNormDecoderLayer, crate::decoder::prelude::DecoderLayer)> {
+) -> Result<(
+    GpuPreNormDecoderLayer,
+    crate::decoder::prelude::DecoderLayer,
+)> {
     let head_dim = config.hidden_size / config.num_attention_heads;
     let kv_dim = config.num_key_value_heads * head_dim;
 
@@ -147,8 +151,6 @@ async fn create_test_layer_pair(
     let attn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
     let ffn_norm_w = Array::random(config.hidden_size, Uniform::new(0.9, 1.1));
 
- 
-
     let to_gpu_native = |arr: &Array2<f32>| -> Result<GpuTensor> {
         GpuTensor::from_ndarray::<f32, _>(context, arr)
     };
@@ -156,13 +158,25 @@ async fn create_test_layer_pair(
     // --- Build GPU Layer ---
     let gpu_attn_weights = GpuAttentionWeights::new(
         q_w.to_gpu(context)?,
-        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?),
+        Some(GpuTensor::from_ndarray::<f32, _>(
+            context,
+            &Array1::zeros(config.hidden_size),
+        )?),
         k_w.to_gpu(context)?,
-        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?),
+        Some(GpuTensor::from_ndarray::<f32, _>(
+            context,
+            &Array1::zeros(kv_dim),
+        )?),
         v_w.to_gpu(context)?,
-        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(kv_dim))?),
+        Some(GpuTensor::from_ndarray::<f32, _>(
+            context,
+            &Array1::zeros(kv_dim),
+        )?),
         o_w.to_gpu(context)?,
-        Some(GpuTensor::from_ndarray::<f32, _>(context, &Array1::zeros(config.hidden_size))?),
+        Some(GpuTensor::from_ndarray::<f32, _>(
+            context,
+            &Array1::zeros(config.hidden_size),
+        )?),
     )?;
 
     let gpu_attn_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, 1e-5));
@@ -231,7 +245,7 @@ fn test_decoder_attention_matches_multihead_attention() -> Result<()> {
     let num_heads = 4;
     let batch_size = 2;
     let seq_len = 10;
-
+    let head_dim = hidden_size / num_heads;
     let weight_data: Vec<f32> = (0..hidden_size * hidden_size)
         .map(|i| ((i % 17) as f32 - 8.0) * 0.01)
         .collect();
@@ -273,7 +287,19 @@ fn test_decoder_attention_matches_multihead_attention() -> Result<()> {
 
     let (mha_output, _, _) = mha.forward_with_cache(&input, None, Some(&mask), true, None, None)?;
 
-    let (da_output, _, _) = da.forward(&input, Some(&mask), None, None)?;
+    // Allocate cache for DecoderAttention
+    let kv_dim = num_heads * head_dim;
+    let mut k_cache = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+    let mut v_cache = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+
+    let da_output = da.forward(
+        &input,
+        Some(&mask),
+        k_cache.view_mut(),
+        v_cache.view_mut(),
+        0,
+        None,
+    )?;
 
     let diff = (&mha_output - &da_output).mapv(|x| x.abs());
     let max_diff = diff.iter().cloned().fold(0.0f32, f32::max);
@@ -336,7 +362,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
         "SwiGLU FFN Parity",
         1e-4,
     )
-    .await;
+        .await;
 
     Ok(())
 }
@@ -384,7 +410,7 @@ async fn test_llama_layer_step_by_step() -> Result<()> {
         &mut pool,
         Some(&gpu_rope_instance),
     )
-    .await?;
+        .await?;
 
     Ok(())
 }
@@ -406,10 +432,19 @@ pub async fn forward_llama_with_debug(
     // --- Ground Truth CPU Calculation ---
     let cpu_residual_1 = hidden_states_cpu.clone();
     let cpu_ln1_out = cpu_layer.self_attn_layer_norm.forward(&cpu_residual_1);
-    let (cpu_attn_out, _, _) = cpu_layer.self_attn.forward(
+
+    // Allocate cache for CPU attention
+    let (batch, seq_len, _) = cpu_ln1_out.dim();
+    let kv_dim = cpu_layer.self_attn.num_kv_heads * cpu_layer.self_attn.head_dim;
+    let mut cpu_k_cache = Array3::<f32>::zeros((batch, seq_len, kv_dim));
+    let mut cpu_v_cache = Array3::<f32>::zeros((batch, seq_len, kv_dim));
+
+    let cpu_attn_out = cpu_layer.self_attn.forward(
         &cpu_ln1_out,
         Some(attention_mask_cpu),
-        None,
+        cpu_k_cache.view_mut(),
+        cpu_v_cache.view_mut(),
+        0,
         cpu_layer.rope.as_deref(),
     )?;
     let cpu_attn_block_output = &cpu_residual_1 + &cpu_attn_out;
@@ -498,7 +533,7 @@ pub async fn forward_llama_with_debug(
         "attn_block_output",
         tolerance,
     )
-    .await;
+        .await;
     let residual_2_gpu = &attn_block_output_gpu;
     let ln2_out_gpu = temp.get(residual_2_gpu.shape().to_vec());
     gpu_layer.ffn_norm.encode(
@@ -554,7 +589,7 @@ pub async fn forward_llama_with_debug(
         "final_output",
         tolerance,
     )
-    .await;
+        .await;
     log::info!("✓ Step 6: Final layer output matches CPU.");
 
     Ok(final_output_gpu)
@@ -617,7 +652,19 @@ fn test_decoder_attention_with_rope_matches_mha() -> Result<()> {
     let (mha_output, _, _) =
         mha.forward_with_cache(&input, None, Some(&mask), true, None, Some(rope.as_ref()))?;
 
-    let (da_output, _, _) = da.forward(&input, Some(&mask), None, Some(rope.as_ref()))?;
+    // Allocate cache for DecoderAttention
+    let kv_dim = num_heads * head_dim;
+    let mut k_cache = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+    let mut v_cache = Array3::<f32>::zeros((batch_size, seq_len, kv_dim));
+
+    let da_output = da.forward(
+        &input,
+        Some(&mask),
+        k_cache.view_mut(),
+        v_cache.view_mut(),
+        0,
+        Some(rope.as_ref()),
+    )?;
 
     // --- 5. Compare (same as before) ---
     let max_diff = (&mha_output - &da_output)
@@ -706,7 +753,7 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
         "GpuRepeatKV Kernel vs CPU Logic",
         1e-6, // Use a very small tolerance
     )
-    .await;
+        .await;
 
     println!("GpuRepeatKV kernel is correct!");
 
@@ -786,10 +833,26 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
     let input = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(b, s, h)| {
         ((b * 100 + s * 10 + h) % 19) as f32 * 0.1 - 0.8
     });
+    let (b, s, _) = input.dim();
     let mask = Array2::<f32>::ones((batch_size, seq_len));
-
-    let (gqa_output, _, _) = da_gqa.forward(&input, Some(&mask), None, None)?;
-    let (manual_mha_output, _, _) = da_mha.forward(&input, Some(&mask), None, None)?;
+    let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
+    let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
+    let gqa_output = da_gqa.forward(
+        &input,
+        Some(&mask),
+        temp_k.view_mut(),
+        temp_v.view_mut(),
+        0,
+        None,
+    )?;
+    let manual_mha_output = da_mha.forward(
+        &input,
+        Some(&mask),
+        temp_k.view_mut(),
+        temp_v.view_mut(),
+        0,
+        None,
+    )?;
 
     // --- 4. Compare ---
     let max_diff = (&gqa_output - &manual_mha_output)
@@ -856,7 +919,7 @@ async fn test_rope_parity_single_token() -> Result<()> {
         "RoPE single token",
         1e-5,
     )
-    .await;
+        .await;
 
     Ok(())
 }

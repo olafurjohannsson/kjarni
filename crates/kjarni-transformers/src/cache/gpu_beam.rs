@@ -134,7 +134,6 @@ impl GpuBeamKVCache {
         let cache_v = &self.v_tensors[layer_idx];
         let position_offset = self.seq_length;
 
-
         self.update_kernel
             .encode(encoder, new_k, new_v, cache_k, cache_v, position_offset);
         Ok(())
@@ -156,7 +155,6 @@ impl GpuBeamKVCache {
 
         // ASSERTION 6: Can't reorder empty cache
         assert!(self.seq_length > 0, "Cannot reorder empty cache!");
-
 
         // Original reorder code...
         for i in 0..self.k_tensors.len() {
@@ -204,10 +202,8 @@ impl Cache for GpuBeamKVCache {
     }
     // fn increment_len(&mut self, new_tokens_len: usize) { self.seq_length += new_tokens_len; }
     fn increment_len(&mut self, new_tokens_len: usize) {
-        let old_len = self.seq_length;
         self.seq_length += new_tokens_len;
 
-        // ASSERTION 7: Check we don't exceed capacity
         let capacity = self.k_tensors[0].shape()[2];
         assert!(
             self.seq_length <= capacity,

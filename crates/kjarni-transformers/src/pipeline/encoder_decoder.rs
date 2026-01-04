@@ -1,6 +1,3 @@
-// kjarni-transformers/src/pipeline/decoder.rs
-
-use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::embeddings::LoadedEmbeddings;
 use crate::encoder::{CpuEncoder, GpuEncoder};
 use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};

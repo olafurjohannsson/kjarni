@@ -1,22 +1,18 @@
-use anyhow::{Result};
 use crate::{
-    WgpuContext,
     cache::GpuKVCache,
     decoder::{gpu::GpuRoPEAttention, prelude::*},
     gpu_ops::{
-        GpuTensor, GpuTensorPool, Kernel,
         blocks::{
-            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
-            GpuSwiGLUFFN,
-            attention::GpuAttentionWeights,
-            rms_norm::{GpuRMSNorm},
-            rope::GpuRoPE,
-        },
-        primitives::add::GpuAdd,
-    }
+            attention::GpuAttentionWeights, rms_norm::GpuRMSNorm, rope::GpuRoPE, GpuFeedForward,
+            GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN,
+        }, primitives::add::GpuAdd, GpuTensor,
+        GpuTensorPool,
+        Kernel,
+    },
+    WgpuContext,
 };
+use anyhow::Result;
 use std::sync::Arc;
-
 pub struct GpuRoPEDecoderLayer {
     pub self_attn: GpuRoPEAttention,
     pub self_attn_weights: GpuAttentionWeights,

@@ -1,8 +1,8 @@
-use crate::WgpuContext;
 use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::WgpuContext;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
