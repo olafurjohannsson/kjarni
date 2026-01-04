@@ -1,7 +1,4 @@
-use super::*;
-use crate::Device::Cpu;
 use crate::WgpuContext;
-use crate::activations::Activation::{Gelu, SilU};
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
@@ -11,7 +8,7 @@ use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
     GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-use crate::gpu_ops::{DType, GpuFrameContext, GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
 
@@ -20,9 +17,9 @@ use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForw
 // New Traits
 use anyhow::Result;
 use common::{
-    assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context, read_gpu_tensor_to_vec,
+    assert_tensors_are_close, assert_tensors_are_close_4d, get_test_context,
 };
-use ndarray::{Array, Array1, Array2, Array3, Array4, Ix4};
+use ndarray::{Array, Array1, Array2, Array3, Array4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::sync::Arc;
 
@@ -326,7 +323,10 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
         &mut temp,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
 
     let output_gpu_3d = output_gpu_2d.view(vec![b, s, h]);
 
@@ -427,7 +427,10 @@ pub async fn forward_llama_with_debug(
         &ln1_out_gpu,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_ln1_out, &ln1_out_gpu, "ln1_out", tolerance).await;
     let q_proj = gpu_layer.self_attn.project(
@@ -471,7 +474,10 @@ pub async fn forward_llama_with_debug(
         &gpu_layer.self_attn_weights,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_attn_out, &attn_out_gpu, "attn_out", tolerance).await;
     let attn_block_output_gpu = temp.get(hidden_states_gpu.shape().to_vec());
@@ -481,7 +487,10 @@ pub async fn forward_llama_with_debug(
         &attn_block_output_gpu,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(
         &cpu_attn_block_output,
@@ -499,7 +508,10 @@ pub async fn forward_llama_with_debug(
         &ln2_out_gpu,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_ln2_out, &ln2_out_gpu, "ln2_out", tolerance).await;
     log::info!("✓ Step 4: Pre-FFN Norm output matches CPU.");
@@ -518,7 +530,10 @@ pub async fn forward_llama_with_debug(
     );
     let ffn_out_gpu = ffn_out_2d_gpu.view(vec![b, s, h]);
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     encoder = context.device.create_command_encoder(&Default::default());
     assert_tensors_are_close(&cpu_ffn_out, &ffn_out_gpu, "ffn_out", tolerance).await;
     log::info!("✓ Step 5: FFN output matches CPU.");
@@ -681,9 +696,10 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
         .encode(&mut encoder, &kv_heads_gpu, &expanded_gpu_out);
 
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-
-    // --- 4. Compare CPU ground truth with GPU result ---
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     assert_tensors_are_close_4d(
         &expected_expanded_cpu,
         &expanded_gpu_out,
@@ -692,7 +708,7 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
     )
     .await;
 
-    println!("✓ GpuRepeatKV kernel is correct!");
+    println!("GpuRepeatKV kernel is correct!");
 
     Ok(())
 }
@@ -828,7 +844,10 @@ async fn test_rope_parity_single_token() -> Result<()> {
     // Use a dummy tensor for K since we only care about Q for this test
     gpu_rope.encode(&mut encoder, &input_gpu, &output_gpu, position_offset);
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
 
     // 5. Compare results
     assert_tensors_are_close_4d(
@@ -890,9 +909,10 @@ async fn test_rope_parity_multiple_tokens() -> Result<()> {
     gpu_rope.encode(&mut encoder, &q_gpu, &q_rot_gpu, position_offset);
     gpu_rope.encode(&mut encoder, &k_gpu, &k_rot_gpu, position_offset);
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely());
-
-    // 5. Compare results
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     assert_tensors_are_close_4d(&expected_q_rot, &q_rot_gpu, "RoPE multi-token Q", 1e-5).await;
     assert_tensors_are_close_4d(&expected_k_rot, &k_rot_gpu, "RoPE multi-token K", 1e-5).await;
 

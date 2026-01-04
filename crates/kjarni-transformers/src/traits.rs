@@ -186,3 +186,213 @@ pub trait ModelConfig: Send + Sync {
         self.metadata().activation
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_device_methods() {
+        let cpu = Device::Cpu;
+        let gpu = Device::Wgpu;
+
+        assert!(cpu.is_cpu());
+        assert!(!cpu.is_gpu());
+
+        assert!(gpu.is_gpu());
+        assert!(!gpu.is_cpu());
+    }
+
+    struct DummyModel {
+        device: Device,
+    }
+
+    impl InferenceModel for DummyModel {
+        fn device(&self) -> Device {
+            self.device
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn test_inference_model_trait() {
+        let model = DummyModel { device: Device::Cpu };
+        let model_ref: &dyn InferenceModel = &model;
+
+        assert_eq!(model_ref.device(), Device::Cpu);
+
+        let any_ref = model_ref.as_any();
+        let downcasted = any_ref.downcast_ref::<DummyModel>().unwrap();
+        assert_eq!(downcasted.device, Device::Cpu);
+    }
+
+    #[test]
+    fn test_model_metadata_fields() {
+        let meta = ModelMetadata {
+            hidden_size: 128,
+            num_layers: 2,
+            num_attention_heads: 4,
+            num_kv_heads: 4,
+            head_dim: 32,
+            vocab_size: 1000,
+            max_seq_len: 512,
+            norm_eps: 1e-5,
+            activation: Activation::Gelu,
+            rope_theta: Some(1000.0),
+            rope_scaling: None,
+            scale_embeddings: true,
+            extra_pos_embeddings: 0,
+            transpose_ffn_weights: false,
+            transpose_attention_weights: false,
+            is_prenorm: true,
+            normalize_embedding: false,
+            normalization_strategy: NormalizationStrategy::LayerNorm,
+        };
+
+        assert_eq!(meta.hidden_size, 128);
+        assert_eq!(meta.num_layers, 2);
+        assert_eq!(meta.activation, Activation::Gelu);
+        assert!(meta.rope_theta.is_some());
+    }
+
+    #[test]
+    fn test_attention_layout_creation() {
+        let attn = AttentionLayout {
+            q_weight: "q_w".to_string(),
+            q_bias: Some("q_b".to_string()),
+            k_weight: "k_w".to_string(),
+            k_bias: None,
+            v_weight: "v_w".to_string(),
+            v_bias: None,
+            o_weight: "o_w".to_string(),
+            o_bias: None,
+            norm_weight: "norm_w".to_string(),
+            norm_bias: Some("norm_b".to_string()),
+        };
+
+        assert_eq!(attn.q_weight, "q_w");
+        assert!(attn.k_bias.is_none());
+    }
+
+    #[test]
+    fn test_feedforward_layout_creation() {
+        let ffn = FeedForwardLayout {
+            up_weight: "up_w".to_string(),
+            up_bias: None,
+            down_weight: "down_w".to_string(),
+            down_bias: Some("down_b".to_string()),
+            gate_weight: None,
+            norm_weight: "norm_w".to_string(),
+            norm_bias: None,
+        };
+
+        assert_eq!(ffn.down_weight, "down_w");
+        assert!(ffn.gate_weight.is_none());
+    }
+
+    #[test]
+    fn test_encoder_layer_and_decoder_layer_layouts() {
+        let attn = AttentionLayout {
+            q_weight: "q".to_string(),
+            q_bias: None,
+            k_weight: "k".to_string(),
+            k_bias: None,
+            v_weight: "v".to_string(),
+            v_bias: None,
+            o_weight: "o".to_string(),
+            o_bias: None,
+            norm_weight: "n".to_string(),
+            norm_bias: None,
+        };
+
+        let ffn = FeedForwardLayout {
+            up_weight: "up".to_string(),
+            up_bias: None,
+            down_weight: "down".to_string(),
+            down_bias: None,
+            gate_weight: None,
+            norm_weight: "norm".to_string(),
+            norm_bias: None,
+        };
+
+        let encoder_layer = EncoderLayerLayout { self_attn: attn.clone(), ffn: ffn.clone() };
+        let decoder_layer = DecoderLayerLayout {
+            self_attn: attn.clone(),
+            cross_attn: Some(attn.clone()),
+            ffn: ffn.clone(),
+        };
+
+        assert_eq!(encoder_layer.ffn.down_weight, "down");
+        assert!(decoder_layer.cross_attn.is_some());
+    }
+
+    #[test]
+    fn test_encoder_and_decoder_layouts() {
+        let attn = AttentionLayout {
+            q_weight: "q".to_string(),
+            q_bias: None,
+            k_weight: "k".to_string(),
+            k_bias: None,
+            v_weight: "v".to_string(),
+            v_bias: None,
+            o_weight: "o".to_string(),
+            o_bias: None,
+            norm_weight: "n".to_string(),
+            norm_bias: None,
+        };
+        let ffn = FeedForwardLayout {
+            up_weight: "up".to_string(),
+            up_bias: None,
+            down_weight: "down".to_string(),
+            down_bias: None,
+            gate_weight: None,
+            norm_weight: "norm".to_string(),
+            norm_bias: None,
+        };
+        let encoder_layout = EncoderLayout {
+            position_embedding: Some("pos".to_string()),
+            token_type_embedding: None,
+            embedding_norm_weight: Some("emb_norm".to_string()),
+            embedding_norm_bias: None,
+            final_norm_weight: None,
+            final_norm_bias: None,
+            layer: EncoderLayerLayout { self_attn: attn.clone(), ffn: ffn.clone() },
+        };
+
+        let decoder_layout = DecoderLayout {
+            position_embedding: None,
+            token_type_embedding: None,
+            embedding_norm_weight: None,
+            embedding_norm_bias: None,
+            final_norm_weight: Some("final_norm".to_string()),
+            final_norm_bias: None,
+            layer: DecoderLayerLayout {
+                self_attn: attn.clone(),
+                cross_attn: Some(attn.clone()),
+                ffn: ffn.clone(),
+            },
+        };
+
+        assert_eq!(encoder_layout.layer.ffn.up_weight, "up");
+        assert_eq!(decoder_layout.layer.self_attn.q_weight, "q");
+    }
+
+    #[test]
+    fn test_model_layout_creation() {
+        let layout = ModelLayout {
+            token_embedding: "tok_emb".to_string(),
+            lm_head: "lm_head".to_string(),
+            encoder: None,
+            decoder: None,
+        };
+
+        assert_eq!(layout.token_embedding, "tok_emb");
+        assert!(layout.encoder.is_none());
+        assert!(layout.decoder.is_none());
+    }
+}

@@ -1,24 +1,12 @@
 use super::*;
 use crate::WgpuContext;
 use anyhow::Result;
-use ndarray::{Array, Array2};
-use ndarray_rand::RandomExt;
-use wgpu::util::DeviceExt;
+use ndarray::{Array};
 #[path = "../../../tests/common.rs"]
 mod common;
 
 use common::assert_tensors_are_close_4d;
 
-// Helper to compare two ndarray arrays for near-equality.
-fn assert_all_close(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
-    let diff = (a - b).mapv(f32::abs);
-    let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
-    assert!(
-        max_diff < tolerance,
-        "Arrays are not close. Max difference: {}",
-        max_diff
-    );
-}
 #[tokio::test]
 async fn test_repeat_kv() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -45,9 +33,6 @@ async fn test_repeat_kv() -> Result<()> {
     let mut encoder = context.device.create_command_encoder(&Default::default());
     repeat_kernel.encode(&mut encoder, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
-    // let result_cpu: Array<f32, _> = output_gpu.to_ndarray_4d().await?;
-
-    // --- Verification ---
     let expected_vec: Vec<f32> = vec![
         1., 2., 3., 4., // Q Head 0 (from KV Head 0)
         1., 2., 3., 4., // Q Head 1 (from KV Head 0)
@@ -56,7 +41,7 @@ async fn test_repeat_kv() -> Result<()> {
     ];
     let expected_cpu = Array::from_shape_vec((1, 4, 2, 2), expected_vec)?;
 
-    assert_tensors_are_close_4d(&expected_cpu, &output_gpu, "Repeat KV", 1e-6);
+    assert_tensors_are_close_4d(&expected_cpu, &output_gpu, "Repeat KV", 1e-6).await;
 
     Ok(())
 }

@@ -167,3 +167,107 @@ impl ChatTemplate for RawTemplate {
             .join("\n\n")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn role_display() {
+        assert_eq!(Role::System.to_string(), "system");
+        assert_eq!(Role::User.to_string(), "user");
+        assert_eq!(Role::Assistant.to_string(), "assistant");
+    }
+
+    #[test]
+    fn message_constructors() {
+        let m1 = Message::system("sys");
+        assert_eq!(m1.role, Role::System);
+        assert_eq!(m1.content, "sys");
+
+        let m2 = Message::user("hi");
+        assert_eq!(m2.role, Role::User);
+        assert_eq!(m2.content, "hi");
+
+        let m3 = Message::assistant("ok");
+        assert_eq!(m3.role, Role::Assistant);
+        assert_eq!(m3.content, "ok");
+    }
+
+    #[test]
+    fn conversation_basic_operations() {
+        let mut convo = Conversation::new();
+        assert!(convo.is_empty());
+        assert_eq!(convo.len(), 0);
+        assert!(convo.system_prompt().is_none());
+
+        convo.push_user("hello");
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.turn_count(), 1);
+        assert_eq!(convo.last().unwrap().role, Role::User);
+
+        convo.push_assistant("hi there");
+        assert_eq!(convo.len(), 2);
+        assert_eq!(convo.turn_count(), 2);
+        assert_eq!(convo.last().unwrap().role, Role::Assistant);
+
+        // push generic message
+        convo.push(Message::system("system message"));
+        assert_eq!(convo.len(), 3);
+        assert_eq!(convo.last().unwrap().role, Role::System);
+    }
+
+    #[test]
+    fn conversation_with_system_prompt() {
+        let convo = Conversation::with_system("init prompt");
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.system_prompt(), Some("init prompt"));
+    }
+
+    #[test]
+    fn conversation_clear_keep_system() {
+        let mut convo = Conversation::with_system("init");
+        convo.push_user("hello");
+        convo.push_assistant("hi");
+
+        convo.clear(true);
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.system_prompt(), Some("init"));
+
+        convo.clear(false);
+        assert!(convo.is_empty());
+    }
+
+    #[test]
+    fn conversation_turn_count() {
+        let mut convo = Conversation::new();
+        convo.push(Message::system("sys"));
+        convo.push_user("u1");
+        convo.push_assistant("a1");
+        convo.push_user("u2");
+
+        assert_eq!(convo.turn_count(), 3); // excludes system
+    }
+
+    #[test]
+    fn raw_template_apply() {
+        let mut convo = Conversation::new();
+        convo.push(Message::system("sys"));
+        convo.push_user("u1");
+        convo.push_assistant("a1");
+
+        let tmpl = RawTemplate::default();
+        let output = tmpl.apply(&convo);
+        let expected = "sys\n\nu1\n\na1";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn conversation_last_message() {
+        let mut convo = Conversation::new();
+        assert!(convo.last().is_none());
+
+        convo.push_user("hello");
+        assert_eq!(convo.last().unwrap().content, "hello");
+    }
+}

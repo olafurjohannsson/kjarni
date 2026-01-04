@@ -2,10 +2,10 @@
 mod common;
 
 use super::*;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu_ops::{GpuTensor};
 use anyhow::Result;
 use common::{assert_arrays_are_close_2d, get_test_context, assert_all_close, read_gpu_tensor_to_vec};
-use ndarray::{Array, Array2, Array3, arr2};
+use ndarray::{Array, Array3, arr2};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 
@@ -23,7 +23,10 @@ async fn test_gpu_scale_out_of_place() -> Result<()> {
     let mut encoder = context.device.create_command_encoder(&Default::default());
     scale_kernel.encode_out_of_place(&mut encoder, &gpu_input, &gpu_output, scale_factor);
     context.queue.submit(std::iter::once(encoder.finish()));
-    let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     let cpu_expected = &cpu_input * scale_factor;
     let gpu_output_cpu = gpu_output.to_ndarray_2d().await?;
     assert_arrays_are_close_2d(&gpu_output_cpu, &cpu_expected, 1e-6);

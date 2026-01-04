@@ -80,8 +80,10 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
     add_kernel.encode_broadcast_offset(&mut encoder, &a_gpu, &b_gpu, b_row_offset, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 
-    // Ensure GPU work completes
-    let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
 
     // 4. Verification
     let output_cpu = output_gpu.to_ndarray_3d().await?;

@@ -26,7 +26,7 @@ pub use traits::{CpuEncoder, CpuEncoderOps, GpuEncoder, GpuEncoderOps, SentenceE
 pub mod prelude {
     pub use crate::encoder::{
         classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead},
-        config::{EncoderLoadConfig, EncodingConfig, PoolingStrategy},
+        config::{EncodingConfig, PoolingStrategy},
         encoder_self_attention::EncoderSelfAttention,
         pooler::{CpuPooler, GpuPooler, StandardCpuPooler},
         traits::{

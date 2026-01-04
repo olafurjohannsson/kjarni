@@ -60,53 +60,6 @@ fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32)
 // HELPER FUNCTIONS
 // ============================================================================
 
-fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
-    assert_eq!(
-        cpu.shape(),
-        gpu.shape(),
-        "[{}] Shape mismatch: {:?} vs {:?}",
-        name,
-        cpu.shape(),
-        gpu.shape()
-    );
-
-    let max_diff = cpu
-        .iter()
-        .zip(gpu.iter())
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0f32, f32::max);
-
-    println!("[{}] Max diff: {:.6}", name, max_diff);
-    println!(
-        "  CPU first 5: {:?}",
-        cpu.iter().take(5).collect::<Vec<_>>()
-    );
-    println!(
-        "  GPU first 5: {:?}",
-        gpu.iter().take(5).collect::<Vec<_>>()
-    );
-
-    if max_diff > atol {
-        panic!("[FAIL] {} - max_diff {:.6} > atol {}", name, max_diff, atol);
-    }
-    println!("[PASS] {}\n", name);
-}
-
-fn assert_close_2d(cpu: &Array2<f32>, gpu: &Array2<f32>, atol: f32, name: &str) {
-    assert_eq!(cpu.shape(), gpu.shape(), "[{}] Shape mismatch", name);
-
-    let max_diff = cpu
-        .iter()
-        .zip(gpu.iter())
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0f32, f32::max);
-
-    println!("[{}] Max diff: {:.6}", name, max_diff);
-    if max_diff > atol {
-        panic!("[FAIL] {} - max_diff {:.6} > atol {}", name, max_diff, atol);
-    }
-    println!("[PASS] {}\n", name);
-}
 
 fn assert_close_4d(cpu: &Array4<f32>, gpu: &Array4<f32>, atol: f32, name: &str) {
     assert_eq!(cpu.shape(), gpu.shape(), "[{}] Shape mismatch", name);

@@ -47,3 +47,6 @@ pub use registry::{
     format_size,
     get_default_cache_dir,
 };
+
+#[cfg(test)]
+mod tests;

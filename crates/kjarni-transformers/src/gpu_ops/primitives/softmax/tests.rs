@@ -1,7 +1,4 @@
-use crate::WgpuContext;
 use crate::activations::softmax as cpu_softmax_4d;
-use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[path = "../../../tests/common.rs"]
 mod common;
@@ -9,31 +6,16 @@ mod common;
 use super::*;
 use crate::gpu_ops::GpuTensor;
 use anyhow::Result;
-use common::read_gpu_tensor_to_vec;
+use common::{read_gpu_tensor_to_vec, get_test_context, assert_all_close_4d};
 use ndarray::{Array, Array2, Array4, Axis, s};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 
-async fn get_test_context() -> Arc<WgpuContext> {
-    WgpuContext::new().await.unwrap()
-}
 
 macro_rules! shape_4d {
     ($shape_vec:expr) => {
         [$shape_vec[0], $shape_vec[1], $shape_vec[2], $shape_vec[3]]
     };
-}
-
-fn assert_all_close_4d(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
-    assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
-    let diff = (a - b).mapv(f32::abs);
-    let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
-    assert!(
-        max_diff < tolerance,
-        "Arrays are not close. Max difference: {}, Tolerance: {}",
-        max_diff,
-        tolerance
-    );
 }
 
 /// CPU reference softmax implementation for a single row.
@@ -90,7 +72,7 @@ async fn test_softmax_simple_case() -> Result<()> {
 
     println!("Verifying Softmax (Simple Case)...");
     assert_all_close_2d(&gpu_result, &cpu_data, 1e-5);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }
@@ -134,7 +116,7 @@ async fn test_softmax_padded_case() -> Result<()> {
 
     println!("Verifying Softmax (Padded Case)...");
     assert_all_close_2d(&gpu_result, &cpu_data, 1e-5);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }
@@ -167,7 +149,7 @@ async fn test_softmax_simple_case2() -> Result<()> {
 
     println!("Verifying Softmax (Simple Case)...");
     assert_all_close_4d(&gpu_result, &cpu_result, 1e-5);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }
@@ -213,7 +195,7 @@ async fn test_softmax_padded_case2() -> Result<()> {
 
     println!("Verifying Softmax (Padded Case)...");
     assert_all_close_4d(&gpu_result, &cpu_result_padded, 1e-5);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }
@@ -247,7 +229,7 @@ async fn test_softmax_with_scaling() -> Result<()> {
 
     println!("Verifying Softmax (With Scaling)...");
     assert_all_close_4d(&gpu_result, &cpu_result, 1e-5);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }
@@ -280,7 +262,7 @@ async fn test_softmax_numerical_stability() -> Result<()> {
     println!("Verifying Softmax (Numerical Stability)...");
     // We might need a slightly looser tolerance here due to large exponents
     assert_all_close_4d(&gpu_result, &cpu_result, 1e-4);
-    println!("✅ Passed!");
+    println!("Passed!");
 
     Ok(())
 }

@@ -1,15 +1,12 @@
 use crate::models::bart::config::BartConfig;
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use kjarni_transformers::WgpuContext;
-use kjarni_transformers::activations::Activation;
 use kjarni_transformers::embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
-use kjarni_transformers::encoder::config::EncoderLoadConfig;
 use kjarni_transformers::encoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
-use kjarni_transformers::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
+use kjarni_transformers::gpu_ops::blocks::{GpuFeedForwardWeights};
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForwardWeightsStd, GpuNormalization, GpuNormalizationWeights,
     layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
@@ -19,15 +16,7 @@ use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
 use std::sync::Arc;
-use tokenizers::Model;
 use wgpu::CommandEncoder;
-
-/// GPU-accelerated BART encoder.
-///
-/// Supports flexible CPU/GPU memory placement via `EncoderLoadConfig`:
-/// - Full GPU execution (default)
-/// - CPU embeddings with GPU layers (saves VRAM)
-/// - Partial layer execution for hybrid workflows
 
 pub struct BartGpuEncoder {
     context: Arc<WgpuContext>,
@@ -503,56 +492,4 @@ impl GpuEncoder for BartGpuEncoder {
     //     let output = self.forward_layers(..., 0, self.num_layers())?;
     //     Ok(GpuEncoderOutput { last_hidden_state: output })
     // }
-}
-
-// ============================================================================
-// TESTS
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Test that encoder can be created with default config
-    #[tokio::test]
-    async fn test_encoder_creation_default() -> Result<()> {
-        // This test requires actual model weights, so skip in CI
-        // Just verify the code compiles
-        Ok(())
-    }
-
-    /// Test that encoder can be created with CPU embeddings
-    #[tokio::test]
-    async fn test_encoder_creation_cpu_embeddings() -> Result<()> {
-        // This test requires actual model weights, so skip in CI
-        // Just verify the code compiles
-        Ok(())
-    }
-
-    /// Test input validation
-    #[test]
-    fn test_model_load_config() {
-        let config = EncoderLoadConfig::default();
-        assert!(!config.cpu_embeddings);
-        // assert!(!config.cpu_output_head);
-        assert!(config.gpu_layer_range.is_none());
-        assert!(config.dtype.is_none());
-
-        let config = EncoderLoadConfig::offload_embeddings();
-        assert!(config.cpu_embeddings);
-
-        // let config = EncoderLoadConfig::max_offload();
-        // assert!(config.cpu_embeddings);
-        // assert!(config.cpu_output_head);
-
-        let config = EncoderLoadConfig::partial_gpu(0, 6);
-        assert_eq!(config.gpu_layer_range, Some((0, 6)));
-
-        // Test builder pattern
-        let config = EncoderLoadConfig::default()
-            .with_cpu_embeddings(true)
-            .with_gpu_layer_range(0, 8);
-        assert!(config.cpu_embeddings);
-        assert_eq!(config.gpu_layer_range, Some((0, 8)));
-    }
 }

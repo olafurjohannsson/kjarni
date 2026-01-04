@@ -46,10 +46,13 @@ futures-core = "0.3.31"
 futures-util = "0.3.31"
 libc = "0.2.177"
 strum = "0.26"
+rand_chacha = "0.9.0"
 strum_macros = "0.26"
 
 [dev-dependencies]
 env_logger = "0.10"
+approx = "0.5.1"
+tempfile = "3.23.0"
 
 [features]
 default = []

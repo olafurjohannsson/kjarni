@@ -6,7 +6,8 @@
 //! # Algorithm
 //!
 //! For each output element [m, n]:
-//! 1. Compute dot product: val = dot(input[m, :], W[n, :])
+//! 1. Compute dot product: val = sum(input[m, i] * W[n, i])
+//!    *Uses FMA (Fused Multiply-Add) for high precision.*
 //! 2. Add bias: output[m, n] = val + bias[n]
 //!
 //! No activation function (linear projection).
@@ -32,7 +33,6 @@
 //! **Weight is transposed** to [N, K] for coalesced reads:
 //! - Each thread reads a contiguous row for one output dimension
 //! - Improves cache locality and bandwidth utilization
-//! - Same optimization as FC1
 //!
 //! # Vectorization
 //!
@@ -41,25 +41,10 @@
 //! - FMA provides better numerical accuracy and speed
 //! - Remainder handled separately for non-divisible-by-4 dimensions
 //!
-//! # TODO / Improvements
-//!
-//! - Add BF16 weight support (2x memory bandwidth)
-//! - Consider fusing with residual connection (FFN output + input)
-//! - Profile whether vec4 loads actually help vs scalar loads
-//! - Add dropout support if needed for training (currently inference-only)
-//!
-//! # Limitations
-//!
-//! - Only supports F32 (no BF16 or quantized weights)
-//! - Assumes K is divisible by 4 for optimal vectorization (remainder handled)
-//! - Workgroup size 512 may be too large for some GPUs (consider 256)
-//! - No activation function (assumes linear projection only)
-//!
 //! # See Also
 //!
 //! - [`fc1.wgsl`] — First FFN layer with activation
 //! - [`swiglu_fused.wgsl`] — Fused FFN for decoder architectures
-//! - [BERT paper](https://arxiv.org/abs/1810.04805) — Original transformer FFN
 
 /// Uniform parameters for FC2 operation.
 struct FfnUniforms {
@@ -95,11 +80,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum: f32 = 0.0;
 
     let input_offset = row * info.k;
-    // --- MODIFICATION ---
-    // The weight for a given output column `col` is now a contiguous row in the transposed matrix.
-    // The offset to this row is `col * k`.
+    // The weight for a given output column `col` is a contiguous row in the transposed matrix.
     let weight_offset = col * info.k;
 
+    // Vectorized FMA loop
     let k_vec = info.k / 4u;
     for (var t = 0u; t < k_vec; t = t + 1u) {
         let base = t * 4u;
@@ -111,8 +95,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             input[input_offset + base + 3u]
         );
 
-        // --- MODIFICATION ---
-        // Read a contiguous vec4 from the transposed weight matrix. This is much faster.
         let weight_vec = vec4<f32>(
             fc2_weight[weight_offset + base + 0u],
             fc2_weight[weight_offset + base + 1u],
@@ -132,6 +114,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         sum = fma(input[input_offset + kk], fc2_weight[weight_offset + kk], sum);
     }
 
-    sum = sum + fc2_bias[col];
-    output[row * info.n + col] = sum;
+    // Optimization: Write directly using the global index
+    output[idx] = sum + fc2_bias[col];
 }

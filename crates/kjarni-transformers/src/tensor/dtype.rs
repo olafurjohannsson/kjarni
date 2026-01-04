@@ -1,7 +1,7 @@
 use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
 use anyhow::{anyhow, Result};
-use gguf_rs::GGMLType;
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
     /// Standard 32-bit float

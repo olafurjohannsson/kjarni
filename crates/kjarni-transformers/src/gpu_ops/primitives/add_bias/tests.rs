@@ -5,7 +5,7 @@ use super::*;
 use crate::gpu_ops::{DType, GpuTensor};
 use common::{read_gpu_tensor_to_vec};
 use anyhow::Result;
-use ndarray::{Array, Array1, Array2};
+use ndarray::{Array, Array2};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 

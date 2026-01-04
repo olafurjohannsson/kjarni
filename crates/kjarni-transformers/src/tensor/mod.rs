@@ -56,6 +56,7 @@ pub trait Dequantizable {
 
 /// A generic, typed tensor for CPU computation.
 /// This enum holds the primary representation of tensor data for the engine.
+#[allow(non_camel_case_types)]
 pub enum CpuTensor {
     F32(ArrayD<f32>),
     BF16(ArrayD<bf16>),

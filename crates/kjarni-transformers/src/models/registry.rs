@@ -353,6 +353,7 @@ pub enum ModelTask {
 ///
 /// - [`ModelInfo`] — Complete metadata for a model
 /// - [`download_model_files`] — Download model weights and config
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum ModelType {
     // === Embeddings & Reranking ===
@@ -369,6 +370,7 @@ pub enum ModelType {
 
     // === The "Edge" Kings (< 4GB VRAM/RAM) ===
     Qwen2_5_0_5B_Instruct, // Tiny Logic
+    Qwen2_5_1_5B_Instruct,
     Llama3_2_1B_Instruct,  // Fast Chat
     Llama3_2_3B_Instruct,  // Balanced Chat
     Phi3_5_Mini_Instruct,  // Logic Powerhouse (3.8B)
@@ -507,6 +509,7 @@ impl ModelType {
 
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b",
+            Self::Qwen2_5_1_5B_Instruct => "wen2.5-1.5b",
             Self::Llama3_2_1B_Instruct => "llama3.2-1b",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini",
@@ -695,6 +698,21 @@ impl ModelType {
                 description: "Tiny logic engine. Perfect for structured output and sanity checks.",
                 size_mb: 990,
                 params_millions: 490,
+            },
+            Self::Qwen2_5_1_5B_Instruct => ModelInfo {
+                architecture: ModelArchitecture::Qwen2,
+                task: ModelTask::Chat,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/config.json",
+                    gguf_url: Some(
+                        "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+                    ),
+                },
+                description: "",
+                size_mb: 0,
+                params_millions: 0,
             },
             Self::Llama3_2_1B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Llama,

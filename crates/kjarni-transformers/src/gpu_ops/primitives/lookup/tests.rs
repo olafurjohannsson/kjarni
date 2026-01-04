@@ -2,8 +2,6 @@ use super::*;
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::{arr2, arr3, Array2, Array3};
-use ndarray_rand::RandomExt;
-use wgpu::util::DeviceExt;
 
 #[path = "../../../tests/common.rs"]
 mod common;

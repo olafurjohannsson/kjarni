@@ -1,8 +1,8 @@
-use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::gpu_ops::{GpuTensor};
 use crate::WgpuContext;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
+use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 
 #[repr(C)]
@@ -123,8 +123,8 @@ fn run_internal_softmax(
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let workgroup_x = (rows + 255) / 256;
-        compute_pass.dispatch_workgroups(workgroup_x, 1, 1);
+        // let workgroup_x = (rows + 255) / 256;
+        compute_pass.dispatch_workgroups(rows, 1, 1);
     });
 }
 

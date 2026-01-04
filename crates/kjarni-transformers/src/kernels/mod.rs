@@ -27,3 +27,5 @@ pub(crate) mod x86;
 pub(crate) mod aarch64;
 
 
+#[cfg(test)]
+mod quantize_tests;

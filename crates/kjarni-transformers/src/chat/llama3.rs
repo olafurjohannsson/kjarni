@@ -99,10 +99,7 @@ impl ChatTemplate for Llama3ChatTemplate {
     }
 
     fn stop_sequences(&self) -> Vec<String> {
-        vec![
-            Self::EOT.to_string(),
-            Self::END_OF_TEXT.to_string(),
-        ]
+        vec![Self::EOT.to_string(), Self::END_OF_TEXT.to_string()]
     }
 
     fn default_system_prompt(&self) -> Option<&str> {
@@ -111,14 +108,18 @@ impl ChatTemplate for Llama3ChatTemplate {
 
     fn validate(&self, conversation: &Conversation) -> Result<(), String> {
         let messages = conversation.messages();
-        
+
         if messages.is_empty() {
             return Err("Conversation is empty".to_string());
         }
 
         // Check that messages alternate properly (after optional system)
         let mut expect_user = true;
-        let start_idx = if messages.first().map(|m| m.role == Role::System).unwrap_or(false) {
+        let start_idx = if messages
+            .first()
+            .map(|m| m.role == Role::System)
+            .unwrap_or(false)
+        {
             1
         } else {
             0
@@ -262,7 +263,7 @@ mod tests {
         conv.push_user("Hello!");
 
         let prompt = template.apply(&conv);
-        
+
         assert!(prompt.contains("<|begin_of_text|>"));
         assert!(prompt.contains("<|start_header_id|>user<|end_header_id|>"));
         assert!(prompt.contains("Hello!"));
@@ -294,14 +295,24 @@ mod tests {
         let prompt = template.apply(&conv);
 
         // Should have two user sections and one assistant section
-        assert_eq!(prompt.matches("<|start_header_id|>user<|end_header_id|>").count(), 2);
-        assert_eq!(prompt.matches("<|start_header_id|>assistant<|end_header_id|>").count(), 2); // 1 response + 1 generation prompt
+        assert_eq!(
+            prompt
+                .matches("<|start_header_id|>user<|end_header_id|>")
+                .count(),
+            2
+        );
+        assert_eq!(
+            prompt
+                .matches("<|start_header_id|>assistant<|end_header_id|>")
+                .count(),
+            2
+        ); // 1 response + 1 generation prompt
     }
 
     #[test]
     fn test_llama3_validation() {
         let template = Llama3ChatTemplate::new();
-        
+
         // Valid conversation
         let mut conv = Conversation::new();
         conv.push_user("Hi");
@@ -317,5 +328,152 @@ mod tests {
         conv.push_user("Hi");
         conv.push(Message::system("System"));
         assert!(template.validate(&conv).is_err());
+    }
+    #[test]
+    fn llama3_empty_conversation() {
+        let template = Llama3ChatTemplate::new();
+        let convo = Conversation::new();
+        let prompt = template.apply(&convo);
+        assert!(prompt.starts_with("<|begin_of_text|>")); // BOS still added
+    }
+
+    #[test]
+    fn llama3_single_user_message() {
+        let template = Llama3ChatTemplate::for_generation();
+        let mut convo = Conversation::new();
+        convo.push_user("Hello!");
+        let prompt = template.apply(&convo);
+
+        assert!(prompt.contains("Hello!"));
+        assert!(prompt.contains("<|start_header_id|>user<|end_header_id|>"));
+        assert!(prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n"));
+    }
+
+    #[test]
+    fn llama3_with_system_message() {
+        let template = Llama3ChatTemplate::for_generation();
+        let mut convo = Conversation::with_system("You are helpful.");
+        convo.push_user("Hello!");
+        let prompt = template.apply(&convo);
+
+        assert!(prompt.contains("<|start_header_id|>system<|end_header_id|>"));
+        assert!(prompt.contains("You are helpful."));
+        assert!(prompt.contains("<|start_header_id|>user<|end_header_id|>"));
+    }
+
+    #[test]
+    fn llama3_multi_turn() {
+        let template = Llama3ChatTemplate::for_generation();
+        let mut convo = Conversation::new();
+        convo.push_user("Hi");
+        convo.push_assistant("Hello!");
+        convo.push_user("How are you?");
+        convo.push_assistant("I am good.");
+
+        let prompt = template.apply(&convo);
+
+        assert_eq!(
+            prompt
+                .matches("<|start_header_id|>user<|end_header_id|>")
+                .count(),
+            2
+        );
+        assert_eq!(
+            prompt
+                .matches("<|start_header_id|>assistant<|end_header_id|>")
+                .count(),
+            3
+        );
+        // 2 responses + trailing assistant header
+    }
+
+    #[test]
+    fn llama3_validation_ok() {
+        let template = Llama3ChatTemplate::new();
+        let mut convo = Conversation::new();
+        convo.push_user("Hi");
+        convo.push_assistant("Hello!");
+        assert!(template.validate(&convo).is_ok());
+    }
+
+    #[test]
+    fn llama3_validation_failures() {
+        let template = Llama3ChatTemplate::new();
+
+        // Assistant first
+        let mut convo = Conversation::new();
+        convo.push_assistant("Hi");
+        assert!(template.validate(&convo).is_err());
+
+        // System not first
+        let mut convo = Conversation::new();
+        convo.push_user("Hi");
+        convo.push(Message::system("System"));
+        assert!(template.validate(&convo).is_err());
+    }
+
+    #[test]
+    fn llama3_stop_sequences() {
+        let template = Llama3ChatTemplate::new();
+        let stops = template.stop_sequences();
+        assert!(stops.contains(&"<|eot_id|>".to_string()));
+        assert!(stops.contains(&"<|end_of_text|>".to_string()));
+    }
+
+    // ----------------------------
+    // Llama 2 Chat Template Tests
+    // ----------------------------
+
+    #[test]
+    fn llama2_empty_conversation() {
+        let template = Llama2ChatTemplate::new();
+        let convo = Conversation::new();
+        let prompt = template.apply(&convo);
+        assert_eq!(prompt, "");
+    }
+
+    #[test]
+    fn llama2_single_user_message_with_system() {
+        let template = Llama2ChatTemplate::new();
+        let mut convo = Conversation::with_system("You are helpful.");
+        convo.push_user("Hello!");
+        let prompt = template.apply(&convo);
+
+        assert!(prompt.contains("[INST]"));
+        assert!(prompt.contains("<<SYS>>"));
+        assert!(prompt.contains("You are helpful."));
+        assert!(prompt.contains("Hello!"));
+        assert!(prompt.contains("[/INST]"));
+    }
+
+    #[test]
+    fn llama2_multi_turn() {
+        let template = Llama2ChatTemplate::new();
+        let mut convo = Conversation::new();
+        convo.push_user("Hi");
+        convo.push_assistant("Hello!");
+        convo.push_user("How are you?");
+        convo.push_assistant("I am fine.");
+
+        let prompt = template.apply(&convo);
+        assert!(prompt.contains("[INST]"));
+        assert!(prompt.matches("[/INST]").count() >= 2);
+        assert!(prompt.matches("</s>").count() >= 2);
+    }
+
+    #[test]
+    fn llama2_stop_sequences() {
+        let template = Llama2ChatTemplate::new();
+        let stops = template.stop_sequences();
+        assert_eq!(stops, vec!["</s>"]);
+    }
+
+    #[test]
+    fn llama2_default_system_prompt() {
+        let template = Llama2ChatTemplate::new();
+        assert_eq!(
+            template.default_system_prompt(),
+            Some("You are a helpful, respectful and honest assistant.")
+        );
     }
 }

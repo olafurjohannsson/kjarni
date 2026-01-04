@@ -3,7 +3,7 @@ use crate::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
 use crate::encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer as CpuDecoderLayer;
 use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
 use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
-use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
+use crate::gpu_ops::blocks::attention::{GpuAttentionWeights};
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
@@ -19,21 +19,6 @@ use crate::linear_layer::LinearLayer;
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 
-fn assert_all_close_debug(cpu: &Array3<f32>, gpu: &Array3<f32>, rtol: f32, atol: f32, name: &str) {
-    let diff = cpu - gpu;
-    let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| a.max(*b));
-    let max_val = cpu.mapv(|x| x.abs()).fold(0.0f32, |a, b| a.max(*b));
-
-    if max_diff > atol + rtol * max_val {
-        println!("[DEBUG FAIL] {} mismatch!", name);
-        println!("  Max Diff: {}", max_diff);
-        println!("  CPU First 5: {:?}", cpu.slice(s![0, 0, 0..5]).to_vec());
-        println!("  GPU First 5: {:?}", gpu.slice(s![0, 0, 0..5]).to_vec());
-        panic!("{} mismatch", name);
-    } else {
-        println!("[DEBUG PASS] {} matches. Max diff: {}", name, max_diff);
-    }
-}
 
 fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, rtol: f32, atol: f32, context: &str) {
     if a.shape() != b.shape() {

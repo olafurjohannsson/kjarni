@@ -372,8 +372,98 @@ pub unsafe fn matmul_vec_q4_k_avx2(
 
                 a_ptr_block = a_ptr_block.add(256);
             }
+
+            let total_sum = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+            *val = hsum_ps_avx(total_sum);
         }
-        let total_sum = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
-        *val = hsum_ps_avx(total_sum);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernels::scalar::matmul_vec_q4_k_scalar;
+    use crate::kernels::q_common::BlockQ4_K;
+    use half::f16;
+
+    /// Create a deterministic Q4_K block with non-trivial values.
+    /// This avoids degenerate cases (e.g. all zeros) while remaining predictable.
+    fn create_test_block(seed: u8) -> BlockQ4_K {
+        let mut qs = [0u8; 128];
+        for (i, q) in qs.iter_mut().enumerate() {
+            // Two 4-bit values per byte, range 0..15
+            let lo = ((i as u8 + seed) & 0x0F) as u8;
+            let hi = ((i as u8 + seed + 3) & 0x0F) as u8;
+            *q = lo | (hi << 4);
+        }
+
+        BlockQ4_K {
+            d: f16::from_f32(0.125),
+            dmin: f16::from_f32(0.01),
+            // Non-zero scales/mins to exercise all code paths
+            scales: [
+                1, 2, 3, 4,
+                5, 6, 7, 8,
+                1, 2, 3, 4,
+            ],
+            qs,
+        }
+    }
+
+    /// The AVX2-enabled test body.
+    /// This MUST live in a separate function with `#[target_feature]`.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    unsafe fn run_q4_k_avx2_vs_scalar_test() {
+        let k = 256;
+        let m = 4; // number of output rows
+
+        // Input vector
+        let a: Vec<f32> = (0..k).map(|i| i as f32 * 0.01).collect();
+
+        // Weight blocks: m rows × (k / 256) blocks per row
+        let blocks: Vec<BlockQ4_K> = (0..m)
+            .flat_map(|row| {
+                (0..(k / 256)).map(move |b| create_test_block((row * 7 + b) as u8))
+            })
+            .collect();
+
+        let mut out_scalar = vec![0.0f32; m];
+        let mut out_avx2 = vec![0.0f32; m];
+
+        // Reference computation
+        matmul_vec_q4_k_scalar(&mut out_scalar, &a, &blocks, k);
+
+        // AVX2 computation
+        unsafe { matmul_vec_q4_k_avx2(&mut out_avx2, a.as_ptr(), &blocks, k) };
+
+        // Compare results
+        for i in 0..m {
+            let diff = (out_scalar[i] - out_avx2[i]).abs();
+            assert!(
+                diff < 1e-3,
+                "Q4_K AVX2 mismatch at row {}: scalar={} avx2={} diff={}",
+                i,
+                out_scalar[i],
+                out_avx2[i],
+                diff
+            );
+        }
+    }
+
+    /// Public test entry point.
+    /// This function is SAFE and can be called by the test harness.
+    #[test]
+    fn test_matmul_vec_q4_k_avx2_matches_scalar() {
+        // Runtime feature detection is mandatory
+        if std::is_x86_feature_detected!("avx2")
+            && std::is_x86_feature_detected!("fma")
+        {
+            unsafe {
+                run_q4_k_avx2_vs_scalar_test();
+            }
+        } else {
+            // On non-AVX2 machines we skip silently
+            eprintln!("skipping Q4_K AVX2 test: CPU does not support AVX2+FMA");
+        }
     }
 }

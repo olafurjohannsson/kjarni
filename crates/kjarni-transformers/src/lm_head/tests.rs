@@ -1,6 +1,4 @@
-// kjarni-transformers/src/lm_head/tests.rs
 
-use super::*;
 use ndarray::{Array2, Array3};
 
 // ============================================================================

@@ -7,6 +7,9 @@ pub mod tensor_ops;
 pub use masks::*;
 pub use levenshtein::{find_similar, find_within_distance, distance, similarity};
 
+#[cfg(test)]
+mod tests;
+
 
 #[cfg(target_os = "linux")]
 fn set_thread_affinity(num_cores: usize) {

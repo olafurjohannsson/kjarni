@@ -1,6 +1,4 @@
-// kjarni-transformers/src/execution/tests.rs
 
-use super::*;
 use crate::prelude::Device;
 
 #[test]

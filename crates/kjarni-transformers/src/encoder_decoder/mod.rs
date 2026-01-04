@@ -31,4 +31,7 @@ pub use decoder_cross_attn::DecoderCrossAttention;
 pub use decoder_self_attn::DecoderSelfAttention;
 pub use generator::{AnyEncoderDecoderBackend, EncoderDecoderGenerator};
 pub use gpu_backend::GpuSeq2SeqState;
-use serde::Deserialize;
+
+
+#[cfg(test)]
+mod generator_test;

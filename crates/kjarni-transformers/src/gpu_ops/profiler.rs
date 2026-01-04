@@ -4,14 +4,17 @@ use std::sync::Mutex;
 use wgpu::util::DeviceExt;
 
 /// Conditionally profile a compute pass.
-/// 
+///
 /// In release builds without `profiling` feature, this compiles to
 /// a plain compute pass with zero overhead.
 #[cfg(feature = "profiling")]
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        $ctx.profiler.profile($encoder, $label, |pass: &mut wgpu::ComputePass<'a>| $body(pass))
+        $ctx.profiler
+            .profile($encoder, $label, |pass: &mut wgpu::ComputePass<'a>| {
+                $body(pass)
+            })
     }};
 }
 
@@ -19,10 +22,11 @@ macro_rules! gpu_profile {
 #[macro_export]
 macro_rules! gpu_profile {
     ($ctx:expr, $encoder:expr, $label:expr, $body:expr) => {{
-        let mut pass: wgpu::ComputePass<'_> = $encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some($label),
-            timestamp_writes: None,
-        });
+        let mut pass: wgpu::ComputePass<'_> =
+            $encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some($label),
+                timestamp_writes: None,
+            });
         $body(&mut pass)
     }};
 }
@@ -75,7 +79,7 @@ impl GpuProfiler {
     ) {
         let mut labels = self.labels.lock().unwrap();
         let index = labels.len() as u32 * 2;
-        
+
         if index + 2 > self.max_queries {
             // Buffer full, just run without profiling
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -103,14 +107,11 @@ impl GpuProfiler {
     /// Prepares buffers for reading (Must call before resolve)
     pub fn process_results(&self, encoder: &mut wgpu::CommandEncoder) {
         let count = { self.labels.lock().unwrap().len() as u32 * 2 };
-        if count == 0 { return; }
+        if count == 0 {
+            return;
+        }
 
-        encoder.resolve_query_set(
-            &self.query_set,
-            0..count,
-            &self.resolve_buffer,
-            0,
-        );
+        encoder.resolve_query_set(&self.query_set, 0..count, &self.resolve_buffer, 0);
 
         encoder.copy_buffer_to_buffer(
             &self.resolve_buffer,
@@ -125,29 +126,38 @@ impl GpuProfiler {
     pub async fn print_stats(&self, context: &WgpuContext) {
         let labels = { self.labels.lock().unwrap().clone() };
 
-        if labels.is_empty() { return; }
+        if labels.is_empty() {
+            return;
+        }
 
-        let slice = self.destination_buffer.slice(0..((labels.len() as u64) * 16));
-        
+        let slice = self
+            .destination_buffer
+            .slice(0..((labels.len() as u64) * 16));
+
         let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        
-        context.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.receive().await.unwrap();
+
+        match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+            Ok(status) => println!("GPU Poll OK: {:?}", status),
+            Err(e) => panic!("GPU Poll Failed: {:?}", e), // remove panic?
+        }
+        rx.receive().await.unwrap().expect("RX ERROR"); // TODO: do better
 
         let data = slice.get_mapped_range();
         let timestamps: &[u64] = bytemuck::cast_slice(&data);
 
         let period = context.queue.get_timestamp_period(); // ns per tick
-        
+
         log::info!("\n=== GPU KERNEL PROFILER ===");
         let mut total = 0.0;
         for (i, label) in labels.iter().enumerate() {
             let start = timestamps[i * 2];
             let end = timestamps[i * 2 + 1];
-            
+
             // Handle counter wrap-around or invalid queries
-            if end < start { continue; }
+            if end < start {
+                continue;
+            }
 
             let duration_ns = (end - start) as f32 * period;
             let duration_ms = duration_ns / 1_000_000.0;
@@ -161,7 +171,7 @@ impl GpuProfiler {
 
         drop(data);
         self.destination_buffer.unmap();
-        
+
         // Reset for next frame
         self.labels.lock().unwrap().clear();
     }

@@ -387,7 +387,11 @@ impl GpuDecoderBackend {
 
         loop {
             // Poll GPU
-            let _ = self.context.device.poll(wgpu::PollType::Poll);
+            // let _ = self.context.device.poll(wgpu::PollType::Poll);
+            match self.context.device.poll(wgpu::PollType::Poll) { // todo?
+                Ok(status) => println!("GPU Poll OK: {:?}", status),
+                Err(e) => panic!("GPU Poll Failed: {:?}", e),
+            }
 
             // Check if mapping completed
             match rx.try_recv() {

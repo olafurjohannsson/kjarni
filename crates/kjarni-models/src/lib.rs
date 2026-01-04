@@ -52,7 +52,6 @@
 //! - [`kjarni_transformers`] — Low-level transformer primitives
 //! - [`kjarni_transformers::models::registry`] — Model metadata and downloading
 
-pub mod tokenizer;
 pub mod cross_encoder;
 pub mod sentence_encoder;
 pub mod sequence_classifier;

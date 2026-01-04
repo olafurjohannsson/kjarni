@@ -8,3 +8,7 @@ pub(crate) mod q4_k;
 pub(crate) mod q6_k;
 pub(crate) mod rms_norm;
 pub(crate) mod rope_strided;
+
+
+#[cfg(test)]
+mod tests;

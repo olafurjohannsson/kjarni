@@ -8,7 +8,9 @@
 //! - Does not have a bias term
 //! - Only normalizes by the RMS (root mean square)
 
-use ndarray::{Array1, Array3, Axis};
+use ndarray::{Array1, Array2, Array3, Axis};
+
+use crate::kernels::x86::rms_norm::rms_norm_avx2;
 
 /// Root Mean Square Layer Normalization
 ///
@@ -73,10 +75,73 @@ impl RMSNorm {
     }
 }
 
+#[derive(Clone)]
+pub struct RMSNormSIMD {
+    pub weight: Array1<f32>,
+    pub eps: f32,
+}
+
+impl RMSNormSIMD {
+    pub fn new(weight: Array1<f32>, eps: f32) -> Self {
+        Self { weight, eps }
+    }
+
+    #[inline]
+    fn apply_row(&self, row: &mut [f32]) {
+        let w = self.weight.as_slice().expect("weight must be contiguous");
+
+        debug_assert_eq!(row.len(), w.len());
+
+        if cfg!(target_arch = "x86_64")
+            && std::is_x86_feature_detected!("avx2")
+            && std::is_x86_feature_detected!("fma")
+        {
+            unsafe {
+                rms_norm_avx2(row, w, self.eps);
+            }
+        } else {
+            // Scalar fallback
+            let sum_sq: f32 = row.iter().map(|v| v * v).sum();
+            let mean = sum_sq / row.len() as f32;
+            let scale = 1.0 / (mean + self.eps).sqrt();
+
+            for (x, w) in row.iter_mut().zip(w.iter()) {
+                *x = *x * scale * *w;
+            }
+        }
+    }
+
+    pub fn forward_2d(&self, hidden: &Array2<f32>) -> Array2<f32> {
+        let mut out = hidden.to_owned();
+
+        for mut row in out.outer_iter_mut() {
+            let row_slice = row.as_slice_mut().expect("row must be contiguous");
+            self.apply_row(row_slice);
+        }
+
+        out
+    }
+
+    pub fn forward_3d(&self, hidden: &Array3<f32>) -> Array3<f32> {
+        let mut out = hidden.to_owned();
+
+        for mut batch in out.outer_iter_mut() {
+            for mut row in batch.outer_iter_mut() {
+                let row_slice = row.as_slice_mut().expect("row must be contiguous");
+                self.apply_row(row_slice);
+            }
+        }
+
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
     use ndarray::{Array3, array};
+
     /// Helper function to compare two 3D tensors for approximate equality.
     fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
         assert_eq!(a.shape(), b.shape(), "Tensor shapes do not match");
@@ -91,6 +156,94 @@ mod tests {
             );
         }
         println!("✓ Tensors are approximately equal.");
+    }
+
+    fn make_test_weight(hidden: usize) -> Array1<f32> {
+        Array1::from_shape_fn(hidden, |i| 1.0 + (i as f32) * 0.001)
+    }
+
+    fn make_test_input_2d(rows: usize, hidden: usize) -> Array2<f32> {
+        Array2::from_shape_fn((rows, hidden), |(i, j)| {
+            ((i * hidden + j) as f32) * 0.01 - 1.5
+        })
+    }
+
+    fn make_test_input_3d(batch: usize, seq: usize, hidden: usize) -> Array3<f32> {
+        Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
+            ((b * 1000 + s * hidden + h) as f32) * 0.005 - 2.0
+        })
+    }
+
+    #[test]
+    fn rms_norm_2d_simd_matches_scalar() {
+        let hidden = 513; // deliberately not a multiple of 8
+        let rows = 7;
+        let eps = 1e-6;
+
+        let weight = make_test_weight(hidden);
+        let input = make_test_input_2d(rows, hidden);
+
+        let scalar = RMSNorm::new(weight.clone(), eps);
+        let simd = RMSNormSIMD::new(weight, eps);
+
+        let y_scalar = scalar.forward_2d(&input);
+        let y_simd = simd.forward_2d(&input);
+
+        assert_eq!(y_scalar.shape(), y_simd.shape());
+
+        for ((i, j), &v_ref) in y_scalar.indexed_iter() {
+            let v_simd = y_simd[(i, j)];
+            assert_abs_diff_eq!(v_ref, v_simd, epsilon = 1e-5);
+        }
+    }
+
+    #[test]
+    fn rms_norm_3d_simd_matches_scalar() {
+        let batch = 3;
+        let seq = 5;
+        let hidden = 257; // remainder-heavy
+        let eps = 1e-6;
+
+        let weight = make_test_weight(hidden);
+        let input = make_test_input_3d(batch, seq, hidden);
+
+        let scalar = RMSNorm::new(weight.clone(), eps);
+        let simd = RMSNormSIMD::new(weight, eps);
+
+        let y_scalar = scalar.forward_3d(&input);
+        let y_simd = simd.forward_3d(&input);
+
+        assert_eq!(y_scalar.shape(), y_simd.shape());
+
+        for ((b, s, h), &v_ref) in y_scalar.indexed_iter() {
+            let v_simd = y_simd[(b, s, h)];
+            assert_abs_diff_eq!(
+                v_ref,
+                v_simd,
+                epsilon = 1e-5
+            );
+        }
+    }
+
+    #[test]
+    fn rms_norm_preserves_zero_input() {
+        let hidden = 128;
+        let rows = 4;
+        let eps = 1e-6;
+
+        let weight = Array1::ones(hidden);
+        let input = Array2::<f32>::zeros((rows, hidden));
+
+        let scalar = RMSNorm::new(weight.clone(), eps);
+        let simd = RMSNormSIMD::new(weight, eps);
+
+        let y_scalar = scalar.forward_2d(&input);
+        let y_simd = simd.forward_2d(&input);
+
+        for ((i, j), &v_ref) in y_scalar.indexed_iter() {
+            let v_simd = y_simd[(i, j)];
+            assert_abs_diff_eq!(v_ref, v_simd, epsilon = 1e-8);
+        }
     }
 
     #[test]

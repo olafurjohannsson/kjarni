@@ -597,7 +597,7 @@ impl GpuTensor {
         let raw_data = self.read_raw_data().await?;
         let data_slice: &[A] = bytemuck::cast_slice(&raw_data);
         Ok(Array1::from_shape_vec(
-            (self.shape[0]),
+            self.shape[0],
             data_slice.to_vec(),
         )?)
     }

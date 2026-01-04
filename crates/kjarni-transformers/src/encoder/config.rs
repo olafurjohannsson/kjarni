@@ -49,74 +49,48 @@ impl fmt::Display for EncodingConfig {
     }
 }
 
-/// Configuration for CPU/GPU memory placement during encoder loading.
-#[derive(Debug, Clone, Default)]
-pub struct EncoderLoadConfig {
-    /// If true, embedding weights stay in CPU RAM (saves ~500MB-2GB VRAM)
-    pub cpu_embeddings: bool,
-    /// Which layers to run on GPU: None = all, Some((start, end)) = layers [start, end)
-    pub gpu_layer_range: Option<(usize, usize)>,
-    /// Target dtype for quantization
-    pub dtype: Option<DType>,
-    /// Pre-allocation hint for batch size
-    pub max_batch_size: Option<usize>,
-    /// Pre-allocation hint for sequence length
-    pub max_sequence_length: Option<usize>,
-}
 
-impl EncoderLoadConfig {
-    /// Full GPU execution (default, maximum performance)
-    pub fn full_gpu() -> Self {
-        Self::default()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tensor::DType;
+
+    #[test]
+    fn test_pooling_strategy_display() {
+        assert_eq!(PoolingStrategy::Mean.to_string(), "Mean");
+        assert_eq!(PoolingStrategy::Max.to_string(), "Max");
+        assert_eq!(PoolingStrategy::Cls.to_string(), "CLS");
+        assert_eq!(PoolingStrategy::LastToken.to_string(), "LastToken");
     }
 
-    /// CPU embeddings, GPU layers (saves ~500MB-2GB VRAM)
-    pub fn offload_embeddings() -> Self {
-        Self {
-            cpu_embeddings: true,
-            ..Default::default()
-        }
+    #[test]
+    fn test_pooling_strategy_default() {
+        let default: PoolingStrategy = Default::default();
+        assert_eq!(default, PoolingStrategy::Mean);
     }
 
-    /// Quantized model loading
-    pub fn quantized(dtype: DType) -> Self {
-        Self {
-            dtype: Some(dtype),
-            ..Default::default()
-        }
+    #[test]
+    fn test_encoding_config_defaults() {
+        let config = EncodingConfig::default();
+        assert_eq!(config.pooling_strategy, PoolingStrategy::Mean);
+        assert!(config.normalize);
+        assert_eq!(
+            config.to_string(),
+            "EncodingConfig { pooling: Mean, normalize: true }"
+        );
     }
 
-    /// Partial GPU execution: only layers [start, end) on GPU
-    pub fn partial_gpu(start: usize, end: usize) -> Self {
-        Self {
-            gpu_layer_range: Some((start, end)),
-            ..Default::default()
-        }
-    }
-
-    // Builder methods
-    pub fn with_cpu_embeddings(mut self, cpu: bool) -> Self {
-        self.cpu_embeddings = cpu;
-        self
-    }
-
-    pub fn with_gpu_layer_range(mut self, start: usize, end: usize) -> Self {
-        self.gpu_layer_range = Some((start, end));
-        self
-    }
-
-    pub fn with_dtype(mut self, dtype: DType) -> Self {
-        self.dtype = Some(dtype);
-        self
-    }
-
-    pub fn with_max_batch_size(mut self, size: usize) -> Self {
-        self.max_batch_size = Some(size);
-        self
-    }
-
-    pub fn with_max_sequence_length(mut self, len: usize) -> Self {
-        self.max_sequence_length = Some(len);
-        self
+    #[test]
+    fn test_encoding_config_custom() {
+        let config = EncodingConfig {
+            pooling_strategy: PoolingStrategy::Cls,
+            normalize: false,
+        };
+        assert_eq!(config.pooling_strategy, PoolingStrategy::Cls);
+        assert!(!config.normalize);
+        assert_eq!(
+            config.to_string(),
+            "EncodingConfig { pooling: CLS, normalize: false }"
+        );
     }
 }

@@ -1,7 +1,7 @@
 //! Pooling traits and implementations for encoder outputs
 
 use super::config::PoolingStrategy;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::{cls_pool, gpu_ops::{GpuTensor, GpuTensorPool}, last_token_pool, max_pool, mean_pool};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
@@ -52,45 +52,72 @@ impl CpuPooler for StandardCpuPooler {
         strategy: &PoolingStrategy,
     ) -> Result<Array2<f32>> {
         match strategy {
-            PoolingStrategy::Cls => {
-                // Take first token: [batch, hidden]
-                Ok(hidden_states.slice(ndarray::s![.., 0, ..]).to_owned())
-            }
-            PoolingStrategy::Mean => {
-                crate::pooling::mean_pool(hidden_states, attention_mask)
-            }
-            PoolingStrategy::Max => {
-                // Max over sequence dimension
-                let (batch, _seq, hidden) = hidden_states.dim();
-                let mut result = Array2::zeros((batch, hidden));
-                for b in 0..batch {
-                    for h in 0..hidden {
-                        let mut max_val = f32::NEG_INFINITY;
-                        for s in 0..hidden_states.dim().1 {
-                            if attention_mask[[b, s]] > 0.0 {
-                                max_val = max_val.max(hidden_states[[b, s, h]]);
-                            }
-                        }
-                        result[[b, h]] = max_val;
-                    }
-                }
-                Ok(result)
-            }
-            PoolingStrategy::LastToken => {
-                // Find last non-padding token for each batch
-                let (batch, seq, hidden) = hidden_states.dim();
-                let mut result = Array2::zeros((batch, hidden));
-                for b in 0..batch {
-                    let last_idx = (0..seq)
-                        .rev()
-                        .find(|&s| attention_mask[[b, s]] > 0.0)
-                        .unwrap_or(0);
-                    for h in 0..hidden {
-                        result[[b, h]] = hidden_states[[b, last_idx, h]];
-                    }
-                }
-                Ok(result)
-            }
+            PoolingStrategy::Cls => cls_pool(hidden_states),
+            PoolingStrategy::Mean => mean_pool(hidden_states, attention_mask),
+            PoolingStrategy::Max => max_pool(hidden_states, attention_mask),
+            PoolingStrategy::LastToken => last_token_pool(hidden_states, attention_mask),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn test_cpu_pooler_cls() {
+        let hidden = array![
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[5.0, 6.0], [7.0, 8.0]]
+        ];
+        let mask = array![[1.0, 1.0], [1.0, 0.0]];
+        let pooler = StandardCpuPooler;
+
+        let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Cls).unwrap();
+        assert_eq!(pooled[[0,0]], 1.0);
+        assert_eq!(pooled[[1,1]], 6.0);
+    }
+
+    #[test]
+    fn test_cpu_pooler_mean() {
+        let hidden = array![
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[5.0, 6.0], [7.0, 8.0]]
+        ];
+        let mask = array![[1.0, 1.0], [1.0, 0.0]];
+        let pooler = StandardCpuPooler;
+
+        let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Mean).unwrap();
+        assert!((pooled[[0,0]] - 2.0).abs() < 1e-6);
+        assert!((pooled[[1,1]] - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cpu_pooler_max() {
+        let hidden = array![
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[5.0, 6.0], [7.0, 8.0]]
+        ];
+        let mask = array![[1.0, 1.0], [1.0, 0.0]];
+        let pooler = StandardCpuPooler;
+
+        let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::Max).unwrap();
+        assert_eq!(pooled[[0,0]], 3.0);
+        assert_eq!(pooled[[1,1]], 6.0);
+    }
+
+    #[test]
+    fn test_cpu_pooler_last_token() {
+        let hidden = array![
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+            [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]
+        ];
+        let mask = array![[1.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+        let pooler = StandardCpuPooler;
+
+        let pooled = pooler.pool(&hidden, &mask, &PoolingStrategy::LastToken).unwrap();
+        assert_eq!(pooled[[0,0]], 3.0);
+        assert_eq!(pooled[[1,1]], 12.0);
     }
 }

@@ -179,6 +179,9 @@ impl GpuFeedForwardStd {
         match activation {
             Activation::Gelu => (),
             Activation::GeluNew => (),
+            Activation::Tanh => (),
+            Activation::Relu => (),
+            Activation::SilU => (),
             _ => {
                 return Err(anyhow::anyhow!(
                     "GpuFeedForward's fused kernel currently only supports gelu and gelu_new. Requested {:?}", activation
@@ -405,6 +408,9 @@ fn compile_fc1_pipeline(
     let act_function = match activation {
         Activation::Gelu => 0.0,
         Activation::GeluNew => 1.0,
+        Activation::Relu => 2.0,
+        Activation::SilU => 3.0,
+        Activation::Tanh => 4.0,
         _ => 0.0,
     };
     let constants = [("0", act_function)];

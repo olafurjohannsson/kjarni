@@ -54,9 +54,10 @@ async fn test_gpu_rope_parity() -> Result<()> {
     gpu_rope.encode(&mut encoder, &k_gpu, &k_rot_gpu, position_offset);
 
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::PollType::wait_indefinitely()); // Ensure GPU work is done
-
-    // --- 5. Assert that the GPU output matches the CPU expectation ---
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
     assert_tensors_are_close_4d(&expected_q, &q_rot_gpu, "Rotated Q", 1e-5).await;
     assert_tensors_are_close_4d(&expected_k, &k_rot_gpu, "Rotated K", 1e-5).await;
 

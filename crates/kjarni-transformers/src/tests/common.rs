@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
+
 pub async fn read_gpu_tensor_4d(tensor: &GpuTensor) -> Result<Array4<f32>> {
     let shape = tensor.shape();
     let raw_data = tensor.read_raw_data().await?;
@@ -19,8 +20,8 @@ pub async fn read_gpu_tensor_4d(tensor: &GpuTensor) -> Result<Array4<f32>> {
         data_slice.to_vec(),
     )?)
 }
+
 pub async fn read_gpu_tensor<D: Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
-    let rank = tensor.rank();
     let shape = tensor.shape().to_vec();
     let raw_data = tensor.read_raw_data().await?;
     let data_slice: &[f32] = bytemuck::cast_slice(&raw_data);
@@ -66,14 +67,31 @@ pub async fn assert_tensors_are_close_2d(
     // Find the maximum difference and its index
     let mut max_diff = 0.0;
     let mut max_diff_index = 0;
+    
     for (i, &d) in diffs.iter().enumerate() {
         if d > max_diff {
             max_diff = d;
             max_diff_index = i;
         }
     }
-    assert!(max_diff <= tolerance);
+
+    if max_diff > tolerance {
+        println!("Mismatch in tensor '{}'", label);
+        println!("Max difference: {} at flat index {}", max_diff, max_diff_index);
+        
+        // Only print full tensors if they aren't massive to avoid spamming the logs
+        if cpu_tensor.len() < 1000 {
+            println!("CPU tensor: \n{:?}", cpu_tensor);
+            println!("GPU tensor: \n{:?}", gpu_as_cpu);
+        }
+        
+        panic!(
+            "Tensor '{}' mismatch. Max diff: {} > tolerance {}", 
+            label, max_diff, tolerance
+        );
+    }
 }
+
 pub async fn assert_tensors_are_close(
     cpu_tensor: &Array3<f32>,
     gpu_tensor: &GpuTensor,
@@ -96,6 +114,7 @@ pub async fn assert_tensors_are_close(
         );
     }
 }
+
 pub fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
     let diff = (a - b).mapv(f32::abs);
     let max_diff = diff.iter().fold(0.0f32, |max, &v| v.max(max));
@@ -105,6 +124,7 @@ pub fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
         max_diff
     );
 }
+
 pub fn assert_arrays_are_close_2d(a: &Array2<f32>, b: &Array2<f32>, epsilon: f32) {
     assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
     for (val_a, val_b) in a.iter().zip(b.iter()) {
@@ -116,6 +136,7 @@ pub fn assert_arrays_are_close_2d(a: &Array2<f32>, b: &Array2<f32>, epsilon: f32
         );
     }
 }
+
 pub fn assert_all_close_4d(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
     assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
     let diff = (a - b).mapv(f32::abs);
@@ -127,6 +148,7 @@ pub fn assert_all_close_4d(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
         tolerance
     );
 }
+
 /// A test utility function to read any GpuTensor back to the CPU for verification.
 pub async fn read_gpu_tensor_to_vec<A>(tensor: &GpuTensor) -> Result<(Vec<A>, Vec<usize>)>
 where
@@ -153,7 +175,11 @@ where
         let _ = tx.send(result);
     });
 
-    context.device.poll(wgpu::PollType::wait_indefinitely());
+    match context.device.poll(wgpu::PollType::wait_indefinitely()) {
+        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Err(e) => panic!("GPU Poll Failed: {:?}", e),
+    }
+
     rx.receive().await.unwrap()?;
 
     let data = buffer_slice.get_mapped_range();

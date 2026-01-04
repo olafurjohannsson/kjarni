@@ -37,74 +37,75 @@ unsafe fn compute_chunk_avx2(
         let mut sum3 = _mm256_setzero_ps();
 
         let mut n = k;
+        unsafe {
+            // Inner Loop: The Dot Product
+            while n >= 32 {
+                _mm_prefetch(b_ptr.add(128) as *const i8, _MM_HINT_T0);
+                _mm_prefetch(a_ptr.add(128) as *const i8, _MM_HINT_T0);
 
-        // Inner Loop: The Dot Product
-        while n >= 32 {
-            _mm_prefetch(b_ptr.add(128) as *const i8, _MM_HINT_T0);
-            _mm_prefetch(a_ptr.add(128) as *const i8, _MM_HINT_T0);
+                let a0 = _mm256_loadu_ps(a_ptr);
+                let a1 = _mm256_loadu_ps(a_ptr.add(8));
+                let a2 = _mm256_loadu_ps(a_ptr.add(16));
+                let a3 = _mm256_loadu_ps(a_ptr.add(24));
 
-            let a0 = _mm256_loadu_ps(a_ptr);
-            let a1 = _mm256_loadu_ps(a_ptr.add(8));
-            let a2 = _mm256_loadu_ps(a_ptr.add(16));
-            let a3 = _mm256_loadu_ps(a_ptr.add(24));
+                let b0_u16 = _mm_loadu_si128(b_ptr as *const __m128i);
+                let b1_u16 = _mm_loadu_si128(b_ptr.add(8) as *const __m128i);
+                let b2_u16 = _mm_loadu_si128(b_ptr.add(16) as *const __m128i);
+                let b3_u16 = _mm_loadu_si128(b_ptr.add(24) as *const __m128i);
 
-            let b0_u16 = _mm_loadu_si128(b_ptr as *const __m128i);
-            let b1_u16 = _mm_loadu_si128(b_ptr.add(8) as *const __m128i);
-            let b2_u16 = _mm_loadu_si128(b_ptr.add(16) as *const __m128i);
-            let b3_u16 = _mm_loadu_si128(b_ptr.add(24) as *const __m128i);
+                // BF16 expansion
+                let b0_u32 = _mm256_cvtepu16_epi32(b0_u16);
+                let b1_u32 = _mm256_cvtepu16_epi32(b1_u16);
+                let b2_u32 = _mm256_cvtepu16_epi32(b2_u16);
+                let b3_u32 = _mm256_cvtepu16_epi32(b3_u16);
 
-            // BF16 expansion
-            let b0_u32 = _mm256_cvtepu16_epi32(b0_u16);
-            let b1_u32 = _mm256_cvtepu16_epi32(b1_u16);
-            let b2_u32 = _mm256_cvtepu16_epi32(b2_u16);
-            let b3_u32 = _mm256_cvtepu16_epi32(b3_u16);
+                let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(b0_u32, 16));
+                let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(b1_u32, 16));
+                let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(b2_u32, 16));
+                let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(b3_u32, 16));
 
-            let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(b0_u32, 16));
-            let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(b1_u32, 16));
-            let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(b2_u32, 16));
-            let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(b3_u32, 16));
+                sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
+                sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
+                sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
+                sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
 
-            sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
-            sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
-            sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
-            sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
+                a_ptr = a_ptr.add(32);
+                b_ptr = b_ptr.add(32);
+                n -= 32;
+            }
 
-            a_ptr = a_ptr.add(32);
-            b_ptr = b_ptr.add(32);
-            n -= 32;
+            sum0 = _mm256_add_ps(sum0, sum1);
+            sum2 = _mm256_add_ps(sum2, sum3);
+            sum0 = _mm256_add_ps(sum0, sum2);
+
+            let mut temp = [0.0f32; 8];
+            _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
+            let mut sum = temp.iter().sum::<f32>();
+
+            // Remainder
+            while n > 0 {
+                let val_a = *a_ptr;
+                let val_b = f32::from_bits((*b_ptr as u32) << 16);
+                sum += val_a * val_b;
+                a_ptr = a_ptr.add(1);
+                b_ptr = b_ptr.add(1);
+                n -= 1;
+            }
+
+            *val = sum;
+            // Do NOT advance a_ptr_base (we reuse input vector)
+            // Advance b_ptr to the next row of weights
+            b_ptr = b_ptr.add(k); // Note: b_ptr was incremented inside inner loop? No.
+            // Wait: The inner loop increments local b_ptr copy.
+            // The outer b_ptr needs to jump K elements *after* the inner loop finishes?
+            // No, in the logic above `b_ptr.add(32)` modifies the loop variable.
+            // We need to ensure we point to the START of the next row.
+            // Since we modified b_ptr inside the `while n >= 32`, it is currently at end of row.
+            // So actually, we don't need to add K again if we consumed the whole row.
+            // BUT: if n > 0 (remainder), we consumed it.
+            // Logic check: `b_ptr` is local to the function args.
+            // We need a separate cursor for the inner loop.
         }
-
-        sum0 = _mm256_add_ps(sum0, sum1);
-        sum2 = _mm256_add_ps(sum2, sum3);
-        sum0 = _mm256_add_ps(sum0, sum2);
-
-        let mut temp = [0.0f32; 8];
-        _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
-        let mut sum = temp.iter().sum::<f32>();
-
-        // Remainder
-        while n > 0 {
-            let val_a = *a_ptr;
-            let val_b = f32::from_bits((*b_ptr as u32) << 16);
-            sum += val_a * val_b;
-            a_ptr = a_ptr.add(1);
-            b_ptr = b_ptr.add(1);
-            n -= 1;
-        }
-
-        *val = sum;
-        // Do NOT advance a_ptr_base (we reuse input vector)
-        // Advance b_ptr to the next row of weights
-        b_ptr = b_ptr.add(k); // Note: b_ptr was incremented inside inner loop? No.
-        // Wait: The inner loop increments local b_ptr copy.
-        // The outer b_ptr needs to jump K elements *after* the inner loop finishes?
-        // No, in the logic above `b_ptr.add(32)` modifies the loop variable.
-        // We need to ensure we point to the START of the next row.
-        // Since we modified b_ptr inside the `while n >= 32`, it is currently at end of row.
-        // So actually, we don't need to add K again if we consumed the whole row.
-        // BUT: if n > 0 (remainder), we consumed it.
-        // Logic check: `b_ptr` is local to the function args.
-        // We need a separate cursor for the inner loop.
     }
 }
 
@@ -133,61 +134,62 @@ unsafe fn compute_chunk_avx2_clean(
         let mut sum3 = _mm256_setzero_ps();
 
         let mut n = k;
+        unsafe {
+            while n >= 32 {
+                _mm_prefetch(b_ptr.add(128) as *const i8, _MM_HINT_T0);
+                _mm_prefetch(a_ptr.add(128) as *const i8, _MM_HINT_T0);
 
-        while n >= 32 {
-            _mm_prefetch(b_ptr.add(128) as *const i8, _MM_HINT_T0);
-            _mm_prefetch(a_ptr.add(128) as *const i8, _MM_HINT_T0);
+                let a0 = _mm256_loadu_ps(a_ptr);
+                let a1 = _mm256_loadu_ps(a_ptr.add(8));
+                let a2 = _mm256_loadu_ps(a_ptr.add(16));
+                let a3 = _mm256_loadu_ps(a_ptr.add(24));
 
-            let a0 = _mm256_loadu_ps(a_ptr);
-            let a1 = _mm256_loadu_ps(a_ptr.add(8));
-            let a2 = _mm256_loadu_ps(a_ptr.add(16));
-            let a3 = _mm256_loadu_ps(a_ptr.add(24));
+                let b0_u16 = _mm_loadu_si128(b_ptr as *const __m128i);
+                let b1_u16 = _mm_loadu_si128(b_ptr.add(8) as *const __m128i);
+                let b2_u16 = _mm_loadu_si128(b_ptr.add(16) as *const __m128i);
+                let b3_u16 = _mm_loadu_si128(b_ptr.add(24) as *const __m128i);
 
-            let b0_u16 = _mm_loadu_si128(b_ptr as *const __m128i);
-            let b1_u16 = _mm_loadu_si128(b_ptr.add(8) as *const __m128i);
-            let b2_u16 = _mm_loadu_si128(b_ptr.add(16) as *const __m128i);
-            let b3_u16 = _mm_loadu_si128(b_ptr.add(24) as *const __m128i);
+                let b0_u32 = _mm256_cvtepu16_epi32(b0_u16);
+                let b1_u32 = _mm256_cvtepu16_epi32(b1_u16);
+                let b2_u32 = _mm256_cvtepu16_epi32(b2_u16);
+                let b3_u32 = _mm256_cvtepu16_epi32(b3_u16);
 
-            let b0_u32 = _mm256_cvtepu16_epi32(b0_u16);
-            let b1_u32 = _mm256_cvtepu16_epi32(b1_u16);
-            let b2_u32 = _mm256_cvtepu16_epi32(b2_u16);
-            let b3_u32 = _mm256_cvtepu16_epi32(b3_u16);
+                let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(b0_u32, 16));
+                let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(b1_u32, 16));
+                let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(b2_u32, 16));
+                let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(b3_u32, 16));
 
-            let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(b0_u32, 16));
-            let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(b1_u32, 16));
-            let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(b2_u32, 16));
-            let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(b3_u32, 16));
+                sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
+                sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
+                sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
+                sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
 
-            sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
-            sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
-            sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
-            sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
+                a_ptr = a_ptr.add(32);
+                b_ptr = b_ptr.add(32);
+                n -= 32;
+            }
 
-            a_ptr = a_ptr.add(32);
-            b_ptr = b_ptr.add(32);
-            n -= 32;
+            sum0 = _mm256_add_ps(sum0, sum1);
+            sum2 = _mm256_add_ps(sum2, sum3);
+            sum0 = _mm256_add_ps(sum0, sum2);
+
+            let mut temp = [0.0f32; 8];
+            _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
+            let mut sum = temp.iter().sum::<f32>();
+
+            while n > 0 {
+                let val_a = *a_ptr;
+                let val_b = f32::from_bits((*b_ptr as u32) << 16);
+                sum += val_a * val_b;
+                a_ptr = a_ptr.add(1);
+                b_ptr = b_ptr.add(1);
+                n -= 1;
+            }
+
+            *val = sum;
+            // Move to start of next row
+            b_row_start = b_row_start.add(k);
         }
-
-        sum0 = _mm256_add_ps(sum0, sum1);
-        sum2 = _mm256_add_ps(sum2, sum3);
-        sum0 = _mm256_add_ps(sum0, sum2);
-
-        let mut temp = [0.0f32; 8];
-        _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
-        let mut sum = temp.iter().sum::<f32>();
-
-        while n > 0 {
-            let val_a = *a_ptr;
-            let val_b = f32::from_bits((*b_ptr as u32) << 16);
-            sum += val_a * val_b;
-            a_ptr = a_ptr.add(1);
-            b_ptr = b_ptr.add(1);
-            n -= 1;
-        }
-
-        *val = sum;
-        // Move to start of next row
-        b_row_start = b_row_start.add(k);
     }
 }
 
@@ -655,18 +657,20 @@ unsafe fn compute_chunk_avx2_f32(
         sum0 = _mm256_add_ps(sum0, sum2);
 
         let mut temp = [0.0f32; 8];
-        _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
-        let mut sum: f32 = temp.iter().sum();
+        unsafe {
+            _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
+            let mut sum: f32 = temp.iter().sum();
 
-        while n > 0 {
-            sum += *a_ptr * *b_ptr;
-            a_ptr = a_ptr.add(1);
-            b_ptr = b_ptr.add(1);
-            n -= 1;
+            while n > 0 {
+                sum += *a_ptr * *b_ptr;
+                a_ptr = a_ptr.add(1);
+                b_ptr = b_ptr.add(1);
+                n -= 1;
+            }
+
+            *val = sum;
+            b_row_start = b_row_start.add(k);
         }
-
-        *val = sum;
-        b_row_start = b_row_start.add(k);
     }
 }
 

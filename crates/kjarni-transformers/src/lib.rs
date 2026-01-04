@@ -27,6 +27,7 @@ pub mod tensor;
 pub mod traits;
 pub mod utils;
 pub mod weights;
+pub mod tokenizer;
 pub mod lm_head;
 pub mod execution;
 pub mod pipeline;

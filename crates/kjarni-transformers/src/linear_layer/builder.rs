@@ -342,3 +342,137 @@ impl<'a> LinearLayerBuilder<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use safetensors::serialize;
+    use safetensors::tensor::{Dtype, TensorView};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // Helper to create a temporary safetensors file with dummy weights
+    fn create_dummy_weights_file() -> (tempfile::TempDir, ModelWeights) {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Write config.json
+        let config_json = r#"{
+        "vocab_size": 100,
+        "hidden_size": 4,
+        "num_attention_heads": 1,
+        "num_hidden_layers": 1
+    }"#;
+        std::fs::write(dir.path().join("config.json"), config_json).unwrap();
+
+        // Create dummy weights tensors
+        let data_f32: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let bytes: Vec<u8> = data_f32.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let shape = vec![2, 2];
+
+        let bias_data: Vec<f32> = vec![0.5, 0.5];
+        let bias_bytes: Vec<u8> = bias_data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let bias_shape = vec![2];
+
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+        let tensors = vec![
+            (
+                "layer.weight",
+                TensorView::new(Dtype::F32, shape.clone(), &bytes).unwrap(),
+            ),
+            (
+                "layer.bias",
+                TensorView::new(Dtype::F32, bias_shape.clone(), &bias_bytes).unwrap(),
+            ),
+        ];
+
+        let tensor_map: std::collections::HashMap<String, TensorView> = tensors
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+
+        let serialized = serialize(&tensor_map, &None).unwrap();
+        std::fs::write(dir.path().join("model.safetensors"), &serialized).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).expect("Failed to load ModelWeights");
+
+        (dir, weights) // keep dir alive
+    }
+
+    #[test]
+    fn test_builder_basic() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer")
+            .build()
+            .expect("Failed to build layer");
+
+        assert_eq!(layer.dtype(), DType::F32);
+        assert_eq!(layer.shape(), [2, 2]);
+        assert!(layer.has_bias(), "Bias should be inferred by default");
+    }
+
+    #[test]
+    fn test_builder_explicit_bias() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        // Point to "layer.bias" explicitly while loading "other.weight"
+        let layer = LinearLayer::builder(&weights, "layer.weight")
+            .with_bias("layer.bias")
+            .build()
+            .unwrap();
+
+        assert!(layer.has_bias());
+        assert_eq!(layer.bias.as_ref().unwrap()[0], 0.5);
+    }
+
+    #[test]
+    fn test_builder_without_bias() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer")
+            .without_bias()
+            .build()
+            .unwrap();
+
+        assert!(!layer.has_bias());
+    }
+
+    #[test]
+    fn test_builder_dtype_conversion() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        // Load F32 weights as BF16
+        let layer = LinearLayer::builder(&weights, "layer")
+            .with_target_dtype(Some(DType::BF16))
+            .build()
+            .unwrap();
+
+        assert_eq!(layer.dtype(), DType::BF16);
+        match layer.data {
+            LinearData::BF16(_) => assert!(true),
+            _ => panic!("Expected BF16 data"),
+        }
+    }
+
+    #[test]
+    fn test_builder_name_normalization() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        // "layer" -> "layer.weight"
+        let l1 = LinearLayer::builder(&weights, "layer").build();
+        // "layer.weight" -> "layer.weight"
+        let l2 = LinearLayer::builder(&weights, "layer.weight").build();
+
+        assert!(l1.is_ok());
+        assert!(l2.is_ok());
+    }
+
+    #[test]
+    fn test_builder_missing_weight() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let result = LinearLayer::builder(&weights, "non_existent").build();
+        assert!(result.is_err());
+    }
+}

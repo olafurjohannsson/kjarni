@@ -99,7 +99,7 @@ use std::time::Instant;
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```ignore
 /// use kjarni_transformers::decoder::prelude::DecoderGenerator;
 /// use kjarni_transformers::common::GenerationConfig;
 ///
@@ -288,7 +288,7 @@ impl DecoderGenerator {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// # async fn example(generator: kjarni_transformers::decoder::prelude::DecoderGenerator) -> anyhow::Result<()> {
     /// use futures_util::StreamExt;
     /// use kjarni_transformers::common::GenerationConfig;

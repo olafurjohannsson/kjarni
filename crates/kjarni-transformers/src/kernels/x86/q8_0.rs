@@ -181,3 +181,81 @@ pub unsafe fn matmul_vec_q8_0_avx2(
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernels::scalar::matmul_vec_q8_0_scalar;
+    use crate::kernels::q_common::BlockQ8_0;
+    use half::f16;
+
+    /// Deterministic, non-degenerate Q8_0 block generator.
+    fn create_test_block(seed: i8) -> BlockQ8_0 {
+        let mut qs = [0i8; 32];
+        for (i, q) in qs.iter_mut().enumerate() {
+            // Range roughly [-64, 63], avoids overflow and zeros
+            *q = ((i as i8 + seed) % 63) - 31;
+        }
+
+        BlockQ8_0 {
+            d: f16::from_f32(0.05),
+            qs,
+        }
+    }
+
+    /// AVX2+FMA test body.
+    /// Must be separated due to `#[target_feature]`.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    unsafe fn run_q8_0_avx2_vs_scalar() {
+        let k = 256; // must be divisible by 32
+        let m = 4;   // number of output rows
+
+        // Input vector
+        let a: Vec<f32> = (0..k).map(|i| (i as f32) * 0.01).collect();
+
+        // Blocks are laid out row-major:
+        // m rows × (k / 32) blocks per row
+        let blocks: Vec<BlockQ8_0> = (0..m)
+            .flat_map(|row| {
+                (0..(k / 32)).map(move |b| create_test_block((row * 13 + b) as i8))
+            })
+            .collect();
+
+        let mut out_scalar = vec![0.0f32; m];
+        let mut out_avx2 = vec![0.0f32; m];
+
+        // Scalar reference
+        matmul_vec_q8_0_scalar(&mut out_scalar, &a, &blocks, k);
+
+        // AVX2 kernel
+        unsafe { matmul_vec_q8_0_avx2(&mut out_avx2, a.as_ptr(), &blocks, k) };
+
+        // Compare
+        for i in 0..m {
+            let diff = (out_scalar[i] - out_avx2[i]).abs();
+            assert!(
+                diff < 1e-4,
+                "Q8_0 AVX2 mismatch at row {}: scalar={} avx2={} diff={}",
+                i,
+                out_scalar[i],
+                out_avx2[i],
+                diff
+            );
+        }
+    }
+
+    /// Safe test entry point.
+    #[test]
+    fn test_matmul_vec_q8_0_avx2_matches_scalar() {
+        if std::is_x86_feature_detected!("avx2")
+            && std::is_x86_feature_detected!("fma")
+        {
+            unsafe {
+                run_q8_0_avx2_vs_scalar();
+            }
+        } else {
+            eprintln!("skipping Q8_0 AVX2 test: CPU lacks AVX2+FMA");
+        }
+    }
+}
