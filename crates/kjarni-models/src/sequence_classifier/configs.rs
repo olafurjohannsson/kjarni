@@ -83,6 +83,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             transpose_ffn_weights: false, // true, // MiniLM quirk
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -109,6 +110,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
                 down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
                 down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
                 gate_weight: None, // No SwiGLU in BERT/MiniLM
+                gate_bias: None,
                 norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
                 norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
             },

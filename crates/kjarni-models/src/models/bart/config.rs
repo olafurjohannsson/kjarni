@@ -118,6 +118,7 @@ impl ModelConfig for BartConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -144,6 +145,7 @@ impl ModelConfig for BartConfig {
                 down_weight: "model.encoder.layers.{}.fc2.weight".to_string(),
                 down_bias: Some("model.encoder.layers.{}.fc2.bias".to_string()),
                 gate_weight: None,
+                gate_bias: None,
                 norm_weight: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
                 norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
             },
@@ -181,6 +183,7 @@ impl ModelConfig for BartConfig {
                 down_weight: "model.decoder.layers.{}.fc2.weight".to_string(),
                 down_bias: Some("model.decoder.layers.{}.fc2.bias".to_string()),
                 gate_weight: None,
+                gate_bias: None,
                 norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
                 norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
             },

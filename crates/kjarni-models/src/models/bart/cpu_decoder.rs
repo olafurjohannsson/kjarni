@@ -15,7 +15,7 @@ use kjarni_transformers::{
     linear_layer::LinearLayer,
     models::base::ModelLoadConfig,
     normalization::LayerNorm,
-    traits::{Device, InferenceModel, ModelConfig},
+    traits::{Device, InferenceModel, ModelConfig, ModelMetadata},
     weights::ModelWeights,
 };
 
@@ -27,6 +27,7 @@ pub struct BartCpuDecoder {
     pub layers: Vec<DecoderCrossAttentionLayer>,
     pub embed_layer_norm: LayerNorm,
     pub config: Arc<BartConfig>,
+    pub meta: ModelMetadata,
 }
 
 impl BartCpuDecoder {
@@ -68,6 +69,7 @@ impl BartCpuDecoder {
             layers,
             embed_layer_norm,
             config,
+            meta,
         })
     }
 
@@ -176,7 +178,9 @@ impl CpuCrossDecoder for BartCpuDecoder {
     fn num_layers(&self) -> usize {
         self.layers.len()
     }
-
+    fn layers(&self) -> &Vec<DecoderCrossAttentionLayer> {
+        &self.layers
+    }
     fn hidden_size(&self) -> usize {
         self.config.d_model
     }
@@ -196,7 +200,7 @@ impl CpuCrossDecoder for BartCpuDecoder {
     }
     fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
         self.embeddings
-            .forward(decoder_input_ids, None, position_offset + 2, false)
+            .forward(decoder_input_ids, None, position_offset + 2, self.meta.scale_embeddings)
     }
     fn embed_and_normalize(
         &self,

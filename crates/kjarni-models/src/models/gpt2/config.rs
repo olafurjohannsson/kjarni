@@ -68,6 +68,7 @@ impl ModelConfig for Gpt2Config {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -104,6 +105,7 @@ impl ModelConfig for Gpt2Config {
                 down_weight: format!("{}.mlp.c_proj.weight", lp),
                 down_bias: Some(format!("{}.mlp.c_proj.bias", lp)),
                 gate_weight: None, // GPT-2 uses GELU, not SwiGLU
+                gate_bias: None,
                 norm_weight: format!("{}.ln_2.weight", lp),
                 norm_bias: Some(format!("{}.ln_2.bias", lp)),
             },

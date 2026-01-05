@@ -20,6 +20,7 @@ mod config;
 pub mod decoder_cross_attn;
 pub mod decoder_cross_attn_layer;
 pub mod decoder_self_attn;
+pub mod cpu_encoder;
 
 pub use crate::encoder_decoder::config::{SummarizationParams, TaskSpecificParams};
 pub use crate::encoder_decoder::traits::{

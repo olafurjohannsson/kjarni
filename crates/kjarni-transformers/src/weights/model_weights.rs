@@ -8,7 +8,7 @@ use crate::tensor::{
 use crate::weights::raw_to_typed_gguf;
 use anyhow::{Context, Result, anyhow};
 use half::{bf16, f16};
-use ndarray::{Array1, Array2, ArrayD, IxDyn};
+use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
 use serde_json::json;
 use std::path::Path;
 
@@ -197,6 +197,14 @@ impl ModelWeights {
         typed
             .to_array2_f32()
             .map_err(|e| anyhow!("Failed to load '{}' as Array2<f32>: {}", name, e))
+    }
+
+
+    pub fn get_array3(&self, name: &str) -> Result<Array3<f32>> {
+        let typed = self.get_typed_tensor(name)?;
+        typed
+            .to_array3_f32()
+            .map_err(|e| anyhow!("Failed to load '{}' as Array3<f32>: {}", name, e))
     }
 }
 

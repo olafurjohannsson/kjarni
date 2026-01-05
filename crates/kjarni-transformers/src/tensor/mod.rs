@@ -16,7 +16,7 @@ use crate::kernels::{
 };
 use anyhow::{Result, anyhow};
 use half::{bf16, f16};
-use ndarray::{Array1, Array2, ArrayD, Ix1, Ix2};
+use ndarray::{Array1, Array2, Array3, ArrayD, Ix1, Ix2};
 
 /// A wrapper for quantized matrix data, pairing the raw blocks with shape information.
 ///
@@ -197,6 +197,35 @@ impl CpuTensor {
                     .into_dimensionality::<Ix1>()?)
             }
             _ => Err(anyhow!("Cannot convert a matrix-quantized type to Array1")),
+        }
+    }
+
+    pub fn to_array3_f32(&self) -> Result<Array3<f32>> {
+        match self {
+            CpuTensor::F32(arr) => {
+                let shape = arr.shape();
+                Ok(arr
+                    .clone()
+                    .into_shape_with_order((shape[0], shape[1], shape[2]))?
+                    .into_dimensionality::<ndarray::Ix3>()?)
+            }
+            CpuTensor::F16(arr) => {
+                let shape = arr.shape();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order((shape[0], shape[1], shape[2]))?
+                    .into_dimensionality::<ndarray::Ix3>()?)
+            }
+            CpuTensor::BF16(arr) => {
+                let shape = arr.shape();
+                Ok(arr
+                    .mapv(|v| v.to_f32())
+                    .into_shape_with_order((shape[0], shape[1], shape[2]))?
+                    .into_dimensionality::<ndarray::Ix3>()?)
+            }
+            _ => Err(anyhow!(
+                "Conversion to Array3<f32> not implemented for this type"
+            )),
         }
     }
 }

@@ -12,11 +12,11 @@ use kjarni_transformers::encoder_decoder::CpuBackend;
 async fn test_beam_search_full_4_beams() -> Result<()> {
     
 
-    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None).await?;
+    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
     let backend = CpuBackend;
 
     let context = WgpuContext::new().await?;
-    let gpu_model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Wgpu, Some(context.clone())).await?;
+    let gpu_model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Wgpu, Some(context.clone()), None).await?;
     let gpu_backend = GpuBackend::new(context)?;
 
     let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
@@ -111,7 +111,7 @@ async fn test_beam_search_full_4_beams() -> Result<()> {
 
 #[tokio::test]
 async fn test_beam_search_debug_trace() -> Result<()> {
-    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None).await?;
+    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
     let backend = CpuBackend;
 
     let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
@@ -163,7 +163,7 @@ async fn test_beam_search_debug_trace() -> Result<()> {
 // Test with full input, greedy (num_beams=1)
 #[tokio::test]
 async fn test_beam_search_greedy_full_input() -> Result<()> {
-    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None).await?;
+    let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
     let backend = CpuBackend;
 
     let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";

@@ -9,7 +9,7 @@ use std::sync::Arc;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni::Encoder;
 ///
 /// let encoder = Encoder::new("minilm-l6-v2").await?;

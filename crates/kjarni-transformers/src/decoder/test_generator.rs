@@ -48,6 +48,7 @@ impl ModelConfig for MockConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -73,6 +74,7 @@ impl ModelConfig for MockConfig {
                     cross_attn: None,
                     ffn: FeedForwardLayout {
                         up_weight: "up".into(), down_weight: "down".into(), gate_weight: None,
+                        gate_bias: None,
                         up_bias: None, down_bias: None, norm_weight: "ln2".into(), norm_bias: None,
                     },
                 },

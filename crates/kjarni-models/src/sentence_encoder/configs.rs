@@ -156,6 +156,7 @@ impl ModelConfig for BertConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -188,6 +189,7 @@ impl ModelConfig for BertConfig {
                     down_weight: format!("{}.mlp.fc2.weight", prefix),
                     
                     up_bias: None, down_bias: None, 
+                    gate_bias: None,
                     
                     norm_weight: format!("{}.norm2.weight", prefix),
                     norm_bias: Some(format!("{}.norm2.bias", prefix)),
@@ -229,6 +231,7 @@ impl ModelConfig for BertConfig {
                     down_weight: "encoder.layer.{}.output.dense.weight".to_string(),
                     down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
                     gate_weight: None,
+                    gate_bias: None,
                     norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
                     norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
                 },
@@ -303,6 +306,7 @@ impl ModelConfig for MpnetConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -327,6 +331,7 @@ impl ModelConfig for MpnetConfig {
                 down_weight: "mpnet.encoder.layer.{}.ffn.output.weight".to_string(),
                 down_bias: Some("mpnet.encoder.layer.{}.ffn.output.bias".to_string()),
                 gate_weight: None,
+                gate_bias: None,
                 norm_weight: "mpnet.encoder.layer.{}.LayerNorm.weight".to_string(),
                 norm_bias: Some("mpnet.encoder.layer.{}.LayerNorm.bias".to_string()),
             },
@@ -415,6 +420,7 @@ impl ModelConfig for DistilBertConfig {
             transpose_ffn_weights: true,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -439,6 +445,7 @@ impl ModelConfig for DistilBertConfig {
                 down_weight: "distilbert.transformer.layer.{}.ffn.lin2.weight".to_string(),
                 down_bias: Some("distilbert.transformer.layer.{}.ffn.lin2.bias".to_string()),
                 gate_weight: None,
+                gate_bias: None,
                 norm_weight: "distilbert.transformer.layer.{}.output_layer_norm.weight".to_string(),
                 norm_bias: Some(
                     "distilbert.transformer.layer.{}.output_layer_norm.bias".to_string(),

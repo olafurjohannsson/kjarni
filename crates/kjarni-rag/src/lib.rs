@@ -21,3 +21,7 @@ pub use kjarni_search::{
     ChunkMetadata,
     SearchMode,
 };
+
+
+// #[cfg(test)]
+// mod tests;

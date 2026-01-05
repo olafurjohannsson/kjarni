@@ -24,9 +24,9 @@ like C++, Haskell, and Erlang.";
     let ctx = get_test_context().await;
     let model_type = ModelType::DistilBartCnn;
 
-    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None).await?;
+    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =
-        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone())).await?;
+        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
     use std::io;
     use std::io::Write;
     let cpu_generator = EncoderDecoderGenerator::new(Box::new(cpu_model))?;

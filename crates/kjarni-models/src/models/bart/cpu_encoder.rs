@@ -156,7 +156,8 @@ impl CpuEncoder for BartCpuEncoder {
 
     /// Compute embeddings only (word + position + token_type)
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
-        self.embeddings.forward(input_ids, token_type_ids, 2, false)
+        
+        self.embeddings.forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
     }
 
     /// Compute embeddings + initial normalization

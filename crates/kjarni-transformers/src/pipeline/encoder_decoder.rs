@@ -2,6 +2,7 @@ use crate::embeddings::LoadedEmbeddings;
 use crate::encoder::{CpuEncoder, GpuEncoder};
 use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use crate::execution::ExecutionPlan;
+use crate::gpu_ops::primitives::broadcast::GpuBroadcast;
 use crate::lm_head::LoadedLMHead;
 use crate::prelude::Device;
 use crate::WgpuContext;
@@ -31,6 +32,8 @@ pub struct EncoderDecoderPipeline {
 
     lm_head: LoadedLMHead,
     final_logits_bias: Option<Array2<f32>>, // todo: inside LMHead?
+
+    gpu_broadcast: Option<GpuBroadcast>,
 
     // Configuration
     plan: ExecutionPlan,
@@ -65,6 +68,11 @@ impl EncoderDecoderPipeline {
         context: Option<Arc<WgpuContext>>,
         config: EncoderDecoderPipelineConfig,
     ) -> Result<Self> {
+        let gpu_broadcast = if let Some(ctx) = &context {
+            Some(GpuBroadcast::new(ctx)?)
+        } else {
+            None
+        };
         let pipeline = Self {
             embeddings,
             cpu_decoder,
@@ -73,6 +81,7 @@ impl EncoderDecoderPipeline {
             gpu_encoder,
             lm_head,
             final_logits_bias,
+            gpu_broadcast,
             plan,
             context,
             num_layers: config.num_layers,
@@ -163,6 +172,10 @@ impl EncoderDecoderPipeline {
 
     pub fn lm_head(&self) -> &LoadedLMHead {
         &self.lm_head
+    }
+
+    pub fn gpu_broadcast(&self) -> Option<&GpuBroadcast> {
+        self.gpu_broadcast.as_ref()
     }
 
     pub fn final_logits_bias(&self) -> Option<&Array2<f32>> {

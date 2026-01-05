@@ -176,6 +176,7 @@ impl ModelConfig for MistralConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -198,9 +199,11 @@ impl ModelConfig for MistralConfig {
             ffn: FeedForwardLayout {
                 up_weight: "model.layers.{}.mlp.up_proj.weight".to_string(),
                 up_bias: None,
+
                 down_weight: "model.layers.{}.mlp.down_proj.weight".to_string(),
                 down_bias: None,
                 gate_weight: Some("model.layers.{}.mlp.gate_proj.weight".to_string()),
+                gate_bias: None,
                 norm_weight: "model.layers.{}.post_attention_layernorm.weight".to_string(),
                 norm_bias: None,
             },

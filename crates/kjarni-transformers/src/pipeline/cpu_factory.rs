@@ -194,6 +194,7 @@ mod tests {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -266,6 +267,7 @@ mod tests {
 
         let layout = FeedForwardLayout {
             gate_weight: Some("layer.{}.gate.weight".to_string()),
+            gate_bias: None,
             up_weight: "layer.{}.up.weight".to_string(),
             down_weight: "layer.{}.down.weight".to_string(),
             up_bias: None,
@@ -287,6 +289,7 @@ mod tests {
 
         let layout = FeedForwardLayout {
             gate_weight: None, // Missing gate!
+            gate_bias: None,
             up_weight: "up".to_string(),
             down_weight: "down".to_string(),
             up_bias: None,

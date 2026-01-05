@@ -118,13 +118,18 @@ impl Embeddings {
         let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, hidden_size));
         self.perform_word_lookup(&mut hidden, input_ids);
 
+        if scale_embeddings {
+            let scale_factor = (hidden_size as f32).sqrt();
+            hidden.mapv_inplace(|x| x * scale_factor);
+        }
+
         if let Some(ref pos_emb) = self.position_embeddings {
             let start_idx = position_offset;
             let end_idx = position_offset + seq_len;
             let max_position = pos_emb.shape()[0];
             if end_idx > max_position {
                 panic!(
-                    "Sequence length {} with offset {} exceeds max position embeddings {}.",
+                    "Sequence length {} with offset {} exceeds max position embeddings {}.", // todo: do not panic
                     seq_len, position_offset, max_position
                 );
             }
@@ -141,10 +146,10 @@ impl Embeddings {
             }
         }
 
-        if scale_embeddings {
-            let scale_factor = (hidden_size as f32).sqrt();
-            hidden *= scale_factor;
-        }
+        // if scale_embeddings {
+        //     let scale_factor = (hidden_size as f32).sqrt();
+        //     hidden *= scale_factor;
+        // }
 
         hidden
     }

@@ -123,7 +123,7 @@ impl BartGpuEncoder {
             .position_embedding(position_embedding) // BART Encoder specific
             .with_token_type_embedding(encoder_layout.token_type_embedding.clone())
             .position_offset(2)
-            .scale_embeddings(true);
+            .scale_embeddings(meta.scale_embeddings);
 
         // if let(Some(type_embedding)) = &encoder_layout.token_type_embedding {
         //    embedding_builder.type_embedding(type_embedding);

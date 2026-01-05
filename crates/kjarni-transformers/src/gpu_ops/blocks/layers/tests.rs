@@ -61,6 +61,7 @@ impl ModelConfig for TestLlamaConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: crate::traits::NormalizationStrategy::RMSNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -86,6 +87,7 @@ impl ModelConfig for TestLlamaConfig {
                 down_weight: "model.layers.{}.mlp.down_proj.weight".to_string(),
                 down_bias: None,
                 gate_weight: Some("model.layers.{}.mlp.gate_proj.weight".to_string()),
+                gate_bias: None,
                 norm_weight: "model.layers.{}.post_attention_layernorm.weight".to_string(),
                 norm_bias: None,
             },
@@ -835,21 +837,33 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
     });
     let (b, s, _) = input.dim();
     let mask = Array2::<f32>::ones((batch_size, seq_len));
-    let mut temp_k = Array3::<f32>::zeros((b, s, kv_dim));
-    let mut temp_v = Array3::<f32>::zeros((b, s, kv_dim));
+    
+    // --- FIX IS HERE ---
+    
+    // 1. Run GQA (Expects compressed KV dim = 32)
+    let mut temp_k_gqa = Array3::<f32>::zeros((b, s, kv_dim));
+    let mut temp_v_gqa = Array3::<f32>::zeros((b, s, kv_dim));
+    
     let gqa_output = da_gqa.forward(
         &input,
         Some(&mask),
-        temp_k.view_mut(),
-        temp_v.view_mut(),
+        temp_k_gqa.view_mut(),
+        temp_v_gqa.view_mut(),
         0,
         None,
     )?;
+
+    // 2. Run Manual MHA (Expects full hidden size = 64)
+    // We cannot reuse the GQA buffer because this "Manual Expansion" model
+    // acts like a standard MHA model, outputting full-sized heads.
+    let mut temp_k_mha = Array3::<f32>::zeros((b, s, hidden_size));
+    let mut temp_v_mha = Array3::<f32>::zeros((b, s, hidden_size));
+
     let manual_mha_output = da_mha.forward(
         &input,
         Some(&mask),
-        temp_k.view_mut(),
-        temp_v.view_mut(),
+        temp_k_mha.view_mut(),
+        temp_v_mha.view_mut(),
         0,
         None,
     )?;
@@ -860,6 +874,7 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
         .iter()
         .cloned()
         .fold(0.0f32, f32::max);
+        
     assert!(
         max_diff < 1e-5,
         "GQA logic does not match manual expansion! Max diff: {}",

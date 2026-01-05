@@ -47,6 +47,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         }
     }
 
@@ -72,6 +73,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
                 down_weight: "layer.{}.down.weight".to_string(),
                 down_bias: Some("layer.{}.down.bias".to_string()),
                 gate_weight: None,
+                gate_bias: None,
                 norm_weight: "layer.{}.ffn_ln.weight".to_string(),
                 norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
             },

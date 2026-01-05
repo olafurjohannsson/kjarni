@@ -70,7 +70,7 @@ pub async fn run(
 
     let loaded_model = match model_type {
         ModelType::BartLargeCnn | ModelType::DistilBartCnn => {
-            BartModel::from_registry(model_type, None, device, None).await?
+            BartModel::from_registry(model_type, None, device, None, None).await?
         }
         _ => {
             return Err(anyhow!(

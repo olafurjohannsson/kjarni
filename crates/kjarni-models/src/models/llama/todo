@@ -124,3 +124,514 @@ O
 )
 O(1)
  math in the attention loop.
+
+
+ Pre-Launch Checklist
+Documentation
+ItemPriorityStatusREADME with hero exampleP0▢README feature matrixP0▢README installation instructionsP0▢CLI help text (--help for all commands)P0▢rustdoc for public APIP0▢CHANGELOG.mdP1▢CONTRIBUTING.mdP2▢LICENSE (MIT/Apache-2.0 dual)P0▢Examples directoryP1▢Architecture overview (for contributors)P2▢
+Testing
+ItemPriorityStatusUnit tests (85%+ coverage)P0▢Integration tests (model loading)P0▢CLI integration testsP1▢Cross-platform CI (Linux, macOS, Windows)P0▢GPU tests (if available in CI)P2▢Benchmark suiteP1▢
+Build & Distribution
+ItemPriorityStatuscargo publish ready (all crates)P0▢Crate names reserved on crates.ioP0▢Pre-built binaries (GitHub Releases)P1▢cargo install kjarni worksP0▢cargo binstall supportP2▢Homebrew formulaP2▢
+CLI Completeness
+CommandWorkingStdin/StdoutHelp Textkjarni model list▢N/A▢kjarni model download▢N/A▢kjarni model remove▢N/A▢kjarni model info▢N/A▢kjarni encode▢▢▢kjarni rerank▢▢▢kjarni search▢▢▢kjarni classify▢▢▢kjarni summarize▢▢▢kjarni translate▢▢▢kjarni transcribe▢▢▢kjarni chat▢▢▢kjarni generate▢▢▢
+CLI Unix Philosophy
+bash# All these should work
+cat document.txt | kjarni summarize
+cat query.txt | kjarni encode --format raw > embedding.vec
+cat audio.mp3 | kjarni transcribe | kjarni translate --to spanish
+cat texts.jsonl | kjarni classify --model sentiment-distilbert
+kjarni search --index ./my_index --query "rust performance" --top-k 10
+```
+
+| Requirement | Status |
+|-------------|--------|
+| Stdin detection (TTY vs pipe) | ▢ |
+| JSON output (`--format json`) | ▢ |
+| JSONL output (`--format jsonl`) | ▢ |
+| Raw output (`--format raw`) | ▢ |
+| Quiet mode (`-q`) | ▢ |
+| Consistent exit codes | ▢ |
+| Stderr for progress, stdout for data | ▢ |
+
+### Model Registry
+
+| Item | Priority | Status |
+|------|----------|--------|
+| All models have `cli_name` | P0 | ▢ |
+| Download with progress bar | P1 | ▢ |
+| GGUF download option | P0 | ▢ |
+| Cache directory configurable | P1 | ▢ |
+| `is_downloaded` check works | P0 | ▢ |
+| Model removal works | P0 | ▢ |
+| Disk usage shown in `info` | P1 | ▢ |
+
+### FFI Preparation
+
+| Item | Priority | Status |
+|------|----------|--------|
+| C header generation (`cbindgen`) | P0 | ▢ |
+| Opaque handle pattern | P0 | ▢ |
+| Error handling across boundary | P0 | ▢ |
+| Memory management (free functions) | P0 | ▢ |
+| Thread safety documented | P0 | ▢ |
+| No panics across FFI | P0 | ▢ |
+
+### Package Names to Reserve
+
+| Platform | Package Name | Registry |
+|----------|--------------|----------|
+| Rust | `kjarni` | crates.io |
+| Rust | `kjarni-transformers` | crates.io |
+| Rust | `kjarni-models` | crates.io |
+| Rust | `kjarni-search` | crates.io |
+| Python | `kjarni` | PyPI |
+| Node.js | `kjarni` | npm |
+| Node.js | `@kjarni/core` | npm |
+| Swift | `Kjarni` | Swift Package Index |
+| C# | `Kjarni` | NuGet |
+| Go | `github.com/user/kjarni-go` | Go modules |
+| Ruby | `kjarni` | RubyGems |
+
+### Error Handling
+
+| Item | Status |
+|------|--------|
+| Consistent error types | ▢ |
+| Helpful error messages | ▢ |
+| Model not found → suggest similar | ▢ |
+| Network errors handled gracefully | ▢ |
+| GPU not available → fallback message | ▢ |
+
+### Performance
+
+| Item | Status |
+|------|--------|
+| Benchmarks documented | ▢ |
+| Memory usage reasonable | ▢ |
+| No memory leaks (valgrind/ASAN) | ▢ |
+| Startup time acceptable | ▢ |
+
+---
+
+## Folder Layout (kjarni-transformers)
+```
+kjarni-transformers/src/
+│
+├── lib.rs                          # Public exports, prelude
+│
+├── common/                         # Shared utilities (device-agnostic)
+│   ├── mod.rs
+│   ├── sampling.rs                 # SamplingConfig, top-k, top-p, temperature
+│   ├── generation.rs               # GenerationConfig, BeamSearchParams
+│   └── tokenization.rs             # Tokenizer utilities
+│
+├── tensor/                         # Tensor types and conversions
+│   ├── mod.rs
+│   ├── dtype.rs                    # DType enum (F32, BF16, Q4_K, etc.)
+│   └── convert.rs                  # Dtype conversions
+│
+├── weights/                        # Weight loading
+│   ├── mod.rs
+│   ├── model_weights.rs            # ModelWeights struct
+│   ├── safetensors.rs              # SafeTensors loader
+│   └── gguf.rs                     # GGUF loader
+│
+├── traits/                         # Core traits (device-agnostic)
+│   ├── mod.rs
+│   ├── model_config.rs             # ModelConfig, ModelMetadata, ModelLayout
+│   ├── inference_model.rs          # InferenceModel trait
+│   └── language_model.rs           # LanguageModel trait
+│
+│
+│ ═══════════════════════════════════════════════════════════════════════
+│                              CPU BACKEND
+│ ═══════════════════════════════════════════════════════════════════════
+│
+├── cpu/
+│   │
+│   ├── mod.rs                      # CPU exports
+│   │
+│   ├── kernels/                    # Low-level SIMD kernels
+│   │   ├── mod.rs                  # Runtime dispatch
+│   │   ├── scalar/                 # Fallback implementations
+│   │   │   ├── mod.rs
+│   │   │   ├── matmul.rs
+│   │   │   ├── softmax.rs
+│   │   │   └── rope.rs
+│   │   ├── x86/                    # x86_64 AVX2/AVX-512
+│   │   │   ├── mod.rs
+│   │   │   ├── matmul_avx2.rs
+│   │   │   ├── softmax_avx2.rs
+│   │   │   ├── rope_avx2.rs
+│   │   │   └── q4k_avx2.rs         # Quantized matmul
+│   │   └── aarch64/                # ARM NEON
+│   │       ├── mod.rs
+│   │       ├── matmul_neon.rs
+│   │       ├── softmax_neon.rs
+│   │       └── rope_neon.rs
+│   │
+│   ├── ops/                        # Mid-level operations (use kernels)
+│   │   ├── mod.rs
+│   │   ├── linear.rs               # LinearLayer
+│   │   ├── layer_norm.rs
+│   │   ├── rms_norm.rs
+│   │   ├── rope.rs                 # RoPE using kernels
+│   │   ├── attention.rs            # Attention utilities
+│   │   └── feedforward.rs          # FFN variants
+│   │
+│   ├── encoder/                    # Encoder-specific CPU impl
+│   │   ├── mod.rs
+│   │   ├── self_attention.rs       # EncoderSelfAttention
+│   │   ├── encoder_layer.rs        # EncoderLayer
+│   │   └── encoder.rs              # Full encoder (CpuEncoder trait impl)
+│   │
+│   ├── decoder/                    # Decoder-specific CPU impl
+│   │   ├── mod.rs
+│   │   ├── self_attention.rs       # DecoderSelfAttention (with KV cache)
+│   │   ├── decoder_layer.rs        # DecoderLayer
+│   │   ├── backend.rs              # CpuDecoderBackend
+│   │   └── generator.rs            # Token generation loop
+│   │
+│   ├── encoder_decoder/            # Seq2Seq-specific CPU impl
+│   │   ├── mod.rs
+│   │   ├── cross_attention.rs      # CrossAttention
+│   │   ├── cross_decoder_layer.rs  # DecoderLayer with cross-attn
+│   │   └── backend.rs              # CpuEncoderDecoderBackend
+│   │
+│   └── cache/                      # KV Cache implementations
+│       ├── mod.rs
+│       ├── kv_cache.rs             # Standard KVCache
+│       └── beam_kv_cache.rs        # Double-buffered beam search cache
+│
+│
+│ ═══════════════════════════════════════════════════════════════════════
+│                              GPU BACKEND
+│ ═══════════════════════════════════════════════════════════════════════
+│
+├── gpu/
+│   │
+│   ├── mod.rs                      # GPU exports
+│   │
+│   ├── core/                       # GPU infrastructure
+│   │   ├── mod.rs
+│   │   ├── context.rs              # WgpuContext
+│   │   ├── tensor.rs               # GpuTensor
+│   │   ├── tensor_pool.rs          # Memory pooling
+│   │   └── frame.rs                # GpuFrameContext (per-inference)
+│   │
+│   ├── shaders/                    # WGSL shader source
+│   │   ├── matmul.wgsl
+│   │   ├── matmul_tiled.wgsl
+│   │   ├── softmax.wgsl
+│   │   ├── rope.wgsl
+│   │   ├── layer_norm.wgsl
+│   │   ├── rms_norm.wgsl
+│   │   ├── add.wgsl
+│   │   ├── mul.wgsl
+│   │   └── gelu.wgsl
+│   │
+│   ├── primitives/                 # Low-level GPU kernels (1:1 with shaders)
+│   │   ├── mod.rs
+│   │   ├── matmul.rs               # GpuMatmul kernel
+│   │   ├── softmax.rs              # GpuSoftmax kernel
+│   │   ├── add.rs                  # GpuAdd kernel
+│   │   ├── mul.rs                  # GpuMul kernel
+│   │   ├── rope.rs                 # GpuRoPE kernel
+│   │   └── broadcast.rs            # GpuBroadcast kernel
+│   │
+│   ├── ops/                        # Mid-level GPU operations
+│   │   ├── mod.rs
+│   │   ├── linear.rs               # GpuLinearLayer
+│   │   ├── layer_norm.rs           # GpuLayerNorm
+│   │   ├── rms_norm.rs             # GpuRmsNorm
+│   │   ├── rope.rs                 # GpuRoPE operation
+│   │   └── feedforward.rs          # GpuFeedForward
+│   │
+│   ├── encoder/                    # Encoder-specific GPU impl
+│   │   ├── mod.rs
+│   │   ├── self_attention.rs
+│   │   ├── encoder_layer.rs
+│   │   └── encoder.rs              # GpuEncoder trait impl
+│   │
+│   ├── decoder/                    # Decoder-specific GPU impl
+│   │   ├── mod.rs
+│   │   ├── self_attention.rs
+│   │   ├── decoder_layer.rs
+│   │   ├── backend.rs              # GpuDecoderBackend
+│   │   └── generator.rs
+│   │
+│   ├── encoder_decoder/            # Seq2Seq-specific GPU impl
+│   │   ├── mod.rs
+│   │   ├── cross_attention.rs
+│   │   ├── cross_decoder_layer.rs
+│   │   └── backend.rs
+│   │
+│   └── cache/                      # GPU KV Cache
+│       ├── mod.rs
+│       ├── kv_cache.rs
+│       └── beam_kv_cache.rs
+│
+│
+│ ═══════════════════════════════════════════════════════════════════════
+│                         ARCHITECTURE DEFINITIONS
+│ ═══════════════════════════════════════════════════════════════════════
+│
+├── encoder/                        # Encoder architecture (backend-agnostic)
+│   ├── mod.rs
+│   ├── traits.rs                   # CpuEncoder, GpuEncoder, EncoderLanguageModel
+│   ├── output.rs                   # EncoderOutput struct
+│   └── seq2seq_encoder.rs          # Unified Seq2SeqEncoder
+│
+├── decoder/                        # Decoder architecture (backend-agnostic)
+│   ├── mod.rs
+│   ├── traits.rs                   # DecoderLanguageModel, CpuDecoderOps, GpuDecoderOps
+│   ├── backend.rs                  # AnyDecoderBackend enum
+│   ├── generator.rs                # DecoderGenerator (main API)
+│   └── output.rs                   # GenerationOutput, Token
+│
+├── encoder_decoder/                # Seq2Seq architecture (backend-agnostic)
+│   ├── mod.rs
+│   ├── traits.rs                   # EncoderDecoderLanguageModel
+│   ├── backend.rs                  # AnyEncoderDecoderBackend
+│   └── generator.rs                # Seq2SeqGenerator
+│
+│
+│ ═══════════════════════════════════════════════════════════════════════
+│                              MODELS
+│ ═══════════════════════════════════════════════════════════════════════
+│
+├── models/
+│   │
+│   ├── mod.rs                      # Model exports
+│   ├── registry.rs                 # ModelType, ModelInfo, download
+│   ├── base.rs                     # ModelInput, ModelLoadConfig
+│   ├── factory.rs                  # Seq2SeqFactory
+│   │
+│   ├── llama/                      # Llama family (Llama, Qwen, Mistral, DeepSeek)
+│   │   ├── mod.rs
+│   │   ├── config.rs               # LlamaConfig implements ModelConfig
+│   │   └── model.rs                # LlamaModel
+│   │
+│   ├── phi/                        # Phi family
+│   │   ├── mod.rs
+│   │   ├── config.rs
+│   │   └── model.rs
+│   │
+│   ├── gpt2/                       # GPT-2 (legacy)
+│   │   ├── mod.rs
+│   │   ├── config.rs
+│   │   └── model.rs
+│   │
+│   ├── bert/                       # BERT family (MiniLM, MPNet, DistilBERT)
+│   │   ├── mod.rs
+│   │   ├── config.rs
+│   │   └── model.rs                # BertModel (for embeddings/classification)
+│   │
+│   ├── bart/                       # BART family (BART, mBART, DistilBART)
+│   │   ├── mod.rs
+│   │   ├── config.rs
+│   │   └── model.rs
+│   │
+│   ├── t5/                         # T5 family (T5, FLAN-T5)
+│   │   ├── mod.rs
+│   │   ├── config.rs
+│   │   └── model.rs
+│   │
+│   └── whisper/                    # Whisper
+│       ├── mod.rs
+│       ├── config.rs
+│       ├── model.rs
+│       └── audio.rs                # AudioPipeline, MelConfig
+│
+│
+│ ═══════════════════════════════════════════════════════════════════════
+│                           EMBEDDINGS & COMPONENTS
+│ ═══════════════════════════════════════════════════════════════════════
+│
+├── embeddings/                     # Embedding layers
+│   ├── mod.rs
+│   ├── token_embeddings.rs
+│   ├── position_embeddings.rs
+│   └── embedding_data.rs           # F32, BF16, quantized storage
+│
+├── normalization/                  # Normalization layers
+│   ├── mod.rs
+│   ├── layer_norm.rs
+│   └── rms_norm.rs
+│
+├── feedforward/                    # FFN variants
+│   ├── mod.rs
+│   ├── standard.rs                 # FC1 → Act → FC2
+│   └── swiglu.rs                   # Gate * Up → Down
+│
+├── rope/                           # Rotary position embeddings
+│   ├── mod.rs
+│   ├── standard.rs
+│   └── scaled.rs                   # LongRoPE, YaRN
+│
+├── linear_layer/                   # Linear layer abstraction
+│   ├── mod.rs
+│   ├── layer.rs                    # LinearLayer struct
+│   ├── builder.rs                  # LinearLayerBuilder
+│   └── quantized.rs                # Q4_K, Q8_0 support
+│
+└── activations/                    # Activation functions
+    ├── mod.rs
+    └── functions.rs                # GELU, SiLU, ReLU, etc.
+```
+
+---
+
+## Crate Structure (Workspace)
+```
+kjarni/
+├── Cargo.toml                      # Workspace root
+├── README.md
+├── LICENSE-MIT
+├── LICENSE-APACHE
+├── CHANGELOG.md
+│
+├── crates/
+│   │
+│   ├── kjarni/                     # Main library (re-exports + high-level API)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs              # Re-exports, prelude
+│   │       ├── encoder.rs          # High-level Encoder API
+│   │       ├── classifier.rs       # High-level Classifier API
+│   │       ├── generator.rs        # High-level Generator API
+│   │       ├── summarizer.rs       # High-level Summarizer API
+│   │       ├── reranker.rs         # High-level Reranker API
+│   │       ├── transcriber.rs      # High-level Transcriber API
+│   │       └── registry.rs         # Model management
+│   │
+│   ├── kjarni-transformers/        # Core inference engine (this doc)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       └── ...                 # Layout above
+│   │
+│   ├── kjarni-search/              # Search functionality
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── bm25.rs             # BM25 index
+│   │       ├── vector.rs           # Vector similarity
+│   │       ├── hybrid.rs           # Hybrid search (BM25 + vector)
+│   │       └── index.rs            # Persistent index
+│   │
+│   ├── kjarni-cli/                 # CLI binary
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs
+│   │       ├── commands/
+│   │       │   ├── mod.rs
+│   │       │   ├── model.rs
+│   │       │   ├── encode.rs
+│   │       │   ├── rerank.rs
+│   │       │   ├── search.rs
+│   │       │   ├── classify.rs
+│   │       │   ├── summarize.rs
+│   │       │   ├── translate.rs
+│   │       │   ├── transcribe.rs
+│   │       │   ├── chat.rs
+│   │       │   └── generate.rs
+│   │       └── util.rs
+│   │
+│   └── kjarni-ffi/                 # C FFI bindings
+│       ├── Cargo.toml
+│       ├── cbindgen.toml
+│       └── src/
+│           ├── lib.rs
+│           ├── encoder.rs
+│           ├── classifier.rs
+│           ├── generator.rs
+│           ├── search.rs
+│           ├── error.rs
+│           └── types.rs
+│
+├── bindings/                       # Language-specific bindings
+│   ├── python/
+│   │   ├── pyproject.toml
+│   │   └── src/
+│   ├── node/
+│   │   ├── package.json
+│   │   └── src/
+│   ├── swift/
+│   │   ├── Package.swift
+│   │   └── Sources/
+│   └── csharp/
+│       ├── Kjarni.csproj
+│       └── src/
+│
+├── examples/
+│   ├── simple_embedding.rs
+│   ├── hybrid_search.rs
+│   ├── rag_pipeline.rs
+│   ├── chat_bot.rs
+│   └── transcribe_audio.rs
+│
+└── benches/
+    ├── embedding_throughput.rs
+    ├── generation_speed.rs
+    └── search_latency.rs
+
+CI/CD Checklist
+yaml# .github/workflows/ci.yml essentials
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - cargo fmt --check
+      - cargo clippy -- -D warnings
+      - cargo test --all-features
+      - cargo doc --no-deps
+
+  build-release:
+    # Pre-built binaries for releases
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+```
+
+---
+
+## Quick Reference: What's Blocking Launch?
+```
+P0 (Must Have):
+├── [ ] All CLI commands working
+├── [ ] Stdin/stdout for all commands
+├── [ ] Model download/remove working
+├── [ ] README with examples
+├── [ ] cargo publish ready
+├── [ ] MIT/Apache-2.0 license
+├── [ ] CI passing on Linux/macOS/Windows
+└── [ ] No panics in happy path
+
+P1 (Should Have):
+├── [ ] Pre-built binaries
+├── [ ] JSON/JSONL output formats
+├── [ ] Progress bars for downloads
+├── [ ] Helpful error messages
+├── [ ] Basic benchmarks documented
+└── [ ] Examples directory
+
+P2 (Nice to Have):
+├── [ ] Homebrew formula
+├── [ ] Video demo
+├── [ ] Integration tutorials
+└── [ ] FFI bindings (can be v1.1)
+You're close. Ship when P0 is done.

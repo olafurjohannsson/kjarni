@@ -105,98 +105,85 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;
 
     let model_type = ModelType::DistilBartCnn;
-    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None).await?;
+    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =
-        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone())).await?;
-
+        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
+    
     // 1. Check Activation
+    
     assert_eq!(
-        cpu_model.meta.activation, gpu_model.meta.activation,
+        cpu_model.meta().activation, gpu_model.meta().activation,
         "Activation mismatch"
     );
     assert_eq!(
-        cpu_model.meta.activation,
+        cpu_model.meta().activation,
         activations::Activation::Gelu,
         "BART must use Gelu"
     );
 
     // 2. Check LayerNorm Epsilon (Top Suspect for 0.0019 drift)
     assert_eq!(
-        cpu_model.meta.norm_eps, gpu_model.meta.norm_eps,
+        cpu_model.meta().norm_eps, gpu_model.meta().norm_eps,
         "Norm Epsilon mismatch"
     );
     // Standard BART often uses 1e-12 or 1e-5 depending on the checkpoint
-    log::info!("Metadata Epsilon: {}", cpu_model.meta.norm_eps);
+    log::info!("Metadata Epsilon: {}", cpu_model.meta().norm_eps);
 
     // 3. Check Normalization Style
     assert_eq!(
-        cpu_model.meta.is_prenorm, gpu_model.meta.is_prenorm,
+        cpu_model.meta().is_prenorm, gpu_model.meta().is_prenorm,
         "Pre-norm flag mismatch"
     );
     assert_eq!(
-        cpu_model.meta.is_prenorm, false,
+        cpu_model.meta().is_prenorm, false,
         "BART must be Post-Norm (is_prenorm=false)"
     );
 
     // 4. Check Attention Scaling
     assert_eq!(
-        cpu_model.meta.head_dim, gpu_model.meta.head_dim,
+        cpu_model.meta().head_dim, gpu_model.meta().head_dim,
         "Head Dim mismatch"
     );
     assert_eq!(
-        cpu_model.meta.head_dim,
+        cpu_model.meta().head_dim,
         1024 / 16,
         "BART-Large Head Dim should be 64"
     );
 
     // 5. Check Transposition Flags
     assert_eq!(
-        cpu_model.meta.transpose_attention_weights, gpu_model.meta.transpose_attention_weights,
+        cpu_model.meta().transpose_attention_weights, gpu_model.meta().transpose_attention_weights,
         "Transpose Attn mismatch"
     );
     assert_eq!(
-        cpu_model.meta.transpose_ffn_weights, gpu_model.meta.transpose_ffn_weights,
+        cpu_model.meta().transpose_ffn_weights, gpu_model.meta().transpose_ffn_weights,
         "Transpose FFN mismatch"
     );
 
     // 6. Check Position Offsets
     assert_eq!(
-        cpu_model.meta.extra_pos_embeddings, gpu_model.meta.extra_pos_embeddings,
+        cpu_model.meta().extra_pos_embeddings, gpu_model.meta().extra_pos_embeddings,
         "Extra Pos mismatch"
     );
     assert_eq!(
-        cpu_model.meta.extra_pos_embeddings, 2,
+        cpu_model.meta().extra_pos_embeddings, 2,
         "BART must use position offset 2"
     );
+    let layout = cpu_model.layout().clone();
+    let gpu_layout = gpu_model.layout().clone();
 
     // Get the nested layouts for both CPU and GPU models.
-    let cpu_encoder_layout = cpu_model
-        .layout
-        .encoder
-        .as_ref()
-        .expect("CPU model requires encoder layout");
-    let cpu_decoder_layout = cpu_model
-        .layout
-        .decoder
-        .as_ref()
-        .expect("CPU model requires decoder layout");
-    let gpu_encoder_layout = gpu_model
-        .layout
-        .encoder
-        .as_ref()
-        .expect("GPU model requires encoder layout");
-    let gpu_decoder_layout = gpu_model
-        .layout
-        .decoder
-        .as_ref()
-        .expect("GPU model requires decoder layout");
+    let cpu_encoder_layout = layout.encoder.as_ref().expect("CPU model requires encoder layout");
+    let cpu_decoder_layout = layout.decoder.as_ref().expect("CPU model requires decoder layout");
+    let gpu_encoder_layout = gpu_layout.encoder.as_ref().expect("GPU model requires encoder layout");
+    let gpu_decoder_layout = gpu_layout.decoder.as_ref().expect("GPU model requires decoder layout");
 
     // 1. Check Shared weights
     assert_eq!(
-        cpu_model.layout.token_embedding,
-        gpu_model.layout.token_embedding
+        cpu_model.layout().token_embedding,
+        gpu_model.layout().token_embedding
     );
-    assert_eq!(cpu_model.layout.lm_head, gpu_model.layout.lm_head);
+    assert_eq!(cpu_model.layout().lm_head, gpu_model.layout().lm_head);
 
     // 2. Check for "Llama leaks" (Ensure SwiGLU isn't accidentally enabled in either encoder or decoder)
     assert!(
@@ -261,8 +248,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let input_ids_gpu = GpuTensor::from_ndarray(&ctx, &input_ids_cpu)?;
     let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask_cpu)?;
 
-    let cpu_encoder = cpu_model.cpu_encoder.expect("No CPU encoder");
-    let gpu_encoder = gpu_model.gpu_encoder.expect("No GPU encoder");
+    let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
+    let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
 
     fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
         let max_diff = cpu
@@ -653,14 +640,14 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;
 
     let model_type = ModelType::DistilBartCnn;
-    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None).await?;
+    let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =
-        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone())).await?;
+        BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
 
-    let cpu_encoder = cpu_model.cpu_encoder.as_ref().expect("No CPU encoder");
-    let gpu_encoder = gpu_model.gpu_encoder.as_ref().expect("No GPU encoder");
-    let cpu_decoder = cpu_model.cpu_decoder.as_ref().expect("No CPU decoder");
-    let gpu_decoder = gpu_model.gpu_decoder.as_ref().expect("No GPU decoder");
+    let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
+    let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
+    let cpu_decoder = cpu_model.pipeline.cpu_decoder().expect("No CPU decoder");
+    let gpu_decoder = gpu_model.pipeline.gpu_decoder().expect("No GPU decoder");
 
     fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
         let max_diff = cpu
@@ -887,8 +874,8 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         cpu_decoder.embed_and_normalize(&decoder_input_ids, position_offset)?;
 
     // Get layer 0 references
-    let cpu_layer0 = &cpu_decoder.layers[0];
-    let gpu_layer0 = &gpu_decoder.layers[0];
+    let cpu_layer0 = &cpu_decoder.layers()[0];
+    let gpu_layer0 = &gpu_decoder.layers()[0];
 
     println!("=== DECODER STEP 4a-DETAIL: SELF-ATTENTION INTERNALS ===");
 

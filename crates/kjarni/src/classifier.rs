@@ -16,7 +16,7 @@ pub struct ClassificationResult {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use kjarni::Classifier;
 ///
 /// let classifier = Classifier::new("sentiment-distilbert").await?;

@@ -35,7 +35,10 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             gpu_decoder_backend: None,
         }
     }
-
+    pub fn with_context(mut self, context: Option<Arc<WgpuContext>>) -> Self {
+        self.context = context;
+        self
+    }
     pub fn with_load_config(mut self, cfg: ModelLoadConfig) -> Self {
         self.load_config = cfg;
         self

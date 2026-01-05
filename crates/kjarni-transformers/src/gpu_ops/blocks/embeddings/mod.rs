@@ -148,6 +148,17 @@ impl GpuEmbeddings {
         self.lookup
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
 
+            // 4. Apply Scaling (BART/T5 style)
+        if scale_embeddings {
+            let scale_factor = (hidden_size as f32).sqrt();
+            let scale_out = pool.get(hidden_states.shape().to_vec());
+
+            self.scale
+                .encode_out_of_place(encoder, &hidden_states, &scale_out, scale_factor);
+
+            hidden_states = scale_out;
+        }
+
         // 2. Add Positional Embeddings (with offset)
         if let Some(pos_embeddings) = &weights.position_embeddings {
             let pos_add_out = pool.get(hidden_states.shape().to_vec());
@@ -198,16 +209,16 @@ impl GpuEmbeddings {
             hidden_states = type_add_out;
         }
 
-        // 4. Apply Scaling (BART/T5 style)
-        if scale_embeddings {
-            let scale_factor = (hidden_size as f32).sqrt();
-            let scale_out = pool.get(hidden_states.shape().to_vec());
+        // // 4. Apply Scaling (BART/T5 style)
+        // if scale_embeddings {
+        //     let scale_factor = (hidden_size as f32).sqrt();
+        //     let scale_out = pool.get(hidden_states.shape().to_vec());
 
-            self.scale
-                .encode_out_of_place(encoder, &hidden_states, &scale_out, scale_factor);
+        //     self.scale
+        //         .encode_out_of_place(encoder, &hidden_states, &scale_out, scale_factor);
 
-            hidden_states = scale_out;
-        }
+        //     hidden_states = scale_out;
+        // }
 
         Ok(hidden_states)
     }

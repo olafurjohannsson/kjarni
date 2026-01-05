@@ -21,6 +21,7 @@ use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::ModelConfig;
+use kjarni_transformers::traits::ModelMetadata;
 use kjarni_transformers::weights::ModelWeights;
 use ndarray::Array2;
 use std::sync::Arc;
@@ -38,6 +39,8 @@ pub struct BartGpuDecoder {
     pub embed_ln_weights: GpuNormalizationWeights,
 
     pub layers: Vec<GpuCrossDecoderLayer>,
+
+    pub meta: ModelMetadata,
 }
 
 impl BartGpuDecoder {
@@ -76,7 +79,7 @@ impl BartGpuDecoder {
         let embedding_config = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
             .position_embedding("model.decoder.embed_positions.weight") // BART Decoder specific
             .position_offset(2)
-            .scale_embeddings(true)
+            .scale_embeddings(meta.scale_embeddings)
             .build();
 
         let embeddings = LoadedEmbeddings::new(
@@ -239,6 +242,7 @@ impl BartGpuDecoder {
             embed_layer_norm,
             embed_ln_weights,
             layers,
+            meta,
         })
     }
 }
@@ -259,7 +263,9 @@ impl GpuCrossDecoder for BartGpuDecoder {
             position_offset
         )
     }
-
+    fn layers(&self) -> &Vec<GpuCrossDecoderLayer> {
+        &self.layers
+    }
     fn embed_and_normalize(
         &self,
         encoder: &mut CommandEncoder,

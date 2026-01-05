@@ -694,6 +694,7 @@ mod tests {
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
                 normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
+                no_scale_qk: false,
             };
             GpuEncoderLayer::new(
                 &ctx,
@@ -770,6 +771,7 @@ mod tests {
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
                 normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
+                no_scale_qk: false,
             }
         }
 
@@ -795,6 +797,7 @@ mod tests {
                     down_weight: "layer.{}.ffn.down.weight".to_string(),
                     down_bias: Some("layer.{}.ffn.down.bias".to_string()),
                     gate_weight: None, // Standard FFN for this test
+                    gate_bias: None,
                     norm_weight: "layer.{}.ffn_ln.weight".to_string(),
                     norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
                 },

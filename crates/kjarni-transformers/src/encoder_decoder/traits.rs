@@ -5,7 +5,11 @@
 
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
+use crate::decoder::prelude::DecoderLayer;
+use crate::encoder::encoder_layer::EncoderLayer;
 use crate::encoder::prelude::EncoderLanguageModel;
+use crate::encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer;
+use crate::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
 use anyhow::Result;
@@ -60,6 +64,8 @@ pub trait CpuCrossDecoder: Send + Sync {
         position_offset: usize,
     ) -> Result<Array3<f32>>;
 
+    fn layers(&self) -> &Vec<DecoderCrossAttentionLayer>;
+
     /// Run a subset of layers `[start_layer, end_layer)`.
     ///
     /// # Arguments
@@ -80,6 +86,8 @@ pub trait CpuCrossDecoder: Send + Sync {
 
     /// Metadata: Hidden dimension size.
     fn hidden_size(&self) -> usize;
+
+    
 
     // --- High-level Default Implementation ---
 
@@ -120,6 +128,8 @@ pub trait GpuCrossDecoder: Send + Sync {
         pool: &mut GpuTensorPool,
         encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache>;
+
+    fn layers(&self) -> &Vec<GpuCrossDecoderLayer>;
 
     fn embed(
         &self,

@@ -76,6 +76,7 @@ pub struct ModelMetadata {
     /// - normalize_embedding: layer norm after embedding lookup
     pub normalize_embedding: bool,
     pub normalization_strategy: NormalizationStrategy,
+    pub no_scale_qk: bool,
 }
 
 /// Naming templates for a standard attention block (self- or cross-attention).
@@ -101,6 +102,7 @@ pub struct FeedForwardLayout {
     pub down_weight: String,
     pub down_bias: Option<String>,
     pub gate_weight: Option<String>, // For SwiGLU/GEGLU variants
+    pub gate_bias: Option<String>,
     pub norm_weight: String,
     pub norm_bias: Option<String>,
 }
@@ -255,6 +257,7 @@ mod tests {
             is_prenorm: true,
             normalize_embedding: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
+            no_scale_qk: false,
         };
 
         assert_eq!(meta.hidden_size, 128);
@@ -290,6 +293,7 @@ mod tests {
             down_weight: "down_w".to_string(),
             down_bias: Some("down_b".to_string()),
             gate_weight: None,
+            gate_bias: None,
             norm_weight: "norm_w".to_string(),
             norm_bias: None,
         };
@@ -319,6 +323,7 @@ mod tests {
             down_weight: "down".to_string(),
             down_bias: None,
             gate_weight: None,
+            gate_bias: None,
             norm_weight: "norm".to_string(),
             norm_bias: None,
         };
@@ -354,6 +359,7 @@ mod tests {
             down_weight: "down".to_string(),
             down_bias: None,
             gate_weight: None,
+            gate_bias: None,
             norm_weight: "norm".to_string(),
             norm_bias: None,
         };
