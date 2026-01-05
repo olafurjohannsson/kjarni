@@ -1,0 +1,1 @@
+/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/03_similarity.dir/link.d CMakeFiles/03_similarity.dir/03_similarity.cpp.o -o 03_similarity   -L/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release  -Wl,-rpath,/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release -ledgegpt -lpthread -ldl -lm
