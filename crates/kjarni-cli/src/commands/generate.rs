@@ -1,14 +1,14 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 
-use std::io::{self, Write};
-
 use kjarni::{
-    DecoderGenerator, DecoderLanguageModel, DecodingStrategy, Device, GenerationConfig,
-    ModelArchitecture, ModelType, SamplingParams, TokenType,
-    models::{Gpt2Model, LlamaModel},
-    registry,
+    models::{Gpt2Model, LlamaModel}, registry, DecoderGenerator, DecoderLanguageModel, DecodingStrategy,
+    Device, GenerationConfig, ModelArchitecture, ModelType,
+    SamplingParams,
+    TokenType,
 };
+use std::io::{self, Write};
+use std::sync::Arc;
 
 use super::util::{model_not_found_error, resolve_input};
 
@@ -67,10 +67,10 @@ pub async fn run(
         eprintln!("Loading model '{}'...", model);
     }
 
-    let loaded_model: Box<dyn DecoderLanguageModel> = if model_type.is_llama_model() {
-        Box::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
+    let loaded_model: Arc<dyn DecoderLanguageModel> = if model_type.is_llama_model() {
+        Arc::new(LlamaModel::from_registry(model_type, None, device, None, None).await?)
     } else if model_type.is_gpt2_model() {
-        Box::new(Gpt2Model::from_registry(model_type, None, device, None, None).await?)
+        Arc::new(Gpt2Model::from_registry(model_type, None, device, None, None).await?)
     } else {
         return Err(anyhow!(
             "Model '{}' not yet supported for generation.",

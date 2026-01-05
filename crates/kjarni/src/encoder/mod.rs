@@ -1,4 +1,17 @@
-// kjarni/src/encoder.rs
+//! Text encoder for generating embeddings.
+//!
+//! This module wraps the underlying SentenceEncoder with a
+//! simplified, high-level API.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use kjarni::Encoder;
+//!
+//! let encoder = Encoder::new("minilm-l6-v2").await?;
+//! let embedding = encoder.encode("Hello world").await?;
+//! assert_eq!(embedding.len(), 384);
+//! ```
 
 use anyhow::{anyhow, Result};
 use kjarni_models::sentence_encoder::SentenceEncoder;
@@ -7,15 +20,7 @@ use std::sync::Arc;
 
 /// Sentence/text encoder for generating embeddings.
 ///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::Encoder;
-///
-/// let encoder = Encoder::new("minilm-l6-v2").await?;
-/// let embedding = encoder.encode("Hello world").await?;
-/// assert_eq!(embedding.len(), 384);
-/// ```
+/// Wraps the underlying SentenceEncoder with a simplified API.
 pub struct Encoder {
     inner: SentenceEncoder,
 }
@@ -62,6 +67,7 @@ impl Encoder {
     }
 }
 
+/// Builder for Encoder configuration.
 pub struct EncoderBuilder {
     model: String,
     device: Device,
@@ -77,22 +83,26 @@ impl EncoderBuilder {
         }
     }
 
+    /// Run on CPU (default).
     pub fn cpu(mut self) -> Self {
         self.device = Device::Cpu;
         self
     }
 
+    /// Run on GPU.
     pub fn gpu(mut self) -> Self {
         self.device = Device::Wgpu;
         self
     }
 
+    /// Provide a pre-created WgpuContext.
     pub fn with_context(mut self, context: Arc<WgpuContext>) -> Self {
         self.context = Some(context);
         self.device = Device::Wgpu;
         self
     }
 
+    /// Build the encoder.
     pub async fn build(self) -> Result<Encoder> {
         let model_type = ModelType::from_cli_name(&self.model)
             .ok_or_else(|| anyhow!("Unknown model: '{}'", self.model))?;

@@ -91,6 +91,12 @@ pub struct RopeScalingConfig {
     pub rope_type: String,
 }
 
+pub enum PaddingSide {
+    Left,
+    Right,
+}
+
+
 /// Defines the autoregressive generation loop strategy for decoder models.
 ///
 /// Different model implementations use different strategies for transitioning
@@ -755,7 +761,7 @@ pub trait LanguageModel: InferenceModel {
     /// let tokens = model.tokenize_batch(&texts)?;
     /// assert_eq!(tokens.shape()[0], 2); // batch size
     /// ```
-    fn tokenize_batch(&self, texts: &[&str]) -> Result<Array2<u32>> {
+    fn tokenize_batch(&self, texts: &[&str], side: PaddingSide) -> Result<Array2<u32>> {
         if texts.is_empty() {
             return Err(anyhow!("Cannot tokenize empty batch"));
         }
@@ -772,16 +778,29 @@ pub trait LanguageModel: InferenceModel {
             max_len = max_len.max(encoding.len());
             encodings.push(encoding);
         }
-        // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime of all references in a program during compilation .
-        // Rust is a multi-paradigm programming language that emphasizes performance, type safety, and concurrency . It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector . To simultaneously enforce memory safety and prevent data races, its 'borrow checker' tracks the object lifetime
+
         let pad_id = self.pad_token_id().unwrap_or(0);
         let batch_size = texts.len();
-
         let mut batch = Array2::from_elem((batch_size, max_len), pad_id);
 
         for (i, encoding) in encodings.iter().enumerate() {
-            for (j, &token_id) in encoding.get_ids().iter().enumerate() {
-                batch[[i, j]] = token_id;
+            let ids = encoding.get_ids();
+            let len = ids.len();
+
+            match side {
+                PaddingSide::Right => {
+                    // Standard for Encoders: [Token, Token, Pad, Pad]
+                    for (j, &token_id) in ids.iter().enumerate() {
+                        batch[[i, j]] = token_id;
+                    }
+                }
+                PaddingSide::Left => {
+                    // Standard for Decoders: [Pad, Pad, Token, Token]
+                    let start_col = max_len - len;
+                    for (j, &token_id) in ids.iter().enumerate() {
+                        batch[[i, start_col + j]] = token_id;
+                    }
+                }
             }
         }
 

@@ -39,9 +39,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use kjarni_transformers::ChatTemplate;
 use kjarni_transformers::chat::llama3::Llama3ChatTemplate;
 use kjarni_transformers::common::{
     DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
@@ -49,6 +48,7 @@ use kjarni_transformers::common::{
 use kjarni_transformers::pipeline::DecoderModelFactory;
 use kjarni_transformers::rope::loader::LoadedRoPE;
 use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
+use kjarni_transformers::ChatTemplate;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
@@ -59,30 +59,30 @@ use crate::models::llama::{
 
 // Workspace imports
 use kjarni_transformers::{
-    WgpuContext,
-    // Cache
     cache::{Cache, CpuKVCache, GpuKVCache},
-    // Decoder traits
     decoder::prelude::*,
-    // Embeddings
     embeddings::{EmbeddingConfig, LoadedEmbeddings},
-    // Execution planning
     execution::ExecutionPlan,
-    // GPU operations
-    gpu_ops::{GpuFrameContext, GpuTensor, blocks::rope::GpuRoPE},
-    // LM Head
+    gpu_ops::{blocks::rope::GpuRoPE, GpuFrameContext, GpuTensor},
+    // Cache
     lm_head::{LMHeadConfig, LoadedLMHead},
-    // Model infrastructure
+    // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
-    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
-    // Pipeline
+    // Embeddings
+    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
+    // Execution planning
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
-    // Utilities
+    // GPU operations
     prelude::*,
+    // LM Head
     rope::RoPE,
+    // Model infrastructure
     tensor::{DType, TensorView},
     traits::{InferenceModel, ModelConfig},
+    // Pipeline
     weights::ModelWeights,
+    // Utilities
+    WgpuContext,
 };
 
 // =============================================================================
@@ -197,7 +197,7 @@ impl LlamaModel {
             context,
             load_config,
         )
-        .await
+            .await
     }
     pub fn from_pretrained(
         model_path: &Path,
@@ -285,14 +285,16 @@ impl LanguageModel for LlamaModel {
         let meta = self.config.metadata();
         let head_dim = meta.head_dim;
 
+        let effective_max_len = self.pipeline.max_sequence_length().unwrap_or(max_len);
+        let effective_batch_size = self.pipeline.max_batch_size().unwrap_or(batch_size);
         // Create cache based on where layers run (not the model's primary device)
         match self.pipeline.plan().layers {
             Device::Cpu => {
                 let kv_dim = head_dim * meta.num_kv_heads;
                 Ok(Box::new(CpuKVCache::new(
                     meta.num_layers,
-                    batch_size,
-                    max_len,
+                    effective_batch_size,
+                    effective_max_len,
                     kv_dim,
                 )))
             }
@@ -304,10 +306,10 @@ impl LanguageModel for LlamaModel {
                 Ok(Box::new(GpuKVCache::new(
                     &context,
                     meta.num_layers,
-                    batch_size,
+                    effective_batch_size,
                     meta.num_kv_heads,
                     head_dim,
-                    max_len,
+                    effective_max_len,
                 )?))
             }
         }
@@ -480,7 +482,7 @@ impl DecoderLanguageModel for LlamaModel {
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
     }
-fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
         self.chat_template.as_deref()
     }
     fn get_default_generation_config(&self) -> GenerationConfig {

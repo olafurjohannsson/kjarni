@@ -5,9 +5,9 @@
 
 use crate::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::{last_token_pool, max_pool};
-use crate::models::base::{LanguageModel, ModelInput};
+use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
+use crate::{last_token_pool, max_pool};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -58,7 +58,7 @@ pub trait EncoderLanguageModel: LanguageModel {
         }
 
         // 1. Tokenize and create attention mask (this logic is good)
-        let input_ids = self.tokenize_batch(texts)?;
+        let input_ids = self.tokenize_batch(texts, PaddingSide::Left)?;
         let pad_id = self.pad_token_id().unwrap_or(0);
         let attention_mask = input_ids.mapv(|id| if id == pad_id { 0.0 } else { 1.0 });
 

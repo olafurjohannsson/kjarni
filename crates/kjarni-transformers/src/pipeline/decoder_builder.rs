@@ -137,6 +137,8 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 num_layers: meta.num_layers,
                 hidden_size: meta.hidden_size,
                 vocab_size: meta.vocab_size,
+                max_sequence_length: self.load_config.max_sequence_length,
+                max_batch_size: self.load_config.max_batch_size,
             },
         )
     }

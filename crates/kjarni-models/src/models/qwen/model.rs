@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
@@ -10,28 +10,28 @@ use tokenizers::Tokenizer;
 // Use your existing Llama decoders!
 use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder};
 
-use kjarni_transformers::chat::chatml::ChatMLTemplate; // todo mode tom models?
+// todo mode tom models?
 
 // Use the Qwen Config we just made
 use crate::models::qwen::config::QwenConfig;
 
 use kjarni_transformers::{
     // Add generic chat templates if available, or custom Qwen template
-    ChatTemplate,
-    WgpuContext,
     cache::{Cache, CpuKVCache, GpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, LoadedEmbeddings},
-    execution::ExecutionPlan,
     gpu_ops::{GpuFrameContext, GpuTensor},
-    models::base::{AutoregressiveLoop, ModelLoadConfig},
-    models::{LanguageModel, ModelArchitecture, ModelType},
+    models::base::{AutoregressiveLoop, ModelLoadConfig}
+
+    ,
+    models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
     rope::loader::LoadedRoPE,
     tensor::{DType, TensorView},
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
+    ChatTemplate,
+    WgpuContext,
 };
 
 pub struct QwenModel {
@@ -124,7 +124,7 @@ impl QwenModel {
             context,
             load_config,
         )
-        .await
+            .await
     }
     pub fn from_pretrained(
         model_path: &Path,
@@ -138,7 +138,7 @@ impl QwenModel {
             device,
             context,
             decoder_config,
-            model_tyoe
+            model_tyoe,
         )
     }
 
@@ -235,6 +235,21 @@ impl LanguageModel for QwenModel {
     fn forced_eos_token_id(&self) -> Option<u32> {
         None
     }
+    fn stop_token_ids(&self) -> std::collections::HashSet<u32> {
+        let mut set = std::collections::HashSet::new();
+
+        // Add all IDs from the config (Qwen often has 2-3)
+        for id in &self.config.eos_token_id {
+            set.insert(*id);
+        }
+
+        // Specifically ensure ChatML end token is there
+        if let Some(im_end) = self.tokenizer().token_to_id("<|im_end|>") {
+            set.insert(im_end);
+        }
+
+        set
+    }
 }
 
 #[async_trait]
@@ -256,7 +271,7 @@ impl DecoderLanguageModel for QwenModel {
     fn autoregressive_loop(&self) -> AutoregressiveLoop {
         AutoregressiveLoop::Pipelined
     }
-fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
         self.chat_template.as_deref()
     }
     fn get_default_generation_config(&self) -> GenerationConfig {
@@ -291,9 +306,10 @@ impl CpuDecoderOps for QwenModel {
         self.pipeline.lm_head().forward_cpu(h)
     }
     fn get_attention_mask(&self, seq: usize, _past: usize) -> Result<Array2<f32>> {
-        Ok(kjarni_transformers::utils::create_full_attention_mask(
-            1, seq,
-        ))
+        Ok(kjarni_transformers::utils::create_causal_mask(seq))
+        // Ok(kjarni_transformers::utils::create_full_attention_mask(
+        //     1, seq,
+        // ))
     }
 }
 

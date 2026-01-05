@@ -35,6 +35,7 @@ pub struct DecoderPipeline {
     num_layers: usize,
     hidden_size: usize,
     vocab_size: usize,
+    max_sequence_length: Option<usize>,
 }
 
 /// Builder configuration for DecoderPipeline
@@ -42,6 +43,8 @@ pub struct DecoderPipelineConfig {
     pub num_layers: usize,
     pub hidden_size: usize,
     pub vocab_size: usize,
+    pub max_sequence_length: Option<usize>,
+    pub max_batch_size: Option<usize>,
 }
 
 impl DecoderPipeline {
@@ -65,6 +68,7 @@ impl DecoderPipeline {
             num_layers: config.num_layers,
             hidden_size: config.hidden_size,
             vocab_size: config.vocab_size,
+            max_sequence_length: config.max_sequence_length,
         };
 
         // Validate the plan against available components
@@ -170,6 +174,13 @@ impl DecoderPipeline {
 
     pub fn vocab_size(&self) -> usize {
         self.vocab_size
+    }
+    pub fn max_sequence_length(&self) -> Option<usize> {
+        self.max_sequence_length()
+    }
+
+    pub fn max_batch_size(&self) -> Option<usize> {
+        None
     }
 
     // ========================================================================

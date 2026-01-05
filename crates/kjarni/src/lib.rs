@@ -62,6 +62,7 @@
 mod config;
 mod config_utils;
 mod utils;
+pub mod chat;
 // Re-export main API
 pub use utils::*;
 
@@ -117,10 +118,65 @@ mod classifier;
 mod encoder;
 #[cfg(any(feature = "python", feature = "c-bindings"))]
 pub mod ffi;
+mod generation;
 
 // Prelude
 pub mod prelude {
     pub use crate::utils::*;
     pub use kjarni_transformers::models::ModelType;
     pub use kjarni_transformers::prelude::*;
+}
+
+
+// ============================================================================
+// Top-level convenience functions
+// ============================================================================
+
+/// Send a chat message (convenience wrapper).
+///
+/// # Example
+///
+/// ```ignore
+/// let response = kjarni::chat("llama3.2-1b", "Hello!").await?;
+/// ```
+pub async fn chat_send(model: &str, message: &str) -> chat::ChatResult<String> {
+    chat::send(model, message).await
+}
+
+/// Encode text to embedding (convenience wrapper).
+///
+/// # Example
+///
+/// ```ignore
+/// let embedding = kjarni::encode("minilm-l6-v2", "Hello world").await?;
+/// ```
+pub async fn encode(model: &str, text: &str) -> anyhow::Result<Vec<f32>> {
+    let encoder = crate::encoder::Encoder::new(model).await?;
+    encoder.encode(text).await
+}
+
+// ============================================================================
+// Version Info
+// ============================================================================
+
+/// Get the kjarni version.
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Get build information.
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        git_hash: option_env!("GIT_HASH"),
+        build_date: option_env!("BUILD_DATE"),
+    }
+}
+
+/// Build metadata.
+#[derive(Debug, Clone)]
+pub struct BuildInfo {
+    pub version: &'static str,
+    pub git_hash: Option<&'static str>,
+    pub build_date: Option<&'static str>,
 }

@@ -72,18 +72,19 @@
 //! - **Bottleneck**: Typically memory bandwidth during decode phase
 
 use crate::common::{
-    GenerationConfig, StreamedToken, TokenType, CancellationToken, apply_no_repeat_ngram,
-    apply_repetition_penalty_mut, sample_token,
+    apply_no_repeat_ngram, apply_repetition_penalty_mut, sample_token, CancellationToken, GenerationConfig,
+    StreamedToken, TokenType,
 };
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
-use crate::{Conversation, prelude::*};
-use anyhow::{Result, anyhow};
+use crate::{prelude::*, Conversation};
+use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
-use log::{debug, info, warn, trace};
+use log::{debug, info, trace, warn};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Orchestrates autoregressive text generation for decoder-only models.
@@ -124,8 +125,8 @@ use std::time::Instant;
 /// and automatically freed when the generation completes or the stream is dropped.
 pub struct DecoderGenerator {
     /// The underlying language model (Llama, GPT-2, Phi, etc.)
-    pub model: Box<dyn DecoderLanguageModel>,
-    
+    pub model: Arc<dyn DecoderLanguageModel + Send + Sync>,
+
     /// Device-specific execution backend
     backend: AnyDecoderBackend,
 }
@@ -156,7 +157,7 @@ impl DecoderGenerator {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(model: Box<dyn DecoderLanguageModel>) -> Result<Self> {
+    pub fn new(model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<Self> {
         let backend = match model.device() {
             Device::Cpu => {
                 debug!("Initializing CPU decoder backend");
@@ -225,7 +226,7 @@ impl DecoderGenerator {
             .filter(|t| t.token_type == TokenType::Generated)
             .map(|v| v.text.as_str())
             .collect();
-            
+
         Ok(text)
     }
 
@@ -311,7 +312,7 @@ impl DecoderGenerator {
         prompt: &str,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         let tokens = self.encode(prompt, config)?;
         self.generate_stream_from_tokens(tokens, config, cancellation).await
     }
@@ -324,7 +325,7 @@ impl DecoderGenerator {
         conversation: &Conversation,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         let prompt = self.format_conversation(conversation)?;
         let tokens = self.encode(&prompt, config)?;
         self.generate_stream_from_tokens(tokens, config, cancellation).await
@@ -451,15 +452,15 @@ impl DecoderGenerator {
         input_tokens: Vec<u32>,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
         // =====================================================================
         // Setup Phase
         // =====================================================================
-        
+
         let prompt_tokens = input_tokens.clone();
         let prompt_len = prompt_tokens.len();
         let mut tokens = input_tokens;
-        
+
         // Determine generation limits
         let max_len = config.max_new_tokens
             .map(|n| prompt_len + n)
@@ -479,14 +480,14 @@ impl DecoderGenerator {
 
         // Allocate KV cache
         let mut cache: Box<dyn Cache> = self.model.new_cache(1, cache_capacity, 0)?;
-        
+
         // Pre-allocate token tensor for decode loop (avoids allocation per step)
         let mut token_tensor = self.backend.new_token_tensor()?;
 
         // =====================================================================
         // Prefill Phase
         // =====================================================================
-        
+
         let mut stats = GenerationStats::new();
         stats.start_prefill(prompt_len);
 
@@ -509,7 +510,7 @@ impl DecoderGenerator {
         // =====================================================================
         // Decode Phase (Async Stream)
         // =====================================================================
-        
+
         let context_limit = self.model.context_size();
         let stop_tokens = self.model.stop_token_ids();
         let tokenizer = self.model.tokenizer();
