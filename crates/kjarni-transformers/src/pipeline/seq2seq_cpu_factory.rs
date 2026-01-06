@@ -449,12 +449,16 @@ impl<'a> Seq2SeqFactory<'a> {
             .as_ref()
             .ok_or_else(|| anyhow!("Seq2Seq decoder requires cross_attn in layout"))?;
 
-        let cross_attn = self.build_decoder_cross_attention(
+        let mut cross_attn = self.build_decoder_cross_attention(
             cross_attn_layout,
             meta.hidden_size,
             meta.num_attention_heads,
             layer_idx,
         )?;
+
+        if meta.no_scale_qk {
+            cross_attn = cross_attn.with_no_qk_scaling();
+        }
 
         // let cross_attn_layer_norm = Normalization::LayerNorm(
         //     self.build_layer_norm(

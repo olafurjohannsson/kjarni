@@ -168,7 +168,7 @@ impl DecoderGenerator {
                 let context = model
                     .context()
                     .ok_or_else(|| anyhow!("GPU model requires WgpuContext, but none found."))?;
-                AnyDecoderBackend::Gpu(GpuDecoderBackend::new(context)?)
+                AnyDecoderBackend::Gpu(Arc::new(GpuDecoderBackend::new(context)?))
             }
         };
 
@@ -217,16 +217,18 @@ impl DecoderGenerator {
     /// # }
     /// ```
     pub async fn generate(&self, prompt: &str, config: &GenerationConfig, cancellation: Option<CancellationToken>) -> Result<String> {
+        println!("Generate!");
         let stream = self.generate_stream(prompt, config, cancellation).await?;
+        println!("Results!");
         let results: Vec<StreamedToken> = stream.try_collect().await?;
-
+        println!("Text!");
         // Filter to only generated tokens (exclude prompt echo)
         let text: String = results
             .iter()
             .filter(|t| t.token_type == TokenType::Generated)
             .map(|v| v.text.as_str())
             .collect();
-
+        println!("Ret!");
         Ok(text)
     }
 
@@ -313,7 +315,9 @@ impl DecoderGenerator {
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
     ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+        println!("About to call encode");
         let tokens = self.encode(prompt, config)?;
+        println!("Calling generate stream from tokens");
         self.generate_stream_from_tokens(tokens, config, cancellation).await
     }
 
@@ -453,10 +457,11 @@ impl DecoderGenerator {
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
     ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+        println!("Generate stream from token!");
         // =====================================================================
         // Setup Phase
         // =====================================================================
-
+        log::info!("Generating stream from token");
         let prompt_tokens = input_tokens.clone();
         let prompt_len = prompt_tokens.len();
         let mut tokens = input_tokens;
@@ -479,11 +484,13 @@ impl DecoderGenerator {
         );
 
         // Allocate KV cache
+        println!("Creating cache!");
         let mut cache: Box<dyn Cache> = self.model.new_cache(1, cache_capacity, 0)?;
+        println!("Cache done!");
 
         // Pre-allocate token tensor for decode loop (avoids allocation per step)
         let mut token_tensor = self.backend.new_token_tensor()?;
-
+        println!("New tensor!");
         // =====================================================================
         // Prefill Phase
         // =====================================================================
@@ -493,7 +500,7 @@ impl DecoderGenerator {
 
         debug!("Starting prefill: {} tokens", prompt_len);
         let prefill_start = Instant::now();
-
+        println!("Starting prefill!");
         let mut next_token_logits = self
             .backend
             .prefill(self.model.as_ref(), &tokens, cache.as_mut())
@@ -506,6 +513,7 @@ impl DecoderGenerator {
             prefill_start.elapsed().as_secs_f64() * 1000.0,
             stats.prefill_tps()
         );
+        println!("Prefill complete!");
 
         // =====================================================================
         // Decode Phase (Async Stream)
@@ -628,7 +636,7 @@ impl DecoderGenerator {
 
                 // decode in backend
                 self.backend.update_token_tensor(&mut token_tensor, next_token)?;
-
+                println!("Update done, decoding!");
                 next_token_logits = self.backend.decode_one(
                     self.model.as_ref(),
                     &token_tensor,

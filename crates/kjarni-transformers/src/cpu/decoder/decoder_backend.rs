@@ -122,6 +122,7 @@ use std::time::Instant;
 ///     current_token = sample(&logits);
 /// }
 /// ```
+#[derive(Clone)]
 pub struct CpuDecoderBackend;
 
 #[async_trait]

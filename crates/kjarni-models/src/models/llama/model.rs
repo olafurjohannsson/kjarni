@@ -282,23 +282,30 @@ impl LanguageModel for LlamaModel {
         max_len: usize,
         _num_beams: usize,
     ) -> Result<Box<dyn Cache>> {
+        println!("New Cache!");
         let meta = self.config.metadata();
         let head_dim = meta.head_dim;
 
+        println!("Calculating effective len!");
         let effective_max_len = self.pipeline.max_sequence_length().unwrap_or(max_len);
         let effective_batch_size = self.pipeline.max_batch_size().unwrap_or(batch_size);
+
+        println!("Matching plan!");
         // Create cache based on where layers run (not the model's primary device)
         match self.pipeline.plan().layers {
             Device::Cpu => {
+                println!("CPU!");
                 let kv_dim = head_dim * meta.num_kv_heads;
+                println!("About to create new cpu cache!");
                 Ok(Box::new(CpuKVCache::new(
                     meta.num_layers,
-                    effective_batch_size,
-                    effective_max_len,
+                    batch_size,
+                    max_len,
                     kv_dim,
                 )))
             }
             Device::Wgpu => {
+                println!("GPu!");
                 let context = self
                     .context()
                     .ok_or_else(|| anyhow!("GPU cache requires WgpuContext"))?;
@@ -391,6 +398,7 @@ impl CpuDecoderOps for LlamaModel {
         Ok(kjarni_transformers::utils::create_full_attention_mask(
             1, seq_len,
         ))
+        // Ok(kjarni_transformers::utils::create_causal_mask(seq_len, _past_len))
     }
 }
 

@@ -657,8 +657,6 @@ pub trait LanguageModel: InferenceModel {
         num_beams: usize,
     ) -> Result<Box<dyn Cache>>;
 
-    // --- Default Implementations ---
-
     /// Returns the set of token IDs that should stop generation.
     ///
     /// By default, includes the model's EOS token and Llama 3's `<|eot_id|>` if present.

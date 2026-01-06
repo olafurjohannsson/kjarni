@@ -49,6 +49,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2};
 use std::any::Any;
+use std::sync::Arc;
 
 /// Unified backend that dispatches to CPU or GPU implementations.
 ///
@@ -73,11 +74,12 @@ use std::any::Any;
 /// While the tensor type is erased, mismatches are caught at runtime with
 /// clear error messages. A mismatch would indicate a bug in the generator
 /// (mixing CPU tensors with GPU backend or vice versa).
+#[derive(Clone)]
 pub enum AnyDecoderBackend {
     /// CPU backend using ndarray
     Cpu(CpuDecoderBackend),
     /// GPU backend using WebGPU/Vulkan
-    Gpu(GpuDecoderBackend),
+    Gpu(Arc<GpuDecoderBackend>),
 }
 
 impl AnyDecoderBackend {

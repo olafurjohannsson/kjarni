@@ -1,5 +1,6 @@
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
+use crate::utils::MASK_VALUE;
 use anyhow::Result;
 use ndarray::{s, Array2, Array3, Array4};
 
@@ -275,9 +276,10 @@ impl DecoderAttention {
         }
 
         // Only apply causal mask if not single-token decode
-        if !is_decode {
-            self.apply_causal_mask(&mut scores, start_write);
-        }
+        // if !is_decode {
+        //     self.apply_causal_mask(&mut scores, start_write);
+        // }
+        self.apply_causal_mask(&mut scores, start_write);
 
         crate::utils::linear_algebra::softmax_inplace(&mut scores);
 
@@ -334,7 +336,7 @@ impl DecoderAttention {
             let query_pos = cache_len + i;
             for j in 0..scores.shape()[3] {
                 if j > query_pos {
-                    scores.slice_mut(s![.., .., i, j]).fill(f32::NEG_INFINITY);
+                    scores.slice_mut(s![.., .., i, j]).fill(MASK_VALUE);
                 }
             }
         }

@@ -249,9 +249,19 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
         None,
     )?;
 
-    let generator = DecoderGenerator::new(Arc::new(llama_model))?;
+    let llama_gpu = LlamaModel::from_pretrained(
+        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        Device::Wgpu,
+        Some(WgpuContext::new().await?),
+        None,
+        None,
+    )?;
+    let generator_gpu = DecoderGenerator::new(Arc::new(llama_gpu))?;
+    let generated_text_gpu = generator_gpu.generate(prompt, &config, None).await?;
+    let concat_prompt_gpu = prompt.to_string() + "" + &generated_text_gpu;
+    assert_eq!(concat_prompt_gpu.trim(), expected_output.trim());
 
-    // 3. Execute the generation.
+    let generator = DecoderGenerator::new(Arc::new(llama_model))?;
     let generated_text = generator.generate(prompt, &config, None).await?;
 
     let concat_prompt = prompt.to_string() + "" + &generated_text;

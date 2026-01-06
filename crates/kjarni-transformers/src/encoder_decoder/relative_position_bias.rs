@@ -1,5 +1,5 @@
 use crate::weights::ModelWeights;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ndarray::{Array2, Array4};
 
 pub struct T5RelativePositionBias {
@@ -97,32 +97,46 @@ impl T5RelativePositionBias {
         Ok(bias)
     }
     fn relative_position_bucket(&self, relative_position: i32) -> usize {
-        let mut n = -relative_position; // T5 looks "backwards" from query to key
-        let mut res = 0;
         let num_buckets = self.num_buckets as i32;
+        let max_distance = self.max_distance as i32;
+
+        // T5 Logic from Mesh Tensorflow / HuggingFace
+        // Standard relative position is (k - q), but bucket logic often expects (q - k)
+        // Let's stick to the canonical implementation:
+
+        let mut n = -relative_position; // Convert (k-q) to (q-k)
+        let mut ret = 0;
 
         if self.is_bidirectional {
-            let max_exact = num_buckets / 2;
+            let num_buckets_half = num_buckets / 2;
+            // In T5, "Future" is usually the first half, "Past" is the second half
+            // If n > 0 (Query > Key, i.e., Past), we add the offset
             if n > 0 {
-                res += max_exact;
+                ret += num_buckets_half;
             }
             n = n.abs();
         } else {
-            n = n.max(0);
+            n = (-n).max(0);
         }
 
         let max_exact = num_buckets / 2;
         let is_small = n < max_exact;
 
-        if is_small {
-            res += n;
+        let val = if is_small {
+            n
         } else {
-            let log_ratio = (n as f32 / max_exact as f32).ln()
-                / (self.max_distance as f32 / max_exact as f32).ln();
-            let bucket = (max_exact as f32 + log_ratio * (num_buckets - max_exact) as f32) as i32;
-            res += bucket.min(num_buckets - 1);
-        }
+            // T5's specific log-bucket formula
+            // val = max_exact + (log(n / max_exact) / log(max_distance / max_exact) * (num_buckets - max_exact))
+            let n_float = n as f32;
+            let max_exact_float = max_exact as f32;
+            let max_dist_float = max_distance as f32;
 
-        res as usize
+            let log_ratio = (n_float / max_exact_float).ln() / (max_dist_float / max_exact_float).ln();
+            let bucket = max_exact_float + (log_ratio * (num_buckets - max_exact) as f32);
+
+            bucket.min((num_buckets - 1) as f32) as i32
+        };
+
+        (ret + val) as usize
     }
 }

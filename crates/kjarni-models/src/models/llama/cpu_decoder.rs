@@ -286,13 +286,15 @@ impl CpuDecoder for LlamaCpuDecoder {
 
             if let Some(ref mut c) = cpu_cache_opt {
                 // OPTIMIZATION: Get the FULL contiguous view (History + New Slot)
+                let current_len = c.get_seq_length();
                 let (k_full_mut, v_full_mut) = c.get_context_view_mut(i, seq_len)?;
 
                 // Pass this full view to the layer
                 hidden = layer.forward(
                     &hidden,
                     attention_mask,
-                    position_offset,
+                    // position_offset,
+                    current_len,
                     k_full_mut,
                     v_full_mut,
                 )?;

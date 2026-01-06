@@ -1,9 +1,9 @@
 // Import Zip
 use crate::linear_layer::LinearLayer;
+use crate::utils::linear_algebra::{apply_attention_mask, softmax_inplace};
 use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decode};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
-use crate::utils::linear_algebra::{softmax_inplace, apply_attention_mask};
 
 // Standard large negative value for masking (avoids NaN in softmax)
 const MASK_VALUE: f32 = -1e9;
@@ -22,6 +22,7 @@ pub struct DecoderCrossAttention {
     pub num_heads: usize,
     pub head_dim: usize,
     pub scale_factor: f32,
+    pub scale_qk: bool,
 }
 
 impl DecoderCrossAttention {
@@ -42,9 +43,13 @@ impl DecoderCrossAttention {
             num_heads,
             head_dim,
             scale_factor: 1.0 / (head_dim as f32).sqrt(),
+            scale_qk: true,
         }
     }
-
+    pub fn with_no_qk_scaling(mut self) -> Self {
+        self.scale_qk = false;
+        self
+    }
     /// Pre-computes K and V from the encoder output.
     pub fn precompute_encoder_kv(
         &self,
@@ -101,8 +106,9 @@ impl DecoderCrossAttention {
         } else {
             matmul_4d(&q_heads, encoder_k_t)
         };
-        scores.mapv_inplace(|x| x * self.scale_factor);
-
+        if self.scale_qk {
+            scores.mapv_inplace(|x| x * self.scale_factor);
+        }
         // Apply Padding Mask (Using safe Zip broadcasting)
         if let Some(mask) = attention_mask {
             scores = apply_attention_mask(scores, mask);

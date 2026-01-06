@@ -176,7 +176,7 @@ impl DecoderPipeline {
         self.vocab_size
     }
     pub fn max_sequence_length(&self) -> Option<usize> {
-        self.max_sequence_length()
+        self.max_sequence_length
     }
 
     pub fn max_batch_size(&self) -> Option<usize> {

@@ -41,6 +41,13 @@ impl SwiGluFeedForward {
                     0.5 * v * (1.0 + f32::tanh(0.79788456 * (v + 0.044715 * v.powi(3))))
                 });
             }
+            Activation::GeluNew => {
+                // Flan-T5 specifically requests this
+                // 0.5 * x * (1 + tanh(...))
+                x.par_mapv_inplace(|v| {
+                    0.5 * v * (1.0 + f32::tanh(0.79788456 * (v + 0.044715 * v.powi(3))))
+                });
+            }
             _ => silu_parallel(x),
         }
     }
@@ -62,8 +69,8 @@ impl SwiGluFeedForward {
         let up_out = self.up.matmul(&hidden.view());
 
         // 2. Activation
-        // silu_parallel(&mut gate_out);
-        self.apply_activation(&mut gate_out);
+        silu_parallel(&mut gate_out);
+        // self.apply_activation(&mut gate_out);
         let activated = gate_out * up_out;
 
         // 3. Down
@@ -82,17 +89,19 @@ impl SwiGluFeedForward {
         // --- Step 1: Call the clean, safe, fused kernel dispatcher from the `ops` module ---
         let t_gate_up = Instant::now();
 
-        let (mut gate_out, up_out) = rayon::join(
-            || self.gate.matmul(&hidden_2d),
-            || self.up.matmul(&hidden_2d),
-        );
+        // let (mut gate_out, up_out) = rayon::join(
+        //     || self.gate.matmul(&hidden_2d),
+        //     || self.up.matmul(&hidden_2d),
+        // );
+        let mut gate_out = self.gate.matmul(&hidden_2d);
+        let mut up_out = self.gate.matmul(&hidden_2d);
 
         let d_gate_up = t_gate_up.elapsed();
 
         // --- Step 2: Activation & Element-wise Ops ---
         let t_act = Instant::now();
-        // silu_parallel(&mut gate_out);
-        self.apply_activation(&mut gate_out);
+        silu_parallel(&mut gate_out);
+        // self.apply_activation(&mut gate_out);
         let activated = gate_out * up_out;
         let d_act = t_act.elapsed();
 
@@ -123,10 +132,12 @@ impl SwiGluFeedForward {
         let t_total = Instant::now();
 
         let t_gate_up = Instant::now();
-        let (mut gate_out, up_out) = rayon::join(
-            || self.gate.matmul(&hidden_2d.view()),
-            || self.up.matmul(&hidden_2d.view()),
-        );
+        // let (mut gate_out, up_out) = rayon::join(
+        //     || self.gate.matmul(&hidden_2d.view()),
+        //     || self.up.matmul(&hidden_2d.view()),
+        // );
+        let mut gate_out = self.gate.matmul(&hidden_2d);
+        let mut up_out = self.gate.matmul(&hidden_2d);
         let d_gate_up = t_gate_up.elapsed();
 
         let t_act = Instant::now();

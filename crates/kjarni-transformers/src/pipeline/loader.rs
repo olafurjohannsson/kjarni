@@ -94,6 +94,10 @@ impl GenericLoader {
         load_config: Option<ModelLoadConfig>,
         model_type: Option<ModelType>,
     ) -> Result<M> {
+        log::info!("Loading from {:?}", model_path);
+        if model_type.is_some() {
+            log::info!("Model {:?}", model_type.unwrap().cli_name());
+        }
         let weights = ModelWeights::new(model_path)?;
         let load_config: ModelLoadConfig = load_config.unwrap_or_default();
 

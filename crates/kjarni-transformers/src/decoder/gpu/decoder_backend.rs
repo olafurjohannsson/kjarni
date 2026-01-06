@@ -85,6 +85,7 @@ use crate::WgpuContext;
 ///     current_token = sample(&logits, &config);
 /// }
 /// ```
+///
 pub struct GpuDecoderBackend {
     /// Shared GPU context (device, queue, pipelines)
     context: Arc<WgpuContext>,

@@ -9,14 +9,24 @@ use tokenizers::Tokenizer;
 use super::config::T5Config;
 use kjarni_transformers::encoder_decoder::cpu_decoder::Seq2SeqDecoderConfig;
 use kjarni_transformers::encoder_decoder::cpu_encoder::Seq2SeqEncoderConfig;
-use kjarni_transformers::{cache::{Cache, CpuBeamKVCache, GpuBeamKVCache}, common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults}, cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps}, encoder_decoder::{
-    cpu_decoder::Seq2SeqCPUDecoder,
-    cpu_encoder::Seq2SeqCPUEncoder,
-    traits::{
-        CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
-        GpuEncoderDecoderOps,
+use kjarni_transformers::{
+    cache::{Cache, CpuBeamKVCache, GpuBeamKVCache}, common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults}, cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
+    encoder_decoder::{
+        cpu_decoder::Seq2SeqCPUDecoder,
+        cpu_encoder::Seq2SeqCPUEncoder,
+        traits::{
+            CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
+            GpuEncoderDecoderOps,
+        },
     },
-}, models::base::ModelLoadConfig, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights, LanguageModel, ModelType, WgpuContext};
+    models::base::ModelLoadConfig,
+    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
+    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
+    LanguageModel,
+    ModelType,
+    WgpuContext,
+};
 
 pub struct T5Model {
     tokenizer: Tokenizer,
@@ -192,7 +202,7 @@ impl LanguageModel for T5Model {
     }
 
     fn forced_bos_token_id(&self) -> Option<u32> {
-        None // T5 doesn't force BOS
+        Some(self.config.decoder_start_token_id)
     }
 
     fn pad_token_id(&self) -> Option<u32> {
@@ -229,7 +239,9 @@ impl LanguageModel for T5Model {
         max_len: usize,
         num_beams: usize,
     ) -> Result<Box<dyn Cache>> {
-        let num_decoder_layers = self.config.num_decoder_layers
+        let num_decoder_layers = self
+            .config
+            .num_decoder_layers
             .unwrap_or(self.config.num_layers);
 
         match self.pipeline.plan().layers {
@@ -266,7 +278,9 @@ impl CpuEncoderDecoderOps for T5Model {
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
         // Creates a triangular matrix where 1.0 is allowed and 0.0 is masked
         // This prevents the decoder from "looking ahead"
-        Some(kjarni_transformers::utils::create_causal_mask(seq_len, past_len))
+        Some(kjarni_transformers::utils::create_causal_mask(
+            seq_len, past_len,
+        ))
     }
 
     fn broadcast_encoder_states(
@@ -284,7 +298,10 @@ impl CpuEncoderDecoderOps for T5Model {
             .to_owned())
     }
 
-    fn project_to_logits(&self, hidden_states: &ndarray::Array3<f32>) -> Result<ndarray::Array3<f32>> {
+    fn project_to_logits(
+        &self,
+        hidden_states: &ndarray::Array3<f32>,
+    ) -> Result<ndarray::Array3<f32>> {
         self.pipeline.lm_head().forward_cpu(hidden_states)
     }
 }
@@ -308,7 +325,9 @@ impl GpuEncoderDecoderOps for T5Model {
 
         let mut expanded_shape = encoder_hidden_states.shape().to_vec();
         if expanded_shape.get(0) != Some(&1) {
-            return Err(anyhow!("Cannot broadcast encoder states with batch size != 1"));
+            return Err(anyhow!(
+                "Cannot broadcast encoder states with batch size != 1"
+            ));
         }
         expanded_shape[0] = num_beams;
 
@@ -329,7 +348,9 @@ impl GpuEncoderDecoderOps for T5Model {
         hidden_states: &kjarni_transformers::gpu_ops::GpuTensor,
     ) -> Result<kjarni_transformers::gpu_ops::GpuTensor> {
         let (encoder_cmd, pool) = frame.resources();
-        self.pipeline.lm_head().forward_gpu(encoder_cmd, pool, hidden_states)
+        self.pipeline
+            .lm_head()
+            .forward_gpu(encoder_cmd, pool, hidden_states)
     }
 }
 
