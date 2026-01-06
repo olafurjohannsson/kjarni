@@ -386,7 +386,11 @@ impl Seq2SeqCPUDecoder {
                 let key_len = position_offset + query_len;
 
                 // We need a version of compute that understands the query starts at position_offset
-                Ok(Some(bias.compute_with_offset(query_len, key_len, position_offset)?))
+                Ok(Some(bias.compute_with_offset(
+                    query_len,
+                    key_len,
+                    position_offset,
+                )?))
             }
             _ => Ok(None),
         }
@@ -442,6 +446,8 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
     embeddings
 }
 
+impl Seq2SeqCPUDecoder {}
+
 // =============================================================================
 // Trait Implementations
 // =============================================================================
@@ -460,6 +466,7 @@ impl InferenceModel for Seq2SeqCPUDecoder {
     }
 }
 
+
 #[async_trait]
 impl CpuCrossDecoder for Seq2SeqCPUDecoder {
     fn num_layers(&self) -> usize {
@@ -472,6 +479,34 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
 
     fn hidden_size(&self) -> usize {
         self.meta.hidden_size
+    }
+
+    fn forward2(
+        &self,
+        decoder_input_ids: &Array2<u32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
+        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    ) -> Result<CpuCrossDecoderOutput> {
+        // 1. Calculate offset
+        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+
+        // 2. Embed
+        let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
+
+        // 3. Run all layers
+        self.forward_layers2(
+            &hidden,
+            encoder_hidden_states,
+            decoder_padding_mask,
+            encoder_padding_mask,
+            cache,
+            cross_kv_cache,
+            0,
+            self.num_layers(),
+        )
     }
 
     fn precompute_cross_attention_kv(
@@ -511,6 +546,77 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         Ok(hidden)
     }
 
+    fn forward_layers2(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>,
+        encoder_padding_mask: Option<&Array2<f32>>,
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<CpuCrossDecoderOutput> {
+        let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
+        let position_offset = cpu_cache.map_or(0, |c| c.get_seq_length());
+
+        let seq_len = hidden_states.dim().1;
+        let total_len = position_offset + seq_len;
+
+        // 1. Create the Causal Mask [seq_len, total_len]
+        let causal_mask = crate::utils::masks::create_causal_mask(seq_len, total_len);
+
+        // 2. Combine with Decoder Padding Mask (Self-Attention Mask)
+        let self_attn_mask = match decoder_padding_mask {
+            Some(pad) => {
+                // If pad is [batch, total_len], we broadcast and multiply
+                // This ensures we are causal AND ignoring padding
+                Some(combine_masks(&causal_mask, pad))
+            }
+            None => Some(causal_mask),
+        };
+
+        // 3. Encoder Padding Mask is used for Cross-Attention
+        let cross_attn_mask = encoder_padding_mask;
+
+        // 4. Compute T5 Position Bias (Using query_offset fix)
+        let position_bias = self.compute_position_bias(hidden_states, position_offset)?;
+
+        let mut hidden = hidden_states.clone();
+        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
+
+        for i in start_layer..end_layer {
+            let layer = &self.layers[i];
+            let past_kv = cpu_cache.and_then(|c| c.get(i));
+            let past_kv_views = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
+            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
+
+            // 5. Pass DIFFERENT masks to the layer
+            let (new_hidden, new_kv) = layer.forward(
+                &hidden,
+                encoder_hidden_states,
+                self_attn_mask.as_ref(), // causal + pad
+                cross_attn_mask,         // encoder pad only
+                past_kv_views,
+                cross_kv_for_layer,
+                position_bias.as_ref(),
+            )?;
+
+            hidden = new_hidden;
+            new_self_attn_kvs.push(new_kv);
+        }
+
+        if end_layer == self.layers.len() {
+            if let Some(norm) = &self.final_norm {
+                hidden = norm.forward(&hidden);
+            }
+        }
+
+        Ok(CpuCrossDecoderOutput {
+            last_hidden_state: hidden,
+            new_self_attn_kv: new_self_attn_kvs,
+        })
+    }
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,

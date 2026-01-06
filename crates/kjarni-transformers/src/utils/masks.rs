@@ -42,6 +42,29 @@ pub fn apply_padding_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow
     Ok(scores)
 }
 
+pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
+    let (batch, heads, q_len, k_len) = scores.dim();
+
+    // The mask can be [batch, k_len] or [q_len, k_len]
+    // We expand to [batch, 1, q_len, k_len] for broadcasting
+    let mask_view = if mask.nrows() == batch {
+        // Padding mask style: [Batch, Keys]
+        mask.view().insert_axis(Axis(1)).insert_axis(Axis(2))
+    } else {
+        // Causal mask style: [Queries, Keys]
+        mask.view().insert_axis(Axis(0)).insert_axis(Axis(1))
+    };
+
+    if let Some(m) = mask_view.broadcast(scores.dim()) {
+        Zip::from(&mut scores).and(&m).for_each(|s, &mask_val| {
+            if mask_val == 0.0 {
+                *s = MASK_VALUE;
+            }
+        });
+    }
+    scores
+}
+
 /// Apply causal mask to attention scores
 ///
 /// Ensures position `i` can only attend to positions `0..=i` in the full sequence.
@@ -66,15 +89,22 @@ pub fn create_full_attention_mask(batch_size: usize, seq_len: usize) -> Array2<f
     Array2::ones((batch_size, seq_len))
 }
 
-/// Create a causal attention mask where position i can only attend to positions 0..=i
+/// Create a causal attention mask for any shape.
 ///
-/// Used for autoregressive generation (GPT-2, GPT-3, etc.)
-/// Returns [seq_len, seq_len] with 1.0 for allowed positions, 0.0 for masked
-pub fn create_causal_mask(seq_len: usize) -> Array2<f32> {
-    let mut mask = Array2::zeros((seq_len, seq_len));
-    for i in 0..seq_len {
-        for j in 0..=i {
-            mask[[i, j]] = 1.0;
+/// # Arguments
+/// * `q_len` - Number of query tokens (usually 1 during decode)
+/// * `total_len` - Total tokens in sequence (past_cache + current)
+pub fn create_causal_mask(q_len: usize, total_len: usize) -> Array2<f32> {
+    let mut mask = Array2::zeros((q_len, total_len));
+    let past_len = total_len - q_len;
+
+    for i in 0..q_len {
+        // The query at index 'i' is actually at absolute position 'past_len + i'
+        let current_abs_pos = past_len + i;
+        for j in 0..total_len {
+            if j <= current_abs_pos {
+                mask[[i, j]] = 1.0;
+            }
         }
     }
     mask
@@ -84,7 +114,7 @@ pub fn create_causal_mask(seq_len: usize) -> Array2<f32> {
 ///
 /// Returns [batch_size, seq_len, seq_len]
 pub fn create_batched_causal_mask(batch_size: usize, seq_len: usize) -> Array3<f32> {
-    let single_mask = create_causal_mask(seq_len);
+    let single_mask = create_causal_mask(seq_len, 0);
     let mut batched = Array3::zeros((batch_size, seq_len, seq_len));
 
     for b in 0..batch_size {
@@ -130,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_causal_mask() {
-        let mask = create_causal_mask(3);
+        let mask = create_causal_mask(3, 0);
 
         // Expected:
         // [[1, 0, 0],

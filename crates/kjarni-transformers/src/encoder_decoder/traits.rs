@@ -77,7 +77,36 @@ pub trait CpuCrossDecoder: Send + Sync {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<CpuCrossDecoderOutput>;
-
+    fn forward_layers2(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
+        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<CpuCrossDecoderOutput> {
+        Ok(CpuCrossDecoderOutput {
+            new_self_attn_kv: Vec::new(),
+            last_hidden_state: Array3::<f32>::zeros((0, 0, 0)),
+        })
+    }
+    fn forward2(
+        &self,
+        decoder_input_ids: &Array2<u32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
+        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    ) -> Result<CpuCrossDecoderOutput> {
+        Ok(CpuCrossDecoderOutput {
+            new_self_attn_kv: Vec::new(),
+            last_hidden_state: Array3::<f32>::zeros((0, 0, 0)),
+        })
+    }
     /// Metadata: Total number of layers.
     fn num_layers(&self) -> usize;
 

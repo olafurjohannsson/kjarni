@@ -1,5 +1,4 @@
 use crate::cache::{Cache, CpuBeamKVCache};
-use crate::encoder_decoder::traits::CpuCrossDecoderOutput;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
@@ -17,6 +16,8 @@ pub enum CpuSeq2SeqState {
         hidden_states: Array3<f32>,
         /// The pre-computed cross-attention Key/Value cache for each decoder layer.
         cross_attention_kv_cache: CpuCrossAttentionKVCache,
+        /// Identifies padding in the source sentence
+        encoder_padding_mask: Array2<f32>,
     },
 }
 
@@ -38,7 +39,10 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let encoder_ops = model
             .encoder_cpu_ops()
             .ok_or_else(|| anyhow!("Model does not support CPU execution"))?;
+
         let input_ids = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
+
+        // Encoder padding mask
         let attention_mask = Array2::ones(input_ids.dim());
 
         let encoder_output = encoder_ops
@@ -46,10 +50,18 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             .forward(&input_ids, &attention_mask, None)?
             .last_hidden_state;
 
-        let final_state = if num_beams > 1 {
-            seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?
+        // let final_state = if num_beams > 1 {
+        //     seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?
+        // } else {
+        //     encoder_output
+        // };
+        let (final_state, final_mask) = if num_beams > 1 {
+            let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
+            let m = attention_mask.broadcast((num_beams, tokens.len()))
+                .ok_or_else(|| anyhow!("Mask broadcast failed"))?.to_owned();
+            (s, m)
         } else {
-            encoder_output
+            (encoder_output, attention_mask)
         };
 
         let cross_cache = seq2seq_ops
@@ -59,6 +71,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         Ok(CpuSeq2SeqState::EncoderState {
             hidden_states: final_state,
             cross_attention_kv_cache: cross_cache,
+            encoder_padding_mask: final_mask,
         })
     }
 
@@ -76,19 +89,31 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let CpuSeq2SeqState::U32(tokens) = decoder_tokens else {
             return Err(anyhow!("Invalid tensor type for decoder_tokens"));
         };
+
         let CpuSeq2SeqState::EncoderState {
             hidden_states: enc_state,
             cross_attention_kv_cache: cross_kv,
+            encoder_padding_mask,
         } = encoder_state
         else {
             return Err(anyhow!("Invalid tensor type for encoder_state"));
         };
+
+        // create decoder padding mask, usually all 1s during auto regressive decode
         let attention_mask = Array2::ones(tokens.dim());
 
-        let decoder_output: CpuCrossDecoderOutput = ops.decoder().forward(
+        // let decoder_output: CpuCrossDecoderOutput = ops.decoder().forward(
+        //     tokens,
+        //     enc_state,
+        //     Some(&attention_mask),
+        //     Some(cache),
+        //     Some(cross_kv),
+        // )?;
+        let decoder_output = ops.decoder().forward2(
             tokens,
             enc_state,
             Some(&attention_mask),
+            Some(encoder_padding_mask), // Pass the source mask here!
             Some(cache),
             Some(cross_kv),
         )?;

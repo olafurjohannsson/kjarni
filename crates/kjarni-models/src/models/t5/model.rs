@@ -266,7 +266,7 @@ impl CpuEncoderDecoderOps for T5Model {
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
         // Creates a triangular matrix where 1.0 is allowed and 0.0 is masked
         // This prevents the decoder from "looking ahead"
-        Some(kjarni_transformers::utils::create_causal_mask(seq_len))
+        Some(kjarni_transformers::utils::create_causal_mask(seq_len, past_len))
     }
 
     fn broadcast_encoder_states(

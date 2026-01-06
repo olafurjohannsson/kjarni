@@ -305,8 +305,8 @@ impl CpuDecoderOps for QwenModel {
     fn project_to_logits(&self, h: &Array3<f32>) -> Result<Array3<f32>> {
         self.pipeline.lm_head().forward_cpu(h)
     }
-    fn get_attention_mask(&self, seq: usize, _past: usize) -> Result<Array2<f32>> {
-        Ok(kjarni_transformers::utils::create_causal_mask(seq))
+    fn get_attention_mask(&self, seq: usize, past: usize) -> Result<Array2<f32>> {
+        Ok(kjarni_transformers::utils::create_causal_mask(seq, past))
         // Ok(kjarni_transformers::utils::create_full_attention_mask(
         //     1, seq,
         // ))
