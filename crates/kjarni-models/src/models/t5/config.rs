@@ -54,6 +54,7 @@ pub struct T5Config {
     #[serde(alias = "dense_act_fn", alias = "feed_forward_proj")]
     pub feed_forward_proj: Option<String>,
 
+    #[serde(default)]
     pub task_specific_params: Option<TaskSpecificParams>,
 }
 
@@ -64,6 +65,12 @@ impl T5Config {
             _ => false,
         }
     }
+    pub fn activation(&self) -> Activation {
+        match self.feed_forward_proj.as_deref() {
+            Some("gated-gelu") | Some("gelu") => Activation::Gelu,
+            _ => Activation::SilU, // Default for Flan-T5 is SiLU (Swish)
+        }
+    }
 }
 
 impl ModelConfig for T5Config {
@@ -72,11 +79,12 @@ impl ModelConfig for T5Config {
     }
 
     fn metadata(&self) -> ModelMetadata {
-        let (activation, is_gated) = match self.feed_forward_proj.as_deref() {
-            Some("gated-gelu") => (Activation::GeluNew, true), // GeGLU
-            Some("relu") => (Activation::Relu, false),
-            Some("gelu") => (Activation::Gelu, false),
-            _ => (Activation::Relu, false), // Default to T5 1.0 Relu
+        let activation = match self.feed_forward_proj.as_deref() {
+            Some("gated-gelu") => Activation::GeluNew,
+            Some("gated-silu") | Some("gated-swish") => Activation::SilU,
+            Some("relu") => Activation::Relu,
+            Some("gelu") => Activation::Gelu,
+            _ => Activation::Relu,
         };
 
         ModelMetadata {
@@ -94,66 +102,46 @@ impl ModelConfig for T5Config {
             scale_embeddings: false, // T5 does not scale embeddings
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: true, // T5 is Pre-Norm
+            is_prenorm: true,             // T5 is Pre-Norm
             transpose_ffn_weights: false, // T5 weights are [out, in] in HF, usually
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm, // T5LayerNorm is effectively RMSNorm
             no_scale_qk: true,
+            decoder_layers: self.num_decoder_layers,
         }
     }
 
     fn layout(&self) -> ModelLayout {
         let is_gated = self.is_gated();
 
-        // 1. Encoder FFN
-        let enc_ffn = if is_gated {
-            // Flan-T5: wi_0 (up/act), wi_1 (gate), wo (down)
-            FeedForwardLayout {
-                up_weight: "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight".to_string(),
-                up_bias: None,
-                gate_weight: Some("encoder.block.{}.layer.1.DenseReluDense.wi_1.weight".to_string()),
-                gate_bias: None,
-                down_weight: "encoder.block.{}.layer.1.DenseReluDense.wo.weight".to_string(),
-                down_bias: None,
-                norm_weight: "encoder.block.{}.layer.1.layer_norm.weight".to_string(),
-                norm_bias: None,
-            }
-        } else {
-            // T5 1.0: wi (up), wo (down)
-            FeedForwardLayout {
-                up_weight: "encoder.block.{}.layer.1.DenseReluDense.wi.weight".to_string(),
-                up_bias: None,
-                gate_weight: None,
-                gate_bias: None,
-                down_weight: "encoder.block.{}.layer.1.DenseReluDense.wo.weight".to_string(),
-                down_bias: None,
-                norm_weight: "encoder.block.{}.layer.1.layer_norm.weight".to_string(),
-                norm_bias: None,
-            }
-        };
-
-        // 2. Decoder FFN (Layer 2 in Decoder)
-        let dec_ffn = if is_gated {
-             FeedForwardLayout {
-                up_weight: "decoder.block.{}.layer.2.DenseReluDense.wi_0.weight".to_string(),
-                up_bias: None,
-                gate_weight: Some("decoder.block.{}.layer.2.DenseReluDense.wi_1.weight".to_string()),
-                gate_bias: None,
-                down_weight: "decoder.block.{}.layer.2.DenseReluDense.wo.weight".to_string(),
-                down_bias: None,
-                norm_weight: "decoder.block.{}.layer.2.layer_norm.weight".to_string(),
-                norm_bias: None,
-            }
-        } else {
-             FeedForwardLayout {
-                up_weight: "decoder.block.{}.layer.2.DenseReluDense.wi.weight".to_string(),
-                up_bias: None,
-                gate_weight: None,
-                gate_bias: None,
-                down_weight: "decoder.block.{}.layer.2.DenseReluDense.wo.weight".to_string(),
-                down_bias: None,
-                norm_weight: "decoder.block.{}.layer.2.layer_norm.weight".to_string(),
-                norm_bias: None,
+        // Helper to build FFN layout correctly
+        let build_ffn_layout = |prefix: &str| {
+            if is_gated {
+                FeedForwardLayout {
+                    // wi_0 is the GATE, wi_1 is the UP
+                    gate_weight: Some(format!(
+                        "{}.block.{{}}.layer.1.DenseReluDense.wi_0.weight",
+                        prefix
+                    )),
+                    gate_bias: None,
+                    up_weight: format!("{}.block.{{}}.layer.1.DenseReluDense.wi_1.weight", prefix),
+                    up_bias: None,
+                    down_weight: format!("{}.block.{{}}.layer.1.DenseReluDense.wo.weight", prefix),
+                    down_bias: None,
+                    norm_weight: format!("{}.block.{{}}.layer.1.layer_norm.weight", prefix),
+                    norm_bias: None,
+                }
+            } else {
+                FeedForwardLayout {
+                    gate_weight: None,
+                    gate_bias: None,
+                    up_weight: format!("{}.block.{{}}.layer.1.DenseReluDense.wi.weight", prefix),
+                    up_bias: None,
+                    down_weight: format!("{}.block.{{}}.layer.1.DenseReluDense.wo.weight", prefix),
+                    down_bias: None,
+                    norm_weight: format!("{}.block.{{}}.layer.1.layer_norm.weight", prefix),
+                    norm_bias: None,
+                }
             }
         };
 
@@ -165,11 +153,12 @@ impl ModelConfig for T5Config {
                 "lm_head.weight".to_string()
             },
             encoder: Some(EncoderLayout {
-                position_embedding: None, // T5 uses relative bias
+                position_embedding: None,
                 token_type_embedding: None,
-                embedding_norm_weight: Some("encoder.final_layer_norm.weight".to_string()),
-                embedding_norm_bias: None, // RMSNorm
-                final_norm_weight: None,
+                embedding_norm_weight: None, // T5 has no embedding norm
+                embedding_norm_bias: None,
+                // THIS is where the T5 final norm goes
+                final_norm_weight: Some("encoder.final_layer_norm.weight".to_string()),
                 final_norm_bias: None,
                 layer: EncoderLayerLayout {
                     self_attn: AttentionLayout {
@@ -184,15 +173,16 @@ impl ModelConfig for T5Config {
                         norm_weight: "encoder.block.{}.layer.0.layer_norm.weight".to_string(),
                         norm_bias: None,
                     },
-                    ffn: enc_ffn,
+                    ffn: build_ffn_layout("encoder"),
                 },
             }),
             decoder: Some(DecoderLayout {
                 position_embedding: None,
                 token_type_embedding: None,
-                embedding_norm_weight: Some("decoder.final_layer_norm.weight".to_string()),
+                embedding_norm_weight: None,
                 embedding_norm_bias: None,
-                final_norm_weight: None,
+                // Final norm for decoder
+                final_norm_weight: Some("decoder.final_layer_norm.weight".to_string()),
                 final_norm_bias: None,
                 layer: DecoderLayerLayout {
                     self_attn: AttentionLayout {
@@ -219,13 +209,22 @@ impl ModelConfig for T5Config {
                         norm_weight: "decoder.block.{}.layer.1.layer_norm.weight".to_string(),
                         norm_bias: None,
                     }),
-                    ffn: dec_ffn,
+                    // Note: Decoder FFN is usually layer 2
+                    ffn: {
+                        let mut ffn = build_ffn_layout("decoder");
+                        ffn.up_weight = ffn.up_weight.replace("layer.1", "layer.2");
+                        ffn.down_weight = ffn.down_weight.replace("layer.1", "layer.2");
+                        ffn.norm_weight = ffn.norm_weight.replace("layer.1", "layer.2");
+                        if let Some(ref mut g) = ffn.gate_weight {
+                            *g = g.replace("layer.1", "layer.2");
+                        }
+                        ffn
+                    },
                 },
             }),
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -286,7 +285,10 @@ mod tests {
 
         // Check Layout (Gated)
         let ffn = layout.encoder.unwrap().layer.ffn;
-        assert!(ffn.gate_weight.is_some(), "Flan-T5 should have a gate weight");
+        assert!(
+            ffn.gate_weight.is_some(),
+            "Flan-T5 should have a gate weight"
+        );
         assert!(ffn.up_weight.contains("wi_0"));
         assert!(ffn.gate_weight.unwrap().contains("wi_1"));
     }
@@ -300,11 +302,13 @@ mod tests {
         // Check Metadata
         assert_eq!(meta.activation, Activation::Relu); // Default -> Relu
         assert_eq!(meta.normalization_strategy, NormalizationStrategy::RMSNorm);
-        
+
         // Check Layout (Standard)
         let ffn = layout.encoder.unwrap().layer.ffn;
-        assert!(ffn.gate_weight.is_none(), "Standard T5 should NOT have a gate weight");
+        assert!(
+            ffn.gate_weight.is_none(),
+            "Standard T5 should NOT have a gate weight"
+        );
         assert!(ffn.up_weight.contains(".wi.weight"));
     }
-
 }

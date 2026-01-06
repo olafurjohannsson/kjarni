@@ -1,12 +1,12 @@
+use crate::WgpuContext;
+use crate::cpu::encoder::{CpuEncoder, GpuEncoder};
 use crate::embeddings::LoadedEmbeddings;
-use crate::encoder::{CpuEncoder, GpuEncoder};
 use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use crate::execution::ExecutionPlan;
 use crate::gpu_ops::primitives::broadcast::GpuBroadcast;
 use crate::lm_head::LoadedLMHead;
 use crate::prelude::Device;
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ndarray::Array2;
 use std::sync::Arc;
 

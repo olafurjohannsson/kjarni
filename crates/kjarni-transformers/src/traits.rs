@@ -77,6 +77,7 @@ pub struct ModelMetadata {
     pub normalize_embedding: bool,
     pub normalization_strategy: NormalizationStrategy,
     pub no_scale_qk: bool,
+    pub decoder_layers: Option<usize>,
 }
 
 /// Naming templates for a standard attention block (self- or cross-attention).
@@ -239,6 +240,7 @@ mod tests {
     #[test]
     fn test_model_metadata_fields() {
         let meta = ModelMetadata {
+            decoder_layers: None,
             hidden_size: 128,
             num_layers: 2,
             num_attention_heads: 4,

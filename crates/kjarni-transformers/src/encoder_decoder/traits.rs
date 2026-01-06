@@ -5,10 +5,8 @@
 
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
-use crate::decoder::prelude::DecoderLayer;
-use crate::encoder::encoder_layer::EncoderLayer;
-use crate::encoder::prelude::EncoderLanguageModel;
-use crate::encoder_decoder::decoder_cross_attn_layer::DecoderCrossAttentionLayer;
+use crate::cpu::encoder::prelude::EncoderLanguageModel;
+use crate::encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer;
 use crate::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
@@ -16,7 +14,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use wgpu::CommandEncoder;
-
 // ============================================================================
 //  1. Compute Components (The Engines)
 // ============================================================================
@@ -64,7 +61,7 @@ pub trait CpuCrossDecoder: Send + Sync {
         position_offset: usize,
     ) -> Result<Array3<f32>>;
 
-    fn layers(&self) -> &Vec<DecoderCrossAttentionLayer>;
+    fn layers(&self) -> &Vec<CrossDecoderLayer>;
 
     /// Run a subset of layers `[start_layer, end_layer)`.
     ///
@@ -87,7 +84,6 @@ pub trait CpuCrossDecoder: Send + Sync {
     /// Metadata: Hidden dimension size.
     fn hidden_size(&self) -> usize;
 
-    
 
     // --- High-level Default Implementation ---
 
@@ -212,6 +208,7 @@ pub trait CpuEncoderDecoderOps: Send + Sync {
         encoder_hidden_states: &Array3<f32>,
         num_beams: usize,
     ) -> Result<Array3<f32>>;
+    fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>>;
 }
 
 /// Defines the GPU-specific computational graph for an encoder-decoder model.

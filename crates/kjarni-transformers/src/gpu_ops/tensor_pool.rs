@@ -1,8 +1,9 @@
-use crate::WgpuContext;
 use crate::gpu_ops::{DType, GpuTensor};
+use crate::WgpuContext;
 use log::info;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
 #[cfg(debug_assertions)]
 #[derive(Default, Debug)]
 struct AllocationStats {

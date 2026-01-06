@@ -1,20 +1,20 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 
-use crate::Normalization;
-use crate::encoder::CpuEncoder;
-use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+use crate::activations::Activation;
+use crate::cpu::encoder::{
+    encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention, CpuEncoder,
+};
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
 use crate::normalization::RMSNorm;
 use crate::rope::RoPE;
 use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
-use crate::{
-    Embeddings, FeedForward, encoder::encoder_layer::EncoderLayer, normalization::LayerNorm,
-};
+use crate::Normalization;
+use crate::{normalization::LayerNorm, Embeddings, FeedForward};
 
 pub struct CpuTransformerEncoder {
     embeddings: Embeddings,
@@ -180,6 +180,7 @@ impl CpuTransformerEncoder {
                     gate,      // Gate
                     up_proj,   // Up
                     down_proj, // Down
+                    Activation::SilU,
                 ))
             } else {
                 // If no Gate, it's Standard (BERT/MiniLM/DistilBERT)

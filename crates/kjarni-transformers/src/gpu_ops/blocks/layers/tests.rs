@@ -12,6 +12,7 @@ use crate::linear_layer::LinearLayer;
 use crate::normalization::{Normalization, RMSNorm};
 use crate::WgpuContext;
 
+use crate::activations::Activation;
 use crate::rope::RoPE as CpuRoPE;
 use crate::traits::{
     AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
@@ -45,6 +46,7 @@ impl ModelConfig for TestLlamaConfig {
         ModelMetadata {
             hidden_size: self.hidden_size,
             num_layers: 1,
+            decoder_layers: None,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
             head_dim: self.hidden_size / self.num_attention_heads,
@@ -225,7 +227,7 @@ async fn create_test_layer_pair(
         Some(config.num_key_value_heads),
     );
     let cpu_attn_norm = Normalization::RMSNorm(RMSNorm::new(attn_norm_w, 1e-5));
-    let cpu_ffn = FeedForward::SwiGLU(SwiGluFeedForward::new(gate_w, up_w, down_w));
+    let cpu_ffn = FeedForward::SwiGLU(SwiGluFeedForward::new(gate_w, up_w, down_w, Activation::SilU));
     let cpu_ffn_norm = Normalization::RMSNorm(RMSNorm::new(ffn_norm_w, 1e-5));
     let cpu_rope = Arc::new(CpuRoPE::new(head_dim, 1024, 10000.0));
 
@@ -322,7 +324,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
     let up_w_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-0.1, 0.1));
     let down_w_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-0.1, 0.1));
 
-    let cpu_ffn = SwiGluFeedForward::new(gate_w_cpu.clone(), up_w_cpu.clone(), down_w_cpu.clone());
+    let cpu_ffn = SwiGluFeedForward::new(gate_w_cpu.clone(), up_w_cpu.clone(), down_w_cpu.clone(), Activation::SilU);
 
     let gpu_ffn_weights = GpuSwiGLUFFNWeights::new(
         GpuTensor::from_ndarray(&context, &gate_w_cpu)?,
@@ -837,13 +839,13 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
     });
     let (b, s, _) = input.dim();
     let mask = Array2::<f32>::ones((batch_size, seq_len));
-    
+
     // --- FIX IS HERE ---
-    
+
     // 1. Run GQA (Expects compressed KV dim = 32)
     let mut temp_k_gqa = Array3::<f32>::zeros((b, s, kv_dim));
     let mut temp_v_gqa = Array3::<f32>::zeros((b, s, kv_dim));
-    
+
     let gqa_output = da_gqa.forward(
         &input,
         Some(&mask),
@@ -874,7 +876,7 @@ fn test_decoder_attention_gqa_matches_manual_expansion() -> Result<()> {
         .iter()
         .cloned()
         .fold(0.0f32, f32::max);
-        
+
     assert!(
         max_diff < 1e-5,
         "GQA logic does not match manual expansion! Max diff: {}",

@@ -3,12 +3,12 @@ use kjarni_transformers::models::base::RopeScalingConfig;
 use kjarni_transformers::traits::NormalizationStrategy;
 use kjarni_transformers::{
     activations::Activation,
-    traits::{ModelConfig, ModelLayout, ModelMetadata, DecoderLayout, DecoderLayerLayout, AttentionLayout, FeedForwardLayout},
+    traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata},
     weights::WeightLoader,
 };
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::sync::Arc;
-use serde::de::{self, Deserializer, Visitor, SeqAccess};
 
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -250,7 +250,7 @@ impl ModelConfig for LlamaConfig {
             num_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
-
+            decoder_layers: None,
             // Calculate head_dim if not explicitly provided (Standard Llama logic)
             head_dim: self
                 .head_dim
@@ -323,7 +323,7 @@ impl ModelConfig for LlamaConfig {
             } else {
                 "lm_head.weight"
             }
-            .to_string(),
+                .to_string(),
             encoder: None, // Llama is decoder-only
             decoder: Some(DecoderLayout {
                 position_embedding: None, // Llama uses RoPE, not learned positional embeddings

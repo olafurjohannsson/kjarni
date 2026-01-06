@@ -1,6 +1,4 @@
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
-
-
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 
 
 /// Dequantize a Q4_K block to 256 f32 values.
@@ -75,7 +73,7 @@ pub fn dequantize_q6_k_block(b: &BlockQ6_K, out: &mut [f32]) {
 
         for j in 0..32 {
             let is = j / 16; // 0 or 1
-            
+
             // Extract the byte containing high bits for 4 values
             let qh_val = qh[j];
 
@@ -122,7 +120,7 @@ pub fn dequantize_q6_k_block(b: &BlockQ6_K, out: &mut [f32]) {
 //   value[i] = d * scale[j] * q[i] - dmin * min[j]
 
 /// Decode the 6-bit scale and min for sub-block j from the packed scales array.
-/// 
+///
 /// This matches llama.cpp's get_scale_min_k4 function exactly.
 #[inline]
 pub fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {

@@ -1,8 +1,10 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::kernels::dequantize::get_scale_min_k4;
-use crate::kernels::q_common::{BlockQ4_K, BlockQ8_K, QK_K};
+use crate::cpu::kernels::{
+    dequantize::get_scale_min_k4,
+    q_common::{BlockQ4_K, BlockQ8_K, QK_K},
+};
 
 #[inline(always)]
 unsafe fn hsum_i32_8(a: __m256i) -> i32 {

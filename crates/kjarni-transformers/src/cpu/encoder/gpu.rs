@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use ndarray::s;
 use std::sync::Arc;
 
+use crate::cpu::encoder::traits::GpuEncoder;
 use crate::embeddings::EmbeddingConfig;
 use crate::embeddings::LoadedEmbeddings;
-use crate::encoder::traits::GpuEncoder;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
@@ -253,6 +253,7 @@ impl GpuTransformerEncoder {
                     .transpose()?;
                 // let gate_b = None; // Usually implicit or shared?
 
+                
                 let swiglu_weights = crate::gpu_ops::blocks::ffn_swiglu::GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,
                     // gate_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,

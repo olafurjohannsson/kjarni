@@ -170,7 +170,7 @@ impl GpuDecoderBackend {
         &self,
         model: &dyn DecoderLanguageModel,
         input: ModelInput<'_>,
-        seq_len: usize,
+        _seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         let input_len = match input {

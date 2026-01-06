@@ -39,14 +39,18 @@
 //! - [`ModelWeights`] — Loading weights from safetensors/GGUF files.
 //! - [`DType`] — Supported data types.
 
+use crate::cpu::{
+    kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+    ops,
+};
+
 use crate::gpu_ops::GpuTensor;
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::linear_layer::LinearLayerBuilder;
 use crate::tensor::{DType, QuantizedMatrix, TensorView};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
-use crate::{WgpuContext, ops};
-use anyhow::{Result, anyhow};
+use crate::WgpuContext;
+use anyhow::{anyhow, Result};
 use half::bf16;
 use ndarray::{Array1, Array2, ArrayView2};
 use std::borrow::Cow;
@@ -333,7 +337,7 @@ impl LinearLayer {
 
         result
     }
-/// Converts this layer to a quantized format.
+    /// Converts this layer to a quantized format.
     ///
     /// Creates a new `LinearLayer` with quantized weights for reduced memory usage.
     /// The bias is discarded during quantization (a warning is logged if present).
@@ -366,12 +370,12 @@ impl LinearLayer {
         let quantized_data = match (&self.data, dtype) {
             (LinearData::BF16(w), DType::Q8_0) => {
                 let w_f32 = w.mapv(|v| v.to_f32());
-                let blocks = crate::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
                 let shape = [w.shape()[0], w.shape()[1]];
                 LinearData::Q8_0(QuantizedMatrix { blocks, shape })
             }
             (LinearData::F32(w), DType::Q8_0) => {
-                let blocks = crate::kernels::quantize::quantize_matrix_q8_0(w)?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(w)?;
                 let shape = [w.shape()[0], w.shape()[1]];
                 LinearData::Q8_0(QuantizedMatrix { blocks, shape })
             }
@@ -380,7 +384,7 @@ impl LinearLayer {
                     "Unsupported quantization from {:?} to {:?}",
                     d.dtype(),
                     t
-                ))
+                ));
             }
         };
 

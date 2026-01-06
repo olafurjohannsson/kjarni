@@ -5,8 +5,6 @@
 //!
 //! The actual text generation is handled by the generic `Generator` struct.
 
-use std::path::{self, Path};
-
 use crate::models::llama::config::LlamaConfig;
 use crate::models::llama::model::LlamaModel;
 use anyhow::Result;
@@ -14,6 +12,8 @@ use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, Generation
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::{LanguageModel, ModelType};
 use kjarni_transformers::prelude::*;
+use std::path::{self, Path};
+use std::sync::Arc;
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
@@ -249,7 +249,7 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
         None,
     )?;
 
-    let generator = DecoderGenerator::new(Box::new(llama_model))?;
+    let generator = DecoderGenerator::new(Arc::new(llama_model))?;
 
     // 3. Execute the generation.
     let generated_text = generator.generate(prompt, &config, None).await?;

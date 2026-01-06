@@ -3,16 +3,19 @@ use crate::models::bart::cpu_encoder::BartCpuEncoder;
 use anyhow::Result;
 use kjarni_transformers::utils::linear_algebra::softmax_inplace;
 use kjarni_transformers::{
-    encoder::{encoder_layer::EncoderLayer, prelude::*}, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, models::base::ModelLoadConfig, traits::Device, utils::linear_algebra::{apply_attention_mask, matmul_4d}, weights::ModelWeights
+    cpu::encoder::prelude::*,
+    encoder_decoder::traits::CpuCrossDecoder,
+    feedforward::FeedForward,
+    models::base::ModelLoadConfig,
+    utils::linear_algebra::{apply_attention_mask, matmul_4d},
+    weights::ModelWeights,
 };
-use ndarray::{Array2, Array3, s};
-use tokenizers::Model;
-use std::sync::Arc;
+use ndarray::{s, Array2, Array3};
 use std::path::Path;
+use std::sync::Arc;
+use tokenizers::Model;
 
-
-const DISTILBART_PATH: &str =
-    "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
+const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
 // Golden values from Python (HuggingFace transformers)
 // Input: "Rust is a multi-paradigm, general-purpose programming language..."
@@ -175,7 +178,9 @@ async fn test_layer0_self_attention() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
+    let attn_out = encoder.layers[0]
+        .self_attn
+        .forward(&hidden, &mask, None, None)?;
     let actual: Vec<f32> = attn_out.slice(s![0, 0, 0..10]).to_vec();
 
     assert_close(&actual, &golden::ATTN_OUT, 1e-4, "Self-Attention Output");
@@ -188,7 +193,9 @@ async fn test_layer0_post_attn_layernorm() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
+    let attn_out = encoder.layers[0]
+        .self_attn
+        .forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
         .forward(&(&hidden + &attn_out));
@@ -209,7 +216,9 @@ async fn test_layer0_fc1_only() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
+    let attn_out = encoder.layers[0]
+        .self_attn
+        .forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
         .forward(&(&hidden + &attn_out));
@@ -231,7 +240,9 @@ async fn test_layer0_fc1_gelu() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
+    let attn_out = encoder.layers[0]
+        .self_attn
+        .forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
         .forward(&(&hidden + &attn_out));
@@ -259,7 +270,9 @@ async fn test_layer0_ffn() -> Result<()> {
     let (encoder, hidden) = setup_encoder()?;
     let mask = Array2::<f32>::ones((1, 10));
 
-    let attn_out = encoder.layers[0].self_attn.forward(&hidden, &mask, None, None)?;
+    let attn_out = encoder.layers[0]
+        .self_attn
+        .forward(&hidden, &mask, None, None)?;
     let post_attn = encoder.layers[0]
         .self_attn_layer_norm
         .forward(&(&hidden + &attn_out));

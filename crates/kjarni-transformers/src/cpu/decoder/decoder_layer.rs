@@ -1,4 +1,4 @@
-use crate::decoder::cpu::DecoderAttention;
+use crate::cpu::decoder::DecoderAttention;
 use crate::feedforward::FeedForward;
 use crate::normalization::Normalization;
 use crate::rope::RoPE;
@@ -141,7 +141,7 @@ mod tests {
     use crate::{
         activations::Activation,
         feedforward::{FeedForward, LegacyFeedForward},
-        linear_layer::{LinearLayer, LinearData},
+        linear_layer::LinearLayer,
         normalization::{LayerNorm, RMSNorm},
     };
     use ndarray::Array1;
@@ -339,49 +339,49 @@ mod tests {
     }
 
     #[test]
-fn test_decoder_layer_with_cache() -> Result<()> {
-    let layer = create_test_layer_prenorm();
-    let batch_size = 1;
-    let seq_len = 1;
-    let hidden_size = 64;
+    fn test_decoder_layer_with_cache() -> Result<()> {
+        let layer = create_test_layer_prenorm();
+        let batch_size = 1;
+        let seq_len = 1;
+        let hidden_size = 64;
 
-    // Create input for decode step
-    let hidden_states = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, k)| {
-        (k as f32) * 0.01
-    });
+        // Create input for decode step
+        let hidden_states = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, k)| {
+            (k as f32) * 0.01
+        });
 
-    // Create attention mask
-    let attention_mask = Array2::ones((batch_size, seq_len));
+        // Create attention mask
+        let attention_mask = Array2::ones((batch_size, seq_len));
 
-    // Create past KV cache
-    let past_len = 3;
-    let past_k = Array3::from_shape_fn((batch_size, past_len, hidden_size), |(_, _, k)| {
-        (k as f32) * 0.005
-    });
-    let past_v = Array3::from_shape_fn((batch_size, past_len, hidden_size), |(_, _, k)| {
-        (k as f32) * 0.005
-    });
+        // Create past KV cache
+        let past_len = 3;
+        let past_k = Array3::from_shape_fn((batch_size, past_len, hidden_size), |(_, _, k)| {
+            (k as f32) * 0.005
+        });
+        let past_v = Array3::from_shape_fn((batch_size, past_len, hidden_size), |(_, _, k)| {
+            (k as f32) * 0.005
+        });
 
-    // Run forward pass with cache
-    let (output, (new_k, new_v)) =
-        layer.forward(&hidden_states, &attention_mask, 0, Some((past_k.view(), past_v.view())))?;
+        // Run forward pass with cache
+        let (output, (new_k, new_v)) =
+            layer.forward(&hidden_states, &attention_mask, 0, Some((past_k.view(), past_v.view())))?;
 
-    // Check output shape
-    assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
+        // Check output shape
+        assert_eq!(output.shape(), &[batch_size, seq_len, hidden_size]);
 
-    // --- FIX IS HERE ---
-    // The refactored layer returns the FULL updated cache (History + New Token)
-    // Left was [1, 4, 64], Right was [1, 1, 64]
-    let total_len = past_len + seq_len;
-    assert_eq!(new_k.shape(), &[batch_size, total_len, hidden_size]);
-    assert_eq!(new_v.shape(), &[batch_size, total_len, hidden_size]);
+        // --- FIX IS HERE ---
+        // The refactored layer returns the FULL updated cache (History + New Token)
+        // Left was [1, 4, 64], Right was [1, 1, 64]
+        let total_len = past_len + seq_len;
+        assert_eq!(new_k.shape(), &[batch_size, total_len, hidden_size]);
+        assert_eq!(new_v.shape(), &[batch_size, total_len, hidden_size]);
 
-    // Check that output is not all zeros
-    let sum: f32 = output.iter().sum();
-    assert!(sum.abs() > 1e-6, "Output should not be all zeros");
+        // Check that output is not all zeros
+        let sum: f32 = output.iter().sum();
+        assert!(sum.abs() > 1e-6, "Output should not be all zeros");
 
-    Ok(())
-}
+        Ok(())
+    }
     #[test]
     fn test_decoder_layer_with_rope() -> Result<()> {
         let mut layer = create_test_layer_prenorm();

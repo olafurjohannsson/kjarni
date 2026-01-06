@@ -2,7 +2,6 @@ use crate::WgpuContext;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use wgpu::util::DeviceExt;
-
 /// Conditionally profile a compute pass.
 ///
 /// In release builds without `profiling` feature, this compiles to

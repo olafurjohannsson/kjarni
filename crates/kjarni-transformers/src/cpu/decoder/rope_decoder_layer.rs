@@ -66,7 +66,7 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::{
-    decoder::cpu::DecoderAttention, feedforward::SwiGluFeedForward, rope::RoPE, Normalization,
+    cpu::decoder::DecoderAttention, feedforward::SwiGluFeedForward, rope::RoPE, Normalization,
 };
 
 /// A complete transformer decoder layer with RoPE, pre-normalization, and SwiGLU.
@@ -138,8 +138,8 @@ impl CpuRoPEDecoderLayer {
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
-        mut k_cache: ndarray::ArrayViewMut3<f32>,
-        mut v_cache: ndarray::ArrayViewMut3<f32>,
+        k_cache: ndarray::ArrayViewMut3<f32>,
+        v_cache: ndarray::ArrayViewMut3<f32>,
     ) -> Result<Array3<f32>> {
         // Changed: Returns only hidden states
         let t_start = std::time::Instant::now();
@@ -194,10 +194,8 @@ impl CpuRoPEDecoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        linear_layer::LinearLayer,
-        normalization::RMSNorm,
-    };
+    use crate::activations::Activation;
+    use crate::{linear_layer::LinearLayer, normalization::RMSNorm};
     use ndarray::{Array1, Array2};
 
     fn create_test_layer() -> CpuRoPEDecoderLayer {
@@ -211,18 +209,26 @@ mod tests {
         // Note: K and V projections output num_kv_heads * head_dim but take hidden_size input
         let kv_dim = num_kv_heads * head_dim;
 
-        let q_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
-            if i == j { 1.0 } else { 0.0 }
-        });
+        let q_weight =
+            Array2::from_shape_fn(
+                (hidden_size, hidden_size),
+                |(i, j)| {
+                    if i == j { 1.0 } else { 0.0 }
+                },
+            );
         let k_weight = Array2::from_shape_fn((kv_dim, hidden_size), |(i, j)| {
             if i < hidden_size && i == j { 1.0 } else { 0.0 }
         });
         let v_weight = Array2::from_shape_fn((kv_dim, hidden_size), |(i, j)| {
             if i < hidden_size && i == j { 1.0 } else { 0.0 }
         });
-        let o_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
-            if i == j { 1.0 } else { 0.0 }
-        });
+        let o_weight =
+            Array2::from_shape_fn(
+                (hidden_size, hidden_size),
+                |(i, j)| {
+                    if i == j { 1.0 } else { 0.0 }
+                },
+            );
 
         let q_proj = LinearLayer::new_f32(q_weight, None);
         let k_proj = LinearLayer::new_f32(k_weight, None);
@@ -252,7 +258,7 @@ mod tests {
         let up_proj = LinearLayer::new_f32(up_weight, None);
         let down_proj = LinearLayer::new_f32(down_weight, None);
 
-        let feed_forward = SwiGluFeedForward::new(gate_proj, up_proj, down_proj);
+        let feed_forward = SwiGluFeedForward::new(gate_proj, up_proj, down_proj, Activation::SilU);
 
         // Create RMS normalization layers
         let norm_weight = Array1::ones(hidden_size);
@@ -271,7 +277,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_rope_decoder_layer_forward_new() -> Result<()> {
         let layer = create_test_layer();
@@ -280,9 +285,10 @@ mod tests {
         let hidden_size = 64;
 
         // Create input
-        let hidden_states = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, k)| {
-            (k as f32) * 0.01
-        });
+        let hidden_states =
+            Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(_, _, k)| {
+                (k as f32) * 0.01
+            });
 
         // Create attention mask
         let attention_mask = Array2::ones((batch_size, seq_len));

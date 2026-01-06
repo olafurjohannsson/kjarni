@@ -1,3 +1,4 @@
+use crate::activations::Activation;
 use crate::decoder::prelude::DecoderAttention;
 use crate::feedforward::SwiGluFeedForward;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
@@ -5,7 +6,7 @@ use crate::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::tensor::DType;
 use crate::traits::{AttentionLayout, FeedForwardLayout, ModelMetadata};
 use crate::weights::ModelWeights;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 pub struct CpuLayerFactory;
 
@@ -69,7 +70,7 @@ impl CpuLayerFactory {
             .build()?;
 
         // 3. Construct the SwiGluFeedForward brick
-        Ok(SwiGluFeedForward::new(gate, up, down))
+        Ok(SwiGluFeedForward::new(gate, up, down, Activation::SilU))
     }
     pub fn build_decoder_attention(
         weights: &ModelWeights,
@@ -132,8 +133,8 @@ mod tests {
     use safetensors::serialize;
     use safetensors::tensor::{Dtype, TensorView};
     use std::io::Write;
-    use tempfile::NamedTempFile;
-    use tempfile::TempDir; // Use TempDir instead of NamedTempFile
+    use tempfile::TempDir;
+    // Use TempDir instead of NamedTempFile
 
     fn create_dummy_weights(tensors: Vec<(&str, Vec<f32>, Vec<usize>)>) -> (TempDir, ModelWeights) {
         // 1. Create a temporary directory
@@ -176,6 +177,7 @@ mod tests {
 
     fn dummy_metadata() -> ModelMetadata {
         ModelMetadata {
+            decoder_layers: None,
             hidden_size: 4,
             num_layers: 1,
             num_attention_heads: 2,
@@ -214,7 +216,7 @@ mod tests {
             1e-5,
             0,
         )
-        .unwrap();
+            .unwrap();
 
         match norm {
             Normalization::RMSNorm(rms) => {
@@ -239,7 +241,7 @@ mod tests {
             1e-5,
             0,
         )
-        .unwrap();
+            .unwrap();
 
         match norm {
             Normalization::LayerNorm(ln) => {

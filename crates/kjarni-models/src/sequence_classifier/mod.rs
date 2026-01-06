@@ -13,7 +13,7 @@ use async_trait::async_trait;
 
 use kjarni_transformers::{
     cache::Cache,
-    encoder::{
+    cpu::encoder::{
         classifier::{CpuSequenceClassificationHead, GpuSequenceClassificationHead}, traits::{CpuEncoderOps, EncoderLanguageModel, GpuEncoderOps}, CpuEncoder, CpuTransformerEncoder,
         GpuEncoder,
         GpuTransformerEncoder,

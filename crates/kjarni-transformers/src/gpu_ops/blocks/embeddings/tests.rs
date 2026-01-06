@@ -1,13 +1,11 @@
 use super::*;
-use crate::WgpuContext;
-use crate::activations::Activation;
 use crate::embeddings::Embeddings;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
+use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
-use std::any::Any;
 /// Mock config for testing embeddings
 struct MockEmbedConfig {
     hidden_size: usize,
@@ -23,6 +21,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
 
     fn metadata(&self) -> crate::traits::ModelMetadata {
         crate::traits::ModelMetadata {
+            decoder_layers: None,
             // --- From Struct ---
             hidden_size: self.hidden_size,
             vocab_size: self.vocab_size,

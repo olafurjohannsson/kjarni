@@ -69,6 +69,7 @@ impl ModelConfig for Gpt2Config {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            decoder_layers: None,
         }
     }
 

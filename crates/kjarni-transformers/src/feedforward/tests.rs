@@ -8,10 +8,10 @@
 //! - up_proj:   [hidden_size, intermediate_size]  
 //! - down_proj: [intermediate_size, hidden_size]
 
+use crate::activations::Activation;
+use crate::feedforward::swiglu::SwiGluFeedForward;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
-
-use crate::feedforward::swiglu::SwiGluFeedForward;
 
 
 #[test]
@@ -28,7 +28,7 @@ fn test_swiglu_ffn_shapes() -> Result<()> {
     let up_weight: Array2<f32> = Array2::zeros((intermediate_size, hidden_size));    // [256, 64]
     let down_weight: Array2<f32> = Array2::zeros((hidden_size, intermediate_size));  // [64, 256]
 
-    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
+    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
 
     let input = Array3::zeros((batch_size, seq_len, hidden_size));
     let output = ffn.forward(&input)?;
@@ -55,7 +55,7 @@ fn test_swiglu_ffn_basic() -> Result<()> {
         down_weight[[i, i]] = 1.0;
     }
 
-    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
+    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
 
     let input = Array3::ones((1, 1, hidden_size));
     let output = ffn.forward(&input)?;
@@ -104,7 +104,7 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
         ],
     ).unwrap();
 
-    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
+    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
 
     let input = Array3::from_shape_vec((1, 1, 2), vec![1.0, 2.0]).unwrap();
     let output = ffn.forward(&input)?;
@@ -147,7 +147,7 @@ fn test_swiglu_pytorch_parity() -> Result<()> {
 
     let down_weight = Array2::from_shape_vec((2, 2), vec![1.0, 0.5, 0.5, 1.0]).unwrap();
 
-    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
+    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
 
     let input = Array3::from_shape_vec((1, 1, 2), vec![1.0, 2.0]).unwrap();
     let output = ffn.forward(&input)?;
@@ -175,7 +175,7 @@ fn test_swiglu_nonlinearity() -> std::result::Result<(), anyhow::Error> {
     let up_weight: Array2<f32> = Array2::eye(hidden_size);
     let down_weight: Array2<f32> = Array2::eye(hidden_size);
 
-    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight);
+    let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
 
     // Input 1: all ones
     let input1 = Array3::ones((1, 1, hidden_size));

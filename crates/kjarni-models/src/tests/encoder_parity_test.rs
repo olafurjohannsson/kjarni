@@ -5,19 +5,19 @@
 use crate::models::bart::model::BartModel;
 use crate::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
-use kjarni_transformers::encoder::prelude::*;
-use kjarni_transformers::encoder::traits::CpuEncoder;
-use kjarni_transformers::encoder_decoder::EncoderDecoderLanguageModel;
+use kjarni_transformers::cpu::encoder::prelude::*;
+use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
 use kjarni_transformers::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
+use kjarni_transformers::encoder_decoder::EncoderDecoderLanguageModel;
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
-use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::ModelInput;
+use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
-use kjarni_transformers::{WgpuContext, activations};
+use kjarni_transformers::{activations, WgpuContext};
+use ndarray::s;
 use ndarray::Array2;
 use ndarray::Array3;
 use ndarray::Array4;
-use ndarray::s;
 
 const TOLERANCE: f32 = 1e-3;
 
@@ -108,11 +108,12 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =
         BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
-    
+
     // 1. Check Activation
-    
+
     assert_eq!(
-        cpu_model.meta().activation, gpu_model.meta().activation,
+        cpu_model.meta().activation,
+        gpu_model.meta().activation,
         "Activation mismatch"
     );
     assert_eq!(
@@ -123,7 +124,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
 
     // 2. Check LayerNorm Epsilon (Top Suspect for 0.0019 drift)
     assert_eq!(
-        cpu_model.meta().norm_eps, gpu_model.meta().norm_eps,
+        cpu_model.meta().norm_eps,
+        gpu_model.meta().norm_eps,
         "Norm Epsilon mismatch"
     );
     // Standard BART often uses 1e-12 or 1e-5 depending on the checkpoint
@@ -131,17 +133,20 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
 
     // 3. Check Normalization Style
     assert_eq!(
-        cpu_model.meta().is_prenorm, gpu_model.meta().is_prenorm,
+        cpu_model.meta().is_prenorm,
+        gpu_model.meta().is_prenorm,
         "Pre-norm flag mismatch"
     );
     assert_eq!(
-        cpu_model.meta().is_prenorm, false,
+        cpu_model.meta().is_prenorm,
+        false,
         "BART must be Post-Norm (is_prenorm=false)"
     );
 
     // 4. Check Attention Scaling
     assert_eq!(
-        cpu_model.meta().head_dim, gpu_model.meta().head_dim,
+        cpu_model.meta().head_dim,
+        gpu_model.meta().head_dim,
         "Head Dim mismatch"
     );
     assert_eq!(
@@ -152,31 +157,47 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
 
     // 5. Check Transposition Flags
     assert_eq!(
-        cpu_model.meta().transpose_attention_weights, gpu_model.meta().transpose_attention_weights,
+        cpu_model.meta().transpose_attention_weights,
+        gpu_model.meta().transpose_attention_weights,
         "Transpose Attn mismatch"
     );
     assert_eq!(
-        cpu_model.meta().transpose_ffn_weights, gpu_model.meta().transpose_ffn_weights,
+        cpu_model.meta().transpose_ffn_weights,
+        gpu_model.meta().transpose_ffn_weights,
         "Transpose FFN mismatch"
     );
 
     // 6. Check Position Offsets
     assert_eq!(
-        cpu_model.meta().extra_pos_embeddings, gpu_model.meta().extra_pos_embeddings,
+        cpu_model.meta().extra_pos_embeddings,
+        gpu_model.meta().extra_pos_embeddings,
         "Extra Pos mismatch"
     );
     assert_eq!(
-        cpu_model.meta().extra_pos_embeddings, 2,
+        cpu_model.meta().extra_pos_embeddings,
+        2,
         "BART must use position offset 2"
     );
     let layout = cpu_model.layout().clone();
     let gpu_layout = gpu_model.layout().clone();
 
     // Get the nested layouts for both CPU and GPU models.
-    let cpu_encoder_layout = layout.encoder.as_ref().expect("CPU model requires encoder layout");
-    let cpu_decoder_layout = layout.decoder.as_ref().expect("CPU model requires decoder layout");
-    let gpu_encoder_layout = gpu_layout.encoder.as_ref().expect("GPU model requires encoder layout");
-    let gpu_decoder_layout = gpu_layout.decoder.as_ref().expect("GPU model requires decoder layout");
+    let cpu_encoder_layout = layout
+        .encoder
+        .as_ref()
+        .expect("CPU model requires encoder layout");
+    let cpu_decoder_layout = layout
+        .decoder
+        .as_ref()
+        .expect("CPU model requires decoder layout");
+    let gpu_encoder_layout = gpu_layout
+        .encoder
+        .as_ref()
+        .expect("GPU model requires encoder layout");
+    let gpu_decoder_layout = gpu_layout
+        .decoder
+        .as_ref()
+        .expect("GPU model requires decoder layout");
 
     // 1. Check Shared weights
     assert_eq!(
@@ -472,7 +493,7 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
         Some(context),
         None,
     )
-    .await?;
+        .await?;
     println!("GPU encoder loaded\n");
 
     // Test sentences
@@ -552,7 +573,7 @@ async fn test_simple_input() -> Result<()> {
         Some(context),
         None,
     )
-    .await?;
+        .await?;
 
     let simple_text = "hello";
 
@@ -588,7 +609,7 @@ async fn test_identical_sentences() -> Result<()> {
         Some(context),
         None,
     )
-    .await?;
+        .await?;
 
     let text = "This is a test sentence";
     let sentences = [text, text]; // Same sentence twice
@@ -1059,11 +1080,11 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     let (attn_out, new_k, new_v) =
         cpu_layer0
             .self_attn
-            .forward(&decoder_hidden_cpu, Some(&decoder_mask), None)?;
+            .forward(&decoder_hidden_cpu, Some(&decoder_mask), None, None)?;
     let hidden_states_after_add = &decoder_hidden_cpu + &attn_out;
     let final_output = cpu_layer0
         .self_attn_layer_norm
-        .forward_3d(&hidden_states_after_add);
+        .forward(&hidden_states_after_add);
 
     let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = (final_output, (new_k, new_v));
 
@@ -1165,7 +1186,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     let hidden_states_after_add = &cpu_after_self_attn + &cross_attn_output;
     let cpu_after_cross_attn = cpu_layer0
         .cross_attn_layer_norm
-        .forward_3d(&hidden_states_after_add);
+        .forward(&hidden_states_after_add);
     println!(
         "CPU after cross-attn+norm shape: {:?}",
         cpu_after_cross_attn.shape()

@@ -1,19 +1,20 @@
-use super::*;
 use crate::activations::Activation;
+use crate::cache::Cache;
 use crate::common::{CancellationToken, GenerationConfig, StreamedToken, TokenType};
 use crate::decoder::prelude::*;
 use crate::models::base::{AutoregressiveLoop, ModelInput};
-use crate::tensor::DType;
-use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy};
+use crate::traits::{
+    AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, InferenceModel,
+    ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
+};
 use crate::{ChatTemplate, Conversation, Device, LanguageModel, WgpuContext};
-use crate::cache::Cache;
+use anyhow::Result;
 use futures::{StreamExt, TryStreamExt};
-use ndarray::{Array1, Array2, Array3};
-use std::sync::Arc;
+use ndarray::{Array2, Array3};
 use std::any::Any;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tokenizers::Tokenizer;
-use anyhow::{Result, anyhow};
 
 // =========================================================================
 //  1. Mock Configuration
@@ -26,10 +27,13 @@ struct MockConfig {
 }
 
 impl ModelConfig for MockConfig {
-    fn model_type(&self) -> &str { "mock" }
+    fn model_type(&self) -> &str {
+        "mock"
+    }
 
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
+            decoder_layers: None,
             hidden_size: self.hidden_size,
             num_layers: 1,
             num_attention_heads: 1,
@@ -67,15 +71,27 @@ impl ModelConfig for MockConfig {
                 final_norm_bias: None,
                 layer: DecoderLayerLayout {
                     self_attn: AttentionLayout {
-                        q_weight: "q".into(), k_weight: "k".into(), v_weight: "v".into(),
-                        o_weight: "o".into(), q_bias: None, k_bias: None, v_bias: None, o_bias: None,
-                        norm_weight: "ln1".into(), norm_bias: None,
+                        q_weight: "q".into(),
+                        k_weight: "k".into(),
+                        v_weight: "v".into(),
+                        o_weight: "o".into(),
+                        q_bias: None,
+                        k_bias: None,
+                        v_bias: None,
+                        o_bias: None,
+                        norm_weight: "ln1".into(),
+                        norm_bias: None,
                     },
                     cross_attn: None,
                     ffn: FeedForwardLayout {
-                        up_weight: "up".into(), down_weight: "down".into(), gate_weight: None,
+                        up_weight: "up".into(),
+                        down_weight: "down".into(),
+                        gate_weight: None,
                         gate_bias: None,
-                        up_bias: None, down_bias: None, norm_weight: "ln2".into(), norm_bias: None,
+                        up_bias: None,
+                        down_bias: None,
+                        norm_weight: "ln2".into(),
+                        norm_bias: None,
                     },
                 },
             }),
@@ -93,7 +109,7 @@ struct MockDecoderModel {
     device: Device,
     tokenizer: Tokenizer,
     pub context_size_override: Option<usize>,
-    
+
     decoder: MockCpuDecoder,
     config: MockConfig,
 }
@@ -141,7 +157,10 @@ impl MockDecoderModel {
             device: Device::Cpu,
             tokenizer,
             context_size_override: None,
-            decoder: MockCpuDecoder { hidden_size: 64, num_layers: 1 },
+            decoder: MockCpuDecoder {
+                hidden_size: 64,
+                num_layers: 1,
+            },
             config,
         }
     }
@@ -149,46 +168,89 @@ impl MockDecoderModel {
 
 // 1. Implement LanguageModel
 impl LanguageModel for MockDecoderModel {
-    fn vocab_size(&self) -> usize { self.vocab_size }
-    fn hidden_size(&self) -> usize { 64 }
-    fn num_layers(&self) -> usize { 1 }
-    fn num_heads(&self) -> usize { 1 }
-    fn context_size(&self) -> usize { self.context_size_override.unwrap_or(self.context_size) }
-    fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
-    fn eos_token_id(&self) -> Option<u32> { Some(1) }
-    fn bos_token_id(&self) -> Option<u32> { Some(0) }
-    fn forced_bos_token_id(&self) -> Option<u32> { None }
-    fn forced_eos_token_id(&self) -> Option<u32> { None }
-    fn pad_token_id(&self) -> Option<u32> { None }
-    
-    fn stop_token_ids(&self) -> HashSet<u32> { 
+    fn vocab_size(&self) -> usize {
+        self.vocab_size
+    }
+    fn hidden_size(&self) -> usize {
+        64
+    }
+    fn num_layers(&self) -> usize {
+        1
+    }
+    fn num_heads(&self) -> usize {
+        1
+    }
+    fn context_size(&self) -> usize {
+        self.context_size_override.unwrap_or(self.context_size)
+    }
+    fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        Some(1)
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        Some(0)
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn forced_eos_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        None
+    }
+
+    fn stop_token_ids(&self) -> HashSet<u32> {
         let mut set = HashSet::new();
-        set.insert(1); 
+        set.insert(1);
         set
     }
 
-    fn new_cache(&self, _batch: usize, _capacity: usize, _num_beams: usize) -> Result<Box<dyn Cache>> {
+    fn new_cache(
+        &self,
+        _batch: usize,
+        _capacity: usize,
+        _num_beams: usize,
+    ) -> Result<Box<dyn Cache>> {
         Ok(Box::new(MockCache { len: 0 }))
     }
 }
 
 // 2. Implement InferenceModel
 impl InferenceModel for MockDecoderModel {
-    fn device(&self) -> Device { self.device }
-    fn context(&self) -> Option<Arc<WgpuContext>> { None }
+    fn device(&self) -> Device {
+        self.device
+    }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        None
+    }
     // fn config(&self) -> &ModelConfig { unimplemented!() }
     // fn quantization_config(&self) -> Option<&QuantizationConfig> { None }
-    fn as_any(&self) -> &dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 // 3. Implement DecoderLanguageModel
 impl DecoderLanguageModel for MockDecoderModel {
     // Return SELF as the ops provider
-    fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> { Some(self) }
-    fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> { None }
-    fn autoregressive_loop(&self) -> AutoregressiveLoop { AutoregressiveLoop::Pipelined }
-    fn is_instruct_model(&self) -> bool { false }
-    fn chat_template(&self) -> Option<&dyn ChatTemplate> { None }
+    fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
+        Some(self)
+    }
+    fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
+        None
+    }
+    fn autoregressive_loop(&self) -> AutoregressiveLoop {
+        AutoregressiveLoop::Pipelined
+    }
+    fn is_instruct_model(&self) -> bool {
+        false
+    }
+    fn chat_template(&self) -> Option<&dyn ChatTemplate> {
+        None
+    }
 }
 
 // 4. Implement CpuDecoderOps for the Model itself
@@ -199,7 +261,7 @@ impl CpuDecoderOps for MockDecoderModel {
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, _hidden) = hidden_states.dim();
-        
+
         // Initialize with a very low value so the chosen token stands out
         let mut logits = Array3::from_elem((batch, seq, self.vocab_size), -100.0);
 
@@ -223,8 +285,12 @@ struct MockCpuDecoder {
 }
 
 impl CpuDecoder for MockCpuDecoder {
-    fn as_any(&self) -> &dyn Any { self }
-    fn num_layers(&self) -> usize { self.num_layers }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn num_layers(&self) -> usize {
+        self.num_layers
+    }
 
     fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
         let (batch, seq) = match input {
@@ -254,16 +320,32 @@ impl CpuDecoder for MockCpuDecoder {
 
 // Mock Cache Implementation
 #[derive(Clone)]
-struct MockCache { len: usize }
+struct MockCache {
+    len: usize,
+}
 
 impl Cache for MockCache {
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
-    fn get_seq_length(&self) -> usize { self.len }
-    fn set_seq_length(&mut self, len: usize) { self.len = len; }
-    fn clear(&mut self) { self.len = 0; }
-    fn increment_len(&mut self, new_tokens: usize) { self.len += new_tokens; }
-    fn clone_box(&self) -> Box<dyn Cache> { Box::new(self.clone()) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn get_seq_length(&self) -> usize {
+        self.len
+    }
+    fn set_seq_length(&mut self, len: usize) {
+        self.len = len;
+    }
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+    fn increment_len(&mut self, new_tokens: usize) {
+        self.len += new_tokens;
+    }
+    fn clone_box(&self) -> Box<dyn Cache> {
+        Box::new(self.clone())
+    }
 }
 
 // =========================================================================
@@ -272,22 +354,22 @@ impl Cache for MockCache {
 
 #[tokio::test]
 async fn test_generator_setup() {
-    let model = Box::new(MockDecoderModel::new());
+    let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).expect("Failed to create generator");
-    
+
     assert_eq!(generator.model.vocab_size(), 100);
 }
 
 #[tokio::test]
 async fn test_encode_with_bos() {
-    let model = Box::new(MockDecoderModel::new());
+    let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();
-    
+
     let config = GenerationConfig {
         add_bos_token: true,
         ..Default::default()
     };
-    
+
     let tokens = generator.encode("Hello", &config).unwrap();
     assert_eq!(tokens[0], 0, "BOS token should be prepended");
 }
@@ -296,8 +378,8 @@ async fn test_encode_with_bos() {
 async fn test_generation_flow_control() {
     // Now this test should actually RUN because we have a valid CpuDecoderOps implementation.
     // It will generate random tokens (since logits are all 0.0), but the loop logic is verified.
-    
-    let model = Box::new(MockDecoderModel::new());
+
+    let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();
 
     let config = GenerationConfig {
@@ -306,7 +388,10 @@ async fn test_generation_flow_control() {
         ..Default::default()
     };
 
-    let stream = generator.generate_stream("Test", &config, None).await.unwrap();
+    let stream = generator
+        .generate_stream("Test", &config, None)
+        .await
+        .unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
 
     // Prompt + 3 generated
@@ -326,7 +411,7 @@ async fn test_generation_flow_control() {
 
 #[tokio::test]
 async fn test_cancellation_during_stream() {
-    let model = Box::new(MockDecoderModel::new());
+    let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();
 
     let (cancel_token, handle) = CancellationToken::new();
@@ -337,10 +422,16 @@ async fn test_cancellation_during_stream() {
         ..Default::default()
     };
 
-    let stream = generator.generate_stream("Test", &config, Some(cancel_token)).await.unwrap();
+    let stream = generator
+        .generate_stream("Test", &config, Some(cancel_token))
+        .await
+        .unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
 
-    let generated_count = tokens.iter().filter(|t| t.token_type == TokenType::Generated).count();
+    let generated_count = tokens
+        .iter()
+        .filter(|t| t.token_type == TokenType::Generated)
+        .count();
     assert_eq!(generated_count, 0);
 }
 
@@ -348,28 +439,31 @@ async fn test_cancellation_during_stream() {
 async fn test_context_limit_check() {
     let mut model = MockDecoderModel::new();
     model.context_size_override = Some(5);
-    let generator = DecoderGenerator::new(Box::new(model)).unwrap();
+    let generator = DecoderGenerator::new(Arc::new(model)).unwrap();
 
     let config = GenerationConfig {
         max_new_tokens: Some(10),
         ..Default::default()
     };
 
-    let stream = generator.generate_stream("Hello world", &config, None).await.unwrap();
+    let stream = generator
+        .generate_stream("Hello world", &config, None)
+        .await
+        .unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
-    
+
     // Total tokens should not exceed context size
     assert!(tokens.len() <= 5);
 }
 
 #[tokio::test]
 async fn test_chat_formatting_fallback() {
-    let model = Box::new(MockDecoderModel::new());
+    let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();
-    
+
     let mut conv = Conversation::new();
     conv.push_user("Hello");
-    
+
     let prompt = generator.format_conversation(&conv).unwrap();
     assert_eq!(prompt, "Hello");
 }

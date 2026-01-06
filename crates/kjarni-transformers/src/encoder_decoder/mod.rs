@@ -22,6 +22,7 @@ pub mod decoder_cross_attn_layer;
 pub mod decoder_self_attn;
 pub mod cpu_encoder;
 
+pub mod relative_position_bias;
 pub use crate::encoder_decoder::config::{SummarizationParams, TaskSpecificParams};
 pub use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
@@ -36,3 +37,4 @@ pub use gpu_backend::GpuSeq2SeqState;
 
 #[cfg(test)]
 mod generator_test;
+pub mod cpu_decoder;

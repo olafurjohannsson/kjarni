@@ -1,4 +1,5 @@
 use super::*;
+use crate::activations::Activation;
 // Imports GpuSwiGLUFFN, GpuSwiGLUFFNWeights
 use crate::feedforward::SwiGluFeedForward as CpuSwiGLUFFN;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
@@ -8,7 +9,7 @@ use crate::tests::common::assert_tensors_are_close_2d as assert_tensors_are_clos
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::Array;
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use ndarray_rand::{rand_distr::Uniform, RandomExt};
 
 #[path = "../../../tests/common.rs"]
 mod common;
@@ -38,6 +39,7 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
         LinearLayer::from(gate_cpu),
         LinearLayer::from(up_cpu),
         LinearLayer::from(down_cpu),
+        Activation::SilU,
     );
 
     let input_cpu = Array::random((rows, hidden_size), Uniform::new(-1.0, 1.0));

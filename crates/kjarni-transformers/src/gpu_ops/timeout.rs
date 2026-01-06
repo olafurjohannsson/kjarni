@@ -28,8 +28,8 @@
 //! }).await?;
 //! ```
 
+use anyhow::Result;
 use std::time::{Duration, Instant};
-use anyhow::{anyhow, Result};
 use wgpu::Device;
 
 /// Default timeout for GPU operations (30 seconds).
@@ -40,7 +40,7 @@ pub const DEFAULT_GPU_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct GpuTimeoutConfig {
     /// Maximum time to wait for GPU operations.
     pub timeout: Duration,
-    
+
     /// How often to poll for completion.
     /// Lower values = more responsive cancellation, higher CPU usage.
     pub poll_interval: Duration,
@@ -221,11 +221,11 @@ pub trait DeviceTimeoutExt {
 impl DeviceTimeoutExt for Device {
     fn poll_with_timeout(&self, config: GpuTimeoutConfig) -> Result<(), GpuTimeoutError> {
         let start = Instant::now();
-        
+
         loop {
             // Do a blocking poll with a small timeout
             let maintained = self.poll(wgpu::PollType::Poll);
-            
+
             // If no more work to do, we're done
             if !maintained.is_ok() {
                 return Ok(());
@@ -260,7 +260,7 @@ impl DeviceTimeoutExt for Device {
 //         // Create a dummy device for testing
 //         // In real tests, you'd use a real WGPU device
 //         let completed = std::sync::atomic::AtomicBool::new(true);
-        
+
 //         let result = poll_with_timeout(
 //             // Can't easily test without a real device, so this is more of a compile check
 //             // &device,
@@ -272,7 +272,7 @@ impl DeviceTimeoutExt for Device {
 //             "test_op",
 //             || true, // Immediately complete
 //         );
-        
+
 //         assert!(result.is_ok());
 //     }
 
@@ -281,6 +281,6 @@ impl DeviceTimeoutExt for Device {
 //         // This would be your actual test device creation
 //         // For unit tests, you might want to mock this
 //         todo!("Create test device")
-        
+
 //     }
 // }

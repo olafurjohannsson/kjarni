@@ -7,9 +7,9 @@ use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache},
     embeddings::Embeddings,
     encoder_decoder::{
-        DecoderCrossAttention, DecoderSelfAttention,
-        decoder_cross_attn_layer::DecoderCrossAttentionLayer,
-        traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
+        decoder_cross_attn_layer::CrossDecoderLayer, traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
+        DecoderCrossAttention,
+        DecoderSelfAttention,
     },
     feedforward::{FeedForward, LegacyFeedForward},
     linear_layer::LinearLayer,
@@ -17,6 +17,7 @@ use kjarni_transformers::{
     normalization::LayerNorm,
     traits::{Device, InferenceModel, ModelConfig, ModelMetadata},
     weights::ModelWeights,
+    Normalization,
 };
 
 use ndarray::{Array2, Array3};
@@ -24,7 +25,7 @@ use std::sync::Arc;
 
 pub struct BartCpuDecoder {
     pub embeddings: Embeddings,
-    pub layers: Vec<DecoderCrossAttentionLayer>,
+    pub layers: Vec<CrossDecoderLayer>,
     pub embed_layer_norm: LayerNorm,
     pub config: Arc<BartConfig>,
     pub meta: ModelMetadata,
@@ -77,7 +78,7 @@ impl BartCpuDecoder {
         weights: &ModelWeights,
         config: &BartConfig,
         i: usize,
-    ) -> Result<DecoderCrossAttentionLayer> {
+    ) -> Result<CrossDecoderLayer> {
         let prefix = format!("model.decoder.layers.{}", i);
         let dtype = None; // Add BF16 support here later if needed
 
@@ -102,11 +103,11 @@ impl BartCpuDecoder {
                 .with_target_dtype(dtype)
                 .build()?,
         );
-        let self_attn_norm = LayerNorm::new(
+        let self_attn_norm = Normalization::LayerNorm(LayerNorm::new(
             weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
             weights.get_array1(&format!("{}.self_attn_layer_norm.bias", prefix))?,
             config.layer_norm_eps,
-        );
+        ));
 
         // B. Cross Attention
         let cross_attn = DecoderCrossAttention::new(
@@ -129,11 +130,11 @@ impl BartCpuDecoder {
                 .with_target_dtype(dtype)
                 .build()?,
         );
-        let cross_attn_norm = LayerNorm::new(
+        let cross_attn_norm = Normalization::LayerNorm(LayerNorm::new(
             weights.get_array1(&format!("{}.encoder_attn_layer_norm.weight", prefix))?,
             weights.get_array1(&format!("{}.encoder_attn_layer_norm.bias", prefix))?,
             config.layer_norm_eps,
-        );
+        ));
 
         // C. Feed Forward (FC1 -> FC2)
         // Note: Using raw arrays for StdFeedForward until it supports LinearLayer
@@ -147,19 +148,20 @@ impl BartCpuDecoder {
             weights.get_array1(&format!("{}.fc2.bias", prefix))?,
             Activation::Gelu, // Hardcoded for BART
         ));
-        let ffn_norm = LayerNorm::new(
+        let ffn_norm = Normalization::LayerNorm(LayerNorm::new(
             weights.get_array1(&format!("{}.final_layer_norm.weight", prefix))?,
             weights.get_array1(&format!("{}.final_layer_norm.bias", prefix))?,
             config.layer_norm_eps,
-        );
+        ));
 
-        Ok(DecoderCrossAttentionLayer {
+        Ok(CrossDecoderLayer {
             self_attn,
             self_attn_layer_norm: self_attn_norm,
             cross_attn,
             cross_attn_layer_norm: cross_attn_norm,
             feedforward: ffn,
             ffn_layer_norm: ffn_norm,
+            pre_norm: false,
         })
     }
 }
@@ -178,7 +180,7 @@ impl CpuCrossDecoder for BartCpuDecoder {
     fn num_layers(&self) -> usize {
         self.layers.len()
     }
-    fn layers(&self) -> &Vec<DecoderCrossAttentionLayer> {
+    fn layers(&self) -> &Vec<CrossDecoderLayer> {
         &self.layers
     }
     fn hidden_size(&self) -> usize {
@@ -199,8 +201,12 @@ impl CpuCrossDecoder for BartCpuDecoder {
         Ok(CpuCrossAttentionKVCache(cache_vec))
     }
     fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
-        self.embeddings
-            .forward(decoder_input_ids, None, position_offset + 2, self.meta.scale_embeddings)
+        self.embeddings.forward(
+            decoder_input_ids,
+            None,
+            position_offset + 2,
+            self.meta.scale_embeddings,
+        )
     }
     fn embed_and_normalize(
         &self,
@@ -225,6 +231,7 @@ impl CpuCrossDecoder for BartCpuDecoder {
         let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
 
         let mut current_hidden_states = hidden_states.clone();
+        log::error!("embed sum: {:?}", current_hidden_states.sum());
         let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
 
         if start_layer >= self.layers.len() || end_layer > self.layers.len() {
@@ -250,10 +257,13 @@ impl CpuCrossDecoder for BartCpuDecoder {
                 None,
                 self_attn_past_kv_views,
                 cross_kv_for_layer,
+                None,
             )?;
 
             current_hidden_states = new_hidden;
             new_self_attn_kvs.push((new_k, new_v));
+
+            log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
         }
 
         Ok(CpuCrossDecoderOutput {
@@ -261,58 +271,6 @@ impl CpuCrossDecoder for BartCpuDecoder {
             new_self_attn_kv: new_self_attn_kvs,
         })
     }
-    // Performs a forward pass through the cross-attention decoder stack.
-    // async fn forward(
-    //     &self,
-    //     decoder_input_ids: &Array2<u32>,
-    //     encoder_hidden_states: &Array3<f32>,
-    //     decoder_attention_mask: Option<&Array2<f32>>,
-    //     cache: Option<&mut dyn Cache>, // Correctly immutable
-    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-    // ) -> Result<CpuCrossDecoderOutput> {
-    //     // --- Get position offset and CPU cache ---
-    //     let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
-    //     let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
-
-    //     // --- 1. Embeddings + Initial LayerNorm ---
-    //     let mut hidden_states = self.embeddings.forward(
-    //         decoder_input_ids,
-    //         None,
-    //         position_offset + 2,
-    //         self.config.scale_embeddings(),
-    //     );
-    //     hidden_states = self.embed_layer_norm.forward_3d(&hidden_states);
-
-    //     // --- 2. Decoder Layers ---
-    //     let mut new_self_attn_kvs = Vec::with_capacity(self.layers.len());
-
-    //     for (i, layer) in self.layers.iter().enumerate() {
-    //         let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
-    //         let self_attn_past_kv_views = self_attn_past_kv
-    //             .as_ref()
-    //             .map(|(k, v)| (k.view(), v.view()));
-
-    //         let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
-
-    //         let (new_hidden, (new_k, new_v)) = layer.forward(
-    //             &hidden_states,
-    //             encoder_hidden_states,
-    //             decoder_attention_mask,
-    //             None, // Encoder mask is handled by cross-attention
-    //             self_attn_past_kv_views,
-    //             cross_kv_for_layer,
-    //         )?;
-
-    //         hidden_states = new_hidden;
-    //         new_self_attn_kvs.push((new_k, new_v));
-    //     }
-
-    //     // --- 3. Return the complete output struct ---
-    //     Ok(CpuCrossDecoderOutput {
-    //         last_hidden_state: hidden_states,
-    //         new_self_attn_kv: new_self_attn_kvs,
-    //     })
-    // }
 }
 
 // In cpu_decoder.rs, add tests module
@@ -322,8 +280,8 @@ mod tests {
     use super::*;
     use crate::models::bart::cpu_encoder::BartCpuEncoder;
     use anyhow::Result;
-    use kjarni_transformers::encoder::traits::CpuEncoder;
-    use ndarray::{Array2, s};
+    use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
+    use ndarray::{s, Array2};
     use std::path::Path;
 
     const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";

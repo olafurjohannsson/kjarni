@@ -1,8 +1,8 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use half::{bf16, f16};
 use ndarray::{ArrayD, IxDyn};
 
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix, TensorView};
 use crate::weights::model_weights::AttentionLayout;
 

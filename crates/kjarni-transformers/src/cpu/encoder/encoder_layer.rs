@@ -1,7 +1,6 @@
-
-use crate::rope::RoPE;
-use crate::{Normalization, encoder::encoder_self_attention::EncoderSelfAttention};
 use crate::feedforward::FeedForward;
+use crate::rope::RoPE;
+use crate::{cpu::encoder::encoder_self_attention::EncoderSelfAttention, Normalization};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
 
@@ -101,9 +100,7 @@ impl EncoderLayer {
         let attn_out = self
             .self_attn
             .forward(&hidden, attention_mask, position_bias, rope)?;
-        let hidden = self
-            .self_attn_layer_norm
-            .forward(&(residual + &attn_out));
+        let hidden = self.self_attn_layer_norm.forward(&(residual + &attn_out));
 
         // FFN block
         let residual = &hidden;
@@ -153,8 +150,11 @@ mod tests {
 
         let self_attn = EncoderSelfAttention::new(hidden_size, num_heads, q, k, v, o);
 
-        let self_attn_layer_norm =
-            Normalization::LayerNorm(LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5));
+        let self_attn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::zeros(hidden_size),
+            1e-5,
+        ));
 
         // Use StdFeedForward with [Out, In] weights
         let feedforward = FeedForward::Standard(StdFeedForward::new(
@@ -165,11 +165,11 @@ mod tests {
             Activation::GeluNew,
         ));
 
-
-
-        let ffn_layer_norm = Normalization::LayerNorm(
-            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5),
-        );
+        let ffn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::zeros(hidden_size),
+            1e-5,
+        ));
 
         EncoderLayer::new(self_attn, self_attn_layer_norm, feedforward, ffn_layer_norm)
     }
@@ -277,45 +277,49 @@ mod tests {
         Ok(())
     }
 
-#[test]
-fn test_postnorm_output_is_normalized() -> Result<()> {
-    let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
-    let layer = create_test_layer(hidden, intermediate, heads);
+    #[test]
+    fn test_postnorm_output_is_normalized() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 10, 64, 128, 4);
+        let layer = create_test_layer(hidden, intermediate, heads);
 
-    // Input with actual variance along hidden dimension
-    let input = Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
-        (h as f32) + (b * 100 + s * 10) as f32 * 0.01  // h varies from 0 to 63
-    });
-    let mask = Array2::<f32>::ones((batch, seq));
+        // Input with actual variance along hidden dimension
+        let input = Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
+            (h as f32) + (b * 100 + s * 10) as f32 * 0.01 // h varies from 0 to 63
+        });
+        let mask = Array2::<f32>::ones((batch, seq));
 
-    let output = layer.forward(input, &mask, None, false, None)?;
+        let output = layer.forward(input, &mask, None, false, None)?;
 
-    // Post-norm: LayerNorm normalizes EACH POSITION along hidden dim
-    for b in 0..batch {
-        for s in 0..seq {
-            let position = output.slice(ndarray::s![b, s, ..]);
-            let mean = position.mean().unwrap();
-            let std = position.std(0.0);
+        // Post-norm: LayerNorm normalizes EACH POSITION along hidden dim
+        for b in 0..batch {
+            for s in 0..seq {
+                let position = output.slice(ndarray::s![b, s, ..]);
+                let mean = position.mean().unwrap();
+                let std = position.std(0.0);
 
-            assert!(
-                mean.abs() < 1e-4,
-                "Position [{},{}] mean should be ~0, got {}",
-                b, s, mean
-            );
-            assert!(
-                (std - 1.0).abs() < 0.1,
-                "Position [{},{}] std should be ~1, got {}",
-                b, s, std
-            );
+                assert!(
+                    mean.abs() < 1e-4,
+                    "Position [{},{}] mean should be ~0, got {}",
+                    b,
+                    s,
+                    mean
+                );
+                assert!(
+                    (std - 1.0).abs() < 0.1,
+                    "Position [{},{}] std should be ~1, got {}",
+                    b,
+                    s,
+                    std
+                );
+            }
         }
-    }
 
-    Ok(())
-}
+        Ok(())
+    }
     #[test]
     fn test_encoder_self_attention_matches_multihead_attention() -> Result<()> {
         use crate::attention::MultiHeadAttention;
-        use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+        use crate::cpu::encoder::encoder_self_attention::EncoderSelfAttention;
         use crate::linear_layer::LinearLayer;
         use ndarray::{Array1, Array2, Array3};
 
@@ -506,8 +510,11 @@ fn test_postnorm_output_is_normalized() -> Result<()> {
         let o = LinearLayer::new_f32(zero_proj.clone(), Some(Array1::zeros(hidden)));
 
         let self_attn = EncoderSelfAttention::new(hidden, heads, q, k, v, o);
-        let self_attn_layer_norm =
-            Normalization::LayerNorm(LayerNorm::new(Array1::ones(hidden), Array1::zeros(hidden), 1e-5));
+        let self_attn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden),
+            Array1::zeros(hidden),
+            1e-5,
+        ));
 
         let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
             zero_fc1,
@@ -516,7 +523,11 @@ fn test_postnorm_output_is_normalized() -> Result<()> {
             Array1::zeros(hidden),
             Activation::GeluNew,
         ));
-        let ffn_layer_norm = Normalization::LayerNorm(LayerNorm::new(Array1::ones(hidden), Array1::zeros(hidden), 1e-5));
+        let ffn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden),
+            Array1::zeros(hidden),
+            1e-5,
+        ));
 
         let layer = EncoderLayer::new(self_attn, self_attn_layer_norm, feedforward, ffn_layer_norm);
 

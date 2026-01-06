@@ -1,33 +1,30 @@
 // --- Standard Library ---
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kjarni_transformers::common::HFGenerationDefaults;
+use kjarni_transformers::encoder_decoder::cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig};
 use kjarni_transformers::encoder_decoder::cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline};
 use kjarni_transformers::traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata};
-use ndarray::{Array1, Array3};
+use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
     common::{BeamSearchParams, DecodingStrategy, GenerationConfig},
-    encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+    cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu_ops::{
-        GpuFrameContext, GpuTensor,
-        primitives::{add::GpuAdd, broadcast::GpuBroadcast, linear::GpuLinearLayer},
-    },
-    linear_layer::LinearLayer,
-    models::{ModelType, download_model_files},
+    gpu_ops::{GpuFrameContext, GpuTensor},
+    models::ModelType,
     prelude::*,
     weights::ModelWeights,
 };
@@ -36,37 +33,13 @@ use kjarni_transformers::{
 use crate::models::bart::{
     config::{BartConfig, BartLikeConfig},
     cpu_decoder::BartCpuDecoder,
-    cpu_encoder::BartCpuEncoder,
     gpu_decoder::BartGpuDecoder,
     gpu_encoder::BartGpuEncoder,
 };
 
 pub struct BartModel {
-    // CPU components
-    // pub cpu_encoder: Option<BartCpuEncoder>,
-    // pub cpu_decoder: Option<BartCpuDecoder>,
-
-    // pub cpu_encoder_new: Option<Seq2SeqCPUEncoder>,
-
-    // GPU components
-    // pub gpu_encoder: Option<BartGpuEncoder>,
-    // pub gpu_decoder: Option<BartGpuDecoder>,
-    // gpu_lm_head: Option<GpuTensor>,
-    // gpu_final_logits_bias: Option<GpuTensor>,
-    // gpu_broadcast_kernel: Option<GpuBroadcast>,
-    // gpu_linear_kernel: Option<GpuLinearLayer>,
-
-    // Shared components
     tokenizer: Tokenizer,
     config: Arc<BartConfig>,
-    // lm_head: LinearLayer,
-    // final_logits_bias: Option<Array1<f32>>,
-    // device: Device,
-    // context: Option<Arc<WgpuContext>>,
-
-    // Cached Data-driven structs
-    // pub meta: ModelMetadata,
-    // pub layout: ModelLayout,
     pub pipeline: EncoderDecoderPipeline,
     generation_defaults: Option<HFGenerationDefaults>,
 }
@@ -126,11 +99,13 @@ impl EncoderDecoderModelFactory for BartModel {
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
 
-            // Legacy Specific Decoder (until you unify this too)
-            cpu_dec = Some(
-                Box::new(BartCpuDecoder::new(weights, config.clone(), *load_config)?)
-                    as Box<dyn CpuCrossDecoder>,
-            );
+            let dec_config = Seq2SeqDecoderConfig::bart();
+            cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
+                weights,
+                config.as_ref(),
+                dec_config,
+                *load_config,
+            )?) as Box<dyn CpuCrossDecoder>);
         }
 
         // GPU Backends
@@ -183,7 +158,7 @@ impl BartModel {
             context,
             load_config,
         )
-        .await
+            .await
     }
     pub fn bart_cpu_decoder(&self) -> Option<&BartCpuDecoder> {
         // self.cpu_decoder.as_ref()
@@ -200,169 +175,8 @@ impl BartModel {
     }
     const SUPPORTED_MODELS: &'static [ModelType] =
         &[ModelType::BartLargeCnn, ModelType::DistilBartCnn];
-    // pub async fn from_registry(
-    //     model_type: ModelType,
-    //     cache_dir: Option<PathBuf>,
-    //     device: Device,
-    //     context: Option<Arc<WgpuContext>>,
-    // ) -> Result<Self> {
-    //     if !Self::SUPPORTED_MODELS.contains(&model_type) {
-    //         return Err(anyhow!("Unsupported BART model type: {:?}", model_type));
-    //     }
-
-    //     let cache_dir = cache_dir.unwrap_or_else(|| {
-    //         dirs::cache_dir()
-    //             .expect("No cache directory found")
-    //             .join("kjarni")
-    //     });
-    //     let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
-
-    //     log::info!("Loading BART model from {:?}", model_dir);
-    //     download_model_files(
-    //         &model_dir,
-    //         &model_type.info().paths,
-    //         kjarni_transformers::models::registry::WeightsFormat::SafeTensors,
-    //     )
-    //     .await?;
-
-    //     // Logic preserved: auto-create context if missing for GPU
-    //     if device.is_gpu() && context.is_none() {
-    //         Self::from_pretrained(&model_dir, device, Some(WgpuContext::new().await?), None)
-    //     } else {
-    //         Self::from_pretrained(&model_dir, device, context, None)
-    //     }
-    // }
-    // pub fn from_pretrained(
-    //     model_path: &Path,
-    //     device: Device,
-    //     context: Option<Arc<WgpuContext>>,
-    //     load_config: Option<ModelLoadConfig>, // Now uses unified load config
-    // ) -> Result<Self> {
-    //     let weights = ModelWeights::new(model_path)?;
-    //     let load_config = load_config.unwrap_or_default();
-    //     let tokenizer =
-    //         Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
-
-    //     // 1. Detect the correct embedding key (LOGIC PRESERVED)
-    //     let shared_key = if weights.contains("model.shared.weight") {
-    //         "model.shared.weight"
-    //     } else if weights.contains("model.encoder.embed_tokens.weight") {
-    //         "model.encoder.embed_tokens.weight"
-    //     } else if weights.contains("model.decoder.embed_tokens.weight") {
-    //         "model.decoder.embed_tokens.weight"
-    //     } else {
-    //         return Err(anyhow!("Could not find shared embedding weights."));
-    //     };
-
-    //     // 2. Initialize Config and Data Structs
-    //     let mut config_obj = BartConfig::from_json(&weights.config_json)?;
-    //     config_obj.shared_embedding_key = Some(shared_key.to_string());
-    //     let config = Arc::new(config_obj);
-
-    //     let meta = config.metadata();
-    //     let layout = config.layout();
-
-    //     // 3. Load Heads (Uses layout.lm_head which was determined by shared_key)
-    //     let lm_head = LinearLayer::builder(&weights, &layout.lm_head)
-    //         .with_target_dtype(load_config.target_dtype)
-    //         .with_optional_bias(None)
-    //         .build()?;
-    //     let final_logits_bias = weights.get_array1("final_logits_bias").ok();
-
-    //     match device {
-    //         Device::Cpu => {
-    //             let cpu_encoder = BartCpuEncoder::new(&weights, config.clone(), load_config)?;
-    //             let cpu_decoder = BartCpuDecoder::new(&weights, config.clone(), load_config)?;
-    //             let encoder_config = Seq2SeqEncoderConfig::bart();
-
-    //             let cpu_encoder_new = Seq2SeqCPUEncoder::new(
-    //                 &weights,
-    //                 config.as_ref(), // Pass as &dyn ModelConfig
-    //                 encoder_config,
-    //                 load_config,
-    //             )?;
-
-    //             Ok(Self {
-    //                 cpu_encoder_new: Some(cpu_encoder_new),
-    //                 cpu_encoder: Some(cpu_encoder),
-    //                 cpu_decoder: Some(cpu_decoder),
-    //                 gpu_encoder: None,
-    //                 gpu_decoder: None,
-    //                 gpu_lm_head: None,
-    //                 gpu_final_logits_bias: None,
-    //                 tokenizer,
-    //                 config,
-    //                 lm_head,
-    //                 final_logits_bias,
-    //                 device,
-    //                 context: None,
-    //                 gpu_broadcast_kernel: None,
-    //                 gpu_linear_kernel: None,
-    //                 meta,
-    //                 layout,
-    //             })
-    //         }
-    //         Device::Wgpu => {
-    //             let ctx = context.ok_or_else(|| anyhow!("WGPU device requires a WgpuContext"))?;
-
-    //             let gpu_encoder = BartGpuEncoder::new(&ctx, &weights, config.clone(), load_config)?;
-    //             let gpu_decoder = BartGpuDecoder::new(&ctx, &weights, config.clone(), load_config)?;
-
-    //             // Upload LM head and bias to GPU
-    //             let gpu_lm_head = Some(GpuTensor::from_model_weights(
-    //                 &ctx,
-    //                 &weights,
-    //                 &layout.lm_head,
-    //                 load_config.target_dtype,
-    //                 "lm_head",
-    //             )?);
-
-    //             let gpu_final_logits_bias = if weights.contains("final_logits_bias") {
-    //                 Some(GpuTensor::from_raw(
-    //                     &ctx,
-    //                     &weights.get_raw("final_logits_bias")?,
-    //                     "final_logits_bias",
-    //                 )?)
-    //             } else {
-    //                 None
-    //             };
-
-    //             Ok(Self {
-    //                 cpu_encoder: None,
-    //                 cpu_encoder_new: None,
-    //                 cpu_decoder: None,
-    //                 gpu_encoder: Some(gpu_encoder),
-    //                 gpu_decoder: Some(gpu_decoder),
-    //                 gpu_lm_head,
-    //                 gpu_final_logits_bias,
-    //                 tokenizer,
-    //                 config,
-    //                 lm_head,
-    //                 final_logits_bias,
-    //                 device,
-    //                 context: Some(ctx.clone()),
-    //                 gpu_broadcast_kernel: Some(GpuBroadcast::new(&ctx.clone())?),
-    //                 gpu_linear_kernel: Some(GpuLinearLayer::new(&ctx)),
-    //                 meta,
-    //                 layout,
-    //             })
-    //         }
-    //     }
-    // }
 }
 
-// --- TransformerModel Implementation ---
-// impl InferenceModel for BartModel {
-//     fn device(&self) -> Device {
-//         self.device
-//     }
-//     fn context(&self) -> Option<Arc<WgpuContext>> {
-//         self.context.clone()
-//     }
-//     fn as_any(&self) -> &dyn std::any::Any {
-//         self
-//     }
-// }
 impl InferenceModel for BartModel {
     fn device(&self) -> Device {
         self.pipeline.plan().layers
@@ -375,11 +189,6 @@ impl InferenceModel for BartModel {
     }
 }
 impl CpuEncoderOps for BartModel {
-    // fn encoder(&self) -> &dyn CpuEncoder {
-    //     self.cpu_encoder_new
-    //         .as_ref()
-    //         .expect("CPU encoder not initialized")
-    // }
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline.cpu_encoder().expect("CPU Encoder not active")
     }
@@ -389,11 +198,6 @@ impl GpuEncoderOps for BartModel {
     fn encoder(&self) -> &dyn GpuEncoder {
         self.pipeline.gpu_encoder().expect("GPU Encoder not active")
     }
-    // fn encoder(&self) -> &dyn GpuEncoder {
-    //     self.gpu_encoder
-    //         .as_ref()
-    //         .expect("GPU encoder not initialized")
-    // }
 }
 
 #[async_trait]
@@ -501,21 +305,13 @@ impl LanguageModel for BartModel {
         }
     }
 }
-
 impl CpuEncoderDecoderOps for BartModel {
-    // fn encoder(&self) -> &dyn CpuEncoder {
-    //     self.cpu_encoder
-    //         .as_ref()
-    //         .expect("CPU encoder not initialized")
-    // }
     fn decoder(&self) -> &dyn CpuCrossDecoder {
         self.pipeline.cpu_decoder().expect("CPU Decoder not active")
-
-        // self.cpu_decoder
-        //     .as_ref()
-        //     .expect("CPU decoder not initialized")
     }
-
+    fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
+        None
+    }
     fn broadcast_encoder_states(
         &self,
         encoder_hidden_states: &Array3<f32>,
@@ -535,34 +331,11 @@ impl CpuEncoderDecoderOps for BartModel {
     // This is the logic moved from the old CpuBackend
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         self.pipeline.lm_head().forward_cpu(hidden_states)
-        // let (batch, seq, hidden) = hidden_states.dim();
-        // let hidden_2d = hidden_states
-        //     .view()
-        //     .into_shape_with_order((batch * seq, hidden))?;
-
-        // // Use the model's own lm_head LinearLayer
-        // let mut logits_2d = self.lm_head.matmul(&hidden_2d.view());
-
-        // if let Some(bias) = &self.final_logits_bias {
-        //     logits_2d += bias;
-        // }
-
-        // logits_2d
-        //     .into_shape_with_order((batch, seq, self.vocab_size()))
-        //     .map_err(|e| anyhow!(e))
     }
 }
 
 impl GpuEncoderDecoderOps for BartModel {
-    // fn encoder(&self) -> &dyn GpuEncoder {
-    //     self.gpu_encoder
-    //         .as_ref()
-    //         .expect("GPU encoder not initialized")
-    // }
     fn decoder(&self) -> &dyn GpuCrossDecoder {
-        // self.gpu_decoder
-        //     .as_ref()
-        //     .expect("GPU decoder not initialized")
         self.pipeline.gpu_decoder().expect("GPU Decoder not active")
     }
     fn broadcast_encoder_states(
@@ -654,11 +427,6 @@ impl EncoderDecoderLanguageModel for BartModel {
         } else {
             None
         }
-        // if self.device.is_cpu() {
-        //     Some(self)
-        // } else {
-        //     None
-        // }
     }
     fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> {
         if self.pipeline.gpu_decoder().is_some() {
@@ -666,11 +434,6 @@ impl EncoderDecoderLanguageModel for BartModel {
         } else {
             None
         }
-        // if self.device.is_gpu() {
-        //     Some(self)
-        // } else {
-        //     None
-        // }
     }
 
     fn decoder_start_token_id(&self) -> u32 {
@@ -680,7 +443,7 @@ impl EncoderDecoderLanguageModel for BartModel {
     fn get_default_generation_config(&self) -> GenerationConfig {
         // Try to load from task specific params in config
         if let Some(params) = &self.config.task_specific_params() {
-            let summary_params = &params.summarization;
+            let summary_params = params.summarization.clone().unwrap();
             return GenerationConfig {
                 max_length: summary_params.max_length,
                 min_length: summary_params.min_length,

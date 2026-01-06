@@ -17,6 +17,7 @@ mod tests {
             "rope_theta": 10000.0,
             "rms_norm_eps": 1e-5,
             "model_type": "mistral"
+            "bos_token_id": "0",
         }"#;
 
         let config: MistralConfig = serde_json::from_str(json).unwrap();

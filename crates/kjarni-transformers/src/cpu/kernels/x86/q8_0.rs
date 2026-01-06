@@ -1,5 +1,5 @@
 #![allow(unsafe_code)]
-use crate::kernels::{q_common::BlockQ8_0, x86::common::hsum_ps_avx};
+use crate::cpu::kernels::{q_common::BlockQ8_0, x86::common::hsum_ps_avx};
 use std::arch::x86_64::*;
 
 /// Computes a vector-matrix multiplication for Q8_0 weights using AVX2.
@@ -182,12 +182,11 @@ pub unsafe fn matmul_vec_q8_0_avx2(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernels::scalar::matmul_vec_q8_0_scalar;
-    use crate::kernels::q_common::BlockQ8_0;
+    use crate::cpu::kernels::q_common::BlockQ8_0;
+    use crate::cpu::kernels::scalar::matmul_vec_q8_0_scalar;
     use half::f16;
 
     /// Deterministic, non-degenerate Q8_0 block generator.
@@ -209,7 +208,7 @@ mod tests {
     #[target_feature(enable = "avx2", enable = "fma")]
     unsafe fn run_q8_0_avx2_vs_scalar() {
         let k = 256; // must be divisible by 32
-        let m = 4;   // number of output rows
+        let m = 4; // number of output rows
 
         // Input vector
         let a: Vec<f32> = (0..k).map(|i| (i as f32) * 0.01).collect();
@@ -217,9 +216,7 @@ mod tests {
         // Blocks are laid out row-major:
         // m rows × (k / 32) blocks per row
         let blocks: Vec<BlockQ8_0> = (0..m)
-            .flat_map(|row| {
-                (0..(k / 32)).map(move |b| create_test_block((row * 13 + b) as i8))
-            })
+            .flat_map(|row| (0..(k / 32)).map(move |b| create_test_block((row * 13 + b) as i8)))
             .collect();
 
         let mut out_scalar = vec![0.0f32; m];
@@ -248,9 +245,7 @@ mod tests {
     /// Safe test entry point.
     #[test]
     fn test_matmul_vec_q8_0_avx2_matches_scalar() {
-        if std::is_x86_feature_detected!("avx2")
-            && std::is_x86_feature_detected!("fma")
-        {
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
                 run_q8_0_avx2_vs_scalar();
             }

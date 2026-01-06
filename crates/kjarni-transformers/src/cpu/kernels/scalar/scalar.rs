@@ -40,12 +40,10 @@
 //! - [`crate::kernels::aarch64`] — ARM NEON optimized kernels.
 //! - [`crate::ops::matmul`] — High-level dispatchers that select the best kernel.
 
-use crate::kernels::{
+use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, get_scale_min_k4},
-    q_common::{BlockQ6_K, BlockQ8_K},
+    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, BlockQ8_K, QK_K},
 };
-
-use super::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
 
 /// Computes vector-matrix product for F32 input and BF16 weights.
 ///
@@ -65,7 +63,7 @@ use super::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
 /// BF16 to F32 conversion is done by left-shifting the 16-bit value by 16 bits,
 /// effectively placing the BF16 mantissa and exponent in the upper bits of an
 /// F32 representation: `f32::from_bits((bf16_bits as u32) << 16)`.
-pub(crate) fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[u16], k: usize) {
+pub fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[u16], k: usize) {
     for (i, out_val) in out_chunk.iter_mut().enumerate() {
         // Extract this output's weight row
         let b_row = &b_rows[i * k..(i + 1) * k];
@@ -95,7 +93,7 @@ pub(crate) fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &
 /// * `a` - Input vector of length `k`.
 /// * `b_rows` - Flattened weight matrix of shape `[out_chunk.len(), k]`.
 /// * `k` - Number of input features (inner dimension).
-pub(crate) fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[f32], k: usize) {
+pub fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[f32], k: usize) {
     for (i, out_val) in out_chunk.iter_mut().enumerate() {
         // Extract this output's weight row
         let b_row = &b_rows[i * k..(i + 1) * k];
@@ -126,12 +124,7 @@ pub(crate) fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[
 /// - `qs`: 32 int8 quantized values
 ///
 /// Dequantization: `value[i] = d * qs[i]`
-pub(crate) fn matmul_vec_q8_0_scalar(
-    out_chunk: &mut [f32],
-    a: &[f32],
-    b_blocks: &[BlockQ8_0],
-    k: usize,
-) {
+pub fn matmul_vec_q8_0_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[BlockQ8_0], k: usize) {
     // Q8_0 block size: 32 elements per block
     let k_per_block = std::mem::size_of_val(&b_blocks[0].qs);
     let blocks_per_row = k / k_per_block;
@@ -293,11 +286,7 @@ pub fn matmul_vec_q6_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
 /// # See Also
 ///
 /// - [`matmul_vec_q4_k_scalar`] — Alternative that dequantizes weights to F32.
-pub fn vec_dot_q4k_q8k_scalar(
-    n: usize,
-    w_blocks: &[BlockQ4_K],
-    q_blocks: &[BlockQ8_K],
-) -> f32 {
+pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[BlockQ8_K]) -> f32 {
     let num_blocks = n / QK_K;
     let mut sumf = 0.0f32;
 
@@ -309,11 +298,11 @@ pub fn vec_dot_q4k_q8k_scalar(
         let d = w.d.to_f32();
         let dmin = w.dmin.to_f32();
 
-        let mut sum_qs = 0i32;   // Accumulator for scaled quantized products
+        let mut sum_qs = 0i32; // Accumulator for scaled quantized products
         let mut sum_mins = 0i32; // Accumulator for min corrections
 
-        let mut is = 0;     // Sub-block scale index
-        let mut q_idx = 0;  // Weight byte index
+        let mut is = 0; // Sub-block scale index
+        let mut q_idx = 0; // Weight byte index
 
         // Process 4 groups of 2 sub-blocks each (8 sub-blocks total, 32 elements each)
         for _j in 0..4 {
@@ -394,11 +383,7 @@ pub fn vec_dot_q4k_q8k_scalar(
 /// # See Also
 ///
 /// - [`matmul_vec_q6_k_scalar`] — Alternative that dequantizes weights to F32.
-pub fn vec_dot_q6k_q8k_scalar(
-    n: usize,
-    w_blocks: &[BlockQ6_K],
-    q_blocks: &[BlockQ8_K],
-) -> f32 {
+pub fn vec_dot_q6k_q8k_scalar(n: usize, w_blocks: &[BlockQ6_K], q_blocks: &[BlockQ8_K]) -> f32 {
     let num_blocks = n / QK_K;
     let mut sumf = 0.0f32;
 
@@ -412,8 +397,8 @@ pub fn vec_dot_q6k_q8k_scalar(
         // Process block in 2 halves (128 elements each)
         for j in 0..2 {
             // Pointers into the Q6_K block data
-            let ql = &w.ql[j * 64..];   // Low 4 bits of quantized values
-            let qh = &w.qh[j * 32..];   // High 2 bits (packed)
+            let ql = &w.ql[j * 64..]; // Low 4 bits of quantized values
+            let qh = &w.qh[j * 32..]; // High 2 bits (packed)
             let sc = &w.scales[j * 8..]; // Per-sub-block scales
 
             // Input offset for this half

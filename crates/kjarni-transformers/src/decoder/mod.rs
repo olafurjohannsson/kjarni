@@ -13,33 +13,30 @@ pub mod backend;
 
 
 // Internal components. Not part of the public API.
-mod cpu;
 mod gpu;
 
 
 pub mod prelude {
+    pub use crate::cpu::decoder::{
+        CpuDecoderBackend,
+        CpuRoPEDecoderLayer,
+        DecoderAttention,
+        DecoderLayer,
+    };
     pub use crate::decoder::{
-        cpu::{
-            DecoderAttention,
-            DecoderLayer,
-            CpuRoPEDecoderLayer,
-            CpuDecoderBackend,
-        },
+        backend::AnyDecoderBackend,
+        generator::DecoderGenerator,
         gpu::{
             GpuDecoderBackend,
             GpuPreNormDecoderLayer,
             GpuRoPEDecoderLayer,
         },
-        backend::AnyDecoderBackend,
-        generator::{
-            DecoderGenerator
-        },
         traits::{
             CpuDecoder,
-            GpuDecoder,
+            CpuDecoderOps,
             DecoderGenerationBackend,
             DecoderLanguageModel,
-            CpuDecoderOps,
+            GpuDecoder,
             GpuDecoderOps,
         },
     };

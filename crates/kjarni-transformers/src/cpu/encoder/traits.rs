@@ -3,13 +3,13 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
-use crate::encoder::config::{EncodingConfig, PoolingStrategy};
+use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
 use crate::{last_token_pool, max_pool};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 
@@ -149,12 +149,6 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
             PoolingStrategy::Mean => mean_pool(&hidden_states, &attention_mask)?,
             PoolingStrategy::LastToken => last_token_pool(&hidden_states, &attention_mask)?,
             PoolingStrategy::Max => max_pool(&hidden_states, &attention_mask)?,
-            _ => {
-                return Err(anyhow!(
-                    "Unknown pooling strategy: {}",
-                    config.pooling_strategy
-                ));
-            }
         };
 
         // 3. Apply the application-specific normalization logic.
@@ -270,7 +264,6 @@ pub trait CpuEncoder: Send + Sync {
 // ============================================================================
 // GPU ENCODER
 // ============================================================================
-
 
 /// Output from GPU encoder.
 #[derive(Debug)]

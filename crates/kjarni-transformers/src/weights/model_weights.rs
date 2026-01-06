@@ -1,12 +1,12 @@
-use super::{WeightLoader, gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader};
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
+use super::{gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader, WeightLoader};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{
     dtype::DType,
     raw_tensor::TensorView,
     {CpuTensor, QuantizedMatrix},
 };
 use crate::weights::raw_to_typed_gguf;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
 use serde_json::json;
@@ -171,7 +171,7 @@ impl ModelWeights {
 
             return raw_to_typed_gguf(raw, true, self.parsed_vocab_size(), attn);
         }
-        
+
         raw_to_typed(raw)
     }
 
@@ -198,7 +198,6 @@ impl ModelWeights {
             .to_array2_f32()
             .map_err(|e| anyhow!("Failed to load '{}' as Array2<f32>: {}", name, e))
     }
-
 
     pub fn get_array3(&self, name: &str) -> Result<Array3<f32>> {
         let typed = self.get_typed_tensor(name)?;

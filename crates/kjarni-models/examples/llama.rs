@@ -6,6 +6,7 @@ use kjarni_transformers::stats::GenerationStats;
 use kjarni_transformers::{Device, ModelType, WgpuContext};
 use std::io;
 use std::io::Write;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -84,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         Some(d),
         Some(ModelType::Llama3_2_3B_Instruct),
     )?;
-    let generator_cpu = DecoderGenerator::new(Box::new(model_cpu))?;
+    let generator_cpu = DecoderGenerator::new(Arc::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config, None).await?;
     futures_util::pin_mut!(stream_cpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {

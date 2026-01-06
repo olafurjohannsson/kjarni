@@ -119,6 +119,7 @@ impl ModelConfig for BartConfig {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            decoder_layers: Some(self.decoder_layers),
         }
     }
 

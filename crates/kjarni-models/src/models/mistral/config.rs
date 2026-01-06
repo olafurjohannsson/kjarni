@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 // --- Helper Deserializers (Standard) ---
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     struct TokenIdVisitor;
     impl<'de> Visitor<'de> for TokenIdVisitor {
         type Value = u32;
@@ -32,7 +34,9 @@ where D: Deserializer<'de> {
 }
 
 fn deserialize_token_ids<'de, D>(deserializer: D) -> Result<Vec<u32>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     struct TokenIdsVisitor;
     impl<'de> Visitor<'de> for TokenIdsVisitor {
         type Value = Vec<u32>;
@@ -84,7 +88,7 @@ pub struct MistralConfig {
     pub architectures: Vec<String>,
     #[serde(default)]
     pub model_type: String,
-    
+
     #[serde(default)] // Mistral usually No Bias
     pub attention_bias: bool,
     #[serde(default = "default_true")]
@@ -100,7 +104,7 @@ impl MistralConfig {
         if loader.has_metadata() {
             // Mistral GGUF uses "llama" architecture keys usually
             let arch = loader.get_string("general.architecture").unwrap_or("llama");
-            
+
             let get_u32 = |k: &str| loader.get_u32(&format!("{}.{}", arch, k));
             let get_f32 = |k: &str| loader.get_f32(&format!("{}.{}", arch, k));
 
@@ -126,21 +130,21 @@ impl MistralConfig {
                 intermediate_size: get_u32("feed_forward_length").unwrap_or(14336) as usize, // Mistral 7B default
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(32000) as usize,
                 // Mistral 0.3 is 32k, 0.1 is 32k/4k
-                max_position_embeddings: get_u32("context_length").unwrap_or(32768) as usize, 
+                max_position_embeddings: get_u32("context_length").unwrap_or(32768) as usize,
                 rms_norm_eps: get_f32("attention.layer_norm_rms_epsilon").unwrap_or(1e-5),
                 hidden_act: loader.get_string(&format!("{}.feed_forward_activation", arch)).unwrap_or("silu").to_string(),
-                
+
                 // Mistral v0.1 was 10000.0, v0.3 often 1000000.0
                 rope_theta: Some(get_f32("rope.freq_base").unwrap_or(1000000.0)), // Default for v0.3
                 rope_scaling,
-                
+
                 sliding_window: get_u32("attention.sliding_window").map(|v| v as usize),
                 head_dim: get_u32("attention.head_dim").map(|v| v as usize),
-                
+
                 bos_token_id: 1, // Mistral standard
                 eos_token_id: vec![2],
                 pad_token_id: None,
-                
+
                 architectures: vec!["MistralForCausalLM".to_string()],
                 model_type: "mistral".to_string(),
                 attention_bias: false,
@@ -177,6 +181,7 @@ impl ModelConfig for MistralConfig {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
+            decoder_layers: None,
         }
     }
 

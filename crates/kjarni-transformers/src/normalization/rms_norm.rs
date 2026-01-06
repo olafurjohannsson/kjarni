@@ -10,7 +10,7 @@
 
 use ndarray::{Array1, Array2, Array3, Axis};
 
-use crate::kernels::x86::rms_norm::rms_norm_avx2;
+use crate::cpu::kernels::x86::rms_norm::rms_norm_avx2;
 
 /// Root Mean Square Layer Normalization
 ///
@@ -140,7 +140,7 @@ impl RMSNormSIMD {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
-    use ndarray::{Array3, array};
+    use ndarray::{array, Array3};
 
     /// Helper function to compare two 3D tensors for approximate equality.
     fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
@@ -217,11 +217,7 @@ mod tests {
 
         for ((b, s, h), &v_ref) in y_scalar.indexed_iter() {
             let v_simd = y_simd[(b, s, h)];
-            assert_abs_diff_eq!(
-                v_ref,
-                v_simd,
-                epsilon = 1e-5
-            );
+            assert_abs_diff_eq!(v_ref, v_simd, epsilon = 1e-5);
         }
     }
 
@@ -376,7 +372,7 @@ mod tests {
                 7.0, 8.0, // batch 1, pos 1
             ],
         )
-        .unwrap();
+            .unwrap();
 
         let output = rms_norm.forward_3d(&hidden);
 

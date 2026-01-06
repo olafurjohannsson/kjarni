@@ -132,7 +132,7 @@ impl QwenConfig {
         if loader.has_metadata() {
             // GGUF usually stores Qwen2 metadata under "qwen2"
             let arch = loader.get_string("general.architecture").unwrap_or("qwen2");
-            
+
             // Helper to handle both "qwen2.key" and "llama.key" (some converters map it)
             let get_val = |k: &str| {
                 loader.get_u32(&format!("{}.{}", arch, k))
@@ -214,6 +214,7 @@ impl ModelConfig for QwenConfig {
             transpose_attention_weights: false,
             normalization_strategy: kjarni_transformers::traits::NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
+            decoder_layers: None,
         }
     }
 
@@ -224,18 +225,18 @@ impl ModelConfig for QwenConfig {
                 q_weight: "model.layers.{}.self_attn.q_proj.weight".to_string(),
                 // Qwen HAS Bias
                 q_bias: Some("model.layers.{}.self_attn.q_proj.bias".to_string()),
-                
+
                 k_weight: "model.layers.{}.self_attn.k_proj.weight".to_string(),
                 k_bias: Some("model.layers.{}.self_attn.k_proj.bias".to_string()),
-                
+
                 v_weight: "model.layers.{}.self_attn.v_proj.weight".to_string(),
                 v_bias: Some("model.layers.{}.self_attn.v_proj.bias".to_string()),
-                
+
                 o_weight: "model.layers.{}.self_attn.o_proj.weight".to_string(),
                 // Qwen output projection usually does NOT have bias, but we check anyway.
                 // If it's missing in GGUF, loader handles it.
-                o_bias: None, 
-                
+                o_bias: None,
+
                 norm_weight: "model.layers.{}.input_layernorm.weight".to_string(),
                 norm_bias: None,
             },
@@ -259,7 +260,7 @@ impl ModelConfig for QwenConfig {
             } else {
                 "lm_head.weight"
             }
-            .to_string(),
+                .to_string(),
             encoder: None,
             decoder: Some(DecoderLayout {
                 position_embedding: None,

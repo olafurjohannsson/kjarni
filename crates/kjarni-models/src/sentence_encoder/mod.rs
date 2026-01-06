@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokenizers::{Model, Tokenizer};
 
 use kjarni_transformers::{
-    encoder::{
+    cpu::encoder::{
         config::{EncodingConfig, PoolingStrategy}, traits::{
             CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps,
             SentenceEncoderModel,

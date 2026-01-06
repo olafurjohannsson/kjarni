@@ -61,53 +61,54 @@ pub unsafe fn rotate_half_avx2(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     debug_assert_eq!(cos.len(), head_dim);
     debug_assert_eq!(sin.len(), head_dim);
     debug_assert!(head_dim % 2 == 0);
+    unsafe {
+        let x0_ptr = x.as_ptr();
+        let x1_ptr = x.as_ptr().add(half_dim);
+        let out0_ptr = x.as_mut_ptr();
+        let out1_ptr = x.as_mut_ptr().add(half_dim);
 
-    let x0_ptr = x.as_ptr();
-    let x1_ptr = x.as_ptr().add(half_dim);
-    let out0_ptr = x.as_mut_ptr();
-    let out1_ptr = x.as_mut_ptr().add(half_dim);
+        // Process 8 elements at a time
+        let simd_iterations = half_dim / 8;
+        let remainder = half_dim % 8;
 
-    // Process 8 elements at a time
-    let simd_iterations = half_dim / 8;
-    let remainder = half_dim % 8;
+        for i in 0..simd_iterations {
+            let offset = i * 8;
 
-    for i in 0..simd_iterations {
-        let offset = i * 8;
+            // Load x[0:half] and x[half:end]
+            let x0 = _mm256_loadu_ps(x0_ptr.add(offset));
+            let x1 = _mm256_loadu_ps(x1_ptr.add(offset));
 
-        // Load x[0:half] and x[half:end]
-        let x0 = _mm256_loadu_ps(x0_ptr.add(offset));
-        let x1 = _mm256_loadu_ps(x1_ptr.add(offset));
+            // Load cos and sin (first half only, same values mirrored in cache)
+            let cos_vec = _mm256_loadu_ps(cos.as_ptr().add(offset));
+            let sin_vec = _mm256_loadu_ps(sin.as_ptr().add(offset));
 
-        // Load cos and sin (first half only, same values mirrored in cache)
-        let cos_vec = _mm256_loadu_ps(cos.as_ptr().add(offset));
-        let sin_vec = _mm256_loadu_ps(sin.as_ptr().add(offset));
+            // Compute rotations using FMA:
+            // out0 = x0 * cos - x1 * sin = fmsub(x0, cos, x1 * sin)
+            // out1 = x0 * sin + x1 * cos = fmadd(x0, sin, x1 * cos)
+            let x1_sin = _mm256_mul_ps(x1, sin_vec);
+            let out0 = _mm256_fmsub_ps(x0, cos_vec, x1_sin);
 
-        // Compute rotations using FMA:
-        // out0 = x0 * cos - x1 * sin = fmsub(x0, cos, x1 * sin)
-        // out1 = x0 * sin + x1 * cos = fmadd(x0, sin, x1 * cos)
-        let x1_sin = _mm256_mul_ps(x1, sin_vec);
-        let out0 = _mm256_fmsub_ps(x0, cos_vec, x1_sin);
+            let x1_cos = _mm256_mul_ps(x1, cos_vec);
+            let out1 = _mm256_fmadd_ps(x0, sin_vec, x1_cos);
 
-        let x1_cos = _mm256_mul_ps(x1, cos_vec);
-        let out1 = _mm256_fmadd_ps(x0, sin_vec, x1_cos);
+            // Store results
+            _mm256_storeu_ps(out0_ptr.add(offset), out0);
+            _mm256_storeu_ps(out1_ptr.add(offset), out1);
+        }
 
-        // Store results
-        _mm256_storeu_ps(out0_ptr.add(offset), out0);
-        _mm256_storeu_ps(out1_ptr.add(offset), out1);
-    }
+        // Handle remainder (if half_dim not divisible by 8)
+        if remainder > 0 {
+            let offset = simd_iterations * 8;
+            for i in 0..remainder {
+                let idx = offset + i;
+                let x0_val = *x0_ptr.add(idx);
+                let x1_val = *x1_ptr.add(idx);
+                let cos_val = cos[idx];
+                let sin_val = sin[idx];
 
-    // Handle remainder (if half_dim not divisible by 8)
-    if remainder > 0 {
-        let offset = simd_iterations * 8;
-        for i in 0..remainder {
-            let idx = offset + i;
-            let x0_val = *x0_ptr.add(idx);
-            let x1_val = *x1_ptr.add(idx);
-            let cos_val = cos[idx];
-            let sin_val = sin[idx];
-
-            *out0_ptr.add(idx) = x0_val * cos_val - x1_val * sin_val;
-            *out1_ptr.add(idx) = x0_val * sin_val + x1_val * cos_val;
+                *out0_ptr.add(idx) = x0_val * cos_val - x1_val * sin_val;
+                *out1_ptr.add(idx) = x0_val * sin_val + x1_val * cos_val;
+            }
         }
     }
 }
@@ -139,7 +140,7 @@ pub unsafe fn rotate_4d_avx2(
     cache_stride: usize,  // = head_dim (row stride in cache)
     position_offset: usize,
 ) {
-    let half_dim = head_dim / 2;
+    let _half_dim = head_dim / 2;
 
     // x is [batch, heads, seq, head_dim] in row-major
     // Stride calculations

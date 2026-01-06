@@ -48,7 +48,7 @@
 use anyhow::Result;
 use ndarray::{Array2, Axis};
 
-use crate::kernels::q_common::{BlockQ8_0, BlockQ8_K, QK_K};
+use crate::cpu::kernels::q_common::{BlockQ8_0, BlockQ8_K, QK_K};
 
 /// Block size for Q8_0 quantization (32 int8 values per block).
 const Q8_0_BLOCK_SIZE: usize = 32;

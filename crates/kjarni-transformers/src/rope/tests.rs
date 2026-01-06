@@ -1,5 +1,5 @@
 use super::*;
-
+use ndarray::s;
 use ndarray::{Array3, Array4};
 /// Helper function to compare two 4D tensors for approximate equality.
 fn assert_tensors_approx_equal(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {

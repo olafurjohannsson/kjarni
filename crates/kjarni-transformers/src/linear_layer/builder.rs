@@ -41,7 +41,7 @@ use crate::{
     tensor::{CpuTensor, DType, QuantizedMatrix},
     weights::ModelWeights,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use half::bf16;
 use ndarray::{Array2, Ix1, Ix2};
 use std::borrow::Cow;
@@ -280,7 +280,7 @@ impl<'a> LinearLayerBuilder<'a> {
             // === Quantization: F32 -> Q8_0 (expensive, ~4x memory savings) ===
             (CpuTensor::F32(arr), DType::Q8_0) => {
                 let w = arr.into_dimensionality::<Ix2>()?;
-                let blocks = crate::kernels::quantize::quantize_matrix_q8_0(&w)?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w)?;
                 LinearData::Q8_0(QuantizedMatrix {
                     blocks,
                     shape: array2_shape(&w),
@@ -292,7 +292,7 @@ impl<'a> LinearLayerBuilder<'a> {
                 let w = arr.into_dimensionality::<Ix2>()?;
                 // Must convert to F32 first since quantization kernels expect F32 input
                 let w_f32 = w.mapv(|v| v.to_f32());
-                let blocks = crate::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
                 LinearData::Q8_0(QuantizedMatrix {
                     blocks,
                     shape: array2_shape(&w),
@@ -349,7 +349,6 @@ mod tests {
     use safetensors::serialize;
     use safetensors::tensor::{Dtype, TensorView};
     use std::io::Write;
-    use tempfile::NamedTempFile;
 
     // Helper to create a temporary safetensors file with dummy weights
     fn create_dummy_weights_file() -> (tempfile::TempDir, ModelWeights) {

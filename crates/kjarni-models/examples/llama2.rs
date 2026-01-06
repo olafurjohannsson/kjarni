@@ -1,18 +1,14 @@
 use anyhow::{anyhow, Result};
 use ndarray::{s, Array2, ArrayView1};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 
-// --- ASSUMPTIONS: Adjust these `use` statements to match your library's structure ---
-use kjarni_transformers::weights::WeightLoader;
+use kjarni_transformers::cpu::kernels::dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block};
+use kjarni_transformers::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
+use kjarni_transformers::tensor::{DType, TensorView};
 use kjarni_transformers::weights::gguf_loader::{GgufHfMapper, GgufLoader};
 use kjarni_transformers::weights::safetensors_loader::SafeTensorsLoader;
-use kjarni_transformers::tensor::{DType, TensorView};
-use kjarni_transformers::kernels::dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block};
-use kjarni_transformers::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0, QK_K};
-use safetensors::{Dtype as SafetensorDtype, SafeTensors};
+// --- ASSUMPTIONS: Adjust these `use` statements to match your library's structure ---
+use kjarni_transformers::weights::WeightLoader;
 
 // --- CONFIGURATION ---
 // Set the model you want to inspect here
@@ -33,7 +29,6 @@ fn main() -> Result<()> {
     println!("\n[1] Loading models...");
     let gguf_loader = GgufLoader::new(&Path::new(&format!(
         "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-
     )))?;
     println!("  ✓ GGUF loaded");
 
@@ -59,17 +54,23 @@ fn main() -> Result<()> {
             Some(name) => name,
             None => continue,
         };
-        
+
         print!(" - Analyzing '{: <40}'... ", gguf_name);
 
         let ground_truth = match to_f32_array2(&st_loader.get_raw(&hf_name)?) {
             Ok(t) => t,
-            Err(_) => { println!("SKIPPED (unsupported dtype)."); continue; }
+            Err(_) => {
+                println!("SKIPPED (unsupported dtype).");
+                continue;
+            }
         };
-        
+
         let gguf_raw_f32 = match dequantize_tensor(&raw_gguf_view) {
             Ok(t) => t,
-            Err(_) => { println!("SKIPPED (dequant failed)."); continue; }
+            Err(_) => {
+                println!("SKIPPED (dequant failed).");
+                continue;
+            }
         };
 
         let is_qk = is_qk_tensor(&gguf_name);
@@ -78,7 +79,7 @@ fn main() -> Result<()> {
         } else { 0 };
 
         let (layout, confidence) = analyze_tensor_layout_full(&ground_truth, &gguf_raw_f32, is_qk, n_head);
-        
+
         let status = match layout {
             LayoutType::DirectMatch => "✓ direct match",
             LayoutType::Interleaved => "✓ interleaved",
@@ -169,10 +170,7 @@ fn analyze_tensor_layout_full(
     let interleaved_conf = interleaved_matches as f32 / rows as f32;
     let permuted_conf = permuted_matches as f32 / rows as f32;
 
-    if direct_conf > 0.99 { (LayoutType::DirectMatch, direct_conf) }
-    else if interleaved_conf > 0.99 { (LayoutType::Interleaved, interleaved_conf) }
-    else if permuted_conf > 0.99 { (LayoutType::Permuted, permuted_conf) }
-    else { (LayoutType::Unknown, 0.0) }
+    if direct_conf > 0.99 { (LayoutType::DirectMatch, direct_conf) } else if interleaved_conf > 0.99 { (LayoutType::Interleaved, interleaved_conf) } else if permuted_conf > 0.99 { (LayoutType::Permuted, permuted_conf) } else { (LayoutType::Unknown, 0.0) }
 }
 
 /// Computes similarity between two vectors, accounting for quantization noise.

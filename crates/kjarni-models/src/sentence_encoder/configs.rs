@@ -15,45 +15,45 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Deserialize)]
 pub struct BertConfig {
     // --- Aliases handle Nomic-BERT's variable names ---
-    #[serde(alias = "n_embd")] 
+    #[serde(alias = "n_embd")]
     pub hidden_size: usize,
-    
+
     #[serde(alias = "n_layer")]
     pub num_hidden_layers: usize,
-    
+
     #[serde(alias = "n_head")]
     pub num_attention_heads: usize,
-    
+
     #[serde(alias = "n_inner")]
     pub intermediate_size: usize,
-    
+
     #[serde(alias = "hidden_act")]
     pub activation_function: Option<String>,
-    
+
     // --- FIX: Separate fields to avoid "duplicate field" error ---
     // Standard BERT
     pub max_position_embeddings: Option<usize>,
     // Nomic / Mosaic BERT
     pub n_positions: Option<usize>,
-    
+
     pub vocab_size: usize,
-    
+
     #[serde(alias = "layer_norm_epsilon")]
     pub layer_norm_eps: f32,
-    
+
     #[serde(default)]
     pub type_vocab_size: usize,
-    
+
     // --- Nomic Specifics ---
     pub model_type: Option<String>, // "bert" or "nomic_bert"
-    
+
     #[serde(alias = "rotary_emb_fraction")]
     pub rotary_embedding_fraction: Option<f32>,
     #[serde(alias = "rotary_emb_base")]
     pub rotary_embedding_base: Option<f32>,
-    
-    #[serde(default = "default_true")] 
-    pub qkv_proj_bias: bool, 
+
+    #[serde(default = "default_true")]
+    pub qkv_proj_bias: bool,
     #[serde(default = "default_true")]
     pub mlp_fc1_bias: bool,
     #[serde(default = "default_true")]
@@ -82,15 +82,15 @@ impl BertConfig {
                 activation_function: Some(loader.get_string(&format!("{}.feed_forward_activation", arch)).unwrap_or("gelu").to_string()),
                 // GGUF provides 'context_length', map it to standard field
                 max_position_embeddings: Some(get_u32("context_length").unwrap_or(2048) as usize),
-                n_positions: None, 
+                n_positions: None,
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(30522) as usize,
                 layer_norm_eps: get_f32("attention.layer_norm_epsilon").unwrap_or(1e-12),
-                type_vocab_size: 2, 
+                type_vocab_size: 2,
                 model_type: Some(arch.to_string()),
                 rotary_embedding_fraction: get_f32("rope.freq_scale").or(None),
                 rotary_embedding_base: get_f32("rope.freq_base").or(None),
                 qkv_proj_bias: get_f32("attention.qkv_bias").unwrap_or(1.0) > 0.0,
-                mlp_fc1_bias: true, 
+                mlp_fc1_bias: true,
                 mlp_fc2_bias: true,
             }))
         } else {
@@ -98,7 +98,7 @@ impl BertConfig {
             Ok(Arc::new(Self::from_json(json_str)?))
         }
     }
-    
+
     fn is_nomic(&self) -> bool {
         self.model_type.as_deref() == Some("nomic_bert")
     }
@@ -112,13 +112,13 @@ impl BertConfig {
 }
 
 impl ModelConfig for BertConfig {
-    fn model_type(&self) -> &str { 
+    fn model_type(&self) -> &str {
         if self.is_nomic() { "nomic_bert" } else { "bert" }
     }
 
     fn metadata(&self) -> ModelMetadata {
         // Nomic sets rotary_emb_fraction (usually 1.0) if enabled
-        let uses_rope = self.rotary_embedding_fraction.is_some() 
+        let uses_rope = self.rotary_embedding_fraction.is_some()
             || self.rotary_embedding_base.is_some();
 
         let rope_theta = if uses_rope {
@@ -144,14 +144,14 @@ impl ModelConfig for BertConfig {
                 Some("relu") => Activation::Relu,
                 _ => Activation::Gelu,
             },
-            
-            rope_theta, 
-            rope_scaling: None, 
-            
+            decoder_layers: None,
+            rope_theta,
+            rope_scaling: None,
+
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: false, 
+            is_prenorm: false,
             // Nomic (SwiGlu) weights usually match LinearLayer expectation better
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
@@ -162,35 +162,38 @@ impl ModelConfig for BertConfig {
 
     fn layout(&self) -> ModelLayout {
         if self.is_nomic() {
-            let prefix = "encoder.layers.{}"; 
-            
+            let prefix = "encoder.layers.{}";
+
             let encoder_layer = EncoderLayerLayout {
                 self_attn: AttentionLayout {
                     // GPT-2 Style: Point all to the fused tensor.
                     // The loader will detect this and slice.
-                    q_weight: format!("{}.attn.Wqkv.weight", prefix), 
+                    q_weight: format!("{}.attn.Wqkv.weight", prefix),
                     // Pointing K/V to the same file signals "It's fused"
                     k_weight: format!("{}.attn.Wqkv.weight", prefix),
                     v_weight: format!("{}.attn.Wqkv.weight", prefix),
-                    
+
                     // Nomic has NO bias for QKV
-                    q_bias: None, k_bias: None, v_bias: None,
-                    
+                    q_bias: None,
+                    k_bias: None,
+                    v_bias: None,
+
                     o_weight: format!("{}.attn.out_proj.weight", prefix),
                     o_bias: None, // Verified from your list: no bias for out_proj
-                    
+
                     norm_weight: format!("{}.norm1.weight", prefix),
                     norm_bias: Some(format!("{}.norm1.bias", prefix)),
                 },
                 ffn: FeedForwardLayout {
                     // SwiGLU: fc11 = Gate, fc12 = Up (Standard split)
                     gate_weight: Some(format!("{}.mlp.fc11.weight", prefix)),
-                    up_weight:   format!("{}.mlp.fc12.weight", prefix),
+                    up_weight: format!("{}.mlp.fc12.weight", prefix),
                     down_weight: format!("{}.mlp.fc2.weight", prefix),
-                    
-                    up_bias: None, down_bias: None, 
+
+                    up_bias: None,
+                    down_bias: None,
                     gate_bias: None,
-                    
+
                     norm_weight: format!("{}.norm2.weight", prefix),
                     norm_bias: Some(format!("{}.norm2.bias", prefix)),
                 },
@@ -198,9 +201,9 @@ impl ModelConfig for BertConfig {
 
             ModelLayout {
                 token_embedding: "embeddings.word_embeddings.weight".to_string(),
-                lm_head: "embeddings.word_embeddings.weight".to_string(), 
+                lm_head: "embeddings.word_embeddings.weight".to_string(),
                 encoder: Some(EncoderLayout {
-                    position_embedding: None, 
+                    position_embedding: None,
                     token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
                     embedding_norm_weight: Some("emb_ln.weight".to_string()), // Updated key
                     embedding_norm_bias: Some("emb_ln.bias".to_string()),     // Updated key
@@ -298,6 +301,7 @@ impl ModelConfig for MpnetConfig {
             norm_eps: self.layer_norm_eps,
             activation: Activation::GeluNew,
             rope_theta: None,
+            decoder_layers: None,
             rope_scaling: None,
             scale_embeddings: false,
             normalize_embedding: false,
@@ -413,6 +417,7 @@ impl ModelConfig for DistilBertConfig {
             activation: Activation::Gelu,
             rope_theta: None,
             rope_scaling: None,
+            decoder_layers: None,
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,

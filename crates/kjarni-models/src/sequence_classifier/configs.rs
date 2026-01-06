@@ -74,6 +74,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
                 "gelu_new" => Activation::GeluNew,
                 _ => Activation::Gelu, // BERT default
             },
+            decoder_layers: None,
             rope_theta: None,
             rope_scaling: None,
             scale_embeddings: false,

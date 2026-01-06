@@ -10,11 +10,11 @@ pub mod raw_tensor;
 pub use dtype::DType;
 pub use raw_tensor::TensorView;
 
-use crate::kernels::{
-    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block},
+    q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, Ix1, Ix2};
 
@@ -81,7 +81,10 @@ impl CpuTensor {
     }
 
     pub fn is_quantized(&self) -> bool {
-        matches!(self, CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q6_K(_))
+        matches!(
+            self,
+            CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q6_K(_)
+        )
     }
 
     /// Returns the shape of the tensor.

@@ -2,7 +2,19 @@ use crate::models::bart::config::BartConfig;
 use anyhow::Result;
 use async_trait::async_trait;
 use kjarni_transformers::{
-    Normalization, WgpuContext, activations::Activation, embeddings::Embeddings, encoder::{encoder_layer::EncoderLayer, prelude::*}, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelLoadConfig, normalization::{LayerNorm, RMSNorm}, traits::{Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy}, utils::linear_algebra::{apply_attention_mask, matmul_4d}, weights::ModelWeights
+    activations::Activation, cpu::encoder::{encoder_layer::EncoderLayer, prelude::*},
+    embeddings::Embeddings,
+    encoder_decoder::traits::CpuCrossDecoder,
+    feedforward::{FeedForward, StdFeedForward},
+    linear_layer::LinearLayer,
+    models::base::ModelLoadConfig,
+    normalization::{LayerNorm, RMSNorm},
+    traits::{
+        Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
+    },
+    weights::ModelWeights,
+    Normalization,
+    WgpuContext,
 };
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
@@ -80,18 +92,19 @@ impl BartCpuEncoder {
                 out_proj,
             );
 
-            let self_attn_layer_norm = if meta.normalization_strategy == NormalizationStrategy::RMSNorm {
-                Normalization::RMSNorm(RMSNorm::new(
-                    weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
-                    config.layer_norm_eps,
-                ))
-            } else {
-                Normalization::LayerNorm(LayerNorm::new(
-                    weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
-                    weights.get_array1(&format!("{}.self_attn_layer_norm.bias", prefix))?,
-                    config.layer_norm_eps,
-                ))
-            };
+            let self_attn_layer_norm =
+                if meta.normalization_strategy == NormalizationStrategy::RMSNorm {
+                    Normalization::RMSNorm(RMSNorm::new(
+                        weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
+                        config.layer_norm_eps,
+                    ))
+                } else {
+                    Normalization::LayerNorm(LayerNorm::new(
+                        weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
+                        weights.get_array1(&format!("{}.self_attn_layer_norm.bias", prefix))?,
+                        config.layer_norm_eps,
+                    ))
+                };
 
             let fc1 = weights.get_array2(&format!("{}.fc1.weight", prefix))?;
             let fc2 = weights.get_array2(&format!("{}.fc2.weight", prefix))?;
@@ -116,7 +129,6 @@ impl BartCpuEncoder {
                     config.layer_norm_eps,
                 ))
             };
-
 
             layers.push(EncoderLayer {
                 self_attn,
@@ -156,8 +168,8 @@ impl CpuEncoder for BartCpuEncoder {
 
     /// Compute embeddings only (word + position + token_type)
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
-        
-        self.embeddings.forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
+        self.embeddings
+            .forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
     }
 
     /// Compute embeddings + initial normalization

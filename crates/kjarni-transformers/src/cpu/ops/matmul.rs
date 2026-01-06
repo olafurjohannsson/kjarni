@@ -56,8 +56,8 @@
 //! - [`crate::linear_layer::LinearLayer`] — High-level wrapper using these functions.
 
 #[cfg(target_arch = "x86_64")]
-use crate::kernels::q_common::BlockQ6_K;
-use crate::kernels::{
+use crate::cpu::kernels::q_common::BlockQ6_K;
+use crate::cpu::kernels::{
     self,
     q_common::{BlockQ4_K, BlockQ8_0, QK_K},
     quantize::quantize_row_q8_k,
@@ -144,7 +144,12 @@ pub fn matmul_2d_cpu_q8_0(a: &ArrayView2<f32>, b_weights: &[BlockQ8_0]) -> Array
                         );
                     }
                     // Fallback to portable scalar implementation
-                    kernels::scalar::matmul_vec_q8_0_scalar(out_chunk, a_slice, b_blocks_chunk, k);
+                    kernels::scalar::matmul_vec_q8_0_scalar(
+                        out_chunk,
+                        a_slice,
+                        b_blocks_chunk,
+                        k,
+                    );
                 }
             });
     } else {

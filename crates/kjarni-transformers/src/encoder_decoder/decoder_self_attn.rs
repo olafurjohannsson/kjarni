@@ -33,7 +33,9 @@
 //! ```
 
 use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d, matmul_4d_context, matmul_4d_decode, softmax_inplace};
+use crate::utils::linear_algebra::{
+    apply_attention_mask, matmul_4d, matmul_4d_context, matmul_4d_decode, softmax_inplace,
+};
 use crate::utils::masks::apply_causal_mask;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3, Axis};
@@ -83,6 +85,8 @@ pub struct DecoderSelfAttention {
     pub head_dim: usize,
     /// Scaling factor: 1 / sqrt(head_dim).
     pub scale_factor: f32,
+    /// If scale_qk
+    pub scale_qk: bool,
 }
 
 impl DecoderSelfAttention {
@@ -119,7 +123,7 @@ impl DecoderSelfAttention {
         o: LinearLayer,
     ) -> Self {
         let head_dim = hidden_size / num_heads;
-        
+
         Self {
             q_proj: q,
             k_proj: k,
@@ -128,9 +132,14 @@ impl DecoderSelfAttention {
             num_heads,
             head_dim,
             scale_factor: 1.0 / (head_dim as f32).sqrt(),
+            scale_qk: true,
         }
     }
 
+    pub fn with_no_qk_scaling(mut self) -> Self {
+        self.scale_qk = false;
+        self
+    }
     /// Performs the forward pass of decoder self-attention.
     ///
     /// # Arguments
@@ -164,6 +173,7 @@ impl DecoderSelfAttention {
         hidden_states: &Array3<f32>,
         attention_mask: Option<&Array2<f32>>,
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
+        position_bias: Option<&Array4<f32>>,
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
         let (batch, seq_len, _) = hidden_states.dim();
         let hidden_size = self.num_heads * self.head_dim;
@@ -219,7 +229,14 @@ impl DecoderSelfAttention {
         };
 
         // Scale
-        scores.mapv_inplace(|x| x * self.scale_factor);
+        if self.scale_qk {
+            scores.mapv_inplace(|x| x * self.scale_factor);
+        }
+
+        // apply relative position bias
+        if let Some(bias) = position_bias {
+            scores += bias;
+        }
 
         // Apply padding mask
         if let Some(mask) = attention_mask {

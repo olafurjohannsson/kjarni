@@ -9,18 +9,19 @@ pub mod activations;
 pub mod attention;
 pub mod cache;
 pub mod chat;
+pub mod cpu;
 pub mod common;
 pub mod decoder;
 pub mod embeddings;
-pub mod encoder;
+
 pub mod encoder_decoder;
 pub mod feedforward;
 pub mod gpu_ops;
-pub mod kernels;
+
 pub mod linear_layer;
 pub mod models;
 pub mod normalization;
-pub mod ops;
+
 pub mod pooling;
 pub mod rope;
 pub mod tensor;
@@ -42,8 +43,8 @@ pub use crate::{
     feedforward::FeedForward,
     lm_head::{LMHeadConfig, LoadedLMHead},
     normalization::Normalization,
-    pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
+    pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
 };
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_ops::context::WgpuContext;
@@ -62,3 +63,4 @@ pub mod prelude {
 
 #[cfg(test)]
 pub mod tests;
+

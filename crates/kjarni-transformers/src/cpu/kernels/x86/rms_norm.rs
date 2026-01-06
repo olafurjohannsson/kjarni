@@ -1,6 +1,6 @@
 use std::arch::x86_64::*;
 
-use crate::kernels::x86::common::hsum_ps_avx;
+use crate::cpu::kernels::x86::common::hsum_ps_avx;
 
 /// RMS Norm optimized for AVX2.
 ///
@@ -79,16 +79,12 @@ mod tests {
         let epsilon = 1e-6;
 
         // Input vector with non-trivial values
-        let mut x_scalar: Vec<f32> = (0..len)
-            .map(|i| (i as f32 * 0.01) - 1.3)
-            .collect();
+        let mut x_scalar: Vec<f32> = (0..len).map(|i| (i as f32 * 0.01) - 1.3).collect();
 
         let mut x_avx2 = x_scalar.clone();
 
         // Weight vector
-        let w: Vec<f32> = (0..len)
-            .map(|i| 1.0 + (i as f32 * 0.001))
-            .collect();
+        let w: Vec<f32> = (0..len).map(|i| 1.0 + (i as f32 * 0.001)).collect();
 
         // Scalar reference
         rms_norm_scalar(&mut x_scalar, &w, epsilon);
@@ -113,9 +109,7 @@ mod tests {
     /// Safe test entry point.
     #[test]
     fn test_rms_norm_avx2_matches_scalar() {
-        if std::is_x86_feature_detected!("avx2")
-            && std::is_x86_feature_detected!("fma")
-        {
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
                 run_rms_norm_avx2_vs_scalar();
             }

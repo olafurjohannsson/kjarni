@@ -1,4 +1,4 @@
-use crate::kernels::q_common::BlockQ6_K;
+use crate::cpu::kernels::q_common::BlockQ6_K;
 use std::arch::x86_64::*;
 
 /// Helper to horizontally sum an AVX register
@@ -147,7 +147,7 @@ pub unsafe fn matmul_vec_q6_k_avx2(
                                               s_b: __m256,
                                               a_off: usize,
                                               sum: __m256|
-                         -> __m256 {
+                                              -> __m256 {
                             // Split i8 into low/high 128 bits
                             let q_low128 = _mm256_castsi256_si128(q_i8);
                             let q_high128 = _mm256_extracti128_si256(q_i8, 1);

@@ -1,17 +1,17 @@
+use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use anyhow::{Result, anyhow};
 use tokenizers::Tokenizer;
 
 use crate::{
-    WgpuContext,
-    weights::ModelWeights,
-    traits::{ModelConfig, ModelMetadata, ModelLayout},
-    models::{ModelType, base::ModelLoadConfig, download_model_files, registry::WeightsFormat},
-    encoder::{CpuEncoder, GpuEncoder},
-    encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
-    pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
     common::HFGenerationDefaults,
+    cpu::encoder::{CpuEncoder, GpuEncoder},
+    encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
+    models::{base::ModelLoadConfig, download_model_files, registry::WeightsFormat, ModelType},
+    pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
+    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
+    WgpuContext,
 };
 
 /// Factory trait for Seq2Seq models (BART, T5, Whisper).
@@ -62,11 +62,7 @@ impl Seq2SeqLoader {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        download_model_files(
-            &model_dir, 
-            &info.paths, 
-            WeightsFormat::SafeTensors
-        ).await?;
+        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors).await?;
 
         let context = if device.is_gpu() && context.is_none() {
             Some(WgpuContext::new().await?)
@@ -113,12 +109,18 @@ impl Seq2SeqLoader {
             .build()?;
 
         // 4. Generation Defaults
-        let gen_defaults = if let Ok(json) = std::fs::read_to_string(model_path.join("generation_config.json")) {
-             HFGenerationDefaults::from_json(&json).ok()
-        } else {
-            None
-        };
+        let gen_defaults =
+            if let Ok(json) = std::fs::read_to_string(model_path.join("generation_config.json")) {
+                HFGenerationDefaults::from_json(&json).ok()
+            } else {
+                None
+            };
 
-        Ok(M::new_from_pipeline(pipeline, tokenizer, config, gen_defaults))
+        Ok(M::new_from_pipeline(
+            pipeline,
+            tokenizer,
+            config,
+            gen_defaults,
+        ))
     }
 }

@@ -3,16 +3,16 @@
 //! This encoder uses `ModelConfig` and `ModelLayout` to configure itself,
 //! and accepts `ModelInput` for flexible input handling.
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::sync::Arc;
 
+pub use super::config::{PositionEncodingType, Seq2SeqEncoderConfig};
+use crate::encoder_decoder::relative_position_bias::T5RelativePositionBias;
 use crate::{
-    Normalization, WgpuContext, embeddings::Embeddings, encoder::{encoder_layer::EncoderLayer, prelude::*}, gpu_ops::{GpuFrameContext, GpuTensor}, models::base::{ModelInput, ModelLoadConfig}, pipeline::Seq2SeqFactory, traits::{Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy}, weights::ModelWeights
+    cpu::encoder::{encoder_layer::EncoderLayer, prelude::*}, embeddings::Embeddings, models::base::{ModelInput, ModelLoadConfig}, pipeline::Seq2SeqFactory, traits::{Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy}, weights::ModelWeights, Normalization, WgpuContext,
 };
-
-pub use super::config::{Seq2SeqEncoderConfig, PositionEncodingType};
 
 // =============================================================================
 // Encoder Output
@@ -187,8 +187,8 @@ impl Seq2SeqCPUEncoder {
             PositionEncodingType::RelativeBias { num_buckets, max_distance } => {
                 let bias = T5RelativePositionBias::new(
                     weights,
-                    "encoder", // T5 prefix
-                    meta.num_attention_heads,
+                    "encoder",
+                    true, // Encoders ARE bidirectional
                     num_buckets,
                     max_distance,
                 )?;
@@ -231,7 +231,7 @@ impl Seq2SeqCPUEncoder {
             ModelInput::TokensCpu(tokens) => {
                 let embeddings = self.embeddings.as_ref()
                     .ok_or_else(|| anyhow!("No embeddings available for token input"))?;
-                
+
                 // Convert view to owned for embedding lookup
                 let tokens_owned = tokens.to_owned();
                 let e = embeddings.forward(&tokens_owned, None, self.position_offset(), false);
@@ -393,74 +393,6 @@ pub enum PositionEncoding {
     None,
 }
 
-/// T5-style relative position bias.
-pub struct T5RelativePositionBias {
-    embeddings: Array2<f32>,
-    num_buckets: usize,
-    max_distance: usize,
-}
-
-impl T5RelativePositionBias {
-    pub fn new(
-        weights: &ModelWeights,
-        prefix: &str,
-        num_heads: usize,
-        num_buckets: usize,
-        max_distance: usize,
-    ) -> Result<Self> {
-        // Try different naming conventions
-        let embeddings = weights
-            .get_array2(&format!("{}.block.0.layer.0.SelfAttention.relative_attention_bias.weight", prefix))
-            .or_else(|_| weights.get_array2(&format!("{}.layer.0.SelfAttention.relative_attention_bias.weight", prefix)))?;
-
-        Ok(Self {
-            embeddings,
-            num_buckets,
-            max_distance,
-        })
-    }
-
-    pub fn compute(&self, query_len: usize, key_len: usize) -> Result<Array4<f32>> {
-        let num_heads = self.embeddings.nrows();
-        let mut bias = Array4::<f32>::zeros((1, num_heads, query_len, key_len));
-
-        for q in 0..query_len {
-            for k in 0..key_len {
-                let relative_pos = k as i32 - q as i32;
-                let bucket = self.relative_position_bucket(relative_pos);
-
-                for h in 0..num_heads {
-                    bias[[0, h, q, k]] = self.embeddings[[h, bucket]];
-                }
-            }
-        }
-
-        Ok(bias)
-    }
-
-    fn relative_position_bucket(&self, relative_position: i32) -> usize {
-        let n = (-relative_position).max(0);
-        let max_exact = self.num_buckets / 2;
-        let is_small = n < max_exact as i32;
-
-        let bucket = if is_small {
-            n as usize
-        } else {
-            let val = ((n as f32 / max_exact as f32).ln()
-                / (self.max_distance as f32 / max_exact as f32).ln()
-                * (self.num_buckets - max_exact) as f32) as usize;
-            (max_exact + val).min(self.num_buckets - 1)
-        };
-
-        let final_bucket = if relative_position > 0 {
-            bucket + self.num_buckets / 2
-        } else {
-            bucket
-        };
-
-        final_bucket.min(self.num_buckets - 1)
-    }
-}
 
 /// Create sinusoidal position embeddings.
 fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {

@@ -9,9 +9,9 @@
 //! - Applied to Q and K, not V
 //! - Different rotation frequencies for different dimensions
 pub mod loader;
-use crate::kernels::x86::rope_avx2;
+use crate::cpu::kernels::x86::rope_avx2;
 use crate::models::base::RopeScalingConfig;
-use ndarray::{s, Array1, Array2, Array3, Array4};
+use ndarray::{Array1, Array2, Array3, Array4};
 use std::f32::consts::PI;
 
 /// Rotary Position Embeddings

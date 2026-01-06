@@ -1,17 +1,14 @@
 // In your main application or examples folder
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::io::Write;
+use std::sync::Arc;
 
-use kjarni_models::models::gpt2::Gpt2Model; // The new, refactored struct
+use kjarni_models::models::gpt2::Gpt2Model;
+// The new, refactored struct
 
-use kjarni_transformers::WgpuContext;
-use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
-use kjarni_transformers::{Device, ModelType};
-use kjarni_transformers::gpu_ops::GpuTensorPool;
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
-
+use kjarni_transformers::{Device, ModelType};
 
 
 #[tokio::main]
@@ -25,14 +22,14 @@ async fn main() -> anyhow::Result<()> {
         None, //Some(context.clone()), // No WGPU context needed for CPU
         None,
     )
-    .await?;
+        .await?;
 
     // // 2. Create the generic Generator, handing it the model.
     // let backend = GpuDecoderBackend::new(context.clone(), pool.clone())?;
-    
+
     // let backend_cpu = CpuDecoderBackend;
 
-    let generator_gpu = DecoderGenerator::new(Box::new(gpt2_model))?;
+    let generator_gpu = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
 
     // 3. Configure the generation parameters.
@@ -45,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";;
     println!("\n--- Streaming text ---");
-    
+
     let stream = generator_gpu.generate_stream(prompt, &config, None).await?;
 
     futures_util::pin_mut!(stream);

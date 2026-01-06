@@ -1,8 +1,11 @@
-use crate::kernels::quantize::quantize_matrix_q8_0;
-use crate::kernels::q_common::{BlockQ4_K, BlockQ6_K, QK_K};
-use crate::ops::matmul::{matmul_2d_cpu_f32, matmul_2d_cpu_bf16, matmul_2d_cpu_q4_k, matmul_2d_cpu_q6_k, matmul_2d_cpu_q8_0};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, QK_K};
+use crate::cpu::kernels::quantize::quantize_matrix_q8_0;
+use crate::cpu::ops::matmul::{
+    matmul_2d_cpu_bf16, matmul_2d_cpu_f32, matmul_2d_cpu_q4_k, matmul_2d_cpu_q6_k,
+    matmul_2d_cpu_q8_0,
+};
 use half::bf16;
-use ndarray::{Array2};
+use ndarray::Array2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -39,22 +42,43 @@ fn ground_truth_matmul(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
 }
 
 /// Asserts that two matrices are close within a given tolerance (RMSE).
-fn assert_matrices_close(actual: &Array2<f32>, expected: &Array2<f32>, tolerance: f32, label: &str) {
-    assert_eq!(actual.shape(), expected.shape(), "Shape mismatch in {}", label);
+fn assert_matrices_close(
+    actual: &Array2<f32>,
+    expected: &Array2<f32>,
+    tolerance: f32,
+    label: &str,
+) {
+    assert_eq!(
+        actual.shape(),
+        expected.shape(),
+        "Shape mismatch in {}",
+        label
+    );
 
     let diff = actual - expected;
     let mse = diff.mapv(|x| x.powi(2)).sum() / diff.len() as f32;
     let rmse = mse.sqrt();
 
     if rmse > tolerance {
-        println!("Failure in {}: RMSE {} > Tolerance {}", label, rmse, tolerance);
+        println!(
+            "Failure in {}: RMSE {} > Tolerance {}",
+            label, rmse, tolerance
+        );
         // Print sample of failures
         let mut count = 0;
         for ((idx, val_a), val_b) in actual.indexed_iter().zip(expected.iter()) {
             if (val_a - val_b).abs() > tolerance * 2.0 {
-                println!("  [{:?}] Actual: {:.5}, Expected: {:.5}, Diff: {:.5}", idx, val_a, val_b, (val_a - val_b).abs());
+                println!(
+                    "  [{:?}] Actual: {:.5}, Expected: {:.5}, Diff: {:.5}",
+                    idx,
+                    val_a,
+                    val_b,
+                    (val_a - val_b).abs()
+                );
                 count += 1;
-                if count > 10 { break; }
+                if count > 10 {
+                    break;
+                }
             }
         }
         panic!("Matrices not close enough");
@@ -133,11 +157,11 @@ fn test_matmul_bf16_correctness() {
     // Since BF16 truncates mantissa, we expect some precision loss compared to F32 math.
     // However, the kernel converts BF16->F32 before multiply, so it should be reasonably close
     // to the F32 result of the truncated weights.
-    
+
     // To generate a fair ground truth, we convert BF16 back to F32 and run ground truth on that.
     let b_reconstructed_vec: Vec<f32> = b_bf16.iter().map(|&x| x.to_f32()).collect();
     let b_reconstructed = Array2::from_shape_vec((n, k), b_reconstructed_vec).unwrap();
-    
+
     let expected = ground_truth_matmul(&a, &b_reconstructed);
 
     // Tolerance is higher due to BF16 precision
@@ -160,7 +184,7 @@ fn test_matmul_q8_0_full_pipeline() {
 
     // 1. Quantize weights
     let b_q8_0 = quantize_matrix_q8_0(&b_f32).expect("Quantization failed");
-    
+
     // 2. Run Quantized Matmul
     let actual = matmul_2d_cpu_q8_0(&a.view(), &b_q8_0);
 
@@ -193,11 +217,11 @@ fn test_matmul_q8_0_decode_path() {
 fn test_matmul_q8_0_alignment_panic() {
     let k = 33; // Not divisible by 32
     let a = random_matrix(1, k, 0);
-    
+
     // Create dummy blocks (size doesn't matter as it panics before reading)
-    let dummy_block = crate::kernels::q_common::BlockQ8_0 { 
-        d: half::f16::from_f32(1.0), 
-        qs: [0; 32] 
+    let dummy_block = crate::cpu::kernels::q_common::BlockQ8_0 {
+        d: half::f16::from_f32(1.0),
+        qs: [0; 32],
     };
     let b_weights = vec![dummy_block; 10]; // Arbitrary length
 
@@ -208,8 +232,8 @@ fn test_matmul_q8_0_alignment_panic() {
 //  K-Quant Plumbing Tests (Q4_K / Q6_K)
 // ========================================================================
 // Note: Since we don't have a `quantize_matrix_q4_k` or `q6_k` implementation
-// in the provided code (only Q8_0), we cannot strictly test numerical accuracy 
-// against a random matrix. 
+// in the provided code (only Q8_0), we cannot strictly test numerical accuracy
+// against a random matrix.
 // Instead, we test that the plumbing works (no crashes) using zeroed blocks.
 
 #[test]
@@ -217,9 +241,9 @@ fn test_matmul_q4_k_plumbing() {
     let m = 1;
     let k = 256; // QK_K
     let n = 10;
-    
+
     let a = random_matrix(m, k, 300);
-    
+
     // Create dummy Q4_K blocks
     let num_blocks = (n * k) / QK_K;
     let dummy_block = BlockQ4_K {
@@ -232,7 +256,7 @@ fn test_matmul_q4_k_plumbing() {
 
     // Should run without panic
     let output = matmul_2d_cpu_q4_k(&a.view(), &b_weights);
-    
+
     assert_eq!(output.shape(), &[m, n]);
     // Since weights are zero/dummy, result should be effectively meaningless but finite
     assert!(output.iter().all(|x| x.is_finite()));
@@ -243,9 +267,9 @@ fn test_matmul_q6_k_plumbing() {
     let m = 4; // Prefill path
     let k = 512; // 2 * QK_K
     let n = 10;
-    
+
     let a = random_matrix(m, k, 301);
-    
+
     // Create dummy Q6_K blocks
     let num_blocks = (n * k) / QK_K;
     let dummy_block = BlockQ6_K {
@@ -258,7 +282,7 @@ fn test_matmul_q6_k_plumbing() {
 
     // Should run without panic
     let output = matmul_2d_cpu_q6_k(&a.view(), &b_weights);
-    
+
     assert_eq!(output.shape(), &[m, n]);
     assert!(output.iter().all(|x| x.is_finite()));
 }
@@ -272,9 +296,7 @@ fn test_dimension_mismatches() {
     let a = random_matrix(1, 10, 0);
     let b = random_matrix(1, 11, 0); // K=11 != 10
 
-    let result = std::panic::catch_unwind(|| {
-        matmul_2d_cpu_f32(&a.view(), &b.view())
-    });
+    let result = std::panic::catch_unwind(|| matmul_2d_cpu_f32(&a.view(), &b.view()));
     assert!(result.is_err(), "Should panic on mismatched K dimension");
 }
 
@@ -283,7 +305,10 @@ fn test_zero_matrix() {
     // A * 0 = 0
     let a = random_matrix(2, 32, 50);
     let b = Array2::<f32>::zeros((4, 32));
-    
+
     let actual = matmul_2d_cpu_f32(&a.view(), &b.view());
-    assert!(actual.iter().all(|&x| x == 0.0), "Multiplication by zero matrix failed");
+    assert!(
+        actual.iter().all(|&x| x == 0.0),
+        "Multiplication by zero matrix failed"
+    );
 }

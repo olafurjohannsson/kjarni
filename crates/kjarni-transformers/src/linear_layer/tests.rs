@@ -1,9 +1,11 @@
-
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use half::bf16;
-use ndarray::{Array1, Array2, arr1, arr2};
+use ndarray::{arr1, arr2, Array1, Array2};
 
-use crate::{linear_layer::{F32MatmulStrategy, LinearData, LinearLayer}, tensor::DType};
+use crate::{
+    linear_layer::{F32MatmulStrategy, LinearData, LinearLayer},
+    tensor::DType,
+};
 
 // Helper to create a standard test layer
 fn create_f32_layer() -> LinearLayer {

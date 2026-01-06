@@ -1,4 +1,5 @@
 use crate::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
+use crate::Normalization;
 pub use crate::{
     attention::MultiHeadAttention,
     cache::CpuKVCache,
@@ -10,33 +11,75 @@ pub use crate::{
 };
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3};
-use std::time::Instant;
+
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,
 /// or an encoder-decoder's decoder layer.
-pub struct DecoderCrossAttentionLayer {
+/// Unified decoder layer with cross-attention.
+///
+/// Supports both pre-norm (T5, Whisper) and post-norm (BART) architectures.
+pub struct CrossDecoderLayer {
     // Self-Attention Components
     pub self_attn: DecoderSelfAttention,
-    pub self_attn_layer_norm: LayerNorm,
+    pub self_attn_layer_norm: Normalization,
+
     // Cross-Attention Components
     pub cross_attn: DecoderCrossAttention,
-    pub cross_attn_layer_norm: LayerNorm,
+    pub cross_attn_layer_norm: Normalization,
+
     // Feed-Forward Components
     pub feedforward: FeedForward,
-    pub ffn_layer_norm: LayerNorm,
+    pub ffn_layer_norm: Normalization,
+
+    // Architecture flags
+    pub pre_norm: bool,
 }
 
-// Add this import
+impl CrossDecoderLayer {
+    /// Create a new decoder layer.
+    pub fn new(
+        self_attn: DecoderSelfAttention,
+        self_attn_layer_norm: Normalization,
+        cross_attn: DecoderCrossAttention,
+        cross_attn_layer_norm: Normalization,
+        feedforward: FeedForward,
+        ffn_layer_norm: Normalization,
+        pre_norm: bool,
+    ) -> Self {
+        Self {
+            self_attn,
+            self_attn_layer_norm,
+            cross_attn,
+            cross_attn_layer_norm,
+            feedforward,
+            ffn_layer_norm,
+            pre_norm,
+        }
+    }
 
-impl DecoderCrossAttentionLayer {
+    /// Pre-compute cross-attention K/V from encoder hidden states.
+    ///
+    /// Call once per generation, then reuse for all decode steps.
     pub fn precompute_cross_kv(
         &self,
         encoder_hidden_states: &Array3<f32>,
     ) -> Result<(Array4<f32>, Array4<f32>)> {
-        // Delegate the call to the cross-attention component, which already has this logic.
         self.cross_attn.precompute_encoder_kv(encoder_hidden_states)
     }
 
+    /// Full forward pass through the layer.
+    ///
+    /// # Arguments
+    /// * `hidden_states` - Input hidden states [batch, seq, hidden]
+    /// * `encoder_hidden_states` - Encoder output (used if cross_kv_cache is None)
+    /// * `self_mask` - Causal mask for self-attention
+    /// * `cross_mask` - Mask for cross-attention
+    /// * `past_kv` - Cached self-attention K/V from previous steps
+    /// * `cross_kv_cache` - Pre-computed cross-attention K/V
+    /// * `position_bias` - Optional relative position bias (T5)
+    ///
+    /// # Returns
+    /// (output_hidden_states, (new_self_k, new_self_v))
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -44,100 +87,185 @@ impl DecoderCrossAttentionLayer {
         self_mask: Option<&Array2<f32>>,
         cross_mask: Option<&Array2<f32>>,
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
-        // OPTIONAL: Pass pre-computed Cross KV here if you have it
-        cross_kv_cache: Option<&(ndarray::Array4<f32>, ndarray::Array4<f32>)>,
+        cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
+        position_bias: Option<&Array4<f32>>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // 1. Self Attention
-        let t_sa = Instant::now();
-        let residual = hidden_states.clone();
-        let (attn_out, new_k, new_v) = self.self_attn.forward(hidden_states, self_mask, past_kv)?;
-
-        let hidden_states = self.self_attn_layer_norm.forward_3d(&(residual + attn_out));
-        log::info!("[CpuLayer] Self-Attention block took: {:?}", t_sa.elapsed());
-
-        // 2. Cross Attention
-        let t_ca = Instant::now();
-        let residual = hidden_states.clone();
-
-        let cross_out = if let Some((k_static, v_static)) = cross_kv_cache {
-            // Fast Path: Zero Copy
-            self.cross_attn
-                .forward(&hidden_states, k_static, v_static, cross_mask)?
+        let (hidden_states, new_kv) = if self.pre_norm {
+            self.forward_prenorm(
+                hidden_states,
+                encoder_hidden_states,
+                self_mask,
+                cross_mask,
+                past_kv,
+                cross_kv_cache,
+                position_bias,
+            )?
         } else {
-            // Slow Path: Re-calculate K/V on the fly (Backwards Compatible)
-            let (k_static, v_static) = self
-                .cross_attn
-                .precompute_encoder_kv(encoder_hidden_states)?;
-            self.cross_attn
-                .forward(&hidden_states, &k_static, &v_static, cross_mask)?
+            self.forward_postnorm(
+                hidden_states,
+                encoder_hidden_states,
+                self_mask,
+                cross_mask,
+                past_kv,
+                cross_kv_cache,
+            )?
         };
 
-        let hidden_states = self
-            .cross_attn_layer_norm
-            .forward_3d(&(residual + cross_out));
-        log::info!(
-            "[CpuLayer] Cross-Attention block took: {:?}",
-            t_ca.elapsed()
-        );
+        Ok((hidden_states, new_kv))
+    }
 
-        // 3. FFN
-        let t_ffn = Instant::now();
+    /// Post-norm forward (BART style): sublayer -> add -> norm
+    fn forward_postnorm(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        self_mask: Option<&Array2<f32>>,
+        cross_mask: Option<&Array2<f32>>,
+        past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
+        cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
+    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        // 1. Self-Attention: attn -> add -> norm
+        let residual = hidden_states.clone();
+        let (attn_out, new_k, new_v) = self.self_attn.forward(hidden_states, self_mask, past_kv, None)?;
+        let hidden_states = self.self_attn_layer_norm.forward(&(residual + attn_out));
+
+        // 2. Cross-Attention: attn -> add -> norm
+        let residual = hidden_states.clone();
+        let cross_out = self.compute_cross_attention(
+            &hidden_states,
+            encoder_hidden_states,
+            cross_mask,
+            cross_kv_cache,
+        )?;
+        let hidden_states = self.cross_attn_layer_norm.forward(&(residual + cross_out));
+
+        // 3. FFN: ffn -> add -> norm
         let residual = hidden_states.clone();
         let ffn_out = self.feedforward.forward(&hidden_states)?;
-        let hidden_states = self.ffn_layer_norm.forward_3d(&(residual + ffn_out));
-        log::info!("[CpuLayer] FFN block took: {:?}", t_ffn.elapsed());
+        let hidden_states = self.ffn_layer_norm.forward(&(residual + ffn_out));
+
         Ok((hidden_states, (new_k, new_v)))
+    }
+
+    /// Pre-norm forward (T5/Whisper style): norm -> sublayer -> add
+    fn forward_prenorm(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        self_mask: Option<&Array2<f32>>,
+        cross_mask: Option<&Array2<f32>>,
+        past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
+        cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
+        position_bias: Option<&Array4<f32>>,
+    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        // 1. Self-Attention: norm -> attn -> add
+        let normed = self.self_attn_layer_norm.forward(hidden_states);
+        let (attn_out, new_k, new_v) = self.self_attn.forward(
+            &normed,
+            self_mask,
+            past_kv,
+            position_bias,
+        )?;
+        let hidden_states = hidden_states + &attn_out;
+
+        // 2. Cross-Attention: norm -> attn -> add
+        let normed = self.cross_attn_layer_norm.forward(&hidden_states);
+        let cross_out = self.compute_cross_attention(
+            &normed,
+            encoder_hidden_states,
+            cross_mask,
+            cross_kv_cache,
+        )?;
+        let hidden_states = hidden_states + &cross_out;
+
+        // 3. FFN: norm -> ffn -> add
+        let normed = self.ffn_layer_norm.forward(&hidden_states);
+        let ffn_out = self.feedforward.forward(&normed)?;
+        let hidden_states = hidden_states + &ffn_out;
+
+        Ok((hidden_states, (new_k, new_v)))
+    }
+
+    /// Compute cross-attention, using cache if available.
+    fn compute_cross_attention(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        cross_mask: Option<&Array2<f32>>,
+        cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
+    ) -> Result<Array3<f32>> {
+        if let Some((k_cache, v_cache)) = cross_kv_cache {
+            // Fast path: use pre-computed K/V
+            self.cross_attn.forward(hidden_states, k_cache, v_cache, cross_mask)
+        } else {
+            // Slow path: compute K/V on the fly
+            let (k, v) = self.cross_attn.precompute_encoder_kv(encoder_hidden_states)?;
+            self.cross_attn.forward(hidden_states, &k, &v, cross_mask)
+        }
+    }
+
+    // =========================================================================
+    // Individual component access (for fine-grained control)
+    // =========================================================================
+
+    pub fn self_attention(
+        &self,
+        hidden_states: &Array3<f32>,
+        mask: Option<&Array2<f32>>,
+        past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
+    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        if self.pre_norm {
+            let normed = self.self_attn_layer_norm.forward(hidden_states);
+            let (attn_out, new_k, new_v) = self.self_attn.forward(&normed, mask, past_kv, None)?;
+            Ok((hidden_states + &attn_out, (new_k, new_v)))
+        } else {
+            let residual = hidden_states.clone();
+            let (attn_out, new_k, new_v) = self.self_attn.forward(hidden_states, mask, past_kv, None)?;
+            let out = self.self_attn_layer_norm.forward(&(residual + attn_out));
+            Ok((out, (new_k, new_v)))
+        }
     }
 
     pub fn cross_attention(
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
-        cross_attention_mask: Option<&Array2<f32>>,
-        precomputed_kv: Option<&(ndarray::Array4<f32>, ndarray::Array4<f32>)>,
+        cross_mask: Option<&Array2<f32>>,
+        cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
     ) -> Result<Array3<f32>> {
-        let residual = hidden_states.clone();
-        let cross_attn_output = if let Some((k, v)) = precomputed_kv {
-            self.cross_attn
-                .forward(hidden_states, k, v, cross_attention_mask)?
+        if self.pre_norm {
+            let normed = self.cross_attn_layer_norm.forward(hidden_states);
+            let cross_out = self.compute_cross_attention(
+                &normed,
+                encoder_hidden_states,
+                cross_mask,
+                cross_kv_cache,
+            )?;
+            Ok(hidden_states + &cross_out)
         } else {
-            let (k, v) = self
-                .cross_attn
-                .precompute_encoder_kv(encoder_hidden_states)?;
-            self.cross_attn
-                .forward(hidden_states, &k, &v, cross_attention_mask)?
-        };
-        let hidden_states_after_add = residual + cross_attn_output;
-        let final_output = self
-            .cross_attn_layer_norm
-            .forward_3d(&hidden_states_after_add);
-        Ok(final_output)
+            let residual = hidden_states.clone();
+            let cross_out = self.compute_cross_attention(
+                hidden_states,
+                encoder_hidden_states,
+                cross_mask,
+                cross_kv_cache,
+            )?;
+            Ok(self.cross_attn_layer_norm.forward(&(residual + cross_out)))
+        }
     }
+
     pub fn feed_forward(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        let residual = hidden_states.clone();
-        let ffn_output = self.feedforward.forward(hidden_states)?;
-        let hidden_states_after_add = residual + ffn_output;
-        let final_output = self.ffn_layer_norm.forward_3d(&hidden_states_after_add);
-        Ok(final_output)
-    }
-    pub fn self_attention(
-        &self,
-        hidden_states: &Array3<f32>,
-        self_attention_mask: Option<&Array2<f32>>,
-        past_kv: Option<(ndarray::ArrayView3<f32>, ndarray::ArrayView3<f32>)>,
-    ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        let residual = hidden_states.clone();
-        let (attn_output, new_k, new_v) =
-            self.self_attn
-                .forward(hidden_states, self_attention_mask, past_kv)?;
-        let hidden_states_after_add = residual + attn_output;
-        let final_output = self
-            .self_attn_layer_norm
-            .forward_3d(&hidden_states_after_add);
-        Ok((final_output, (new_k, new_v)))
+        if self.pre_norm {
+            let normed = self.ffn_layer_norm.forward(hidden_states);
+            let ffn_out = self.feedforward.forward(&normed)?;
+            Ok(hidden_states + &ffn_out)
+        } else {
+            let residual = hidden_states.clone();
+            let ffn_out = self.feedforward.forward(hidden_states)?;
+            Ok(self.ffn_layer_norm.forward(&(residual + ffn_out)))
+        }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,7 +278,7 @@ mod tests {
         hidden_size: usize,
         intermediate_size: usize,
         num_heads: usize,
-    ) -> DecoderCrossAttentionLayer {
+    ) -> CrossDecoderLayer {
         let q_weight = Array2::from_shape_fn((hidden_size, hidden_size), |(i, j)| {
             if i == j { 1.1 } else { (i + j) as f32 * 0.001 }
         });
@@ -172,8 +300,11 @@ mod tests {
             LinearLayer::from(q_weight.clone()),
             LinearLayer::from(o_weight.clone()),
         );
-        let self_attn_layer_norm =
-            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
+        let self_attn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::zeros(hidden_size),
+            1e-5,
+        ));
 
         let cross_attn = DecoderCrossAttention::new(
             hidden_size,
@@ -183,8 +314,11 @@ mod tests {
             LinearLayer::from(q_weight.clone()),
             LinearLayer::from(o_weight.clone()),
         );
-        let cross_attn_layer_norm =
-            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
+        let cross_attn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::zeros(hidden_size),
+            1e-5,
+        ));
 
         let feedforward = FeedForward::Legacy(LegacyFeedForward::new(
             fc1_weight,
@@ -193,16 +327,20 @@ mod tests {
             Array1::zeros(hidden_size),
             crate::activations::Activation::Gelu, // TODO CONFIG!!
         ));
-        let ffn_layer_norm =
-            LayerNorm::new(Array1::ones(hidden_size), Array1::zeros(hidden_size), 1e-5);
+        let ffn_layer_norm = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::zeros(hidden_size),
+            1e-5,
+        ));
 
-        DecoderCrossAttentionLayer {
+        CrossDecoderLayer {
             self_attn,
             self_attn_layer_norm,
             cross_attn,
             cross_attn_layer_norm,
             feedforward,
             ffn_layer_norm,
+            pre_norm: false,
         }
     }
 
@@ -221,6 +359,7 @@ mod tests {
             &encoder_hidden_states,
             Some(&self_mask),
             Some(&cross_mask),
+            None,
             None,
             None,
         );

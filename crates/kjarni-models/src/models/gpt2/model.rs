@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig};
@@ -20,16 +20,16 @@ use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
-    WgpuContext,
     decoder::prelude::*,
-    gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
+    gpu_ops::{primitives::linear::GpuLinearLayer, GpuFrameContext, GpuTensor},
     linear_layer::LinearLayer,
     models::{
-        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
+        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
     },
     prelude::*,
     tensor::{DType, TensorView},
     weights::ModelWeights,
+    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -83,7 +83,7 @@ impl Gpt2Model {
         //     return Err(anyhow!("Model {:?} is not a decoder model.", model_type));
         // }
         let info = model_type.info();
-        
+
         // 2. Validate Architecture
         // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
         match info.architecture {
@@ -449,7 +449,7 @@ mod tests {
         let gpt2_model =
             Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
+        let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config, None).await?;
@@ -485,7 +485,7 @@ mod tests {
         let gpt2_model =
             Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = DecoderGenerator::new(Box::new(gpt2_model))?;
+        let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
         // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
         let generated_text = generator.generate(prompt, &config, None).await?;
@@ -493,7 +493,7 @@ mod tests {
         let ctx = WgpuContext::new().await?;
         let gpt2_model_2 =
             Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
-        let generator_2 = DecoderGenerator::new(Box::new(gpt2_model_2))?;
+        let generator_2 = DecoderGenerator::new(Arc::new(gpt2_model_2))?;
         let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
 
         // 4. Assert that the generated output is bit-for-bit identical to the golden value.

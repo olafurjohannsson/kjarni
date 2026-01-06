@@ -19,7 +19,7 @@ pub struct WhisperConfig {
     pub encoder_ffn_dim: usize,
     pub decoder_ffn_dim: usize,
     pub vocab_size: usize,
-    
+
     pub max_source_positions: usize,
     pub max_target_positions: usize,
 
@@ -29,13 +29,13 @@ pub struct WhisperConfig {
     pub pad_token_id: u32,
 
     pub activation_function: String,
-    
+
     #[serde(default)]
     pub scale_embedding: bool,
-    
+
     pub model_type: String,
     pub num_mel_bins: usize,
-    
+
     pub task_specific_params: Option<TaskSpecificParams>,
 }
 
@@ -54,7 +54,7 @@ impl ModelConfig for WhisperConfig {
             vocab_size: self.vocab_size,
             max_seq_len: self.max_target_positions,
             // Whisper usually defaults to 1e-5 implicitly if not in config
-            norm_eps: 1e-5, 
+            norm_eps: 1e-5,
             activation: match self.activation_function.as_str() {
                 "gelu" => Activation::Gelu,
                 "silu" => Activation::SilU,
@@ -63,7 +63,7 @@ impl ModelConfig for WhisperConfig {
             rope_theta: None,
             rope_scaling: None,
             // Explicitly False in Whisper
-            scale_embeddings: self.scale_embedding, 
+            scale_embeddings: self.scale_embedding,
             normalize_embedding: false, // Whisper has LN in the blocks, not on embeddings immediately
             extra_pos_embeddings: 0,
             is_prenorm: true, // Whisper is Pre-Norm
@@ -71,6 +71,7 @@ impl ModelConfig for WhisperConfig {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm, // Standard LN with Bias
             no_scale_qk: false,
+            decoder_layers: None,
         }
     }
 
@@ -83,7 +84,7 @@ impl ModelConfig for WhisperConfig {
         ModelLayout {
             token_embedding: shared.clone(),
             lm_head: "proj_out.weight".to_string(), // Whisper often has a specific proj_out
-            
+
             encoder: Some(EncoderLayout {
                 // Whisper Encoder uses Sinusoidal, computed on fly. No weight.
                 position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
@@ -115,9 +116,9 @@ impl ModelConfig for WhisperConfig {
                         norm_weight: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
                         norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
                     },
-                }
+                },
             }),
-            
+
             decoder: Some(DecoderLayout {
                 // Whisper Decoder uses learned positions
                 position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
@@ -161,8 +162,8 @@ impl ModelConfig for WhisperConfig {
                         norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
                         norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
                     },
-                }
-            })
+                },
+            }),
         }
     }
 }
@@ -203,7 +204,7 @@ mod tests {
         assert_eq!(meta.is_prenorm, true);
         assert_eq!(meta.normalization_strategy, NormalizationStrategy::LayerNorm);
         assert!(!meta.scale_embeddings);
-        
+
         // Verify Encoder Attention Layout (Biased)
         let attn = layout.encoder.unwrap().layer.self_attn;
         assert!(attn.q_bias.is_some());

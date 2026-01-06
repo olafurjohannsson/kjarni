@@ -1,4 +1,4 @@
-use crate::kernels::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
+use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
 use anyhow::{anyhow, Result};
 
 #[allow(non_camel_case_types)]
@@ -17,7 +17,7 @@ pub enum DType {
     /// 4-bit block-quantized with K-quants (from GGUF)
     Q4_K,
     Q5_K,
-    Q6_K
+    Q6_K,
 }
 
 impl DType {
@@ -31,7 +31,10 @@ impl DType {
             safetensors::Dtype::F16 => Ok(DType::F16),
             safetensors::Dtype::BF16 => Ok(DType::BF16),
             safetensors::Dtype::U32 => Ok(DType::U32),
-            _ => Err(anyhow!("Unsupported or unknown safetensors DType: {:?}", dtype)),
+            _ => Err(anyhow!(
+                "Unsupported or unknown safetensors DType: {:?}",
+                dtype
+            )),
         }
     }
 
@@ -46,7 +49,7 @@ impl DType {
             _ => Err(anyhow!("Unsupported or unknown GGUF DType: {:?}", dtype)),
         }
     }
-pub fn size_in_bytes(&self) -> usize {
+    pub fn size_in_bytes(&self) -> usize {
         match self {
             DType::F32 => 4,
             DType::F16 => 2,
@@ -73,14 +76,20 @@ pub fn size_in_bytes(&self) -> usize {
             DType::Q8_0 => {
                 let k_per_block = std::mem::size_of::<[i8; 32]>(); // 32
                 if num_elements % k_per_block != 0 {
-                    return Err(anyhow!("For Q8_0, the number of elements must be a multiple of {}", k_per_block));
+                    return Err(anyhow!(
+                        "For Q8_0, the number of elements must be a multiple of {}",
+                        k_per_block
+                    ));
                 }
                 let num_blocks = num_elements / k_per_block;
                 Ok(num_blocks * std::mem::size_of::<BlockQ8_0>())
             }
             DType::Q4_K => {
                 if num_elements % QK_K != 0 {
-                    return Err(anyhow!("For Q4_K, the number of elements must be a multiple of {}", QK_K));
+                    return Err(anyhow!(
+                        "For Q4_K, the number of elements must be a multiple of {}",
+                        QK_K
+                    ));
                 }
                 let num_blocks = num_elements / QK_K;
                 Ok(num_blocks * std::mem::size_of::<BlockQ4_K>())

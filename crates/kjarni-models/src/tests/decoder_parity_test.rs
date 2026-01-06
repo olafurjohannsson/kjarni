@@ -16,6 +16,7 @@ use kjarni_transformers::traits::{Device, ModelConfig};
 use kjarni_transformers::{DecoderPipeline, WgpuContext};
 use ndarray::{s, Array1, Array2, Array3, Array4};
 use std::path::Path;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_full_text_generation_parity() -> Result<()> {
@@ -27,12 +28,12 @@ async fn test_full_text_generation_parity() -> Result<()> {
         ..Default::default()
     };
     let cpu_generator = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
-    let cpu_gen = DecoderGenerator::new(Box::new(cpu_generator))?;
+    let cpu_gen = DecoderGenerator::new(Arc::new(cpu_generator))?;
     let cpu_generated_text = cpu_gen.generate(prompt, &config, None).await?;
     let context = WgpuContext::new().await?;
     let gpu_generator =
         Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(context), None).await?;
-    let gpu_gen = DecoderGenerator::new(Box::new(gpu_generator))?;
+    let gpu_gen = DecoderGenerator::new(Arc::new(gpu_generator))?;
     let gpu_generated_text = gpu_gen.generate(prompt, &config, None).await?;
     assert_eq!(
         cpu_generated_text, gpu_generated_text,

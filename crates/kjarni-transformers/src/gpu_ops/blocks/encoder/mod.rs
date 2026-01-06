@@ -1,13 +1,13 @@
-use crate::gpu_ops::Kernel;
-use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
+use crate::activations;
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
+use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
+use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
+use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm};
+use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
-use crate::gpu_ops::blocks::ffn::{GpuFeedForwardStd};
 use crate::traits::ModelMetadata;
 use crate::WgpuContext;
-use crate::activations;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -48,7 +48,7 @@ pub struct GpuEncoderLayer {
     self_attn: GpuEncoderSelfAttention,
     self_attn_weights: GpuAttentionWeights,
     // Use Enum for Normalization (LayerNorm vs RMSNorm)
-    self_attn_layer_norm: GpuNormalization, 
+    self_attn_layer_norm: GpuNormalization,
     self_attn_ln_weights: GpuNormalizationWeights,
 
     // Feed-forward (Enum: Standard vs SwiGlu)
@@ -97,12 +97,12 @@ impl GpuEncoderLayer {
         // but if passed as Enum weights, we need matching Enum compute).
         // Note: The Weights Enum usually dictates the Compute Enum type.
         // Assuming caller passed correct weights, we create matching compute ops.
-        
+
         let create_norm = |w: &GpuNormalizationWeights| -> GpuNormalization {
             match w {
-                GpuNormalizationWeights::LayerNorm(_) => 
+                GpuNormalizationWeights::LayerNorm(_) =>
                     GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps)),
-                GpuNormalizationWeights::RMSNorm(_) => 
+                GpuNormalizationWeights::RMSNorm(_) =>
                     GpuNormalization::RMSNorm(crate::gpu_ops::blocks::rms_norm::GpuRMSNorm::new(context, meta.norm_eps)),
             }
         };
@@ -478,19 +478,19 @@ impl GpuEncoderLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::WgpuContext;
     use crate::activations::Activation;
-    use crate::encoder::encoder_layer::EncoderLayer;
-    use crate::encoder::encoder_self_attention::EncoderSelfAttention;
+    use crate::cpu::encoder::encoder_layer::EncoderLayer;
+    use crate::cpu::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
-    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
+    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
     use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
+    use crate::WgpuContext;
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
@@ -676,6 +676,7 @@ mod tests {
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_b)?,
             )?);
             let mock_meta = ModelMetadata {
+                decoder_layers: None,
                 hidden_size,
                 num_layers: 1,
                 num_attention_heads: num_heads,
@@ -753,6 +754,7 @@ mod tests {
 
         fn metadata(&self) -> crate::traits::ModelMetadata {
             crate::traits::ModelMetadata {
+                decoder_layers: None,
                 hidden_size: self.hidden_size,
                 num_layers: 1,
                 num_attention_heads: self.num_heads,

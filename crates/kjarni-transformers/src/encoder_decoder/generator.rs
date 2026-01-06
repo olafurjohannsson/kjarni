@@ -196,7 +196,7 @@ impl EncoderDecoderGenerator {
             }
 
             // `run_beam_search_stream` is now called inside the stream block.
-            let mut stream = run_beam_search_stream(
+            let stream = run_beam_search_stream(
                 self.model.as_ref(),
                 &self.backend,
                 input_text,

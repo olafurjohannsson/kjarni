@@ -380,7 +380,7 @@ mod llama_test {
     use crate::models::llama::LlamaModel;
     const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct";
     use kjarni_transformers::{
-        kernels::{
+        cpu::kernels::{
             dequantize::{dequantize_q4_k_block, dequantize_q6_k_block},
             q_common::{BlockQ4_K, BlockQ6_K},
         },

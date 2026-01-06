@@ -49,7 +49,15 @@ like C++, Haskell, and Erlang.";
     let t = cpu_generator.generate(&article, Some(&config)).await?;
     println!("CPU Generation test: {}", t);
     io::stdout().flush().unwrap();
+    let gpu_generator = EncoderDecoderGenerator::new(Box::new(gpu_model))?;
 
+    println!();
+
+    let tt = gpu_generator.generate(&article, Some(&config)).await?;
+    io::stdout().flush().unwrap();
+    println!("GPU Generation test: {}", tt);
+
+    println!();
     println!("GenConfig {:?}", cpu_generation_config);
     io::stdout().flush().unwrap();
     let cpu_summary = cpu_generator.generate_stream(article, Some(&cpu_generation_config));
@@ -65,17 +73,16 @@ like C++, Haskell, and Erlang.";
     // let mut stream_gpu = generator_gpu.generate_stream(formatted.as_str(), &config).await?;
 
     futures_util::pin_mut!(cpu_summary);
-    println!("\n--- FINAL CPU GENERATED SUMMARY ---");
+    println!("\nCPU STREAMING TEST:");
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut cpu_summary).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }
 
-    let gpu_generator = EncoderDecoderGenerator::new(Box::new(gpu_model))?;
     let gpu_generation_config = gpu_generator.model.get_default_generation_config();
     let gpu_summary = gpu_generator.generate_stream(article, Some(&gpu_generation_config));
     futures_util::pin_mut!(gpu_summary);
-    println!("\n--- FINAL GPU GENERATED SUMMARY ---");
+    println!("\nGPU STREAMING TEST: ");
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut gpu_summary).await? {
         print!("{}", token.text);
         std::io::stdout().flush().unwrap();

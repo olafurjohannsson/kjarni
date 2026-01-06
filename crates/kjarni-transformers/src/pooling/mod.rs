@@ -1,10 +1,10 @@
 //! Pooling strategies for transformer outputs
 
+use crate::utils::MASK_VALUE;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Axis};
-use crate::utils::MASK_VALUE;
 
-pub use crate::encoder::config::{EncodingConfig, PoolingStrategy};
+pub use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 
 pub fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array2<f32>> {
     let mask_expanded = attention_mask.view().insert_axis(ndarray::Axis(2));
@@ -95,10 +95,10 @@ mod tests {
         // Batch 0: mean of [[1,2],[3,4]] = [2,3]
         // Batch 1: mean of [[5,6]] = [5,6] (second token ignored)
         assert_eq!(pooled.shape(), &[2, 2]);
-        assert!((pooled[[0,0]] - 2.0).abs() < 1e-6);
-        assert!((pooled[[0,1]] - 3.0).abs() < 1e-6);
-        assert!((pooled[[1,0]] - 5.0).abs() < 1e-6);
-        assert!((pooled[[1,1]] - 6.0).abs() < 1e-6);
+        assert!((pooled[[0, 0]] - 2.0).abs() < 1e-6);
+        assert!((pooled[[0, 1]] - 3.0).abs() < 1e-6);
+        assert!((pooled[[1, 0]] - 5.0).abs() < 1e-6);
+        assert!((pooled[[1, 1]] - 6.0).abs() < 1e-6);
     }
 
     #[test]
@@ -112,10 +112,10 @@ mod tests {
 
         // CLS is first token
         assert_eq!(pooled.shape(), &[2, 2]);
-        assert_eq!(pooled[[0,0]], 1.0);
-        assert_eq!(pooled[[0,1]], 2.0);
-        assert_eq!(pooled[[1,0]], 5.0);
-        assert_eq!(pooled[[1,1]], 6.0);
+        assert_eq!(pooled[[0, 0]], 1.0);
+        assert_eq!(pooled[[0, 1]], 2.0);
+        assert_eq!(pooled[[1, 0]], 5.0);
+        assert_eq!(pooled[[1, 1]], 6.0);
     }
 
     #[test]
@@ -135,10 +135,10 @@ mod tests {
         // Batch 0: max of [[1,2],[3,4]] = [3,4]
         // Batch 1: max of [[5,6]] = [5,6] (second token ignored)
         assert_eq!(pooled.shape(), &[2, 2]);
-        assert!((pooled[[0,0]] - 3.0).abs() < 1e-6);
-        assert!((pooled[[0,1]] - 4.0).abs() < 1e-6);
-        assert!((pooled[[1,0]] - 5.0).abs() < 1e-6);
-        assert!((pooled[[1,1]] - 6.0).abs() < 1e-6);
+        assert!((pooled[[0, 0]] - 3.0).abs() < 1e-6);
+        assert!((pooled[[0, 1]] - 4.0).abs() < 1e-6);
+        assert!((pooled[[1, 0]] - 5.0).abs() < 1e-6);
+        assert!((pooled[[1, 1]] - 6.0).abs() < 1e-6);
     }
 
     #[test]
@@ -158,10 +158,10 @@ mod tests {
         // Batch 0: last valid token = second token [3,4]
         // Batch 1: last valid token = third token [11,12]
         assert_eq!(pooled.shape(), &[2, 2]);
-        assert_eq!(pooled[[0,0]], 3.0);
-        assert_eq!(pooled[[0,1]], 4.0);
-        assert_eq!(pooled[[1,0]], 11.0);
-        assert_eq!(pooled[[1,1]], 12.0);
+        assert_eq!(pooled[[0, 0]], 3.0);
+        assert_eq!(pooled[[0, 1]], 4.0);
+        assert_eq!(pooled[[1, 0]], 11.0);
+        assert_eq!(pooled[[1, 1]], 12.0);
     }
 
     #[test]
@@ -172,8 +172,8 @@ mod tests {
         let pooled = mean_pool(&hidden, &attention_mask).unwrap();
 
         // Should not divide by zero
-        assert_eq!(pooled[[0,0]], 1.0);
-        assert_eq!(pooled[[0,1]], 2.0);
+        assert_eq!(pooled[[0, 0]], 1.0);
+        assert_eq!(pooled[[0, 1]], 2.0);
     }
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
         let pooled = max_pool(&hidden, &attention_mask).unwrap();
 
         // All masked -> returns MASK_VALUE
-        assert_eq!(pooled[[0,0]], MASK_VALUE);
-        assert_eq!(pooled[[0,1]], MASK_VALUE);
+        assert_eq!(pooled[[0, 0]], MASK_VALUE);
+        assert_eq!(pooled[[0, 1]], MASK_VALUE);
     }
 }

@@ -1,4 +1,5 @@
-use crate::linear_layer::{LinearLayer};
+use crate::activations::Activation;
+use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 use rayon::prelude::*;
@@ -13,6 +14,7 @@ pub struct SwiGluFeedForward {
     pub gate: LinearLayer,
     pub up: LinearLayer,
     pub down: LinearLayer,
+    pub activation: Activation,
 }
 
 impl SwiGluFeedForward {
@@ -21,11 +23,25 @@ impl SwiGluFeedForward {
         gate: impl Into<LinearLayer>,
         up: impl Into<LinearLayer>,
         down: impl Into<LinearLayer>,
+        activation: Activation,
     ) -> Self {
         Self {
             gate: gate.into(),
             up: up.into(),
             down: down.into(),
+            activation: activation,
+        }
+    }
+
+    fn apply_activation(&self, x: &mut Array2<f32>) {
+        match self.activation {
+            Activation::Gelu => {
+                // Use your existing GELU implementation
+                x.par_mapv_inplace(|v| {
+                    0.5 * v * (1.0 + f32::tanh(0.79788456 * (v + 0.044715 * v.powi(3))))
+                });
+            }
+            _ => silu_parallel(x),
         }
     }
 
@@ -46,7 +62,8 @@ impl SwiGluFeedForward {
         let up_out = self.up.matmul(&hidden.view());
 
         // 2. Activation
-        silu_parallel(&mut gate_out);
+        // silu_parallel(&mut gate_out);
+        self.apply_activation(&mut gate_out);
         let activated = gate_out * up_out;
 
         // 3. Down
@@ -74,7 +91,8 @@ impl SwiGluFeedForward {
 
         // --- Step 2: Activation & Element-wise Ops ---
         let t_act = Instant::now();
-        silu_parallel(&mut gate_out);
+        // silu_parallel(&mut gate_out);
+        self.apply_activation(&mut gate_out);
         let activated = gate_out * up_out;
         let d_act = t_act.elapsed();
 
@@ -112,7 +130,8 @@ impl SwiGluFeedForward {
         let d_gate_up = t_gate_up.elapsed();
 
         let t_act = Instant::now();
-        silu_parallel(&mut gate_out);
+        // silu_parallel(&mut gate_out);
+        self.apply_activation(&mut gate_out);
         let activated = gate_out * up_out;
         let d_act = t_act.elapsed();
 

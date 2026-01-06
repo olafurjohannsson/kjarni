@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
-use crate::kernels::dequantize::get_scale_min_k4;
-use crate::kernels::q_common::BlockQ4_K;
-use crate::kernels::x86::common::hsum_ps_avx;
+use crate::cpu::kernels::{
+    dequantize::get_scale_min_k4, q_common::BlockQ4_K, x86::common::hsum_ps_avx,
+};
 use std::arch::x86_64::*;
 
 /// 1. Completely unrolled the inner loop (was `for _ in 0..4`).
@@ -382,8 +382,8 @@ pub unsafe fn matmul_vec_q4_k_avx2(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernels::scalar::matmul_vec_q4_k_scalar;
-    use crate::kernels::q_common::BlockQ4_K;
+    use crate::cpu::kernels::q_common::BlockQ4_K;
+    use crate::cpu::kernels::scalar::matmul_vec_q4_k_scalar;
     use half::f16;
 
     /// Create a deterministic Q4_K block with non-trivial values.
@@ -401,11 +401,7 @@ mod tests {
             d: f16::from_f32(0.125),
             dmin: f16::from_f32(0.01),
             // Non-zero scales/mins to exercise all code paths
-            scales: [
-                1, 2, 3, 4,
-                5, 6, 7, 8,
-                1, 2, 3, 4,
-            ],
+            scales: [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4],
             qs,
         }
     }
@@ -422,9 +418,7 @@ mod tests {
 
         // Weight blocks: m rows × (k / 256) blocks per row
         let blocks: Vec<BlockQ4_K> = (0..m)
-            .flat_map(|row| {
-                (0..(k / 256)).map(move |b| create_test_block((row * 7 + b) as u8))
-            })
+            .flat_map(|row| (0..(k / 256)).map(move |b| create_test_block((row * 7 + b) as u8)))
             .collect();
 
         let mut out_scalar = vec![0.0f32; m];
@@ -455,9 +449,7 @@ mod tests {
     #[test]
     fn test_matmul_vec_q4_k_avx2_matches_scalar() {
         // Runtime feature detection is mandatory
-        if std::is_x86_feature_detected!("avx2")
-            && std::is_x86_feature_detected!("fma")
-        {
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
                 run_q4_k_avx2_vs_scalar_test();
             }
