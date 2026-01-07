@@ -1,7 +1,8 @@
+use crate::generation::GenerationOverrides;
+use anyhow::Result;
+use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use anyhow::Result;
-use config::{Config, File, Environment};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KjarniConfig {
@@ -10,7 +11,7 @@ pub struct KjarniConfig {
     #[serde(default)]
     pub models: ModelsConfig,
     #[serde(default)]
-    pub generation: GenerationDefaults,
+    pub generation: GenerationOverrides,
     #[serde(default)]
     pub indexing: IndexingConfig,
 }
@@ -43,21 +44,6 @@ impl Default for ModelsConfig {
     }
 }
 
-/// User preferences that override model defaults.
-/// All fields are Option<> because they are overrides.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GenerationDefaults {
-    pub temperature: Option<f32>,
-    pub top_k: Option<usize>,
-    pub top_p: Option<f32>,
-    pub min_p: Option<f32>,
-    pub repetition_penalty: Option<f32>,
-    pub max_new_tokens: Option<usize>,
-    pub num_beams: Option<usize>,
-    pub length_penalty: Option<f32>,
-    pub no_repeat_ngram_size: Option<usize>,
-    pub do_sample: Option<bool>, // To toggle greedy vs sample
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexingConfig {

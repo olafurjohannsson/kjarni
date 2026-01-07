@@ -94,7 +94,7 @@ impl SwiGluFeedForward {
         //     || self.up.matmul(&hidden_2d),
         // );
         let mut gate_out = self.gate.matmul(&hidden_2d);
-        let mut up_out = self.gate.matmul(&hidden_2d);
+        let mut up_out = self.up.matmul(&hidden_2d);
 
         let d_gate_up = t_gate_up.elapsed();
 
@@ -137,7 +137,7 @@ impl SwiGluFeedForward {
         //     || self.up.matmul(&hidden_2d.view()),
         // );
         let mut gate_out = self.gate.matmul(&hidden_2d);
-        let mut up_out = self.gate.matmul(&hidden_2d);
+        let mut up_out = self.up.matmul(&hidden_2d);
         let d_gate_up = t_gate_up.elapsed();
 
         let t_act = Instant::now();

@@ -282,7 +282,7 @@ impl CpuDecoder for LlamaCpuDecoder {
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
         for i in start_layer..end_layer {
-            let layer = &self.layers[i];
+            let layer: &CpuRoPEDecoderLayer = &self.layers[i];
 
             if let Some(ref mut c) = cpu_cache_opt {
                 // OPTIMIZATION: Get the FULL contiguous view (History + New Slot)
@@ -293,8 +293,7 @@ impl CpuDecoder for LlamaCpuDecoder {
                 hidden = layer.forward(
                     &hidden,
                     attention_mask,
-                    // position_offset,
-                    current_len,
+                    position_offset,
                     k_full_mut,
                     v_full_mut,
                 )?;
