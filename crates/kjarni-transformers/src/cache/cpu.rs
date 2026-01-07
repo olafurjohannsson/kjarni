@@ -306,7 +306,7 @@ impl CpuKVCache {
     ///     // ...
     /// }
     /// ```
-    pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<f32>, ArrayView3<f32>)> {
+    pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<'_, f32>, ArrayView3<'_, f32>)> {
         if layer_idx >= self.layers.len() {
             return None;
         }
@@ -380,7 +380,7 @@ impl CpuKVCache {
         &mut self,
         layer_idx: usize,
         new_tokens: usize,
-    ) -> anyhow::Result<(ArrayViewMut3<f32>, ArrayViewMut3<f32>)> {
+    ) -> anyhow::Result<(ArrayViewMut3<'_, f32>, ArrayViewMut3<'_, f32>)> {
         if layer_idx >= self.layers.len() {
             anyhow::bail!("Layer index out of bounds");
         }
@@ -398,47 +398,7 @@ impl CpuKVCache {
 
         Ok((k_view, v_view))
     }
-    /// Returns a mutable view of the current timestep slot (for writing)
-    /// AND an immutable view of the history (for reading).
-    ///
-    /// Returns: (History_K, History_V, Current_Slot_K, Current_Slot_V)
-    /// History shapes: [Batch, Current_Len, Hidden]
-    /// Current shapes: [Batch, New_Len, Hidden]
-    pub fn get_split_view(
-        &mut self,
-        layer_idx: usize,
-        new_tokens: usize,
-    ) -> anyhow::Result<(
-        ArrayViewMut3<f32>,
-        ArrayViewMut3<f32>,
-        ArrayViewMut3<f32>,
-        ArrayViewMut3<f32>,
-    )> {
-        if layer_idx >= self.layers.len() {
-            anyhow::bail!("Layer index out of bounds");
-        }
-
-        let (k_cache, v_cache) = &mut self.layers[layer_idx];
-
-        let end_write = self.current_len + new_tokens;
-        if end_write > k_cache.shape()[1] {
-            anyhow::bail!("Cache overflow");
-        }
-
-        // Get disjoint mutable slices
-        let (k_hist, k_new) = k_cache.multi_slice_mut((
-            s![.., 0..self.current_len, ..],
-            s![.., self.current_len..end_write, ..],
-        ));
-
-        let (v_hist, v_new) = v_cache.multi_slice_mut((
-            s![.., 0..self.current_len, ..],
-            s![.., self.current_len..end_write, ..],
-        ));
-
-        Ok((k_hist, v_hist, k_new, v_new))
-    }
-
+    
     /// Returns a boxed clone of this cache.
     ///
     /// Useful for beam search where each beam may need its own cache copy.
@@ -494,65 +454,6 @@ impl Cache for CpuKVCache {
     }
 }
 
-// =============================================================================
-// Performance Analysis
-// =============================================================================
-
-/// # Performance Assessment
-///
-/// ## Strengths ✅
-///
-/// 1. **Pre-allocation**: No allocation during generation loop
-/// 2. **Slice-based updates**: `assign()` compiles to memcpy, very fast
-/// 3. **View-based reads**: `get()` returns zero-copy views
-/// 4. **Rayon parallelism**: `reorder()` parallelizes across layers
-///
-/// ## Potential Improvements 🔧
-///
-/// ### 1. Memory Layout for Head-Parallel Attention
-///
-/// Current: `[batch, seq, hidden]` where `hidden = num_heads × head_dim`
-///
-/// For models using per-head parallel attention, consider:
-/// `[batch, num_heads, seq, head_dim]`
-///
-/// This would allow each head's KV slice to be contiguous, improving
-/// cache locality for GQA/MQA patterns.
-///
-/// ### 2. Double-Buffering for Reorder
-///
-/// Current `reorder()` clones entire cache then overwrites. Better:
-/// ```ignore
-/// struct CpuKVCache {
-///     buffers: [Vec<(Array3<f32>, Array3<f32>)>; 2],
-///     active: usize,  // 0 or 1
-/// }
-///
-/// fn reorder(&mut self, indices: &[usize]) {
-///     let (src, dst) = self.buffers.split_at_mut(1);
-///     // Copy from src[active] to dst[1-active]
-///     self.active = 1 - self.active;
-/// }
-/// ```
-///
-/// ### 3. SIMD-Friendly Alignment
-///
-/// Ensure hidden_size is a multiple of SIMD width (8 for AVX2, 16 for AVX-512)
-/// for optimal vectorization of the `assign()` operations.
-///
-/// ### 4. Lazy Allocation
-///
-/// For memory-constrained scenarios, allocate layers lazily:
-/// ```ignore
-/// layers: Vec<Option<(Array3<f32>, Array3<f32>)>>
-/// ```
-/// First access to layer N triggers its allocation.
-///
-/// ## Benchmarking Suggestions
-///
-/// - Profile with `perf` to verify no unexpected allocations
-/// - Compare `assign()` vs manual SIMD copy for large hidden sizes
-/// - Measure cache miss rates for different memory layouts
 #[cfg(test)]
 mod tests {
     use super::*;

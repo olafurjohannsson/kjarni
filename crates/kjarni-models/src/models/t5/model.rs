@@ -7,13 +7,15 @@ use ndarray::Array2;
 use tokenizers::Tokenizer;
 
 use super::config::T5Config;
-use kjarni_transformers::encoder_decoder::cpu_decoder::Seq2SeqDecoderConfig;
-use kjarni_transformers::encoder_decoder::cpu_encoder::Seq2SeqEncoderConfig;
+
+
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache}, common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults}, cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
+    cpu::encoder_decoder::{
+        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+    },
     encoder_decoder::{
-        cpu_decoder::Seq2SeqCPUDecoder,
-        cpu_encoder::Seq2SeqCPUEncoder,
         traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
             GpuEncoderDecoderOps,

@@ -1,12 +1,15 @@
 //! Factory for building Seq2Seq components from weights + layout.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ndarray::Array1;
 
-use crate::encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer;
-use crate::encoder_decoder::{DecoderCrossAttention, DecoderSelfAttention};
+use crate::cpu::encoder_decoder::{
+    decoder_cross_attn::DecoderCrossAttention, decoder_cross_attn_layer::CrossDecoderLayer,
+};
+use crate::encoder_decoder::DecoderSelfAttention;
 use crate::feedforward::LegacyFeedForward;
 use crate::{
+    Normalization,
     activations::Activation,
     cpu::encoder::{encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention},
     embeddings::{EmbeddingData, Embeddings},
@@ -19,7 +22,6 @@ use crate::{
         AttentionLayout, EncoderLayout, FeedForwardLayout, ModelMetadata, NormalizationStrategy,
     },
     weights::ModelWeights,
-    Normalization,
 };
 
 /// Factory for building encoder/decoder components using ModelLayout.
@@ -262,10 +264,14 @@ impl<'a> Seq2SeqFactory<'a> {
         if let Some(gate_template) = &layout.gate_weight {
             let gate = self.build_linear(gate_template, layout.gate_bias.as_deref(), layer_idx)?;
             let up = self.build_linear(&layout.up_weight, layout.up_bias.as_deref(), layer_idx)?;
-            let down = self.build_linear(&layout.down_weight, layout.down_bias.as_deref(), layer_idx)?;
+            let down =
+                self.build_linear(&layout.down_weight, layout.down_bias.as_deref(), layer_idx)?;
 
             return Ok(FeedForward::SwiGLU(SwiGluFeedForward::new(
-                gate, up, down, meta.activation,
+                gate,
+                up,
+                down,
+                meta.activation,
             )));
         }
 
@@ -283,10 +289,14 @@ impl<'a> Seq2SeqFactory<'a> {
             log::debug!("Detected implicit T5 gated FFN for layer {}", layer_idx);
             let gate = self.build_linear(&t5_gate_name, layout.gate_bias.as_deref(), layer_idx)?;
             let up = self.build_linear(&t5_up_name, layout.up_bias.as_deref(), layer_idx)?;
-            let down = self.build_linear(&layout.down_weight, layout.down_bias.as_deref(), layer_idx)?;
+            let down =
+                self.build_linear(&layout.down_weight, layout.down_bias.as_deref(), layer_idx)?;
 
             return Ok(FeedForward::SwiGLU(SwiGluFeedForward::new(
-                gate, up, down, meta.activation,
+                gate,
+                up,
+                down,
+                meta.activation,
             )));
         }
 
@@ -324,12 +334,16 @@ impl<'a> Seq2SeqFactory<'a> {
         let fc1_transposed = fc1.t().as_standard_layout().to_owned();
         let fc2_transposed = fc2.t().as_standard_layout().to_owned();
 
-        let fc1_bias = layout.up_bias.as_ref()
+        let fc1_bias = layout
+            .up_bias
+            .as_ref()
             .map(|t| self.weights.get_array1(&Self::resolve(t, layer_idx)))
             .transpose()?
             .unwrap_or_else(|| Array1::zeros(fc1_transposed.ncols()));
 
-        let fc2_bias = layout.down_bias.as_ref()
+        let fc2_bias = layout
+            .down_bias
+            .as_ref()
             .map(|t| self.weights.get_array1(&Self::resolve(t, layer_idx)))
             .transpose()?
             .unwrap_or_else(|| Array1::zeros(fc2_transposed.ncols()));
@@ -420,7 +434,6 @@ impl<'a> Seq2SeqFactory<'a> {
         if meta.no_scale_qk {
             self_attn = self_attn.with_no_qk_scaling();
         }
-
 
         // Self-attention norm (LayerNorm for BART)
         // let self_attn_layer_norm = Normalization::LayerNorm(

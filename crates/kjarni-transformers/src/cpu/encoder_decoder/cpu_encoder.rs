@@ -3,15 +3,23 @@
 //! This encoder uses `ModelConfig` and `ModelLayout` to configure itself,
 //! and accepts `ModelInput` for flexible input handling.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::sync::Arc;
 
-pub use super::config::{PositionEncodingType, Seq2SeqEncoderConfig};
-use crate::encoder_decoder::relative_position_bias::T5RelativePositionBias;
+use crate::cpu::encoder_decoder::relative_position_bias::T5RelativePositionBias;
+pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
-    cpu::encoder::{encoder_layer::EncoderLayer, prelude::*}, embeddings::Embeddings, models::base::{ModelInput, ModelLoadConfig}, pipeline::Seq2SeqFactory, traits::{Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy}, weights::ModelWeights, Normalization, WgpuContext,
+    Normalization, WgpuContext,
+    cpu::encoder::{encoder_layer::EncoderLayer, prelude::*},
+    embeddings::Embeddings,
+    models::base::{ModelInput, ModelLoadConfig},
+    pipeline::Seq2SeqFactory,
+    traits::{
+        Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
+    },
+    weights::ModelWeights,
 };
 
 // =============================================================================
@@ -100,11 +108,12 @@ impl Seq2SeqCPUEncoder {
         let meta = config.metadata();
         let layout = config.layout();
 
-        let encoder_layout = layout.encoder.as_ref()
+        let encoder_layout = layout
+            .encoder
+            .as_ref()
             .ok_or_else(|| anyhow!("Model layout has no encoder component"))?;
 
-        let factory = Seq2SeqFactory::new(weights)
-            .with_load_config(&load_config);
+        let factory = Seq2SeqFactory::new(weights).with_load_config(&load_config);
 
         // 1. Build embeddings (optional - Whisper doesn't need token embeddings)
         let embeddings = if let Some(pos_name) = &encoder_layout.position_embedding {
@@ -113,15 +122,17 @@ impl Seq2SeqCPUEncoder {
             // Check if we should still build token embeddings without positions
             // (for models that handle positions differently)
             match encoder_config.position_encoding {
-                PositionEncodingType::RelativeBias { .. } |
-                PositionEncodingType::Sinusoidal |
-                PositionEncodingType::None => {
+                PositionEncodingType::RelativeBias { .. }
+                | PositionEncodingType::Sinusoidal
+                | PositionEncodingType::None => {
                     // These don't use learned position embeddings in the Embeddings struct
                     Some(factory.build_embeddings(&layout.token_embedding, None)?)
                 }
                 PositionEncodingType::Learned { .. } => {
                     // Learned positions should have been in the layout
-                    return Err(anyhow!("Learned position encoding requires position_embedding in layout"));
+                    return Err(anyhow!(
+                        "Learned position encoding requires position_embedding in layout"
+                    ));
                 }
             }
         };
@@ -179,12 +190,16 @@ impl Seq2SeqCPUEncoder {
         // 5. Build position encoding
         let position_encoding = match encoder_config.position_encoding {
             PositionEncodingType::Learned { offset } => {
-                let pos_name = encoder_layout.position_embedding.as_ref()
-                    .ok_or_else(|| anyhow!("Learned positions require position_embedding in layout"))?;
+                let pos_name = encoder_layout.position_embedding.as_ref().ok_or_else(|| {
+                    anyhow!("Learned positions require position_embedding in layout")
+                })?;
                 let embeddings = weights.get_array2(pos_name)?;
                 PositionEncoding::Learned { embeddings, offset }
             }
-            PositionEncodingType::RelativeBias { num_buckets, max_distance } => {
+            PositionEncodingType::RelativeBias {
+                num_buckets,
+                max_distance,
+            } => {
                 let bias = T5RelativePositionBias::new(
                     weights,
                     "encoder",
@@ -229,7 +244,9 @@ impl Seq2SeqCPUEncoder {
         // 1. Get initial hidden states based on input type
         let (mut hidden, is_raw_hidden) = match input {
             ModelInput::TokensCpu(tokens) => {
-                let embeddings = self.embeddings.as_ref()
+                let embeddings = self
+                    .embeddings
+                    .as_ref()
                     .ok_or_else(|| anyhow!("No embeddings available for token input"))?;
 
                 // Convert view to owned for embedding lookup
@@ -237,11 +254,11 @@ impl Seq2SeqCPUEncoder {
                 let e = embeddings.forward(&tokens_owned, None, self.position_offset(), false);
                 (e, false)
             }
-            ModelInput::HiddenCpu(hidden_states) => {
-                (hidden_states.to_owned(), true)
-            }
+            ModelInput::HiddenCpu(hidden_states) => (hidden_states.to_owned(), true),
             ModelInput::TokensGpu(_) | ModelInput::HiddenGpu(_) => {
-                return Err(anyhow!("GPU input not supported by CPU encoder. Use Seq2SeqGpuEncoder."));
+                return Err(anyhow!(
+                    "GPU input not supported by CPU encoder. Use Seq2SeqGpuEncoder."
+                ));
             }
         };
 
@@ -382,17 +399,12 @@ pub enum PositionEncoding {
         offset: usize,
     },
     /// Relative position bias (T5)
-    RelativeBias {
-        bias: T5RelativePositionBias,
-    },
+    RelativeBias { bias: T5RelativePositionBias },
     /// Sinusoidal positions (Whisper)
-    Sinusoidal {
-        cache: Array2<f32>,
-    },
+    Sinusoidal { cache: Array2<f32> },
     /// No position encoding
     None,
 }
-
 
 /// Create sinusoidal position embeddings.
 fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
@@ -432,7 +444,14 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
         self.embeddings
             .as_ref()
-            .map(|e| e.forward(input_ids, token_type_ids, self.position_offset(), self.meta.scale_embeddings))
+            .map(|e| {
+                e.forward(
+                    input_ids,
+                    token_type_ids,
+                    self.position_offset(),
+                    self.meta.scale_embeddings,
+                )
+            })
             .unwrap_or_else(|| {
                 Array3::zeros((input_ids.nrows(), input_ids.ncols(), self.meta.hidden_size))
             })

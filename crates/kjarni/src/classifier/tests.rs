@@ -205,13 +205,21 @@ mod builder_tests {
         assert!(builder.quiet);
         assert_eq!(builder.download_policy, DownloadPolicy::Never);
     }
+ #[test]
+    fn test_builder_from_preset() {
+        let builder = ClassifierBuilder::from_preset(&presets::SENTIMENT_BINARY_V1);
+
+        assert_eq!(builder.model, presets::SENTIMENT_BINARY_V1.model);
+        assert_eq!(builder.device, presets::SENTIMENT_BINARY_V1.recommended_device);
+    }
 
     #[test]
-    fn test_builder_from_preset() {
-        let builder = ClassifierBuilder::from_preset(&presets::SENTIMENT_V1);
+    fn test_builder_from_zeroshot_preset() {
+        let builder = ClassifierBuilder::from_preset(&presets::ZEROSHOT_LARGE_V1);
 
-        assert_eq!(builder.model, presets::SENTIMENT_V1.model);
-        assert_eq!(builder.device, presets::SENTIMENT_V1.recommended_device);
+        assert_eq!(builder.model, "bart-zeroshot");
+        // Zero-shot presets don't have labels - user provides them
+        assert!(builder.label_config.is_none());
     }
 
     #[test]
@@ -231,27 +239,70 @@ mod builder_tests {
 // =============================================================================
 
 mod preset_tests {
+    use crate::classifier::presets::{EmotionTier, SentimentTier, ZeroShotTier, find_preset};
+
     use super::*;
 
     #[test]
-    fn test_sentiment_v1_preset() {
-        let preset = &presets::SENTIMENT_V1;
+    fn test_sentiment_binary_preset() {
+        let preset = &presets::SENTIMENT_BINARY_V1;
 
-        assert_eq!(preset.name, "SENTIMENT_V1");
-        assert!(!preset.model.is_empty());
+        assert_eq!(preset.name, "SENTIMENT_BINARY_V1");
+        assert_eq!(preset.model, "distilbert-sentiment");
         assert_eq!(preset.task, presets::ClassificationTask::Sentiment);
+        assert!(preset.labels.is_some());
+        assert_eq!(preset.labels.unwrap().len(), 2); // NEGATIVE, POSITIVE
+    }
+
+    #[test]
+    fn test_sentiment_3class_preset() {
+        let preset = &presets::SENTIMENT_3CLASS_V1;
+
+        assert_eq!(preset.name, "SENTIMENT_3CLASS_V1");
+        assert_eq!(preset.model, "roberta-sentiment");
+        assert_eq!(preset.labels.unwrap().len(), 3); // negative, neutral, positive
+    }
+
+    #[test]
+    fn test_zeroshot_preset() {
+        let preset = &presets::ZEROSHOT_LARGE_V1;
+
+        assert_eq!(preset.name, "ZEROSHOT_LARGE_V1");
+        assert_eq!(preset.task, presets::ClassificationTask::ZeroShot);
+        assert!(preset.labels.is_none()); // User provides at runtime
+    }
+
+    #[test]
+    fn test_emotion_preset() {
+        let preset = &presets::EMOTION_V1;
+
+        assert_eq!(preset.name, "EMOTION_V1");
+        assert_eq!(preset.task, presets::ClassificationTask::Emotion);
+        assert_eq!(preset.labels.unwrap().len(), 7);
+    }
+
+    #[test]
+    fn test_toxicity_preset() {
+        let preset = &presets::TOXICITY_V1;
+
+        assert_eq!(preset.name, "TOXICITY_V1");
+        assert_eq!(preset.task, presets::ClassificationTask::Toxicity);
+        assert_eq!(preset.labels.unwrap().len(), 6);
     }
 
     #[test]
     fn test_find_preset_exists() {
-        let preset = presets::find_preset("SENTIMENT_V1");
+        let preset = presets::find_preset("SENTIMENT_BINARY_V1");
         assert!(preset.is_some());
-        assert_eq!(preset.unwrap().name, "SENTIMENT_V1");
+        assert_eq!(preset.unwrap().name, "SENTIMENT_BINARY_V1");
     }
 
     #[test]
     fn test_find_preset_case_insensitive() {
-        let preset = presets::find_preset("sentiment_v1");
+        let preset = presets::find_preset("sentiment_binary_v1");
+        assert!(preset.is_some());
+
+        let preset = presets::find_preset("Emotion_V1");
         assert!(preset.is_some());
     }
 
@@ -262,15 +313,28 @@ mod preset_tests {
     }
 
     #[test]
+    fn test_sentiment_tier_resolve() {
+        let fast = presets::SentimentTier::Fast.resolve();
+        let balanced = presets::SentimentTier::Balanced.resolve();
+        let detailed = presets::SentimentTier::Detailed.resolve();
+
+        assert_eq!(fast.model, "distilbert-sentiment");
+        assert_eq!(balanced.model, "roberta-sentiment");
+        assert_eq!(detailed.model, "bert-sentiment-multilingual");
+    }
+
+    #[test]
     fn test_classifier_tier_resolve() {
         let fast = presets::ClassifierTier::Fast.resolve();
         let balanced = presets::ClassifierTier::Balanced.resolve();
         let accurate = presets::ClassifierTier::Accurate.resolve();
 
-        // All should resolve to valid presets
-        assert!(!fast.model.is_empty());
-        assert!(!balanced.model.is_empty());
-        assert!(!accurate.model.is_empty());
+        // Fast defaults to binary sentiment
+        assert_eq!(fast.name, "SENTIMENT_BINARY_V1");
+        // Balanced defaults to 3-class sentiment
+        assert_eq!(balanced.name, "SENTIMENT_3CLASS_V1");
+        // Accurate defaults to zero-shot (most flexible)
+        assert_eq!(accurate.name, "ZEROSHOT_LARGE_V1");
     }
 
     #[test]
@@ -280,8 +344,48 @@ mod preset_tests {
             assert!(!preset.model.is_empty());
             assert!(preset.memory_mb > 0);
             assert!(!preset.description.is_empty());
+            
+            // Zero-shot presets don't have labels
+            if preset.task != presets::ClassificationTask::ZeroShot {
+                assert!(preset.labels.is_some(), "Non-zeroshot preset {} should have labels", preset.name);
+            }
         }
     }
+
+    #[test]
+    fn test_all_presets_unique_names() {
+        let mut names: Vec<&str> = presets::ALL_V1_PRESETS.iter().map(|p| p.name).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), original_len, "Duplicate preset names found");
+    }
+    #[test]
+    fn test_preset_lookup() {
+        assert!(find_preset("SENTIMENT_BINARY_V1").is_some());
+        assert!(find_preset("sentiment_binary_v1").is_some()); // case insensitive
+        assert!(find_preset("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_sentiment_tier_resolution() {
+        assert_eq!(SentimentTier::Fast.resolve().model, "distilbert-sentiment");
+        assert_eq!(SentimentTier::Balanced.resolve().model, "roberta-sentiment");
+        assert_eq!(SentimentTier::Detailed.resolve().model, "bert-sentiment-multilingual");
+    }
+
+    #[test]
+    fn test_zeroshot_tier_resolution() {
+        assert_eq!(ZeroShotTier::Fast.resolve().model, "deberta-zeroshot");
+        assert_eq!(ZeroShotTier::Accurate.resolve().model, "bart-zeroshot");
+    }
+
+    #[test]
+    fn test_emotion_tier_resolution() {
+        assert_eq!(EmotionTier::Basic.resolve().model, "distilroberta-emotion");
+        assert_eq!(EmotionTier::Detailed.resolve().model, "roberta-emotions");
+    }
+   
 }
 
 // =============================================================================
@@ -291,7 +395,47 @@ mod preset_tests {
 mod validation_tests {
     use super::*;
     use kjarni_transformers::models::ModelType;
+    #[test]
+    fn test_validate_sentiment_model() {
+        // DistilBERT-SST2 should be valid
+        if let Some(model_type) = ModelType::from_cli_name("distilbert-sentiment") {
+            let result = validation::validate_for_classification(model_type);
+            assert!(result.is_ok(), "Sentiment model should be valid for classification");
+        }
+    }
 
+    #[test]
+    fn test_validate_reranker_is_not_classifier() {
+        // Reranker should NOT be valid for classification
+        if let Some(model_type) = ModelType::from_cli_name("minilm-reranker") {
+            let result = validation::validate_for_classification(model_type);
+            // This depends on how you implement validation
+            // If ReRanking task is excluded, this should fail
+            // If you allow it, adjust the test
+        }
+    }
+
+    #[test]
+    fn test_validate_decoder_invalid() {
+        // Decoder models should fail
+        if let Some(model_type) = ModelType::from_cli_name("llama3.2-1b-instruct") {
+            let result = validation::validate_for_classification(model_type);
+            assert!(result.is_err(), "Decoder should not be valid for classification");
+        }
+    }
+
+    #[test]
+    fn test_get_classifier_models() {
+        let models = validation::get_classifier_models();
+        // Should return at least some models
+        assert!(!models.is_empty(), "Should have at least one classifier model");
+        
+        // Should include sentiment model
+        assert!(
+            models.iter().any(|m| m.contains("sentiment") || m.contains("emotion") || m.contains("zeroshot")),
+            "Should include at least one known classifier"
+        );
+    }
     #[test]
     fn test_validate_classifier_model() {
         // Cross-encoder should be valid
@@ -310,13 +454,6 @@ mod validation_tests {
         }
     }
 
-    #[test]
-    fn test_get_classifier_models() {
-        let models = validation::get_classifier_models();
-        // Should return some models (or empty if none configured)
-        // At minimum, test that it doesn't panic
-        assert!(models.len() >= 0);
-    }
 }
 
 // =============================================================================

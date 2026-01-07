@@ -4,7 +4,7 @@
 use std::any::Any;
 
 use crate::tensor::TensorView;
-use anyhow::{Context, Result};
+use anyhow::{Result};
 
 pub mod gguf_loader;
 pub mod model_weights;

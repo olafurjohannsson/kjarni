@@ -188,9 +188,15 @@ pub trait ModelConfig: Send + Sync {
     fn activation(&self) -> Activation {
         self.metadata().activation
     }
-    /// Returns label mapping for classification models (index -> label name)
+     /// Get ordered label names for classification models.
+    /// Labels are sorted by their index (0, 1, 2, ...).
     fn id2label(&self) -> Option<&[String]> {
-        None
+        None  // Default: no labels
+    }
+
+    /// Get number of labels for classification models.
+    fn num_labels(&self) -> Option<usize> {
+        self.id2label().map(|l| l.len())
     }
 }
 

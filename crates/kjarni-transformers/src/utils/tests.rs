@@ -1,31 +1,9 @@
-use crate::utils::linear_algebra::{apply_attention_mask, matmul_2d, matmul_2d_f32_notranspose, matmul_2d_mixed_bf16_new, matmul_2d_transposed, matmul_3d_2d_transposed, matmul_4d, matmul_4d_context_gqa, matmul_4d_decode_gqa, softmax_inplace};
-
+use crate::utils::linear_algebra::{apply_attention_mask, matmul_2d, matmul_2d_f32_notranspose, matmul_2d_mixed_bf16_new, matmul_2d_transposed, matmul_3d_2d_transposed, matmul_4d, matmul_4d_context_gqa, matmul_4d_decode_gqa};
+use crate::activations::softmax_4d_inplace;
 use super::*;
 use ndarray::{Array2, Array3, Array4, ArrayView2, arr2};
 use approx::assert_abs_diff_eq;
 use half::bf16;
-
-// ========================================================================
-//  Helper: Simple Scalar Reference
-// ========================================================================
-
-fn reference_matmul_2d(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
-    let (m, k) = a.dim();
-    let (k2, n) = b.dim();
-    assert_eq!(k, k2);
-    
-    let mut c = Array2::zeros((m, n));
-    for i in 0..m {
-        for j in 0..n {
-            let mut sum = 0.0;
-            for x in 0..k {
-                sum += a[[i, x]] * b[[x, j]];
-            }
-            c[[i, j]] = sum;
-        }
-    }
-    c
-}
 
 // ========================================================================
 //  Standard Matmul Tests
@@ -188,7 +166,7 @@ fn test_softmax_inplace() {
     // [1, 1, 1, 2] -> [0.0, 10.0]
     let mut scores = Array4::from_shape_vec((1, 1, 1, 2), vec![0.0f32, 10.0]).unwrap();
     
-    softmax_inplace(&mut scores);
+    softmax_4d_inplace(&mut scores);
     
     // exp(0) vs exp(10). The 10 should dominate.
     // e^0 / (e^0 + e^10) approx 0

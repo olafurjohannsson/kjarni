@@ -43,7 +43,7 @@ pub fn apply_padding_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow
 }
 
 pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
-    let (batch, heads, q_len, k_len) = scores.dim();
+    let batch = scores.dim().0;
 
     // The mask can be [batch, k_len] or [q_len, k_len]
     // We expand to [batch, 1, q_len, k_len] for broadcasting

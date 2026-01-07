@@ -1,15 +1,20 @@
 //! Unified Seq2Seq decoder supporting BART, T5, Whisper, and similar architectures.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::sync::Arc;
 
-pub use super::config::{PositionEncodingType, Seq2SeqDecoderConfig};
-use crate::encoder_decoder::relative_position_bias::T5RelativePositionBias;
+pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqDecoderConfig};
+
+use crate::cpu::encoder_decoder::{
+    decoder_cross_attn_layer::CrossDecoderLayer, relative_position_bias::T5RelativePositionBias,
+};
+
 use crate::{
-    cache::{Cache, CpuBeamKVCache}, embeddings::Embeddings,
-    encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer,
+    Normalization, WgpuContext,
+    cache::{Cache, CpuBeamKVCache},
+    embeddings::Embeddings,
     encoder_decoder::traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
     models::base::ModelLoadConfig,
     pipeline::Seq2SeqFactory,
@@ -17,8 +22,6 @@ use crate::{
         Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
     },
     weights::ModelWeights,
-    Normalization,
-    WgpuContext,
 };
 
 // =============================================================================
@@ -465,7 +468,6 @@ impl InferenceModel for Seq2SeqCPUDecoder {
         self
     }
 }
-
 
 #[async_trait]
 impl CpuCrossDecoder for Seq2SeqCPUDecoder {

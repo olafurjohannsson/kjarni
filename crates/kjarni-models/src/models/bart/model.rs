@@ -1,35 +1,32 @@
 // --- Standard Library ---
+use ndarray::{Array2, Array3};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-// --- External Crates ---
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use kjarni_transformers::common::HFGenerationDefaults;
-use kjarni_transformers::encoder_decoder::cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig};
-use kjarni_transformers::encoder_decoder::cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig};
-use kjarni_transformers::models::base::ModelLoadConfig;
-use kjarni_transformers::pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline};
-use kjarni_transformers::traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata};
-use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-// --- Workspace Crates ---
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
+
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
-    common::{BeamSearchParams, DecodingStrategy, GenerationConfig},
-    cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
+    common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults},
+    cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+    cpu::encoder_decoder::{
+        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+    },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
     gpu_ops::{GpuFrameContext, GpuTensor},
-    models::ModelType,
+    models::{ModelType, base::ModelLoadConfig},
+    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
     prelude::*,
+    traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 
-// --- Crate-Specific ---
 use crate::models::bart::{
     config::{BartConfig, BartLikeConfig},
     cpu_decoder::BartCpuDecoder,
@@ -158,7 +155,7 @@ impl BartModel {
             context,
             load_config,
         )
-            .await
+        .await
     }
     pub fn bart_cpu_decoder(&self) -> Option<&BartCpuDecoder> {
         // self.cpu_decoder.as_ref()

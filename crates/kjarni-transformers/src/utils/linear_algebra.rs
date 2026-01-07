@@ -1034,23 +1034,3 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
 
     scores
 }
-
-pub fn softmax_inplace(x: &mut Array4<f32>) {
-    for mut batch in x.outer_iter_mut() {
-        for mut head in batch.outer_iter_mut() {
-            for mut row in head.outer_iter_mut() {
-                let max = row.fold(MASK_VALUE, |a, &b| a.max(b));
-                let mut sum = 0.0;
-                for v in row.iter_mut() {
-                    *v = (*v - max).exp();
-                    sum += *v;
-                }
-                if sum > 0.0 {
-                    for v in row.iter_mut() {
-                        *v /= sum;
-                    }
-                }
-            }
-        }
-    }
-}

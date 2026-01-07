@@ -9,6 +9,8 @@ use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::{linear::GpuLinearLayer, tanh::GpuTanh};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::linear_layer::LinearLayer;
+use crate::models::base::ModelLoadConfig;
+use crate::weights::ModelWeights;
 use anyhow::{anyhow, Result};
 use ndarray::{s, Array2, Array3};
 
@@ -16,56 +18,199 @@ use ndarray::{s, Array2, Array3};
 //  CPU Sequence Classification Head
 // ============================================================================
 
-/// A CPU-based head for sequence classification tasks (e.g., sentiment, NLI, reranking).
+/// Layout for sequence classification head.
+#[derive(Debug, Clone)]
+pub struct ClassificationHeadLayout {
+    /// Pre-classifier projection (hidden_size -> hidden_size)
+    pub pre_classifier_weight: Option<String>,
+    pub pre_classifier_bias: Option<String>,
+    
+    /// Final classifier (hidden_size -> num_labels)
+    pub classifier_weight: String,
+    pub classifier_bias: Option<String>,
+}
+
+/// Activation function for the classification head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeadActivation {
+    #[default]
+    Tanh,
+    Relu,
+    Gelu,
+    None,
+}
+
+/// CPU classification head supporting multiple architectures.
+///
+/// Supports:
+/// - BERT/RoBERTa: pooler (Tanh) → classifier  
+/// - DistilBERT: pre_classifier (ReLU) → classifier
+/// - Simple: classifier only
 pub struct CpuSequenceClassificationHead {
+    /// Pooler layer (BERT-style, uses Tanh)
     pooler: Option<LinearLayer>,
+    /// Pre-classifier layer (DistilBERT-style)
+    pre_classifier: Option<LinearLayer>,
+    /// Final classifier
     classifier: LinearLayer,
+    /// Activation after pooler/pre_classifier
+    activation: HeadActivation,
+    /// Label names (optional)
+    labels: Option<Vec<String>>,
 }
 
 impl CpuSequenceClassificationHead {
+    /// Create a new classification head.
+    ///
+    /// # Arguments
+    /// * `pooler` - Optional pooler layer (BERT-style)
+    /// * `classifier` - Final classification layer
     pub fn new(pooler: Option<LinearLayer>, classifier: LinearLayer) -> Result<Self> {
-        if let Some(p) = &pooler {
+        Self::with_config(pooler, None, classifier, HeadActivation::Tanh, None)
+    }
+
+    /// Create with full configuration.
+    pub fn with_config(
+        pooler: Option<LinearLayer>,
+        pre_classifier: Option<LinearLayer>,
+        classifier: LinearLayer,
+        activation: HeadActivation,
+        labels: Option<Vec<String>>,
+    ) -> Result<Self> {
+        // Validate dimensions
+        if let Some(ref p) = pooler {
             if p.out_features() != classifier.in_features() {
                 return Err(anyhow!(
-                    "Dimension mismatch: Pooler output ({}) does not match Classifier input ({})",
+                    "Pooler output ({}) != Classifier input ({})",
                     p.out_features(),
                     classifier.in_features()
                 ));
             }
         }
-        Ok(Self { pooler, classifier })
+        if let Some(ref pc) = pre_classifier {
+            if pc.out_features() != classifier.in_features() {
+                return Err(anyhow!(
+                    "Pre-classifier output ({}) != Classifier input ({})",
+                    pc.out_features(),
+                    classifier.in_features()
+                ));
+            }
+        }
+
+        Ok(Self {
+            pooler,
+            pre_classifier,
+            classifier,
+            activation,
+            labels,
+        })
     }
 
-    /// Takes the full sequence of hidden states and produces final logits.
+    /// Create from model weights with auto-detection.
+    pub fn from_weights(
+        weights: &ModelWeights,
+        load_config: &ModelLoadConfig,
+        labels: Option<Vec<String>>,
+    ) -> Result<Self> {
+        // Auto-detect head structure from available weights
+        let (pooler, pre_classifier, activation) = if weights.contains("pre_classifier.weight") {
+            // DistilBERT style
+            let pre_classifier = LinearLayer::builder(weights, "pre_classifier.weight")
+                .with_optional_bias(Some("pre_classifier.bias"))
+                .with_target_dtype(load_config.target_dtype)
+                .build()?;
+            (None, Some(pre_classifier), HeadActivation::Relu)
+        } else if weights.contains("bert.pooler.dense.weight") {
+            // BERT style
+            let pooler = LinearLayer::builder(weights, "bert.pooler.dense.weight")
+                .with_optional_bias(Some("bert.pooler.dense.bias"))
+                .with_target_dtype(load_config.target_dtype)
+                .build()?;
+            (Some(pooler), None, HeadActivation::Tanh)
+        } else if weights.contains("roberta.pooler.dense.weight") {
+            // RoBERTa style
+            let pooler = LinearLayer::builder(weights, "roberta.pooler.dense.weight")
+                .with_optional_bias(Some("roberta.pooler.dense.bias"))
+                .with_target_dtype(load_config.target_dtype)
+                .build()?;
+            (Some(pooler), None, HeadActivation::Tanh)
+        } else if weights.contains("classifier.dense.weight") {
+            // RoBERTa sequence classification style
+            let pre_classifier = LinearLayer::builder(weights, "classifier.dense.weight")
+                .with_optional_bias(Some("classifier.dense.bias"))
+                .with_target_dtype(load_config.target_dtype)
+                .build()?;
+            // Note: classifier is actually classifier.out_proj in this case
+            let classifier = LinearLayer::builder(weights, "classifier.out_proj.weight")
+                .with_optional_bias(Some("classifier.out_proj.bias"))
+                .with_target_dtype(load_config.target_dtype)
+                .build()?;
+            return Self::with_config(None, Some(pre_classifier), classifier, HeadActivation::Tanh, labels);
+        } else {
+            // Simple classifier only
+            (None, None, HeadActivation::None)
+        };
+
+        // Load main classifier
+        let classifier = LinearLayer::builder(weights, "classifier.weight")
+            .with_optional_bias(Some("classifier.bias"))
+            .with_target_dtype(load_config.target_dtype)
+            .build()?;
+
+        Self::with_config(pooler, pre_classifier, classifier, activation, labels)
+    }
+
+    /// Forward pass: hidden_states → logits.
     ///
     /// # Arguments
-    /// * `encoder_hidden_states`: Shape `[batch, seq_len, hidden_size]`.
+    /// * `encoder_hidden_states`: Shape `[batch, seq_len, hidden_size]`
     ///
     /// # Returns
-    /// * Logits with shape `[batch, num_classes]`.
+    /// * Logits with shape `[batch, num_classes]`
     pub fn forward(&self, encoder_hidden_states: &Array3<f32>) -> Result<Array2<f32>> {
         let (batch, seq_len, _hidden_size) = encoder_hidden_states.dim();
-
         if batch == 0 || seq_len == 0 {
             return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
         }
 
+        // Extract [CLS] token (index 0)
         let cls_embedding = encoder_hidden_states.slice(s![.., 0, ..]).to_owned();
 
-        let pooled_output = if let Some(p) = &self.pooler {
-            let mut pooled = p.matmul(&cls_embedding.view());
-            pooled.mapv_inplace(f32::tanh);
+        // Apply pooler OR pre_classifier (not both)
+        let features = if let Some(ref pooler) = self.pooler {
+            let mut pooled = pooler.matmul(&cls_embedding.view());
+            self.apply_activation_inplace(&mut pooled);
             pooled
+        } else if let Some(ref pre_classifier) = self.pre_classifier {
+            let mut pre_out = pre_classifier.matmul(&cls_embedding.view());
+            self.apply_activation_inplace(&mut pre_out);
+            pre_out
         } else {
             cls_embedding
         };
 
-        let logits = self.classifier.matmul(&pooled_output.view());
+        // Final classifier
+        let logits = self.classifier.matmul(&features.view());
         Ok(logits)
+    }
+
+    fn apply_activation_inplace(&self, x: &mut Array2<f32>) {
+        match self.activation {
+            HeadActivation::Tanh => x.mapv_inplace(f32::tanh),
+            HeadActivation::Relu => x.mapv_inplace(|v| v.max(0.0)),
+            HeadActivation::Gelu => x.mapv_inplace(|v| {
+                0.5 * v * (1.0 + (std::f32::consts::FRAC_2_SQRT_PI * (v + 0.044715 * v.powi(3))).tanh())
+            }),
+            HeadActivation::None => {}
+        }
     }
 
     pub fn num_classes(&self) -> usize {
         self.classifier.out_features()
+    }
+
+    pub fn labels(&self) -> Option<&[String]> {
+        self.labels.as_deref()
     }
 }
 

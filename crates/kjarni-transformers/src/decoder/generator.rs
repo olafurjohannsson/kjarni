@@ -80,12 +80,10 @@ use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
 use crate::{prelude::*, Conversation};
 use anyhow::{anyhow, Result};
-use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use std::sync::Arc;
-use std::time::Instant;
 
 /// Orchestrates autoregressive text generation for decoder-only models.
 ///

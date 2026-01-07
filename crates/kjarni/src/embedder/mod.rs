@@ -31,7 +31,7 @@ mod validation;
 pub use builder::EmbedderBuilder;
 pub use model::Embedder;
 pub use presets::{EmbedderPreset, EmbedderTier};
-pub use types::{EmbeddingOverrides, EmbedderError, EmbedderResult, PoolingStrategy};
+pub use types::{EmbeddingOverrides, EmbedderError, EmbedderResult};
 
 // ============================================================================
 // Convenience Functions

@@ -1,6 +1,6 @@
 use libm::{erff, expf, tanhf};
 use ndarray::parallel::prelude::*;
-use ndarray::{Array2, Array3, Array4, Axis};
+use ndarray::{Array1, Array2, Array3, Array4, Axis};
 use ndarray::{ArrayBase, DataMut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -202,19 +202,62 @@ pub fn silu_parallel(x: &mut Array2<f32>) {
 
 // ==================== Softmax ====================
 
-pub fn softmax(scores: &Array4<f32>) -> Array4<f32> {
-    let max_vals = scores.fold_axis(Axis(3), f32::NEG_INFINITY, |&acc, &x| acc.max(x));
-    let max_expanded = max_vals.insert_axis(Axis(3));
 
-    let mut result = scores - &max_expanded;
-    result.mapv_inplace(f32::exp);
+/// The core, allocation-free Softmax implementation.
+/// Works on both `Vec<f32>` and `Array1<f32>` (via as_slice_mut).
+pub fn softmax_inplace(slice: &mut [f32]) {
+    if slice.is_empty() { return; }
 
-    let sum_exp = result.sum_axis(Axis(3)).insert_axis(Axis(3));
-    result /= &sum_exp;
+    // 1. Find max for numerical stability
+    let max = slice.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
-    result
+    // 2. Exp and Sum
+    let mut sum = 0.0;
+    for v in slice.iter_mut() {
+        *v = (*v - max).exp();
+        sum += *v;
+    }
+
+    // 3. Normalize (multiplication is faster than division)
+    let scale = 1.0 / sum;
+    for v in slice.iter_mut() {
+        *v *= scale;
+    }
 }
 
+/// Wrapper for `Array1` usage (keeps your existing signature valid elsewhere)
+pub fn softmax_1d_inplace(logits: &mut Array1<f32>) {
+    if let Some(slice) = logits.as_slice_mut() {
+        softmax_inplace(slice);
+    } else {
+        // Fallback for non-contiguous Array1 (rare)
+        let max = logits.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        logits.mapv_inplace(|x| (x - max).exp());
+        let sum = logits.sum();
+        *logits /= sum;
+    }
+}
+
+/// Wrapper for 4D attention scores
+pub fn softmax_4d_inplace(x: &mut Array4<f32>) {
+    x.lanes_mut(Axis(3)).into_iter().for_each(|mut lane| {
+        if let Some(slice) = lane.as_slice_mut() {
+            softmax_inplace(slice);
+        } else {
+            // Fallback
+            let max = lane.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let mut sum = 0.0;
+            for v in lane.iter_mut() {
+                *v = (*v - max).exp();
+                sum += *v;
+            }
+            let scale = 1.0 / sum;
+            for v in lane.iter_mut() {
+                *v *= scale;
+            }
+        }
+    });
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,17 +393,17 @@ mod tests {
     }
     #[test]
     fn test_softmax() {
-        let input = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
-        let output = softmax(&input);
+        let mut output: Array4<f32> = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
+        softmax_4d_inplace(&mut output);
 
         // Check sum to 1
         assert_relative_eq!(output.sum(), 1.0, epsilon = 1e-6);
 
         // Check stability with large numbers
-        let large = Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
-        let output_large = softmax(&large);
-        assert_relative_eq!(output_large.sum(), 1.0, epsilon = 1e-6);
-        assert!(!output_large.iter().any(|x| x.is_nan()));
+        let mut large: Array4<f32> = Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
+        softmax_4d_inplace(&mut large);
+        assert_relative_eq!(large.sum(), 1.0, epsilon = 1e-6);
+        assert!(!large.iter().any(|x| x.is_nan()));
     }
     // #[test]
     // fn test_apply_activation_2d() {
@@ -492,9 +535,9 @@ mod tests {
 
     #[test]
     fn test_softmax_sum_to_one() {
-        let input = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
-        let output = softmax(&input);
-
+        let mut  input = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
+        softmax_4d_inplace(&mut input);
+        let output = input.clone();
         let sum = output.sum();
         assert_relative_eq!(sum, 1.0, epsilon = 1e-6);
 
@@ -506,8 +549,9 @@ mod tests {
     #[test]
     fn test_softmax_numerical_stability() {
         // Large values should not produce NaN due to subtraction of max
-        let input = Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
-        let output = softmax(&input);
+        let mut input = Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
+        softmax_4d_inplace(&mut input);
+        let output = input.clone();
 
         assert_relative_eq!(output.sum(), 1.0, epsilon = 1e-6);
         assert!(!output.iter().any(|x| x.is_nan()));

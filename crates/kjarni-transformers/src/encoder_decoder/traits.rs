@@ -6,7 +6,7 @@
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
 use crate::cpu::encoder::prelude::EncoderLanguageModel;
-use crate::encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer;
+use crate::cpu::encoder_decoder::CrossDecoderLayer;
 use crate::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
@@ -77,6 +77,7 @@ pub trait CpuCrossDecoder: Send + Sync {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<CpuCrossDecoderOutput>;
+    
     fn forward_layers2(
         &self,
         hidden_states: &Array3<f32>,

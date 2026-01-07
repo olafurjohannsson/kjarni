@@ -29,7 +29,7 @@ mod configs;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata};
 
-use crate::sentence_encoder::configs::BertConfig;
+pub use crate::sentence_encoder::configs::{BertConfig, DistilBertConfig, MpnetConfig};
 
 /// Sentence encoder for semantic similarity tasks
 ///

@@ -1,7 +1,7 @@
 //! Text embedding command using the high-level Embedder API.
 
 use anyhow::{anyhow, Result};
-use kjarni::embedder::{Embedder, PoolingStrategy};
+use kjarni::{PoolingStrategy, embedder::Embedder};
 
 pub async fn run(
     input: Option<&str>,

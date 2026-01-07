@@ -34,8 +34,9 @@
 
 use crate::linear_layer::LinearLayer;
 use crate::utils::linear_algebra::{
-    apply_attention_mask, matmul_4d, matmul_4d_context, matmul_4d_decode, softmax_inplace,
+    apply_attention_mask, matmul_4d, matmul_4d_context, matmul_4d_decode
 };
+use crate::activations::softmax_4d_inplace;
 use crate::utils::masks::apply_causal_mask;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3, Axis};
@@ -250,7 +251,7 @@ impl DecoderSelfAttention {
         }
 
         // Softmax
-        softmax_inplace(&mut scores);
+        softmax_4d_inplace(&mut scores);
 
         // 5. Compute context: Scores @ V
         let v_heads = full_v

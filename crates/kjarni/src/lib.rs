@@ -67,7 +67,7 @@ pub mod embedder;
 mod generation;
 
 pub mod common;
-
+pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API
 pub use utils::*;
 

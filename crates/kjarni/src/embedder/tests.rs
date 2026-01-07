@@ -11,6 +11,8 @@ use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig};
 // =============================================================================
 
 mod types_tests {
+    use kjarni_transformers::PoolingStrategy;
+
     use super::*;
 
     #[test]
@@ -91,6 +93,8 @@ mod types_tests {
 // =============================================================================
 
 mod builder_tests {
+    use kjarni_transformers::PoolingStrategy;
+
     use super::*;
 
     #[test]
@@ -230,6 +234,8 @@ mod builder_tests {
 // =============================================================================
 
 mod preset_tests {
+    use kjarni_transformers::PoolingStrategy;
+
     use super::*;
 
     #[test]
@@ -431,6 +437,8 @@ mod similarity_tests {
 // =============================================================================
 
 mod integration_tests {
+    use kjarni_transformers::PoolingStrategy;
+
     use super::*;
 
     /// Test that we can create an embedder.

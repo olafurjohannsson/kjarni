@@ -281,7 +281,7 @@ impl DecoderAttention {
         // }
         self.apply_causal_mask(&mut scores, start_write);
 
-        crate::utils::linear_algebra::softmax_inplace(&mut scores);
+        crate::activations::softmax_4d_inplace(&mut scores);
 
         // 6. Context (Scores @ V)
         let context = if is_decode {

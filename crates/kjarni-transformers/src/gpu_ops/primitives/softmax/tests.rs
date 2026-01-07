@@ -1,4 +1,6 @@
-use crate::activations::softmax as cpu_softmax_4d;
+use crate::activations::softmax_4d_inplace;
+
+
 
 #[path = "../../../tests/common.rs"]
 mod common;
@@ -131,7 +133,7 @@ async fn test_softmax_simple_case2() -> Result<()> {
     let seq_len = 128;
 
     // 1. Create CPU data and GPU tensor
-    let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-1.0, 5.0));
+    let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
 
     // 2. Execute GPU kernel (in-place)
@@ -141,14 +143,14 @@ async fn test_softmax_simple_case2() -> Result<()> {
     context.queue.submit(std::iter::once(encoder.finish()));
 
     // 3. Execute CPU ground truth
-    let cpu_result = cpu_softmax_4d(&cpu_scores);
+    softmax_4d_inplace(&mut cpu_scores);
 
     // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array4::from_shape_vec(shape_4d!(shape), gpu_vec)?;
 
     println!("Verifying Softmax (Simple Case)...");
-    assert_all_close_4d(&gpu_result, &cpu_result, 1e-5);
+    assert_all_close_4d(&gpu_result, &cpu_scores, 1e-5);
     println!("Passed!");
 
     Ok(())
@@ -167,7 +169,7 @@ async fn test_softmax_padded_case2() -> Result<()> {
 
     // 1. Create dirty CPU data with padding
     let mut cpu_data_padded = Array::from_elem((batch, heads, query_len, physical_cols), f32::NAN);
-    let valid_part = Array::random(
+    let mut valid_part = Array::random(
         (batch, heads, query_len, logical_cols),
         Uniform::new(-1.0, 5.0),
     );
@@ -183,7 +185,8 @@ async fn test_softmax_padded_case2() -> Result<()> {
     context.queue.submit(std::iter::once(encoder.finish()));
 
     // 3. Execute CPU ground truth ONLY on the valid part
-    let cpu_result_valid = cpu_softmax_4d(&valid_part);
+    softmax_4d_inplace(&mut valid_part);
+    let cpu_result_valid = valid_part.clone();
     let mut cpu_result_padded = Array4::<f32>::zeros((batch, heads, query_len, physical_cols));
     cpu_result_padded
         .slice_mut(s![.., .., .., 0..logical_cols])
@@ -211,7 +214,7 @@ async fn test_softmax_with_scaling() -> Result<()> {
     let scale = 0.125; // Typical 1/sqrt(64)
 
     // 1. Create data
-    let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
+    let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
 
     // 2. Execute GPU
@@ -220,9 +223,9 @@ async fn test_softmax_with_scaling() -> Result<()> {
     context.queue.submit(std::iter::once(encoder.finish()));
 
     // 3. Execute CPU ground truth (apply scale before softmax)
-    let cpu_scores_scaled = &cpu_scores * scale;
-    let cpu_result = cpu_softmax_4d(&cpu_scores_scaled);
-
+    let mut cpu_scores_scaled = &cpu_scores * scale;
+    softmax_4d_inplace(&mut cpu_scores_scaled);
+    let cpu_result = cpu_scores_scaled.clone();
     // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array4::from_shape_vec(shape_4d!(shape), gpu_vec)?;
@@ -244,7 +247,7 @@ async fn test_softmax_numerical_stability() -> Result<()> {
     let seq_len = 32;
 
     // 1. Create data with large values to test stability
-    let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(100.0, 110.0));
+    let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(100.0, 110.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
 
     // 2. Execute GPU
@@ -253,7 +256,8 @@ async fn test_softmax_numerical_stability() -> Result<()> {
     context.queue.submit(std::iter::once(encoder.finish()));
 
     // 3. Execute CPU
-    let cpu_result = cpu_softmax_4d(&cpu_scores);
+    softmax_4d_inplace(&mut cpu_scores);
+    let cpu_result = cpu_scores.clone();
 
     // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;

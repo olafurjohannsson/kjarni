@@ -8,7 +8,7 @@ use crate::common::{default_cache_dir, ensure_model_downloaded};
 use crate::SentenceEncoder;
 
 use super::builder::EmbedderBuilder;
-use super::types::{EmbeddingOverrides, EmbedderError, EmbedderResult, PoolingStrategy};
+use super::types::{EmbeddingOverrides, EmbedderError, EmbedderResult};
 use super::validation::validate_for_embedding;
 
 /// High-level text embedder.

@@ -1,7 +1,8 @@
 //! Versioned presets for embedding models.
 
+use kjarni_transformers::PoolingStrategy;
+
 use crate::common::KjarniDevice;
-use super::types::PoolingStrategy;
 
 /// An embedding model preset.
 #[derive(Debug, Clone)]

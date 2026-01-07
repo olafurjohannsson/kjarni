@@ -1,6 +1,6 @@
 //! Multi-head attention implementation with KV caching support
 
-use crate::activations::softmax;
+use crate::activations::softmax_4d_inplace;
 use crate::rope::RoPE;
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use crate::utils::masks::{apply_causal_mask, apply_padding_mask};
@@ -152,9 +152,10 @@ impl MultiHeadAttention {
         }
 
         // 6. Compute attention output
-        let weights = softmax(&scores);
+        
+        softmax_4d_inplace(&mut scores);
         let v_contiguous = v_reshaped.as_standard_layout().to_owned();
-        let context = matmul_4d(&weights, &v_contiguous);
+        let context = matmul_4d(&scores, &v_contiguous);
 
         // 7. Reshape back to [batch, seq, hidden]
         let context_reshaped = context

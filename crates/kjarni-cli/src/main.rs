@@ -173,17 +173,18 @@ async fn main() -> Result<()> {
             gpu,
             quiet,
         } => {
-            commands::rerank::run(
-                &query,
-                &documents,
-                &model,
-                model_path.as_deref(),
-                top_k,
-                &format,
-                gpu,
-                quiet,
-            )
-            .await
+            unimplemented!()
+            // commands::rerank::run(
+            //     &query,
+            //     &documents,
+            //     &model,
+            //     model_path.as_deref(),
+            //     top_k,
+            //     &format,
+            //     gpu,
+            //     quiet,
+            // )
+            // .await
         }
 
         Commands::Chat {

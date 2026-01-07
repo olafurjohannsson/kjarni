@@ -28,7 +28,8 @@
 
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
-use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d, softmax_inplace};
+use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d};
+use crate::activations::softmax_4d_inplace;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
 
@@ -265,7 +266,7 @@ impl EncoderSelfAttention {
         scores = apply_attention_mask(scores, attention_mask);
 
         // 7. Softmax
-        softmax_inplace(&mut scores);
+        softmax_4d_inplace(&mut scores);
 
         // 8. Compute context: Scores @ V
         let context = matmul_4d(&scores, &v_heads);

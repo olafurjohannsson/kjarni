@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub async fn run(action: ModelCommands) -> Result<()> {
     match action {
-        ModelCommands::List { arch } => list(arch),
+        ModelCommands::List { arch, task, downloaded } => list(arch, task, downloaded),
         ModelCommands::Download { name, gguf } => download(&name, gguf).await,
         ModelCommands::Remove { name } => remove(&name),
         ModelCommands::Info { name } => info(&name),
@@ -107,9 +107,11 @@ pub fn format_params(millions: usize) -> String {
     }
 }
 
-fn list(filter_arg: Option<String>) -> Result<()> {
+
+fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloaded: bool) -> Result<()> {
     let models = registry::list_models();
-    let filter = filter_arg.as_deref().map(|s| s.to_lowercase());
+    let arch_filter = filter_arch.as_deref().map(|s| s.to_lowercase());
+    let task_filter = filter_task.as_deref().map(|s| s.to_lowercase());
 
     let groups = [
         "LLM (Decoder)",
@@ -126,7 +128,24 @@ fn list(filter_arg: Option<String>) -> Result<()> {
     println!();
     println!("Cache: {}", registry::cache_dir().display());
     println!("Models: {}/{} downloaded", downloaded_count, total_count);
+    
+    // Show active filters
+    if arch_filter.is_some() || task_filter.is_some() || only_downloaded {
+        let mut filters = Vec::new();
+        if let Some(ref a) = arch_filter {
+            filters.push(format!("arch={}", a));
+        }
+        if let Some(ref t) = task_filter {
+            filters.push(format!("task={}", t));
+        }
+        if only_downloaded {
+            filters.push("downloaded".to_string());
+        }
+        println!("Filter: {}", filters.join(", "));
+    }
     println!();
+
+    let mut any_shown = false;
 
     for group in groups {
         let group_models: Vec<_> = models
@@ -136,20 +155,39 @@ fn list(filter_arg: Option<String>) -> Result<()> {
                 if m_group != group {
                     return false;
                 }
-                if let Some(f) = &filter {
-                    // Handle special filters
-                    if f == "downloaded" {
-                        return m.downloaded;
-                    }
-                    if m_group.to_lowercase().contains(f) {
-                        return true;
-                    }
-                    let arch = format!("{:?}", m.architecture).to_lowercase();
-                    if arch.contains(f) {
-                        return true;
-                    }
+
+                // Filter by downloaded
+                if only_downloaded && !m.downloaded {
                     return false;
                 }
+
+                // Filter by architecture
+                if let Some(ref f) = arch_filter {
+                    let arch = format!("{:?}", m.architecture).to_lowercase();
+                    if !arch.contains(f) {
+                        return false;
+                    }
+                }
+
+                // Filter by task
+                if let Some(ref f) = task_filter {
+                    let task_match = match f.as_str() {
+                        "chat" | "llm" | "decoder" => m_group == "LLM (Decoder)",
+                        "embedding" | "embed" | "encoder" => m_group == "Embedding",
+                        "classification" | "classify" | "classifier" => m_group == "Classifier",
+                        "rerank" | "reranker" | "re-ranker" => m_group == "Re-Ranker",
+                        "seq2seq" | "summarization" | "translation" | "summarize" => m_group == "Seq2Seq",
+                        _ => {
+                            // Also check task enum
+                            let task_str = format!("{:?}", m.model_type.info().task).to_lowercase();
+                            task_str.contains(f)
+                        }
+                    };
+                    if !task_match {
+                        return false;
+                    }
+                }
+
                 true
             })
             .collect();
@@ -157,6 +195,8 @@ fn list(filter_arg: Option<String>) -> Result<()> {
         if group_models.is_empty() {
             continue;
         }
+
+        any_shown = true;
 
         println!("{}", group.to_uppercase());
         println!("{}", "-".repeat(90));
@@ -187,6 +227,14 @@ fn list(filter_arg: Option<String>) -> Result<()> {
         println!();
     }
 
+    if !any_shown {
+        println!("No models found matching the filters.");
+        println!();
+        println!("Available task filters: chat, embedding, classification, rerank, seq2seq");
+        println!("Available arch filters: llama, bert, qwen, t5, bart, mistral, gpt");
+        println!();
+    }
+
     println!("Legend: ✓ gguf = GGUF downloaded, ✓ st = SafeTensors downloaded");
     println!("        [GGUF] = GGUF format available for download");
     println!();
@@ -195,6 +243,12 @@ fn list(filter_arg: Option<String>) -> Result<()> {
     println!("  kjarni model download <name> --gguf Download GGUF (smaller)");
     println!("  kjarni model info <name>            Show details");
     println!("  kjarni model remove <name>          Delete from disk");
+    println!();
+    println!("Filters:");
+    println!("  kjarni model list --task chat       Show only chat/LLM models");
+    println!("  kjarni model list --task embedding  Show only embedding models");
+    println!("  kjarni model list --arch bert       Show only BERT-based models");
+    println!("  kjarni model list --downloaded      Show only downloaded models");
     println!();
 
     Ok(())

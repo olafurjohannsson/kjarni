@@ -6,7 +6,7 @@ pub use cancellation::{CancellationError, CancellationHandle, CancellationToken}
 pub use sampling::{
     apply_no_repeat_ngram, apply_no_repeat_ngram_inplace, apply_repetition_penalty,
     apply_repetition_penalty_inplace, apply_repetition_penalty_mut, get_top_k_from_log_probs,
-    log_softmax_1d, min_p_filtering, sample_from_probs, sample_token, softmax_1d, top_k_filtering,
+    log_softmax_1d, min_p_filtering, sample_from_probs, sample_token, top_k_filtering,
     top_p_filtering,
 };
 pub use stream::{StreamedToken, TokenType};

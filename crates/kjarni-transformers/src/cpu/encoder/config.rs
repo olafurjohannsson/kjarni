@@ -1,23 +1,55 @@
 //! Encoder configuration types
 use std::fmt;
 
-/// Pooling strategies for sequence outputs
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum PoolingStrategy {
+    /// Mean pooling over all tokens (default, recommended).
     #[default]
     Mean,
+
+    /// Max pooling over all tokens.
     Max,
+
+    /// Use [CLS] token representation.
     Cls,
+
+    /// Use last token representation.
     LastToken,
+}
+
+impl PoolingStrategy {
+    /// Convert to string for the low-level API.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Mean => "mean",
+            Self::Max => "max",
+            Self::Cls => "cls",
+            Self::LastToken => "last_token",
+        }
+    }
 }
 
 impl fmt::Display for PoolingStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PoolingStrategy::Mean => write!(f, "Mean"),
-            PoolingStrategy::Max => write!(f, "Max"),
-            PoolingStrategy::Cls => write!(f, "CLS"),
-            PoolingStrategy::LastToken => write!(f, "LastToken"),
+            Self::Mean => write!(f, "mean"),
+            Self::Max => write!(f, "max"),
+            Self::Cls => write!(f, "cls"),
+            Self::LastToken => write!(f, "last_token"),
+        }
+    }
+}
+
+impl std::str::FromStr for PoolingStrategy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "mean" => Ok(Self::Mean),
+            "max" => Ok(Self::Max),
+            "cls" => Ok(Self::Cls),
+            "last_token" | "lasttoken" | "last" => Ok(Self::LastToken),
+            _ => Err(format!("Unknown pooling strategy: {}", s)),
         }
     }
 }
@@ -47,6 +79,8 @@ impl fmt::Display for EncodingConfig {
         )
     }
 }
+
+
 
 
 #[cfg(test)]

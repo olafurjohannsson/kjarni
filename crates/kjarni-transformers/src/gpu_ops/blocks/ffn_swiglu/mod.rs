@@ -1,12 +1,11 @@
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
-use crate::gpu_ops::primitives::matmul::GpuMatMul;
-use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::{gpu_profile, WgpuContext};
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FusedInfo {
@@ -43,23 +42,14 @@ pub struct GpuSwiGLUFFN {
     fused_bmm_bf16: wgpu::ComputePipeline,
     fused_gemv_f32: wgpu::ComputePipeline,
     fused_bmm_f32: wgpu::ComputePipeline,
-
-    elementwise_pipeline: wgpu::ComputePipeline,
-    elementwise_bind_group_layout: wgpu::BindGroupLayout,
-    matmul: GpuMatMul,
     linear_layer: GpuLinearLayer,
     context: Arc<WgpuContext>,
-
-    buffer: wgpu::Buffer,
 }
 
 impl GpuSwiGLUFFN {
     pub fn new(context: &Arc<WgpuContext>) -> Result<Self> {
         let device = &context.device;
 
-        let shader = context
-            .device
-            .create_shader_module(wgpu::include_wgsl!("./swiglu.wgsl"));
 
         let elementwise_bind_group_layout =
             context
@@ -98,27 +88,6 @@ impl GpuSwiGLUFFN {
                             count: None,
                         },
                     ],
-                });
-
-        let pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("SwiGLU Elementwise Pipeline Layout"),
-                    bind_group_layouts: &[&elementwise_bind_group_layout],
-                    push_constant_ranges: &[],
-                });
-
-        let elementwise_pipeline =
-            context
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("SwiGLU Elementwise Pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
                 });
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("./swiglu_fused.wgsl"));
@@ -282,12 +251,8 @@ impl GpuSwiGLUFFN {
             fused_bmm_bf16: make_pipeline(&layout_bf16, "fused_bmm_bf16"),
             fused_gemv_f32: make_pipeline(&layout_f32, "fused_gemv_f32"),
             fused_bmm_f32: make_pipeline(&layout_f32, "fused_bmm_f32"),
-            elementwise_pipeline,
-            elementwise_bind_group_layout,
-            matmul: GpuMatMul::new(context),
             linear_layer: GpuLinearLayer::new(context),
             context: context.clone(),
-            buffer,
         })
     }
 
@@ -430,49 +395,7 @@ impl GpuSwiGLUFFN {
             }
         );
     }
-    /// Encodes the element-wise part of the SwiGLU operation.
-    fn encode_elementwise(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        gate_tensor: &GpuTensor,
-        up_tensor: &GpuTensor,
-        output: &GpuTensor,
-    ) {
-        let bind_group = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("SwiGLU Elementwise Bind Group"),
-                layout: &self.elementwise_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: gate_tensor.buffer().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: up_tensor.buffer().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: output.buffer().as_entire_binding(),
-                    },
-                ],
-            });
-
-        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("SwiGLU Elementwise Pass"), timestamp_writes: None });
-        // compute_pass.set_pipeline(&self.elementwise_pipeline);
-        // compute_pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (output.num_elements() as u32 + 255) / 256;
-        self.context
-            .profiler
-            .profile(encoder, "SwiGLU Elementwise", |pass| {
-                pass.set_pipeline(&self.elementwise_pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(workgroups, 1, 1);
-            });
-        // compute_pass.dispatch_workgroups(workgroups, 1, 1);
-    }
+ 
 }
 
 #[cfg(test)]

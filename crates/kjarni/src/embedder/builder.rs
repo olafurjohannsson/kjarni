@@ -3,13 +3,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use kjarni_transformers::WgpuContext;
+use kjarni_transformers::{PoolingStrategy, WgpuContext};
 
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 
 use super::model::Embedder;
 use super::presets::EmbedderPreset;
-use super::types::{EmbeddingOverrides, EmbedderResult, PoolingStrategy};
+use super::types::{EmbeddingOverrides, EmbedderResult};
 
 /// Builder for configuring and constructing an Embedder.
 pub struct EmbedderBuilder {

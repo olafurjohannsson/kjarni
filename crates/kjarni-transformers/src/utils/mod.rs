@@ -12,7 +12,6 @@ mod tests;
 
 #[cfg(target_os = "linux")]
 fn set_thread_affinity(num_cores: usize) {
-    use std::os::unix::thread::JoinHandleExt;
 
     // Use libc to set CPU affinity
     unsafe {

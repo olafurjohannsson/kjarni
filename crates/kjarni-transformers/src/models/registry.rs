@@ -46,7 +46,7 @@
 //! - [`crate::models::base::LanguageModel`] — Core model trait
 //! - [`crate::weights::ModelWeights`] — Low-level weight loading
 use crate::utils::levenshtein;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 use strum_macros::EnumIter;
 
@@ -377,16 +377,27 @@ pub enum ModelTask {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum ModelType {
     // === Embeddings & Reranking ===
-    MiniLML6V2,     // Fast, Legacy
-    NomicEmbedText, // Modern Standard (8k context)
-    BgeM3,          // Dense/Multilingual
-    MiniLML6V2CrossEncoder,
+    MiniLML6V2,             // Fast, Legacy
+    NomicEmbedText,         // Modern Standard (8k context)
+    BgeM3,                  // Dense/Multilingual
+    MiniLML6V2CrossEncoder, // Reranker
     MpnetBaseV2,
     DistilBertBaseCased, // TODO: remove?
 
     // === Classifiers ===
-    DistilBertSST2, // Sentiment
-    BartLargeMNLI,  // Zero-Shot Classifier
+    // Sentiment
+    DistilBertSST2,            // Binary: positive/negative (existing)
+    TwitterRobertaSentiment,   // 3-class: negative/neutral/positive
+    BertMultilingualSentiment, // 5-class: 1-5 stars, multilingual
+    ToxicBertMultilingual,
+
+    // Zero-Shot
+    BartLargeMNLI,    // Zero-shot (existing)
+    DebertaV3BaseNLI, // Better zero-shot, smaller than BART
+
+    // Emotion
+    RobertaGoEmotions,    // 28 emotions, multi-label
+    DistilRobertaEmotion, // 7 emotions, simpler
 
     // === The "Edge" Kings (< 4GB VRAM/RAM) ===
     Qwen2_5_0_5B_Instruct, // Tiny Logic
@@ -529,8 +540,21 @@ impl ModelType {
             Self::MiniLML6V2CrossEncoder => "minilm-l6-v2-cross-encoder", // Fixed: was empty
 
             // Classifiers
-            Self::DistilBertSST2 => "sentiment-distilbert",
-            Self::BartLargeMNLI => "zeroshot-bart",
+                        // Sentiment
+            Self::DistilBertSST2 => "distilbert-sentiment",
+            Self::TwitterRobertaSentiment => "roberta-sentiment",
+            Self::BertMultilingualSentiment => "bert-sentiment-multilingual",
+            
+            // Zero-Shot
+            Self::BartLargeMNLI => "bart-zeroshot",
+            Self::DebertaV3BaseNLI => "deberta-zeroshot",
+            
+            // Emotion
+            Self::RobertaGoEmotions => "roberta-emotions",
+            Self::DistilRobertaEmotion => "distilroberta-emotion",
+            
+            // Toxicity
+            Self::ToxicBertMultilingual => "toxic-bert",
 
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b",
@@ -680,19 +704,60 @@ impl ModelType {
             // ================================================================
             // Classifiers
             // ================================================================
+            // ================================================================
+            // SENTIMENT ANALYSIS
+            // ================================================================
+
+            // Existing - Binary sentiment
             Self::DistilBertSST2 => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/config.json",
+                    weights_url: "https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/onnx/tokenizer.json",
+                    config_url: "https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english/resolve/main/config.json",
                     gguf_url: None,
                 },
-                description: "Ultra-fast sentiment analysis (Positive/Negative).",
+                description: "Fast binary sentiment (positive/negative). Best for simple yes/no sentiment.",
                 size_mb: 268,
                 params_millions: 66,
             },
+
+            // NEW - 3-class sentiment (social media optimized)
+            Self::TwitterRobertaSentiment => ModelInfo {
+                architecture: ModelArchitecture::Bert, // RoBERTa is BERT-like
+                task: ModelTask::SentimentAnalysis,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "3-class sentiment (negative/neutral/positive). Optimized for social media text.",
+                size_mb: 499,
+                params_millions: 125,
+            },
+
+            // NEW - Multilingual 5-star sentiment
+            Self::BertMultilingualSentiment => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::SentimentAnalysis,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/nlptown/bert-base-multilingual-uncased-sentiment/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/nlptown/bert-base-multilingual-uncased-sentiment/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/nlptown/bert-base-multilingual-uncased-sentiment/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "5-star sentiment (1-5). Multilingual: EN, DE, FR, ES, IT, NL.",
+                size_mb: 681,
+                params_millions: 168,
+            },
+
+            // ================================================================
+            // ZERO-SHOT CLASSIFICATION
+            // ================================================================
+
+            // Existing
             Self::BartLargeMNLI => ModelInfo {
                 architecture: ModelArchitecture::Bart,
                 task: ModelTask::ZeroShotClassification,
@@ -702,9 +767,94 @@ impl ModelType {
                     config_url: "https://huggingface.co/facebook/bart-large-mnli/resolve/main/config.json",
                     gguf_url: None,
                 },
-                description: "Magical Zero-Shot classifier. Classify text into ANY labels you provide at runtime.",
+                description: "Zero-shot classifier. Classify text into ANY labels you provide at runtime.",
                 size_mb: 1630,
                 params_millions: 406,
+            },
+
+            // NEW - Smaller, often better zero-shot
+            Self::DebertaV3BaseNLI => ModelInfo {
+                architecture: ModelArchitecture::Bert, // DeBERTa is BERT-like for our purposes
+                task: ModelTask::ZeroShotClassification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "Zero-shot via NLI. Often better than BART-MNLI, smaller footprint.",
+                size_mb: 738,
+                params_millions: 184,
+            },
+
+            // ================================================================
+            // EMOTION CLASSIFICATION
+            // ================================================================
+
+            // NEW - 28 emotions (multi-label)
+            Self::RobertaGoEmotions => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::Classification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/SamLowe/roberta-base-go_emotions/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/SamLowe/roberta-base-go_emotions/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/SamLowe/roberta-base-go_emotions/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "28 emotion labels (multi-label). Detects nuanced emotions like admiration, amusement, anger, etc.",
+                size_mb: 499,
+                params_millions: 125,
+            },
+
+            // NEW - 7 emotions (simpler)
+            Self::DistilRobertaEmotion => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::Classification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "7 emotions: anger, disgust, fear, joy, neutral, sadness, surprise.",
+                size_mb: 329,
+                params_millions: 82,
+            },
+
+            // ================================================================
+            // TOXICITY/MODERATION
+            // ================================================================
+
+            // NEW - Toxic comment detection
+            Self::ToxicBertMultilingual => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::Classification,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "Toxic comment classifier. Detects: toxic, severe_toxic, obscene, threat, insult, identity_hate.",
+                size_mb: 438,
+                params_millions: 110,
+            },
+
+            // ================================================================
+            // RERANKER (NOT a classifier!)
+            // ================================================================
+            Self::MiniLML6V2CrossEncoder => ModelInfo {
+                architecture: ModelArchitecture::Bert,
+                task: ModelTask::ReRanking, // NOT Classification!
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "Cross-encoder for passage reranking. Use for search result reordering, NOT sentiment.",
+                size_mb: 90,
+                params_millions: 22,
             },
 
             // ================================================================
@@ -931,7 +1081,7 @@ impl ModelType {
         ModelType::iter().find(|m| m.cli_name() == normalized)
     }
 
-    pub fn all() -> impl Iterator<Item=ModelType> {
+    pub fn all() -> impl Iterator<Item = ModelType> {
         use strum::IntoEnumIterator;
         ModelType::iter()
     }

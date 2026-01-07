@@ -3,13 +3,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use kjarni_transformers::{
+    Normalization,
     activations::Activation,
     cache::{Cache, CpuBeamKVCache},
+    cpu::encoder_decoder::{CrossDecoderLayer, DecoderCrossAttention},
     embeddings::Embeddings,
     encoder_decoder::{
-        decoder_cross_attn_layer::CrossDecoderLayer, traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
-        DecoderCrossAttention,
         DecoderSelfAttention,
+        traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
     },
     feedforward::{FeedForward, LegacyFeedForward},
     linear_layer::LinearLayer,
@@ -17,7 +18,6 @@ use kjarni_transformers::{
     normalization::LayerNorm,
     traits::{Device, InferenceModel, ModelConfig, ModelMetadata},
     weights::ModelWeights,
-    Normalization,
 };
 
 use ndarray::{Array2, Array3};
@@ -281,7 +281,7 @@ mod tests {
     use crate::models::bart::cpu_encoder::BartCpuEncoder;
     use anyhow::Result;
     use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
-    use ndarray::{s, Array2};
+    use ndarray::{Array2, s};
     use std::path::Path;
 
     const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";

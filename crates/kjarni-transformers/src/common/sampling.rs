@@ -1,3 +1,4 @@
+use crate::activations::softmax_1d_inplace;
 pub use crate::common::{DecodingStrategy, GenerationConfig};
 use anyhow::Result;
 use ndarray::Array1;
@@ -107,13 +108,19 @@ pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Res
             };
             logits /= temp;
 
-            let probs = softmax_1d(&logits);
-            sample_from_probs(&probs)
+            softmax_1d_inplace(&mut logits);
+            sample_from_probs(&logits)
         }
         DecodingStrategy::BeamSearch(_) => {
             anyhow::bail!("Beam search is not supported in this generator.")
         }
     }
+}
+
+fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
+    let mut probs = logits.clone();
+    softmax_1d_inplace(&mut probs);
+    probs
 }
 
 pub fn min_p_filtering(mut logits: Array1<f32>, min_p: f32) -> Array1<f32> {
@@ -129,12 +136,6 @@ pub fn min_p_filtering(mut logits: Array1<f32>, min_p: f32) -> Array1<f32> {
     logits
 }
 
-pub fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
-    let max_val = logits.fold(f32::NEG_INFINITY, |acc, &x| acc.max(x));
-    let exp_logits = (logits - max_val).mapv(f32::exp);
-    let e = exp_logits.sum();
-    exp_logits / e
-}
 
 pub fn top_k_filtering(mut logits: Array1<f32>, k: usize) -> Array1<f32> {
     let mut indices: Vec<usize> = (0..logits.len()).collect();
@@ -148,7 +149,10 @@ pub fn top_k_filtering(mut logits: Array1<f32>, k: usize) -> Array1<f32> {
 pub fn top_p_filtering(mut logits: Array1<f32>, p: f32) -> Array1<f32> {
     let mut indices: Vec<usize> = (0..logits.len()).collect();
     indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
-    let probs = softmax_1d(&logits);
+    
+    softmax_1d_inplace(&mut logits);
+    let probs = logits.clone();
+
     let mut cumulative = 0.0;
     for (i, &idx) in indices.iter().enumerate() {
         cumulative += probs[idx];
@@ -242,9 +246,9 @@ mod tests {
 
     #[test]
     fn test_softmax_1d_basic() {
-        let logits = array![1.0, 2.0, 3.0];
-        let probs = softmax_1d(&logits);
-
+        let mut logits = array![1.0, 2.0, 3.0];
+        softmax_1d_inplace(&mut logits);
+        let probs = logits.clone();
         // Sum should be 1.0
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         // All probabilities should be positive
@@ -256,11 +260,11 @@ mod tests {
 
     #[test]
     fn test_softmax_1d_uniform() {
-        let logits = array![1.0, 1.0, 1.0, 1.0];
-        let probs = softmax_1d(&logits);
+        let mut logits = array![1.0, 1.0, 1.0, 1.0];
+        softmax_1d_inplace(&mut logits);
 
         // Equal logits = equal probabilities
-        for &p in probs.iter() {
+        for &p in logits.iter() {
             assert!((p - 0.25).abs() < 1e-6);
         }
     }
@@ -268,8 +272,9 @@ mod tests {
     #[test]
     fn test_softmax_1d_numerical_stability() {
         // Large values that could overflow without proper implementation
-        let logits = array![1000.0, 1001.0, 1002.0];
-        let probs = softmax_1d(&logits);
+        let mut logits = array![1000.0, 1001.0, 1002.0];
+        softmax_1d_inplace(&mut logits);
+        let probs = logits.clone();
 
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         assert!(probs.iter().all(|p| p.is_finite()));
@@ -277,8 +282,9 @@ mod tests {
 
     #[test]
     fn test_softmax_1d_negative_values() {
-        let logits = array![-2.0, -1.0, 0.0, 1.0];
-        let probs = softmax_1d(&logits);
+        let mut logits = array![-2.0, -1.0, 0.0, 1.0];
+        softmax_1d_inplace(&mut logits);
+        let probs = logits.clone();
 
         assert!((probs.sum() - 1.0).abs() < 1e-6);
         assert!(probs[3] > probs[2]);
@@ -290,11 +296,12 @@ mod tests {
 
     #[test]
     fn test_log_softmax_1d_basic() {
-        let logits = array![1.0, 2.0, 3.0];
+        let mut logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
 
         // log_softmax should equal log(softmax)
-        let probs = softmax_1d(&logits);
+        softmax_1d_inplace(&mut logits);
+        let probs = logits.clone();
         for i in 0..3 {
             assert!((log_probs[i] - probs[i].ln()).abs() < 1e-5);
         }
@@ -302,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_log_softmax_1d_all_negative() {
-        let logits = array![1.0, 2.0, 3.0];
+        let mut logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
 
         // All log probabilities should be <= 0

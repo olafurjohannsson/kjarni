@@ -1,6 +1,7 @@
 use super::*;
-use crate::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
-use crate::encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer as CpuDecoderLayer;
+use crate::cpu::encoder_decoder::decoder_cross_attn::DecoderCrossAttention;
+use crate::cpu::encoder_decoder::decoder_cross_attn_layer::CrossDecoderLayer as CpuDecoderLayer;
+
 use crate::encoder_decoder::decoder_self_attn::DecoderSelfAttention;
 use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;

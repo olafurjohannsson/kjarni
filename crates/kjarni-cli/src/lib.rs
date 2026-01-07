@@ -363,8 +363,17 @@ pub enum Commands {
 pub enum ModelCommands {
     /// List all available models
     List {
+        /// Filter by architecture (e.g., llama, bert, t5)
         #[arg(short, long)]
         arch: Option<String>,
+
+        /// Filter by task (e.g., chat, embedding, classification, summarization)
+        #[arg(short, long)]
+        task: Option<String>,
+
+        /// Show only downloaded models
+        #[arg(short, long)]
+        downloaded: bool,
     },
 
     /// Download a model

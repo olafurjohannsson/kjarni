@@ -1,9 +1,7 @@
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::traits::Cache;
 use crate::GpuKVCache;
 use crate::WgpuContext;
 use anyhow::Result;
@@ -24,7 +22,6 @@ pub struct GpuPreNormDecoderLayer {
     pub ffn_norm: GpuNormalization,
     pub ffn_norm_weights: GpuNormalizationWeights,
     pub add: GpuAdd,
-    concat: GpuConcatenate,
 }
 
 impl GpuPreNormDecoderLayer {
@@ -52,7 +49,6 @@ impl GpuPreNormDecoderLayer {
             num_kv_heads as u32,
         );
         let add = GpuAdd::new(&context);
-        let concat = GpuConcatenate::new(&context);
 
         Ok(Self {
             self_attn,
@@ -64,7 +60,6 @@ impl GpuPreNormDecoderLayer {
             ffn_norm,
             ffn_norm_weights,
             add,
-            concat,
         })
     }
     pub fn forward_llama(

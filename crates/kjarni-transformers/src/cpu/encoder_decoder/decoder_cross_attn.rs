@@ -1,6 +1,7 @@
 // Import Zip
 use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::{apply_attention_mask, softmax_inplace};
+use crate::utils::linear_algebra::{apply_attention_mask};
+use crate::activations::softmax_4d_inplace;
 use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decode};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
@@ -114,7 +115,7 @@ impl DecoderCrossAttention {
             scores = apply_attention_mask(scores, mask);
         }
 
-        softmax_inplace(&mut scores);
+        softmax_4d_inplace(&mut scores);
 
         // Context
         let context = if seq_len == 1 {

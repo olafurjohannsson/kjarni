@@ -169,7 +169,7 @@ impl ModelWeights {
                 .downcast_ref::<GgufLoader>()
                 .and_then(|g| g.attention_layout());
 
-            return raw_to_typed_gguf(raw, true, self.parsed_vocab_size(), attn);
+            return raw_to_typed_gguf(raw, attn);
         }
 
         raw_to_typed(raw)
