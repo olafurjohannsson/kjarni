@@ -217,18 +217,14 @@ impl DecoderGenerator {
     /// # }
     /// ```
     pub async fn generate(&self, prompt: &str, config: &GenerationConfig, cancellation: Option<CancellationToken>) -> Result<String> {
-        println!("Generate!");
         let stream = self.generate_stream(prompt, config, cancellation).await?;
-        println!("Results!");
         let results: Vec<StreamedToken> = stream.try_collect().await?;
-        println!("Text!");
         // Filter to only generated tokens (exclude prompt echo)
         let text: String = results
             .iter()
             .filter(|t| t.token_type == TokenType::Generated)
             .map(|v| v.text.as_str())
             .collect();
-        println!("Ret!");
         Ok(text)
     }
 
@@ -315,9 +311,7 @@ impl DecoderGenerator {
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
     ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
-        println!("About to call encode");
         let tokens = self.encode(prompt, config)?;
-        println!("Calling generate stream from tokens");
         self.generate_stream_from_tokens(tokens, config, cancellation).await
     }
 
@@ -451,207 +445,369 @@ impl DecoderGenerator {
     /// │    6. decode_one(token) → logits     │
     /// └──────────────────────────────────────┘
     /// ```
+    /// Generates a stream of tokens using a dedicated blocking thread.
     pub async fn generate_stream_from_tokens(
         &self,
         input_tokens: Vec<u32>,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
     ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
-        println!("Generate stream from token!");
-        // =====================================================================
-        // Setup Phase
-        // =====================================================================
-        log::info!("Generating stream from token");
-        let prompt_tokens = input_tokens.clone();
-        let prompt_len = prompt_tokens.len();
-        let mut tokens = input_tokens;
+        // 1. Prepare data for transfer to the compute thread
+        let model = self.model.clone();
+        let backend = self.backend.clone();
+        let config = config.clone();
 
-        // Determine generation limits
-        let max_len = config.max_new_tokens
-            .map(|n| prompt_len + n)
-            .unwrap_or(config.max_length);
+        // 2. Create a channel to bridge Compute Thread -> Async World
+        // Buffer size 32 is plenty for text generation
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-        // Legacy autoregressive loops (GPT-2 style) need +1 cache capacity
-        // because they compute logits for position N from cache position N-1
-        let cache_capacity = match self.model.autoregressive_loop() {
-            AutoregressiveLoop::Legacy => max_len + 1,
-            AutoregressiveLoop::Pipelined => max_len,
-        };
+        // 3. Spawn the compute task on a dedicated OS thread
+        tokio::task::spawn_blocking(move || {
+            // We need a minimal runtime to execute the backend's async methods
+            // synchronously within this blocking thread.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
 
-        debug!(
-            "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
-            prompt_len, max_len, cache_capacity, self.model.autoregressive_loop()
-        );
-
-        // Allocate KV cache
-        println!("Creating cache!");
-        let mut cache: Box<dyn Cache> = self.model.new_cache(1, cache_capacity, 0)?;
-        println!("Cache done!");
-
-        // Pre-allocate token tensor for decode loop (avoids allocation per step)
-        let mut token_tensor = self.backend.new_token_tensor()?;
-        println!("New tensor!");
-        // =====================================================================
-        // Prefill Phase
-        // =====================================================================
-
-        let mut stats = GenerationStats::new();
-        stats.start_prefill(prompt_len);
-
-        debug!("Starting prefill: {} tokens", prompt_len);
-        let prefill_start = Instant::now();
-        println!("Starting prefill!");
-        let mut next_token_logits = self
-            .backend
-            .prefill(self.model.as_ref(), &tokens, cache.as_mut())
-            .await?;
-
-        stats.end_prefill();
-        info!(
-            "Prefill complete: {} tokens in {:.2}ms ({:.2} t/s)",
-            prompt_len,
-            prefill_start.elapsed().as_secs_f64() * 1000.0,
-            stats.prefill_tps()
-        );
-        println!("Prefill complete!");
-
-        // =====================================================================
-        // Decode Phase (Async Stream)
-        // =====================================================================
-
-        let context_limit = self.model.context_size();
-        let stop_tokens = self.model.stop_token_ids();
-        let tokenizer = self.model.tokenizer();
-        let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
-
-        Ok(try_stream! {
-            // Yield prompt tokens
-            for &token_id in &prompt_tokens {
-                // Check cancellation during prompt echo
-                if let Some(token) = &cancellation {
-                    if token.is_cancelled() {
-                        info!("Generation cancelled during prompt echo");
-                        return;
-                    }
+            let local_rt = match rt {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(anyhow!("Failed to create local runtime: {}", e)));
+                    return;
                 }
-                // Skip BOS token in output
-                if Some(token_id) == self.model.bos_token_id() {
-                    continue;
+            };
+
+            // Run the generation logic
+            local_rt.block_on(async {
+                if let Err(e) = run_generation_loop(
+                    model, 
+                    backend, 
+                    input_tokens, 
+                    config, 
+                    tx.clone(), 
+                    cancellation
+                ).await {
+                    // Send fatal errors to the stream
+                    let _ = tx.send(Err(e)).await;
                 }
-                let text = tokenizer
-                    .decode(&[token_id], false)
-                    .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
-                yield StreamedToken {
-                    text,
-                    id: token_id,
-                    token_type: TokenType::Prompt,
-                };
-            }
+            });
+        });
 
-            // Generation loop with cancellation checks
-            for step in 0..max_new_tokens {
-                if let Some(token) = &cancellation {
-                    if token.is_cancelled() {
-                        info!("Generation cancelled at step {}", step);
-                        return;
-                    }
-                }
-                // Check context window limit
-                if tokens.len() >= context_limit {
-                    warn!(
-                        "Context limit reached ({}/{}), stopping generation",
-                        tokens.len(), context_limit
-                    );
-                    break;
-                }
-
-                // Check max length limit
-                if tokens.len() >= max_len {
-                    debug!("Reached max_len={}, stopping generation", max_len);
-                    break;
-                }
-
-                //sampling
-                let sampling_start = Instant::now();
-                let mut logits = next_token_logits.clone();
-
-                // Apply repetition penalty
-                if config.repetition_penalty != 1.0 {
-                    apply_repetition_penalty_mut(
-                        &mut logits,
-                        &tokens,
-                        config.repetition_penalty
-                    );
-                }
-
-                // Apply n-gram blocking
-                if config.no_repeat_ngram_size > 0 {
-                    apply_no_repeat_ngram(
-                        &mut logits,
-                        &tokens,
-                        config.no_repeat_ngram_size
-                    );
-                }
-
-                // Sample next token (applies temperature, top-k, top-p, min-p)
-                let next_token = sample_token(logits, &config.strategy)?;
-                
-                trace!(
-                    "Step {}: sampled token {} in {:.2}ms",
-                    step, next_token, sampling_start.elapsed().as_secs_f64() * 1000.0
-                );
-
-                tokens.push(next_token);
-
-                // yield token
-                let text = tokenizer
-                    .decode(&[next_token], false)
-                    .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
-                    
-                yield StreamedToken {
-                    text,
-                    id: next_token,
-                    token_type: TokenType::Generated,
-                };
-                
-                stats.record_token();
-
-                // check stop tokens
-                if stop_tokens.contains(&next_token) {
-                    debug!("Stop token {} generated at step {}", next_token, step);
-                    break;
-                }
-
-                if tokens.len() >= max_len {
-                    break;
-                }
-
-                // check cancel before decode
-                if let Some(cancellation) = &cancellation {
-                    if cancellation.is_cancelled() {
-                        info!("Generation cancelled at step {}", step);
-                        break;
-                    }
-                }
-
-                // decode in backend
-                self.backend.update_token_tensor(&mut token_tensor, next_token)?;
-                println!("Update done, decoding!");
-                next_token_logits = self.backend.decode_one(
-                    self.model.as_ref(),
-                    &token_tensor,
-                    tokens.len(),
-                    cache.as_mut(),
-                ).await?;
-
-                // Periodic TPS logging
-                if GenerationStats::is_enabled() && step > 0 && step % 20 == 0 {
-                    debug!("Step {}: {:.2} tok/s", step, stats.decode_tps());
-                }
-            }
-
-            // generation complete
-            stats.print_summary();
-        })
+        // 4. Return the stream wrapper immediately
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
+    // pub async fn generate_stream_from_tokens(
+    //     &self,
+    //     input_tokens: Vec<u32>,
+    //     config: &GenerationConfig,
+    //     cancellation: Option<CancellationToken>,
+    // ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+
+    //     // Prepare data for transfer to the compute thread
+    //     let model = self.model.clone();
+    //     let backend = self.backend.clone();
+    //     let config = config.clone();
+
+    //     // =====================================================================
+    //     // Setup Phase
+    //     // =====================================================================
+    //     log::info!("Generating stream from token");
+    //     let prompt_tokens = input_tokens.clone();
+    //     let prompt_len = prompt_tokens.len();
+    //     let mut tokens = input_tokens;
+
+    //     // Determine generation limits
+    //     let max_len = config.max_new_tokens
+    //         .map(|n| prompt_len + n)
+    //         .unwrap_or(config.max_length);
+
+    //     // Legacy autoregressive loops (GPT-2 style) need +1 cache capacity
+    //     // because they compute logits for position N from cache position N-1
+    //     let cache_capacity = match self.model.autoregressive_loop() {
+    //         AutoregressiveLoop::Legacy => max_len + 1,
+    //         AutoregressiveLoop::Pipelined => max_len,
+    //     };
+
+    //     debug!(
+    //         "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
+    //         prompt_len, max_len, cache_capacity, self.model.autoregressive_loop()
+    //     );
+
+    //     // Allocate KV cache
+    //     let mut cache: Box<dyn Cache> = self.model.new_cache(1, cache_capacity, 0)?;
+
+    //     // Pre-allocate token tensor for decode loop (avoids allocation per step)
+    //     let mut token_tensor = self.backend.new_token_tensor()?;
+    //     // =====================================================================
+    //     // Prefill Phase
+    //     // =====================================================================
+
+    //     let mut stats = GenerationStats::new();
+    //     stats.start_prefill(prompt_len);
+
+    //     debug!("Starting prefill: {} tokens", prompt_len);
+    //     let prefill_start = Instant::now();
+    //     let mut next_token_logits = self
+    //         .backend
+    //         .prefill(self.model.as_ref(), &tokens, cache.as_mut())
+    //         .await?;
+
+    //     stats.end_prefill();
+    //     info!(
+    //         "Prefill complete: {} tokens in {:.2}ms ({:.2} t/s)",
+    //         prompt_len,
+    //         prefill_start.elapsed().as_secs_f64() * 1000.0,
+    //         stats.prefill_tps()
+    //     );
+        
+
+    //     // =====================================================================
+    //     // Decode Phase (Async Stream)
+    //     // =====================================================================
+
+    //     let context_limit = self.model.context_size();
+    //     let stop_tokens = self.model.stop_token_ids();
+    //     let tokenizer = self.model.tokenizer();
+    //     let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
+
+    //     Ok(try_stream! {
+    //         // Yield prompt tokens
+    //         for &token_id in &prompt_tokens {
+    //             // Check cancellation during prompt echo
+    //             if let Some(token) = &cancellation {
+    //                 if token.is_cancelled() {
+    //                     info!("Generation cancelled during prompt echo");
+    //                     return;
+    //                 }
+    //             }
+    //             // Skip BOS token in output
+    //             if Some(token_id) == self.model.bos_token_id() {
+    //                 continue;
+    //             }
+    //             let text = tokenizer
+    //                 .decode(&[token_id], false)
+    //                 .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
+    //             yield StreamedToken {
+    //                 text,
+    //                 id: token_id,
+    //                 token_type: TokenType::Prompt,
+    //             };
+    //         }
+
+    //         // Generation loop with cancellation checks
+    //         for step in 0..max_new_tokens {
+    //             if let Some(token) = &cancellation {
+    //                 if token.is_cancelled() {
+    //                     info!("Generation cancelled at step {}", step);
+    //                     return;
+    //                 }
+    //             }
+    //             // Check context window limit
+    //             if tokens.len() >= context_limit {
+    //                 warn!(
+    //                     "Context limit reached ({}/{}), stopping generation",
+    //                     tokens.len(), context_limit
+    //                 );
+    //                 break;
+    //             }
+
+    //             // Check max length limit
+    //             if tokens.len() >= max_len {
+    //                 debug!("Reached max_len={}, stopping generation", max_len);
+    //                 break;
+    //             }
+
+    //             //sampling
+    //             let sampling_start = Instant::now();
+    //             let mut logits = next_token_logits.clone();
+
+    //             // Apply repetition penalty
+    //             if config.repetition_penalty != 1.0 {
+    //                 apply_repetition_penalty_mut(
+    //                     &mut logits,
+    //                     &tokens,
+    //                     config.repetition_penalty
+    //                 );
+    //             }
+
+    //             // Apply n-gram blocking
+    //             if config.no_repeat_ngram_size > 0 {
+    //                 apply_no_repeat_ngram(
+    //                     &mut logits,
+    //                     &tokens,
+    //                     config.no_repeat_ngram_size
+    //                 );
+    //             }
+
+    //             // Sample next token (applies temperature, top-k, top-p, min-p)
+    //             let next_token = sample_token(logits, &config.strategy)?;
+                
+    //             trace!(
+    //                 "Step {}: sampled token {} in {:.2}ms",
+    //                 step, next_token, sampling_start.elapsed().as_secs_f64() * 1000.0
+    //             );
+
+    //             tokens.push(next_token);
+                
+    //             // check stop tokens
+    //             if stop_tokens.contains(&next_token) {
+    //                 debug!("Stop token {} generated at step {}", next_token, step);
+    //                 break;
+    //             }
+
+    //             // yield token
+    //             let text = tokenizer
+    //                 .decode(&[next_token], false)
+    //                 .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
+                    
+    //             yield StreamedToken {
+    //                 text,
+    //                 id: next_token,
+    //                 token_type: TokenType::Generated,
+    //             };
+                
+    //             stats.record_token();
+
+                
+    //             if tokens.len() >= max_len {
+    //                 break;
+    //             }
+
+    //             // check cancel before decode
+    //             if let Some(cancellation) = &cancellation {
+    //                 if cancellation.is_cancelled() {
+    //                     info!("Generation cancelled at step {}", step);
+    //                     break;
+    //                 }
+    //             }
+
+    //             // decode in backend
+    //             self.backend.update_token_tensor(&mut token_tensor, next_token)?;
+    //             next_token_logits = self.backend.decode_one(
+    //                 self.model.as_ref(),
+    //                 &token_tensor,
+    //                 tokens.len(),
+    //                 cache.as_mut(),
+    //             ).await?;
+
+    //             // Periodic TPS logging
+    //             if GenerationStats::is_enabled() && step > 0 && step % 20 == 0 {
+    //                 debug!("Step {}: {:.2} tok/s", step, stats.decode_tps());
+    //             }
+    //         }
+
+    //         // generation complete
+    //         stats.print_summary();
+    //     })
+    // }
+}
+
+async fn run_generation_loop(
+    model: Arc<dyn DecoderLanguageModel + Send + Sync>,
+    backend: AnyDecoderBackend,
+    input_tokens: Vec<u32>,
+    config: GenerationConfig,
+    tx: tokio::sync::mpsc::Sender<Result<StreamedToken>>,
+    cancellation: Option<CancellationToken>,
+) -> Result<()> {
+    let prompt_len = input_tokens.len();
+    let mut tokens = input_tokens;
+
+    // --- Limits & Setup ---
+    let max_len = config.max_new_tokens
+        .map(|n| prompt_len + n)
+        .unwrap_or(config.max_length);
+
+    let cache_capacity = match model.autoregressive_loop() {
+        AutoregressiveLoop::Legacy => max_len + 1,
+        AutoregressiveLoop::Pipelined => max_len,
+    };
+    debug!(
+        "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
+        prompt_len, max_len, cache_capacity, model.autoregressive_loop()
+    );
+    let mut cache = model.new_cache(1, cache_capacity, 0)?;
+    let mut token_tensor = backend.new_token_tensor()?;
+
+    // --- Prefill ---
+    let mut stats = GenerationStats::new();
+    stats.start_prefill(prompt_len);
+    
+    let mut next_token_logits = backend
+        .prefill(model.as_ref(), &tokens, cache.as_mut())
+        .await?;
+    
+    stats.end_prefill();
+
+    // --- Emit Prompt Tokens ---
+    let tokenizer = model.tokenizer();
+    for &token_id in &tokens {
+        // Check cancellation
+        if let Some(c) = &cancellation {
+            if c.is_cancelled() { return Ok(()); }
+        }
+
+        if Some(token_id) == model.bos_token_id() { continue; }
+        
+        let text = tokenizer.decode(&[token_id], false).map_err(|e| anyhow!(e))?;
+        
+        // Send to channel
+        if tx.send(Ok(StreamedToken {
+            text,
+            id: token_id,
+            token_type: TokenType::Prompt,
+        })).await.is_err() {
+            return Ok(()); // Receiver dropped
+        }
+    }
+
+    // --- Decode Loop ---
+    let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
+    let stop_tokens = model.stop_token_ids();
+
+    for _step in 0..max_new_tokens {
+        if let Some(c) = &cancellation {
+            if c.is_cancelled() { break; }
+        }
+        if tokens.len() >= max_len { break; }
+
+        // Sample
+        let mut logits = next_token_logits.clone();
+        if config.repetition_penalty != 1.0 {
+            apply_repetition_penalty_mut(&mut logits, &tokens, config.repetition_penalty);
+        }
+        if config.no_repeat_ngram_size > 0 {
+            apply_no_repeat_ngram(&mut logits, &tokens, config.no_repeat_ngram_size);
+        }
+
+        let next_token = sample_token(logits, &config.strategy)?;
+        tokens.push(next_token);
+
+        // Emit
+        let text = tokenizer.decode(&[next_token], false).map_err(|e| anyhow!(e))?;
+        
+        if tx.send(Ok(StreamedToken {
+            text,
+            id: next_token,
+            token_type: TokenType::Generated,
+        })).await.is_err() {
+            break;
+        }
+
+        stats.record_token();
+
+        if stop_tokens.contains(&next_token) { break; }
+
+        // Compute Next
+        backend.update_token_tensor(&mut token_tensor, next_token)?;
+        next_token_logits = backend.decode_one(
+            model.as_ref(),
+            &token_tensor,
+            tokens.len(),
+            cache.as_mut(),
+        ).await?;
+    }
+    
+    stats.print_summary();
+    Ok(())
 }

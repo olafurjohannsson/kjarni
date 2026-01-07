@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod classify;
 pub mod encode;
+pub mod embed;
 pub mod generate;
 pub mod index;
 pub mod model;

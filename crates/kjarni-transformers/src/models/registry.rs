@@ -526,7 +526,7 @@ impl ModelType {
             Self::DistilBertBaseCased => "distilbert-base", // Fixed: was empty
 
             // Reranker
-            Self::MiniLML6V2CrossEncoder => "minilm-reranker", // Fixed: was empty
+            Self::MiniLML6V2CrossEncoder => "minilm-l6-v2-cross-encoder", // Fixed: was empty
 
             // Classifiers
             Self::DistilBertSST2 => "sentiment-distilbert",
@@ -535,13 +535,13 @@ impl ModelType {
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b",
             Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b", // Fixed: was "wen2.5-1.5b"
-            Self::Llama3_2_1B_Instruct => "llama3.2-1b",
-            Self::Llama3_2_3B_Instruct => "llama3.2-3b",
+            Self::Llama3_2_1B_Instruct => "llama3.2-1b-instruct",
+            Self::Llama3_2_3B_Instruct => "llama3.2-3b-instruct",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini",
 
             // Workhorse LLMs
             Self::Mistral7B_v0_3_Instruct => "mistral-7b", // Changed for clarity
-            Self::Llama3_1_8B_Instruct => "llama3.1-8b",
+            Self::Llama3_1_8B_Instruct => "llama3.1-8b-instruct",
             Self::DeepSeek_R1_Distill_Llama_8B => "deepseek-r1-8b",
 
             // Seq2Seq

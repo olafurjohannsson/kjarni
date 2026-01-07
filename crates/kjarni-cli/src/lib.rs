@@ -174,31 +174,58 @@ pub enum Commands {
         gpu: bool,
     },
 
-    /// Classify text using a sequence classification model
+    /// Classify text using a classification model
     Classify {
-        /// Text to classify (or file path, or stdin)
+        /// Input text(s) to classify. Use - for stdin.
         #[arg(trailing_var_arg = true)]
         input: Vec<String>,
 
-        /// Classification model
-        #[arg(short, long, default_value = "distilbert-sentiment")]
+        /// Model name from registry
+        #[arg(short, long, default_value = "minilm-l6-v2-cross-encoder")]
         model: String,
 
-        /// Return top-k predictions
-        #[arg(short = 'k', long, default_value_t = 1)]
+        /// Load model from local path instead of registry
+        #[arg(long, value_name = "PATH")]
+        model_path: Option<String>,
+
+        /// Custom labels (comma-separated, order must match model output)
+        /// Example: --labels "negative,positive" or --labels "neikvætt,jákvætt"
+        #[arg(long, value_name = "LABELS")]
+        labels: Option<String>,
+
+        /// Return top K predictions
+        #[arg(long, default_value = "5")]
         top_k: usize,
 
-        /// Output format: text, json, jsonl
+        /// Minimum confidence threshold (0.0-1.0)
+        #[arg(long)]
+        threshold: Option<f32>,
+
+        /// Maximum sequence length (truncates longer inputs)
+        #[arg(long)]
+        max_length: Option<usize>,
+
+        /// Batch size for inference
+        #[arg(long)]
+        batch_size: Option<usize>,
+
+        /// Use multi-label classification (sigmoid instead of softmax)
+        #[arg(long)]
+        multi_label: bool,
+
+        /// Output format: json, jsonl, text
         #[arg(short, long, default_value = "text")]
         format: String,
 
-        /// Custom labels (comma-separated, for zero-shot)
-        #[arg(long)]
-        labels: Option<String>,
-
+        /// Run on GPU
         #[arg(long)]
         gpu: bool,
 
+        /// Model precision: f32, f16, bf16
+        #[arg(long)]
+        dtype: Option<String>,
+
+        /// Suppress progress output
         #[arg(short, long)]
         quiet: bool,
     },

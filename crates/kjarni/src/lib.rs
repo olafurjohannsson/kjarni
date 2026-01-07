@@ -59,10 +59,15 @@
 //! This crate provides a high-level API for running transformer models
 //! on edge devices, with Python and C bindings.
 
-mod config;
-mod config_utils;
+
 mod utils;
 pub mod chat;
+pub mod classifier;
+pub mod embedder;
+mod generation;
+
+pub mod common;
+
 // Re-export main API
 pub use utils::*;
 
@@ -73,7 +78,7 @@ pub use kjarni_models::SequenceClassifier;
 // Re-export core types
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
 pub use kjarni_transformers::traits::Device;
-
+pub use kjarni_transformers::models::base::DType;
 // Re-export generation
 pub use kjarni_transformers::common::{
     BeamSearchParams, DecodingStrategy, GenerationConfig, SamplingParams, StreamedToken, TokenType,
@@ -114,11 +119,11 @@ pub mod models {
 pub mod registry;
 
 // FFI module (feature-gated and public)
-mod classifier;
-mod encoder;
+
 #[cfg(any(feature = "python", feature = "c-bindings"))]
 pub mod ffi;
-mod generation;
+
+
 
 // Prelude
 pub mod prelude {
@@ -148,11 +153,23 @@ pub async fn chat_send(model: &str, message: &str) -> chat::ChatResult<String> {
 /// # Example
 ///
 /// ```ignore
-/// let embedding = kjarni::encode("minilm-l6-v2", "Hello world").await?;
+/// let embedding = kjarni::embed("minilm-l6-v2", "Hello world").await?;
 /// ```
-pub async fn encode(model: &str, text: &str) -> anyhow::Result<Vec<f32>> {
-    let encoder = crate::encoder::Encoder::new(model).await?;
-    encoder.encode(text).await
+pub async fn embed(model: &str, text: &str) -> anyhow::Result<Vec<f32>> {
+    let encoder = crate::embedder::Embedder::new(model).await?;
+    let embedding = encoder.embed(text).await?;
+    Ok(embedding)
+}
+
+/// Classify text (convenience wrapper).
+//// # Example
+/// ```ignore
+/// let result = kjarni::classify("distilbert-base-uncased-finetuned-sst-2-english", "I love programming!").await?;
+/// ```
+pub async fn classify(model: &str, text: &str) -> anyhow::Result<crate::classifier::ClassificationResult> {
+    let classifier = crate::classifier::Classifier::new(model).await?;
+    let result = classifier.classify(text).await?;
+    Ok(result)
 }
 
 // ============================================================================

@@ -18,8 +18,9 @@ use kjarni_transformers::{
 
 use super::builder::ChatBuilder;
 use super::conversation::ChatConversation;
-use super::types::{ChatDevice, ChatError, ChatMode, ChatResult, DownloadPolicy, History, Role};
+use super::types::{ChatDevice, ChatError, ChatMode, ChatResult, History, Role};
 use super::validation::validate_for_chat;
+use crate::common::DownloadPolicy;
 
 /// High-level chat interface for conversational AI.
 ///
@@ -41,8 +42,9 @@ use super::validation::validate_for_chat;
 /// let response = chat.send_with_history(&history, "Tell me more.").await?;
 /// ```
 pub struct Chat {
-    /// The underlying model (shared via Arc for streaming support).
-    inner: Arc<dyn DecoderLanguageModel + Send + Sync>,
+
+    // Generator instance
+    generator: Arc<DecoderGenerator>,
 
     /// Model type from registry.
     model_type: ModelType,
@@ -149,8 +151,8 @@ impl Chat {
             None
         };
 
-        // Step 7: Load the model
-        let inner: Arc<dyn DecoderLanguageModel> =
+        // Load the model
+        let model: Arc<dyn DecoderLanguageModel> =
             Self::load_model(model_type, &cache_dir, device, context.clone())
                 .await
                 .map_err(|e| ChatError::LoadFailed {
@@ -158,15 +160,22 @@ impl Chat {
                     source: e,
                 })?;
 
-        // Step 8: Verify chat template exists
-        if inner.chat_template().is_none() {
+        // Create generator
+        let generator = Arc::new(DecoderGenerator::new(model.clone())
+            .map_err(|e| ChatError::LoadFailed { 
+                model: builder.model.clone(), 
+                source: e 
+            })?);
+
+        // Verify chat template exists
+        if model.chat_template().is_none() {
             return Err(ChatError::InvalidConfig(
                 "Model does not have a chat template configured".to_string(),
             ));
         }
 
         // Step 9: Resolve generation config
-        let model_defaults = inner.get_default_generation_config();
+        let model_defaults = model.get_default_generation_config();
 
         // Apply mode-specific adjustments
         let mut mode_overrides = builder.generation_overrides.clone();
@@ -182,9 +191,9 @@ impl Chat {
             &mode_overrides,
             &GenerationOverrides::default(),
         );
-
+        
         Ok(Self {
-            inner,
+            generator,
             model_type,
             system_prompt: builder.system_prompt,
             generation_config,
@@ -193,6 +202,11 @@ impl Chat {
             device,
             context,
         })
+    }
+
+    /// Get a reference to the inner model.
+    fn inner_model(&self) -> &dyn DecoderLanguageModel {
+        self.generator.model.as_ref()
     }
 
     /// Load the appropriate model based on architecture.
@@ -215,7 +229,7 @@ impl Chat {
                     None,
                 )
                     .await?;
-                Ok(Arc::new(model))
+                Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
 
             ModelArchitecture::Qwen2 => {
@@ -228,7 +242,7 @@ impl Chat {
                     None,
                 )
                     .await?;
-                Ok(Arc::new(model))
+                Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
 
             ModelArchitecture::Mistral => {
@@ -241,7 +255,7 @@ impl Chat {
                     None,
                 )
                     .await?;
-                Ok(Arc::new(model))
+                Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
 
             ModelArchitecture::GPT => {
@@ -254,7 +268,7 @@ impl Chat {
                     None,
                 )
                     .await?;
-                Ok(Arc::new(model))
+                Ok(Arc::new(model) as Arc<dyn DecoderLanguageModel + Send + Sync>)
             }
 
             // Phi3 - you may need to add this to kjarni-models
@@ -274,7 +288,7 @@ impl Chat {
 
     /// Get the chat template from the inner model.
     fn get_chat_template(&self) -> ChatResult<&dyn ChatTemplate> {
-        self.inner.chat_template().ok_or_else(|| {
+        self.inner_model().chat_template().ok_or_else(|| {
             ChatError::InvalidConfig("Model does not have a chat template".to_string())
         })
     }
@@ -419,7 +433,7 @@ impl Chat {
             Some(prompt) => Conversation::with_system(prompt),
             None => {
                 // Try to get default from template
-                if let Some(template) = self.inner.chat_template() {
+                if let Some(template) = self.inner_model().chat_template() {
                     if let Some(default) = template.default_system_prompt() {
                         return Conversation::with_system(default);
                     }
@@ -476,11 +490,7 @@ impl Chat {
             runtime_overrides,
         );
 
-        // Create generator on demand
-        let generator = DecoderGenerator::new(self.inner.clone())
-            .map_err(|e| ChatError::GenerationFailed(e))?;
-
-        let stream = generator
+        let stream = self.generator
             .generate_stream(prompt, config.as_ref(), None)
             .await?;
 
@@ -520,7 +530,7 @@ impl Chat {
         );
 
         // Clone the Arc to move into the spawned task
-        let model = Arc::clone(&self.inner);
+        let generator = self.generator.clone();
         let config = config.into_inner();
 
         // Create a channel to send tokens
@@ -528,14 +538,6 @@ impl Chat {
 
         // Spawn a task to process the stream
         tokio::spawn(async move {
-            // Create generator inside the spawned task
-            let generator = match DecoderGenerator::new(model) {
-                Ok(g) => g,
-                Err(e) => {
-                    let _ = tx.send(Err(ChatError::GenerationFailed(e))).await;
-                    return;
-                }
-            };
 
             // Get the stream
             let stream = match generator.generate_stream(&prompt, &config, None).await {
@@ -554,14 +556,6 @@ impl Chat {
                         // Skip prompt tokens
                         if token.token_type == TokenType::Prompt {
                             continue;
-                        }
-
-                        // Check for stop sequences
-                        if token.text.contains("<|eot_id|>")
-                            || token.text.contains("<|end_of_text|>")
-                            || token.text.contains("<|im_end|>")
-                        {
-                            break;
                         }
 
                         Ok(token.text)
@@ -607,7 +601,7 @@ impl Chat {
 
     /// Get the context window size.
     pub fn context_size(&self) -> usize {
-        self.inner.context_size()
+        self.generator.model.context_size()
     }
 
     /// Get the system prompt.

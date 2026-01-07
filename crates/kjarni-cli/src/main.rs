@@ -134,21 +134,33 @@ async fn main() -> Result<()> {
         Commands::Classify {
             input,
             model,
-            top_k,
-            format,
+            model_path,
             labels,
+            top_k,
+            threshold,
+            max_length,
+            batch_size,
+            multi_label,
+            format,
             gpu,
+            dtype,
             quiet,
         } => {
-            unimplemented!()
-            // commands::classify::run(
-            //     input.as_deref(),
-            //     &model,
-            //     model_path.as_deref(),
-            //     &format,
-            //     gpu,
-            // )
-            // .await
+            commands::classify::run(
+                &input,
+                &model,
+                model_path.as_deref(),
+                labels.as_deref(),
+                top_k,
+                threshold,
+                max_length,
+                batch_size,
+                multi_label,
+                &format,
+                gpu,
+                dtype.as_deref(),
+                quiet,
+            ).await
         }
 
         Commands::Rerank {

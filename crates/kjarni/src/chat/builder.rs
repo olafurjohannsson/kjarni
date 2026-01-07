@@ -12,7 +12,8 @@ use crate::generation::overrides::GenerationOverrides;
 
 use super::model::Chat;
 use super::presets::ModelPreset;
-use super::types::{ChatDevice, ChatMode, ChatResult, DownloadPolicy};
+use super::types::{ChatDevice, ChatMode, ChatResult};
+use crate::common::DownloadPolicy;
 
 /// Builder for configuring and constructing a Chat instance.
 ///

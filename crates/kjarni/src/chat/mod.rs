@@ -79,8 +79,9 @@ pub use model::Chat;
 pub use presets::{ChatTier, ModelPreset};
 pub use types::{
     ChatDevice, ChatError, ChatMode, ChatResult, ChatWarning,
-    DownloadPolicy, History, Message, Role,
+    History, Message, Role,
 };
+pub use crate::common::DownloadPolicy;
 
 // ============================================================================
 // Convenience Functions
@@ -175,26 +176,6 @@ pub fn suggested_models() -> Vec<&'static str> {
     validation::suggest_chat_models()
 }
 
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_chat_model() {
-        // Valid chat models
-        assert!(is_chat_model("llama3.2-1b").is_ok());
-        assert!(is_chat_model("qwen2.5-0.5b").is_ok());
-
-        // Invalid models
-        assert!(is_chat_model("minilm-l6-v2").is_err()); // encoder
-        assert!(is_chat_model("flan-t5-base").is_err()); // seq2seq
-        assert!(is_chat_model("nonexistent").is_err());
-    }
-
-    #[test]
-    fn test_available_models() {
-        let models = available_models();
-        assert!(!models.is_empty());
-        assert!(models.contains(&"llama3.2-1b"));
-    }
-}
+mod tests;

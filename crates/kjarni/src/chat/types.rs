@@ -45,20 +45,6 @@ impl ChatMode {
     }
 }
 
-/// Policy for downloading models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DownloadPolicy {
-    /// Download model if not present locally (default).
-    #[default]
-    IfMissing,
-
-    /// Never download, fail if model not present.
-    Never,
-
-    /// Always check for updates and download if newer.
-    Eager,
-}
-
 /// Execution device for the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChatDevice {

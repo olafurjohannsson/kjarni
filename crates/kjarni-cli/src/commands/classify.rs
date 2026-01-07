@@ -1,92 +1,123 @@
-//! Text classification command
+//! Text classification command using the high-level Classifier API.
 
-use crate::commands::util::resolve_input;
 use anyhow::{anyhow, Result};
-use kjarni::{registry, Device, ModelTask, ModelType, SequenceClassifier};
+use kjarni::DType;
+use kjarni::classifier::{Classifier, ClassificationMode, ClassificationOverrides};
+use kjarni::common::LoadConfig;
+
 
 pub async fn run(
     input: &[String],
     model: &str,
+    model_path: Option<&str>,
+    labels: Option<&str>,
     top_k: usize,
+    threshold: Option<f32>,
+    max_length: Option<usize>,
+    batch_size: Option<usize>,
+    multi_label: bool,
     format: &str,
     gpu: bool,
+    dtype: Option<&str>,
     quiet: bool,
 ) -> Result<()> {
     // 1. Resolve input text
     let text = if input.is_empty() {
-        resolve_input(None)?
+        crate::commands::util::resolve_input(None)?
     } else {
-        resolve_input(Some(&input.join(" ")))?
+        input.join(" ")
     };
 
     if text.trim().is_empty() {
         return Err(anyhow!("No input text provided."));
     }
 
-    // Check for batch mode (multiple lines)
+    // Check for batch mode
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let is_batch = lines.len() > 1;
 
-    // 2. Resolve model
-    let device = if gpu { Device::Wgpu } else { Device::Cpu };
+    // 2. Build classifier
+    let mut builder = if let Some(path) = model_path {
+        // Load from local path
+        Classifier::from_path(path)
+    } else {
+        // Load from registry
+        Classifier::builder(model)
+    };
 
-    let model_type = ModelType::from_cli_name(model).ok_or_else(|| {
-        let mut msg = format!("Unknown model: '{}'.", model);
-        let suggestions = ModelType::find_similar(model);
-        if !suggestions.is_empty() {
-            msg.push_str("\n\nDid you mean?");
-            for (name, _) in suggestions.iter().take(3) {
-                msg.push_str(&format!("\n  - {}", name));
-            }
-        }
-        anyhow!(msg)
-    })?;
+    // Apply options
+    builder = builder
+        .top_k(top_k)
+        .quiet(quiet);
 
-    // Validate it's a classifier
-    let info = model_type.info();
-    let is_classifier = matches!(
-        info.task,
-        ModelTask::SentimentAnalysis | ModelTask::ZeroShotClassification
-    );
-
-    if !is_classifier {
-        return Err(anyhow!(
-            "Model '{}' is not a classifier (task: {:?}).\n\
-             Use a classifier model like:\n  \
-             - sentiment-distilbert (sentiment analysis)\n  \
-             - zeroshot-bart (zero-shot classification)",
-            model,
-            info.task
-        ));
+    if let Some(t) = threshold {
+        builder = builder.threshold(t);
     }
 
-    // 3. Download if needed
-    if !registry::is_model_downloaded(model)? {
-        if !quiet {
-            eprintln!("Downloading model '{}'...", model);
-        }
-        registry::download_model(model, false).await?;
+    if let Some(max_len) = max_length {
+        builder = builder.max_length(max_len);
     }
 
-    // 4. Load classifier
+    if let Some(bs) = batch_size {
+        builder = builder.batch_size(bs);
+    }
+
+    if multi_label {
+        builder = builder.multi_label();
+    }
+
+    if gpu {
+        builder = builder.gpu();
+    }
+
+    // Parse dtype
+    if let Some(dt) = dtype {
+        let dtype_enum = match dt.to_lowercase().as_str() {
+            "f32" | "float32" => DType::F32,
+            "f16" | "float16" => DType::F16,
+            "bf16" | "bfloat16" => DType::BF16,
+            _ => return Err(anyhow!("Invalid dtype: {}. Use: f32, f16, bf16", dt)),
+        };
+        builder = builder.dtype(dtype_enum);
+    }
+
+    // Parse labels
+    if let Some(labels_str) = labels {
+        builder = builder.labels_str(labels_str);
+    }
+
+    let classifier = builder
+        .build()
+        .await
+        .map_err(|e| anyhow!("Failed to load classifier: {}", e))?;
+
+    // Show info
     if !quiet {
-        eprintln!("Loading classifier '{}'...", model);
+        eprintln!("Model: {}", classifier.model_name());
+        eprintln!("Device: {:?}", classifier.device());
+        eprintln!("Labels: {:?}", classifier.labels().unwrap_or_default());
+        if multi_label {
+            eprintln!("Mode: multi-label (sigmoid)");
+        }
     }
 
-    let classifier =
-        SequenceClassifier::from_registry(model_type, None, device, None, None).await?;
-
-    // 5. Run classification
+    // 3. Run classification
     if is_batch {
         if !quiet {
             eprintln!("Classifying {} texts...", lines.len());
         }
-        let all_predictions = classifier.classify_batch(&lines, top_k).await?;
-        output_batch_results(&lines, &all_predictions, format, quiet)?;
+        let results = classifier
+            .classify_batch(&lines)
+            .await
+            .map_err(|e| anyhow!("Classification failed: {}", e))?;
+        output_batch_results(&lines, &results, format, quiet)?;
     } else {
-        let text_str = lines.first().map(|s| *s).unwrap_or(&text);
-        let predictions = classifier.classify(text_str, top_k).await?;
-        output_single_result(text_str, &predictions, format, quiet)?;
+        let text_str = lines.first().copied().unwrap_or(&text);
+        let result = classifier
+            .classify(text_str)
+            .await
+            .map_err(|e| anyhow!("Classification failed: {}", e))?;
+        output_single_result(text_str, &result, format, quiet)?;
     }
 
     Ok(())
@@ -94,7 +125,7 @@ pub async fn run(
 
 fn output_single_result(
     text: &str,
-    predictions: &[(String, f32)],
+    result: &kjarni::classifier::ClassificationResult,
     format: &str,
     quiet: bool,
 ) -> Result<()> {
@@ -102,11 +133,11 @@ fn output_single_result(
         "json" => {
             let output = serde_json::json!({
                 "text": text,
-                "predictions": predictions.iter().map(|(label, score)| {
-                    serde_json::json!({
-                        "label": label,
-                        "score": score
-                    })
+                "label": result.label,
+                "score": result.score,
+                "label_index": result.label_index,
+                "predictions": result.all_scores.iter().map(|(label, score)| {
+                    serde_json::json!({ "label": label, "score": score })
                 }).collect::<Vec<_>>()
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -114,41 +145,32 @@ fn output_single_result(
         "jsonl" => {
             let output = serde_json::json!({
                 "text": text,
-                "label": predictions.first().map(|(l, _)| l),
-                "score": predictions.first().map(|(_, s)| s),
-                "all": predictions
+                "label": result.label,
+                "score": result.score
             });
             println!("{}", serde_json::to_string(&output)?);
         }
         "text" => {
             if quiet {
-                // Just output top label
-                if let Some((label, _)) = predictions.first() {
-                    println!("{}", label);
-                }
+                println!("{}", result.label);
             } else {
                 println!();
-                for (label, score) in predictions {
+                for (label, score) in &result.all_scores {
                     let bar_len = (score * 40.0) as usize;
                     let bar = "█".repeat(bar_len);
-                    println!("  {:>12}  {:>6.2}%  {}", label, score * 100.0, bar);
+                    println!("  {:>16}  {:>6.2}%  {}", label, score * 100.0, bar);
                 }
                 println!();
             }
         }
-        _ => {
-            return Err(anyhow!(
-                "Unknown format: '{}'. Use: json, jsonl, text",
-                format
-            ));
-        }
+        _ => return Err(anyhow!("Unknown format: '{}'. Use: json, jsonl, text", format)),
     }
     Ok(())
 }
 
 fn output_batch_results(
     texts: &[&str],
-    all_predictions: &[Vec<(String, f32)>],
+    results: &[kjarni::classifier::ClassificationResult],
     format: &str,
     quiet: bool,
 ) -> Result<()> {
@@ -156,12 +178,14 @@ fn output_batch_results(
         "json" => {
             let output: Vec<_> = texts
                 .iter()
-                .zip(all_predictions.iter())
-                .map(|(text, preds)| {
+                .zip(results.iter())
+                .map(|(text, result)| {
                     serde_json::json!({
                         "text": text,
-                        "predictions": preds.iter().map(|(label, score)| {
-                            serde_json::json!({ "label": label, "score": score })
+                        "label": result.label,
+                        "score": result.score,
+                        "predictions": result.all_scores.iter().map(|(l, s)| {
+                            serde_json::json!({ "label": l, "score": s })
                         }).collect::<Vec<_>>()
                     })
                 })
@@ -169,42 +193,37 @@ fn output_batch_results(
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         "jsonl" => {
-            for (text, preds) in texts.iter().zip(all_predictions.iter()) {
+            for (text, result) in texts.iter().zip(results.iter()) {
                 let output = serde_json::json!({
                     "text": text,
-                    "label": preds.first().map(|(l, _)| l),
-                    "score": preds.first().map(|(_, s)| s)
+                    "label": result.label,
+                    "score": result.score
                 });
                 println!("{}", serde_json::to_string(&output)?);
             }
         }
         "text" => {
             if quiet {
-                for preds in all_predictions {
-                    if let Some((label, _)) = preds.first() {
-                        println!("{}", label);
-                    }
+                for result in results {
+                    println!("{}", result.label);
                 }
             } else {
-                for (text, preds) in texts.iter().zip(all_predictions.iter()) {
+                for (text, result) in texts.iter().zip(results.iter()) {
                     let truncated = if text.len() > 50 {
                         format!("{}...", &text[..47])
                     } else {
                         text.to_string()
                     };
-
-                    if let Some((label, score)) = preds.first() {
-                        println!("{:>12} ({:.1}%)  {}", label, score * 100.0, truncated);
-                    }
+                    println!(
+                        "{:>16} ({:.1}%)  {}",
+                        result.label,
+                        result.score * 100.0,
+                        truncated
+                    );
                 }
             }
         }
-        _ => {
-            return Err(anyhow!(
-                "Unknown format: '{}'. Use: json, jsonl, text",
-                format
-            ));
-        }
+        _ => return Err(anyhow!("Unknown format: '{}'. Use: json, jsonl, text", format)),
     }
     Ok(())
 }
