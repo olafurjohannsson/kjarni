@@ -712,6 +712,7 @@ async fn run_generation_loop(
     let mut tokens = input_tokens;
 
     // --- Limits & Setup ---
+    let context_limit = model.context_size(); 
     let max_len = config.max_new_tokens
         .map(|n| prompt_len + n)
         .unwrap_or(config.max_length);
@@ -743,6 +744,11 @@ async fn run_generation_loop(
         // Check cancellation
         if let Some(c) = &cancellation {
             if c.is_cancelled() { return Ok(()); }
+        }
+
+        if tokens.len() >= context_limit {
+            debug!("Context limit reached ({}), stopping.", context_limit);
+            break;
         }
 
         if Some(token_id) == model.bos_token_id() { continue; }

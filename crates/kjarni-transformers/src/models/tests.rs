@@ -208,19 +208,20 @@ fn test_repo_id_extraction() {
 
 #[test]
 fn test_from_cli_name() {
+    // 1. Update the input string to match the full registry name
     assert_eq!(
-        ModelType::from_cli_name("llama3.2-1b"),
+        ModelType::from_cli_name("llama3.2-1b-instruct"), 
         Some(ModelType::Llama3_2_1B_Instruct)
     );
+    
     assert_eq!(
         ModelType::from_cli_name("minilm-l6-v2"),
         Some(ModelType::MiniLML6V2)
     );
 
-    // Test case insensitivity if implemented (currently exact match in code, but usually good practice)
-    // Based on code: `let normalized = name.to_lowercase();` -> So it IS case insensitive!
+    // 2. Update the case-insensitivity check
     assert_eq!(
-        ModelType::from_cli_name("Llama3.2-1B"),
+        ModelType::from_cli_name("Llama3.2-1B-Instruct"),
         Some(ModelType::Llama3_2_1B_Instruct)
     );
 
