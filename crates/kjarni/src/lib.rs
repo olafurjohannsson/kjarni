@@ -117,6 +117,11 @@ pub mod models {
     pub use kjarni_models::models::qwen::{QwenConfig, QwenModel};
 }
 pub mod registry;
+pub mod kjarni_config;
+pub mod kjarni_config_resolve;
+pub mod kjarni_config_loader;
+
+pub mod generator;
 
 // FFI module (feature-gated and public)
 

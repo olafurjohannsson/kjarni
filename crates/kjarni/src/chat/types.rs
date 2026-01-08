@@ -1,94 +1,24 @@
-//! Core types for the Chat module.
-//!
-//! Contains enums and small types used throughout the chat API.
+// =============================================================================
+// kjarni/src/chat/types.rs
+// =============================================================================
+
+//! Chat types and error definitions.
 
 use std::fmt;
 use thiserror::Error;
 
-/// Chat behavior mode.
-///
-/// Affects generation defaults without changing the underlying model.
-/// This is a behavioral hint, not a capability requirement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChatMode {
-    /// Standard conversational mode.
-    /// Balanced temperature, moderate output length.
-    #[default]
-    Default,
-
-    /// Reasoning mode for complex tasks.
-    /// Lower temperature, longer output, encourages step-by-step thinking.
-    Reasoning,
-
-    /// Creative mode for open-ended generation.
-    /// Higher temperature, more varied outputs.
-    Creative,
-}
-
-impl ChatMode {
-    /// Get recommended temperature for this mode.
-    pub fn default_temperature(&self) -> f32 {
-        match self {
-            Self::Default => 0.7,
-            Self::Reasoning => 0.3,
-            Self::Creative => 0.9,
-        }
-    }
-
-    /// Get recommended max_new_tokens for this mode.
-    pub fn default_max_tokens(&self) -> usize {
-        match self {
-            Self::Default => 512,
-            Self::Reasoning => 2048,
-            Self::Creative => 1024,
-        }
-    }
-}
-
-/// Execution device for the model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChatDevice {
-    /// Run on CPU (default, always available).
-    #[default]
-    Cpu,
-
-    /// Run on GPU via WebGPU.
-    Gpu,
-
-    /// Automatically select best available device.
-    Auto,
-}
-
-impl ChatDevice {
-    /// Resolve Auto to a concrete device.
-    pub fn resolve(self) -> Self {
-        match self {
-            Self::Auto => {
-                // TODO: Check for GPU availability
-                // For now, default to CPU as it's always available
-                Self::Cpu
-            }
-            other => other,
-        }
-    }
-}
-
-/// Errors that can occur when using the Chat API.
+/// Errors that can occur during chat operations.
 #[derive(Debug, Error)]
 pub enum ChatError {
-    /// Model cannot perform chat/generation tasks.
-    #[error("Model '{model}' cannot be used for chat: {reason}")]
-    IncompatibleModel { model: String, reason: String },
-
-    /// Model not found in registry.
-    #[error("Unknown model: '{0}'. Run 'kjarni model list' to see available models.")]
+    /// Model name not found in registry.
+    #[error("Unknown model: '{0}'. Run 'kjarni model list --task chat' to see available models.")]
     UnknownModel(String),
 
-    /// Model not downloaded and download policy is Never.
-    #[error("Model '{0}' not downloaded and download policy is set to Never")]
+    /// Model files not present locally.
+    #[error("Model '{0}' not downloaded. Run: kjarni model download {0}")]
     ModelNotDownloaded(String),
 
-    /// Failed to download model.
+    /// Download failed.
     #[error("Failed to download model '{model}': {source}")]
     DownloadFailed {
         model: String,
@@ -96,7 +26,7 @@ pub enum ChatError {
         source: anyhow::Error,
     },
 
-    /// Failed to load model.
+    /// Model loading failed.
     #[error("Failed to load model '{model}': {source}")]
     LoadFailed {
         model: String,
@@ -104,36 +34,159 @@ pub enum ChatError {
         source: anyhow::Error,
     },
 
+    /// GPU requested but unavailable.
+    #[error("GPU unavailable. Use .cpu() or check your graphics drivers.")]
+    GpuUnavailable,
+
     /// Generation failed.
     #[error("Generation failed: {0}")]
     GenerationFailed(#[from] anyhow::Error),
 
-    /// GPU requested but not available.
-    #[error("GPU requested but WebGPU context could not be created")]
-    GpuUnavailable,
+    /// Model doesn't have a chat template.
+    #[error("Model '{0}' does not have a chat template. Use Generator for raw text generation.")]
+    NoChatTemplate(String),
+
+    /// Model is incompatible with chat.
+    #[error("Model '{model}' is incompatible with chat: {reason}")]
+    IncompatibleModel {
+        model: String,
+        reason: String,
+    },
+
+    /// Invalid model for chat (alias for IncompatibleModel for backwards compat).
+    #[error("Model '{0}' is not suitable for chat: {1}")]
+    InvalidModel(String, String),
 
     /// Invalid configuration.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 }
 
-/// Result type for Chat operations.
+/// Result type for chat operations.
 pub type ChatResult<T> = Result<T, ChatError>;
 
-/// Warning emitted when using suboptimal model configuration.
+/// Warning about chat model selection or configuration.
 #[derive(Debug, Clone)]
 pub struct ChatWarning {
+    /// Warning message.
     pub message: String,
-    pub suggestion: Option<String>,
+    /// Severity level.
+    pub severity: WarningSeverity,
+}
+
+impl ChatWarning {
+    /// Create a new warning.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            severity: WarningSeverity::Info,
+        }
+    }
+
+    /// Create a warning with severity.
+    pub fn with_severity(message: impl Into<String>, severity: WarningSeverity) -> Self {
+        Self {
+            message: message.into(),
+            severity,
+        }
+    }
 }
 
 impl fmt::Display for ChatWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Warning: {}", self.message)?;
-        if let Some(suggestion) = &self.suggestion {
-            write!(f, " {}", suggestion)?;
+        let prefix = match self.severity {
+            WarningSeverity::Info => "ℹ️ ",
+            WarningSeverity::Warning => "⚠️ ",
+            WarningSeverity::Important => "❗",
+        };
+        write!(f, "{} {}", prefix, self.message)
+    }
+}
+
+/// Severity level for warnings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningSeverity {
+    /// Informational note.
+    Info,
+    /// Warning that may affect behavior.
+    Warning,
+    /// Important warning that should be addressed.
+    Important,
+}
+
+/// Device selection for chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatDevice {
+    /// Use CPU.
+    Cpu,
+    /// Use GPU (WGPU).
+    Gpu,
+    /// Automatically select best available device.
+    #[default]
+    Auto,
+}
+
+impl ChatDevice {
+    /// Resolve to concrete device, checking GPU availability.
+    pub fn resolve(&self) -> ChatDevice {
+        match self {
+            Self::Auto => {
+                // For now, default to CPU. GPU detection could be added here.
+                // if gpu_available() { Self::Gpu } else { Self::Cpu }
+                Self::Cpu
+            }
+            other => *other,
         }
-        Ok(())
+    }
+
+    /// Resolve to the internal Device type.
+    pub fn resolve_to_device(&self) -> kjarni_transformers::traits::Device {
+        match self.resolve() {
+            Self::Cpu | Self::Auto => kjarni_transformers::traits::Device::Cpu,
+            Self::Gpu => kjarni_transformers::traits::Device::Wgpu,
+        }
+    }
+}
+
+/// Chat mode affecting generation behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatMode {
+    /// Balanced mode for general conversation.
+    #[default]
+    Default,
+    /// Creative mode with higher temperature.
+    Creative,
+    /// Reasoning mode with lower temperature for logical tasks.
+    Reasoning,
+}
+
+impl ChatMode {
+    /// Get the default temperature for this mode.
+    pub fn default_temperature(&self) -> f32 {
+        match self {
+            Self::Default => 0.7,
+            Self::Creative => 0.9,
+            Self::Reasoning => 0.3,
+        }
+    }
+
+    /// Get the default max tokens for this mode.
+    pub fn default_max_tokens(&self) -> usize {
+        match self {
+            Self::Default => 512,
+            Self::Creative => 1024,
+            Self::Reasoning => 2048,
+        }
+    }
+}
+
+impl fmt::Display for ChatMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => write!(f, "default"),
+            Self::Creative => write!(f, "creative"),
+            Self::Reasoning => write!(f, "reasoning"),
+        }
     }
 }
 
@@ -155,7 +208,7 @@ impl fmt::Display for Role {
     }
 }
 
-/// A single message in a conversation.
+/// A message in a conversation.
 #[derive(Debug, Clone)]
 pub struct Message {
     pub role: Role,
@@ -185,61 +238,56 @@ impl Message {
     }
 }
 
-/// Conversation history for stateless operations.
+/// Conversation history.
 #[derive(Debug, Clone, Default)]
 pub struct History {
     messages: Vec<Message>,
 }
 
 impl History {
+    /// Create empty history.
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_system(system_prompt: impl Into<String>) -> Self {
+    /// Create history with a system prompt.
+    pub fn with_system(system: impl Into<String>) -> Self {
         Self {
-            messages: vec![Message::system(system_prompt)],
+            messages: vec![Message::system(system)],
         }
     }
 
-    pub fn push(&mut self, message: Message) {
-        self.messages.push(message);
-    }
-
+    /// Add a user message.
     pub fn push_user(&mut self, content: impl Into<String>) {
-        self.push(Message::user(content));
+        self.messages.push(Message::user(content));
     }
 
+    /// Add an assistant message.
     pub fn push_assistant(&mut self, content: impl Into<String>) {
-        self.push(Message::assistant(content));
+        self.messages.push(Message::assistant(content));
     }
 
+    /// Get all messages.
     pub fn messages(&self) -> &[Message] {
         &self.messages
     }
 
+    /// Get the number of messages.
     pub fn len(&self) -> usize {
         self.messages.len()
     }
 
+    /// Check if empty.
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
     }
 
-    pub fn clear(&mut self) {
-        self.messages.clear();
-    }
-
-    /// Clear but keep system message if present.
-    pub fn clear_keep_system(&mut self) {
-        if let Some(first) = self.messages.first() {
-            if first.role == Role::System {
-                let system = self.messages.remove(0);
-                self.messages.clear();
-                self.messages.push(system);
-                return;
-            }
+    /// Clear history (optionally preserving system prompt).
+    pub fn clear(&mut self, keep_system: bool) {
+        if keep_system {
+            self.messages.retain(|m| matches!(m.role, Role::System));
+        } else {
+            self.messages.clear();
         }
-        self.messages.clear();
     }
 }

@@ -1,218 +1,125 @@
-//! Versioned model presets for reproducible deployments.
-//!
-//! Presets provide sensible defaults that are frozen at compile time.
-//! Upgrading kjarni may change which models presets resolve to,
-//! but within a version, presets are stable.
-//!
-//! # Versioning Policy
-//!
-//! - `V1` presets are frozen and will never change
-//! - New versions (V2, V3) may be added with improved models
-//! - Deprecated presets will warn but continue to work
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni::chat::{Chat, presets::CHAT_SMALL_V1};
-//!
-//! let chat = Chat::from_preset(CHAT_SMALL_V1).build().await?;
-//! ```
+// =============================================================================
+// kjarni/src/chat/presets.rs
+// =============================================================================
 
-use super::types::ChatDevice;
+//! Chat presets for common use cases.
 
-/// A versioned model preset.
-///
-/// Contains all information needed to instantiate a model with
-/// known-good defaults. Resolution happens at build time.
+use super::types::ChatMode;
+use crate::common::KjarniDevice;
+
+/// Preset configuration for chat models.
 #[derive(Debug, Clone)]
-pub struct ModelPreset {
-    /// Human-readable name for this preset.
-    pub name: &'static str,
-
-    /// CLI name of the model (e.g., "llama3.2-1b").
+pub struct ChatPreset {
+    /// Model name from registry.
     pub model: &'static str,
-
-    /// Maximum context length to configure.
-    pub context_length: usize,
-
-    /// Chat template identifier.
-    pub chat_template: &'static str,
-
-    /// Recommended quantization format.
-    pub quantization: &'static str,
-
-    /// Recommended device for this model size.
-    pub recommended_device: ChatDevice,
-
-    /// Approximate VRAM/RAM required in MB.
-    pub memory_mb: usize,
-
-    /// Brief description of the model's strengths.
+    /// Recommended device.
+    pub recommended_device: KjarniDevice,
+    /// Default chat mode.
+    pub mode: ChatMode,
+    /// Default system prompt (if any).
+    pub system_prompt: Option<&'static str>,
+    /// Recommended temperature.
+    pub temperature: Option<f32>,
+    /// Recommended max tokens.
+    pub max_tokens: Option<usize>,
+    /// Human-readable description.
     pub description: &'static str,
 }
 
-// =============================================================================
-// V1 Presets - Frozen, will never change
-// =============================================================================
+impl ChatPreset {
+    /// Small, fast model for quick responses.
+    pub const FAST: ChatPreset = ChatPreset {
+        model: "qwen2.5-0.5b-instruct",
+        recommended_device: KjarniDevice::Cpu,
+        mode: ChatMode::Default,
+        system_prompt: None,
+        temperature: Some(0.7),
+        max_tokens: Some(256),
+        description: "Fast responses, lower quality. Good for simple tasks.",
+    };
 
-/// Smallest chat model. Fast, low memory, basic capability.
-///
-/// - Model: Llama 3.2 1B Instruct
-/// - Memory: ~1.5 GB (Q4)
-/// - Best for: Simple queries, quick responses, constrained environments
-pub const CHAT_SMALL_V1: ModelPreset = ModelPreset {
-    name: "CHAT_SMALL_V1",
-    model: "llama3.2-1b",
-    context_length: 8192,
-    chat_template: "llama3",
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Cpu,
-    memory_mb: 1500,
-    description: "Fast and lightweight, good for simple tasks",
-};
+    /// Balanced model for general use.
+    pub const BALANCED: ChatPreset = ChatPreset {
+        model: "llama3.2-1b-instruct",
+        recommended_device: KjarniDevice::Cpu,
+        mode: ChatMode::Default,
+        system_prompt: None,
+        temperature: Some(0.7),
+        max_tokens: Some(512),
+        description: "Balanced speed and quality. Good for most tasks.",
+    };
 
-/// Medium chat model. Balanced speed and capability.
-///
-/// - Model: Llama 3.2 3B Instruct
-/// - Memory: ~3.5 GB (Q4)
-/// - Best for: General conversation, moderate complexity
-pub const CHAT_MEDIUM_V1: ModelPreset = ModelPreset {
-    name: "CHAT_MEDIUM_V1",
-    model: "llama3.2-3b",
-    context_length: 8192,
-    chat_template: "llama3",
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Cpu,
-    memory_mb: 3500,
-    description: "Balanced speed and quality for general use",
-};
+    /// Larger model for better quality.
+    pub const QUALITY: ChatPreset = ChatPreset {
+        model: "llama3.2-3b-instruct",
+        recommended_device: KjarniDevice::Gpu,
+        mode: ChatMode::Default,
+        system_prompt: None,
+        temperature: Some(0.7),
+        max_tokens: Some(1024),
+        description: "Higher quality, slower. Best with GPU.",
+    };
 
-/// Large chat model. Higher capability, requires more resources.
-///
-/// - Model: Llama 3.1 8B Instruct
-/// - Memory: ~8 GB (Q4)
-/// - Best for: Complex reasoning, nuanced responses
-pub const CHAT_LARGE_V1: ModelPreset = ModelPreset {
-    name: "CHAT_LARGE_V1",
-    model: "llama3.1-8b",
-    context_length: 8192,
-    chat_template: "llama3",
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Gpu,
-    memory_mb: 8000,
-    description: "High quality responses, best with GPU",
-};
+    /// Optimized for creative writing.
+    pub const CREATIVE: ChatPreset = ChatPreset {
+        model: "llama3.2-1b-instruct",
+        recommended_device: KjarniDevice::Cpu,
+        mode: ChatMode::Creative,
+        system_prompt: Some("You are a creative writing assistant. Be imaginative and expressive."),
+        temperature: Some(0.9),
+        max_tokens: Some(1024),
+        description: "Higher temperature for creative tasks.",
+    };
 
-/// Reasoning-optimized model. Slower but better at complex tasks.
-///
-/// - Model: DeepSeek R1 Distill 8B
-/// - Memory: ~8 GB (Q4)
-/// - Best for: Math, logic, step-by-step reasoning
-pub const REASONING_V1: ModelPreset = ModelPreset {
-    name: "REASONING_V1",
-    model: "deepseek-r1-8b",
-    context_length: 8192,
-    chat_template: "llama3", // Uses Llama architecture
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Gpu,
-    memory_mb: 8000,
-    description: "Optimized for reasoning and chain-of-thought",
-};
+    /// Optimized for coding assistance.
+    pub const CODING: ChatPreset = ChatPreset {
+        model: "qwen2.5-1.5b-instruct",
+        recommended_device: KjarniDevice::Cpu,
+        mode: ChatMode::Reasoning,
+        system_prompt: Some("You are a coding assistant. Write clean, well-documented code."),
+        temperature: Some(0.3),
+        max_tokens: Some(2048),
+        description: "Lower temperature for precise code generation.",
+    };
 
-/// Tiny chat model for extreme constraints.
-///
-/// - Model: Qwen 2.5 0.5B Instruct
-/// - Memory: ~500 MB (Q4)
-/// - Best for: Embedded, mobile, or very limited environments
-pub const CHAT_TINY_V1: ModelPreset = ModelPreset {
-    name: "CHAT_TINY_V1",
-    model: "qwen2.5-0.5b",
-    context_length: 4096,
-    chat_template: "chatml",
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Cpu,
-    memory_mb: 500,
-    description: "Minimal footprint, basic capability",
-};
-
-/// Qwen-based small model. Good multilingual support.
-///
-/// - Model: Qwen 2.5 1.5B Instruct
-/// - Memory: ~2 GB (Q4)
-/// - Best for: Multilingual tasks, structured output
-pub const CHAT_QWEN_SMALL_V1: ModelPreset = ModelPreset {
-    name: "CHAT_QWEN_SMALL_V1",
-    model: "qwen2.5-1.5b",
-    context_length: 8192,
-    chat_template: "chatml",
-    quantization: "q4_k_m",
-    recommended_device: ChatDevice::Cpu,
-    memory_mb: 2000,
-    description: "Good for multilingual and structured output",
-};
-
-// =============================================================================
-// Preset Collections
-// =============================================================================
-
-/// All available V1 presets.
-pub const ALL_V1_PRESETS: &[&ModelPreset] = &[
-    &CHAT_TINY_V1,
-    &CHAT_SMALL_V1,
-    &CHAT_MEDIUM_V1,
-    &CHAT_LARGE_V1,
-    &CHAT_QWEN_SMALL_V1,
-    &REASONING_V1,
-];
-
-/// Find a preset by name.
-pub fn find_preset(name: &str) -> Option<&'static ModelPreset> {
-    let name_upper = name.to_uppercase();
-    ALL_V1_PRESETS
-        .iter()
-        .find(|p| p.name == name_upper)
-        .copied()
+    /// Optimized for reasoning and analysis.
+    pub const REASONING: ChatPreset = ChatPreset {
+        model: "llama3.2-3b-instruct",
+        recommended_device: KjarniDevice::Gpu,
+        mode: ChatMode::Reasoning,
+        system_prompt: Some("You are a logical reasoning assistant. Think step by step."),
+        temperature: Some(0.3),
+        max_tokens: Some(2048),
+        description: "Lower temperature for logical tasks.",
+    };
 }
 
-/// Tier-based preset selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Tier-based presets
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChatTier {
-    /// ~500MB, basic capability
-    Tiny,
-    /// ~1.5GB, fast responses
-    Small,
-    /// ~3.5GB, balanced
-    Medium,
-    /// ~8GB, high quality
-    Large,
+    /// Fastest, smallest model.
+    Fast,
+    /// Balanced speed and quality.
+    #[default]
+    Balanced,
+    /// Best quality, may need GPU.
+    Quality,
 }
 
 impl ChatTier {
-    /// Resolve tier to the current default preset for that tier.
-    pub fn resolve(&self) -> &'static ModelPreset {
+    /// Get the preset for this tier.
+    pub fn preset(&self) -> &'static ChatPreset {
         match self {
-            Self::Tiny => &CHAT_TINY_V1,
-            Self::Small => &CHAT_SMALL_V1,
-            Self::Medium => &CHAT_MEDIUM_V1,
-            Self::Large => &CHAT_LARGE_V1,
+            Self::Fast => &ChatPreset::FAST,
+            Self::Balanced => &ChatPreset::BALANCED,
+            Self::Quality => &ChatPreset::QUALITY,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_preset_lookup() {
-        assert!(find_preset("CHAT_SMALL_V1").is_some());
-        assert!(find_preset("chat_small_v1").is_some()); // case insensitive
-        assert!(find_preset("nonexistent").is_none());
-    }
-
-    #[test]
-    fn test_tier_resolution() {
-        assert_eq!(ChatTier::Small.resolve().model, "llama3.2-1b");
-        assert_eq!(ChatTier::Large.resolve().model, "llama3.1-8b");
+    pub fn resolve(&self) -> &'static ChatPreset {
+        match self {
+            Self::Balanced => &ChatPreset::BALANCED,
+            Self::Fast => &ChatPreset::FAST,
+            Self::Quality => &ChatPreset::QUALITY,
+        }
     }
 }

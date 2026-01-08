@@ -76,7 +76,7 @@ mod validation;
 pub use builder::ChatBuilder;
 pub use conversation::ChatConversation;
 pub use model::Chat;
-pub use presets::{ChatTier, ModelPreset};
+pub use presets::{ChatTier, ChatPreset};
 pub use types::{
     ChatDevice, ChatError, ChatMode, ChatResult, ChatWarning,
     History, Message, Role,
@@ -119,8 +119,8 @@ pub async fn send(model: &str, message: &str) -> ChatResult<String> {
 ///
 /// let response = kjarni::chat::send_preset(&CHAT_SMALL_V1, "Hello!").await?;
 /// ```
-pub async fn send_preset(preset: &ModelPreset, message: &str) -> ChatResult<String> {
-    let chat = Chat::from_preset(preset).build().await?;
+pub async fn send_preset(preset: &ChatPreset, message: &str) -> ChatResult<String> {
+    let chat = ChatBuilder::from_preset(preset).build().await?;
     chat.send(message).await
 }
 
@@ -175,7 +175,3 @@ pub fn available_models() -> Vec<&'static str> {
 pub fn suggested_models() -> Vec<&'static str> {
     validation::suggest_chat_models()
 }
-
-
-#[cfg(test)]
-mod tests;

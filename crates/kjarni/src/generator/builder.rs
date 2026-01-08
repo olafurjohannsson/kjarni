@@ -1,41 +1,36 @@
 // =============================================================================
-// kjarni/src/chat/builder.rs
+// kjarni/src/generator/builder.rs
 // =============================================================================
 
-//! Builder pattern for Chat configuration.
+//! Builder pattern for Generator configuration.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use kjarni_transformers::WgpuContext;
 
-use crate::chat::presets::ChatPreset;
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 use crate::generation::GenerationOverrides;
 
-use super::model::Chat;
-use super::types::{ChatMode, ChatResult};
+use super::model::Generator;
+use super::types::GeneratorResult;
 
-/// Builder for configuring a Chat instance.
+/// Builder for configuring a Generator.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let chat = Chat::builder("llama3.2-1b-instruct")
-///     .system("You are a helpful assistant.")
-///     .mode(ChatMode::Creative)
+/// let generator = Generator::builder("gpt2")
+///     .cpu()
 ///     .temperature(0.8)
+///     .max_tokens(100)
 ///     .build()
 ///     .await?;
 /// ```
-pub struct ChatBuilder {
+pub struct GeneratorBuilder {
     // Model selection
     pub(crate) model: String,
     pub(crate) model_path: Option<PathBuf>,
-
-    // Chat-specific
-    pub(crate) system_prompt: Option<String>,
-    pub(crate) mode: ChatMode,
 
     // Device configuration
     pub(crate) device: KjarniDevice,
@@ -51,17 +46,19 @@ pub struct ChatBuilder {
 
     // Behavior
     pub(crate) quiet: bool,
-    pub(crate) allow_suboptimal: bool,
+    pub(crate) allow_warnings: bool,
 }
 
-impl ChatBuilder {
+impl GeneratorBuilder {
     /// Create a new builder for the specified model.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - Model name from registry (e.g., "gpt2", "llama3.2-1b")
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
             model_path: None,
-            system_prompt: None,
-            mode: ChatMode::default(),
             device: KjarniDevice::default(),
             context: None,
             cache_dir: None,
@@ -69,55 +66,18 @@ impl ChatBuilder {
             load_config: None,
             generation_overrides: GenerationOverrides::default(),
             quiet: false,
-            allow_suboptimal: false,
+            allow_warnings: false,
         }
-    }
-
-    /// Create a builder from a preset.
-    pub fn from_preset(preset: &ChatPreset) -> Self {
-        let mut builder = Self::new(preset.model);
-        builder.device = preset.recommended_device;
-        builder.mode = preset.mode;
-        
-        if let Some(system) = preset.system_prompt {
-            builder.system_prompt = Some(system.to_string());
-        }
-        
-        if let Some(temp) = preset.temperature {
-            builder.generation_overrides.temperature = Some(temp);
-        }
-        
-        if let Some(max) = preset.max_tokens {
-            builder.generation_overrides.max_new_tokens = Some(max);
-        }
-        
-        builder
     }
 
     // =========================================================================
-    // Chat-Specific
+    // Model Selection
     // =========================================================================
 
-    /// Set the system prompt.
-    pub fn system(mut self, prompt: impl Into<String>) -> Self {
-        self.system_prompt = Some(prompt.into());
+    /// Load model from a local path instead of registry.
+    pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(path.into());
         self
-    }
-
-    /// Set the chat mode.
-    pub fn mode(mut self, mode: ChatMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Use creative mode (higher temperature).
-    pub fn creative(self) -> Self {
-        self.mode(ChatMode::Creative)
-    }
-
-    /// Use reasoning mode (lower temperature).
-    pub fn reasoning(self) -> Self {
-        self.mode(ChatMode::Reasoning)
     }
 
     // =========================================================================
@@ -152,6 +112,9 @@ impl ChatBuilder {
     // =========================================================================
 
     /// Set the sampling temperature.
+    ///
+    /// Higher values (e.g., 1.0) make output more random.
+    /// Lower values (e.g., 0.1) make output more deterministic.
     pub fn temperature(mut self, temp: f32) -> Self {
         self.generation_overrides.temperature = Some(temp);
         self
@@ -182,8 +145,16 @@ impl ChatBuilder {
     }
 
     /// Set repetition penalty.
+    ///
+    /// Values > 1.0 discourage repetition. Default is typically 1.1.
     pub fn repetition_penalty(mut self, penalty: f32) -> Self {
         self.generation_overrides.repetition_penalty = Some(penalty);
+        self
+    }
+
+    /// Use greedy decoding (temperature = 0, deterministic).
+    pub fn greedy(mut self) -> Self {
+        self.generation_overrides.temperature = Some(0.0);
         self
     }
 
@@ -198,6 +169,18 @@ impl ChatBuilder {
     // =========================================================================
 
     /// Configure model loading options.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// Generator::builder("llama3.2-3b")
+    ///     .with_load_config(|cfg| cfg
+    ///         .offload_embeddings(true)
+    ///         .quantize_lm_head_q8()
+    ///     )
+    ///     .build()
+    ///     .await?;
+    /// ```
     pub fn with_load_config<F>(mut self, f: F) -> Self
     where
         F: FnOnce(LoadConfigBuilder) -> LoadConfigBuilder,
@@ -235,8 +218,8 @@ impl ChatBuilder {
     }
 
     /// Allow suboptimal model choices without warnings.
-    pub fn allow_suboptimal(mut self) -> Self {
-        self.allow_suboptimal = true;
+    pub fn allow_warnings(mut self) -> Self {
+        self.allow_warnings = true;
         self
     }
 
@@ -244,16 +227,8 @@ impl ChatBuilder {
     // Build
     // =========================================================================
 
-    /// Build the Chat instance.
-    pub async fn build(self) -> ChatResult<Chat> {
-        Chat::from_builder(self).await
-    }
-}
-
-
-impl Chat {
-    /// Create a builder from a preset.
-    pub fn from_preset(preset: &ChatPreset) -> ChatBuilder {
-        ChatBuilder::from_preset(preset)
+    /// Build the Generator.
+    pub async fn build(self) -> GeneratorResult<Generator> {
+        Generator::from_builder(self).await
     }
 }

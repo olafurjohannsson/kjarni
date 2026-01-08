@@ -1,33 +1,23 @@
+// =============================================================================
+// kjarni/src/common/load_config.rs
+// =============================================================================
+
 //! Model loading configuration.
 
 use kjarni_transformers::{models::base::ModelLoadConfig, tensor::DType};
 
-
-/// High-level loading configuration with builder pattern.
-///
-/// This wraps `ModelLoadConfig` with a more ergonomic API.
+/// Wrapper around ModelLoadConfig for the high-level API.
 #[derive(Debug, Clone)]
 pub struct LoadConfig {
     pub(crate) inner: ModelLoadConfig,
 }
 
-impl Default for LoadConfig {
-    fn default() -> Self {
+impl LoadConfig {
+    /// Create a new default LoadConfig.
+    pub fn new() -> Self {
         Self {
             inner: ModelLoadConfig::default(),
         }
-    }
-}
-
-impl LoadConfig {
-    /// Create a new default configuration.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create a builder for custom configuration.
-    pub fn builder() -> LoadConfigBuilder {
-        LoadConfigBuilder::new()
     }
 
     /// Get the inner ModelLoadConfig.
@@ -41,9 +31,9 @@ impl LoadConfig {
     }
 }
 
-impl From<LoadConfig> for ModelLoadConfig {
-    fn from(config: LoadConfig) -> Self {
-        config.inner
+impl Default for LoadConfig {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -56,75 +46,93 @@ impl From<ModelLoadConfig> for LoadConfig {
 /// Builder for LoadConfig.
 #[derive(Debug, Clone, Default)]
 pub struct LoadConfigBuilder {
-    offload_embeddings: bool,
-    offload_lm_head: bool,
-    target_dtype: Option<DType>,
-    quantize_lm_head: Option<DType>,
-    max_batch_size: Option<usize>,
-    max_sequence_length: Option<usize>,
-    use_gguf: bool,
+    inner: ModelLoadConfig,
 }
 
 impl LoadConfigBuilder {
     /// Create a new builder with defaults.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            inner: ModelLoadConfig::default(),
+        }
+    }
+
+    /// Create a builder from an existing LoadConfig.
+    pub fn from_config(config: LoadConfig) -> Self {
+        Self {
+            inner: config.inner,
+        }
+    }
+
+    /// Create a builder from an existing ModelLoadConfig.
+    pub fn from_inner(inner: ModelLoadConfig) -> Self {
+        Self { inner }
     }
 
     /// Keep embedding layer on CPU to save VRAM.
     pub fn offload_embeddings(mut self, offload: bool) -> Self {
-        self.offload_embeddings = offload;
+        self.inner.offload_embeddings = offload;
         self
     }
 
     /// Keep language model head on CPU to save VRAM.
     pub fn offload_lm_head(mut self, offload: bool) -> Self {
-        self.offload_lm_head = offload;
+        self.inner.offload_lm_head = offload;
         self
     }
 
-    /// Force quantization to this data type.
-    pub fn target_dtype(mut self, dtype: DType) -> Self {
-        self.target_dtype = Some(dtype);
+    /// Set target dtype for weights.
+    pub fn dtype(mut self, dtype: DType) -> Self {
+        self.inner.target_dtype = Some(dtype);
         self
     }
 
-    /// Quantize the LM head to this data type.
+    /// Use F16 precision.
+    pub fn f16(self) -> Self {
+        self.dtype(DType::F16)
+    }
+
+    /// Use BF16 precision.
+    pub fn bf16(self) -> Self {
+        self.dtype(DType::BF16)
+    }
+
+    /// Use F32 precision (default).
+    pub fn f32(self) -> Self {
+        self.dtype(DType::F32)
+    }
+
+    /// Quantize the LM head to specified dtype.
     pub fn quantize_lm_head(mut self, dtype: DType) -> Self {
-        self.quantize_lm_head = Some(dtype);
+        self.inner.quantize_lm_head = Some(dtype);
         self
     }
 
-    /// Pre-allocate KV cache for this batch size.
+    /// Quantize LM head to Q8_0.
+    pub fn quantize_lm_head_q8(self) -> Self {
+        self.quantize_lm_head(DType::Q8_0)
+    }
+
+    /// Set maximum batch size for KV cache pre-allocation.
     pub fn max_batch_size(mut self, size: usize) -> Self {
-        self.max_batch_size = Some(size);
+        self.inner.max_batch_size = Some(size);
         self
     }
 
-    /// Pre-allocate KV cache for this sequence length.
+    /// Set maximum sequence length for KV cache pre-allocation.
     pub fn max_sequence_length(mut self, length: usize) -> Self {
-        self.max_sequence_length = Some(length);
+        self.inner.max_sequence_length = Some(length);
         self
     }
 
-    /// Use GGUF format.
-    pub fn use_gguf(mut self, use_gguf: bool) -> Self {
-        self.use_gguf = use_gguf;
+    /// Prefer GGUF format if available.
+    pub fn prefer_gguf(mut self, prefer: bool) -> Self {
+        self.inner.use_gguf = prefer;
         self
     }
 
     /// Build the LoadConfig.
     pub fn build(self) -> LoadConfig {
-        LoadConfig {
-            inner: ModelLoadConfig {
-                offload_embeddings: self.offload_embeddings,
-                offload_lm_head: self.offload_lm_head,
-                target_dtype: self.target_dtype,
-                quantize_lm_head: self.quantize_lm_head,
-                max_batch_size: self.max_batch_size,
-                max_sequence_length: self.max_sequence_length,
-                use_gguf: self.use_gguf,
-            },
-        }
+        LoadConfig { inner: self.inner }
     }
 }

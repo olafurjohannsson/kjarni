@@ -165,17 +165,18 @@ fn get_head_config(model_type: ModelType, weights: &ModelWeights) -> Classificat
 ///
 /// Works with BERT, DistilBERT, RoBERTa, DeBERTa and other encoder models
 /// for tasks like sentiment analysis, emotion detection, and zero-shot classification.
+
 pub struct SequenceClassifier {
     // Encoder components
-    cpu_encoder: Option<CpuTransformerEncoder>,
-    gpu_encoder: Option<GpuTransformerEncoder>,
+    pub(crate) cpu_encoder: Option<CpuTransformerEncoder>,
+    pub(crate) gpu_encoder: Option<GpuTransformerEncoder>,
 
-    // Classification head (unified)
-    cpu_head: Option<CpuSequenceClassificationHead>,
-    gpu_head: Option<GpuSequenceClassificationHead>,
+    // Classification head
+    pub(crate) cpu_head: Option<CpuSequenceClassificationHead>,
+    pub(crate) gpu_head: Option<GpuSequenceClassificationHead>,
 
-    // Model info
-    tokenizer: Tokenizer,
+    // Keep these private or pub(crate) as needed
+    pub(crate) tokenizer: Tokenizer,
     model_type: ModelType,
     device: Device,
     context: Option<Arc<WgpuContext>>,
@@ -183,7 +184,6 @@ pub struct SequenceClassifier {
     pub layout: ModelLayout,
     config: Arc<dyn ModelConfig>,
 
-    // Classification-specific
     num_labels: usize,
     labels: Option<Vec<String>>,
 }
@@ -208,6 +208,10 @@ impl SequenceClassifier {
         );
 
         is_encoder && is_classification_task
+    }
+
+    pub fn device(&self) -> Device {
+        self.device
     }
 
     /// Get list of supported classification models.
@@ -390,6 +394,8 @@ impl SequenceClassifier {
     pub fn num_labels(&self) -> usize {
         self.num_labels
     }
+
+    
 
     /// Classify a single text, returning (label, score) pairs sorted by score.
     pub async fn classify(&self, text: &str, top_k: usize) -> Result<Vec<(String, f32)>> {

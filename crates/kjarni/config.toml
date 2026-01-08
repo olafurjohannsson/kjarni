@@ -1,14 +1,228 @@
+# =============================================================================
+# KJARNI CONFIGURATION
+# =============================================================================
+# Location: ./kjarni.toml or ~/.config/kjarni/config.toml
+# CLI flags always override these settings.
+
+# =============================================================================
+# Default Models
+# =============================================================================
 [defaults]
-decoder = "llama-3.2-1b"
-encoder = "minilm-l6-v2"
-cross_encoder = "minilm-l6-v2-cross-encoder"
-seq2seq = "distilbart-cnn"
+# Decoder models (Chat, Generate)
+chat = "llama3.2-1b-instruct"
+generate = "llama3.2-1b-instruct"
 
-[generation]
+# Encoder models
+embed = "minilm-l6-v2"
+classify = "distilbert-sentiment"
+rerank = "minilm-reranker"
+
+# Seq2Seq models
+summarize = "distilbart-cnn"
+translate = "flan-t5-base"
+
+# Audio models
+transcribe = "whisper-tiny"
+
+# =============================================================================
+# Chat Task Defaults
+# =============================================================================
+[chat]
 temperature = 0.7
-max_tokens = 100
+max_tokens = 512
+top_p = 0.9
+top_k = 40
+min_p = 0.05
 repetition_penalty = 1.1
+# system_prompt = "You are a helpful assistant."  # Optional default
 
+[chat.modes]
+# Mode-specific overrides
+default.temperature = 0.7
+default.max_tokens = 512
+creative.temperature = 0.9
+creative.max_tokens = 1024
+reasoning.temperature = 0.3
+reasoning.max_tokens = 2048
+
+# =============================================================================
+# Generate Task Defaults (Raw generation, no chat template)
+# =============================================================================
+[generate]
+temperature = 0.5
+max_tokens = 256
+top_p = 0.9
+top_k = 40
+repetition_penalty = 1.0
+
+# =============================================================================
+# Summarize Task Defaults
+# =============================================================================
+[summarize]
+min_length = 50
+max_length = 200
+num_beams = 4
+length_penalty = 2.0
+no_repeat_ngram_size = 3
+early_stopping = true
+
+# =============================================================================
+# Translate Task Defaults
+# =============================================================================
+[translate]
+max_length = 512
+num_beams = 4
+length_penalty = 1.0
+no_repeat_ngram_size = 0  # Allow repetition in translation
+
+# =============================================================================
+# Classify Task Defaults
+# =============================================================================
+[classify]
+top_k = 5
+threshold = 0.0           # Show all results by default
+multi_label = false
+max_length = 512
+batch_size = 8
+
+# =============================================================================
+# Embed Task Defaults
+# =============================================================================
+[embed]
+normalize = true
+pooling = "mean"          # mean, cls, max, last
+
+# =============================================================================
+# Rerank Task Defaults
+# =============================================================================
+[rerank]
+top_k = 10
+return_scores = true
+
+# =============================================================================
+# Index/Search Task Defaults
+# =============================================================================
+[index]
+chunk_size = 512
+chunk_overlap = 50
+max_docs_per_segment = 10000
+
+[search]
+top_k = 10
+mode = "semantic"         # semantic, keyword, hybrid
+hybrid_alpha = 0.5        # Weight for semantic vs keyword (0=keyword, 1=semantic)
+
+# =============================================================================
+# Transcribe Task Defaults
+# =============================================================================
+[transcribe]
+language = "en"           # Auto-detect if not specified
+# timestamps = false
+
+# =============================================================================
+# Per-Model Overrides
+# =============================================================================
+
+# --- Decoder Models ---
+[models.llama3-2-1b-instruct]
+# No special overrides, use defaults
+
+[models.llama3-2-3b-instruct]
+# Larger model, offload to save memory
+offload_embeddings = true
+quantize_lm_head = "q8"
+
+[models.llama3-2-3b-instruct.generation]
+# Slightly lower temp for larger model
+temperature = 0.6
+max_tokens = 1024
+
+[models.qwen2-5-1-5b]
+# Qwen likes higher temperature
+[models.qwen2-5-1-5b.generation]
+temperature = 0.9
+
+[models.qwen2-5-0-5b]
+[models.qwen2-5-0-5b.generation]
+temperature = 0.8
+
+# --- Encoder Models ---
+[models.minilm-l6-v2]
+# Keep in f32 for embedding accuracy
+dtype = "f32"
+
+[models.nomic-embed-text]
+dtype = "f32"
+[models.nomic-embed-text.encoding]
+normalize = true
+pooling = "mean"
+
+# --- Classifier Models ---
+[models.distilbert-sentiment]
+dtype = "f32"
+
+[models.bart-zeroshot]
+# Large model
+dtype = "f16"
+
+# --- Seq2Seq Models ---
+[models.distilbart-cnn]
+dtype = "f32"
+[models.distilbart-cnn.summarize]
+min_length = 30
+max_length = 150
+
+[models.flan-t5-base]
+dtype = "f32"
+
+# =============================================================================
+# Load Configuration (Hardware/Memory)
+# =============================================================================
+[load]
+# Default dtype for all models (can be overridden per-model)
+dtype = "f32"             # f32, f16, bf16
+
+# Memory optimization defaults
+offload_embeddings = false
+offload_lm_head = false
+quantize_lm_head = false  # or "q8", "q4"
+
+# GGUF preference
+prefer_gguf = false
+
+# KV Cache pre-allocation (optional)
+# max_batch_size = 1
+# max_sequence_length = 2048
+
+# =============================================================================
+# Cache Configuration
+# =============================================================================
 [cache]
-# Optional override
-# dir = "/custom/path"
+# Model cache directory (default: ~/.cache/kjarni)
+# dir = "~/.cache/kjarni"
+
+# Auto-download models if missing
+auto_download = true
+
+# =============================================================================
+# Hardware Configuration
+# =============================================================================
+[hardware]
+# Device selection: cpu, gpu, auto
+device = "auto"
+
+# GPU-specific (when device = gpu)
+# gpu_memory_fraction = 0.9  # Future: limit GPU memory usage
+
+# =============================================================================
+# Output Configuration
+# =============================================================================
+[output]
+# Default output format for CLI commands that support it
+format = "text"           # text, json, jsonl
+
+# Quiet mode (suppress info messages)
+quiet = false
+
+# Color output
+color = true

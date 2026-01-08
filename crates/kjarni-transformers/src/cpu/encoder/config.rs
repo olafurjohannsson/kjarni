@@ -89,10 +89,10 @@ mod tests {
 
     #[test]
     fn test_pooling_strategy_display() {
-        assert_eq!(PoolingStrategy::Mean.to_string(), "Mean");
-        assert_eq!(PoolingStrategy::Max.to_string(), "Max");
-        assert_eq!(PoolingStrategy::Cls.to_string(), "CLS");
-        assert_eq!(PoolingStrategy::LastToken.to_string(), "LastToken");
+        assert_eq!(PoolingStrategy::Mean.to_string(), "mean");
+        assert_eq!(PoolingStrategy::Max.to_string(), "max");
+        assert_eq!(PoolingStrategy::Cls.to_string(), "cls");
+        assert_eq!(PoolingStrategy::LastToken.to_string(), "last_token");
     }
 
     #[test]
@@ -108,7 +108,7 @@ mod tests {
         assert!(config.normalize);
         assert_eq!(
             config.to_string(),
-            "EncodingConfig { pooling: Mean, normalize: true }"
+            "EncodingConfig { pooling: mean, normalize: true }"
         );
     }
 
@@ -122,7 +122,7 @@ mod tests {
         assert!(!config.normalize);
         assert_eq!(
             config.to_string(),
-            "EncodingConfig { pooling: CLS, normalize: false }"
+            "EncodingConfig { pooling: cls, normalize: false }"
         );
     }
 }

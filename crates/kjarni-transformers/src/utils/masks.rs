@@ -9,36 +9,53 @@ pub const MASK_VALUE: f32 = -1e9; // SAME as GPU
 pub fn apply_padding_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow::Result<Array4<f32>> {
     let (batch_size, num_heads, seq_q, seq_k) = scores.dim();
 
-    if mask.shape()[0] != batch_size {
+    if mask.shape() != [batch_size, seq_k] {
         return Err(anyhow!(
-            "Mask batch size {} doesn't match scores batch size {}",
-            mask.shape()[0],
-            batch_size
-        ));
-    }
-
-    if mask.shape()[1] != seq_k {
-        return Err(anyhow!(
-            "Mask sequence length {} doesn't match key sequence length {}",
-            mask.shape()[1],
-            seq_k
+            "Padding mask shape {:?} does not match expected [{}, {}]",
+            mask.shape(), batch_size, seq_k
         ));
     }
 
     // Expand mask: [batch, seq_k] → [batch, 1, 1, seq_k]
+    // Broadcasts across heads and query positions
     let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
 
-    // Broadcast and apply
     if let Some(broadcast_mask) = mask_expanded.broadcast((batch_size, num_heads, seq_q, seq_k)) {
         Zip::from(&mut scores)
             .and(&broadcast_mask)
             .for_each(|s, &m| {
-                if m == 0.0 {
-                    *s = MASK_VALUE;
-                }
+                if m == 0.0 { *s = MASK_VALUE; }
             });
     }
 
+    Ok(scores)
+}
+
+/// Apply a general bias mask (e.g. Alibi or Causal mask provided as tensor)
+/// Assumes mask shape is [Q_Len, K_Len] or [1, 1, Q_Len, K_Len]
+pub fn apply_bias_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow::Result<Array4<f32>> {
+    let (batch, heads, q, k) = scores.dim();
+    
+    // Check if dimensions match the attention window
+    if mask.shape() != [q, k] {
+         return Err(anyhow!(
+            "Bias mask shape {:?} does not match attention window [{}, {}]",
+            mask.shape(), q, k
+        ));
+    }
+
+    // Expand: [Q, K] -> [1, 1, Q, K]
+    // Broadcasts across Batch and Heads
+    let mask_view = mask.view().insert_axis(Axis(0)).insert_axis(Axis(0));
+
+    if let Some(m) = mask_view.broadcast((batch, heads, q, k)) {
+        Zip::from(&mut scores).and(&m).for_each(|s, &mask_val| {
+            // Assuming mask contains 1.0 to keep, 0.0 to mask, or additive bias?
+            // If it's a binary mask (1.0/0.0):
+            if mask_val == 0.0 { *s = MASK_VALUE; }
+            // If it's an additive bias (like Alibi), you should use += instead.
+        });
+    }
     Ok(scores)
 }
 
@@ -95,11 +112,15 @@ pub fn create_full_attention_mask(batch_size: usize, seq_len: usize) -> Array2<f
 /// * `q_len` - Number of query tokens (usually 1 during decode)
 /// * `total_len` - Total tokens in sequence (past_cache + current)
 pub fn create_causal_mask(q_len: usize, total_len: usize) -> Array2<f32> {
+    if total_len < q_len {
+        // Graceful handling or panic, but helpful message
+        panic!("create_causal_mask: total_len ({}) cannot be less than q_len ({})", total_len, q_len);
+    }
+    
     let mut mask = Array2::zeros((q_len, total_len));
     let past_len = total_len - q_len;
 
     for i in 0..q_len {
-        // The query at index 'i' is actually at absolute position 'past_len + i'
         let current_abs_pos = past_len + i;
         for j in 0..total_len {
             if j <= current_abs_pos {
@@ -109,6 +130,7 @@ pub fn create_causal_mask(q_len: usize, total_len: usize) -> Array2<f32> {
     }
     mask
 }
+
 
 /// Create a causal mask for a batch
 ///
@@ -160,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_causal_mask() {
-        let mask = create_causal_mask(3, 0);
+        let mask = create_causal_mask(3, 3);
 
         // Expected:
         // [[1, 0, 0],

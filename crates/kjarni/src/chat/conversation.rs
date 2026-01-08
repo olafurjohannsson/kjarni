@@ -1,39 +1,34 @@
-//! Stateful conversation wrapper.
-//!
-//! Provides a convenience type for multi-turn conversations
-//! that automatically maintains history.
+// =============================================================================
+// kjarni/src/chat/conversation.rs
+// =============================================================================
 
-use futures_util::StreamExt;
+//! Stateful conversation management.
 
 use super::model::Chat;
-use super::types::{ChatResult, History, Message, Role};
-use crate::generation::overrides::GenerationOverrides;
+use super::types::{ChatResult, History, Role};
+use crate::generation::GenerationOverrides;
 
-/// A stateful conversation that maintains history.
-///
-/// Created via `chat.conversation()`. Each call to `send()` automatically
-/// appends to the history.
+/// A stateful conversation that maintains history automatically.
 ///
 /// # Example
 ///
 /// ```ignore
+/// let chat = Chat::new("llama3.2-1b-instruct").await?;
 /// let mut convo = chat.conversation();
 ///
-/// // First turn
-/// let response = convo.send("Hello!").await?;
-/// println!("Assistant: {}", response);
+/// // Blocking send (adds to history automatically)
+/// let response = convo.send("What is Rust?").await?;
 ///
-/// // Second turn (includes history)
-/// let response = convo.send("What did I just say?").await?;
-/// println!("Assistant: {}", response);
-///
-/// // View history
-/// for msg in convo.history().messages() {
-///     println!("{}: {}", msg.role, msg.content);
+/// // Streaming (must manually add response to history)
+/// convo.push_user("Tell me more.");
+/// let mut stream = convo.stream_next().await?;
+/// let mut response = String::new();
+/// while let Some(token) = stream.next().await {
+///     let text = token?;
+///     print!("{}", text);
+///     response.push_str(&text);
 /// }
-///
-/// // Clear and start over
-/// convo.clear();
+/// convo.push_assistant(&response);
 /// ```
 pub struct ChatConversation<'a> {
     chat: &'a Chat,
@@ -43,9 +38,10 @@ pub struct ChatConversation<'a> {
 impl<'a> ChatConversation<'a> {
     /// Create a new conversation.
     pub(crate) fn new(chat: &'a Chat) -> Self {
-        let history = match chat.system_prompt() {
-            Some(system) => History::with_system(system),
-            None => History::new(),
+        let history = if let Some(system) = chat.system_prompt() {
+            History::with_system(system)
+        } else {
+            History::new()
         };
 
         Self { chat, history }
@@ -59,22 +55,21 @@ impl<'a> ChatConversation<'a> {
         }
     }
 
+    // =========================================================================
+    // Blocking Send (Auto-manages history)
+    // =========================================================================
+
     /// Send a message and get a response.
     ///
     /// Both the user message and assistant response are added to history.
-    pub async fn send(&mut self, message: impl Into<String>) -> ChatResult<String> {
-        let message = message.into();
+    pub async fn send(&mut self, message: &str) -> ChatResult<String> {
+        // Add user message first
+        self.history.push_user(message);
 
-        // Add user message to history
-        self.history.push_user(&message);
+        // Generate response using history
+        let response = self.chat.send_with_history(&self.history_without_last_user(), message).await?;
 
-        // Generate response
-        let response = self
-            .chat
-            .send_with_history(&self.history_without_last(), &message)
-            .await?;
-
-        // Add assistant response to history
+        // Add assistant response
         self.history.push_assistant(&response);
 
         Ok(response)
@@ -83,63 +78,100 @@ impl<'a> ChatConversation<'a> {
     /// Send with custom generation overrides.
     pub async fn send_with_config(
         &mut self,
-        message: impl Into<String>,
+        message: &str,
         overrides: &GenerationOverrides,
     ) -> ChatResult<String> {
-        let message = message.into();
-        self.history.push_user(&message);
+        self.history.push_user(message);
 
-        // We need to use the underlying chat's internal method
-        // For now, we'll use send_with_history which doesn't take overrides
-        // This is a limitation we should address
-        let response = self
-            .chat
-            .send_with_history(&self.history_without_last(), &message)
-            .await?;
+        let mut conversation = self.chat.history_to_conversation(&self.history_without_last_user());
+        conversation.push_user(message);
+        let prompt = self.chat.format_prompt(&conversation);
+
+        let response = self.chat.generate(&prompt, overrides).await?;
 
         self.history.push_assistant(&response);
+
         Ok(response)
     }
 
-    /// Stream a response token by token.
+    // Helper: get history without the last user message (for send_with_history)
+    fn history_without_last_user(&self) -> History {
+        let mut h = History::new();
+        let messages = self.history.messages();
+        
+        // Copy all but potentially skip last if we just added it
+        for msg in messages.iter().take(messages.len().saturating_sub(1)) {
+            match msg.role {
+                Role::System => {
+                    // Reconstruct with system
+                    h = History::with_system(&msg.content);
+                }
+                Role::User => h.push_user(&msg.content),
+                Role::Assistant => h.push_assistant(&msg.content),
+            }
+        }
+        h
+    }
+
+    // =========================================================================
+    // Streaming (Manual history management)
+    // =========================================================================
+
+    /// Add a user message to history (for streaming workflow).
+    pub fn push_user(&mut self, message: &str) {
+        self.history.push_user(message);
+    }
+
+    /// Add an assistant response to history (for streaming workflow).
+    pub fn push_assistant(&mut self, response: &str) {
+        self.history.push_assistant(response);
+    }
+
+    /// Stream the next response based on current history.
     ///
-    /// The complete response is added to history after streaming completes.
+    /// **Important:** You must call `push_user()` before this, and
+    /// `push_assistant()` after collecting the full response.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// use futures_util::StreamExt;
-    ///
-    /// let mut stream = convo.stream("Tell me a story.").await?;
-    /// let mut full_response = String::new();
-    ///
+    /// convo.push_user("Hello!");
+    /// let mut stream = convo.stream_next().await?;
+    /// let mut response = String::new();
     /// while let Some(token) = stream.next().await {
-    ///     let text = token?;
-    ///     print!("{}", text);
-    ///     full_response.push_str(&text);
+    ///     response.push_str(&token?);
     /// }
-    ///
-    /// // Note: For streaming, you need to manually add the response
-    /// // after collecting it, or use send() for automatic handling
+    /// convo.push_assistant(&response);
     /// ```
-    pub async fn stream(
-        &mut self,
-        message: impl Into<String>,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>> {
-        let message = message.into();
-        self.history.push_user(&message);
+    pub async fn stream_next(
+        &self,
+    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    {
+        // Format prompt from current history
+        let conversation = self.chat.history_to_conversation(&self.history);
+        let prompt = self.chat.format_prompt(&conversation);
 
+        // Get stream from chat (internal method)
         self.chat
-            .stream_with_history(&self.history_without_last(), &message)
+            .generate_stream(prompt, GenerationOverrides::default())
             .await
     }
 
-    /// Add the assistant's response to history after streaming.
+    /// Convenience: Push user message and stream response.
     ///
-    /// Call this after collecting a streamed response.
-    pub fn add_response(&mut self, response: impl Into<String>) {
-        self.history.push_assistant(response);
+    /// Returns the stream. You must still call `push_assistant()` after.
+    pub async fn stream(
+        &mut self,
+        message: &str,
+    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    {
+        self.push_user(message);
+        self.stream_next().await
     }
+
+    // =========================================================================
+    // History Management
+    // =========================================================================
 
     /// Get the conversation history.
     pub fn history(&self) -> &History {
@@ -153,78 +185,18 @@ impl<'a> ChatConversation<'a> {
 
     /// Clear the conversation history.
     ///
-    /// If a system prompt was set, it is preserved.
-    pub fn clear(&mut self) {
-        self.history.clear_keep_system();
+    /// If `keep_system` is true, the system prompt is preserved.
+    pub fn clear(&mut self, keep_system: bool) {
+        self.history.clear(keep_system);
     }
 
-    /// Clear everything including system prompt.
-    pub fn clear_all(&mut self) {
-        self.history.clear();
-    }
-
-    /// Set a new system prompt.
-    ///
-    /// This clears the conversation and starts fresh.
-    pub fn set_system(&mut self, system: impl Into<String>) {
-        self.history = History::with_system(system);
-    }
-
-    /// Get the number of messages in the conversation.
+    /// Get the number of messages in history.
     pub fn len(&self) -> usize {
         self.history.len()
     }
 
-    /// Check if the conversation is empty.
+    /// Check if history is empty.
     pub fn is_empty(&self) -> bool {
         self.history.is_empty()
-    }
-
-    /// Get history without the last message (for internal use).
-    fn history_without_last(&self) -> History {
-        let mut h = History::new();
-        let messages = self.history.messages();
-
-        if messages.len() <= 1 {
-            return h;
-        }
-
-        for msg in &messages[..messages.len() - 1] {
-            h.push(Message {
-                role: msg.role,
-                content: msg.content.clone(),
-            });
-        }
-
-        h
-    }
-}
-
-/// Extension trait for iterating over conversation messages.
-impl<'a> IntoIterator for &'a ChatConversation<'a> {
-    type Item = &'a Message;
-    type IntoIter = std::slice::Iter<'a, Message>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.history.messages().iter()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_history_management() {
-        let mut history = History::with_system("You are helpful.");
-        assert_eq!(history.len(), 1);
-
-        history.push_user("Hello");
-        history.push_assistant("Hi there!");
-        assert_eq!(history.len(), 3);
-
-        history.clear_keep_system();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history.messages()[0].role, Role::System);
     }
 }

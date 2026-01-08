@@ -7,4 +7,5 @@
 pub use crate::sequence_classifier::MiniLMCrossEncoderConfig;
 
 /// A type alias for `SequenceClassifier` to be used for reranking tasks.
-pub type CrossEncoder = crate::sequence_classifier::SequenceClassifier;
+// pub type CrossEncoder = crate::sequence_classifier::SequenceClassifier;
+pub use crate::models::cross_encoder::CrossEncoder;
