@@ -59,6 +59,39 @@ pub fn apply_bias_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> anyhow::R
     Ok(scores)
 }
 
+/// Pools the hidden states by taking the hidden state of the last non-padding token.
+///
+/// # Arguments
+/// * `hidden_states` - `[batch_size, seq_len, hidden_size]`
+/// * `attention_mask` - `[batch_size, seq_len]` where `1`s are real tokens and `0`s are padding.
+///
+/// # Returns
+/// Pooled output `[batch_size, hidden_size]`
+pub fn last_token_pool(
+    hidden_states: &Array3<f32>,
+    attention_mask: &Array2<f32>,
+) -> Array2<f32> {
+    let (batch_size, _, hidden_size) = hidden_states.dim();
+    let mut pooled = Array2::zeros((batch_size, hidden_size));
+
+    for i in 0..batch_size {
+        // For each item in the batch, find the index of the last '1' in its attention mask.
+        let last_token_index = attention_mask
+            .row(i)
+            .iter()
+            .rposition(|&x| x == 1.0) // Find the last position of a 1.0
+            .unwrap_or(0); // Default to the first token if all are masked (edge case)
+
+        // Select the hidden state at that specific index for this batch item.
+        let last_token_hidden_state = hidden_states.slice(s![i, last_token_index, ..]);
+        
+        // Assign it to the corresponding row in the output.
+        pooled.row_mut(i).assign(&last_token_hidden_state);
+    }
+
+    pooled
+}
+
 pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
     let batch = scores.dim().0;
 

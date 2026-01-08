@@ -289,6 +289,7 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
+        println!("[DEBUG] Attention Mask being passed to layer 0:\n{:?}", attention_mask);
         for layer in &self.layers[start_layer..end_layer] {
             hidden = layer.forward(
                 hidden,

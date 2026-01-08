@@ -74,6 +74,7 @@ impl EncoderDecoderModelFactory for BartModel {
         config: &Arc<BartConfig>,
         load_config: &ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
+        device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
         Option<Box<dyn GpuEncoder>>,
@@ -84,9 +85,9 @@ impl EncoderDecoderModelFactory for BartModel {
         let mut cpu_dec = None;
         let mut gpu_enc = None;
         let mut gpu_dec = None;
-        let cpu = true; 
+        
         // CPU Backends
-        if cpu || load_config.offload_embeddings {
+        if device.is_cpu() || load_config.offload_embeddings {
             // Unified Encoder
             let enc_config = Seq2SeqEncoderConfig::bart();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
@@ -106,7 +107,7 @@ impl EncoderDecoderModelFactory for BartModel {
         }
 
         // GPU Backends
-        if let Some(ctx) = context {
+        else if let Some(ctx) = context && device.is_gpu() {
             gpu_enc = Some(Box::new(BartGpuEncoder::new(
                 ctx,
                 weights,
@@ -120,6 +121,9 @@ impl EncoderDecoderModelFactory for BartModel {
                 config.clone(),
                 *load_config,
             )?) as Box<dyn GpuCrossDecoder>);
+        }
+        else {
+            log::error!("Invalid device");
         }
 
         Ok((cpu_enc, gpu_enc, cpu_dec, gpu_dec))

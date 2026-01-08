@@ -69,11 +69,31 @@ pub struct BartConfig {
     /// Static position embeddings (BART uses learned, not static)
     #[serde(default)]
     pub static_position_embeddings: bool,
+
+    // zero shot
+    #[serde(default)]
+    pub architectures: Option<Vec<String>>,
+    #[serde(default)]
+    pub id2label: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip)]
+    pub labels_vec: Option<Vec<String>>,
 }
 
 impl BartConfig {
     pub fn from_json(json: &str) -> anyhow::Result<Self> {
-        Ok(serde_json::from_str(json)?)
+        let mut config: Self = serde_json::from_str(json)?;
+
+        // Add label processing logic, just like in your other classifier configs.
+        if let Some(ref map) = config.id2label {
+            let mut labels: Vec<(usize, String)> = map
+                .iter()
+                .filter_map(|(k, v)| k.parse::<usize>().ok().map(|idx| (idx, v.clone())))
+                .collect();
+            labels.sort_by_key(|(idx, _)| *idx);
+            config.labels_vec = Some(labels.into_iter().map(|(_, v)| v).collect());
+        }
+
+        Ok(config)
     }
     pub fn get_forced_eos_token_id(&self) -> Option<u32> {
         self.forced_eos_token_id
@@ -82,6 +102,13 @@ impl BartConfig {
         self.shared_embedding_key
             .clone()
             .unwrap_or_else(|| "model.shared.weight".to_string())
+    }
+    /// Checks if the model architecture is for sequence classification.
+    fn is_sequence_classifier(&self) -> bool {
+        self.architectures
+            .as_ref()
+            .map(|archs| archs.iter().any(|a| a == "BartForSequenceClassification"))
+            .unwrap_or(false)
     }
     pub fn to_str(&self) -> anyhow::Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
@@ -92,7 +119,9 @@ impl ModelConfig for BartConfig {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-
+    fn id2label(&self) -> Option<&[String]> {
+        self.labels_vec.as_deref()
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.d_model,
@@ -151,67 +180,97 @@ impl ModelConfig for BartConfig {
                 norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
             },
         };
+        if self.is_sequence_classifier() {
+            // --- Generate the ENCODER-ONLY layout for classification ---
+            ModelLayout {
+                token_embedding: "model.shared.weight".to_string(),
+                // CRUCIAL: Point to the separate classification head
+                lm_head: "classification_head.out_proj.weight".to_string(),
+                encoder: Some(EncoderLayout {
+                    position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
+                    token_type_embedding: None,
+                    embedding_norm_weight: Some(
+                        "model.encoder.layernorm_embedding.weight".to_string(),
+                    ),
+                    embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
+                    final_norm_weight: None,
+                    final_norm_bias: None,
+                    layer: encoder_layer,
+                }),
+                // CRUCIAL: We do not define the decoder.
+                decoder: None,
+            }
+        } else {
+            // --- Define the Decoder's Layer Structure ---
+            let decoder_layer = DecoderLayerLayout {
+                self_attn: AttentionLayout {
+                    q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),
+                    q_bias: Some("model.decoder.layers.{}.self_attn.q_proj.bias".to_string()),
+                    k_weight: "model.decoder.layers.{}.self_attn.k_proj.weight".to_string(),
+                    k_bias: Some("model.decoder.layers.{}.self_attn.k_proj.bias".to_string()),
+                    v_weight: "model.decoder.layers.{}.self_attn.v_proj.weight".to_string(),
+                    v_bias: Some("model.decoder.layers.{}.self_attn.v_proj.bias".to_string()),
+                    o_weight: "model.decoder.layers.{}.self_attn.out_proj.weight".to_string(),
+                    o_bias: Some("model.decoder.layers.{}.self_attn.out_proj.bias".to_string()),
+                    norm_weight: "model.decoder.layers.{}.self_attn_layer_norm.weight".to_string(),
+                    norm_bias: Some(
+                        "model.decoder.layers.{}.self_attn_layer_norm.bias".to_string(),
+                    ),
+                },
+                cross_attn: Some(AttentionLayout {
+                    q_weight: "model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string(),
+                    q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
+                    k_weight: "model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string(),
+                    k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
+                    v_weight: "model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string(),
+                    v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
+                    o_weight: "model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string(),
+                    o_bias: Some("model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string()),
+                    norm_weight: "model.decoder.layers.{}.encoder_attn_layer_norm.weight"
+                        .to_string(),
+                    norm_bias: Some(
+                        "model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string(),
+                    ),
+                }),
+                ffn: FeedForwardLayout {
+                    up_weight: "model.decoder.layers.{}.fc1.weight".to_string(),
+                    up_bias: Some("model.decoder.layers.{}.fc1.bias".to_string()),
+                    down_weight: "model.decoder.layers.{}.fc2.weight".to_string(),
+                    down_bias: Some("model.decoder.layers.{}.fc2.bias".to_string()),
+                    gate_weight: None,
+                    gate_bias: None,
+                    norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
+                    norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
+                },
+            };
 
-        // --- Define the Decoder's Layer Structure ---
-        let decoder_layer = DecoderLayerLayout {
-            self_attn: AttentionLayout {
-                q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),
-                q_bias: Some("model.decoder.layers.{}.self_attn.q_proj.bias".to_string()),
-                k_weight: "model.decoder.layers.{}.self_attn.k_proj.weight".to_string(),
-                k_bias: Some("model.decoder.layers.{}.self_attn.k_proj.bias".to_string()),
-                v_weight: "model.decoder.layers.{}.self_attn.v_proj.weight".to_string(),
-                v_bias: Some("model.decoder.layers.{}.self_attn.v_proj.bias".to_string()),
-                o_weight: "model.decoder.layers.{}.self_attn.out_proj.weight".to_string(),
-                o_bias: Some("model.decoder.layers.{}.self_attn.out_proj.bias".to_string()),
-                norm_weight: "model.decoder.layers.{}.self_attn_layer_norm.weight".to_string(),
-                norm_bias: Some("model.decoder.layers.{}.self_attn_layer_norm.bias".to_string()),
-            },
-            cross_attn: Some(AttentionLayout {
-                q_weight: "model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string(),
-                q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
-                k_weight: "model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string(),
-                k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
-                v_weight: "model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string(),
-                v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
-                o_weight: "model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string(),
-                o_bias: Some("model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string()),
-                norm_weight: "model.decoder.layers.{}.encoder_attn_layer_norm.weight".to_string(),
-                norm_bias: Some("model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string()),
-            }),
-            ffn: FeedForwardLayout {
-                up_weight: "model.decoder.layers.{}.fc1.weight".to_string(),
-                up_bias: Some("model.decoder.layers.{}.fc1.bias".to_string()),
-                down_weight: "model.decoder.layers.{}.fc2.weight".to_string(),
-                down_bias: Some("model.decoder.layers.{}.fc2.bias".to_string()),
-                gate_weight: None,
-                gate_bias: None,
-                norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
-                norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
-            },
-        };
-
-        // --- Assemble the final ModelLayout ---
-        ModelLayout {
-            token_embedding: shared.clone(),
-            lm_head: shared,
-            encoder: Some(EncoderLayout {
-                position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
-                token_type_embedding: None,
-                embedding_norm_weight: Some("model.encoder.layernorm_embedding.weight".to_string()),
-                embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
-                final_norm_weight: None, // BART encoder doesn't have a final norm
-                final_norm_bias: None,
-                layer: encoder_layer,
-            }),
-            decoder: Some(DecoderLayout {
-                position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
-                token_type_embedding: None,
-                embedding_norm_weight: Some("model.decoder.layernorm_embedding.weight".to_string()),
-                embedding_norm_bias: Some("model.decoder.layernorm_embedding.bias".to_string()),
-                final_norm_weight: None, // BART decoder doesn't have a final norm before the LM head
-                final_norm_bias: None,
-                layer: decoder_layer,
-            }),
+            // --- Assemble the final ModelLayout ---
+            ModelLayout {
+                token_embedding: shared.clone(),
+                lm_head: shared,
+                encoder: Some(EncoderLayout {
+                    position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
+                    token_type_embedding: None,
+                    embedding_norm_weight: Some(
+                        "model.encoder.layernorm_embedding.weight".to_string(),
+                    ),
+                    embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
+                    final_norm_weight: None, // BART encoder doesn't have a final norm
+                    final_norm_bias: None,
+                    layer: encoder_layer,
+                }),
+                decoder: Some(DecoderLayout {
+                    position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
+                    token_type_embedding: None,
+                    embedding_norm_weight: Some(
+                        "model.decoder.layernorm_embedding.weight".to_string(),
+                    ),
+                    embedding_norm_bias: Some("model.decoder.layernorm_embedding.bias".to_string()),
+                    final_norm_weight: None, // BART decoder doesn't have a final norm before the LM head
+                    final_norm_bias: None,
+                    layer: decoder_layer,
+                }),
+            }
         }
     }
 }

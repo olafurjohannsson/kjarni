@@ -62,6 +62,7 @@ impl EncoderDecoderModelFactory for T5Model {
         config: &Arc<T5Config>,
         load_config: &ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
+        device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
         Option<Box<dyn GpuEncoder>>,
@@ -74,7 +75,7 @@ impl EncoderDecoderModelFactory for T5Model {
         let gpu_dec = None;
 
         // CPU Backends
-        if load_config.offload_embeddings {
+        if device.is_cpu() || load_config.offload_embeddings {
             // T5 Encoder
             let enc_config = Seq2SeqEncoderConfig::t5();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
@@ -92,6 +93,8 @@ impl EncoderDecoderModelFactory for T5Model {
                 dec_config,
                 *load_config,
             )?) as Box<dyn CpuCrossDecoder>);
+        } else if device.is_gpu() {
+            todo!()
         }
 
         // TODO: GPU backends for T5

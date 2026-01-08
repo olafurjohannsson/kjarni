@@ -51,23 +51,22 @@ pub trait EncoderLanguageModel: LanguageModel {
         Ok(batch_hidden_states)
     }
 
-    /// Get hidden states for a batch of texts
-    async fn get_hidden_states_batch(&self, texts: &[&str]) -> Result<(Array3<f32>, Array2<f32>)> {
-        if texts.is_empty() {
-            return Ok((Array3::zeros((0, 0, 0)), Array2::zeros((0, 0))));
-        }
+    async fn get_hidden_states_batch_from_ids(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<u32>,
+    ) -> Result<(Array3<f32>, Array2<f32>)> {
+        // We can provide a default implementation that dispatches to the correct backend.
+        // This is the core logic that makes the trait so powerful.
 
-        // 1. Tokenize and create attention mask (this logic is good)
-        let input_ids = self.tokenize_batch(texts, PaddingSide::Left)?;
-        let pad_id = self.pad_token_id().unwrap_or(0);
-        let attention_mask = input_ids.mapv(|id| if id == pad_id { 0.0 } else { 1.0 });
+        // Convert the u32 attention mask to f32 for the CPU backend's forward_layers method.
+        let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
 
-        // 2. Dispatch to the correct backend using the ops traits
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
             // --- CPU PATH ---
-            // The `token_type_ids` can be added here later if a model needs them.
+            // This reuses the existing `forward` method on the low-level trait.
             ops.encoder()
-                .forward(&input_ids, &attention_mask, None)?
+                .forward(input_ids, &attention_mask_f32, None)?
                 .last_hidden_state
         } else if let Some(ops) = self.encoder_gpu_ops() {
             // --- GPU PATH ---
@@ -76,13 +75,12 @@ pub trait EncoderLanguageModel: LanguageModel {
                 .ok_or_else(|| anyhow!("GPU model missing context"))?;
             let pool = context.get_inference_pool();
             let mut pool_guard = pool.lock().await;
-            // Use a GpuFrameContext to manage resources
             let mut frame = GpuFrameContext::new(&context, pool_guard);
             let (encoder_cmd, pool_ref) = frame.resources();
 
             // Upload data to GPU
-            let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids)?;
-            let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask)?;
+            let input_ids_gpu = GpuTensor::from_ndarray(&context, input_ids)?;
+            let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask_f32)?;
 
             // Run the forward pass
             let gpu_output = ops.encoder().forward(
@@ -90,7 +88,7 @@ pub trait EncoderLanguageModel: LanguageModel {
                 pool_ref,
                 ModelInput::TokensGpu(&input_ids_gpu),
                 &attention_mask_gpu,
-                None, // token_type_ids can be added here
+                None, // token_type_ids
             )?;
 
             frame.finish();
@@ -103,7 +101,55 @@ pub trait EncoderLanguageModel: LanguageModel {
             ));
         };
 
-        Ok((hidden_states, attention_mask))
+        Ok((hidden_states, attention_mask_f32))
+    }
+    fn encode_batch_texts(&self, texts: &[&str]) -> Result<Vec<tokenizers::Encoding>> {
+        self.tokenizer()
+            .encode_batch(texts.to_vec(), true)
+            .map_err(|e| anyhow!("Tokenizer failed: {}", e))
+    }
+    /// Get hidden states for a batch of texts
+    async fn get_hidden_states_batch(&self, texts: &[&str]) -> Result<(Array3<f32>, Array2<f32>)> {
+        if texts.is_empty() {
+            return Ok((
+                Array3::zeros((0, 0, self.hidden_size())),
+                Array2::zeros((0, 0)),
+            ));
+        }
+
+        // 1. Use the new helper to get encodings. The tokenizer (now correctly configured
+        //    with padding) will handle everything, including the attention mask.
+        let encodings = self.encode_batch_texts(texts)?;
+
+        // 2. Extract the IDs and mask from the tokenizer's output.
+        let batch_size = encodings.len();
+        if batch_size == 0 {
+            return Ok((
+                Array3::zeros((0, 0, self.hidden_size())),
+                Array2::zeros((0, 0)),
+            ));
+        }
+        let sequence_length = encodings[0].len();
+
+        let input_ids_vec: Vec<u32> = encodings
+            .iter()
+            .flat_map(|e| e.get_ids())
+            .cloned()
+            .collect();
+        let attention_mask_vec: Vec<u32> = encodings
+            .iter()
+            .flat_map(|e| e.get_attention_mask())
+            .cloned()
+            .collect();
+
+        let input_ids = Array2::from_shape_vec((batch_size, sequence_length), input_ids_vec)?;
+        let attention_mask =
+            Array2::from_shape_vec((batch_size, sequence_length), attention_mask_vec)?;
+
+        // 3. Call the `from_ids` method, which already contains the dispatch logic.
+        //    This completely eliminates the duplicated CPU/GPU logic.
+        self.get_hidden_states_batch_from_ids(&input_ids, &attention_mask)
+            .await
     }
 }
 

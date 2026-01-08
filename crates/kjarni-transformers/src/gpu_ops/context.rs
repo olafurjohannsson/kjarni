@@ -22,18 +22,18 @@ pub struct GpuMemoryInfo {
 impl GpuMemoryInfo {
     /// Print a human-readable summary of GPU memory
     pub fn print_summary(&self) {
-        println!("\n=== GPU Memory Info ===");
+        log::debug!("\n=== GPU Memory Info ===");
 
         if let Some(available) = self.available_memory {
-            println!("Available VRAM:     {:.2} GB", available as f64 / 1_073_741_824.0);
+            log::debug!("Available VRAM:     {:.2} GB", available as f64 / 1_073_741_824.0);
         } else {
-            println!("Available VRAM:     Unknown (could not query)");
+            log::debug!("Available VRAM:     Unknown (could not query)");
         }
 
-        println!("Max Buffer Size:    {:.2} GB", self.max_buffer_size as f64 / 1_073_741_824.0);
-        println!("Max Binding Size:   {:.2} GB", self.max_storage_buffer_binding_size as f64 / 1_073_741_824.0);
-        println!("KV Cache Reserved:  {:.2} GB", self.reserved_for_kv_cache as f64 / 1_073_741_824.0);
-        println!("======================\n");
+        log::debug!("Max Buffer Size:    {:.2} GB", self.max_buffer_size as f64 / 1_073_741_824.0);
+        log::debug!("Max Binding Size:   {:.2} GB", self.max_storage_buffer_binding_size as f64 / 1_073_741_824.0);
+        log::debug!("KV Cache Reserved:  {:.2} GB", self.reserved_for_kv_cache as f64 / 1_073_741_824.0);
+        log::debug!("======================\n");
     }
 }
 
@@ -79,13 +79,13 @@ impl WgpuContext {
         let adapter_info = adapter.get_info();
         let adapter_limits = adapter.limits();
 
-        println!("\n=== GPU Adapter Info ===");
-        println!("Name:     {}", adapter_info.name);
-        println!("Backend:  {:?}", adapter_info.backend);
-        println!("Vendor:   0x{:X}", adapter_info.vendor);
-        println!("Device:   0x{:X}", adapter_info.device);
-        println!("Type:     {:?}", adapter_info.device_type);
-        println!("========================\n");
+        log::debug!("\n=== GPU Adapter Info ===");
+        log::debug!("Name:     {}", adapter_info.name);
+        log::debug!("Backend:  {:?}", adapter_info.backend);
+        log::debug!("Vendor:   0x{:X}", adapter_info.vendor);
+        log::debug!("Device:   0x{:X}", adapter_info.device);
+        log::debug!("Type:     {:?}", adapter_info.device_type);
+        log::debug!("========================\n");
 
         log::info!(
             "GPU: {} ({})",

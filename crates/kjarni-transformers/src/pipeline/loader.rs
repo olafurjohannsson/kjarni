@@ -30,6 +30,7 @@ pub trait DecoderModelFactory: Sized {
         rope: &LoadedRoPE, // Handover RoPE
         load_config: ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
+        device: Device,
     ) -> Result<(Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>)>;
 
     fn new_from_pipeline(
@@ -138,6 +139,7 @@ impl GenericLoader {
             &rope,
             load_config,
             context.as_ref(),
+            device,
         )?;
 
         // 3. Build Pipeline via Builder (Coordinates tied weights internally)

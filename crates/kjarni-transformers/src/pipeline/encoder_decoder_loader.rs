@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+use crate::Device;
 use crate::{
     common::HFGenerationDefaults,
     cpu::encoder::{CpuEncoder, GpuEncoder},
@@ -28,6 +29,7 @@ pub trait EncoderDecoderModelFactory: Sized {
         config: &Arc<Self::Config>,
         load_config: &ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
+        device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
         Option<Box<dyn GpuEncoder>>,
@@ -75,7 +77,7 @@ impl Seq2SeqLoader {
 
     pub fn load_from_pretrained<M: EncoderDecoderModelFactory>(
         model_path: &Path,
-        device: crate::prelude::Device,
+        device: Device,
         context: Option<Arc<WgpuContext>>,
         load_config: Option<ModelLoadConfig>,
     ) -> Result<M> {
@@ -98,6 +100,7 @@ impl Seq2SeqLoader {
             &config,
             &load_config,
             context.as_ref(),
+            device,
         )?;
 
         // 3. Build Pipeline

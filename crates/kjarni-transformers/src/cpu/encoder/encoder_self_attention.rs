@@ -263,7 +263,8 @@ impl EncoderSelfAttention {
         }
 
         // 6. Apply padding mask
-        scores = apply_attention_mask(scores, attention_mask);
+        // scores = apply_attention_mask(scores, attention_mask);
+        scores = crate::utils::apply_padding_mask(scores, attention_mask)?;
 
         // 7. Softmax
         softmax_4d_inplace(&mut scores);

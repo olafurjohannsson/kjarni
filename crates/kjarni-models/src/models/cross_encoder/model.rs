@@ -14,6 +14,7 @@ use kjarni_transformers::{
     traits::Device,
     WgpuContext,
 };
+use tokenizers::EncodeInput;
 
 use crate::sequence_classifier::SequenceClassifier;
 
@@ -106,95 +107,30 @@ impl CrossEncoder {
     /// Returns a relevance score. Higher scores indicate more relevance.
     pub async fn predict_pair(&self, query: &str, document: &str) -> Result<f32> {
         let scores = self.predict_pairs(&[(query, document)]).await?;
-        scores
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("No score returned"))
+        scores.into_iter().next().ok_or_else(|| anyhow!("No score returned"))
     }
 
-    /// Score multiple query-document pairs in a batch.
-    ///
-    /// More efficient than calling `predict_pair` multiple times.
+    /// Score multiple query-document pairs in a batch (SIMPLIFIED AND CORRECTED).
     pub async fn predict_pairs(&self, pairs: &[(&str, &str)]) -> Result<Vec<f32>> {
         if pairs.is_empty() {
             return Ok(vec![]);
         }
 
-        // Tokenize pairs: [CLS] query [SEP] document [SEP]
-        let encodings: Vec<_> = pairs
+        // 1. Create sentence pairs for the tokenizer.
+        let inputs_to_tokenize: Vec<EncodeInput> = pairs
             .iter()
-            .map(|(query, doc)| {
-                self.inner
-                    .tokenizer
-                    .encode((query.to_string(), doc.to_string()), true)
-                    .map_err(|e| anyhow!("Tokenization failed: {}", e))
-            })
-            .collect::<Result<Vec<_>>>()?;
+            .map(|&(query, doc)| (query.to_string(), doc.to_string()).into())
+            .collect();
 
-        // Get max length for padding
-        let max_len = encodings
-            .iter()
-            .map(|e| e.get_ids().len())
-            .max()
-            .unwrap_or(0)
-            .min(self.inner.meta.max_seq_len);
+        // 2. Let the SequenceClassifier do all the heavy lifting.
+        //    This single call handles tokenization, padding, masking, and running the encoder.
+        let logits = self.inner.predict_from_pairs(&inputs_to_tokenize).await?;
 
-        let batch_size = pairs.len();
-
-        // Build input tensors
-        let mut input_ids = vec![0u32; batch_size * max_len];
-        let mut attention_mask = vec![0f32; batch_size * max_len];
-        let mut token_type_ids = vec![0u32; batch_size * max_len];
-
-        for (i, encoding) in encodings.iter().enumerate() {
-            let ids = encoding.get_ids();
-            let mask = encoding.get_attention_mask();
-            let types = encoding.get_type_ids();
-
-            let len = ids.len().min(max_len);
-            let offset = i * max_len;
-
-            input_ids[offset..offset + len].copy_from_slice(&ids[..len]);
-
-            attention_mask[offset..offset + len]
-                .copy_from_slice(&mask[..len].iter().map(|&v| v as f32).collect::<Vec<f32>>());
-            
-            token_type_ids[offset..offset + len].copy_from_slice(&types[..len]);
-        }
-
-        // Convert to ndarray
-        let input_ids = Array2::from_shape_vec((batch_size, max_len), input_ids)?;
-        let attention_mask = Array2::<f32>::from_shape_vec((batch_size, max_len), attention_mask)?;
-        let token_type_ids = Array2::from_shape_vec((batch_size, max_len), token_type_ids)?;
-
-        // Run through encoder
-        let encoder_output = if let Some(ref encoder) = self.inner.cpu_encoder {
-            encoder.forward(&input_ids, &attention_mask, Some(&token_type_ids))?
-        } else if let Some(ref _encoder) = self.inner.gpu_encoder {
-            // GPU path would go here
-            return Err(anyhow!("GPU cross-encoder not yet implemented"));
+        // 3. Extract scores (same logic as before).
+        let scores: Vec<f32> = if logits.get(0).map_or(0, |l| l.len()) == 1 {
+            logits.iter().map(|l| l[0]).collect()
         } else {
-            return Err(anyhow!("No encoder available"));
-        };
-
-        let hidden_states = encoder_output.last_hidden_state;
-
-        // Run through classification head
-        let logits = if let Some(ref head) = self.inner.cpu_head {
-            head.forward(&hidden_states)?
-        } else {
-            return Err(anyhow!("No classification head available"));
-        };
-
-        // Extract scores
-        // For cross-encoders, typically:
-        // - 1 output: use directly as score
-        // - 2 outputs (binary): use logit[1] - logit[0] or just logit[1]
-        let scores: Vec<f32> = if logits.ncols() == 1 {
-            logits.column(0).to_vec()
-        } else {
-            // Binary classification - take positive class logit
-            logits.column(1).to_vec()
+            logits.iter().map(|l| l.get(1).copied().unwrap_or(0.0)).collect()
         };
 
         Ok(scores)

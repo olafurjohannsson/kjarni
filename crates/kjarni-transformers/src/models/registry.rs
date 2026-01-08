@@ -728,9 +728,9 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert, // RoBERTa is BERT-like
                 task: ModelTask::SentimentAnalysis,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/resolve/main/config.json",
+                    weights_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/config.json",
                     gguf_url: None,
                 },
                 description: "3-class sentiment (negative/neutral/positive). Optimized for social media text.",
@@ -811,9 +811,9 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/j-hartmann/emotion-english-distilroberta-base/resolve/main/config.json",
+                    weights_url: "https://huggingface.co/olafuraron/emotion-english-distilroberta-base-safetensors/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/olafuraron/emotion-english-distilroberta-base-safetensors/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/olafuraron/emotion-english-distilroberta-base-safetensors/resolve/main/config.json",
                     gguf_url: None,
                 },
                 description: "7 emotions: anger, disgust, fear, joy, neutral, sadness, surprise.",

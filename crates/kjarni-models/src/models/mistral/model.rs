@@ -53,11 +53,12 @@ impl DecoderModelFactory for MistralModel {
         rope: &LoadedRoPE,
         load_config: ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
+        device: Device,
     ) -> Result<(Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>)> {
         let mut cpu = None;
         let mut gpu = None;
 
-        if load_config.offload_embeddings {
+        if device.is_cpu() || load_config.offload_embeddings {
             cpu = Some(Box::new(LlamaCpuDecoder::new(
                 weights,
                 meta.clone(),
@@ -67,7 +68,7 @@ impl DecoderModelFactory for MistralModel {
             )?) as Box<dyn CpuDecoder>);
         }
 
-        if let Some(ctx) = context {
+        else if let Some(ctx) = context && device.is_gpu() {
             gpu = Some(Box::new(LlamaGpuDecoder::new(
                 ctx,
                 weights,
@@ -76,6 +77,8 @@ impl DecoderModelFactory for MistralModel {
                 rope.gpu.clone(),
                 load_config,
             )?) as Box<dyn GpuDecoder>);
+        } else {
+            
         }
 
         Ok((cpu, gpu))
