@@ -84,9 +84,9 @@ impl EncoderDecoderModelFactory for BartModel {
         let mut cpu_dec = None;
         let mut gpu_enc = None;
         let mut gpu_dec = None;
-
+        let cpu = true; 
         // CPU Backends
-        if load_config.gpu_layers.is_none() || load_config.offload_embeddings {
+        if cpu || load_config.offload_embeddings {
             // Unified Encoder
             let enc_config = Seq2SeqEncoderConfig::bart();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(

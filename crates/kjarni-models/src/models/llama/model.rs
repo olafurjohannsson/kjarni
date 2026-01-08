@@ -142,7 +142,7 @@ impl DecoderModelFactory for LlamaModel {
     ) -> Result<(Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>)> {
         let mut cpu = None;
         let mut gpu = None;
-        if load_config.gpu_layers.is_none() || load_config.offload_embeddings {
+        if load_config.offload_embeddings {
             cpu = Some(Box::new(LlamaCpuDecoder::new(
                 weights,
                 meta.clone(),

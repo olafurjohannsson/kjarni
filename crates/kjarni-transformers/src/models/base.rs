@@ -283,10 +283,8 @@ impl<'a> ModelInput<'a> {
 ///
 /// * `offload_embeddings` — Keep embedding layer on CPU to save VRAM (500MB-2GB).
 /// * `offload_lm_head` — Keep language model head on CPU to save VRAM.
-/// * `gpu_layers` — Number of decoder layers to place on GPU (None = all).
 /// * `target_dtype` — Force quantization to this data type (overrides file format).
 /// * `quantize_lm_head` — Quantize the language model head to this data type.
-/// * `gpu_layer_range` — Only place layers `[start, end)` on GPU.
 /// * `max_batch_size` — Pre-allocate KV cache for this batch size.
 /// * `max_sequence_length` — Pre-allocate KV cache for this sequence length.
 ///
@@ -305,9 +303,6 @@ impl<'a> ModelInput<'a> {
 ///
 /// // Quantized model with 4-bit weights
 /// let config = ModelLoadConfig::quantized(DType::Q4_K);
-///
-/// // Partial GPU: only middle layers on GPU
-/// let config = ModelLoadConfig::partial_gpu(4, 20);
 /// ```
 ///
 /// # See Also
@@ -319,14 +314,10 @@ pub struct ModelLoadConfig {
     pub offload_embeddings: bool,
     /// Keep language model head on CPU to save VRAM.
     pub offload_lm_head: bool,
-    /// Number of decoder layers to place on GPU (None = all layers).
-    pub gpu_layers: Option<usize>,
     /// Force quantization to this data type (overrides file format).
     pub target_dtype: Option<DType>,
     /// Quantize the language model head to this data type.
     pub quantize_lm_head: Option<DType>,
-    /// Only place layers `[start, end)` on GPU.
-    pub gpu_layer_range: Option<(usize, usize)>,
     /// Pre-allocate KV cache for this batch size.
     pub max_batch_size: Option<usize>,
     /// Pre-allocate KV cache for this sequence length.
@@ -340,10 +331,8 @@ impl Default for ModelLoadConfig {
         Self {
             offload_embeddings: false,
             offload_lm_head: false,
-            gpu_layers: None,
             target_dtype: None, // Default to "detect from file"
             quantize_lm_head: None,
-            gpu_layer_range: None,
             max_batch_size: None,
             max_sequence_length: None,
             use_gguf: false,
@@ -425,35 +414,6 @@ impl ModelLoadConfig {
         }
     }
 
-    /// Creates a configuration for partial GPU execution.
-    ///
-    /// Only places layers in the range `[start, end)` on GPU, keeping all other
-    /// layers on CPU. Useful for large models that don't fit entirely in VRAM,
-    /// or for balancing computation across devices.
-    ///
-    /// # Arguments
-    ///
-    /// * `start` - Index of first layer to place on GPU (inclusive).
-    /// * `end` - Index of last layer to place on GPU (exclusive).
-    ///
-    /// # Returns
-    ///
-    /// A configuration with the specified layer range on GPU.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Place layers 4-20 on GPU, rest on CPU
-    /// let config = ModelLoadConfig::partial_gpu(4, 20);
-    /// let model = LlamaModel::load(weights, config)?;
-    /// ```
-    pub fn partial_gpu(start: usize, end: usize) -> Self {
-        Self {
-            gpu_layer_range: Some((start, end)),
-            ..Default::default()
-        }
-    }
-
     /// Sets quantization for the language model head.
     ///
     /// The language model head (vocabulary projection) is often the largest single
@@ -489,21 +449,6 @@ impl ModelLoadConfig {
     /// The modified configuration.
     pub fn with_offload_embeddings(mut self, offload: bool) -> Self {
         self.offload_embeddings = offload;
-        self
-    }
-
-    /// Sets the range of layers to place on GPU.
-    ///
-    /// # Arguments
-    ///
-    /// * `start` - Index of first layer to place on GPU (inclusive).
-    /// * `end` - Index of last layer to place on GPU (exclusive).
-    ///
-    /// # Returns
-    ///
-    /// The modified configuration.
-    pub fn with_gpu_layer_range(mut self, start: usize, end: usize) -> Self {
-        self.gpu_layer_range = Some((start, end));
         self
     }
 

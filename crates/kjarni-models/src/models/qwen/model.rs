@@ -65,7 +65,7 @@ impl DecoderModelFactory for QwenModel {
         // REUSE LLAMA DECODER
         // It works because Qwen uses standard LinearLayers which handle the biases
         // defined in the QwenConfig layout.
-        if load_config.gpu_layers.is_none() || load_config.offload_embeddings {
+        if load_config.offload_embeddings {
             cpu = Some(Box::new(LlamaCpuDecoder::new(
                 weights,
                 meta.clone(),

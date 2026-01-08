@@ -58,10 +58,8 @@ impl From<ModelLoadConfig> for LoadConfig {
 pub struct LoadConfigBuilder {
     offload_embeddings: bool,
     offload_lm_head: bool,
-    gpu_layers: Option<usize>,
     target_dtype: Option<DType>,
     quantize_lm_head: Option<DType>,
-    gpu_layer_range: Option<(usize, usize)>,
     max_batch_size: Option<usize>,
     max_sequence_length: Option<usize>,
     use_gguf: bool,
@@ -85,12 +83,6 @@ impl LoadConfigBuilder {
         self
     }
 
-    /// Number of layers to place on GPU (None = all).
-    pub fn gpu_layers(mut self, layers: Option<usize>) -> Self {
-        self.gpu_layers = layers;
-        self
-    }
-
     /// Force quantization to this data type.
     pub fn target_dtype(mut self, dtype: DType) -> Self {
         self.target_dtype = Some(dtype);
@@ -100,12 +92,6 @@ impl LoadConfigBuilder {
     /// Quantize the LM head to this data type.
     pub fn quantize_lm_head(mut self, dtype: DType) -> Self {
         self.quantize_lm_head = Some(dtype);
-        self
-    }
-
-    /// Only place layers in range [start, end) on GPU.
-    pub fn gpu_layer_range(mut self, start: usize, end: usize) -> Self {
-        self.gpu_layer_range = Some((start, end));
         self
     }
 
@@ -133,10 +119,8 @@ impl LoadConfigBuilder {
             inner: ModelLoadConfig {
                 offload_embeddings: self.offload_embeddings,
                 offload_lm_head: self.offload_lm_head,
-                gpu_layers: self.gpu_layers,
                 target_dtype: self.target_dtype,
                 quantize_lm_head: self.quantize_lm_head,
-                gpu_layer_range: self.gpu_layer_range,
                 max_batch_size: self.max_batch_size,
                 max_sequence_length: self.max_sequence_length,
                 use_gguf: self.use_gguf,

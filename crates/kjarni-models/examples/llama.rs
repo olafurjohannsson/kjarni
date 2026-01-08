@@ -32,7 +32,6 @@ async fn main() -> anyhow::Result<()> {
     let context = WgpuContext::new().await?;
     //
     let d = ModelLoadConfig {
-        gpu_layers: None,
         offload_embeddings: false,
         offload_lm_head: false,
         target_dtype: None,

@@ -75,15 +75,7 @@ fn test_config_defaults() {
     let config = ModelLoadConfig::default();
     assert!(!config.offload_embeddings);
     assert!(!config.offload_lm_head);
-    assert!(config.gpu_layers.is_none());
     assert!(config.target_dtype.is_none());
-}
-
-#[test]
-fn test_config_full_gpu() {
-    let config = ModelLoadConfig::full_gpu();
-    // Should be same as default basically, implies all layers
-    assert!(config.gpu_layers.is_none());
 }
 
 #[test]
@@ -103,15 +95,6 @@ fn test_config_quantized() {
 
     let config2 = ModelLoadConfig::default().with_target_dtype(DType::Q8_0);
     assert_eq!(config2.target_dtype, Some(DType::Q8_0));
-}
-
-#[test]
-fn test_config_partial_gpu() {
-    let config = ModelLoadConfig::partial_gpu(0, 10);
-    assert_eq!(config.gpu_layer_range, Some((0, 10)));
-
-    let config2 = ModelLoadConfig::default().with_gpu_layer_range(5, 15);
-    assert_eq!(config2.gpu_layer_range, Some((5, 15)));
 }
 
 #[test]

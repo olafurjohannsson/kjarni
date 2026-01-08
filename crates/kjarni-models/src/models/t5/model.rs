@@ -74,7 +74,7 @@ impl EncoderDecoderModelFactory for T5Model {
         let gpu_dec = None;
 
         // CPU Backends
-        if load_config.gpu_layers.is_none() || load_config.offload_embeddings {
+        if load_config.offload_embeddings {
             // T5 Encoder
             let enc_config = Seq2SeqEncoderConfig::t5();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
