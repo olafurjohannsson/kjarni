@@ -453,7 +453,7 @@ async fn test_context_limit_check() {
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
 
     // Total tokens should not exceed context size
-    assert!(tokens.len() <= 5);
+    assert_eq!(tokens.len(), 5);
 }
 
 #[tokio::test]

@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 
+use crate::Normalization;
 use crate::activations::Activation;
 use crate::cpu::encoder::{
-    encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention, CpuEncoder,
+    CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
@@ -13,8 +14,7 @@ use crate::normalization::RMSNorm;
 use crate::rope::RoPE;
 use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
-use crate::Normalization;
-use crate::{normalization::LayerNorm, Embeddings, FeedForward};
+use crate::{Embeddings, FeedForward, normalization::LayerNorm};
 
 pub struct CpuTransformerEncoder {
     embeddings: Embeddings,
@@ -289,8 +289,17 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
-        println!("[DEBUG] Attention Mask being passed to layer 0:\n{:?}", attention_mask);
-        for layer in &self.layers[start_layer..end_layer] {
+        println!(
+            "[DEBUG] Attention Mask being passed to layer 0:\n{:?}",
+            attention_mask
+        );
+        println!("\n--- [DEBUG] TRACING HIDDEN STATE THROUGH ENCODER ---");
+        println!(
+            "  - Before Layer 0 (Initial Embeddings): Mean = {:.6}, Std Dev = {:.6}",
+            hidden.mean().unwrap(),
+            hidden.std(0.0)
+        );
+        for (i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
             hidden = layer.forward(
                 hidden,
                 attention_mask,
@@ -298,7 +307,14 @@ impl CpuEncoder for CpuTransformerEncoder {
                 is_prenorm,
                 self.rope.as_deref(),
             )?;
+            println!(
+                "  - After Layer {}: Mean = {:.6}, Std Dev = {:.6}",
+                i,
+                hidden.mean().unwrap(),
+                hidden.std(0.0)
+            );
         }
+        println!("--- [DEBUG] END OF ENCODER TRACE ---");
         Ok(hidden)
     }
 

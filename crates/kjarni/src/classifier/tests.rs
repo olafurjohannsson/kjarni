@@ -549,6 +549,8 @@ mod convenience_tests {
 mod integration_tests {
     use kjarni_transformers::Device;
 
+    use crate::classifier::presets::ClassificationTask;
+
     use super::*;
 
     /// Test that we can create a classifier (requires model).
@@ -824,6 +826,8 @@ async fn test_preset_sentiment_binary_v1() {
     // --- SETUP ---
     const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_BINARY_V1;
     let model_name = PRESET.model;
+    assert_eq!("distilbert-sentiment", model_name);
+    assert_eq!(PRESET.task, ClassificationTask::Sentiment);
     let positive_text = "This is a fantastic and wonderful product!";
     let negative_text = "I absolutely hate this, it's a terrible experience.";
 

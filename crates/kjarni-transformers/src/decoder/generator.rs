@@ -72,14 +72,14 @@
 //! - **Bottleneck**: Typically memory bandwidth during decode phase
 
 use crate::common::{
-    apply_no_repeat_ngram, apply_repetition_penalty_mut, sample_token, CancellationToken, GenerationConfig,
-    StreamedToken, TokenType,
+    CancellationToken, GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram,
+    apply_repetition_penalty_mut, sample_token,
 };
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
-use crate::{prelude::*, Conversation};
-use anyhow::{anyhow, Result};
+use crate::{Conversation, prelude::*};
+use anyhow::{Result, anyhow};
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
 use log::{debug, info, trace};
@@ -214,7 +214,12 @@ impl DecoderGenerator {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn generate(&self, prompt: &str, config: &GenerationConfig, cancellation: Option<CancellationToken>) -> Result<String> {
+    pub async fn generate(
+        &self,
+        prompt: &str,
+        config: &GenerationConfig,
+        cancellation: Option<CancellationToken>,
+    ) -> Result<String> {
         let stream = self.generate_stream(prompt, config, cancellation).await?;
         let results: Vec<StreamedToken> = stream.try_collect().await?;
         // Filter to only generated tokens (exclude prompt echo)
@@ -308,9 +313,10 @@ impl DecoderGenerator {
         prompt: &str,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
         let tokens = self.encode(prompt, config)?;
-        self.generate_stream_from_tokens(tokens, config, cancellation).await
+        self.generate_stream_from_tokens(tokens, config, cancellation)
+            .await
     }
 
     /// Generates a stream of tokens for a conversation.
@@ -321,10 +327,11 @@ impl DecoderGenerator {
         conversation: &Conversation,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
         let prompt = self.format_conversation(conversation)?;
         let tokens = self.encode(&prompt, config)?;
-        self.generate_stream_from_tokens(tokens, config, cancellation).await
+        self.generate_stream_from_tokens(tokens, config, cancellation)
+            .await
     }
 
     // =========================================================================
@@ -362,7 +369,11 @@ impl DecoderGenerator {
             }
         }
 
-        debug!("Encoded prompt: {} chars → {} tokens", prompt.len(), tokens.len());
+        debug!(
+            "Encoded prompt: {} chars → {} tokens",
+            prompt.len(),
+            tokens.len()
+        );
         Ok(tokens)
     }
 
@@ -449,7 +460,7 @@ impl DecoderGenerator {
         input_tokens: Vec<u32>,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
-    ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
+    ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
         // 1. Prepare data for transfer to the compute thread
         let model = self.model.clone();
         let backend = self.backend.clone();
@@ -478,13 +489,15 @@ impl DecoderGenerator {
             // Run the generation logic
             local_rt.block_on(async {
                 if let Err(e) = run_generation_loop(
-                    model, 
-                    backend, 
-                    input_tokens, 
-                    config, 
-                    tx.clone(), 
-                    cancellation
-                ).await {
+                    model,
+                    backend,
+                    input_tokens,
+                    config,
+                    tx.clone(),
+                    cancellation,
+                )
+                .await
+                {
                     // Send fatal errors to the stream
                     let _ = tx.send(Err(e)).await;
                 }
@@ -557,7 +570,6 @@ impl DecoderGenerator {
     //         prefill_start.elapsed().as_secs_f64() * 1000.0,
     //         stats.prefill_tps()
     //     );
-        
 
     //     // =====================================================================
     //     // Decode Phase (Async Stream)
@@ -639,14 +651,14 @@ impl DecoderGenerator {
 
     //             // Sample next token (applies temperature, top-k, top-p, min-p)
     //             let next_token = sample_token(logits, &config.strategy)?;
-                
+
     //             trace!(
     //                 "Step {}: sampled token {} in {:.2}ms",
     //                 step, next_token, sampling_start.elapsed().as_secs_f64() * 1000.0
     //             );
 
     //             tokens.push(next_token);
-                
+
     //             // check stop tokens
     //             if stop_tokens.contains(&next_token) {
     //                 debug!("Stop token {} generated at step {}", next_token, step);
@@ -657,16 +669,15 @@ impl DecoderGenerator {
     //             let text = tokenizer
     //                 .decode(&[next_token], false)
     //                 .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
-                    
+
     //             yield StreamedToken {
     //                 text,
     //                 id: next_token,
     //                 token_type: TokenType::Generated,
     //             };
-                
+
     //             stats.record_token();
 
-                
     //             if tokens.len() >= max_len {
     //                 break;
     //             }
@@ -712,8 +723,9 @@ async fn run_generation_loop(
     let mut tokens = input_tokens;
 
     // --- Limits & Setup ---
-    let context_limit = model.context_size(); 
-    let max_len = config.max_new_tokens
+    let context_limit = model.context_size();
+    let max_len = config
+        .max_new_tokens
         .map(|n| prompt_len + n)
         .unwrap_or(config.max_length);
 
@@ -723,7 +735,10 @@ async fn run_generation_loop(
     };
     debug!(
         "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
-        prompt_len, max_len, cache_capacity, model.autoregressive_loop()
+        prompt_len,
+        max_len,
+        cache_capacity,
+        model.autoregressive_loop()
     );
     let mut cache = model.new_cache(1, cache_capacity, 0)?;
     let mut token_tensor = backend.new_token_tensor()?;
@@ -731,11 +746,11 @@ async fn run_generation_loop(
     // --- Prefill ---
     let mut stats = GenerationStats::new();
     stats.start_prefill(prompt_len);
-    
+
     let mut next_token_logits = backend
         .prefill(model.as_ref(), &tokens, cache.as_mut())
         .await?;
-    
+
     stats.end_prefill();
 
     // --- Emit Prompt Tokens ---
@@ -743,7 +758,9 @@ async fn run_generation_loop(
     for &token_id in &tokens {
         // Check cancellation
         if let Some(c) = &cancellation {
-            if c.is_cancelled() { return Ok(()); }
+            if c.is_cancelled() {
+                return Ok(());
+            }
         }
 
         if tokens.len() >= context_limit {
@@ -751,16 +768,24 @@ async fn run_generation_loop(
             break;
         }
 
-        if Some(token_id) == model.bos_token_id() { continue; }
-        
-        let text = tokenizer.decode(&[token_id], false).map_err(|e| anyhow!(e))?;
-        
+        if Some(token_id) == model.bos_token_id() {
+            continue;
+        }
+
+        let text = tokenizer
+            .decode(&[token_id], false)
+            .map_err(|e| anyhow!(e))?;
+
         // Send to channel
-        if tx.send(Ok(StreamedToken {
-            text,
-            id: token_id,
-            token_type: TokenType::Prompt,
-        })).await.is_err() {
+        if tx
+            .send(Ok(StreamedToken {
+                text,
+                id: token_id,
+                token_type: TokenType::Prompt,
+            }))
+            .await
+            .is_err()
+        {
             return Ok(()); // Receiver dropped
         }
     }
@@ -771,9 +796,19 @@ async fn run_generation_loop(
 
     for _step in 0..max_new_tokens {
         if let Some(c) = &cancellation {
-            if c.is_cancelled() { break; }
+            if c.is_cancelled() {
+                break;
+            }
         }
-        if tokens.len() >= max_len { break; }
+
+        if tokens.len() >= context_limit {
+            debug!("Context limit reached ({}), stopping.", context_limit);
+            break;
+        }
+
+        if tokens.len() >= max_len {
+            break;
+        }
 
         // Sample
         let mut logits = next_token_logits.clone();
@@ -788,30 +823,35 @@ async fn run_generation_loop(
         tokens.push(next_token);
 
         // Emit
-        let text = tokenizer.decode(&[next_token], false).map_err(|e| anyhow!(e))?;
-        
-        if tx.send(Ok(StreamedToken {
-            text,
-            id: next_token,
-            token_type: TokenType::Generated,
-        })).await.is_err() {
+        let text = tokenizer
+            .decode(&[next_token], false)
+            .map_err(|e| anyhow!(e))?;
+
+        if tx
+            .send(Ok(StreamedToken {
+                text,
+                id: next_token,
+                token_type: TokenType::Generated,
+            }))
+            .await
+            .is_err()
+        {
             break;
         }
 
         stats.record_token();
 
-        if stop_tokens.contains(&next_token) { break; }
+        if stop_tokens.contains(&next_token) {
+            break;
+        }
 
         // Compute Next
         backend.update_token_tensor(&mut token_tensor, next_token)?;
-        next_token_logits = backend.decode_one(
-            model.as_ref(),
-            &token_tensor,
-            tokens.len(),
-            cache.as_mut(),
-        ).await?;
+        next_token_logits = backend
+            .decode_one(model.as_ref(), &token_tensor, tokens.len(), cache.as_mut())
+            .await?;
     }
-    
+
     stats.print_summary();
     Ok(())
 }

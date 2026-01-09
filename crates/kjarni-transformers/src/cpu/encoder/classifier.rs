@@ -247,44 +247,68 @@ impl CpuSequenceClassificationHead {
     ///
     /// # Returns
     /// * Logits with shape `[batch, num_classes]`
-    pub fn forward(&self, encoder_hidden_states: &Array3<f32>, attention_mask: Option<&Array2<f32>>,) -> Result<Array2<f32>> {
-        let (batch, seq_len, _hidden_size) = encoder_hidden_states.dim();
-        if batch == 0 || seq_len == 0 {
-            return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
-        }
-
-        // Extract [CLS] token (index 0)
-        // let cls_embedding = encoder_hidden_states.slice(s![.., 0, ..]).to_owned();
-
-        let sequence_embedding = match self.pooling_strategy {
-            PoolingStrategy::Cls => {
-                // Extract [CLS] token (index 0)
-                encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
-            }
-            PoolingStrategy::LastToken => {
-                crate::utils::last_token_pool(encoder_hidden_states, attention_mask.unwrap())
-            }
-            // You can add Mean/Max later if needed.
-            _ => return Err(anyhow!("Unsupported pooling strategy for classification head: {:?}", self.pooling_strategy)),
-        };
-
-        // Apply pooler OR pre_classifier (not both)
-        let features = if let Some(ref pooler) = self.pooler {
-            let mut pooled = pooler.matmul(&sequence_embedding.view());
-            self.apply_activation_inplace(&mut pooled);
-            pooled
-        } else if let Some(ref pre_classifier) = self.pre_classifier {
-            let mut pre_out = pre_classifier.matmul(&sequence_embedding.view());
-            self.apply_activation_inplace(&mut pre_out);
-            pre_out
-        } else {
-            sequence_embedding
-        };
-
-        // Final classifier
-        let logits = self.classifier.matmul(&features.view());
-        Ok(logits)
+    pub fn forward(
+    &self,
+    encoder_hidden_states: &Array3<f32>,
+    // The mask is now required for robust pooling.
+    attention_mask: Option<&Array2<f32>>,
+) -> Result<Array2<f32>> {
+    let (batch, seq_len, _hidden_size) = encoder_hidden_states.dim();
+    if batch == 0 || seq_len == 0 {
+        return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
     }
+
+    // ========================================================================
+    // --- [DEBUG] TRACE INSIDE THE CLASSIFICATION HEAD ---
+    // ========================================================================
+    println!("\n--- [DEBUG] TRACING INSIDE HEAD ---");
+    println!("  - Step 0 (Input Hidden State): Mean = {:.6}, Std Dev = {:.6}", encoder_hidden_states.mean().unwrap(), encoder_hidden_states.std(0.0));
+    // ========================================================================
+
+    // 1. POOLING
+    let sequence_embedding = match self.pooling_strategy {
+        PoolingStrategy::Cls => encoder_hidden_states.slice(s![.., 0, ..]).to_owned(),
+        PoolingStrategy::LastToken => last_token_pool(encoder_hidden_states, attention_mask.unwrap())?,
+        _ => return Err(anyhow!("Unsupported pooling strategy for classification head: {:?}", self.pooling_strategy)),
+    };
+
+    // ========================================================================
+    println!("  - Step 1 (After Pooling):      Mean = {:.6}, Std Dev = {:.6}", sequence_embedding.mean().unwrap(), sequence_embedding.std(0.0));
+    // Print a sample from the first and last rows of the pooled batch to see if they are different.
+    println!("    - Pooled (Row 0 Sample): {:?}", sequence_embedding.slice(s![0, ..5]));
+    println!("    - Pooled (Row 7 Sample): {:?}", sequence_embedding.slice(s![batch - 1, ..5]));
+    // ========================================================================
+
+    // 2. PRE-CLASSIFIER (DENSE LAYER) + ACTIVATION
+    let features = if let Some(ref pooler) = self.pooler {
+        // This case is for BERT-style heads with a "pooler" layer.
+        let mut pooled = pooler.matmul(&sequence_embedding.view());
+        println!("  - Step 2 (After Pooler Matmul):  Mean = {:.6}, Std Dev = {:.6}", pooled.mean().unwrap(), pooled.std(0.0));
+        self.apply_activation_inplace(&mut pooled);
+        println!("  - Step 3 (After Activation):   Mean = {:.6}, Std Dev = {:.6}", pooled.mean().unwrap(), pooled.std(0.0));
+        pooled
+    } else if let Some(ref pre_classifier) = self.pre_classifier {
+        // This case is for BART/RoBERTa/DistilBERT style heads with a "pre_classifier" or "dense" layer.
+        let mut pre_out = pre_classifier.matmul(&sequence_embedding.view());
+        println!("  - Step 2 (After Pre-Classifier Matmul): Mean = {:.6}, Std Dev = {:.6}", pre_out.mean().unwrap(), pre_out.std(0.0));
+        self.apply_activation_inplace(&mut pre_out);
+        println!("  - Step 3 (After Activation):          Mean = {:.6}, Std Dev = {:.6}", pre_out.mean().unwrap(), pre_out.std(0.0));
+        pre_out
+    } else {
+        // This is for simple heads with no intermediate layer.
+        sequence_embedding
+    };
+
+    // 3. FINAL CLASSIFIER (OUT_PROJ)
+    let logits = self.classifier.matmul(&features.view());
+
+    // ========================================================================
+    println!("  - Step 4 (Final Logits):       Mean = {:.6}, Std Dev = {:.6}", logits.mean().unwrap(), logits.std(0.0));
+    println!("--- [DEBUG] END OF HEAD TRACE ---");
+    // ========================================================================
+
+    Ok(logits)
+}
 
     fn apply_activation_inplace(&self, x: &mut Array2<f32>) {
         match self.activation {

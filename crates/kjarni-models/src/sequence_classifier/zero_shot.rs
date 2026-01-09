@@ -44,65 +44,94 @@ impl ZeroShotClassifier {
     }
 
     /// Performs zero-shot classification on a batch of texts.
-    pub async fn classify(
-        &self,
-        texts: &[&str],
-        candidate_labels: &[&str],
-    ) -> Result<Vec<Vec<(String, f32)>>> {
-        if texts.is_empty() || candidate_labels.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // 1. THIS IS THE ROBUST WAY TO CREATE SENTENCE PAIRS FOR THE TOKENIZER.
-        let mut inputs_to_tokenize: Vec<EncodeInput> =
-            Vec::with_capacity(texts.len() * candidate_labels.len());
-        for &text in texts {
-            for &label in candidate_labels {
-                let hypothesis = self.hypothesis_template.replace("{}", label);
-                // Create a tuple of (premise, hypothesis) for the tokenizer.
-                // The tokenizer knows how to format this correctly (e.g., with [SEP] tokens).
-                let pair: EncodeInput = (text.to_string(), hypothesis).into();
-                inputs_to_tokenize.push(pair);
-            }
-        }
-
-        // 2. Run all pairs through the NLI model to get raw logits.
-        // We need a new method on SequenceClassifier to handle this input type.
-        let all_logits = self
-            .nli_model
-            .predict_from_pairs(&inputs_to_tokenize)
-            .await?;
-
-        // 3. Process the results.
-        let mut final_results = Vec::with_capacity(texts.len());
-println!("\n[DEBUG] RAW LOGITS FROM RUST (contradiction, neutral, entailment):");
-for (i, logits_for_label) in all_logits.iter().enumerate() {
-    println!("  - Pair ('{}'): {:?}", candidate_labels[i], logits_for_label);
-}
-        for text_logits in all_logits.chunks(candidate_labels.len()) {
-            // 4. Extract the "entailment" logit for each candidate label.
-            let mut entailment_scores: Vec<f32> = text_logits
-                .iter()
-                .map(|logits_for_label| logits_for_label[self.entailment_id])
-                .collect();
-
-            // 5. Apply Softmax to the entailment scores to turn them into probabilities.
-            softmax_inplace(&mut entailment_scores);
-
-            // 6. Pair the final probabilities with the labels and sort.
-            let mut labeled_scores: Vec<(String, f32)> = candidate_labels
-                .iter()
-                .map(|&label| label.to_string())
-                .zip(entailment_scores)
-                .collect();
-
-            labeled_scores
-                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            final_results.push(labeled_scores);
-        }
-
-        Ok(final_results)
+pub async fn classify(
+    &self,
+    texts: &[&str],
+    candidate_labels: &[&str],
+) -> Result<Vec<Vec<(String, f32)>>> {
+    if texts.is_empty() || candidate_labels.is_empty() {
+        return Ok(vec![]);
     }
+
+    println!("\n--- [DEBUG] INSIDE ZeroShotClassifier::classify ---");
+    println!("  - Received {} texts and {} candidate labels.", texts.len(), candidate_labels.len());
+
+    // 1. Create sentence pairs
+    let mut inputs_to_tokenize: Vec<EncodeInput> =
+        Vec::with_capacity(texts.len() * candidate_labels.len());
+    for &text in texts {
+        for &label in candidate_labels {
+            let hypothesis = self.hypothesis_template.replace("{}", label);
+            let pair: EncodeInput = (text.to_string(), hypothesis).into();
+            inputs_to_tokenize.push(pair);
+        }
+    }
+    println!("  - Created {} sentence pairs to tokenize.", inputs_to_tokenize.len());
+
+    // 2. Run all pairs through the NLI model to get raw logits.
+    let all_logits = self
+        .nli_model
+        .predict_from_pairs(&inputs_to_tokenize)
+        .await?;
+    
+    println!("  - Received `all_logits` from model with length: {}", all_logits.len());
+    if let Some(first_logit) = all_logits.first() {
+        println!("  - Logit vector length (e.g., for first pair): {}", first_logit.len());
+    }
+
+    // --- Detailed Log of Raw Logits ---
+    println!("\n  --- [DEBUG] RAW LOGITS FROM RUST (contradiction, neutral, entailment) ---");
+    let mut pair_index = 0;
+    for i in 0..texts.len() {
+        println!("    -- For Text {}: '{}' --", i, texts[i]);
+        for j in 0..candidate_labels.len() {
+            if pair_index < all_logits.len() {
+                println!("      - Pair ('{}'): {:?}", candidate_labels[j], all_logits[pair_index]);
+            } else {
+                println!("      - !! Ran out of logits at pair_index {} !!", pair_index);
+            }
+            pair_index += 1;
+        }
+    }
+    println!("  --- [DEBUG] END OF RAW LOGITS ---");
+
+    // 3. Process the results.
+    let mut final_results = Vec::with_capacity(texts.len());
+    
+    println!("\n  - Processing logits in chunks of {}", candidate_labels.len());
+    for (i, text_logits) in all_logits.chunks(candidate_labels.len()).enumerate() {
+        println!("\n    -- Processing Chunk {} (for Text {}) --", i, i);
+        println!("      - Chunk length: {}", text_logits.len());
+
+        // 4. Extract the "entailment" logit for each candidate label.
+        let mut entailment_scores: Vec<f32> = text_logits
+            .iter()
+            .map(|logits_for_label| logits_for_label[self.entailment_id])
+            .collect();
+        println!("      - Extracted entailment scores (pre-softmax): {:?}", entailment_scores);
+
+        // 5. Apply Softmax to the entailment scores.
+        softmax_inplace(&mut entailment_scores);
+        println!("      - Final probabilities (post-softmax): {:?}", entailment_scores);
+
+        // 6. Pair the final probabilities with the labels and sort.
+        let mut labeled_scores: Vec<(String, f32)> = candidate_labels
+            .iter()
+            .map(|&label| label.to_string())
+            .zip(entailment_scores)
+            .collect();
+
+        labeled_scores
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        println!("      - Final sorted labeled scores: {:?}", labeled_scores);
+        final_results.push(labeled_scores);
+    }
+
+    println!("\n  - Finished processing. Final results vec has length: {}", final_results.len());
+    println!("--- [DEBUG] END OF ZeroShotClassifier::classify ---");
+    Ok(final_results)
+}
 }
 
 impl SequenceClassifier {
