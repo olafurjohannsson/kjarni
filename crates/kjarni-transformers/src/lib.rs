@@ -64,3 +64,6 @@ pub mod prelude {
 #[cfg(test)]
 pub mod tests;
 
+
+#[global_allocator]
+static GLOBAL: crate::utils::alloc_stats::TracingAllocator = crate::utils::alloc_stats::TracingAllocator;

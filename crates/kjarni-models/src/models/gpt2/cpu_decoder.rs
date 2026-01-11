@@ -46,7 +46,7 @@ impl Gpt2CpuDecoder {
         };
 
         let embeddings = Embeddings::new(
-            kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings),
+            kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings)),
             position_embeddings,
             None,
         );

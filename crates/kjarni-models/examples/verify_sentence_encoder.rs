@@ -1,4 +1,4 @@
-use kjarni_models::sentence_encoder::SentenceEncoder;
+use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 use kjarni_transformers::WgpuContext;

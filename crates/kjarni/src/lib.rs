@@ -71,8 +71,8 @@ pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API
 pub use utils::*;
 
-pub use kjarni_models::cross_encoder::CrossEncoder;
-pub use kjarni_models::sentence_encoder::SentenceEncoder;
+pub use kjarni_models::models::cross_encoder::CrossEncoder;
+pub use kjarni_models::models::sentence_encoder::SentenceEncoder;
 pub use kjarni_models::SequenceClassifier;
 
 // Re-export core types

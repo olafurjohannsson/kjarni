@@ -98,7 +98,7 @@ impl BartGpuEncoder {
             let pos_emb =
                 weights.get_array2(encoder_layout.position_embedding.as_ref().unwrap())?;
 
-            let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
+            let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
             let cpu_emb = Embeddings::new(embed, Some(pos_emb), None);
             (Some(cpu_emb), None)
         } else {

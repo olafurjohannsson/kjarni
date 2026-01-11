@@ -44,7 +44,7 @@
 //! - [`crate::generation`] — Generation strategies
 
 // kjarni-transformers/src/pipeline/mod.rs
-
+mod encoder;
 mod decoder;
 mod decoder_builder;
 mod encoder_decoder;
@@ -64,6 +64,13 @@ pub use decoder_builder::DecoderPipelineBuilder;
 pub use cpu_factory::CpuLayerFactory;
 pub use seq2seq_cpu_factory::Seq2SeqFactory;
 pub use audio::{AudioConvFrontend, AudioPipeline, MelConfig};
+pub use encoder::{
+    EncoderLoader,
+    EncoderModelFactory,
+    EncoderPipeline,
+    EncoderPipelineBuilder,
+    EncoderPipelineConfig
+};
 
 #[cfg(test)]
 mod tests;

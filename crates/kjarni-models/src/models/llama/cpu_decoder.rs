@@ -45,12 +45,14 @@ use std::sync::Arc;
 
 // --- External Crates ---
 use crate::models::llama::config::LlamaConfig;
-use anyhow::{anyhow, Result};
-use ndarray::{s, Array2, Array3, Axis};
+use anyhow::{Result, anyhow};
+use ndarray::{Array2, Array3, Axis, s};
 use std::time::Instant;
 
 use kjarni_transformers::{
-    cache::CpuKVCache, decoder::prelude::*,
+    Normalization, WgpuContext,
+    cache::CpuKVCache,
+    decoder::prelude::*,
     embeddings::Embeddings,
     feedforward::SwiGluFeedForward,
     linear_layer::LinearLayer,
@@ -62,8 +64,6 @@ use kjarni_transformers::{
     tensor::DType,
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    Normalization,
-    WgpuContext,
 };
 
 /// CPU-based Llama decoder implementation with RoPE and SwiGLU.
@@ -138,6 +138,14 @@ impl LlamaCpuDecoder {
             .decoder
             .as_ref()
             .expect("Llama layout must have a decoder section");
+        if target_dtype.is_some() {
+            println!("Creating Llama CPU Decoder with dtype {:?}", target_dtype);    
+        } else {
+            println!("No dtype set on Llama CPU Decoder!");
+        }
+        
+        let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [LlamaCpu] Pre-Layers RAM: {:.2} MB", start_ram);
 
         let embeddings = Embeddings::from_weights(
             weights,
@@ -145,6 +153,9 @@ impl LlamaCpuDecoder {
             decoder_layout.position_embedding.as_deref(), // Correctly access nested field
             decoder_layout.token_type_embedding.as_deref(),
         )?;
+
+        let mid_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [LlamaCpu] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)", mid_ram, mid_ram - start_ram);
 
         let final_norm = RMSNorm::new(
             weights.get_array1(decoder_layout.final_norm_weight.as_ref().unwrap())?,
@@ -162,7 +173,8 @@ impl LlamaCpuDecoder {
                 target_dtype,
             )?);
         }
-
+        let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [LlamaCpu] Post-Layers RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
         Ok(Self {
             embeddings,
             layers,
@@ -244,7 +256,7 @@ impl CpuDecoder for LlamaCpuDecoder {
             ModelInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
                 // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-
+                
                 Ok(self
                     .embeddings
                     .forward(&ids.to_owned(), None, position_offset, false))
@@ -381,309 +393,343 @@ mod llama_test {
     use crate::models::llama::LlamaModel;
     const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct";
     use kjarni_transformers::{
+        ModelType,
         cpu::kernels::{
             dequantize::{dequantize_q4_k_block, dequantize_q6_k_block},
             q_common::{BlockQ4_K, BlockQ6_K},
         },
-        weights::{
-            cast_or_copy, ModelWeights
-            ,
-        }
-
-        ,
-        ModelType,
+        weights::{ModelWeights, cast_or_copy},
     };
+    use ndarray::ArrayView1;
     use std::path::Path;
     const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf";
-    #[test]
-    fn test_check_all_matrix_sizes_interleaving() {
-        let gguf_path = Path::new(GGUF_PATH);
-        let st_path = Path::new(SAFETENSORS_PATH);
 
-        let gguf_weights = ModelWeights::new(gguf_path).unwrap();
-        let st_weights = ModelWeights::new(st_path).unwrap();
+    // Helper to calculate cosine similarity between two 1D slices
+    fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 0.0;
+        }
+        dot / (norm_a * norm_b)
+    }
+
+    #[test]
+    fn test_gguf_safetensors_alignment_parity() -> Result<()> {
+        // Define paths (use environment variables or hardcoded local paths)
+        let gguf_path =
+            Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/model-q4_k.gguf");
+        let st_path = Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
+
+        if !gguf_path.exists() || !st_path.exists() {
+            println!("Skipping test: Model files not found for comparison.");
+            return Ok(());
+        }
+
+        let gguf_weights = ModelWeights::new(gguf_path)?;
+        let st_weights = ModelWeights::new(st_path)?;
 
         let tensors_to_check = [
-            ("model.layers.0.self_attn.q_proj.weight", [2048, 2048]), // Q
-            ("model.layers.0.self_attn.k_proj.weight", [512, 2048]),  // K (smaller)
-            ("model.layers.0.self_attn.v_proj.weight", [512, 2048]),  // V (smaller)
-            ("model.layers.0.self_attn.o_proj.weight", [2048, 2048]), // O
-            ("model.layers.0.mlp.gate_proj.weight", [8192, 2048]),    // Gate (larger)
-            ("model.layers.0.mlp.up_proj.weight", [8192, 2048]),      // Up (larger)
-            ("model.layers.0.mlp.down_proj.weight", [2048, 8192]),    // Down
+            // {Name}, {Is Interleaved in GGUF?}
+            ("model.layers.0.self_attn.q_proj.weight", true), // Q (Needs Reordering)
+            ("model.layers.0.self_attn.k_proj.weight", true), // K (Needs Reordering)
+            ("model.layers.0.self_attn.v_proj.weight", false), // V (Standard)
+            ("model.layers.0.self_attn.o_proj.weight", false), // O (Standard)
+            ("model.layers.0.mlp.gate_proj.weight", false),   // Gate
         ];
 
-        for (name, expected_shape) in tensors_to_check {
+        for (name, is_interleaved) in tensors_to_check {
             println!(
-                "\n=== {} [{}, {}] ===",
-                name, expected_shape[0], expected_shape[1]
+                "\n=== Checking Tensor: {} (Interleaved: {}) ===",
+                name, is_interleaved
             );
 
-            let raw = gguf_weights.get_raw(name).unwrap();
-            println!("Actual shape: {:?}, dtype: {:?}", raw.shape, raw.dtype);
-
-            // Get ST reference (if exists)
-            let st_f32 = match st_weights.get_typed_tensor(name) {
-                Ok(t) => t.to_array2_f32().ok(),
-                Err(_) => None,
-            };
-
-            if st_f32.is_none() {
-                println!("ST tensor not found, skipping");
+            // 1. Load Ground Truth (SafeTensors)
+            if !st_weights.contains(name) {
+                println!("Skipping {}: Not found in SafeTensors", name);
                 continue;
             }
-            let st_f32 = st_f32.unwrap();
+            let st_arr = st_weights.get_array2(name)?;
 
-            // Get ORIGINAL GGUF blocks
-            let blocks_per_row = raw.shape[1] / 256;
-
-            // Check block group mapping for first few groups
-            print!("Block mapping: ");
-
-            match raw.dtype {
-                DType::Q4_K => {
-                    let blocks: Vec<BlockQ4_K> = cast_or_copy(&raw.bytes);
-                    // let arr = [0.0usize; blocks.len()]; // Dummy array for type inference
-
-                    for (i, block) in blocks.iter().enumerate().take(256) {
-                        let block_idx = i * blocks_per_row;
-                        if block_idx >= blocks.len() {
-                            continue;
-                        }
-
-                        let mut block_data = [0.0f32; 256];
-                        dequantize_q4_k_block(&blocks[block_idx], &mut block_data);
-
-                        // Find best ST row
-                        let mut best_row = 0;
-                        let mut best_diff = f32::MAX;
-                        for st_row in 0..64.min(raw.shape[0]) {
-                            let diff: f32 = block_data
-                                .iter()
-                                .zip(st_f32.row(st_row).iter().take(256))
-                                .map(|(a, b)| (a - b).abs())
-                                .sum();
-                            if diff < best_diff {
-                                best_diff = diff;
-                                best_row = st_row;
-                            }
-                        }
-                        print!("{}→{} ", i, best_row);
-                    }
-                }
-                DType::Q6_K => {
-                    let blocks: Vec<BlockQ6_K> = cast_or_copy(&raw.bytes);
-                    for block_group in [0, 1, 2, 3] {
-                        let block_idx = block_group * blocks_per_row;
-                        if block_idx >= blocks.len() {
-                            continue;
-                        }
-
-                        let mut block_data = [0.0f32; 256];
-                        dequantize_q6_k_block(&blocks[block_idx], &mut block_data);
-
-                        let mut best_row = 0;
-                        let mut best_diff = f32::MAX;
-                        for st_row in 0..64.min(raw.shape[0]) {
-                            let diff: f32 = block_data
-                                .iter()
-                                .zip(st_f32.row(st_row).iter().take(256))
-                                .map(|(a, b)| (a - b).abs())
-                                .sum();
-                            if diff < best_diff {
-                                best_diff = diff;
-                                best_row = st_row;
-                            }
-                        }
-                        print!("{}→{} ", block_group, best_row);
-                    }
-                }
-                _ => println!("Unsupported dtype"),
+            // 2. Load GGUF (This triggers the reordering logic inside get_array2)
+            if !gguf_weights.contains(name) {
+                println!("Skipping {}: Not found in GGUF", name);
+                continue;
             }
-            println!();
+            let gguf_arr = gguf_weights.get_array2(name)?;
+
+            // 3. Check Shapes
+            assert_eq!(
+                gguf_arr.shape(),
+                st_arr.shape(),
+                "Shape mismatch for {}",
+                name
+            );
+
+            // 4. Verify Content (Row by Row)
+            // We check the first 64 rows (covering at least one super-block)
+            let rows_to_check = 64.min(gguf_arr.nrows());
+            let mut total_sim = 0.0;
+
+            for i in 0..rows_to_check {
+                let sim = cosine_similarity(gguf_arr.row(i), st_arr.row(i));
+                total_sim += sim;
+
+                // Thresholds:
+                // Q4_K vs F32 should have high similarity (>0.90 usually).
+                // If reordering is wrong, similarity will be near 0 (random vectors).
+                if sim < 0.80 {
+                    println!(
+                        "!! FAILURE at Row {}: Similarity = {:.4} (Expected > 0.8)",
+                        i, sim
+                    );
+
+                    // Debug print first few values
+                    println!(
+                        "  GGUF: {:?}",
+                        gguf_arr.row(i).iter().take(5).collect::<Vec<_>>()
+                    );
+                    println!(
+                        "  ST  : {:?}",
+                        st_arr.row(i).iter().take(5).collect::<Vec<_>>()
+                    );
+
+                    if is_interleaved {
+                        panic!(
+                            "Interleaved layer '{}' failed parity check at row {}. \
+                            This indicates `gguf_conversion.rs` reordering logic is incorrect.",
+                            name, i
+                        );
+                    } else {
+                        panic!(
+                            "Standard layer '{}' failed parity check. Basic loading is broken.",
+                            name
+                        );
+                    }
+                }
+            }
+
+            let avg_sim = total_sim / rows_to_check as f32;
+            println!("  ✅ Passed. Avg Cosine Similarity: {:.4}", avg_sim);
+
+            // Stricter assertion on average to ensure overall quality
+            assert!(avg_sim > 0.90, "Average similarity too low for {}", name);
         }
+
+        Ok(())
     }
 
     #[test]
     fn test_gguf_and_safetensors_load_identical_configs() -> Result<()> {
+        use kjarni_transformers::weights::clear_mmap_cache;
+        use std::path::Path;
+
         println!("--- Comparing GGUF vs Safetensors configs for 1B and 3B models ---");
+
+        // Define paths (Hardcoded based on your environment)
+        let gguf_1b_path = Path::new(
+            "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        );
+        let st_1b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct");
+
+        let gguf_3b_path = Path::new(
+            "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        );
+        let st_3b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct");
 
         // --- Test 1B Model ---
         {
             println!("\n[1] Testing Llama 3.2 1B Instruct...");
-            let model_gguf = LlamaModel::from_pretrained(
-                Path::new(
-                    "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-                ),
-                Device::Cpu,
-                None,
-                None,
-                Some(ModelType::Llama3_2_1B_Instruct),
-            )?;
-            let model_st = LlamaModel::from_pretrained(
-                Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct"),
-                Device::Cpu,
-                None,
-                None,
-                Some(ModelType::Llama3_2_1B_Instruct),
-            )?;
 
-            let config_gguf = model_gguf.config();
-            let config_st = model_st.config();
+            if !gguf_1b_path.exists() || !st_1b_path.exists() {
+                println!("Skipping 1B test: Files not found.");
+            } else {
+                let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
 
-            println!("   ... Comparing all parameters for 1B model...");
-            assert_eq!(
-                config_gguf.hidden_size, config_st.hidden_size,
-                "1B: hidden_size"
-            );
-            assert_eq!(
-                config_gguf.num_hidden_layers, config_st.num_hidden_layers,
-                "1B: num_hidden_layers"
-            );
-            assert_eq!(
-                config_gguf.num_attention_heads, config_st.num_attention_heads,
-                "1B: num_attention_heads"
-            );
-            assert_eq!(
-                config_gguf.num_key_value_heads, config_st.num_key_value_heads,
-                "1B: num_key_value_heads"
-            );
-            assert_eq!(
-                config_gguf.intermediate_size, config_st.intermediate_size,
-                "1B: intermediate_size"
-            );
-            assert_eq!(
-                config_gguf.vocab_size, config_st.vocab_size,
-                "1B: vocab_size"
-            );
-            assert_eq!(
-                config_gguf.max_position_embeddings, config_st.max_position_embeddings,
-                "1B: max_position_embeddings"
-            );
+                let model_gguf = LlamaModel::from_pretrained(
+                    gguf_1b_path,
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_1B_Instruct),
+                )?;
+                let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+                
+                println!("Model 1 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
 
-            // Use a tolerance for floating point comparisons
-            assert!(
-                (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
-                "1B: rms_norm_eps"
-            );
-            assert_eq!(
-                config_gguf.hidden_act, config_st.hidden_act,
-                "1B: hidden_act"
-            );
+                let model_st = LlamaModel::from_pretrained(
+                    st_1b_path,
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_1B_Instruct),
+                )?;
 
-            assert!(
-                (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
-                "1B: rope_theta"
-            );
+                let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+                println!("Model 2 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
 
-            // assert_eq!(
-            //     config_gguf.bos_token_id, config_st.bos_token_id,
-            //     "1B: bos_token_id"
-            // );
-            // assert_eq!(
-            //     config_gguf.eos_token_id, config_st.eos_token_id,
-            //     "1B: eos_token_id"
-            // );
-            assert_eq!(
-                config_gguf.pad_token_id, config_st.pad_token_id,
-                "1B: pad_token_id"
-            );
+                let config_gguf = model_gguf.config();
+                let config_st = model_st.config();
 
-            assert_eq!(
-                config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
-                "1B: tie_word_embeddings"
-            );
+                println!("   ... Comparing all parameters for 1B model...");
+                assert_eq!(
+                    config_gguf.hidden_size, config_st.hidden_size,
+                    "1B: hidden_size"
+                );
+                assert_eq!(
+                    config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+                    "1B: num_hidden_layers"
+                );
+                assert_eq!(
+                    config_gguf.num_attention_heads, config_st.num_attention_heads,
+                    "1B: num_attention_heads"
+                );
+                assert_eq!(
+                    config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+                    "1B: num_key_value_heads"
+                );
+                assert_eq!(
+                    config_gguf.intermediate_size, config_st.intermediate_size,
+                    "1B: intermediate_size"
+                );
+                assert_eq!(
+                    config_gguf.vocab_size, config_st.vocab_size,
+                    "1B: vocab_size"
+                );
+                assert_eq!(
+                    config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+                    "1B: max_position_embeddings"
+                );
 
-            println!("   ... ✓ 1B model configs match perfectly.");
+                assert!(
+                    (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+                    "1B: rms_norm_eps"
+                );
+                assert_eq!(
+                    config_gguf.hidden_act, config_st.hidden_act,
+                    "1B: hidden_act"
+                );
+                assert!(
+                    (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+                    "1B: rope_theta"
+                );
+
+                assert_eq!(
+                    config_gguf.pad_token_id, config_st.pad_token_id,
+                    "1B: pad_token_id"
+                );
+                assert_eq!(
+                    config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+                    "1B: tie_word_embeddings"
+                );
+
+                println!("   ... ✓ 1B model configs match perfectly.");
+            }
+            // `model_gguf` and `model_st` DROP here.
+            // Arc counts to mmap decrease, but cache still holds them.
         }
+
+        // CRITICAL: Clear cache now that the structs are dropped.
+        // This frees the 1B model RAM before loading the 3B model.
+        println!("   ... Clearing mmap cache to free 1B model memory ...");
+        clear_mmap_cache();
 
         // --- Test 3B Model ---
         {
             println!("\n[2] Testing Llama 3.2 3B Instruct...");
-            let model_gguf = LlamaModel::from_pretrained(
-                Path::new(
-                    "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-                ),
-                Device::Cpu,
-                None,
-                None,
-                Some(ModelType::Llama3_2_3B_Instruct),
-            )?;
-            let model_st = LlamaModel::from_pretrained(
-                Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct"),
-                Device::Cpu,
-                None,
-                None,
-                Some(ModelType::Llama3_2_3B_Instruct),
-            )?;
+            if !gguf_3b_path.exists() || !st_3b_path.exists() {
+                println!("Skipping 3B test: Files not found.");
+            } else {
+                let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+                
+                let model_gguf = LlamaModel::from_pretrained(
+                    gguf_3b_path,
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_3B_Instruct),
+                )?;
+                let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+                
+                println!("Model 3 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
+                
+                
+                
 
-            let config_gguf = model_gguf.config();
-            let config_st = model_st.config();
+                let model_st = LlamaModel::from_pretrained(
+                    st_3b_path,
+                    Device::Cpu,
+                    None,
+                    None,
+                    Some(ModelType::Llama3_2_3B_Instruct),
+                )?;
+                let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+                println!("Model 4 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
 
-            println!("   ... Comparing all parameters for 3B model...");
-            assert_eq!(
-                config_gguf.hidden_size, config_st.hidden_size,
-                "3B: hidden_size"
-            );
-            assert_eq!(
-                config_gguf.num_hidden_layers, config_st.num_hidden_layers,
-                "3B: num_hidden_layers"
-            );
-            assert_eq!(
-                config_gguf.num_attention_heads, config_st.num_attention_heads,
-                "3B: num_attention_heads"
-            );
-            assert_eq!(
-                config_gguf.num_key_value_heads, config_st.num_key_value_heads,
-                "3B: num_key_value_heads"
-            );
-            assert_eq!(
-                config_gguf.intermediate_size, config_st.intermediate_size,
-                "3B: intermediate_size"
-            );
-            assert_eq!(
-                config_gguf.vocab_size, config_st.vocab_size,
-                "3B: vocab_size"
-            );
-            assert_eq!(
-                config_gguf.max_position_embeddings, config_st.max_position_embeddings,
-                "3B: max_position_embeddings"
-            );
+                let config_gguf = model_gguf.config();
+                let config_st = model_st.config();
 
-            assert!(
-                (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
-                "3B: rms_norm_eps"
-            );
-            assert_eq!(
-                config_gguf.hidden_act, config_st.hidden_act,
-                "3B: hidden_act"
-            );
+                println!("   ... Comparing all parameters for 3B model...");
+                assert_eq!(
+                    config_gguf.hidden_size, config_st.hidden_size,
+                    "3B: hidden_size"
+                );
+                assert_eq!(
+                    config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+                    "3B: num_hidden_layers"
+                );
+                assert_eq!(
+                    config_gguf.num_attention_heads, config_st.num_attention_heads,
+                    "3B: num_attention_heads"
+                );
+                assert_eq!(
+                    config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+                    "3B: num_key_value_heads"
+                );
+                assert_eq!(
+                    config_gguf.intermediate_size, config_st.intermediate_size,
+                    "3B: intermediate_size"
+                );
+                assert_eq!(
+                    config_gguf.vocab_size, config_st.vocab_size,
+                    "3B: vocab_size"
+                );
+                assert_eq!(
+                    config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+                    "3B: max_position_embeddings"
+                );
 
-            assert!(
-                (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
-                "3B: rope_theta"
-            );
+                assert!(
+                    (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+                    "3B: rms_norm_eps"
+                );
+                assert_eq!(
+                    config_gguf.hidden_act, config_st.hidden_act,
+                    "3B: hidden_act"
+                );
+                assert!(
+                    (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+                    "3B: rope_theta"
+                );
 
-            // assert_eq!(
-            //     config_gguf.bos_token_id, config_st.bos_token_id,
-            //     "3B: bos_token_id"
-            // );
-            // assert_eq!(
-            //     config_gguf.eos_token_id, config_st.eos_token_id,
-            //     "3B: eos_token_id"
-            // );
-            assert_eq!(
-                config_gguf.pad_token_id, config_st.pad_token_id,
-                "3B: pad_token_id"
-            );
+                assert_eq!(
+                    config_gguf.pad_token_id, config_st.pad_token_id,
+                    "3B: pad_token_id"
+                );
+                assert_eq!(
+                    config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+                    "3B: tie_word_embeddings"
+                );
 
-            assert_eq!(
-                config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
-                "3B: tie_word_embeddings"
-            );
-
-            println!("   ... ✓ 3B model configs match perfectly.");
+                println!("   ... ✓ 3B model configs match perfectly.");
+            }
         }
+
+        // Final cleanup (good practice)
+        println!("   ... Clearing mmap cache ...");
+        clear_mmap_cache();
 
         println!(
             "\n✓ SUCCESS: All GGUF configurations correctly match their SafeTensors counterparts."

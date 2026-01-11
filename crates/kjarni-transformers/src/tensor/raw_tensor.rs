@@ -6,7 +6,11 @@ use std::borrow::Cow;
 
 /// A raw, untyped view into a tensor's bytes, shape, and dtype.
 /// This is the primary output of a file loader before any CPU/GPU-specific processing.
-pub struct TensorView<'a> {
+/// 
+/// Important to note is that TensorView borrows and is only valid while
+/// mmap pages are alive and loader is alive
+/// IMPORTANT: The view must be fully consumed synchronously
+pub(crate) struct TensorView<'a> { // (crate)
     pub name: String,
     pub bytes: Cow<'a, [u8]>,
     pub shape: Vec<usize>,

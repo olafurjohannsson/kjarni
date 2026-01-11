@@ -1,5 +1,7 @@
 mod loader;
 
+use std::sync::Arc;
+
 use crate::tensor::CpuTensor;
 use crate::weights::ModelWeights;
 use anyhow::Result;
@@ -7,12 +9,13 @@ use half::bf16;
 use ndarray::{Array2, Array3, Axis, s};
 use rayon::prelude::*;
 
-pub use loader::{EmbeddingConfig, EmbeddingConfigBuilder, LoadedEmbeddings, EmbeddingInput};
+pub use loader::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LoadedEmbeddings};
 
 /// An enum to hold the word embeddings table in its native, memory-efficient format.
+#[derive(Clone)]
 pub enum EmbeddingData {
-    F32(Array2<f32>),
-    BF16(Array2<bf16>),
+    F32(Arc<Array2<f32>>),
+    BF16(Arc<Array2<bf16>>),
 }
 
 /// A CPU-based embedding layer that handles word, position, and token type embeddings.
@@ -47,20 +50,15 @@ impl Embeddings {
     ) -> Result<Self> {
         let word_tensor = weights.get_typed_tensor(word_embedding_name)?;
         let word_embeddings = match word_tensor {
-            CpuTensor::F32(arr) => EmbeddingData::F32(arr.into_dimensionality()?),
-            CpuTensor::BF16(arr) => EmbeddingData::BF16(arr.into_dimensionality()?),
+            // Wrap in Arc::new()
+            CpuTensor::F32(arr) => EmbeddingData::F32(Arc::new(arr.into_dimensionality()?)),
+            CpuTensor::BF16(arr) => EmbeddingData::BF16(Arc::new(arr.into_dimensionality()?)),
             CpuTensor::Q8_0(_) | CpuTensor::Q4_K(_) | CpuTensor::Q6_K(_) => {
-                log::info!(
-                    "Dequantizing GGUF embeddings for '{}' to F32",
-                    word_embedding_name
-                );
-                EmbeddingData::F32(word_tensor.to_array2_f32()?)
+                log::info!("Dequantizing GGUF embeddings...");
+                // Wrap result in Arc::new()
+                EmbeddingData::F32(Arc::new(word_tensor.to_array2_f32()?))
             }
-
-            _ => anyhow::bail!(
-                "Unsupported dtype for word embeddings: {:?}",
-                word_tensor.dtype()
-            ),
+            _ => anyhow::bail!("Unsupported dtype..."),
         };
 
         let position_embeddings = if let Some(name) = pos_embedding_name {

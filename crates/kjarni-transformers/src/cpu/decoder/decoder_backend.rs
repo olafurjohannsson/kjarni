@@ -83,7 +83,7 @@ use crate::models::base::{AutoregressiveLoop, ModelInput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::{debug, trace};
-use ndarray::{s, Array1, Array2};
+use ndarray::{Array1, Array2, Array3, s};
 use std::time::Instant;
 
 /// CPU-based backend for autoregressive decoder generation.
@@ -279,6 +279,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         // Extract token ID from tensor
         let token_id = token_tensor[[0, 0]];
         let token_slice = [token_id];
+        // let hidden_states: Array3<f32> = ops.embed(&token_slice, 0)?;
         let input = ModelInput::from_tokens(&token_slice);
 
         // Build attention mask
@@ -327,9 +328,13 @@ impl CpuDecoderBackend {
         // Build causal mask for full sequence
         let attention_mask = ops.get_attention_mask(prompt_len, 0)?;
 
+        // let hidden_states: Array3<f32> = ops.embed(tokens, 0)?;
+
+        let input = ModelInput::from_tokens(tokens);
+
         // Single forward pass
         let decoder_output = ops.decoder().forward(
-            ModelInput::from_tokens(tokens),
+            input,
             &attention_mask,
             0, // Position offset is 0 for prefill
             Some(cache),

@@ -70,6 +70,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             .as_ref()
             .ok_or_else(|| anyhow!("Pipeline requires a DecoderLayout in ModelLayout"))?;
 
+         let start_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [Builder] Pre-Embeddings RAM: {:.2} MB", start_ram);
+
         // 4. Load Embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
         if let Some(pos) = &dec_layout.position_embedding {
@@ -94,6 +97,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             emb_load_gpu,
             target_dt,
         )?;
+
+        let mid_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)", mid_ram, mid_ram - start_ram);
 
         // 5. Load LM Head (The "Tied" Check)
 
@@ -120,7 +126,8 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 self.load_config.quantize_lm_head,
             )?
         };
-
+        let end_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        println!("  [Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
         // 6. Build Model Backends (Handover RoPE and DType)
         // We resolve backends here using the specific model's factory logic
         // This is where you call build_backends from the GenericLoader

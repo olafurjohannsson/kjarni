@@ -260,7 +260,10 @@ impl CpuDecoderOps for MockDecoderModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         &self.decoder
     }
-
+    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
+        
+        Ok(Array3::zeros((1, 1, self.hidden_size())))
+    }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, _hidden) = hidden_states.dim();
 

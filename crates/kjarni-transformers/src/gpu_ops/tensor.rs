@@ -1,7 +1,8 @@
 use crate::WgpuContext; // Assuming WgpuContext is accessible from the crate root
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::tensor::TensorView;
+use crate::tensor::CpuTensor;
+use crate::tensor::raw_tensor::TensorView;
 use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
@@ -34,7 +35,7 @@ impl GpuDType for u32 {
 pub struct GpuTensor {
     buffer: Arc<Buffer>,
     shape: Vec<usize>,
-    dtype: DType,
+    pub dtype: DType,
     context: Arc<WgpuContext>,
     id: u64,
 }
@@ -66,15 +67,14 @@ impl GpuTensor {
     pub fn linear_layer_dims(&self) -> (usize, usize) {
         (self.shape[1], self.shape[0]) // [Out, In] → (In, Out)
     }
+
     /// Creates a GpuTensor by loading a tensor from `ModelWeights`.
     ///
-    /// This is the primary, reusable function for loading model weights directly to the GPU.
-    /// It handles the "load raw -> check type -> convert if needed -> upload" pattern.
-    ///
-    /// - If `target_dt` is `None` or matches the tensor's file dtype, it performs a
-    ///   zero-copy upload directly from the memory-mapped file.
-    /// - If `target_dt` differs, it performs a CPU-side conversion before uploading,
-    ///   which involves an intermediate memory allocation.
+    /// # Strategy
+    /// 1. **Fast Path (Zero-Copy):** Attempts to copy bytes directly from the memory-mapped file
+    ///    to the GPU. This happens if the file dtype matches the target dtype (or no target is specified).
+    /// 2. **Slow Path (Conversion):** If types mismatch (e.g., file is Q4_K, target is F16),
+    ///    it loads to CPU RAM, dequantizes/converts, and then uploads.
     pub fn from_model_weights(
         ctx: &Arc<WgpuContext>,
         weights: &ModelWeights,
@@ -82,138 +82,76 @@ impl GpuTensor {
         target_dt: Option<DType>,
         label: &str,
     ) -> Result<Self> {
-        // Step 1: Get the raw, zero-copy view of the tensor from the file.
-        let raw = weights.get_raw(name)?;
-        let current_dt = raw.dtype;
-        if current_dt.is_quantized() {
-            log::info!("Tensor '{}' is quantized as {:?}. Dequantizing for GPU upload.", name, current_dt);
-            let target = target_dt.unwrap_or(DType::F32);
-            log::info!(
-                "Dequantizing tensor '{}' from {:?} to {:?} for GPU upload",
-                name,
-                current_dt,
-                target
-            );
-
-            // Use get_typed_tensor which handles dequantization
-            let typed = weights.get_typed_tensor(name)?;
-            let shape = typed.shape().to_vec();
-
-            // Dequantize to f32 first
-            let f32_data = match typed {
-                t if t.shape().len() == 2 => t.to_array2_f32()?,
-                t if t.shape().len() == 1 => {
-                    let arr1 = t.to_array1_f32()?;
-                    // Reshape 1D to 2D for consistency
-                    ndarray::Array2::from_shape_vec((1, arr1.len()), arr1.to_vec())?
+        // --- PHASE 1: Attempt Zero-Copy Upload ---
+        let upload_attempt = weights.with_raw_tensor(name, |raw| {
+            // Case A: Quantized file but non-quantized target -> Must dequantize on CPU
+            if raw.dtype.is_quantized() {
+                let target = target_dt.unwrap_or(DType::F32);
+                if !target.is_quantized() {
+                    return Ok(None); 
                 }
-                _ => anyhow::bail!("Unsupported tensor rank for dequantization"),
-            };
-
-            // Convert to target dtype
-            let converted_bytes = match target {
-                DType::F32 => bytemuck::cast_slice(f32_data.as_slice().unwrap()).to_vec(),
-                DType::BF16 => {
-                    let bf16_data: Vec<u16> = f32_data
-                        .iter()
-                        .map(|&v| half::bf16::from_f32(v).to_bits())
-                        .collect();
-                    bytemuck::cast_slice(&bf16_data).to_vec()
-                }
-                DType::F16 => {
-                    let f16_data: Vec<u16> = f32_data
-                        .iter()
-                        .map(|&v| half::f16::from_f32(v).to_bits())
-                        .collect();
-                    bytemuck::cast_slice(&f16_data).to_vec()
-                }
-                _ => anyhow::bail!("Cannot convert to {:?} for GPU", target),
-            };
-
-            let converted_raw = TensorView {
-                name: name.to_string(),
-                bytes: Cow::Owned(converted_bytes),
-                shape,
-                dtype: target,
-            };
-
-            return GpuTensor::from_raw(ctx, &converted_raw, label);
-        }
-        // Step 2: Check if a conversion is needed.
-        if let Some(target) = target_dt {
-            if target != current_dt {
-                // Conversion is needed. This path will allocate a new CPU buffer.
-                log::trace!(
-                    "Converting tensor '{}' from {:?} to {:?}",
-                    name,
-                    current_dt,
-                    target
-                );
-
-                let typed = weights.get_typed_tensor(name)?;
-                let shape = typed.shape().to_vec(); // Get shape before consuming
-
-                // Create a new TensorView with an owned, converted byte buffer.
-                let converted_raw = match typed {
-                    t if t.shape().len() == 2 => {
-                        let f32_arr = t.to_array2_f32()?;
-                        let converted_bytes = match target {
-                            DType::F32 => {
-                                bytemuck::cast_slice(f32_arr.as_slice().unwrap()).to_vec()
-                            }
-                            DType::F16 => {
-                                let f16_data: Vec<half::f16> =
-                                    f32_arr.iter().map(|&v| half::f16::from_f32(v)).collect();
-                                bytemuck::cast_slice(&f16_data).to_vec()
-                            }
-                            _ => anyhow::bail!(
-                                "Conversion to {:?} for 2D tensors not implemented",
-                                target
-                            ),
-                        };
-                        TensorView {
-                            name: name.to_string(),
-                            bytes: Cow::Owned(converted_bytes),
-                            shape,
-                            dtype: target,
-                        }
-                    }
-                    t if t.shape().len() == 1 => {
-                        let f32_arr = t.to_array1_f32()?;
-                        let converted_bytes = match target {
-                            DType::F32 => {
-                                bytemuck::cast_slice(f32_arr.as_slice().unwrap()).to_vec()
-                            }
-                            DType::F16 => {
-                                let f16_data: Vec<half::f16> =
-                                    f32_arr.iter().map(|&v| half::f16::from_f32(v)).collect();
-                                bytemuck::cast_slice(&f16_data).to_vec()
-                            }
-                            _ => anyhow::bail!(
-                                "Conversion to {:?} for 1D tensors not implemented",
-                                target
-                            ),
-                        };
-                        TensorView {
-                            name: name.to_string(),
-                            bytes: Cow::Owned(converted_bytes),
-                            shape,
-                            dtype: target,
-                        }
-                    }
-                    _ => anyhow::bail!(
-                        "Cannot resolve dtype for tensor with rank {}",
-                        typed.shape().len()
-                    ),
-                };
-                // Step 4 (Conversion Path): Upload the new, owned buffer.
-                return GpuTensor::from_raw(ctx, &converted_raw, label);
             }
+
+            // Case B: DType Mismatch -> Must convert on CPU
+            if let Some(target) = target_dt {
+                if target != raw.dtype {
+                    return Ok(None); 
+                }
+            }
+
+            // Case C: Zero-copy upload
+            let tensor = GpuTensor::from_raw(ctx, &raw, label)?;
+            Ok(Some(tensor))
+        })?;
+
+        if let Some(tensor) = upload_attempt {
+            return Ok(tensor);
         }
 
-        // Step 4 (No Conversion Path): Upload the borrowed, zero-copy slice directly.
-        GpuTensor::from_raw(ctx, &raw, label)
+        // --- PHASE 2: Conversion / Dequantization Path ---
+        let target = target_dt.unwrap_or(DType::F32);
+        
+        log::debug!(
+            "Converting/Dequantizing tensor '{}' to {:?} for GPU upload",
+            label,
+            target
+        );
+
+        // 1. Get OWNED CpuTensor (this loads to RAM and handles de-interleaving if needed)
+        let typed_cpu = weights.get_typed_tensor(name)?;
+        
+        // 2. Pass ownership to helper
+        let (converted_bytes, final_shape) = convert_cpu_tensor_to_bytes(typed_cpu, target)?;
+
+        // 3. Create view and upload
+        let converted_view = TensorView {
+            name: name.to_string(),
+            bytes: Cow::Owned(converted_bytes),
+            shape: final_shape,
+            dtype: target,
+        };
+
+        GpuTensor::from_raw(ctx, &converted_view, label)
     }
+
+    pub fn create(
+        ctx: &Arc<WgpuContext>,
+        data: &Vec<f32>,
+        shape: Vec<usize>,
+        label: &str,
+    ) -> Result<GpuTensor> {
+        GpuTensor::from_raw(
+            ctx,
+            &TensorView {
+                bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&data).to_vec()),
+                shape: shape,
+                dtype: DType::F32,
+                name: label.to_string(),
+            },
+            label,
+        )
+    }
+
     pub fn from_raw(ctx: &Arc<WgpuContext>, raw: &TensorView, label: &str) -> Result<Self> {
         log::info!(
             "Uploading Tensor '{}': DType={:?}, Shape={:?} ({:.2} MB)",
@@ -596,10 +534,7 @@ impl GpuTensor {
         anyhow::ensure!(self.rank() == 1, "Tensor rank is not 1");
         let raw_data = self.read_raw_data().await?;
         let data_slice: &[A] = bytemuck::cast_slice(&raw_data);
-        Ok(Array1::from_shape_vec(
-            self.shape[0],
-            data_slice.to_vec(),
-        )?)
+        Ok(Array1::from_shape_vec(self.shape[0], data_slice.to_vec())?)
     }
 
     pub async fn to_ndarray_2d<A>(&self) -> Result<Array2<A>>
@@ -722,6 +657,72 @@ impl GpuTensor {
     }
 }
 
+// --- Helper Function ---
+
+/// Converts a CpuTensor (which might be F32, F16, or a quantized wrapper)
+/// into a flat byte vector of the `target_dtype`.
+///
+/// Returns (Bytes, Shape)
+/// Converts an owned CpuTensor into a flat byte vector of the `target_dtype`.
+/// Takes OWNERSHIP of the tensor so it can consume it during conversion/dequantization.
+fn convert_cpu_tensor_to_bytes(
+    tensor: CpuTensor, 
+    target_dtype: DType
+) -> Result<(Vec<u8>, Vec<usize>)> {
+    
+    // 1. Normalize to F32
+    // We match on `tensor` directly. Since `tensor` is owned, `t` becomes owned.
+    // This allows `t.to_array*_f32()` to consume `t`.
+    let (f32_data, shape) = match tensor {
+        t if t.shape().len() == 2 => {
+            let shape = t.shape().to_vec();
+            // to_array2_f32 consumes self
+            let arr = t.to_array2_f32()?; 
+            (
+                arr.as_slice().ok_or_else(|| anyhow!("Non-contiguous array"))?.to_vec(), 
+                shape
+            )
+        },
+        t if t.shape().len() == 1 => {
+             let shape = t.shape().to_vec();
+            let arr = t.to_array1_f32()?;
+            (arr.to_vec(), shape)
+        },
+        t if t.shape().len() == 3 => {
+             let shape = t.shape().to_vec();
+             let arr = t.to_array3_f32()?;
+             (
+                 arr.as_slice().ok_or_else(|| anyhow!("Non-contiguous array"))?.to_vec(), 
+                 shape
+             )
+        }
+        t => anyhow::bail!("Unsupported tensor rank {} for conversion", t.shape().len()),
+    };
+
+    // 2. Cast F32 data to the Target DType bytes
+    let bytes = match target_dtype {
+        DType::F32 => {
+            bytemuck::cast_slice(&f32_data).to_vec()
+        },
+        DType::F16 => {
+            let f16_data: Vec<u16> = f32_data
+                .iter()
+                .map(|&v| half::f16::from_f32(v).to_bits())
+                .collect();
+            bytemuck::cast_slice(&f16_data).to_vec()
+        },
+        DType::BF16 => {
+            let bf16_data: Vec<u16> = f32_data
+                .iter()
+                .map(|&v| half::bf16::from_f32(v).to_bits())
+                .collect();
+            bytemuck::cast_slice(&bf16_data).to_vec()
+        },
+        _ => anyhow::bail!("Unsupported target dtype {:?} for CPU conversion", target_dtype),
+    };
+
+    Ok((bytes, shape))
+}
 #[cfg(test)]
 mod tests {
     use super::*;

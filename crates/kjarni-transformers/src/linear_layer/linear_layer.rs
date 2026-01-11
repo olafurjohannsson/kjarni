@@ -39,14 +39,14 @@
 //! - [`ModelWeights`] — Loading weights from safetensors/GGUF files.
 //! - [`DType`] — Supported data types.
 
-use crate::cpu::{
+use crate::{cpu::{
     kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
     ops,
-};
+}, tensor::raw_tensor::TensorView};
 
 use crate::gpu_ops::GpuTensor;
 use crate::linear_layer::LinearLayerBuilder;
-use crate::tensor::{DType, QuantizedMatrix, TensorView};
+use crate::tensor::{DType, QuantizedMatrix};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
 use crate::WgpuContext;
@@ -130,6 +130,7 @@ pub enum F32MatmulStrategy {
 ///
 /// - [`LinearData`] — The underlying weight storage enum.
 /// - [`ModelWeights`] — Loading weights from files.
+#[derive(Clone)]
 pub struct LinearLayer {
     /// The weight matrix in one of several supported formats.
     pub data: LinearData,
@@ -159,36 +160,37 @@ pub struct LinearLayer {
 /// assert_eq!(data.dtype(), DType::F32);
 /// ```
 #[allow(non_camel_case_types)]
+#[derive(Clone)]
 pub enum LinearData {
     /// 32-bit IEEE 754 floating point weights.
     ///
     /// Highest precision, largest memory footprint. Use for accuracy-critical
     /// computations or when loading F32 model weights.
-    F32(Array2<f32>),
+    F32(Arc<Array2<f32>>),
 
     /// 16-bit brain floating point weights.
     ///
     /// Same exponent range as F32 with reduced mantissa. Provides 2x memory
     /// savings with minimal quality loss for inference.
-    BF16(Array2<bf16>),
+    BF16(Arc<Array2<bf16>>),
 
     /// 8-bit block-quantized weights (32 elements per block).
     ///
     /// Each block stores 32 int8 values with a shared F16 scale factor.
     /// Provides approximately 4x compression with minimal quality loss.
-    Q8_0(QuantizedMatrix<BlockQ8_0>),
+    Q8_0(Arc<QuantizedMatrix<BlockQ8_0>>),
 
     /// 4-bit block-quantized weights with K-quants (256 elements per block).
     ///
     /// Each block stores 256 4-bit values with multiple scale factors.
     /// Provides approximately 8x compression, suitable for large models
     /// on limited memory.
-    Q4_K(QuantizedMatrix<BlockQ4_K>),
+    Q4_K(Arc<QuantizedMatrix<BlockQ4_K>>),
 
     /// 6-bit block-quantized weights with K-quants.
     ///
     /// Higher precision than Q4_K with approximately 5x compression.
-    Q6_K(QuantizedMatrix<BlockQ6_K>),
+    Q6_K(Arc<QuantizedMatrix<BlockQ6_K>>),
 }
 
 impl LinearData {
@@ -265,7 +267,15 @@ impl LinearLayer {
     /// ```
     pub fn new_f32(weights: Array2<f32>, bias: impl Into<Option<Array1<f32>>>) -> Self {
         Self {
-            data: LinearData::F32(weights),
+            data: LinearData::F32(Arc::new(weights)),
+            bias: bias.into(),
+            f32_strategy: F32MatmulStrategy::CustomSimd,
+        }
+    }
+
+    pub fn from_arc_f32(weights: Arc<Array2<f32>>, bias: impl Into<Option<Array1<f32>>>) -> Self {
+        Self {
+            data: LinearData::F32(weights), // No copy!
             bias: bias.into(),
             f32_strategy: F32MatmulStrategy::CustomSimd,
         }
@@ -290,7 +300,15 @@ impl LinearLayer {
     /// ```
     pub fn new_bf16(weights: Array2<bf16>, bias: impl Into<Option<Array1<f32>>>) -> Self {
         Self {
-            data: LinearData::BF16(weights),
+            data: LinearData::BF16(Arc::new(weights)),
+            bias: bias.into(),
+            f32_strategy: F32MatmulStrategy::CustomSimd,
+        }
+    }
+
+    pub fn from_arc_bf16(weights: Arc<Array2<bf16>>, bias: impl Into<Option<Array1<f32>>>) -> Self {
+        Self {
+            data: LinearData::BF16(weights), // No copy!
             bias: bias.into(),
             f32_strategy: F32MatmulStrategy::CustomSimd,
         }
@@ -372,12 +390,12 @@ impl LinearLayer {
                 let w_f32 = w.mapv(|v| v.to_f32());
                 let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
                 let shape = [w.shape()[0], w.shape()[1]];
-                LinearData::Q8_0(QuantizedMatrix { blocks, shape })
+                LinearData::Q8_0(Arc::new(QuantizedMatrix { blocks, shape }))
             }
             (LinearData::F32(w), DType::Q8_0) => {
                 let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(w)?;
                 let shape = [w.shape()[0], w.shape()[1]];
-                LinearData::Q8_0(QuantizedMatrix { blocks, shape })
+                LinearData::Q8_0(Arc::new(QuantizedMatrix { blocks, shape }))
             }
             (d, t) => {
                 return Err(anyhow!(

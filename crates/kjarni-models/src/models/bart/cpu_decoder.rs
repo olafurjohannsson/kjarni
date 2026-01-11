@@ -42,7 +42,7 @@ impl BartCpuDecoder {
 
         // 1. Word Embeddings (Logic preserved: Force dequantize to F32)
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(word_embeddings);
+        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
 
         // 2. Decoder-Specific Embeddings (Preserving BART-specific naming logic)
         let embeddings = Embeddings::new(

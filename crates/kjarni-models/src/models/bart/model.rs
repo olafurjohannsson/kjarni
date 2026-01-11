@@ -54,7 +54,7 @@ impl EncoderDecoderModelFactory for BartModel {
     type Config = BartConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        let mut config = BartConfig::from_json(&weights.config_json)?;
+        let mut config = BartConfig::from_json(&weights.config_json())?;
         // Helper to find shared key, same as before
         if config.shared_embedding_key.is_none() {
             let key = if weights.contains("model.shared.weight") {

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // --- External Crates ---
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig};
@@ -20,16 +20,16 @@ use tokenizers::Tokenizer;
 
 // --- Workspace Crates ---
 use kjarni_transformers::{
+    WgpuContext,
     decoder::prelude::*,
-    gpu_ops::{primitives::linear::GpuLinearLayer, GpuFrameContext, GpuTensor},
+    gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
     linear_layer::LinearLayer,
     models::{
-        base::AutoregressiveLoop, download_model_files, LanguageModel, ModelArchitecture, ModelType,
+        LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
-    tensor::{DType, TensorView},
+    tensor::DType,
     weights::ModelWeights,
-    WgpuContext,
 };
 
 // --- Crate-Specific ---
@@ -106,7 +106,12 @@ impl Gpt2Model {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        download_model_files(&model_dir, &model_type.info().paths, kjarni_transformers::models::registry::WeightsFormat::SafeTensors).await?;
+        download_model_files(
+            &model_dir,
+            &model_type.info().paths,
+            kjarni_transformers::models::registry::WeightsFormat::SafeTensors,
+        )
+        .await?;
         Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 
@@ -123,7 +128,7 @@ impl Gpt2Model {
             Tokenizer::from_file(model_path.join("tokenizer.json")).map_err(|e| anyhow!(e))?;
 
         let config: Arc<Gpt2Config> = {
-            let mut cfg = serde_json::from_str::<Gpt2Config>(&weights.config_json)?;
+            let mut cfg = serde_json::from_str::<Gpt2Config>(&weights.config_json())?;
             if model_type == ModelType::DistilGpt2 {
                 // Special handling for DistilGPT2's unique weight naming convention.
                 cfg.set_model_type("distilgpt2".to_string());
@@ -284,7 +289,9 @@ impl CpuDecoderOps for Gpt2Model {
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden) = hidden_states.dim();
-        let hidden_2d = hidden_states.view().into_shape_with_order((batch * seq, hidden))?;
+        let hidden_2d = hidden_states
+            .view()
+            .into_shape_with_order((batch * seq, hidden))?;
         let logits_2d = self.lm_head.matmul(&hidden_2d);
 
         logits_2d
@@ -295,6 +302,10 @@ impl CpuDecoderOps for Gpt2Model {
     fn get_attention_mask(&self, seq_len: usize, past_len: usize) -> Result<Array2<f32>> {
         let total_len = seq_len + past_len;
         Ok(Array2::ones((1, total_len)))
+    }
+
+    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
+        unimplemented!()
     }
 }
 
@@ -317,20 +328,20 @@ impl GpuDecoderOps for Gpt2Model {
         let mask_data: Vec<f32> = (0..max_len)
             .map(|i| if i < seq_len { 1.0 } else { 0.0 })
             .collect();
-
+        GpuTensor::create(ctx.context, &mask_data, vec![1, max_len], "AttentionMask")
         // Upload using Cow::Owned to fix the type mismatch error
-        let tensor = GpuTensor::from_raw(
-            ctx.context,
-            &TensorView {
-                bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
-                shape: vec![1, max_len],
-                dtype: DType::F32,
-                name: "AttentionMask".to_string(),
-            },
-            "AttentionMask",
-        )?;
+        // let tensor = GpuTensor::from_raw(
+        //     ctx.context,
+        //     &TensorView {
+        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
+        //         shape: vec![1, max_len],
+        //         dtype: DType::F32,
+        //         name: "AttentionMask".to_string(),
+        //     },
+        //     "AttentionMask",
+        // )?;
 
-        Ok(tensor)
+        // Ok(tensor)
     }
 
     fn project_to_logits(
@@ -398,28 +409,30 @@ mod tests {
     #[tokio::test]
     async fn test_distilgpt2_architectural_properties() -> Result<()> {
         // 1. Arrange: Load the model.
-        let model = load_distilgpt2_for_test().await?;
-        let config = model.concrete_config();
+        {
+            let model = load_distilgpt2_for_test().await?;
+            let config = model.concrete_config();
 
-        // 2. Assert: Check architectural values directly from the config struct.
-        assert_eq!(config.vocab_size, 50257);
-        assert_eq!(config.n_embd, 768); // hidden size
-        assert_eq!(config.n_layer, 6);
-        assert_eq!(config.n_head, 12);
-        assert_eq!(config.n_ctx, 1024); // max_position_embeddings
+            // 2. Assert: Check architectural values directly from the config struct.
+            assert_eq!(config.vocab_size, 50257);
+            assert_eq!(config.n_embd, 768); // hidden size
+            assert_eq!(config.n_layer, 6);
+            assert_eq!(config.n_head, 12);
+            assert_eq!(config.n_ctx, 1024); // max_position_embeddings
 
-        // 3. Assert: Check that the trait implementations correctly expose these values.
-        assert_eq!(model.vocab_size(), 50257);
-        assert_eq!(model.hidden_size(), 768);
-        assert_eq!(model.num_layers(), 6);
-        assert_eq!(model.num_heads(), 12);
-        assert_eq!(model.max_length(), 1024);
+            // 3. Assert: Check that the trait implementations correctly expose these values.
+            assert_eq!(model.vocab_size(), 50257);
+            assert_eq!(model.hidden_size(), 768);
+            assert_eq!(model.num_layers(), 6);
+            assert_eq!(model.num_heads(), 12);
+            assert_eq!(model.max_length(), 1024);
 
-        // Check token IDs. GPT-2 uses the same ID for BOS, EOS, and PAD.
-        assert_eq!(model.bos_token_id(), Some(50256));
-        assert_eq!(model.eos_token_id(), Some(50256));
-        assert_eq!(model.pad_token_id(), Some(50256));
-
+            // Check token IDs. GPT-2 uses the same ID for BOS, EOS, and PAD.
+            assert_eq!(model.bos_token_id(), Some(50256));
+            assert_eq!(model.eos_token_id(), Some(50256));
+            assert_eq!(model.pad_token_id(), Some(50256));
+        }
+        kjarni_transformers::weights::clear_mmap_cache();
         Ok(())
     }
 
@@ -446,19 +459,21 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model =
-            Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
+        {
+            let gpt2_model =
+                Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
+            let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
-        // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-        let generated_text = generator.generate(prompt, &config, None).await?;
+            // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
+            let generated_text = generator.generate(prompt, &config, None).await?;
 
-        // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-        //    We trim both strings to avoid any potential whitespace differences at the end.
-        let concat_prompt = prompt.to_string() + "" + &generated_text;
-        assert_eq!(concat_prompt.trim(), expected_output.trim());
-
+            // 4. Assert that the generated output is bit-for-bit identical to the golden value.
+            //    We trim both strings to avoid any potential whitespace differences at the end.
+            let concat_prompt = prompt.to_string() + "" + &generated_text;
+            assert_eq!(concat_prompt.trim(), expected_output.trim());
+        }
+        kjarni_transformers::weights::clear_mmap_cache();
         Ok(())
     }
 
@@ -482,24 +497,26 @@ mod tests {
 
         // 2. Load model and create the generator.
         //    We run on CPU to match the Python script's environment.
-        let gpt2_model =
-            Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
+        {
+            let gpt2_model =
+                Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
-        let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
+            let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
-        // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
-        let generated_text = generator.generate(prompt, &config, None).await?;
+            // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
+            let generated_text = generator.generate(prompt, &config, None).await?;
 
-        let ctx = WgpuContext::new().await?;
-        let gpt2_model_2 =
-            Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
-        let generator_2 = DecoderGenerator::new(Arc::new(gpt2_model_2))?;
-        let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
+            let ctx = WgpuContext::new().await?;
+            let gpt2_model_2 =
+                Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
+            let generator_2 = DecoderGenerator::new(Arc::new(gpt2_model_2))?;
+            let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
 
-        // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-        //    We trim both strings to avoid any potential whitespace differences at the end.
-        assert_eq!(generated_text.trim(), generated_text_2.trim());
-
+            // 4. Assert that the generated output is bit-for-bit identical to the golden value.
+            //    We trim both strings to avoid any potential whitespace differences at the end.
+            assert_eq!(generated_text.trim(), generated_text_2.trim());
+        }
+        kjarni_transformers::weights::clear_mmap_cache();
         Ok(())
     }
 }

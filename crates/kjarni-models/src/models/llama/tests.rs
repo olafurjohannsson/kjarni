@@ -39,7 +39,9 @@ async fn load_llama_8b_for_test() -> Result<LlamaModel> {
 //
 #[tokio::test]
 async fn test_llama3_8b_architectural_properties() -> Result<()> {
-    if std::path::Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-8B-Instruct").exists() == false {
+    if std::path::Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-8B-Instruct").exists()
+        == false
+    {
         log::warn!("Skipping Llama-3.2-8B test since model files not found in cache.");
         return Ok(());
     }
@@ -189,31 +191,33 @@ fn test_llama_config_parsing_1b() {
 #[tokio::test]
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     // 1. Arrange: Load the model.
-    let model = load_llama_for_test().await?;
-    let config = model.config();
+    {
+        let model = load_llama_for_test().await?;
+        let config = model.config();
 
-    // 2. Assert: Check architectural values directly from the config struct.
-    assert_eq!(config.vocab_size, 128256);
-    assert_eq!(config.hidden_size, 2048);
-    assert_eq!(config.num_hidden_layers, 16);
-    assert_eq!(config.num_attention_heads, 32);
-    assert_eq!(config.num_key_value_heads, 8); // GQA
-    assert_eq!(config.max_position_embeddings, 131072);
-    assert_eq!(config.rope_theta, 500000.0);
+        // 2. Assert: Check architectural values directly from the config struct.
+        assert_eq!(config.vocab_size, 128256);
+        assert_eq!(config.hidden_size, 2048);
+        assert_eq!(config.num_hidden_layers, 16);
+        assert_eq!(config.num_attention_heads, 32);
+        assert_eq!(config.num_key_value_heads, 8); // GQA
+        assert_eq!(config.max_position_embeddings, 131072);
+        assert_eq!(config.rope_theta, 500000.0);
 
-    // 3. Assert: Check that the trait implementations correctly expose these values.
-    assert_eq!(model.vocab_size(), 128256);
-    assert_eq!(model.hidden_size(), 2048);
-    assert_eq!(model.num_layers(), 16);
-    assert_eq!(model.num_heads(), 32);
-    assert_eq!(model.max_length(), 131072);
+        // 3. Assert: Check that the trait implementations correctly expose these values.
+        assert_eq!(model.vocab_size(), 128256);
+        assert_eq!(model.hidden_size(), 2048);
+        assert_eq!(model.num_layers(), 16);
+        assert_eq!(model.num_heads(), 32);
+        assert_eq!(model.max_length(), 131072);
 
-    // Check token IDs.
-    assert_eq!(model.bos_token_id(), Some(128000));
-    assert_eq!(model.eos_token_id(), Some(128001));
-    // Llama often doesn't define a pad token, so this should be None.
-    assert_eq!(model.pad_token_id(), None);
-
+        // Check token IDs.
+        assert_eq!(model.bos_token_id(), Some(128000));
+        assert_eq!(model.eos_token_id(), Some(128001));
+        // Llama often doesn't define a pad token, so this should be None.
+        assert_eq!(model.pad_token_id(), None);
+    }
+    kjarni_transformers::weights::clear_mmap_cache();
     Ok(())
 }
 
@@ -239,33 +243,34 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
         ..Default::default()
     };
     // decoder_layer::tests::test_decoder_layer_with_rope_and_gqa
+    {
+        // 2. Load model and create the generator.
+        let llama_model = LlamaModel::from_pretrained(
+            Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+            Device::Cpu,
+            None,
+            None,
+            None,
+        )?;
 
-    // 2. Load model and create the generator.
-    let llama_model = LlamaModel::from_pretrained(
-        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
-        Device::Cpu,
-        None,
-        None,
-        None,
-    )?;
+        let llama_gpu = LlamaModel::from_pretrained(
+            Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+            Device::Wgpu,
+            Some(WgpuContext::new().await?),
+            None,
+            None,
+        )?;
+        let generator_gpu = DecoderGenerator::new(Arc::new(llama_gpu))?;
+        let generated_text_gpu = generator_gpu.generate(prompt, &config, None).await?;
+        let concat_prompt_gpu = prompt.to_string() + "" + &generated_text_gpu;
+        assert_eq!(concat_prompt_gpu.trim(), expected_output.trim());
 
-    let llama_gpu = LlamaModel::from_pretrained(
-        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
-        Device::Wgpu,
-        Some(WgpuContext::new().await?),
-        None,
-        None,
-    )?;
-    let generator_gpu = DecoderGenerator::new(Arc::new(llama_gpu))?;
-    let generated_text_gpu = generator_gpu.generate(prompt, &config, None).await?;
-    let concat_prompt_gpu = prompt.to_string() + "" + &generated_text_gpu;
-    assert_eq!(concat_prompt_gpu.trim(), expected_output.trim());
+        let generator = DecoderGenerator::new(Arc::new(llama_model))?;
+        let generated_text = generator.generate(prompt, &config, None).await?;
 
-    let generator = DecoderGenerator::new(Arc::new(llama_model))?;
-    let generated_text = generator.generate(prompt, &config, None).await?;
-
-    let concat_prompt = prompt.to_string() + "" + &generated_text;
-    assert_eq!(concat_prompt.trim(), expected_output.trim());
-
+        let concat_prompt = prompt.to_string() + "" + &generated_text;
+        assert_eq!(concat_prompt.trim(), expected_output.trim());
+    }
+    kjarni_transformers::weights::clear_mmap_cache();
     Ok(())
 }

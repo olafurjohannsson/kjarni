@@ -39,8 +39,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use kjarni_transformers::ChatTemplate;
 use kjarni_transformers::chat::llama3::Llama3ChatTemplate;
 use kjarni_transformers::common::{
     DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
@@ -48,7 +49,6 @@ use kjarni_transformers::common::{
 use kjarni_transformers::pipeline::DecoderModelFactory;
 use kjarni_transformers::rope::loader::LoadedRoPE;
 use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
-use kjarni_transformers::ChatTemplate;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
@@ -59,17 +59,19 @@ use crate::models::llama::{
 
 // Workspace imports
 use kjarni_transformers::{
+    // Utilities
+    WgpuContext,
     cache::{Cache, CpuKVCache, GpuKVCache},
     decoder::prelude::*,
     embeddings::{EmbeddingConfig, LoadedEmbeddings},
     execution::ExecutionPlan,
-    gpu_ops::{blocks::rope::GpuRoPE, GpuFrameContext, GpuTensor},
+    gpu_ops::{GpuFrameContext, GpuTensor, blocks::rope::GpuRoPE},
     // Cache
     lm_head::{LMHeadConfig, LoadedLMHead},
     // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     // Embeddings
-    models::{download_model_files, LanguageModel, ModelArchitecture, ModelType},
+    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
     // Execution planning
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
     // GPU operations
@@ -77,12 +79,10 @@ use kjarni_transformers::{
     // LM Head
     rope::RoPE,
     // Model infrastructure
-    tensor::{DType, TensorView},
+    tensor::DType,
     traits::{InferenceModel, ModelConfig},
     // Pipeline
     weights::ModelWeights,
-    // Utilities
-    WgpuContext,
 };
 
 // =============================================================================
@@ -129,7 +129,7 @@ impl DecoderModelFactory for LlamaModel {
     type Config = LlamaConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        LlamaConfig::from_loader(&*weights.loader, Some(&weights.config_json))
+        LlamaConfig::from_loader(&*weights.loader(), Some(&weights.config_json()))
     }
 
     fn build_backends(
@@ -151,8 +151,9 @@ impl DecoderModelFactory for LlamaModel {
                 rope.cpu.clone(),
                 load_config.target_dtype,
             )?) as Box<dyn CpuDecoder>);
-        }
-        else if let Some(ctx) = context && device.is_gpu() {
+        } else if let Some(ctx) = context
+            && device.is_gpu()
+        {
             gpu = Some(Box::new(LlamaGpuDecoder::new(
                 ctx,
                 weights,
@@ -200,7 +201,7 @@ impl LlamaModel {
             context,
             load_config,
         )
-            .await
+        .await
     }
     pub fn from_pretrained(
         model_path: &Path,
@@ -278,7 +279,8 @@ impl InferenceModel for LlamaModel {
 // LanguageModel Implementation
 // =============================================================================
 
-impl LanguageModel for LlamaModel { // TODO: extract to builder
+impl LanguageModel for LlamaModel {
+    // TODO: extract to builder
     fn new_cache(
         &self,
         batch_size: usize,
@@ -288,7 +290,6 @@ impl LanguageModel for LlamaModel { // TODO: extract to builder
         let meta = self.config.metadata();
         let head_dim = meta.head_dim;
 
-        
         let effective_max_len = self.pipeline.max_sequence_length().unwrap_or(max_len);
         let effective_batch_size = self.pipeline.max_batch_size().unwrap_or(batch_size);
 
@@ -398,6 +399,12 @@ impl CpuDecoderOps for LlamaModel {
         ))
         // Ok(kjarni_transformers::utils::create_causal_mask(seq_len, _past_len))
     }
+    // CpuDecoderOps (for Autoregressive Decoders)
+    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
+        // Hardcode None because Llama/GPT don't use it
+        let token_arr = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
+        self.pipeline.embeddings().embed_cpu(&token_arr, None, pos)
+    }
 }
 
 // =============================================================================
@@ -423,16 +430,20 @@ impl GpuDecoderOps for LlamaModel {
             .map(|i| if i < seq_len { 1.0 } else { 0.0 })
             .collect();
 
-        GpuTensor::from_raw(
-            ctx.context,
-            &TensorView {
-                bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
-                shape: vec![1, max_len],
-                dtype: DType::F32,
-                name: "AttentionMask".to_string(),
-            },
-            "AttentionMask",
-        )
+        let shape = vec![1, max_len];
+
+        GpuTensor::create(ctx.context, &mask_data, shape, "AttentionMask")
+
+        // GpuTensor::from_raw(
+        //     ctx.context,
+        //     &TensorView {
+        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
+        //         shape: vec![1, max_len],
+        //         dtype: DType::F32,
+        //         name: "AttentionMask".to_string(),
+        //     },
+        //     "AttentionMask",
+        // )
     }
 
     fn project_to_logits(

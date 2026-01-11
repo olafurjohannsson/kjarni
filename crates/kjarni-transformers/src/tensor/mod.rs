@@ -8,7 +8,7 @@ pub mod dtype;
 pub mod raw_tensor;
 
 pub use dtype::DType;
-pub use raw_tensor::TensorView;
+
 
 use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, dequantize_q8_0_block},
@@ -101,11 +101,11 @@ impl CpuTensor {
     pub fn to_array2_f32(self) -> Result<Array2<f32>> {
         match self {
             CpuTensor::F32(arr) => {
-                let shape = arr.shape();
+                let rows = arr.shape()[0];
+                let cols = arr.shape()[1];
                 // Use only the first two dimensions, effectively squeezing [2048, 128256, 1] into [2048, 128256]
                 Ok(arr
-                    .clone()
-                    .into_shape_with_order((shape[0], shape[1]))?
+                    .into_shape_with_order((rows, cols))?
                     .into_dimensionality::<Ix2>()?)
             }
             CpuTensor::F16(arr) => {

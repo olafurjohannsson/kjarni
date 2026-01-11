@@ -18,13 +18,13 @@
 
 use crate::{
     WgpuContext,
-    embeddings::Embeddings,
+    embeddings::{EmbeddingData, Embeddings},
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
     },
     linear_layer::LinearLayer,
-    models::base::{ModelInput},
+    models::base::ModelInput,
     tensor::DType,
     weights::ModelWeights,
 };
@@ -274,11 +274,14 @@ impl LoadedEmbeddings {
 
     /// Returns the raw word embedding weights for CPU weight sharing.
     pub fn word_embeddings_cpu(&self) -> Option<LinearLayer> {
-        // This assumes your Embeddings struct has a public/internal word_embeddings field
         self.cpu.as_ref().and_then(|e| match &e.word_embeddings {
-            crate::embeddings::EmbeddingData::F32(w) => Some(LinearLayer::new_f32(w.clone(), None)),
-            crate::embeddings::EmbeddingData::BF16(w) => {
-                Some(LinearLayer::new_bf16(w.clone(), None))
+            EmbeddingData::F32(arc_w) => {
+                // Use the new LinearLayer::from_arc_f32
+                Some(LinearLayer::from_arc_f32(arc_w.clone(), None))
+            },
+            EmbeddingData::BF16(arc_w) => {
+                // You need to add LinearLayer::from_arc_bf16 too!
+                Some(LinearLayer::from_arc_bf16(arc_w.clone(), None))
             }
         })
     }
@@ -312,6 +315,37 @@ impl LoadedEmbeddings {
     pub fn is_gpu_loaded(&self) -> bool {
         self.gpu_weights.is_some()
     }
+
+
+    /// CPU-Native embedding lookup.
+    /// Returns Array3<f32> (Hidden States) for pure CPU execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_ids` - The token IDs [batch, seq_len]
+    /// * `token_type_ids` - Optional token type IDs [batch, seq_len] (e.g., for BERT)
+    /// * `position_offset` - The starting position for positional embeddings
+    ///
+    pub fn embed_cpu(
+        &self, 
+        token_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+        position_offset: usize
+    ) -> Result<ndarray::Array3<f32>> {
+        let cpu_layer = self.cpu.as_ref().ok_or_else(|| 
+            anyhow::anyhow!("Cannot run embed_cpu: Embeddings are not loaded on CPU")
+        )?;
+
+        // Forward pass on CPU
+        // This delegates directly to the underlying Embeddings logic
+        Ok(cpu_layer.forward(
+            token_ids,
+            token_type_ids,
+            position_offset + self.config.position_offset,
+            self.config.scale_embeddings,
+        ))
+    }
+
     /// The "Universal" embedding function.
     ///
     /// Automatically handles data movement and compute placement.

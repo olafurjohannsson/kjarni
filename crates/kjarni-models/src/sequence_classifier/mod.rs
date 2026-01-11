@@ -42,7 +42,7 @@ mod tests;
 pub use configs::*;
 pub mod zero_shot;
 use crate::models::bart::config::BartConfig;
-use crate::sentence_encoder::{BertConfig, DistilBertConfig};
+use crate::{BertConfig, DistilBertConfig};
 
 // =============================================================================
 // Generic Sequence Classifier
@@ -289,25 +289,25 @@ impl SequenceClassifier {
             ModelArchitecture::Bert => {
                 // Check if it's DistilBERT or standard BERT/RoBERTa
                 if weights
-                    .config_json
+                    .config_json()
                     .contains("\"model_type\": \"distilbert\"")
                     || weights
-                        .config_json
+                        .config_json()
                         .contains("\"model_type\":\"distilbert\"")
                 {
-                    Ok(Arc::new(DistilBertConfig::from_json(&weights.config_json)?))
-                } else if weights.config_json.contains("\"model_type\": \"roberta\"")
-                    || weights.config_json.contains("\"model_type\":\"roberta\"")
+                    Ok(Arc::new(DistilBertConfig::from_json(&weights.config_json())?))
+                } else if weights.config_json().contains("\"model_type\": \"roberta\"")
+                    || weights.config_json().contains("\"model_type\":\"roberta\"")
                 {
-                    Ok(Arc::new(RobertaConfig::from_json(&weights.config_json)?))
+                    Ok(Arc::new(RobertaConfig::from_json(&weights.config_json())?))
                 } else {
-                    Ok(Arc::new(BertConfig::from_json(&weights.config_json)?))
+                    Ok(Arc::new(BertConfig::from_json(&weights.config_json())?))
                 }
             }
             ModelArchitecture::Bart => {
                 // BART zero shot is special, it ignores the decoder
-                if weights.config_json.contains("\"model_type\": \"bart\"") {
-                    Ok(Arc::new(BartConfig::from_json(&weights.config_json)?))
+                if weights.config_json().contains("\"model_type\": \"bart\"") {
+                    Ok(Arc::new(BartConfig::from_json(&weights.config_json())?))
                 } else {
                     unimplemented!()
                 }

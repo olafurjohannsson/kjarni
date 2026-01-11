@@ -27,7 +27,7 @@ use kjarni_transformers::{
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
     rope::loader::LoadedRoPE,
-    tensor::{DType, TensorView},
+    tensor::{DType},
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
     ChatTemplate,
@@ -48,7 +48,7 @@ impl DecoderModelFactory for QwenModel {
     type Config = QwenConfig;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        QwenConfig::from_loader(&*weights.loader, Some(&weights.config_json))
+        QwenConfig::from_loader(&*weights.loader(), Some(&weights.config_json()))
     }
 
     fn build_backends(
@@ -312,6 +312,9 @@ impl CpuDecoderOps for QwenModel {
         //     1, seq,
         // ))
     }
+    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
+        unimplemented!()
+    }
 }
 
 impl GpuDecoderOps for QwenModel {
@@ -325,16 +328,22 @@ impl GpuDecoderOps for QwenModel {
         max: usize,
     ) -> Result<GpuTensor> {
         let mask: Vec<f32> = (0..max).map(|i| if i < seq { 1.0 } else { 0.0 }).collect();
-        GpuTensor::from_raw(
+        GpuTensor::create(
             ctx.context,
-            &TensorView {
-                bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask).to_vec()),
-                shape: vec![1, max],
-                dtype: DType::F32,
-                name: "AttentionMask".to_string(),
-            },
-            "AttentionMask",
+            &mask,
+            vec![1, max],
+            "AttentionMask"
         )
+        // GpuTensor::from_raw(
+        //     ctx.context,
+        //     &TensorView {
+        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask).to_vec()),
+        //         shape: vec![1, max],
+        //         dtype: DType::F32,
+        //         name: "AttentionMask".to_string(),
+        //     },
+        //     "AttentionMask",
+        // )
     }
     fn project_to_logits(&self, ctx: &mut GpuFrameContext, h: &GpuTensor) -> Result<GpuTensor> {
         let lm = self.pipeline.lm_head();

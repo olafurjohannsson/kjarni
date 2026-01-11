@@ -51,7 +51,7 @@ impl EncoderDecoderModelFactory for T5Model {
     type Config = T5Config;
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
-        let config: T5Config = serde_json::from_str(&weights.config_json)?;
+        let config: T5Config = serde_json::from_str(&weights.config_json())?;
         Ok(Arc::new(config))
     }
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use half::bf16;
 use ndarray::{arr1, arr2, Array1, Array2};
@@ -81,13 +83,13 @@ fn test_f32_strategies_consistency() {
     let weights_transposed = weights_standard.t().to_owned(); // [In, Out]
 
     let layer_simd = LinearLayer {
-        data: LinearData::F32(weights_standard),
+        data: LinearData::F32(Arc::new(weights_standard)),
         bias: None,
         f32_strategy: F32MatmulStrategy::CustomSimd,
     };
 
     let layer_faer = LinearLayer {
-        data: LinearData::F32(weights_transposed),
+        data: LinearData::F32(Arc::new(weights_transposed)),
         bias: None,
         f32_strategy: F32MatmulStrategy::Faer,
     };

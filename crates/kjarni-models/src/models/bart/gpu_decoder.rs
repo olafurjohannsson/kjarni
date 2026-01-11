@@ -10,8 +10,8 @@ use kjarni_transformers::encoder_decoder::traits::{
 
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
-use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
     GpuNormalization, GpuNormalizationWeights,
@@ -33,7 +33,7 @@ pub struct BartGpuDecoder {
 
     // Unified Embeddings (CPU/GPU/Hybrid)
     pub embeddings: LoadedEmbeddings,
-    
+
     // Decoder-specific Norm
     pub embed_layer_norm: GpuNormalization,
     pub embed_ln_weights: GpuNormalizationWeights,
@@ -55,25 +55,6 @@ impl BartGpuDecoder {
         let layout = config.layout();
         let target_dt = load_config.target_dtype;
 
-        // --- 1. Embeddings - MANUALLY load with decoder-specific paths (Preserved Logic) ---
-        // let word_emb = GpuTensor::from_raw(
-        //     context,
-        //     &weights.get_raw(&layout.token_embedding)?,
-        //     "decoder_word_emb",
-        // )?;
-
-        // // BART uses a specific separate position table for the decoder
-        // let pos_emb = GpuTensor::from_raw(
-        //     context,
-        //     &weights.get_raw("model.decoder.embed_positions.weight")?,
-        //     "decoder_pos_emb",
-        // )?;
-
-        // let embedding_weights = GpuEmbeddingWeights {
-        //     word_embeddings: word_emb,
-        //     position_embeddings: Some(pos_emb),
-        //     token_type_embeddings: None,
-        // };
         let embed_layer_norm =
             GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
         let embedding_config = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
@@ -97,8 +78,8 @@ impl BartGpuDecoder {
         let norm_b_name = "model.decoder.layernorm_embedding.bias";
 
         let embed_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-            GpuTensor::from_raw(context, &weights.get_raw(norm_w_name)?, norm_w_name)?,
-            GpuTensor::from_raw(context, &weights.get_raw(norm_b_name)?, norm_b_name)?,
+            GpuTensor::from_model_weights(context, weights, norm_w_name, None, norm_w_name)?,
+            GpuTensor::from_model_weights(context, weights, norm_b_name, None, norm_b_name)?,
         )?);
 
         // --- 3. Decoder Layers Loop ---
@@ -234,8 +215,7 @@ impl BartGpuDecoder {
             layers.push(layer);
         }
 
-
-      Ok(Self {
+        Ok(Self {
             context: context.clone(),
             config,
             embeddings,
@@ -256,11 +236,11 @@ impl GpuCrossDecoder for BartGpuDecoder {
         position_offset: usize,
     ) -> Result<GpuTensor> {
         self.embeddings.embed(
-            encoder, 
-            pool, 
-            input, 
+            encoder,
+            pool,
+            input,
             None, // Decoders usually don't use token_type_ids
-            position_offset
+            position_offset,
         )
     }
     fn layers(&self) -> &Vec<GpuCrossDecoderLayer> {
@@ -284,7 +264,7 @@ impl GpuCrossDecoder for BartGpuDecoder {
         encoder: &mut CommandEncoder,
         pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
-        encoder_hidden_states: &GpuTensor,  // Fallback if no cross_kv_cache
+        encoder_hidden_states: &GpuTensor, // Fallback if no cross_kv_cache
         decoder_attention_mask: &GpuTensor,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
@@ -308,13 +288,17 @@ impl GpuCrossDecoder for BartGpuDecoder {
                 &cache.0[i]
             } else {
                 // Slow path: compute on the fly
-                cross_kv_for_layer = layer.precompute_cross_kv(encoder, encoder_hidden_states, pool);
+                cross_kv_for_layer =
+                    layer.precompute_cross_kv(encoder, encoder_hidden_states, pool);
                 &cross_kv_for_layer
             };
 
             // Get self-attention cache for this layer
             let cached_kv = gpu_cache.as_ref().and_then(|c| c.get_layer_tensors(i));
-            let cache_len = gpu_cache.as_ref().map(|c| c.get_seq_length()).unwrap_or(position_offset);
+            let cache_len = gpu_cache
+                .as_ref()
+                .map(|c| c.get_seq_length())
+                .unwrap_or(position_offset);
 
             // Forward through layer
             let (new_hidden, new_k, new_v) = layer.forward(
@@ -322,7 +306,7 @@ impl GpuCrossDecoder for BartGpuDecoder {
                 &current_hidden,
                 cross_kv_ref,
                 decoder_attention_mask,
-                None,  // encoder_mask - usually None for BART
+                None, // encoder_mask - usually None for BART
                 cached_kv,
                 cache_len,
                 pool,
@@ -380,8 +364,6 @@ impl GpuCrossDecoder for BartGpuDecoder {
     //             position_offset,
     //             pool,
     //         )?;
-        
-            
 
     //         current_hidden = new_hidden;
     //         new_self_attn_kvs.push((new_k, new_v));

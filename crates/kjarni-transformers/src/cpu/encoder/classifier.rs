@@ -123,7 +123,7 @@ impl CpuSequenceClassificationHead {
         load_config: &ModelLoadConfig,
         labels: Option<Vec<String>>,
     ) -> Result<Self> {
-        let pooling_strategy = if weights.config_json.contains("\"model_type\": \"bart\"") {
+        let pooling_strategy = if weights.config_json().contains("\"model_type\": \"bart\"") {
             // BART for classification uses the EOS token, which is the last token.
             PoolingStrategy::LastToken
         } else {

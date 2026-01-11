@@ -194,10 +194,10 @@ mod sentence_encoder_loading_tests {
         // Try loading as MiniLM (which uses BERT architecture)
         let encoder = SentenceEncoder::from_pretrained(
             dir.path(),
-            ModelType::MiniLML6V2,
             Device::Cpu,
             None,
             None,
+            Some(ModelType::MiniLML6V2),
         );
 
         assert!(

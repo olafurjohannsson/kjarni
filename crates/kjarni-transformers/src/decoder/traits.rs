@@ -188,6 +188,23 @@ pub trait CpuDecoder: Send + Sync {
 
     fn num_layers(&self) -> usize;
 
+    fn forward_new(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
+        self.forward_layers(
+            &hidden_states,
+            attention_mask,
+            position_offset,
+            cache,
+            0,
+            self.num_layers(),
+        )
+    }
+
     fn forward(
         &self,
         input: ModelInput<'_>,
@@ -223,6 +240,8 @@ pub trait CpuDecoderOps: Send + Sync {
     /// Generates the attention mask on the CPU.
     /// Allows models to implement Sliding Window or Alibi logic.
     fn get_attention_mask(&self, seq_len: usize, past_len: usize) -> Result<Array2<f32>>;
+
+    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>>;
 }
 
 /// Logic specific to GPU execution.

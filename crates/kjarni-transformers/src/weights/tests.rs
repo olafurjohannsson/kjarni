@@ -214,7 +214,7 @@ mod loader_tests {
         let weights = ModelWeights::new(Path::new(SAFETENSORS_PATH)).unwrap();
 
         assert!(
-            !weights.config_json.is_empty(),
+            !weights.config_json().is_empty(),
             "Config JSON should not be empty"
         );
 
@@ -252,10 +252,10 @@ mod loader_tests {
         let weights = ModelWeights::new(Path::new(GGUF_PATH)).unwrap();
 
         assert!(
-            !weights.config_json.is_empty(),
+            !weights.config_json().is_empty(),
             "Config JSON should not be empty"
         );
-        println!("GGUF synthesized config:\n{}", weights.config_json);
+        println!("GGUF synthesized config:\n{}", weights.config_json());
 
         // Check key tensors exist (using HF names - loader should translate)
         assert!(

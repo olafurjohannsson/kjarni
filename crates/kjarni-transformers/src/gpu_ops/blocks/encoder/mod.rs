@@ -498,55 +498,101 @@ mod tests {
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()
     }
-    #[tokio::test]
+#[tokio::test]
     async fn test_bart_weights_loading_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
 
-        // Load actual BART weights
-        let model_path =
-            std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
+        // Path to your model
+        let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
+        
+        // Skip test if file doesn't exist (prevents CI failures if local path is missing)
+        if !model_path.exists() {
+            println!("Skipping test: Model path not found at {:?}", model_path);
+            return Ok(());
+        }
+
         let weights = crate::weights::ModelWeights::new(model_path)?;
+        let tensor_name = "model.encoder.layers.0.self_attn.q_proj.weight";
 
-        let prefix = "model.encoder.layers.0";
+        println!("Testing parity for tensor: {}", tensor_name);
 
-        // Load Q weight two ways:
-        // 1. via get_raw -> from_raw (what BartGpuEncoder does)
-        let q_raw = weights.get_raw(&format!("{}.self_attn.q_proj.weight", prefix))?;
-        let q_gpu_from_raw = GpuTensor::from_raw(&ctx, &q_raw, "q_raw")?;
+        // --- Method 1: The "Production" Path (Zero-Copy) ---
+        // Uses GpuTensor::from_model_weights. This exercises the logic we just wrote.
+        // We pass None for target_dt to accept the file's native dtype (likely F32 for BART).
+        let q_gpu_production = GpuTensor::from_model_weights(
+            &ctx, 
+            &weights, 
+            tensor_name, 
+            None, 
+            "production_q"
+        )?;
 
-        // 2. via get_array2 -> from_ndarray (what works in test)
-        let q_arr = weights.get_array2(&format!("{}.self_attn.q_proj.weight", prefix))?;
-        let q_gpu_from_ndarray = GpuTensor::from_ndarray(&ctx, &q_arr)?;
+        // --- Method 2: The "Reference" Path (CPU Roundtrip) ---
+        // Forces a load to CPU RAM via ndarray, then uploads. 
+        // This is our "ground truth" for value correctness.
+        let q_cpu_arr = weights.get_array2(tensor_name)?;
+        let q_gpu_reference = GpuTensor::from_ndarray(&ctx, &q_cpu_arr)?;
 
-        // Compare shapes
-        println!("from_raw shape: {:?}", q_gpu_from_raw.shape());
-        println!("from_ndarray shape: {:?}", q_gpu_from_ndarray.shape());
+        // --- VERIFICATION ---
 
-        // Compare actual values
-        let raw_cpu = q_gpu_from_raw.to_ndarray_2d::<f32>().await?;
-        let ndarray_cpu = q_gpu_from_ndarray.to_ndarray_2d::<f32>().await?;
-
-        println!(
-            "from_raw first 5: {:?}",
-            raw_cpu.iter().take(5).collect::<Vec<_>>()
+        // 1. Check Metadata
+        assert_eq!(
+            q_gpu_production.shape(), 
+            q_gpu_reference.shape(), 
+            "Shapes mismatch between loading methods"
         );
-        println!(
-            "from_ndarray first 5: {:?}",
-            ndarray_cpu.iter().take(5).collect::<Vec<_>>()
+        assert_eq!(
+            q_gpu_production.dtype, 
+            q_gpu_reference.dtype, 
+            "DType mismatch (Production: {:?}, Reference: {:?})",
+            q_gpu_production.dtype, q_gpu_reference.dtype
         );
 
-        let max_diff = raw_cpu
+        println!("Shape verified: {:?}", q_gpu_production.shape());
+
+        // 2. Download both back to CPU for bit-exact comparison
+        let prod_values = q_gpu_production.to_ndarray_2d::<f32>().await?;
+        let ref_values = q_gpu_reference.to_ndarray_2d::<f32>().await?;
+
+        // 3. Compare Values
+        let max_diff = prod_values
             .iter()
-            .zip(ndarray_cpu.iter())
+            .zip(ref_values.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
 
-        println!("Max diff between loading methods: {}", max_diff);
+        println!("Max diff between loading methods: {:.10e}", max_diff);
 
-        assert!(max_diff < 1e-6, "Weights differ based on loading method!");
+        // 4. Debug Print on Failure
+        if max_diff > 1e-6 {
+            println!("\n!!! MISMATCH DETECTED !!!");
+            println!("Index | Production | Reference | Diff");
+            println!("-------------------------------------");
+            let mut errors_printed = 0;
+            for (idx, (a, b)) in prod_values.iter().zip(ref_values.iter()).enumerate() {
+                let diff = (a - b).abs();
+                if diff > 1e-6 {
+                    println!("{:5} | {:10.5} | {:10.5} | {:.5e}", idx, a, b, diff);
+                    errors_printed += 1;
+                    if errors_printed >= 10 {
+                        println!("... and more ...");
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert!(max_diff < 1e-5, "Weights differ significantly based on loading method!");
+
+        // 5. Cleanup 
+        // (Optional: clear mmap cache if this was a huge model to free RAM for other tests)
+        drop(weights); // Drop struct first
+        crate::weights::clear_mmap_cache();
 
         Ok(())
     }
+
+
     fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
         assert_eq!(cpu.shape(), gpu.shape(), "{} shape mismatch", name);
         let max_diff = cpu

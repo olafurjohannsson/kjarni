@@ -289,15 +289,15 @@ impl CrossEncoder {
         match arch {
             ModelArchitecture::Bert => {
                 // Check model_type in JSON to determine exact config type
-                println!("weights: {:?}", weights.config_json);
+                println!("weights: {:?}", weights.config_json());
                 if weights
-                    .config_json
+                    .config_json()
                     .contains("\"_name_or_path\": \"cross-encoder/ms-marco-MiniLM-L-12-v2\"")
                     || weights
-                        .config_json
+                        .config_json()
                         .contains("\"_name_or_path\": \"cross-encoder/ms-marco-MiniLM-L-12-v2\"")
                 {
-                    let config = MiniLMCrossEncoderConfig::from_json(&weights.config_json)?;
+                    let config = MiniLMCrossEncoderConfig::from_json(&weights.config_json())?;
                     Ok(Arc::new(config))
                 } else {
                     panic!("Not implemented")
@@ -592,8 +592,8 @@ impl InferenceModel for CrossEncoder {
 }
 use kjarni_transformers::{LanguageModel, WgpuContext};
 
-use crate::cross_encoder::MiniLMCrossEncoderConfig;
-use crate::sentence_encoder::BertConfig;
+use crate::MiniLMCrossEncoderConfig;
+use crate::BertConfig;
 use crate::sequence_classifier::RobertaConfig;
 
 impl LanguageModel for CrossEncoder {

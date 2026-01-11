@@ -1,5 +1,7 @@
 //! Factory for building Seq2Seq components from weights + layout.
 
+use std::sync::Arc;
+
 use anyhow::{Result, anyhow};
 use ndarray::Array1;
 
@@ -502,7 +504,7 @@ impl<'a> Seq2SeqFactory<'a> {
             .transpose()?;
 
         Ok(Embeddings::new(
-            EmbeddingData::F32(word_emb),
+            EmbeddingData::F32(Arc::new(word_emb)),
             pos_emb,
             None, // token_type_embeddings
         ))

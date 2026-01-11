@@ -52,14 +52,12 @@
 //! - [`kjarni_transformers`] — Low-level transformer primitives
 //! - [`kjarni_transformers::models::registry`] — Model metadata and downloading
 
-pub mod cross_encoder;
-pub mod sentence_encoder;
-pub mod sequence_classifier;
 pub mod models;
+pub mod sequence_classifier;
 
-pub use cross_encoder::CrossEncoder;
-pub use sentence_encoder::SentenceEncoder;
-pub use sequence_classifier::SequenceClassifier;
+pub use models::cross_encoder::CrossEncoder;
+pub use models::sentence_encoder::{BertConfig, DistilBertConfig, MpnetConfig, SentenceEncoder};
+pub use sequence_classifier::{MiniLMCrossEncoderConfig, SequenceClassifier};
 // pub use text_generation::TextGenerator;
 // pub use generation::Generator;
 
@@ -167,7 +165,7 @@ pub use tokenizer::wasm::BPETokenizer;
 //     pub fn vocab_size(&self) -> usize {
 //         dispatch_decoder!(self, vocab_size)
 //     }
-    
+
 //     pub fn tokenizer(&self) -> &Tokenizer {
 //         dispatch_decoder!(self, tokenizer)
 //     }

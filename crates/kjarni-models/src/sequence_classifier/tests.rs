@@ -1,4 +1,4 @@
-use crate::cross_encoder::CrossEncoder;
+use crate::models::cross_encoder::CrossEncoder;
 use anyhow::Result;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::models::ModelType;
@@ -11,47 +11,48 @@ mod cross_encoder_tests {
     use super::*;
     #[tokio::test]
     async fn test_torch_cross_encoder_predict() -> Result<()> {
-        let cpu_encoder = CrossEncoder::from_registry(
-            ModelType::MiniLML6V2CrossEncoder,
-            None,
-            Device::Cpu,
-            None,
-            None,
-        )
-        .await?;
-        let context = WgpuContext::new().await?;
-        let gpu_encoder = CrossEncoder::from_registry(
-            ModelType::MiniLML6V2CrossEncoder,
-            None,
-            Device::Wgpu,
-            Some(context.clone()),
-            None,
-        )
-        .await?;
-        // let classifier = SequenceClassifier::from_registry(
-        //     ModelType::MiniLML6V2CrossEncoder,
-        //     None,
-        //     Device::Wgpu,
-        //     Some(context),
-        //     None,
-        // )
-        // .await?;
-        let cpu_score = cpu_encoder
-            .predict_pair("i love edgeGPT", "edgeGPT is a new model inference library")
+        {
+            let cpu_encoder = CrossEncoder::from_registry(
+                ModelType::MiniLML6V2CrossEncoder,
+                None,
+                Device::Cpu,
+                None,
+                None,
+            )
             .await?;
-        
-       
-
-        let torch_value = 3.1776933670043945;
-        println!("cpu {}", cpu_score);
-        assert!((cpu_score - torch_value).abs() < 1e-3);
-        let gpu_score = gpu_encoder
-            .predict_pair("i love edgeGPT", "edgeGPT is a new model inference library")
+            let context = WgpuContext::new().await?;
+            let gpu_encoder = CrossEncoder::from_registry(
+                ModelType::MiniLML6V2CrossEncoder,
+                None,
+                Device::Wgpu,
+                Some(context.clone()),
+                None,
+            )
             .await?;
+            // let classifier = SequenceClassifier::from_registry(
+            //     ModelType::MiniLML6V2CrossEncoder,
+            //     None,
+            //     Device::Wgpu,
+            //     Some(context),
+            //     None,
+            // )
+            // .await?;
+            let cpu_score = cpu_encoder
+                .predict_pair("i love edgeGPT", "edgeGPT is a new model inference library")
+                .await?;
 
-        assert!((gpu_score - torch_value).abs() < 1e-3);
+            let torch_value = 3.1776933670043945;
+            println!("cpu {}", cpu_score);
+            assert!((cpu_score - torch_value).abs() < 1e-3);
+            let gpu_score = gpu_encoder
+                .predict_pair("i love edgeGPT", "edgeGPT is a new model inference library")
+                .await?;
 
-        assert!((cpu_score - gpu_score).abs() < 1e-3);
+            assert!((gpu_score - torch_value).abs() < 1e-3);
+
+            assert!((cpu_score - gpu_score).abs() < 1e-3);
+        }
+        kjarni_transformers::weights::clear_mmap_cache();
         Ok(())
     }
     #[tokio::test]

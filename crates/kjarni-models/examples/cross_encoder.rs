@@ -1,4 +1,4 @@
-use kjarni_models::cross_encoder::CrossEncoder;
+use kjarni_models::models::cross_encoder::CrossEncoder;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 use kjarni_transformers::WgpuContext;
