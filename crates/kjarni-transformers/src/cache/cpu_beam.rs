@@ -268,6 +268,9 @@ impl CpuBeamKVCache {
         );
 
         // Parallel copy from main → temp according to indices
+        // OPTIMIZATION: Only copy valid history (0..seq_length), ignore tail capacity.
+        let valid_len = self.seq_length;
+
         self.layers_k
             .par_iter()
             .zip(self.layers_v.par_iter())
@@ -275,22 +278,58 @@ impl CpuBeamKVCache {
             .zip(self.temp_layers_v.par_iter_mut())
             .for_each(|(((source_k, source_v), dest_k), dest_v)| {
                 for (dest_idx, &source_idx) in indices.iter().enumerate() {
-                    // Copy entire beam's history (all positions, all hidden dims)
-                    let source_k_slice = source_k.slice(s![source_idx, .., ..]);
-                    let mut dest_k_slice = dest_k.slice_mut(s![dest_idx, .., ..]);
+                    // Copy only active history
+                    let source_k_slice = source_k.slice(s![source_idx, ..valid_len, ..]);
+                    let mut dest_k_slice = dest_k.slice_mut(s![dest_idx, ..valid_len, ..]);
                     dest_k_slice.assign(&source_k_slice);
 
-                    let source_v_slice = source_v.slice(s![source_idx, .., ..]);
-                    let mut dest_v_slice = dest_v.slice_mut(s![dest_idx, .., ..]);
+                    let source_v_slice = source_v.slice(s![source_idx, ..valid_len, ..]);
+                    let mut dest_v_slice = dest_v.slice_mut(s![dest_idx, ..valid_len, ..]);
                     dest_v_slice.assign(&source_v_slice);
                 }
             });
 
         // Swap pointers: temp becomes main, main becomes temp
-        // This is O(1) - just swapping Vec pointers
         std::mem::swap(&mut self.layers_k, &mut self.temp_layers_k);
         std::mem::swap(&mut self.layers_v, &mut self.temp_layers_v);
     }
+    // pub fn reorder(&mut self, indices: &[usize]) {
+    //     assert!(
+    //         self.seq_length > 0,
+    //         "Cannot reorder an empty cache (seq_length=0)"
+    //     );
+    //     assert_eq!(
+    //         indices.len(),
+    //         self.num_beams(),
+    //         "Number of indices ({}) must match number of beams ({})",
+    //         indices.len(),
+    //         self.num_beams()
+    //     );
+
+    //     // Parallel copy from main → temp according to indices
+    //     self.layers_k
+    //         .par_iter()
+    //         .zip(self.layers_v.par_iter())
+    //         .zip(self.temp_layers_k.par_iter_mut())
+    //         .zip(self.temp_layers_v.par_iter_mut())
+    //         .for_each(|(((source_k, source_v), dest_k), dest_v)| {
+    //             for (dest_idx, &source_idx) in indices.iter().enumerate() {
+    //                 // Copy entire beam's history (all positions, all hidden dims)
+    //                 let source_k_slice = source_k.slice(s![source_idx, .., ..]);
+    //                 let mut dest_k_slice = dest_k.slice_mut(s![dest_idx, .., ..]);
+    //                 dest_k_slice.assign(&source_k_slice);
+
+    //                 let source_v_slice = source_v.slice(s![source_idx, .., ..]);
+    //                 let mut dest_v_slice = dest_v.slice_mut(s![dest_idx, .., ..]);
+    //                 dest_v_slice.assign(&source_v_slice);
+    //             }
+    //         });
+
+    //     // Swap pointers: temp becomes main, main becomes temp
+    //     // This is O(1) - just swapping Vec pointers
+    //     std::mem::swap(&mut self.layers_k, &mut self.temp_layers_k);
+    //     std::mem::swap(&mut self.layers_v, &mut self.temp_layers_v);
+    // }
 
     /// Appends new key/value tensors to a layer's cache.
     ///

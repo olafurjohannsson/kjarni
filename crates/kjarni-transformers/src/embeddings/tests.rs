@@ -19,7 +19,9 @@ impl ModelConfig for TestConfig {
     fn model_type(&self) -> &str {
         "test_encoder"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: 384,

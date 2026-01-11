@@ -56,6 +56,12 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
     fn model_type(&self) -> &str {
         "bert_cross_encoder"
     }
+    fn num_labels(&self) -> Option<usize> {
+        Some(self.num_labels)
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn id2label(&self) -> Option<&[String]> {
         self.labels_vec.as_deref()
     }
@@ -206,7 +212,9 @@ impl ModelConfig for RobertaConfig {
     fn model_type(&self) -> &str {
         "roberta"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn id2label(&self) -> Option<&[String]> {
         self.labels_vec.as_deref()
     }

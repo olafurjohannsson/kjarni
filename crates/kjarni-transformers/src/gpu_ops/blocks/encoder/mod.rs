@@ -751,7 +751,9 @@ mod tests {
         fn model_type(&self) -> &str {
             "mock"
         }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
         fn metadata(&self) -> crate::traits::ModelMetadata {
             crate::traits::ModelMetadata {
                 decoder_layers: None,

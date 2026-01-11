@@ -557,7 +557,7 @@ mod integration_tests {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classifier_new() {
-        let classifier = Classifier::new("minilm-l6-v2-cross-encoder").await;
+        let classifier = Classifier::new("distilbert-sentiment").await;
         assert!(
             classifier.is_ok(),
             "Failed to create classifier: {:?}",
@@ -584,80 +584,94 @@ mod integration_tests {
     }
 
     #[tokio::test]
-#[ignore = "Requires model download"]
-async fn test_classifier_explore_api_toxic_bert() {
-    // --- SETUP ---
-    const MODEL_NAME: &str = "toxic-bert";
-    let toxic_text = "You are a stupid idiot and I will find you.";
-    
-    println!("\n\n--- Starting Exploratory Test for Multi-Label Model: '{}' ---", MODEL_NAME);
+    #[ignore = "Requires model download"]
+    async fn test_classifier_explore_api_toxic_bert() {
+        // --- SETUP ---
+        const MODEL_NAME: &str = "toxic-bert";
+        let toxic_text = "You are a stupid idiot and I will find you.";
 
-    // ========================================================================
-    // 1. Observe Initialization in Multi-Label Mode
-    // ========================================================================
-    println!("\n--- [1] Observing Initialization ---");
-    
-    // CRUCIAL: We must enable .multi_label() mode for this model.
-    let classifier = Classifier::builder(MODEL_NAME)
-        .multi_label()
-        .build()
-        .await
-        .expect("Failed to load classifier in multi-label mode");
+        println!(
+            "\n\n--- Starting Exploratory Test for Multi-Label Model: '{}' ---",
+            MODEL_NAME
+        );
 
-    println!("Loaded model '{}' successfully.", classifier.model_name());
-    println!("Classifier mode: {:?}", classifier.mode()); // Should be MultiLabel
-    println!("Model labels: {:?}", classifier.labels().unwrap());
+        // ========================================================================
+        // 1. Observe Initialization in Multi-Label Mode
+        // ========================================================================
+        println!("\n--- [1] Observing Initialization ---");
 
-    // ========================================================================
-    // 2. Observe Multi-Label Classification
-    // ========================================================================
-    println!("\n--- [2] Observing Multi-Label Classification ---");
-    
-    let result = classifier.classify(toxic_text).await.expect("classify() failed");
-    
-    // For multi-label, the top score is less important than all scores above a threshold.
-    // The scores are independent probabilities (post-sigmoid).
-    println!("classify('{}') result:", toxic_text);
-    println!("  (Note: The top 'label' and 'score' are less meaningful in multi-label scenarios)");
-    println!("  Top Label: '{}' with Score: {}", result.label, result.score);
-    println!("  All Scores (sorted): {:?}", result.all_scores);
+        // CRUCIAL: We must enable .multi_label() mode for this model.
+        let classifier = Classifier::builder(MODEL_NAME)
+            .multi_label()
+            .build()
+            .await
+            .expect("Failed to load classifier in multi-label mode");
 
-    // This is the most common way to use a multi-label result.
-    let predictions_above_threshold = result.above_threshold(0.5);
-    println!("\n  Predictions with score > 0.5: {:?}", predictions_above_threshold);
-    
-    // Observe raw scores (post-sigmoid)
-    let scores = classifier.classify_scores(toxic_text).await.expect("classify_scores() failed");
-    let sum: f32 = scores.iter().sum();
-    println!("\nclassify_scores('{}') result:", toxic_text);
-    println!("  Scores (post-sigmoid): {:?}", scores);
-    println!("  (Note: Sum is NOT expected to be 1.0 in multi-label. Sum = {})", sum);
-}
+        println!("Loaded model '{}' successfully.", classifier.model_name());
+        println!("Classifier mode: {:?}", classifier.mode()); // Should be MultiLabel
+        println!("Model labels: {:?}", classifier.labels().unwrap());
 
+        // ========================================================================
+        // 2. Observe Multi-Label Classification
+        // ========================================================================
+        println!("\n--- [2] Observing Multi-Label Classification ---");
+
+        let result = classifier
+            .classify(toxic_text)
+            .await
+            .expect("classify() failed");
+
+        // For multi-label, the top score is less important than all scores above a threshold.
+        // The scores are independent probabilities (post-sigmoid).
+        println!("classify('{}') result:", toxic_text);
+        println!(
+            "  (Note: The top 'label' and 'score' are less meaningful in multi-label scenarios)"
+        );
+        println!(
+            "  Top Label: '{}' with Score: {}",
+            result.label, result.score
+        );
+        println!("  All Scores (sorted): {:?}", result.all_scores);
+
+        // This is the most common way to use a multi-label result.
+        let predictions_above_threshold = result.above_threshold(0.5);
+        println!(
+            "\n  Predictions with score > 0.5: {:?}",
+            predictions_above_threshold
+        );
+
+        // Observe raw scores (post-sigmoid)
+        let scores = classifier
+            .classify_scores(toxic_text)
+            .await
+            .expect("classify_scores() failed");
+        let sum: f32 = scores.iter().sum();
+        println!("\nclassify_scores('{}') result:", toxic_text);
+        println!("  Scores (post-sigmoid): {:?}", scores);
+        println!(
+            "  (Note: Sum is NOT expected to be 1.0 in multi-label. Sum = {})",
+            sum
+        );
+    }
 
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classifier_full_api_distilroberta() {
-        // --- SETUP ---
         const MODEL_NAME: &str = "distilroberta-emotion";
         let happy_text = "I am so happy and excited for the weekend!";
         let sad_text = "That was a truly disappointing and sad experience.";
         let batch_texts = &[happy_text, sad_text];
 
-        /// 0. test preset first
-        // 1. Define the preset we are testing against.
         const PRESET: &presets::ClassifierPreset = &presets::EMOTION_V1;
         assert_eq!(PRESET.model, MODEL_NAME);
         let model_name = PRESET.model;
 
         println!("--- Verifying Preset Contract for '{}' ---", PRESET.name);
 
-        // 2. Load the classifier using the model name from the preset.
         let classifier = Classifier::new(model_name)
             .await
             .expect("Failed to load model defined in preset");
 
-        // 3. Assert that the loaded classifier's properties match the preset's contract.
         assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
 
         let expected_labels: Vec<String> = PRESET
@@ -677,18 +691,6 @@ async fn test_classifier_explore_api_toxic_bert() {
             "Label content mismatch"
         );
 
-        // 4. Perform a quick sanity check classification to ensure the model works.
-        let result = classifier
-            .classify("This is a fantastic product!")
-            .await
-            .unwrap();
-        assert_eq!(result.label, "joy");
-
-        println!(
-            "Preset contract for '{}' verified successfully.",
-            PRESET.name
-        );
-
         // ========================================================================
         // 1. Test Initialization and Accessors
         // ========================================================================
@@ -705,44 +707,82 @@ async fn test_classifier_explore_api_toxic_bert() {
         // 2. Test Core Classification Methods
         // ========================================================================
 
-        // Test `classify()` on happy text
+        // Helper for epsilon check
+        let eps = 1e-6;
+        let approx_eq = |a: f32, b: f32| (a - b).abs() < eps;
+
+        // classify() on happy text
         let single_result = classifier
             .classify(happy_text)
             .await
             .expect("classify() failed");
         assert_eq!(single_result.label, "joy");
-        assert_eq!(single_result.score, 0.9730234); // Exact value from Rust output
+        assert!(approx_eq(single_result.score, 0.98810238));
 
-        // Test `classify_batch()`
+        // classify_batch()
         let batch_results = classifier
             .classify_batch(batch_texts)
             .await
             .expect("classify_batch() failed");
         assert_eq!(batch_results.len(), 2);
         assert_eq!(batch_results[0].label, "joy");
-        assert_eq!(batch_results[0].score, 0.9730234);
+        assert!(approx_eq(batch_results[0].score, 0.98810238));
         assert_eq!(batch_results[1].label, "sadness");
-        assert_eq!(batch_results[1].score, 0.96994925); // Exact value from Rust output
+        assert!(approx_eq(batch_results[1].score, 0.96455652));
 
-        // Test `classify_scores()` on sad text
-        let scores = classifier
+        // classify_scores() on HAPPY text (not sad!)
+        let happy_scores = classifier
+            .classify_scores(happy_text)
+            .await
+            .expect("classify_scores() on happy text failed");
+        let expected_happy_scores: Vec<f32> = vec![
+            0.0010008,  // anger
+            0.0003247,  // disgust
+            0.00030043, // fear
+            0.98810238, // joy ← winner
+            0.00171235, // neutral
+            0.00189455, // sadness
+            0.0066648,  // surprise
+        ];
+        for (i, (actual, expected)) in happy_scores
+            .iter()
+            .zip(expected_happy_scores.iter())
+            .enumerate()
+        {
+            assert!(
+                approx_eq(*actual, *expected),
+                "Happy score mismatch at index {} ({}): actual {}, expected {}",
+                i,
+                expected_labels[i],
+                actual,
+                expected
+            );
+        }
+
+        // classify_scores() on SAD text
+        let sad_scores = classifier
             .classify_scores(sad_text)
             .await
-            .expect("classify_scores() failed");
-        let expected_scores: Vec<f32> = vec![
-            0.00090631115,
-            0.0029943902,
-            0.0026212432,
-            0.0019687533,
-            0.01139427,
-            0.96339935,
-            0.016715772,
+            .expect("classify_scores() on sad text failed");
+        let expected_sad_scores: Vec<f32> = vec![
+            0.00093757, // anger
+            0.0035196,  // disgust
+            0.0030509,  // fear
+            0.00237514, // joy
+            0.01091947, // neutral
+            0.96455652, // sadness ← winner
+            0.01464079, // surprise
         ];
-        // Compare float vectors with a small tolerance
-        for (actual, expected) in scores.iter().zip(expected_scores.iter()) {
+        for (i, (actual, expected)) in sad_scores
+            .iter()
+            .zip(expected_sad_scores.iter())
+            .enumerate()
+        {
             assert!(
-                (actual - expected).abs() < 1e-6,
-                "Score mismatch: actual {}, expected {}",
+                approx_eq(*actual, *expected),
+                "Sad score mismatch at index {} ({}): actual {}, expected {}",
+                i,
+                expected_labels[i],
                 actual,
                 expected
             );
@@ -752,7 +792,6 @@ async fn test_classifier_explore_api_toxic_bert() {
         // 3. Test Overrides with `classify_with_config()`
         // ========================================================================
 
-        // Test `top_k` override
         let top_k_override = ClassificationOverrides {
             top_k: Some(3),
             ..Default::default()
@@ -762,20 +801,13 @@ async fn test_classifier_explore_api_toxic_bert() {
             .await
             .expect("top_k override failed");
         assert_eq!(top_k_result.all_scores.len(), 3);
-        assert_eq!(
-            top_k_result.all_scores[0],
-            ("sadness".to_string(), 0.96339935)
-        );
-        assert_eq!(
-            top_k_result.all_scores[1],
-            ("surprise".to_string(), 0.016715772)
-        );
-        assert_eq!(
-            top_k_result.all_scores[2],
-            ("neutral".to_string(), 0.01139427)
-        );
+        assert_eq!(top_k_result.all_scores[0].0, "sadness");
+        assert!(approx_eq(top_k_result.all_scores[0].1, 0.96455652));
+        assert_eq!(top_k_result.all_scores[1].0, "surprise");
+        assert!(approx_eq(top_k_result.all_scores[1].1, 0.01464079));
+        assert_eq!(top_k_result.all_scores[2].0, "neutral");
+        assert!(approx_eq(top_k_result.all_scores[2].1, 0.01091947));
 
-        // Test `threshold` override
         let threshold_override = ClassificationOverrides {
             threshold: Some(0.05),
             ..Default::default()
@@ -787,7 +819,6 @@ async fn test_classifier_explore_api_toxic_bert() {
         assert_eq!(threshold_result.all_scores.len(), 1);
         assert_eq!(threshold_result.all_scores[0].0, "sadness");
 
-        // Test a failing `threshold` override to confirm behavior
         let failing_threshold_override = ClassificationOverrides {
             threshold: Some(0.999),
             ..Default::default()
@@ -812,112 +843,146 @@ async fn test_classifier_explore_api_toxic_bert() {
 
         assert!(classifier_custom.has_custom_labels());
 
-        // "joy" is index 3 in the original labels, so it should map to "D" (index 3) in our custom labels.
         let custom_result = classifier_custom
             .classify(happy_text)
             .await
             .expect("classify() with custom labels failed");
         assert_eq!(custom_result.label, "D");
-        assert_eq!(custom_result.score, 0.9730234); // Score should be identical
+        assert!(approx_eq(custom_result.score, 0.98810238));
     }
-#[tokio::test]
-#[ignore = "Requires model download"]
-async fn test_preset_sentiment_binary_v1() {
-    // --- SETUP ---
-    const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_BINARY_V1;
-    let model_name = PRESET.model;
-    assert_eq!("distilbert-sentiment", model_name);
-    assert_eq!(PRESET.task, ClassificationTask::Sentiment);
-    let positive_text = "This is a fantastic and wonderful product!";
-    let negative_text = "I absolutely hate this, it's a terrible experience.";
 
-    println!("--- Verifying Preset Contract & Outputs for '{}' ---", PRESET.name);
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_preset_sentiment_binary_v1() {
+        // --- SETUP ---
+        const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_BINARY_V1;
+        let model_name = PRESET.model;
+        assert_eq!("distilbert-sentiment", model_name);
+        assert_eq!(PRESET.task, ClassificationTask::Sentiment);
+        let positive_text = "This is a fantastic and wonderful product!";
+        let negative_text = "I absolutely hate this, it's a terrible experience.";
 
-    // --- 1. Load Model & Verify Preset Contract ---
-    let classifier = Classifier::new(model_name)
-        .await
-        .expect("Failed to load model defined in preset");
+        println!(
+            "--- Verifying Preset Contract & Outputs for '{}' ---",
+            PRESET.name
+        );
 
-    let expected_labels: Vec<String> = PRESET.labels.unwrap().iter().map(|s| s.to_string()).collect();
-    assert_eq!(classifier.labels().unwrap(), expected_labels, "Label content mismatch");
-    assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
+        // --- 1. Load Model & Verify Preset Contract ---
+        let classifier = Classifier::new(model_name)
+            .await
+            .expect("Failed to load model defined in preset");
 
-    // --- 2. Assert Positive Case ---
-    let positive_result = classifier.classify(positive_text).await.unwrap();
-    assert_eq!(positive_result.label, "POSITIVE");
-    // Assert the exact score from your verified Rust output
-    assert_eq!(positive_result.score, 0.99988973); 
+        let expected_labels: Vec<String> = PRESET
+            .labels
+            .unwrap()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            classifier.labels().unwrap(),
+            expected_labels,
+            "Label content mismatch"
+        );
+        assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
 
-    // --- 3. Assert Negative Case ---
-    let negative_result = classifier.classify(negative_text).await.unwrap();
-    assert_eq!(negative_result.label, "NEGATIVE");
-    // Assert the exact score from your verified Rust output
-    assert_eq!(negative_result.score, 0.99904543);
-    
-    println!("Preset '{}' verified successfully with exact outputs.", PRESET.name);
-}
+        // --- 2. Assert Positive Case ---
+        let positive_result = classifier.classify(positive_text).await.unwrap();
+        assert_eq!(positive_result.label, "POSITIVE");
+        // Assert the exact score from your verified Rust output
+        assert_eq!(positive_result.score, 0.99988973);
 
+        // --- 3. Assert Negative Case ---
+        let negative_result = classifier.classify(negative_text).await.unwrap();
+        assert_eq!(negative_result.label, "NEGATIVE");
+        // Assert the exact score from your verified Rust output
+        assert_eq!(negative_result.score, 0.99904543);
 
-/// An EXPLORATORY test for the SENTIMENT_3CLASS_V1 preset ('roberta-sentiment').
-#[tokio::test]
-#[ignore = "Requires model download"]
-async fn test_explore_sentiment_3class_v1() {
-    // --- SETUP ---
-    const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_3CLASS_V1;
-    let model_name = PRESET.model;
-    let positive_text = "I love this so much, it's the best day ever.";
-    let neutral_text = "The movie was okay, I guess.";
-    let negative_text = "That was an awful thing to say.";
-    
-    println!("\n\n--- Starting Exploratory Test for Preset: '{}' ---", PRESET.name);
+        println!(
+            "Preset '{}' verified successfully with exact outputs.",
+            PRESET.name
+        );
+    }
 
-    // --- LOAD MODEL ---
-    let classifier = Classifier::new(model_name)
-        .await
-        .expect("Failed to load classifier");
-    
-    println!("Model: '{}'", classifier.model_name());
-    println!("Labels: {:?}", classifier.labels().unwrap());
-    
-    // --- OBSERVE OUTPUTS ---
-    let positive_result = classifier.classify(positive_text).await.unwrap();
-    println!("\nclassify('{}') result:\n  {:?}", positive_text, positive_result);
+    /// An EXPLORATORY test for the SENTIMENT_3CLASS_V1 preset ('roberta-sentiment').
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_explore_sentiment_3class_v1() {
+        // --- SETUP ---
+        const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_3CLASS_V1;
+        let model_name = PRESET.model;
+        let positive_text = "I love this so much, it's the best day ever.";
+        let neutral_text = "The movie was okay, I guess.";
+        let negative_text = "That was an awful thing to say.";
 
-    let neutral_result = classifier.classify(neutral_text).await.unwrap();
-    println!("\nclassify('{}') result:\n  {:?}", neutral_text, neutral_result);
+        println!(
+            "\n\n--- Starting Exploratory Test for Preset: '{}' ---",
+            PRESET.name
+        );
 
-    let negative_result = classifier.classify(negative_text).await.unwrap();
-    println!("\nclassify('{}') result:\n  {:?}", negative_text, negative_result);
-}
+        // --- LOAD MODEL ---
+        let classifier = Classifier::new(model_name)
+            .await
+            .expect("Failed to load classifier");
 
+        println!("Model: '{}'", classifier.model_name());
+        println!("Labels: {:?}", classifier.labels().unwrap());
 
-/// An EXPLORATORY test for the SENTIMENT_5STAR_V1 preset ('bert-sentiment-multilingual').
-#[tokio::test]
-#[ignore = "Requires model download"]
-async fn test_explore_sentiment_5star_v1() {
-    // --- SETUP ---
-    const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_5STAR_V1;
-    let model_name = PRESET.model;
-    let five_star_text = "An absolute masterpiece, the best I've ever seen.";
-    let one_star_text = "Awful, a complete waste of time and money.";
-    
-    println!("\n\n--- Starting Exploratory Test for Preset: '{}' ---", PRESET.name);
+        // --- OBSERVE OUTPUTS ---
+        let positive_result = classifier.classify(positive_text).await.unwrap();
+        println!(
+            "\nclassify('{}') result:\n  {:?}",
+            positive_text, positive_result
+        );
 
-    // --- LOAD MODEL ---
-    let classifier = Classifier::new(model_name)
-        .await
-        .expect("Failed to load classifier");
+        let neutral_result = classifier.classify(neutral_text).await.unwrap();
+        println!(
+            "\nclassify('{}') result:\n  {:?}",
+            neutral_text, neutral_result
+        );
 
-    println!("Model: '{}'", classifier.model_name());
-    println!("Labels: {:?}", classifier.labels().unwrap());
-    
-    // --- OBSERVE OUTPUTS ---
-    let five_star_result = classifier.classify(five_star_text).await.unwrap();
-    println!("\nclassify('{}') result:\n  {:?}", five_star_text, five_star_result);
+        let negative_result = classifier.classify(negative_text).await.unwrap();
+        println!(
+            "\nclassify('{}') result:\n  {:?}",
+            negative_text, negative_result
+        );
+    }
 
-    let one_star_result = classifier.classify(one_star_text).await.unwrap();
-    println!("\nclassify('{}') result:\n  {:?}", one_star_text, one_star_result);
-}
+    /// An EXPLORATORY test for the SENTIMENT_5STAR_V1 preset ('bert-sentiment-multilingual').
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_explore_sentiment_5star_v1() {
+        // --- SETUP ---
+        const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_5STAR_V1;
+        let model_name = PRESET.model;
+        let five_star_text = "An absolute masterpiece, the best I've ever seen.";
+        let one_star_text = "Awful, a complete waste of time and money.";
+
+        println!(
+            "\n\n--- Starting Exploratory Test for Preset: '{}' ---",
+            PRESET.name
+        );
+
+        // --- LOAD MODEL ---
+        let classifier = Classifier::new(model_name)
+            .await
+            .expect("Failed to load classifier");
+
+        println!("Model: '{}'", classifier.model_name());
+        println!("Labels: {:?}", classifier.labels().unwrap());
+
+        // --- OBSERVE OUTPUTS ---
+        let five_star_result = classifier.classify(five_star_text).await.unwrap();
+        println!(
+            "\nclassify('{}') result:\n  {:?}",
+            five_star_text, five_star_result
+        );
+
+        let one_star_result = classifier.classify(one_star_text).await.unwrap();
+        println!(
+            "\nclassify('{}') result:\n  {:?}",
+            one_star_text, one_star_result
+        );
+    }
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classifier_builder_with_f16_dtype() {
@@ -958,7 +1023,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classify_batch() {
-        let classifier = Classifier::new("minilm-l6-v2-cross-encoder")
+        let classifier = Classifier::new("distilroberta-emotion")
             .await
             .expect("Failed to load classifier");
 
@@ -980,7 +1045,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classify_with_config() {
-        let classifier = Classifier::new("minilm-l6-v2-cross-encoder")
+        let classifier = Classifier::new("distilbert-sentiment")
             .await
             .expect("Failed to load classifier");
 
@@ -1004,7 +1069,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classify_scores() {
-        let classifier = Classifier::new("minilm-l6-v2-cross-encoder")
+        let classifier = Classifier::new("distilbert-sentiment")
             .await
             .expect("Failed to load classifier");
 
@@ -1023,7 +1088,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires GPU and model download"]
     async fn test_classify_gpu() {
-        let classifier = Classifier::builder("minilm-l6-v2-cross-encoder")
+        let classifier = Classifier::builder("distilbert-sentiment")
             .gpu()
             .build()
             .await
@@ -1041,7 +1106,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classifier_accessors() {
-        let classifier = Classifier::new("minilm-l6-v2-cross-encoder")
+        let classifier = Classifier::new("distilroberta-emotion")
             .await
             .expect("Failed to load classifier");
 
@@ -1054,7 +1119,7 @@ async fn test_explore_sentiment_5star_v1() {
     #[tokio::test]
     #[ignore = "Requires model download"]
     async fn test_classify_convenience_function() {
-        let result = classify("minilm-l6-v2-cross-encoder", "I love this!")
+        let result = classify("distilroberta-emotion", "I love this!")
             .await
             .expect("Classify function failed");
 

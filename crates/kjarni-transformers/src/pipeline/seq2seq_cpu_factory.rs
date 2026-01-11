@@ -435,19 +435,6 @@ impl<'a> Seq2SeqFactory<'a> {
             self_attn = self_attn.with_no_qk_scaling();
         }
 
-        // Self-attention norm (LayerNorm for BART)
-        // let self_attn_layer_norm = Normalization::LayerNorm(
-        //     self.build_layer_norm(
-        //         &layer_layout.self_attn.norm_weight,
-        //         layer_layout
-        //             .self_attn
-        //             .norm_bias
-        //             .as_ref()
-        //             .ok_or_else(|| anyhow!("BART decoder requires norm bias"))?,
-        //         meta.norm_eps,
-        //         layer_idx,
-        //     )?,
-        // );
         let self_attn_layer_norm = self.build_norm_from_layout(
             &layer_layout.self_attn.norm_weight,
             layer_layout.self_attn.norm_bias.as_ref(),
@@ -473,17 +460,6 @@ impl<'a> Seq2SeqFactory<'a> {
             cross_attn = cross_attn.with_no_qk_scaling();
         }
 
-        // let cross_attn_layer_norm = Normalization::LayerNorm(
-        //     self.build_layer_norm(
-        //         &cross_attn_layout.norm_weight,
-        //         cross_attn_layout
-        //             .norm_bias
-        //             .as_ref()
-        //             .ok_or_else(|| anyhow!("BART decoder requires cross_attn norm bias"))?,
-        //         meta.norm_eps,
-        //         layer_idx,
-        //     )?,
-        // );
         let cross_attn_layer_norm = self.build_norm_from_layout(
             &cross_attn_layout.norm_weight,
             cross_attn_layout.norm_bias.as_ref(),
@@ -494,20 +470,7 @@ impl<'a> Seq2SeqFactory<'a> {
 
         // 3. FFN
         let feedforward = self.build_ffn(&layer_layout.ffn, meta, layer_idx)?;
-        //let feedforward = self.build_legacy_ffn(&layer_layout.ffn, meta.activation, layer_idx)?;
 
-        // let ffn_layer_norm = Normalization::LayerNorm(
-        //     self.build_layer_norm(
-        //         &layer_layout.ffn.norm_weight,
-        //         layer_layout
-        //             .ffn
-        //             .norm_bias
-        //             .as_ref()
-        //             .ok_or_else(|| anyhow!("BART decoder requires FFN norm bias"))?,
-        //         meta.norm_eps,
-        //         layer_idx,
-        //     )?,
-        // );
         let ffn_layer_norm = self.build_norm_from_layout(
             &layer_layout.ffn.norm_weight,
             layer_layout.ffn.norm_bias.as_ref(),

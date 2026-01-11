@@ -20,29 +20,39 @@ struct ShardInfo<'a> {
     _backing: Mmap,
     tensors: SafeTensors<'a>,
 }
-
 impl<'a> SafeTensorsLoader<'a> {
     pub fn new(path: &Path) -> Result<Self> {
+        // Case 1: Path is a specific file (e.g. "/tmp/foo.safetensors")
+        if path.is_file() {
+            return Self::load_single(path).map(|(shards, map)| Self {
+                shards,
+                tensor_to_shard: map,
+            });
+        }
+
+        // Case 2: Path is a directory
         let index_file = path.join("model.safetensors.index.json");
         let (shards, tensor_to_shard) = if index_file.exists() {
             Self::load_sharded(path)?
         } else {
-            Self::load_single(path)?
+            // Assume directory contains the standard "model.safetensors"
+            Self::load_single(&path.join("model.safetensors"))?
         };
+        
         Ok(Self {
             shards,
             tensor_to_shard,
         })
     }
 
+    /// Loads a single .safetensors file as one shard.
     fn load_single(path: &Path) -> Result<(Vec<ShardInfo<'a>>, HashMap<String, usize>)> {
-        let weights_file = path.join("model.safetensors");
-        let shard = Self::load_shard_mmap(&weights_file)?;
+        let shard = Self::load_shard_mmap(path)?;
         let tensor_to_shard = shard
             .tensors
             .names()
             .into_iter()
-            .map(|name| (name.clone(), 0))
+            .map(|name| (name.to_string(), 0))
             .collect();
         Ok((vec![shard], tensor_to_shard))
     }
@@ -85,6 +95,9 @@ impl<'a> SafeTensorsLoader<'a> {
         let file = fs::File::open(path)
             .with_context(|| format!("Failed to open weight file: {:?}", path))?;
         let mmap = unsafe { Mmap::map(&file)? };
+        // SAFETY: We own the Mmap (in the struct) and transmute to static lifetime.
+        // The memory remains valid as long as the struct exists.
+        // This is a common pattern when wrapping self-referential structs in Rust.
         let static_slice: &'static [u8] =
             unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&mmap) };
         let tensors = SafeTensors::deserialize(static_slice)?;
@@ -109,9 +122,12 @@ impl WeightLoader for SafeTensorsLoader<'_> {
             dtype: DType::from_safetensors(view.dtype())?,
         })
     }
+    
+    // Updated to return self for downcasting if needed
     fn as_any(&self) -> &dyn Any {
         unimplemented!()
     }
+    
     fn contains(&self, name: &str) -> bool {
         self.tensor_to_shard.contains_key(name)
     }

@@ -103,6 +103,7 @@ pub trait EncoderLanguageModel: LanguageModel {
 
         Ok((hidden_states, attention_mask_f32))
     }
+
     fn encode_batch_texts(&self, texts: &[&str]) -> Result<Vec<tokenizers::Encoding>> {
         self.tokenizer()
             .encode_batch(texts.to_vec(), true)
@@ -433,5 +434,294 @@ pub fn l2_normalize_inplace(embeddings: &mut Array2<f32>) {
         if norm > 0.0 {
             row /= norm;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_trait {
+    use crate::{Cache, WgpuContext, traits::InferenceModel};
+
+    use super::*;
+    use ndarray::Array2;
+    use std::sync::Mutex;
+
+    // ========================================================================
+    //  MOCK INFRASTRUCTURE (For Dispatch Test)
+    // ========================================================================
+
+    struct MockCpuEncoder {
+        hidden_size: usize,
+        captured_mask_sum: Mutex<f32>,
+    }
+
+    impl MockCpuEncoder {
+        fn new(hidden_size: usize) -> Self {
+            Self {
+                hidden_size,
+                captured_mask_sum: Mutex::new(0.0),
+            }
+        }
+    }
+
+    impl CpuEncoder for MockCpuEncoder {
+        fn embed(
+            &self,
+            _input_ids: &Array2<u32>,
+            _token_type_ids: Option<&Array2<u32>>,
+        ) -> Array3<f32> {
+            unimplemented!()
+        }
+
+        fn embed_and_normalize(
+            &self,
+            input_ids: &Array2<u32>,
+            _token_type_ids: Option<&Array2<u32>>,
+        ) -> Array3<f32> {
+            let (batch, seq) = input_ids.dim();
+            Array3::zeros((batch, seq, self.hidden_size))
+        }
+
+        fn forward_layers(
+            &self,
+            hidden_states: &Array3<f32>,
+            attention_mask: &Array2<f32>,
+            _start_layer: usize,
+            _end_layer: usize,
+        ) -> Result<Array3<f32>> {
+            let mut lock = self.captured_mask_sum.lock().unwrap();
+            *lock = attention_mask.sum();
+            Ok(hidden_states.clone())
+        }
+
+        fn num_layers(&self) -> usize { 1 }
+        fn hidden_size(&self) -> usize { self.hidden_size }
+    }
+
+    struct MockModel {
+        encoder: MockCpuEncoder,
+    }
+
+    // Minimal Trait Impls for MockModel
+    impl LanguageModel for MockModel {
+        fn vocab_size(&self) -> usize { 100 }
+        fn hidden_size(&self) -> usize { self.encoder.hidden_size }
+        fn num_layers(&self) -> usize { 1 }
+        fn num_heads(&self) -> usize { 1 }
+        fn context_size(&self) -> usize { 128 }
+        fn tokenizer(&self) -> &tokenizers::Tokenizer { unimplemented!() }
+        fn bos_token_id(&self) -> Option<u32> { None }
+        fn eos_token_id(&self) -> Option<u32> { None }
+        fn pad_token_id(&self) -> Option<u32> { None }
+        fn forced_bos_token_id(&self) -> Option<u32> { None }
+        fn forced_eos_token_id(&self) -> Option<u32> { None }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> { unimplemented!() }
+    }
+
+    impl crate::traits::InferenceModel for MockModel {
+        fn device(&self) -> crate::traits::Device { crate::traits::Device::Cpu }
+        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> { None }
+        fn as_any(&self) -> &dyn std::any::Any { self }
+    }
+
+    impl CpuEncoderOps for MockModel {
+        fn encoder(&self) -> &dyn CpuEncoder { &self.encoder }
+    }
+
+    impl EncoderLanguageModel for MockModel {
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> { Some(self) }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> { None }
+    }
+
+    // ========================================================================
+    //  MOCK INFRASTRUCTURE (For Golden Pooling Test)
+    // ========================================================================
+    
+    // Allows us to inject EXACT golden hidden states regardless of encoder logic
+    struct MockGoldenEncoder {
+        hidden_states: Array3<f32>,
+    }
+
+    impl LanguageModel for MockGoldenEncoder {
+        fn vocab_size(&self) -> usize { 0 }
+        fn hidden_size(&self) -> usize { 4 }
+        fn num_layers(&self) -> usize { 1 }
+        fn num_heads(&self) -> usize { 1 }
+        fn context_size(&self) -> usize { 5 }
+        fn tokenizer(&self) -> &tokenizers::Tokenizer { unimplemented!() }
+        fn bos_token_id(&self) -> Option<u32> { None }
+        fn eos_token_id(&self) -> Option<u32> { None }
+        fn pad_token_id(&self) -> Option<u32> { None }
+        fn forced_bos_token_id(&self) -> Option<u32> { None }
+        fn forced_eos_token_id(&self) -> Option<u32> { None }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> { unimplemented!() }
+    }
+
+    impl InferenceModel for MockGoldenEncoder {
+        fn device(&self) -> crate::traits::Device { crate::traits::Device::Cpu }
+        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> { None }
+        fn as_any(&self) -> &dyn std::any::Any { self }
+    }
+
+    #[async_trait]
+    impl EncoderLanguageModel for MockGoldenEncoder {
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> { None }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> { None }
+        
+        // Override to return GOLDEN data directly
+        async fn get_hidden_states_batch(&self, _texts: &[&str]) -> Result<(Array3<f32>, Array2<f32>)> {
+            // Mask from Python script:
+            // [1, 1, 1, 1, 1]
+            // [1, 1, 1, 0, 0]
+            let mask = Array2::from_shape_vec((2, 5), vec![
+                1.0, 1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 0.0, 0.0
+            ]).unwrap();
+            Ok((self.hidden_states.clone(), mask))
+        }
+    }
+
+
+    // ========================================================================
+    //  TESTS
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_trait_dispatch_and_mask_conversion() -> Result<()> {
+        let hidden_size = 8;
+        let model = MockModel {
+            encoder: MockCpuEncoder::new(hidden_size),
+        };
+
+        let input_ids = Array2::from_elem((2, 3), 1u32);
+        let attention_mask_u32 = Array2::from_shape_vec((2, 3), vec![1, 1, 0, 1, 0, 0])?;
+
+        let (output, attention_mask_f32) = model
+            .get_hidden_states_batch_from_ids(&input_ids, &attention_mask_u32)
+            .await?;
+
+        assert_eq!(output.dim(), (2, 3, hidden_size));
+        assert_eq!(attention_mask_f32[[0, 0]], 1.0);
+        assert_eq!(attention_mask_f32[[0, 2]], 0.0);
+        assert_eq!(attention_mask_f32.sum(), 3.0);
+
+        let captured_sum = *model.encoder.captured_mask_sum.lock().unwrap();
+        assert_eq!(captured_sum, 3.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_l2_normalize_inplace() {
+        let mut data = Array2::from_shape_vec((2, 2), vec![3.0, 4.0, 1.0, 1.0]).unwrap();
+        l2_normalize_inplace(&mut data);
+        
+        assert!((data[[0, 0]] - 0.6).abs() < 1e-6);
+        assert!((data[[0, 1]] - 0.8).abs() < 1e-6);
+        
+        let val = 1.0 / 2.0f32.sqrt();
+        assert!((data[[1, 0]] - val).abs() < 1e-6);
+        assert!((data[[1, 1]] - val).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_pooling_strategies_golden() -> Result<()> {
+        // 1. Load Golden Hidden States
+        // hidden_states Shape: [2, 5, 4]
+        let hidden_states_data = vec![
+            -1.331580, -0.437194, 0.457193, 1.351581, -1.331581, -0.437193, 0.457194, 1.351580,
+            -1.331581, -0.437194, 0.457194, 1.351581, -1.331581, -0.437194, 0.457194, 1.351581,
+            -1.331581, -0.437193, 0.457194, 1.351580, -1.331580, -0.437194, 0.457193, 1.351581,
+            -1.331581, -0.437193, 0.457193, 1.351581, -1.331581, -0.437193, 0.457194, 1.351580,
+            -1.331581, -0.437193, 0.457193, 1.351581, -1.331581, -0.437193, 0.457193, 1.351581,
+        ];
+        let hidden = Array3::from_shape_vec((2, 5, 4), hidden_states_data)?;
+        let model = MockGoldenEncoder { hidden_states: hidden };
+
+        // --- TEST A: MEAN POOLING ---
+        let config_mean = EncodingConfig {
+            pooling_strategy: PoolingStrategy::Mean,
+            normalize: false, // Check raw first
+        };
+        let out_mean = model.encode_batch(&["a", "b"], &config_mean).await?;
+        
+        let pool_mean_data = vec![
+            -1.331581, -0.437193, 0.457194, 1.351580, -1.331581, -0.437193, 0.457193, 1.351581,
+        ];
+        for (i, row) in out_mean.iter().enumerate() {
+            for (j, val) in row.iter().enumerate() {
+                let golden = pool_mean_data[i * 4 + j];
+                assert!((val - golden).abs() < 1e-5, "Mean Pooling: Got {}, Expected {}", val, golden);
+            }
+        }
+
+        // --- TEST B: CLS POOLING ---
+        let config_cls = EncodingConfig {
+            pooling_strategy: PoolingStrategy::Cls,
+            normalize: false,
+        };
+        let out_cls = model.encode_batch(&["a", "b"], &config_cls).await?;
+
+        let pool_cls_data = vec![
+            -1.331580, -0.437194, 0.457193, 1.351581, -1.331580, -0.437194, 0.457193, 1.351581,
+        ];
+        for (i, row) in out_cls.iter().enumerate() {
+            for (j, val) in row.iter().enumerate() {
+                let golden = pool_cls_data[i * 4 + j];
+                assert!((val - golden).abs() < 1e-5, "CLS Pooling mismatch");
+            }
+        }
+
+        // --- TEST C: MAX POOLING ---
+        let config_max = EncodingConfig {
+            pooling_strategy: PoolingStrategy::Max,
+            normalize: false,
+        };
+        let out_max = model.encode_batch(&["a", "b"], &config_max).await?;
+
+        let pool_max_data = vec![
+            -1.331580, -0.437193, 0.457194, 1.351581, -1.331580, -0.437193, 0.457194, 1.351581,
+        ];
+        for (i, row) in out_max.iter().enumerate() {
+            for (j, val) in row.iter().enumerate() {
+                let golden = pool_max_data[i * 4 + j];
+                assert!((val - golden).abs() < 1e-5, "Max Pooling mismatch");
+            }
+        }
+
+        // --- TEST D: LAST TOKEN POOLING ---
+        let config_last = EncodingConfig {
+            pooling_strategy: PoolingStrategy::LastToken,
+            normalize: false,
+        };
+        let out_last = model.encode_batch(&["a", "b"], &config_last).await?;
+
+        let pool_last_data = vec![
+            -1.331581, -0.437193, 0.457194, 1.351580, -1.331581, -0.437193, 0.457194, 1.351580,
+        ];
+        for (i, row) in out_last.iter().enumerate() {
+            for (j, val) in row.iter().enumerate() {
+                let golden = pool_last_data[i * 4 + j];
+                assert!((val - golden).abs() < 1e-5, "Last Token Pooling mismatch");
+            }
+        }
+
+        // --- TEST E: NORMALIZATION (Mean Pool + Norm) ---
+        let config_norm = EncodingConfig {
+            pooling_strategy: PoolingStrategy::Mean,
+            normalize: true,
+        };
+        let out_norm = model.encode_batch(&["a", "b"], &config_norm).await?;
+
+        let normed_mean_data = vec![
+            -0.665787, -0.218596, 0.228596, 0.675787, -0.665787, -0.218595, 0.228595, 0.675787,
+        ];
+        for (i, row) in out_norm.iter().enumerate() {
+            for (j, val) in row.iter().enumerate() {
+                let golden = normed_mean_data[i * 4 + j];
+                assert!((val - golden).abs() < 1e-5, "Normalization mismatch");
+            }
+        }
+
+        Ok(())
     }
 }

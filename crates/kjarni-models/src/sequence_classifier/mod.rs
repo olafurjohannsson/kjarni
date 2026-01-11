@@ -6,6 +6,8 @@
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::PoolingStrategy;
+use kjarni_transformers::cpu::encoder_decoder::Seq2SeqCPUDecoder;
+use kjarni_transformers::encoder_decoder::config::Seq2SeqDecoderConfig;
 use kjarni_transformers::models::registry::WeightsFormat;
 use ndarray::{Array1, Array2};
 use std::path::{Path, PathBuf};
@@ -34,6 +36,9 @@ use kjarni_transformers::{
 
 // Re-export configs
 mod configs;
+#[cfg(test)]
+mod tests;
+
 pub use configs::*;
 pub mod zero_shot;
 use crate::models::bart::config::BartConfig;
@@ -52,6 +57,9 @@ pub struct SequenceClassifier {
     // Encoder components
     pub(crate) cpu_encoder: Option<CpuTransformerEncoder>,
     pub(crate) gpu_encoder: Option<GpuTransformerEncoder>,
+
+    pub(crate) cpu_decoder: Option<Seq2SeqCPUDecoder>,
+    // pub(crate) cpu_head: Option<CpuSequenceClassificationHead>,
 
     // Classification head
     pub(crate) cpu_head: Option<CpuSequenceClassificationHead>,
@@ -89,10 +97,15 @@ impl SequenceClassifier {
                 | ModelTask::ZeroShotClassification
         );
 
+        let is_cross_encoder = is_encoder && matches!(
+            info.task,
+            ModelTask::ReRanking
+        );
+
         let is_zero_shot = matches!(info.architecture, ModelArchitecture::Bart)
             && matches!(info.task, ModelTask::ZeroShotClassification);
 
-        is_encoder && is_classification_task || is_zero_shot
+        is_encoder && is_classification_task || is_zero_shot || is_cross_encoder
     }
 
     pub fn device(&self) -> Device {
@@ -178,7 +191,7 @@ impl SequenceClassifier {
             strategy: tokenizers::PaddingStrategy::BatchLongest,
             // The pad token and id should be read from the model's config/tokenizer file.
             // For BART, the pad_token_id is 1.
-            pad_id: 1,//config.pad_token_id().unwrap_or(1),
+            pad_id: 1, //config.pad_token_id().unwrap_or(1),
             pad_token: tokenizer
                 .get_vocab(true)
                 .get("[PAD]")
@@ -196,7 +209,7 @@ impl SequenceClassifier {
         let mut gpu_encoder = None;
         let mut cpu_head = None;
         let mut gpu_head = None;
-
+        let mut cpu_decoder = None;
         match device {
             Device::Cpu => {
                 cpu_encoder = Some(CpuTransformerEncoder::new(
@@ -205,7 +218,24 @@ impl SequenceClassifier {
                     layout.clone(),
                     load_cfg.clone(),
                 )?);
+                if model_type.info().architecture == ModelArchitecture::Bart {
+                    println!("Loading Bart DECODER");
+                    // Initialize the Decoder
+                    let dec_config = Seq2SeqDecoderConfig::bart();
+                    let bart_config = config
+                        .as_any()
+                        .downcast_ref::<BartConfig>()
+                        .ok_or_else(|| anyhow!("Config is not BartConfig"))?;
 
+                    let decoder = Seq2SeqCPUDecoder::new(
+                        &weights,
+                        bart_config, // Pass the loaded config
+                        dec_config,
+                        load_cfg.clone(),
+                    )?;
+                    cpu_decoder = Some(decoder);
+                }
+                
                 // Use the auto-detecting head loader!
                 cpu_head = Some(CpuSequenceClassificationHead::from_weights(
                     &weights,
@@ -236,6 +266,7 @@ impl SequenceClassifier {
         Ok(Self {
             cpu_encoder,
             gpu_encoder,
+            cpu_decoder,
             cpu_head,
             gpu_head,
             tokenizer,
@@ -362,17 +393,47 @@ impl SequenceClassifier {
             return Ok(vec![]);
         }
 
-        // Get hidden states from encoder
-        let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
+        // 1. Run the Encoder (Once!)
+        let (encoder_hidden_states, encoder_mask) = self.get_hidden_states_batch(texts).await?;
 
-        // Apply classification head
-        let logits = if let Some(ref head) = self.cpu_head {
-            head.forward(&hidden_states, Some(&attention_mask))?
+        // 2. Prepare the Vector for the Head
+        // We also determine if we need a mask for the head.
+        let (vector_for_head, head_mask) = if let Some(decoder) = &self.cpu_decoder {
+            // === BART PATH (Encoder -> Decoder -> Head) ===
+            let batch_size = encoder_hidden_states.shape()[0];
+            let eos_id = self.config.eos_token_id().unwrap_or(2);
+
+            // Input is just the EOS token
+            let decoder_input_ids = Array2::from_elem((batch_size, 1), eos_id as u32);
+
+            let decoder_output = decoder.forward(
+                &decoder_input_ids,
+                &encoder_hidden_states,
+                None,                // No self-attn mask needed for len 1
+                Some(&encoder_mask), // Mask padding in the encoder
+                None,                // No KV cache
+                None,                // No Cross cache
+                0,                   // Offset 0
+            )?;
+
+            // Output is [Batch, 1, Hidden].
+            // We pass None for the mask because there is no padding in this 1-token sequence.
+            (decoder_output.last_hidden_state, None)
         } else {
-            return Err(anyhow!("No classification head available"));
+            // === BERT PATH (Encoder -> Head) ===
+            // Output is [Batch, Seq, Hidden].
+            // We MUST pass the encoder mask so the head knows which tokens are padding.
+            (encoder_hidden_states, Some(&encoder_mask))
         };
 
-        Ok(logits.outer_iter().map(|row| row.to_vec()).collect())
+        // 3. Run the Head
+        let logits = self
+            .cpu_head
+            .as_ref()
+            .ok_or_else(|| anyhow!("No classification head available"))?
+            .forward(&vector_for_head, head_mask)?; // Pass the correct mask (None for BART, Some for BERT)
+
+        Ok(logits.outer_iter().map(|r| r.to_vec()).collect())
     }
 
     /// Maximum sequence length.

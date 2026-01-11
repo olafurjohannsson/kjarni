@@ -1,6 +1,6 @@
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
-use crate::{cpu::encoder::encoder_self_attention::EncoderSelfAttention, Normalization};
+use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
 
@@ -96,30 +96,210 @@ impl EncoderLayer {
         rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
         // Attention block
-        let residual = &hidden;
-        let attn_out = self
-            .self_attn
-            .forward(&hidden, attention_mask, position_bias, rope)?;
-        let hidden = self.self_attn_layer_norm.forward(&(residual + &attn_out));
+        let attn_residual = &hidden;
+        let attn_out =
+            self.self_attn
+                .forward(&attn_residual, attention_mask, position_bias, rope)?;
+
+        let ffn_input = self
+            .self_attn_layer_norm
+            .forward(&(attn_residual + &attn_out));
 
         // FFN block
-        let residual = &hidden;
-        let ffn_out = self.feedforward.forward(&hidden)?;
-        let hidden = self.ffn_layer_norm.forward(&(residual + &ffn_out));
+        let ffn_residual = &ffn_input;
+        let ffn_out = self.feedforward.forward(&ffn_residual)?;
+
+        let hidden = self.ffn_layer_norm.forward(&(ffn_residual + &ffn_out));
 
         Ok(hidden)
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod encoder_layer_tests {
     use super::*;
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
+    fn create_deterministic_layer(
+        hidden_size: usize,
+        intermediate_size: usize,
+        num_heads: usize,
+    ) -> EncoderLayer {
+        let mut count = 1;
 
+        // Python: fixed_vals = torch.arange(count, count + num_elements) * 0.001
+        let mut get_linear_weights = |rows: usize, cols: usize| -> Array2<f32> {
+            let size = rows * cols;
+            let data: Vec<f32> = (count..count + size).map(|x| x as f32 * 0.001).collect();
+            count += size;
+            // PyTorch Linear is [Out, In], Array2::from_shape_vec fills row-major
+            Array2::from_shape_vec((rows, cols), data).unwrap()
+        };
+
+        let bias_val = 0.01;
+
+        // 1. Self Attention (Q, K, V, Out)
+        // Note: PyTorch named_parameters() order for the mocks provided
+        let q_w = get_linear_weights(hidden_size, hidden_size);
+        let q_b = Array1::from_elem(hidden_size, bias_val);
+
+        let k_w = get_linear_weights(hidden_size, hidden_size);
+        let k_b = Array1::from_elem(hidden_size, bias_val);
+
+        let v_w = get_linear_weights(hidden_size, hidden_size);
+        let v_b = Array1::from_elem(hidden_size, bias_val);
+
+        let o_w = get_linear_weights(hidden_size, hidden_size);
+        let o_b = Array1::from_elem(hidden_size, bias_val);
+
+        let self_attn = EncoderSelfAttention::new(
+            hidden_size,
+            num_heads,
+            LinearLayer::new_f32(q_w, Some(q_b)),
+            LinearLayer::new_f32(k_w, Some(k_b)),
+            LinearLayer::new_f32(v_w, Some(v_b)),
+            LinearLayer::new_f32(o_w, Some(o_b)),
+        );
+
+        // 2. Attn LayerNorm
+        // Python: weights (gamma) = 1.0, bias (beta) = 0.01
+        let ln1 = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::from_elem(hidden_size, bias_val),
+            1e-5,
+        ));
+
+        // 3. FeedForward (FC1, FC2)
+        let fc1_w = get_linear_weights(intermediate_size, hidden_size);
+        let fc1_b = Array1::from_elem(intermediate_size, bias_val);
+
+        let fc2_w = get_linear_weights(hidden_size, intermediate_size);
+        let fc2_b = Array1::from_elem(hidden_size, bias_val);
+
+        let feedforward = FeedForward::Standard(StdFeedForward::new(
+            fc1_w,
+            fc1_b,
+            fc2_w,
+            fc2_b,
+            Activation::Gelu, // Using Standard Gelu (not New/Tanh) to match Python default
+        ));
+
+        // 4. FFN LayerNorm
+        let ln2 = Normalization::LayerNorm(LayerNorm::new(
+            Array1::ones(hidden_size),
+            Array1::from_elem(hidden_size, bias_val),
+            1e-5,
+        ));
+
+        EncoderLayer::new(self_attn, ln1, feedforward, ln2)
+    }
+
+    #[test]
+    fn test_golden_prenorm() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        // 1. Initialize Layer with exact deterministic weights
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        // 2. Prepare Inputs
+        let input_hidden_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let input = Array3::from_shape_vec((batch, seq, hidden), input_hidden_data)?;
+
+        let input_mask_data = vec![1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000];
+        let mask = Array2::from_shape_vec((batch, seq), input_mask_data)?;
+
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        // Note: Python broadcasts [1, heads, seq, seq] to batch automatically.
+        // Rust implementation likely handles the broadcast inside forward or expects matching dims.
+        // Assuming implementation handles broadcasting of dimension 0.
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        // 3. Run Forward (Pre-Norm = true)
+        let output = layer.forward(input, &mask, Some(&pos_bias), true, None)?;
+
+        // 4. Validate against Golden Values
+        let golden_output_prenorm_data = vec![
+            0.030466, 0.131298, 0.232129, 0.332961, 0.430466, 0.531298, 0.632130, 0.732961,
+            0.830467, 0.931298, 1.032130, 1.132961, 1.230467, 1.331298, 1.432130, 1.532961,
+            1.630466, 1.731298, 1.832129, 1.932961, 2.030467, 2.131298, 2.232130, 2.332961,
+        ];
+        let golden = Array3::from_shape_vec((batch, seq, hidden), golden_output_prenorm_data)?;
+
+        let diff = &output - &golden;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Pre-Norm Max Diff: {:.6}", max_diff);
+
+        // Allow small float error (accumulated via multiple matmuls)
+        assert!(
+            max_diff < 1e-4,
+            "Pre-norm golden value mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_golden_postnorm() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_hidden_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let input = Array3::from_shape_vec((batch, seq, hidden), input_hidden_data)?;
+
+        let input_mask_data = vec![1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000];
+        let mask = Array2::from_shape_vec((batch, seq), input_mask_data)?;
+
+        // Even in post-norm (usually BERT), the python test passed the position bias
+        // to generate the golden values, so we must pass it here too.
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        // 3. Run Forward (Pre-Norm = false)
+        let output = layer.forward(input, &mask, Some(&pos_bias), false, None)?;
+
+        // 4. Validate against Golden Values
+        let golden_output_postnorm_data = vec![
+            -1.331634, -0.437211, 0.457211, 1.351634, -1.331634, -0.437212, 0.457212, 1.351634,
+            -1.331634, -0.437211, 0.457212, 1.351634, -1.331634, -0.437211, 0.457211, 1.351634,
+            -1.331634, -0.437211, 0.457211, 1.351634, -1.331634, -0.437211, 0.457211, 1.351634,
+        ];
+        let golden = Array3::from_shape_vec((batch, seq, hidden), golden_output_postnorm_data)?;
+
+        let diff = &output - &golden;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Post-Norm Max Diff: {:.6}", max_diff);
+
+        assert!(
+            max_diff < 1e-4,
+            "Post-norm golden value mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
     fn create_test_layer(
         hidden_size: usize,
         intermediate_size: usize,

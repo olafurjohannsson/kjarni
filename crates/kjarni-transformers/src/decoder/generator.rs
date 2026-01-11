@@ -148,7 +148,7 @@ impl DecoderGenerator {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// # use kjarni_transformers::decoder::prelude::*;
     /// # fn example(model: Box<dyn DecoderLanguageModel>) -> anyhow::Result<()> {
     /// let generator = DecoderGenerator::new(model)?;

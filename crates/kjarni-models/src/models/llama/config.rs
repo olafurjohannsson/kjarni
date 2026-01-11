@@ -242,7 +242,9 @@ impl ModelConfig for LlamaConfig {
     fn model_type(&self) -> &str {
         "llama"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             // --- Basic Dimensions ---

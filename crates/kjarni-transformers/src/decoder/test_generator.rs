@@ -30,7 +30,9 @@ impl ModelConfig for MockConfig {
     fn model_type(&self) -> &str {
         "mock"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             decoder_layers: None,
@@ -451,9 +453,13 @@ async fn test_context_limit_check() {
         .await
         .unwrap();
     let tokens: Vec<StreamedToken> = stream.try_collect().await.unwrap();
-
+    let expected_len = if generator.model.bos_token_id().is_some() {
+        4 // 5 context - 1 hidden BOS
+    } else {
+        5
+    };
     // Total tokens should not exceed context size
-    assert_eq!(tokens.len(), 5);
+    assert_eq!(tokens.len(), expected_len);
 }
 
 #[tokio::test]

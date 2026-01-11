@@ -43,7 +43,9 @@ impl ModelConfig for WhisperConfig {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.d_model,

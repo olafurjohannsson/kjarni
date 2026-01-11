@@ -1,7 +1,8 @@
 from sentence_transformers.cross_encoder import CrossEncoder
 
 # Load the model
-model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device='cpu')
+model = CrossEncoder(
+    '/home/olafurj/.cache/kjarni/cross-encoder_ms-marco-MiniLM-L-6-v2/', device='cpu')
 
 # === Example 1: Score a single pair ===
 query1 = "How do I train a neural network?"

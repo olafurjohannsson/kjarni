@@ -25,13 +25,12 @@
 //! let output = attn.forward(&hidden_states, &attention_mask, None)?;
 //! ```
 
-
+use crate::activations::softmax_4d_inplace;
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
 use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d};
-use crate::activations::softmax_4d_inplace;
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4};
+use ndarray::{Array2, Array3, Array4, s};
 
 /// Large negative value for masking (avoids NaN in softmax).
 const MASK_VALUE: f32 = -1e9;
@@ -273,14 +272,20 @@ impl EncoderSelfAttention {
         let context = matmul_4d(&scores, &v_heads);
 
         // 9. Merge heads and output projection
-        let context_flat = context
+        let context_contigous = context
             .permuted_axes([0, 2, 1, 3])
             .as_standard_layout()
-            .into_shape_with_order((batch * seq_len, hidden_dim))?
             .to_owned();
-
+        
+        let context_flat =
+            context_contigous.into_shape_with_order((batch * seq_len, hidden_dim))?;
         let output = self.out_proj.matmul(&context_flat.view());
 
-        Ok(output.into_shape_with_order((batch, seq_len, hidden_dim))?)
+        let output_3d = output
+            .as_standard_layout()
+            .into_owned() // Ensures we own the data
+            .into_shape_with_order((batch, seq_len, hidden_dim))?;
+
+        Ok(output_3d)
     }
 }

@@ -1,4 +1,4 @@
-use super::{gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader, WeightLoader};
+use super::{WeightLoader, gguf_loader::GgufLoader, safetensors_loader::SafeTensorsLoader};
 use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0};
 use crate::tensor::{
     dtype::DType,
@@ -6,7 +6,7 @@ use crate::tensor::{
     {CpuTensor, QuantizedMatrix},
 };
 use crate::weights::raw_to_typed_gguf;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
 use serde_json::json;
@@ -43,8 +43,12 @@ impl ModelWeights {
                 || path.join("model.safetensors.index.json").exists()
             {
                 let loader = Box::new(SafeTensorsLoader::new(path)?);
+                
+                // FIX: Make config.json optional. 
+                // Defaults to empty JSON "{}" if missing (useful for tests/raw weights).
                 let config_json = std::fs::read_to_string(path.join("config.json"))
-                    .context("Safetensors model directory missing config.json")?;
+                    .unwrap_or_else(|_| "{}".to_string());
+
                 return Ok(Self {
                     loader,
                     config_json,
@@ -62,6 +66,37 @@ impl ModelWeights {
             }
         }
         Err(anyhow!("No supported weight format found at {:?}", path))
+    }
+
+    /// Loads weights from a specific file path.
+    ///
+    /// This extends `new` by supporting direct paths to non-GGUF files (assumed to be SafeTensors),
+    /// which is particularly useful for unit tests using `NamedTempFile`.
+    pub fn from_file(path: &Path) -> Result<Self> {
+        // 1. Delegate to `new` for GGUF files or Directories (standard loading)
+        if (path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf"))
+            || path.is_dir()
+        {
+            return Self::new(path);
+        }
+
+        // 2. Fallback: Treat as a direct SafeTensors file
+        // This handles cases like `NamedTempFile` in tests which are files but lack extensions
+        if path.exists() {
+            let loader = Box::new(SafeTensorsLoader::new(path)?);
+
+            // For single-file loads (like tests), we might not have a config.json next to it.
+            // We provide a dummy empty JSON default. The test code uses `MockConfig` struct
+            // for metadata anyway, so `weights.config_json` is likely unused in that context.
+            return Ok(Self {
+                loader,
+                config_json: "{}".to_string(),
+                is_gguf: false,
+            });
+        }
+
+        // If not found or other error, let `new` generate the standard error message
+        Self::new(path)
     }
 
     /// Determines the DType to use for a specific tensor.

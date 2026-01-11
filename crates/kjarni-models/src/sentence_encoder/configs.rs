@@ -140,6 +140,9 @@ impl ModelConfig for BertConfig {
             "bert"
         }
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn id2label(&self) -> Option<&[String]> {
         self.labels_vec.as_deref()
     }
@@ -319,7 +322,9 @@ impl ModelConfig for MpnetConfig {
     fn model_type(&self) -> &str {
         "mpnet"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.hidden_size,
@@ -531,7 +536,9 @@ impl ModelConfig for DistilBertConfig {
     fn model_type(&self) -> &str {
         "distilbert"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn id2label(&self) -> Option<&[String]> {
         self.labels_vec.as_deref()
     }

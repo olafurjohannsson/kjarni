@@ -159,7 +159,9 @@ impl MistralConfig {
 
 impl ModelConfig for MistralConfig {
     fn model_type(&self) -> &str { "mistral" }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.hidden_size,

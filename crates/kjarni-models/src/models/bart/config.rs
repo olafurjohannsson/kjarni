@@ -119,8 +119,14 @@ impl ModelConfig for BartConfig {
     fn model_type(&self) -> &str {
         &self.model_type
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn id2label(&self) -> Option<&[String]> {
         self.labels_vec.as_deref()
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        Some(self.eos_token_id)
     }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
@@ -180,27 +186,7 @@ impl ModelConfig for BartConfig {
                 norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
             },
         };
-        if self.is_sequence_classifier() {
-            // --- Generate the ENCODER-ONLY layout for classification ---
-            ModelLayout {
-                token_embedding: "model.shared.weight".to_string(),
-                // CRUCIAL: Point to the separate classification head
-                lm_head: "classification_head.out_proj.weight".to_string(),
-                encoder: Some(EncoderLayout {
-                    position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
-                    token_type_embedding: None,
-                    embedding_norm_weight: Some(
-                        "model.encoder.layernorm_embedding.weight".to_string(),
-                    ),
-                    embedding_norm_bias: Some("model.encoder.layernorm_embedding.bias".to_string()),
-                    final_norm_weight: None,
-                    final_norm_bias: None,
-                    layer: encoder_layer,
-                }),
-                // CRUCIAL: We do not define the decoder.
-                decoder: None,
-            }
-        } else {
+     
             // --- Define the Decoder's Layer Structure ---
             let decoder_layer = DecoderLayerLayout {
                 self_attn: AttentionLayout {
@@ -270,7 +256,7 @@ impl ModelConfig for BartConfig {
                     final_norm_bias: None,
                     layer: decoder_layer,
                 }),
-            }
+            
         }
     }
 }

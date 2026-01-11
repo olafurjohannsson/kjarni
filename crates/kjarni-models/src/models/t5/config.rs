@@ -77,7 +77,9 @@ impl ModelConfig for T5Config {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         let activation = match self.feed_forward_proj.as_deref() {
             Some("gated-gelu") => Activation::GeluNew,

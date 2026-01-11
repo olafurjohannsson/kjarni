@@ -192,7 +192,9 @@ impl QwenConfig {
 
 impl ModelConfig for QwenConfig {
     fn model_type(&self) -> &str { "qwen2" }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.hidden_size,

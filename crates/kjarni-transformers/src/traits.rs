@@ -167,6 +167,7 @@ pub trait ModelConfig: Send + Sync {
     fn vocab_size(&self) -> usize {
         self.metadata().vocab_size
     }
+    fn as_any(&self) -> &dyn std::any::Any;
     fn num_heads(&self) -> usize {
         self.metadata().num_attention_heads
     }
@@ -187,6 +188,10 @@ pub trait ModelConfig: Send + Sync {
     }
     fn activation(&self) -> Activation {
         self.metadata().activation
+    }
+
+    fn eos_token_id(&self) -> Option<u32> {
+        None
     }
      /// Get ordered label names for classification models.
     /// Labels are sorted by their index (0, 1, 2, ...).

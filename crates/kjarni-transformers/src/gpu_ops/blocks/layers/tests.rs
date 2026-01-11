@@ -41,7 +41,9 @@ impl ModelConfig for TestLlamaConfig {
     fn model_type(&self) -> &str {
         "llama"
     }
-
+fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.hidden_size,

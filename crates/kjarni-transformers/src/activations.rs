@@ -1,6 +1,6 @@
 use libm::{erff, expf, tanhf};
 use ndarray::parallel::prelude::*;
-use ndarray::{Array1, Array2, Array3, Array4, Axis};
+use ndarray::{Array1, Array2, Array3, Array4, Axis, s};
 use ndarray::{ArrayBase, DataMut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -202,61 +202,204 @@ pub fn silu_parallel(x: &mut Array2<f32>) {
 
 // ==================== Softmax ====================
 
-
 /// The core, allocation-free Softmax implementation.
 /// Works on both `Vec<f32>` and `Array1<f32>` (via as_slice_mut).
 pub fn softmax_inplace(slice: &mut [f32]) {
     if slice.is_empty() { return; }
 
-    // 1. Find max for numerical stability
     let max = slice.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
-    // 2. Exp and Sum
     let mut sum = 0.0;
     for v in slice.iter_mut() {
         *v = (*v - max).exp();
         sum += *v;
     }
 
-    // 3. Normalize (multiplication is faster than division)
-    let scale = 1.0 / sum;
-    for v in slice.iter_mut() {
-        *v *= scale;
+    if sum > 0.0 {
+        let scale = 1.0 / sum;
+        for v in slice.iter_mut() {
+            *v *= scale;
+        }
     }
 }
 
-/// Wrapper for `Array1` usage (keeps your existing signature valid elsewhere)
+/// Wrapper for `Array1` usage.
 pub fn softmax_1d_inplace(logits: &mut Array1<f32>) {
     if let Some(slice) = logits.as_slice_mut() {
         softmax_inplace(slice);
     } else {
         // Fallback for non-contiguous Array1 (rare)
-        let max = logits.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        let max = logits.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
         logits.mapv_inplace(|x| (x - max).exp());
         let sum = logits.sum();
-        *logits /= sum;
+        if sum > 0.0 {
+            *logits /= sum;
+        }
     }
 }
 
-/// Wrapper for 4D attention scores
-pub fn softmax_4d_inplace(x: &mut Array4<f32>) {
-    x.lanes_mut(Axis(3)).into_iter().for_each(|mut lane| {
-        if let Some(slice) = lane.as_slice_mut() {
-            softmax_inplace(slice);
-        } else {
-            // Fallback
-            let max = lane.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-            let mut sum = 0.0;
-            for v in lane.iter_mut() {
-                *v = (*v - max).exp();
-                sum += *v;
-            }
-            let scale = 1.0 / sum;
-            for v in lane.iter_mut() {
-                *v *= scale;
+/// Applies softmax along the last dimension (Axis(3)) of a 4D tensor.
+/// This implementation uses explicit loops to be robust against memory layout issues.
+pub fn softmax_4d_inplace(scores: &mut Array4<f32>) {
+    // Get the dimensions of the 4D tensor: [Batch, Heads, Queries, Keys]
+    let (batch_size, num_heads, q_len, _) = scores.dim();
+
+    // Iterate through every single 1D row of the attention matrix.
+    for b in 0..batch_size {
+        for h in 0..num_heads {
+            for q in 0..q_len {
+                // Get a mutable view of the current row, e.g., scores[b, h, q, :]
+                let mut row_view = scores.slice_mut(s![b, h, q, ..]);
+
+                // `row_view` is an `ArrayViewMut1`, which we can pass to our
+                // tested and working 1D softmax function.
+                if let Some(slice) = row_view.as_slice_mut() {
+                    softmax_inplace(slice);
+                } else {
+                    // Fallback for the extremely rare case that even a slice is not contiguous.
+                    let max = row_view.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                    row_view.mapv_inplace(|x| (x - max).exp());
+                    let sum = row_view.sum();
+                    if sum > 0.0 {
+                        row_view /= sum;
+                    }
+                }
             }
         }
-    });
+    }
+}
+
+// ==================== Test Module ====================
+
+#[cfg(test)]
+mod mod_softmax_tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    use ndarray::{Array, Array4, arr1, s};
+
+     #[test]
+    fn test_softmax_1d_golden() {
+        // === GOLDEN VALUES FROM PYTHON ===
+        // softmax_1d_input Shape: [5]
+        let input_data = vec![
+            1.000000, 2.000000, 3.000000, 4.000000, 5.000000,
+        ];
+        // softmax_1d_output Shape: [5]
+        let golden_data = vec![
+            0.011656, 0.031685, 0.086129, 0.234122, 0.636409,
+        ];
+
+        let mut input = Array1::from_vec(input_data);
+        let golden = Array1::from_vec(golden_data);
+
+        // Run In-place Softmax
+        softmax_1d_inplace(&mut input);
+
+        let diff = (&input - &golden).mapv(|x| x.abs());
+        let max_diff = diff.iter().fold(0.0f32, |a, &b| a.max(b));
+
+        assert!(max_diff < 1e-5, "Softmax 1D mismatch: {}", max_diff);
+    }
+
+    #[test]
+    fn test_softmax_4d_golden() {
+        // === GOLDEN VALUES FROM PYTHON ===
+        // softmax_4d_input Shape: [1, 2, 2, 4]
+        let input_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+        ];
+        // softmax_4d_output Shape: [1, 2, 2, 4]
+        let golden_data = vec![
+            0.213838, 0.236328, 0.261183, 0.288651, 0.213838, 0.236328, 0.261183, 0.288651,
+            0.213838, 0.236328, 0.261183, 0.288651, 0.213838, 0.236328, 0.261183, 0.288651,
+        ];
+
+        let mut input = Array4::from_shape_vec((1, 2, 2, 4), input_data).unwrap();
+        let golden = Array4::from_shape_vec((1, 2, 2, 4), golden_data).unwrap();
+
+        // Run In-place 4D Softmax (Last Dim)
+        softmax_4d_inplace(&mut input);
+
+        let diff = (&input - &golden).mapv(|x| x.abs());
+        let max_diff = diff.iter().fold(0.0f32, |a, &b| a.max(b));
+
+        assert!(max_diff < 1e-5, "Softmax 4D mismatch: {}", max_diff);
+    }
+
+    #[test]
+    fn test_softmax_inplace_basic() {
+        let mut data = vec![1.0, 2.0, 3.0];
+        softmax_inplace(&mut data);
+        assert_relative_eq!(data[0], 0.09003057, epsilon = 1e-6);
+        assert_relative_eq!(data[1], 0.24472847, epsilon = 1e-6);
+        assert_relative_eq!(data[2], 0.66524094, epsilon = 1e-6);
+        assert_relative_eq!(data.iter().sum::<f32>(), 1.0, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn test_softmax_inplace_with_negatives() {
+        let mut data = vec![-1.0, 0.0, 1.0];
+        softmax_inplace(&mut data);
+        // Same result as [1.0, 2.0, 3.0] due to max subtraction
+        assert_relative_eq!(data[0], 0.09003057, epsilon = 1e-6);
+        assert_relative_eq!(data[1], 0.24472847, epsilon = 1e-6);
+        assert_relative_eq!(data[2], 0.66524094, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn test_softmax_inplace_empty_slice() {
+        let mut data: Vec<f32> = vec![];
+        softmax_inplace(&mut data);
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn test_softmax_1d_inplace() {
+        let mut data = arr1(&[1.0, 2.0, 3.0]);
+        softmax_1d_inplace(&mut data);
+        assert_relative_eq!(data[0], 0.09003057, epsilon = 1e-6);
+        assert_relative_eq!(data[1], 0.24472847, epsilon = 1e-6);
+        assert_relative_eq!(data[2], 0.66524094, epsilon = 1e-6);
+    }
+
+    /// This is the most important test. It verifies the 4D softmax behavior.
+ #[test]
+    fn test_softmax_4d_inplace_axis() {
+        let mut scores = {
+            let shape: (usize, usize, usize, usize) = (1, 2, 2, 3);
+            let data = vec![
+                // Batch 0, Head 0
+                1.0, 2.0, 3.0, // Query 0
+                4.0, 2.0, 0.0, // Query 1
+                // Batch 0, Head 1
+                -1.0, 0.0, 1.0, // Query 0
+                5.0, 5.0, 5.0,  // Query 1
+            ];
+            Array::from_shape_vec(shape, data).unwrap()
+        };
+
+        softmax_4d_inplace(&mut scores);
+
+        // --- Verification with CORRECTED values ---
+        
+        let row1 = scores.slice(s![0, 0, 0, ..]);
+        assert_relative_eq!(row1.sum(), 1.0, epsilon = 1e-6);
+        assert_relative_eq!(row1[0 as usize], 0.09003057, epsilon = 1e-6); // Correct
+
+        let row2 = scores.slice(s![0, 0, 1, ..]);
+        assert_relative_eq!(row2.sum(), 1.0, epsilon = 1e-6);
+        // CORRECTED VALUE:
+        assert_relative_eq!(row2[0 as usize], 0.8668133, epsilon = 1e-6); 
+
+        let row3 = scores.slice(s![0, 1, 0, ..]);
+        assert_relative_eq!(row3.sum(), 1.0, epsilon = 1e-6);
+        assert_relative_eq!(row3[2 as usize], 0.66524094, epsilon = 1e-6); // Correct
+
+        let row4 = scores.slice(s![0, 1, 1, ..]);
+        assert_relative_eq!(row4.sum(), 1.0, epsilon = 1e-6);
+        assert_relative_eq!(row4[0 as usize], 1.0/3.0, epsilon = 1e-6); // Correct
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -393,14 +536,16 @@ mod tests {
     }
     #[test]
     fn test_softmax() {
-        let mut output: Array4<f32> = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
+        let mut output: Array4<f32> =
+            Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
         softmax_4d_inplace(&mut output);
 
         // Check sum to 1
         assert_relative_eq!(output.sum(), 1.0, epsilon = 1e-6);
 
         // Check stability with large numbers
-        let mut large: Array4<f32> = Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
+        let mut large: Array4<f32> =
+            Array4::from_shape_vec((1, 1, 1, 3), vec![1000.0, 1001.0, 1002.0]).unwrap();
         softmax_4d_inplace(&mut large);
         assert_relative_eq!(large.sum(), 1.0, epsilon = 1e-6);
         assert!(!large.iter().any(|x| x.is_nan()));
@@ -535,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_softmax_sum_to_one() {
-        let mut  input = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
+        let mut input = Array4::from_shape_vec((1, 1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
         softmax_4d_inplace(&mut input);
         let output = input.clone();
         let sum = output.sum();
