@@ -158,3 +158,102 @@ impl Seq2SeqDecoderConfig {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ========================================================================
+    //  TaskParams Parsing Tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_task_specific_params() {
+        let json = json!({
+            "summarization": {
+                "early_stopping": true,
+                "max_length": 128,
+                "prefix": "summarize: "
+            },
+            "translation_en_to_de": {
+                "early_stopping": false,
+                "max_length": 200,
+                "prefix": "translate English to German: "
+            }
+        });
+
+        let params: TaskSpecificParams = serde_json::from_value(json).unwrap();
+
+        // 1. Check Summarization
+        let sum = params.summarization().unwrap();
+        assert!(sum.early_stopping);
+        assert_eq!(sum.max_length, 128);
+        assert_eq!(sum.prefix.as_deref(), Some("summarize: "));
+        // Defaults
+        assert_eq!(sum.length_penalty, 2.0); // default_length_penalty
+        assert_eq!(sum.num_beams, 4);        // default_num_beams
+
+        // 2. Check Translation
+        let trans = params.translation_en_to_de.as_ref().unwrap();
+        assert!(!trans.early_stopping);
+        assert_eq!(trans.prefix, "translate English to German: ");
+    }
+
+    #[test]
+    fn test_parse_defaults() {
+        let json = json!({
+            "summarization": {
+                "early_stopping": true,
+                "max_length": 10
+            }
+        });
+        let params: TaskSpecificParams = serde_json::from_value(json).unwrap();
+        let sum = params.summarization().unwrap();
+
+        assert_eq!(sum.min_length, 0); // Default usize
+        assert_eq!(sum.no_repeat_ngram_size, 3); // default fn
+        assert!(sum.prefix.is_none()); // Option default
+    }
+
+    // ========================================================================
+    //  Architecture Config Tests
+    // ========================================================================
+
+    #[test]
+    fn test_encoder_configs() {
+        // BART
+        let bart = Seq2SeqEncoderConfig::bart();
+        assert!(matches!(bart.position_encoding, PositionEncodingType::Learned { offset: 2 }));
+        assert!(bart.normalize_embeddings);
+        assert!(!bart.final_layer_norm);
+
+        // T5
+        let t5 = Seq2SeqEncoderConfig::t5();
+        assert!(matches!(t5.position_encoding, PositionEncodingType::RelativeBias { num_buckets: 32, .. }));
+        assert!(t5.final_layer_norm);
+
+        // Whisper
+        let whisper = Seq2SeqEncoderConfig::whisper();
+        assert!(matches!(whisper.position_encoding, PositionEncodingType::Sinusoidal));
+    }
+
+    #[test]
+    fn test_decoder_configs() {
+        // BART
+        let bart = Seq2SeqDecoderConfig::bart();
+        assert!(matches!(bart.position_encoding, PositionEncodingType::Learned { offset: 2 }));
+        assert!(!bart.pre_norm);
+
+        // T5
+        let t5 = Seq2SeqDecoderConfig::t5();
+        assert!(t5.pre_norm);
+        assert!(t5.final_layer_norm);
+
+        // Whisper
+        let whisper = Seq2SeqDecoderConfig::whisper();
+        assert!(whisper.pre_norm);
+        assert!(matches!(whisper.position_encoding, PositionEncodingType::Learned { offset: 0 }));
+    }
+}

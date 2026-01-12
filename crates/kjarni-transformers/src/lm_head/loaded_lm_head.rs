@@ -127,7 +127,7 @@ impl LoadedLMHead {
                 Some(cpu_emb.to_quantized(dtype)?)
             } else {
                 // Original behavior: just clone the layer.
-                Some(cpu_emb.clone())
+                Some(cpu_emb.clone()) // this is an Arc, so we just increment the reference count
             }
         } else {
             None

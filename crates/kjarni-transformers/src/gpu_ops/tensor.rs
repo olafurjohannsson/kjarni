@@ -88,14 +88,14 @@ impl GpuTensor {
             if raw.dtype.is_quantized() {
                 let target = target_dt.unwrap_or(DType::F32);
                 if !target.is_quantized() {
-                    return Ok(None); 
+                    return Ok(None);
                 }
             }
 
             // Case B: DType Mismatch -> Must convert on CPU
             if let Some(target) = target_dt {
                 if target != raw.dtype {
-                    return Ok(None); 
+                    return Ok(None);
                 }
             }
 
@@ -110,7 +110,7 @@ impl GpuTensor {
 
         // --- PHASE 2: Conversion / Dequantization Path ---
         let target = target_dt.unwrap_or(DType::F32);
-        
+
         log::debug!(
             "Converting/Dequantizing tensor '{}' to {:?} for GPU upload",
             label,
@@ -119,7 +119,7 @@ impl GpuTensor {
 
         // 1. Get OWNED CpuTensor (this loads to RAM and handles de-interleaving if needed)
         let typed_cpu = weights.get_typed_tensor(name)?;
-        
+
         // 2. Pass ownership to helper
         let (converted_bytes, final_shape) = convert_cpu_tensor_to_bytes(typed_cpu, target)?;
 
@@ -261,7 +261,7 @@ impl GpuTensor {
     }
 
     /// Creates a new GpuTensor with an identical shape and a full copy of the data.
-    /// This is a deep copy on the GPU.
+    /// This is a deep copy on the GPU - creates a completely new buffer.
     pub fn deep_clone(&self, label: &str) -> Self {
         let new_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
@@ -276,18 +276,18 @@ impl GpuTensor {
             self.context
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("GpuTensor::clone encoder"),
+                    label: Some("GpuTensor::deep_clone encoder"),
                 });
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buffer, 0, self.buffer.size());
         self.context.queue.submit(Some(encoder.finish()));
 
-        GpuTensor {
-            id: self.id,
-            buffer: Arc::new(new_buffer),
-            shape: self.shape.clone(),
-            dtype: self.dtype,
-            context: self.context.clone(),
-        }
+        // NEW buffer = NEW ID!
+        Self::new_allocation(
+            Arc::new(new_buffer),
+            self.shape.clone(),
+            self.dtype,
+            self.context.clone(),
+        )
     }
 
     /// Creates a view with different axis permutation (metadata only)
@@ -657,68 +657,53 @@ impl GpuTensor {
     }
 }
 
-// --- Helper Function ---
-
-/// Converts a CpuTensor (which might be F32, F16, or a quantized wrapper)
-/// into a flat byte vector of the `target_dtype`.
-///
-/// Returns (Bytes, Shape)
 /// Converts an owned CpuTensor into a flat byte vector of the `target_dtype`.
 /// Takes OWNERSHIP of the tensor so it can consume it during conversion/dequantization.
 fn convert_cpu_tensor_to_bytes(
-    tensor: CpuTensor, 
-    target_dtype: DType
+    tensor: CpuTensor,
+    target_dtype: DType,
 ) -> Result<(Vec<u8>, Vec<usize>)> {
-    
-    // 1. Normalize to F32
-    // We match on `tensor` directly. Since `tensor` is owned, `t` becomes owned.
-    // This allows `t.to_array*_f32()` to consume `t`.
-    let (f32_data, shape) = match tensor {
-        t if t.shape().len() == 2 => {
-            let shape = t.shape().to_vec();
-            // to_array2_f32 consumes self
-            let arr = t.to_array2_f32()?; 
-            (
-                arr.as_slice().ok_or_else(|| anyhow!("Non-contiguous array"))?.to_vec(), 
-                shape
-            )
-        },
-        t if t.shape().len() == 1 => {
-             let shape = t.shape().to_vec();
-            let arr = t.to_array1_f32()?;
-            (arr.to_vec(), shape)
-        },
-        t if t.shape().len() == 3 => {
-             let shape = t.shape().to_vec();
-             let arr = t.to_array3_f32()?;
-             (
-                 arr.as_slice().ok_or_else(|| anyhow!("Non-contiguous array"))?.to_vec(), 
-                 shape
-             )
+    let shape = tensor.shape().to_vec();
+
+    // 1. Normalize to F32 based on rank
+    let f32_data: Vec<f32> = match shape.len() {
+        1 => tensor.to_array1_f32()?.to_vec(),
+        2 => {
+            let arr = tensor.to_array2_f32()?;
+            arr.as_slice()
+                .ok_or_else(|| anyhow!("Non-contiguous 2D array"))?
+                .to_vec()
         }
-        t => anyhow::bail!("Unsupported tensor rank {} for conversion", t.shape().len()),
+        3 => {
+            let arr = tensor.to_array3_f32()?;
+            arr.as_slice()
+                .ok_or_else(|| anyhow!("Non-contiguous 3D array"))?
+                .to_vec()
+        }
+        rank => anyhow::bail!("Unsupported tensor rank {} for GPU conversion", rank),
     };
 
     // 2. Cast F32 data to the Target DType bytes
     let bytes = match target_dtype {
-        DType::F32 => {
-            bytemuck::cast_slice(&f32_data).to_vec()
-        },
+        DType::F32 => bytemuck::cast_slice(&f32_data).to_vec(),
         DType::F16 => {
             let f16_data: Vec<u16> = f32_data
                 .iter()
                 .map(|&v| half::f16::from_f32(v).to_bits())
                 .collect();
             bytemuck::cast_slice(&f16_data).to_vec()
-        },
+        }
         DType::BF16 => {
             let bf16_data: Vec<u16> = f32_data
                 .iter()
                 .map(|&v| half::bf16::from_f32(v).to_bits())
                 .collect();
             bytemuck::cast_slice(&bf16_data).to_vec()
-        },
-        _ => anyhow::bail!("Unsupported target dtype {:?} for CPU conversion", target_dtype),
+        }
+        other => anyhow::bail!(
+            "Unsupported target dtype {:?} for CPU→GPU conversion",
+            other
+        ),
     };
 
     Ok((bytes, shape))
@@ -824,5 +809,127 @@ mod tests {
     async fn test_dtype_size() {
         assert_eq!(DType::F32.size_of(), 4);
         assert_eq!(DType::U32.size_of(), 4);
+    }
+    #[tokio::test]
+    async fn test_buffer_id_uniqueness() {
+        let ctx = setup_context().await;
+
+        let t1 = GpuTensor::zeros(&ctx, vec![2, 2], DType::F32, "t1").unwrap();
+        let t2 = GpuTensor::zeros(&ctx, vec![2, 2], DType::F32, "t2").unwrap();
+
+        // Different allocations should have different IDs
+        assert_ne!(t1.buffer_id(), t2.buffer_id());
+    }
+
+    #[tokio::test]
+    async fn test_view_keeps_buffer_id() {
+        let ctx = setup_context().await;
+
+        let original = GpuTensor::zeros(&ctx, vec![2, 3, 4], DType::F32, "original").unwrap();
+        let viewed = original.view(vec![6, 4]);
+
+        // View should keep same ID
+        assert_eq!(original.buffer_id(), viewed.buffer_id());
+    }
+
+    #[tokio::test]
+    async fn test_deep_clone_gets_new_id() {
+        let ctx = setup_context().await;
+
+        let original = GpuTensor::zeros(&ctx, vec![2, 2], DType::F32, "original").unwrap();
+        let cloned = original.deep_clone("cloned");
+
+        // Deep clone creates new buffer, should have different ID
+        assert_ne!(original.buffer_id(), cloned.buffer_id());
+
+        // But same shape and dtype
+        assert_eq!(original.shape(), cloned.shape());
+        assert_eq!(original.dtype(), cloned.dtype());
+    }
+
+    #[tokio::test]
+    async fn test_clone_keeps_buffer_id() {
+        let ctx = setup_context().await;
+
+        let original = GpuTensor::zeros(&ctx, vec![2, 2], DType::F32, "original").unwrap();
+        let shallow = original.clone();
+
+        // Shallow clone (Arc clone) keeps same ID
+        assert_eq!(original.buffer_id(), shallow.buffer_id());
+    }
+
+    #[tokio::test]
+    async fn test_from_bytes_validation() {
+        let ctx = setup_context().await;
+
+        // Correct size
+        let bytes = vec![0u8; 16]; // 4 f32s
+        let result = GpuTensor::from_bytes(&ctx, &bytes, vec![2, 2], DType::F32, "test");
+        assert!(result.is_ok());
+
+        // Wrong size
+        let wrong_bytes = vec![0u8; 12]; // Only 3 f32s
+        let result = GpuTensor::from_bytes(&ctx, &wrong_bytes, vec![2, 2], DType::F32, "test");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_linear_layer_dims() {
+        let ctx = setup_context().await;
+
+        // Weight stored as [out, in] = [768, 512]
+        let weight = GpuTensor::zeros(&ctx, vec![768, 512], DType::F32, "weight").unwrap();
+
+        // linear_layer_dims returns (in_features, out_features)
+        let (in_feat, out_feat) = weight.linear_layer_dims();
+        assert_eq!(in_feat, 512);
+        assert_eq!(out_feat, 768);
+    }
+
+    #[tokio::test]
+    async fn test_dtype_as_str() {
+        let ctx = setup_context().await;
+
+        let f32_tensor = GpuTensor::zeros(&ctx, vec![2], DType::F32, "f32").unwrap();
+        assert_eq!(f32_tensor.dtype_as_str(), "f32");
+
+        // Would need to create tensors of other dtypes to test others
+    }
+
+    #[tokio::test]
+    async fn test_permute_axes_metadata() {
+        let ctx = setup_context().await;
+
+        let tensor = GpuTensor::zeros(&ctx, vec![2, 3, 4], DType::F32, "test").unwrap();
+        let permuted = tensor.permute_axes(&[2, 0, 1]);
+
+        // Shape should be permuted
+        assert_eq!(permuted.shape(), &[4, 2, 3]);
+
+        // Same buffer ID (it's a view)
+        assert_eq!(tensor.buffer_id(), permuted.buffer_id());
+    }
+
+    #[tokio::test]
+    async fn test_uninitialized_tensor() {
+        let ctx = setup_context().await;
+
+        let tensor = GpuTensor::uninitialized(&ctx, vec![100, 100], DType::F32, "uninit");
+
+        assert_eq!(tensor.shape(), &[100, 100]);
+        assert_eq!(tensor.num_elements(), 10000);
+        // Buffer exists but contents are undefined
+    }
+
+    #[tokio::test]
+    async fn test_debug_format() {
+        let ctx = setup_context().await;
+
+        let tensor = GpuTensor::zeros(&ctx, vec![2, 3], DType::F32, "test").unwrap();
+        let debug_str = format!("{:?}", tensor);
+
+        assert!(debug_str.contains("GpuTensor"));
+        assert!(debug_str.contains("[2, 3]"));
+        assert!(debug_str.contains("F32"));
     }
 }

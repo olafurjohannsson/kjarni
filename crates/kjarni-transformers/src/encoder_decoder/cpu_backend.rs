@@ -21,6 +21,8 @@ pub enum CpuSeq2SeqState {
     },
 }
 
+
+#[derive(Debug)]
 pub struct CpuBackend;
 
 #[async_trait]

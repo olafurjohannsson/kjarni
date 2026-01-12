@@ -14,10 +14,18 @@ use bytemuck;
 use ndarray::{Array1, Array2, Array3};
 use std::sync::Arc;
 
+
+#[derive(Debug)]
 pub struct GpuBackend {
     pub context: Arc<WgpuContext>,
 }
 
+
+impl std::fmt::Debug for WgpuContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WgpuContext").finish()
+    }
+}
 impl GpuBackend {
     pub fn new(context: Arc<WgpuContext>) -> Result<Self> {
         Ok(Self { context })

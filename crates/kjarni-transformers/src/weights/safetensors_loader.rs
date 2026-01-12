@@ -31,9 +31,9 @@
 
 use crate::tensor::DType;
 use crate::tensor::raw_tensor::TensorView;
-use crate::weights::mmap_cache::get_or_create_mmap;
 use crate::weights::WeightLoader;
-use anyhow::{anyhow, Context, Result};
+use crate::weights::mmap_cache::get_or_create_mmap;
+use anyhow::{Context, Result, anyhow};
 use memmap2::Mmap;
 use safetensors::SafeTensors;
 use std::any::Any;
@@ -63,6 +63,7 @@ use std::sync::Arc;
 ///     Ok(())
 /// })?;
 /// ```
+#[derive(Debug)]
 pub struct SafeTensorsLoader {
     /// Loaded shards, each containing an mmap and parsed SafeTensors
     shards: Vec<ShardInfo>,
@@ -71,12 +72,13 @@ pub struct SafeTensorsLoader {
 }
 
 /// Information about a single safetensors shard.
+#[derive(Debug)]
 struct ShardInfo {
     /// Memory-mapped file contents (shared via cache)
     #[allow(dead_code)]
     mmap: Arc<Mmap>,
     /// Parsed SafeTensors structure
-    /// 
+    ///
     /// SAFETY: The 'static lifetime is safe because:
     /// 1. The mmap is owned by Arc and outlives this struct
     /// 2. ShardInfo holds both the mmap and tensors, ensuring the mmap
@@ -125,10 +127,7 @@ impl SafeTensorsLoader {
 
         // Case 2: Directory
         if !path.is_dir() {
-            return Err(anyhow!(
-                "Path {:?} is neither a file nor a directory",
-                path
-            ));
+            return Err(anyhow!("Path {:?} is neither a file nor a directory", path));
         }
 
         let index_file = path.join("model.safetensors.index.json");
@@ -153,13 +152,13 @@ impl SafeTensorsLoader {
             .into_iter()
             .map(|name| (name.to_string(), 0))
             .collect();
-        
+
         log::info!(
             "Loaded single safetensors file: {} tensors from {:?}",
             shard.tensors.names().len(),
             path.file_name().unwrap_or_default()
         );
-        
+
         Ok((vec![shard], tensor_to_shard))
     }
 
@@ -168,10 +167,10 @@ impl SafeTensorsLoader {
         let index_path = path.join("model.safetensors.index.json");
         let index_content = fs::read_to_string(&index_path)
             .with_context(|| format!("Failed to read index file: {:?}", index_path))?;
-        
-        let index: serde_json::Value = serde_json::from_str(&index_content)
-            .context("Failed to parse index.json")?;
-        
+
+        let index: serde_json::Value =
+            serde_json::from_str(&index_content).context("Failed to parse index.json")?;
+
         let weight_map = index["weight_map"]
             .as_object()
             .ok_or_else(|| anyhow!("Invalid index.json: missing 'weight_map' object"))?;
@@ -198,8 +197,13 @@ impl SafeTensorsLoader {
             let shard_path = path.join(filename);
             shards.push(Self::load_shard(&shard_path)?);
             file_to_shard_idx.insert(filename.clone(), idx);
-            
-            log::debug!("Loaded shard {}/{}: {}", idx + 1, unique_files.len(), filename);
+
+            log::debug!(
+                "Loaded shard {}/{}: {}",
+                idx + 1,
+                unique_files.len(),
+                filename
+            );
         }
 
         // Build tensor -> shard index mapping
@@ -249,7 +253,6 @@ impl SafeTensorsLoader {
     }
 }
 
-
 impl WeightLoader for SafeTensorsLoader {
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let shard_idx = self
@@ -279,12 +282,44 @@ impl WeightLoader for SafeTensorsLoader {
     }
 }
 #[cfg(test)]
-mod tests {
+mod safetensor_loader_tests {
     use super::*;
     use safetensors::tensor::{Dtype, TensorView as StTensorView};
     use std::collections::HashMap;
+    use std::io::Write;
     use tempfile::TempDir;
 
+    #[test]
+    fn test_load_nonexistent_path() {
+        let path = Path::new("non_existent_file.safetensors");
+        let res = SafeTensorsLoader::new(path);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_load_directory_no_index() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let res = SafeTensorsLoader::new(dir.path());
+        // Should fail or try to load model.safetensors and fail
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_load_directory_with_single_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let model_path = dir.path().join("model.safetensors");
+
+
+        std::fs::write(&model_path, b"invalid content").unwrap();
+
+        let res = SafeTensorsLoader::new(dir.path());
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("Failed to parse safetensors")
+        );
+    }
     fn create_safetensors_file(
         dir: &TempDir,
         filename: &str,
@@ -314,13 +349,18 @@ mod tests {
     #[test]
     fn test_single_file_loading() {
         let dir = tempfile::tempdir().unwrap();
-        create_safetensors_file(&dir, "model.safetensors", &[
-            ("layer1.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
-            ("layer1.bias", vec![0.1, 0.2], vec![2]),
-        ]).unwrap();
+        create_safetensors_file(
+            &dir,
+            "model.safetensors",
+            &[
+                ("layer1.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
+                ("layer1.bias", vec![0.1, 0.2], vec![2]),
+            ],
+        )
+        .unwrap();
 
         let loader = SafeTensorsLoader::new(dir.path()).unwrap();
-        
+
         assert_eq!(loader.tensor_count(), 2);
         assert_eq!(loader.shard_count(), 1);
         assert!(loader.contains("layer1.weight"));
@@ -331,15 +371,20 @@ mod tests {
     #[test]
     fn test_tensor_names() {
         let dir = tempfile::tempdir().unwrap();
-        create_safetensors_file(&dir, "model.safetensors", &[
-            ("a.weight", vec![1.0], vec![1]),
-            ("b.weight", vec![2.0], vec![1]),
-            ("c.weight", vec![3.0], vec![1]),
-        ]).unwrap();
+        create_safetensors_file(
+            &dir,
+            "model.safetensors",
+            &[
+                ("a.weight", vec![1.0], vec![1]),
+                ("b.weight", vec![2.0], vec![1]),
+                ("c.weight", vec![3.0], vec![1]),
+            ],
+        )
+        .unwrap();
 
         let loader = SafeTensorsLoader::new(dir.path()).unwrap();
         let names = loader.tensor_names();
-        
+
         assert_eq!(names.len(), 3);
         assert!(names.contains(&"a.weight"));
         assert!(names.contains(&"b.weight"));
@@ -350,13 +395,16 @@ mod tests {
     fn test_get_raw_tensor() {
         let dir = tempfile::tempdir().unwrap();
         let values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        create_safetensors_file(&dir, "model.safetensors", &[
-            ("test.weight", values.clone(), vec![2, 3]),
-        ]).unwrap();
+        create_safetensors_file(
+            &dir,
+            "model.safetensors",
+            &[("test.weight", values.clone(), vec![2, 3])],
+        )
+        .unwrap();
 
         let loader = SafeTensorsLoader::new(dir.path()).unwrap();
         let view = loader.get_raw("test.weight").unwrap();
-        
+
         assert_eq!(view.name, "test.weight");
         assert_eq!(view.shape, vec![2, 3]);
         assert_eq!(view.dtype, DType::F32);
@@ -366,13 +414,16 @@ mod tests {
     #[test]
     fn test_missing_tensor_error() {
         let dir = tempfile::tempdir().unwrap();
-        create_safetensors_file(&dir, "model.safetensors", &[
-            ("exists.weight", vec![1.0], vec![1]),
-        ]).unwrap();
+        create_safetensors_file(
+            &dir,
+            "model.safetensors",
+            &[("exists.weight", vec![1.0], vec![1])],
+        )
+        .unwrap();
 
         let loader = SafeTensorsLoader::new(dir.path()).unwrap();
         let result = loader.get_raw("does_not_exist");
-        
+
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("not found"));
@@ -381,14 +432,17 @@ mod tests {
     #[test]
     fn test_direct_file_path() {
         let dir = tempfile::tempdir().unwrap();
-        create_safetensors_file(&dir, "model.safetensors", &[
-            ("test.weight", vec![1.0], vec![1]),
-        ]).unwrap();
+        create_safetensors_file(
+            &dir,
+            "model.safetensors",
+            &[("test.weight", vec![1.0], vec![1])],
+        )
+        .unwrap();
 
         // Load directly from file path
         let file_path = dir.path().join("model.safetensors");
         let loader = SafeTensorsLoader::new(&file_path).unwrap();
-        
+
         assert!(loader.contains("test.weight"));
     }
 

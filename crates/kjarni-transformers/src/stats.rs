@@ -274,4 +274,31 @@ mod tests {
 
         GenerationStats::disable();
     }
+    #[test]
+    fn test_generation_stats_lifecycle() {
+        let mut stats = GenerationStats::new();
+
+        // Initial state
+        assert_eq!(stats.prefill_tps(), 0.0);
+        assert_eq!(stats.decode_tps(), 0.0);
+
+        // Prefill
+        stats.start_prefill(100);
+        std::thread::sleep(Duration::from_millis(10));
+        stats.end_prefill();
+
+        assert!(stats.prefill_tps() > 0.0);
+
+        // Decode
+        stats.record_token();
+        std::thread::sleep(Duration::from_millis(10));
+        stats.record_token();
+
+        assert!(stats.decode_tps() > 0.0);
+
+        // Verify counts
+        // (Access fields or print summary to ensure no panic)
+        stats.print_summary();
+    }
+
 }

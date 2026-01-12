@@ -215,3 +215,56 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpu::decoder::CpuDecoderBackend;
+    
+    // Note: Testing GpuBackend requires context, so we focus on CPU/Structure here
+    
+    #[test]
+    fn test_any_backend_is_cpu() {
+        let cpu = CpuDecoderBackend;
+        let any = AnyDecoderBackend::Cpu(cpu);
+        
+        assert!(any.is_cpu());
+        assert!(!any.is_gpu());
+    }
+
+    #[test]
+    fn test_any_backend_dispatch_cpu() {
+        let cpu = CpuDecoderBackend;
+        let any = AnyDecoderBackend::Cpu(cpu);
+        
+        // Test basic dispatch
+        let tensor = any.new_token_tensor();
+        assert!(tensor.is_ok());
+        
+        let mut t = tensor.unwrap();
+        let update = any.update_token_tensor(&mut t, 123);
+        assert!(update.is_ok());
+        
+        // Verify internal type is Array2<u32> (what CpuBackend uses)
+        let concrete = t.downcast_ref::<ndarray::Array2<u32>>();
+        assert!(concrete.is_some());
+        assert_eq!(concrete.unwrap()[[0,0]], 123);
+    }
+    
+    #[test]
+    fn test_tensor_mismatch_error() {
+        let cpu = CpuDecoderBackend;
+        let any = AnyDecoderBackend::Cpu(cpu);
+        
+        // Create a fake tensor (e.g. String)
+        let mut fake_tensor: Box<dyn std::any::Any + Send + Sync> = Box::new(String::from("fake"));
+        
+        // CPU backend expects Array2<u32>, should fail gracefully
+        let result = any.update_token_tensor(&mut fake_tensor, 1);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(), 
+            "Type mismatch: CPU backend expected Array2<u32>, got different type. This is a bug - tensor was created by wrong backend."
+        );
+    }
+}

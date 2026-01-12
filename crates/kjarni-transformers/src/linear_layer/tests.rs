@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use half::bf16;
-use ndarray::{arr1, arr2, Array1, Array2};
+use ndarray::{Array1, Array2, arr1, arr2};
 
 use crate::{
     linear_layer::{F32MatmulStrategy, LinearData, LinearLayer},
@@ -30,6 +30,39 @@ fn test_matmul_f32_basic() {
     let output = layer.matmul(&input.view());
 
     assert_eq!(output, arr2(&[[3.0, 7.0]]));
+}
+
+#[test]
+fn test_matmul_strategies() {
+    let rows = 4;
+    let cols = 4;
+    let weights = Array2::<f32>::eye(rows); // Identity matrix
+
+    // 1. Test CustomSimd
+    let l1 = LinearLayer::new_f32(weights.clone(), None);
+    // Default is CustomSimd
+    let input = Array2::<f32>::ones((1, cols));
+    let out1 = l1.matmul(&input.view());
+    assert_eq!(out1, input);
+
+    // 2. Test Faer (Transposed Layout)
+    let mut l2 = LinearLayer::new_f32(weights.t().to_owned(), None);
+    l2.f32_strategy = F32MatmulStrategy::Faer;
+
+    let out2 = l2.matmul(&input.view());
+    assert_eq!(out2, input);
+}
+
+#[test]
+fn test_matmul_bf16() {
+    let weights = Array2::<f32>::eye(4).mapv(half::bf16::from_f32);
+    let layer = LinearLayer::new_bf16(weights, None);
+
+    let input = Array2::<f32>::ones((1, 4));
+    let output = layer.matmul(&input.view());
+
+    // BF16 precision might drift slightly, but Identity is usually exact
+    assert!((output[[0, 0]] - 1.0).abs() < 1e-2);
 }
 
 #[test]
@@ -61,7 +94,7 @@ fn test_matmul_f32_batch() {
 }
 
 #[test]
-fn test_matmul_bf16() {
+fn test_matmul_bf16_2() {
     // Create BF16 weights
     let data = vec![1.0f32, 2.0, 3.0, 4.0];
     let weights_bf16 =

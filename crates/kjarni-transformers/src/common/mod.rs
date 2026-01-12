@@ -146,3 +146,89 @@ impl HFGenerationDefaults {
         }
     }
 }
+
+#[cfg(test)]
+mod common_tests {
+    use super::*;
+
+    #[test]
+    fn test_default_generation_config() {
+        let config = GenerationConfig::default();
+
+        assert_eq!(config.max_new_tokens, Some(50));
+        assert_eq!(config.max_length, 100);
+        assert!(config.add_bos_token);
+        assert_eq!(config.repetition_penalty, 1.0);
+
+        match config.strategy {
+            DecodingStrategy::Sample(params) => {
+                assert_eq!(params.temperature, 0.7);
+                assert_eq!(params.top_k, Some(50));
+                assert_eq!(params.top_p, Some(0.9));
+            }
+            _ => panic!("Default strategy should be Sampling"),
+        }
+    }
+
+    #[test]
+    fn test_hf_defaults_greedy() {
+        let json = r#"{
+        "do_sample": false,
+        "max_length": 2048
+    }"#;
+
+        let hf_defaults = HFGenerationDefaults::from_json(json).unwrap();
+        let config = hf_defaults.into_generation_config(4096);
+
+        match config.strategy {
+            DecodingStrategy::Greedy => {} // Pass
+            _ => panic!("Should be Greedy"),
+        }
+        assert_eq!(config.max_length, 2048);
+    }
+
+    #[test]
+    fn test_hf_defaults_sampling() {
+        let json = r#"{
+        "do_sample": true,
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 40,
+        "repetition_penalty": 1.1
+    }"#;
+
+        let hf_defaults = HFGenerationDefaults::from_json(json).unwrap();
+        let config = hf_defaults.into_generation_config(1024);
+
+        match config.strategy {
+            DecodingStrategy::Sample(params) => {
+                assert_eq!(params.temperature, 0.8);
+                assert_eq!(params.top_p, Some(0.95));
+                assert_eq!(params.top_k, Some(40));
+            }
+            _ => panic!("Should be Sampling"),
+        }
+        assert_eq!(config.repetition_penalty, 1.1);
+        // Should fallback to max_seq_len if max_length not in JSON
+        assert_eq!(config.max_length, 1024);
+    }
+
+    #[test]
+    fn test_hf_defaults_empty_json() {
+        // Test robustness against missing fields
+        let json = "{}";
+        let hf_defaults = HFGenerationDefaults::from_json(json).unwrap();
+
+        assert!(!hf_defaults.do_sample);
+        assert_eq!(hf_defaults.temperature, 1.0); // Default via serde
+
+        let config = hf_defaults.into_generation_config(512);
+        assert_eq!(config.max_length, 512);
+    }
+
+    #[test]
+    fn test_hf_defaults_invalid_json() {
+        let json = "{ invalid_json }";
+        assert!(HFGenerationDefaults::from_json(json).is_err());
+    }
+}

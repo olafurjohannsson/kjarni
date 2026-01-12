@@ -7,3 +7,7 @@ pub use crate::cpu::decoder::{
     decoder_attention::DecoderAttention, decoder_backend::CpuDecoderBackend,
     decoder_layer::DecoderLayer, rope_decoder_layer::CpuRoPEDecoderLayer,
 };
+
+
+#[cfg(test)]
+mod tests;

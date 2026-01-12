@@ -16,6 +16,8 @@ use futures_core::stream::Stream;
 use ndarray::Array3;
 use std::any::Any;
 
+
+#[derive(Debug)]
 pub enum AnyEncoderDecoderBackend {
     Cpu(CpuBackend),
     Gpu(GpuBackend),
@@ -112,9 +114,16 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
     }
 }
 
+#[derive(Debug)]
 pub struct EncoderDecoderGenerator {
     pub model: Box<dyn EncoderDecoderLanguageModel>,
     backend: AnyEncoderDecoderBackend,
+}
+
+impl std::fmt::Debug for Box<dyn EncoderDecoderLanguageModel> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EncoderDecoder")
+    }
 }
 
 impl EncoderDecoderGenerator {
@@ -222,5 +231,115 @@ impl EncoderDecoderGenerator {
                 yield token?;
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpu::encoder::traits::EncoderLanguageModel;
+    use crate::cpu::encoder::{CpuEncoderOps, GpuEncoderOps};
+    use crate::traits::{Device, InferenceModel};
+    use crate::encoder_decoder::traits::{
+        CpuEncoderDecoderOps, GpuEncoderDecoderOps,
+    };
+    use crate::cache::Cache;
+    use tokenizers::Tokenizer;
+    use std::sync::Arc;
+    use std::any::Any;
+    use std::collections::HashSet;
+    use ndarray::Array2;
+
+    // --- Mocks ---
+
+    struct MockModel {
+        device: Device,
+    }
+
+    impl InferenceModel for MockModel {
+        fn device(&self) -> Device { self.device }
+        fn context(&self) -> Option<Arc<WgpuContext>> { None }
+        fn as_any(&self) -> &dyn Any { self }
+    }
+
+    impl LanguageModel for MockModel {
+        fn vocab_size(&self) -> usize { 100 }
+        fn hidden_size(&self) -> usize { 10 }
+        fn num_layers(&self) -> usize { 1 }
+        fn num_heads(&self) -> usize { 1 }
+        fn context_size(&self) -> usize { 100 }
+        fn tokenizer(&self) -> &Tokenizer { unimplemented!("Mock tokenizer not available") }
+        fn eos_token_id(&self) -> Option<u32> { Some(1) }
+        fn bos_token_id(&self) -> Option<u32> { Some(0) }
+        fn forced_bos_token_id(&self) -> Option<u32> { None }
+        fn forced_eos_token_id(&self) -> Option<u32> { None }
+        fn pad_token_id(&self) -> Option<u32> { None }
+        fn stop_token_ids(&self) -> HashSet<u32> { HashSet::default() }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> { unimplemented!() }
+    }
+
+    #[async_trait]
+    impl EncoderLanguageModel for MockModel {
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> { None }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> { None }
+    }
+
+    #[async_trait]
+    impl EncoderDecoderLanguageModel for MockModel {
+        fn encoder_decoder_cpu_ops(&self) -> Option<&dyn CpuEncoderDecoderOps> { None }
+        fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> { None }
+        fn decoder_start_token_id(&self) -> u32 { 0 }
+        fn get_default_generation_config(&self) -> GenerationConfig { GenerationConfig::default() }
+    }
+
+    // --- Tests ---
+
+    #[test]
+    fn test_generator_new_cpu() {
+        let model = MockModel { device: Device::Cpu };
+        let generator = EncoderDecoderGenerator::new(Box::new(model));
+        assert!(generator.is_ok());
+        
+        // Verify backend type implicitly
+        // We can't access generator.backend (private), but success implies it matched
+    }
+
+    #[tokio::test]
+    async fn test_generator_new_gpu_missing_context() {
+        // GPU model without context should fail
+        let model = MockModel { device: Device::Wgpu };
+        let generator = EncoderDecoderGenerator::new(Box::new(model));
+        assert!(generator.is_err());
+        assert_eq!(generator.unwrap_err().to_string(), "GPU model missing WgpuContext");
+    }
+
+    #[test]
+    fn test_backend_dispatch_cpu() {
+        // Test manual dispatch wrapper
+        let backend = AnyEncoderDecoderBackend::Cpu(crate::encoder_decoder::cpu_backend::CpuBackend);
+        
+        // create_token_tensor
+        let tokens = vec![1, 2, 3];
+        let tensor = backend.create_token_tensor(&tokens, 1);
+        assert!(tensor.is_ok());
+        
+        // Verify boxed type
+        let boxed = tensor.unwrap();
+        let concrete = boxed.downcast_ref::<crate::encoder_decoder::cpu_backend::CpuSeq2SeqState>();
+        assert!(concrete.is_some());
+    }
+
+    #[test]
+    fn test_backend_mismatch_error() {
+        let backend = AnyEncoderDecoderBackend::Cpu(crate::encoder_decoder::cpu_backend::CpuBackend);
+        
+        // Create Fake Tensor (String)
+        let mut fake_tensor: Box<dyn Any + Send + Sync> = Box::new(String::from("fake"));
+        
+        // Try to update using CpuBackend (expects CpuSeq2SeqState)
+        let res = backend.update_token_tensor(&mut fake_tensor, &[1]);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Mismatched Tensor type"));
     }
 }

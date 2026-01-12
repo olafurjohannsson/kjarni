@@ -30,7 +30,7 @@ impl ModelConfig for MockConfig {
     fn model_type(&self) -> &str {
         "mock"
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -261,7 +261,6 @@ impl CpuDecoderOps for MockDecoderModel {
         &self.decoder
     }
     fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
-        
         Ok(Array3::zeros((1, 1, self.hidden_size())))
     }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {

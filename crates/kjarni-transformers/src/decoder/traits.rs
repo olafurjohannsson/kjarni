@@ -23,6 +23,8 @@
 //!     -   **Role**: Engine. Executes the heavy Transformer layers.
 //!     -   **Knowledge**: Pure linear algebra. Embed -> Normalize -> Forward Layers.
 
+use std::any::Any;
+
 use crate::ChatTemplate;
 use crate::cache::{Cache, GpuKVCache};
 use crate::common::GenerationConfig;
@@ -166,7 +168,9 @@ pub trait CpuDecoder: Send + Sync {
     
     // fn layers(&self)
 
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any(&self) -> &dyn Any;
+
+    // fn as_any_mut(&mut self) -> &mut dyn Any;
 
     fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>>;
 

@@ -1,6 +1,6 @@
 //! Layer normalization implementation
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array3, ArrayView3, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
@@ -68,7 +68,7 @@ impl LayerNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array3;
+    use ndarray::{Array3, arr1};
 
     #[test]
     fn test_layer_norm_basic() {
@@ -139,7 +139,7 @@ mod tests {
                 6.0, 8.0, // batch 1, pos 1: mean=7, var=1
             ],
         )
-            .unwrap();
+        .unwrap();
 
         let output = layer_norm.forward_3d(&hidden);
 
@@ -194,5 +194,17 @@ mod tests {
         assert!(output[[0, 0, 0]].abs() < 1e-3);
         assert!(output[[0, 0, 1]].abs() < 1e-3);
         assert!(output[[0, 0, 2]].abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_layer_norm_forward_3d() {
+        let weight = arr1(&[1.0, 1.0]);
+        let bias = arr1(&[0.0, 0.0]);
+        let ln = LayerNorm::new(weight, bias, 1e-5);
+
+        let input = ndarray::Array3::zeros((1, 1, 2));
+        let output = ln.forward_3d(&input);
+
+        assert_eq!(output.shape(), &[1, 1, 2]);
     }
 }

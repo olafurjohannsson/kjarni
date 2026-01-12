@@ -43,8 +43,8 @@
 //! let result = generation_task.await?;
 //! ```
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A token that can be checked to determine if cancellation was requested.
 ///
@@ -237,7 +237,6 @@ impl CancellationHandle {
     /// // Generation will be cancelled after 30 seconds
     /// generator.generate_cancellable("prompt", &config, token).await;
     /// ```
-    #[cfg(feature = "tokio")]
     pub fn cancel_after(self, timeout: std::time::Duration) {
         let handle = self.clone();
         tokio::spawn(async move {
@@ -248,8 +247,46 @@ impl CancellationHandle {
 }
 
 #[cfg(test)]
-mod tests {
+mod cancellation_tests {
     use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_send_sync() {
+        let (token, handle) = CancellationToken::new();
+
+        // Move token to another thread
+        let t1 = thread::spawn(move || {
+            assert!(!token.is_cancelled());
+            // Wait for cancel
+            while !token.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(token.is_cancelled());
+        });
+
+        // Cancel from main thread
+        std::thread::sleep(Duration::from_millis(50));
+        handle.cancel();
+
+        t1.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_cancel_after() {
+        let (token, handle) = CancellationToken::new();
+
+        // Cancel after 50ms
+        handle.cancel_after(Duration::from_millis(50));
+
+        assert!(!token.is_cancelled());
+
+        // Wait 100ms
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(token.is_cancelled());
+    }
 
     #[test]
     fn test_new_token_not_cancelled() {
@@ -261,20 +298,20 @@ mod tests {
     fn test_cancel_sets_flag() {
         let (token, handle) = CancellationToken::new();
         assert!(!token.is_cancelled());
-        
+
         handle.cancel();
-        
+
         assert!(token.is_cancelled());
     }
 
     #[test]
     fn test_multiple_cancels_idempotent() {
         let (token, handle) = CancellationToken::new();
-        
+
         handle.cancel();
         handle.cancel();
         handle.cancel();
-        
+
         assert!(token.is_cancelled());
     }
 
@@ -282,12 +319,12 @@ mod tests {
     fn test_cloned_tokens_share_state() {
         let (token1, handle) = CancellationToken::new();
         let token2 = token1.clone();
-        
+
         assert!(!token1.is_cancelled());
         assert!(!token2.is_cancelled());
-        
+
         handle.cancel();
-        
+
         assert!(token1.is_cancelled());
         assert!(token2.is_cancelled());
     }
@@ -308,11 +345,11 @@ mod tests {
     #[test]
     fn test_check_returns_error_when_cancelled() {
         let (token, handle) = CancellationToken::new();
-        
+
         assert!(token.check().is_ok());
-        
+
         handle.cancel();
-        
+
         assert!(token.check().is_err());
     }
 }
