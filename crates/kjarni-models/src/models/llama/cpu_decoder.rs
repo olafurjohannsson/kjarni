@@ -152,6 +152,7 @@ impl LlamaCpuDecoder {
             &layout.token_embedding,
             decoder_layout.position_embedding.as_deref(), // Correctly access nested field
             decoder_layout.token_type_embedding.as_deref(),
+            target_dtype,
         )?;
 
         let mid_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();

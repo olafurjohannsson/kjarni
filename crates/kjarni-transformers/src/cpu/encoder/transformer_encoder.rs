@@ -45,6 +45,7 @@ impl CpuTransformerEncoder {
             &layout.token_embedding,
             encoder_layout.position_embedding.as_deref(),
             encoder_layout.token_type_embedding.as_deref(),
+            load_cfg.target_dtype,
         )?;
 
         // 3. Embedding LayerNorm

@@ -1,12 +1,12 @@
 // kjarni-transformers/src/pipeline/decoder.rs
 
+use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::embeddings::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
 use crate::lm_head::LoadedLMHead;
 use crate::prelude::Device;
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
 /// A container that holds all components needed for decoder inference.
@@ -201,5 +201,474 @@ impl DecoderPipeline {
             .as_ref()
             .map(|d| d.as_ref())
             .ok_or_else(|| anyhow!("GPU decoder not available"))
+    }
+}
+
+#[cfg(test)]
+mod decoder_pipeline_test {
+    use ndarray::{Array2, Array3};
+
+    use super::*;
+    use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+    use crate::models::base::{ModelInput, ModelLoadConfig};
+    use crate::pipeline::DecoderPipelineBuilder;
+    use crate::tensor::DType;
+    use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
+    use crate::weights::ModelWeights;
+    use crate::{Cache, GpuKVCache, WgpuContext};
+    use std::sync::Arc;
+
+    struct MockCpuDecoder {
+        num_layers: usize,
+    }
+    impl CpuDecoder for MockCpuDecoder {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
+            let (batch, seq) = match input {
+                ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
+                _ => (1, 1),
+            };
+            Ok(Array3::zeros((batch, seq, 1)))
+        }
+
+        fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
+            self.embed(input, offset)
+        }
+        fn forward_layers(
+            &self,
+            _: &Array3<f32>,
+            _: &Array2<f32>,
+            _: usize,
+            _: Option<&mut dyn Cache>,
+            _: usize,
+            _: usize,
+        ) -> anyhow::Result<Array3<f32>> {
+            Ok(Array3::zeros((1, 1, 1)))
+        }
+        fn num_layers(&self) -> usize {
+            self.num_layers
+        }
+    }
+
+    struct MockGpuDecoder {
+        num_layers: usize,
+    }
+    impl GpuDecoder for MockGpuDecoder {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn embed(
+            &self,
+            encoder: &mut wgpu::CommandEncoder,
+            pool: &mut GpuTensorPool,
+            input: ModelInput<'_>,
+            position_offset: usize,
+        ) -> Result<GpuTensor> {
+            unimplemented!()
+        }
+        /// Metadata: Hidden dimension size.
+        fn hidden_size(&self) -> usize {
+            0
+        }
+        fn embed_and_normalize(
+            &self,
+            encoder: &mut wgpu::CommandEncoder,
+            pool: &mut GpuTensorPool,
+            input: ModelInput<'_>,
+            position_offset: usize,
+        ) -> Result<GpuTensor> {
+            unimplemented!()
+        }
+
+        fn forward_layers(
+            &self,
+            _: &mut wgpu::CommandEncoder,
+            _: &mut GpuTensorPool,
+            _: &GpuTensor,
+            _: &GpuTensor,
+            _: usize,
+            _: Option<&mut GpuKVCache>,
+            _: usize,
+            _: usize,
+        ) -> anyhow::Result<GpuTensor> {
+            unimplemented!()
+        }
+        fn num_layers(&self) -> usize {
+            self.num_layers
+        }
+    }
+
+    use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout};
+
+    struct MockConfig {
+        hidden: usize,
+        vocab: usize,
+        tied: bool,
+    }
+
+    impl crate::traits::ModelConfig for MockConfig {
+        fn model_type(&self) -> &str {
+            "mock_pipeline"
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn metadata(&self) -> ModelMetadata {
+            ModelMetadata {
+                decoder_layers: None,
+                hidden_size: self.hidden,
+                num_layers: 1,
+                num_attention_heads: 1,
+                num_kv_heads: 1,
+                head_dim: self.hidden,
+                vocab_size: self.vocab,
+                max_seq_len: 128,
+                norm_eps: 1e-5,
+                activation: crate::activations::Activation::Gelu,
+                rope_theta: None,
+                rope_scaling: None,
+                scale_embeddings: false,
+                normalize_embedding: false,
+                extra_pos_embeddings: 0,
+                is_prenorm: true,
+                transpose_ffn_weights: false,
+                transpose_attention_weights: false,
+                normalization_strategy: crate::traits::NormalizationStrategy::RMSNorm,
+                no_scale_qk: false,
+            }
+        }
+
+        fn layout(&self) -> ModelLayout {
+            // We only care about embeddings and head for pipeline tests
+            let layer_layout = DecoderLayerLayout {
+                self_attn: AttentionLayout {
+                    q_weight: "layer.{}.q.weight".to_string(),
+                    k_weight: "layer.{}.k.weight".to_string(),
+                    v_weight: "layer.{}.v.weight".to_string(),
+                    o_weight: "layer.{}.o.weight".to_string(),
+                    norm_weight: "layer.{}.attn_norm.weight".to_string(),
+                    q_bias: None,
+                    k_bias: None,
+                    v_bias: None,
+                    o_bias: None,
+                    norm_bias: None,
+                },
+                cross_attn: None,
+                ffn: FeedForwardLayout {
+                    gate_weight: Some("layer.{}.gate.weight".to_string()),
+                    up_weight: "layer.{}.up.weight".to_string(),
+                    down_weight: "layer.{}.down.weight".to_string(),
+                    norm_weight: "layer.{}.ffn_norm.weight".to_string(),
+                    gate_bias: None,
+                    up_bias: None,
+                    down_bias: None,
+                    norm_bias: None,
+                },
+            };
+
+            ModelLayout {
+                token_embedding: "token_embd.weight".to_string(),
+                // CRITICAL: If tied, point to same name as token_embedding
+                lm_head: if self.tied {
+                    "token_embd.weight".to_string()
+                } else {
+                    "output.weight".to_string()
+                },
+                encoder: None,
+                decoder: Some(DecoderLayout {
+                    position_embedding: None,
+                    token_type_embedding: None,
+                    embedding_norm_weight: None,
+                    embedding_norm_bias: None,
+                    final_norm_weight: Some("norm.weight".to_string()),
+                    final_norm_bias: None,
+                    layer: layer_layout,
+                }),
+            }
+        }
+    }
+    fn get_mock_backends() -> (Option<Box<dyn CpuDecoder>>, Option<Box<dyn GpuDecoder>>) {
+        (
+            Some(Box::new(MockCpuDecoder { num_layers: 1 })),
+            Some(Box::new(MockGpuDecoder { num_layers: 1 })),
+        )
+    }
+    fn create_dummy_weights(
+        tensors: Vec<(&str, Vec<f32>, Vec<usize>)>,
+    ) -> (tempfile::TempDir, ModelWeights) {
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+        use std::io::Write;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let model_path = dir.path().join("model.safetensors");
+        let config_json = r#"{ "hidden_size": 32, "vocab_size": 100 }"#;
+        std::fs::write(dir.path().join("config.json"), config_json).unwrap();
+
+        let mut data_map = std::collections::HashMap::new();
+        let mut buffers = Vec::new(); // Keep alive
+
+        for (name, data, shape) in tensors {
+            let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+            buffers.push((name.to_string(), bytes, shape));
+        }
+        for (name, bytes, shape) in &buffers {
+            let view = TensorView::new(Dtype::F32, shape.clone(), bytes).unwrap();
+            data_map.insert(name.clone(), view);
+        }
+
+        let serialized = serialize(&data_map, &None).unwrap();
+        std::fs::write(&model_path, &serialized).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        (dir, weights)
+    }
+
+    // =========================================================================
+    //  Unit Tests: DecoderPipeline Validation
+    // =========================================================================
+
+    #[test]
+    fn test_pipeline_validation_cpu_ok() {
+        // Should succeed if plan=CPU and components loaded on CPU
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![0.0], vec![1, 1])]);
+        // Mock components would be complex to instantiate manually without builder.
+        // Testing via Builder is easier.
+    }
+
+    // =========================================================================
+    //  Integration Tests: DecoderPipelineBuilder
+    // =========================================================================
+
+    #[test]
+    fn test_builder_cpu_plan_tied_weights() {
+        // Verify that tied weights logic shares memory (Arc)
+        let hidden = 32;
+        let vocab = 100;
+
+        let (_dir, weights) = create_dummy_weights(vec![
+            (
+                "token_embd.weight",
+                vec![1.0; vocab * hidden],
+                vec![vocab, hidden],
+            ),
+            // No output.weight needed because tied
+        ]);
+
+        let config = Arc::new(MockConfig {
+            hidden,
+            vocab,
+            tied: true,
+        });
+
+        // Default config = CPU
+        let load_config = ModelLoadConfig::default();
+        let (cpu, gpu) = get_mock_backends();
+        let pipeline = DecoderPipelineBuilder::new(&weights, config)
+            .with_load_config(load_config)
+            .with_backends(cpu, gpu) 
+            .build()
+            .expect("Failed to build pipeline");
+
+        // 1. Verify Embeddings Loaded
+        assert!(pipeline.embeddings().is_cpu());
+
+        // 2. Verify LM Head Loaded
+        assert!(pipeline.lm_head().has_cpu());
+
+        // 3. Verify Sharing (Pointer Equality)
+        let emb_ptr = pipeline.embeddings().word_embeddings_cpu().unwrap().data;
+        let head_ptr = pipeline
+            .lm_head()
+            .cpu_weights
+            .as_ref()
+            .unwrap()
+            .data
+            .clone();
+
+        // Need to match on LinearData variants to check Arcs
+        match (emb_ptr, head_ptr) {
+            (
+                crate::linear_layer::LinearData::F32(arc1),
+                crate::linear_layer::LinearData::F32(arc2),
+            ) => {
+                assert!(
+                    Arc::ptr_eq(&arc1, &arc2),
+                    "Weights should be shared via Arc"
+                );
+            }
+            _ => panic!("Expected F32 weights"),
+        }
+    }
+
+    #[test]
+    fn test_builder_cpu_plan_untied_weights() {
+        let hidden = 32;
+        let vocab = 100;
+
+        let (_dir, weights) = create_dummy_weights(vec![
+            (
+                "token_embd.weight",
+                vec![1.0; vocab * hidden],
+                vec![vocab, hidden],
+            ),
+            (
+                "output.weight",
+                vec![2.0; vocab * hidden],
+                vec![vocab, hidden],
+            ),
+        ]);
+
+        let config = Arc::new(MockConfig {
+            hidden,
+            vocab,
+            tied: false,
+        });
+        let (cpu, gpu) = get_mock_backends();
+        let pipeline = DecoderPipelineBuilder::new(&weights, config)
+            .with_backends(cpu, gpu) 
+            .build()
+            .expect("Failed to build pipeline");
+
+        let emb_val = pipeline.embeddings().word_embeddings_cpu().unwrap().data;
+        let head_val = pipeline
+            .lm_head()
+            .cpu_weights
+            .as_ref()
+            .unwrap()
+            .data
+            .clone();
+
+        match (emb_val, head_val) {
+            (
+                crate::linear_layer::LinearData::F32(arc1),
+                crate::linear_layer::LinearData::F32(arc2),
+            ) => {
+                // Should NOT be equal
+                assert!(!Arc::ptr_eq(&arc1, &arc2));
+                assert_eq!(arc1[[0, 0]], 1.0);
+                assert_eq!(arc2[[0, 0]], 2.0);
+            }
+            _ => panic!("Expected F32 weights"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_builder_gpu_plan() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let hidden = 32;
+        let vocab = 100;
+
+        let (_dir, weights) = create_dummy_weights(vec![(
+            "token_embd.weight",
+            vec![1.0; vocab * hidden],
+            vec![vocab, hidden],
+        )]);
+
+        let config = Arc::new(MockConfig {
+            hidden,
+            vocab,
+            tied: true,
+        });
+
+        // Plan assumes GPU if context provided
+        let (cpu, gpu) = get_mock_backends();
+        let pipeline = DecoderPipelineBuilder::new(&weights, config)
+            .with_backends(cpu, gpu) 
+            .with_context_opt(Some(context))
+            .build()?;
+
+        // Verify GPU placement
+        assert!(pipeline.plan().embeddings.is_gpu());
+        assert!(pipeline.plan().lm_head.is_gpu());
+
+        assert!(pipeline.embeddings().is_gpu());
+        assert!(pipeline.lm_head().has_gpu());
+
+        // Verify CPU was skipped (default behavior for pure GPU plan)
+        // Note: Depends on ExecutionPlan::from_load_config logic.
+        // If it defaults to hybrid, CPU might be loaded.
+        // Let's assume pure GPU for now.
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_builder_explicit_offload() {
+        let hidden = 32;
+        let vocab = 100;
+        let (_dir, weights) = create_dummy_weights(vec![(
+            "token_embd.weight",
+            vec![1.0; vocab * hidden],
+            vec![vocab, hidden],
+        )]);
+        let config = Arc::new(MockConfig {
+            hidden,
+            vocab,
+            tied: true,
+        });
+
+        let load_config = ModelLoadConfig {
+            offload_embeddings: true, // Force CPU embeddings
+            ..Default::default()
+        };
+
+        // Even with GPU Context available (simulated by plan logic),
+        // offload should keep embeddings on CPU.
+        // Since we don't pass context here, plan defaults to CPU anyway.
+        let (cpu, gpu) = get_mock_backends();
+        let pipeline = DecoderPipelineBuilder::new(&weights, config)
+            .with_backends(cpu, gpu) 
+            .with_load_config(load_config)
+            .build()
+            .unwrap();
+
+        assert!(pipeline.embeddings().is_cpu());
+        // Plan should reflect this
+        assert!(pipeline.plan().embeddings.is_cpu());
+    }
+
+    #[test]
+    fn test_builder_quantization_propagation() {
+        // Verify that quantize_lm_head config propagates to LoadedLMHead
+        let hidden = 32;
+        let vocab = 100;
+        // Provide F32 weights
+        let (_dir, weights) = create_dummy_weights(vec![
+            (
+                "token_embd.weight",
+                vec![1.0; vocab * hidden],
+                vec![vocab, hidden],
+            ),
+            (
+                "output.weight",
+                vec![1.0; vocab * hidden],
+                vec![vocab, hidden],
+            ),
+        ]);
+
+        let config = Arc::new(MockConfig {
+            hidden,
+            vocab,
+            tied: false,
+        });
+
+        let load_config = ModelLoadConfig {
+            quantize_lm_head: Some(DType::Q8_0),
+            ..Default::default()
+        };
+        let (cpu, gpu) = get_mock_backends();
+        let pipeline = DecoderPipelineBuilder::new(&weights, config)
+            .with_backends(cpu, gpu) 
+            .with_load_config(load_config)
+            .build()
+            .unwrap();
+
+        let head = pipeline.lm_head().cpu_weights.as_ref().unwrap();
+        assert_eq!(head.dtype(), DType::Q8_0);
     }
 }

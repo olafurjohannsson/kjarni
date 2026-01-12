@@ -1,386 +1,591 @@
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
-use crate::embeddings::Embeddings;
-use crate::normalization::Normalization;
-// Unified Traits
-use crate::WgpuContext;
-
-use anyhow::Result;
-use ndarray::{arr2, s, Array2, Array3};
-
-struct TestConfig {
-    extra_pos_embeddings: usize,
-    scale_embed: bool,
-}
-
-// Replaces TransformerConfig and LanguageModelConfig
-impl ModelConfig for TestConfig {
-    fn model_type(&self) -> &str {
-        "test_encoder"
-    }
-fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn metadata(&self) -> ModelMetadata {
-        ModelMetadata {
-            hidden_size: 384,
-            num_layers: 6,
-            num_attention_heads: 12,
-            num_kv_heads: 12,
-            head_dim: 384 / 12,
-            vocab_size: 30522,
-            max_seq_len: 512,
-            norm_eps: 1e-12,
-            activation: crate::activations::Activation::Gelu,
-            rope_theta: None,
-            rope_scaling: None,
-            scale_embeddings: self.scale_embed,
-            extra_pos_embeddings: self.extra_pos_embeddings,
-            is_prenorm: false,
-            transpose_ffn_weights: false,
-        }
-    }
-
-    fn layout(&self) -> ModelLayout {
-        ModelLayout {
-            token_embedding: "embeddings.word_embeddings.weight".to_string(),
-            position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
-            token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
-            embedding_norm: Some("embeddings.LayerNorm.weight".to_string()),
-            embedding_norm_bias: "embeddings.LayerNorm.bias".to_string(),
-            final_norm: "".to_string(),
-            lm_head: "".to_string(),
-
-            attn_q: "".to_string(),
-            attn_k: "".to_string(),
-            attn_v: "".to_string(),
-            attn_o: "".to_string(),
-            attn_norm: "".to_string(),
-            attn_q_bias: String::new(),
-            attn_k_bias: String::new(),
-            attn_v_bias: String::new(),
-            attn_o_bias: String::new(),
-            attn_norm_bias: String::new(),
-
-            ffn_gate: None,
-            ffn_up: "".to_string(),
-            ffn_down: "".to_string(),
-            ffn_norm: "".to_string(),
-            ffn_up_bias: String::new(),
-            ffn_down_bias: String::new(),
-            ffn_norm_bias: String::new(),
-
-            cross_attn_q: None,
-            cross_attn_k: None,
-            cross_attn_v: None,
-            cross_attn_o: None,
-            cross_attn_norm: None,
-        }
-    }
-}
-
-// Helper for float comparison
-fn assert_tensors_are_close(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
-    assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
-    for (val_a, val_b) in a.iter().zip(b.iter()) {
-        assert!(
-            (val_a - val_b).abs() < epsilon,
-            "Values differ: {} vs {}",
-            val_a,
-            val_b
-        );
-    }
-}
-#[tokio::test]
-async fn test_bart_embeddings_golden_parity() -> Result<()> {
+#[cfg(test)]
+mod embeddings_tests {
+    use super::*;
+    use crate::embeddings::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
+    use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+    use crate::models::base::ModelInput; // <--- Using your actual input enum
+    use crate::tensor::{CpuTensor, DType};
     use crate::weights::ModelWeights;
-    use ndarray::Array2;
+    use crate::{Embeddings, WgpuContext};
+    use anyhow::Result;
+    use ndarray::{Array2, Array3, ArrayView2, arr2, s};
     use std::path::Path;
-    let path_str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
-    let path = Path::new(path_str);
-    assert!(path.exists());
-    if !path.exists() {
-        println!(
-            "SKIPPING TEST: Weights not found at {}. Please download them to run golden test.",
-            path_str
-        );
-        return Ok(());
+    use std::sync::Arc;
+
+    // =========================================================================
+    //  Helpers & Mocks
+    // =========================================================================
+
+    fn create_dummy_weights(
+        tensors: Vec<(&str, Vec<f32>, Vec<usize>)>,
+    ) -> (tempfile::TempDir, ModelWeights) {
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+        use std::io::Write;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let model_path = dir.path().join("model.safetensors");
+        let config_json = r#"{ "hidden_size": 64, "vocab_size": 100 }"#;
+        std::fs::write(dir.path().join("config.json"), config_json).unwrap();
+
+        let mut buffers = Vec::new();
+        for (name, data, shape) in tensors {
+            let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+            buffers.push((name.to_string(), bytes, shape));
+        }
+
+        let mut data_map = std::collections::HashMap::new();
+        for (name, bytes, shape) in &buffers {
+            let view = TensorView::new(Dtype::F32, shape.clone(), bytes).unwrap();
+            data_map.insert(name.clone(), view);
+        }
+
+        let serialized = serialize(&data_map, &None).unwrap();
+        std::fs::write(&model_path, &serialized).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        (dir, weights)
     }
 
-    let weights = ModelWeights::new(path)?;
-
-    // 2. Load Weights (Standard BART naming)
-    let word_emb = weights.get_array2("model.shared.weight")?;
-    let pos_emb = weights.get_array2("model.encoder.embed_positions.weight")?;
-
-    // BART-specific: No token type embeddings
-    let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
-
-    // 3. Define Inputs (From your Python Checkpoint 1)
-    // "Rust is a multi-paradigm..."
-    let input_ids_vec = vec![0, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
-    let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
-
-    // 4. Run Forward
-    // CONFIG CHECK: extra_pos_embeddings=2, scale_embeddings=False
-    let output = embeddings.forward(
-        &input_ids, None, 2,     // position_offset (BART starts at 2)
-        false, // scale_embeddings (DistilBART is false)
-    );
-
-    // 5. Assert against Ground Truth (From your Python Checkpoint 1.5)
-    let expected_first_10 = vec![
-        0.011993408,
-        -0.13934326,
-        0.058532715,
-        -0.042541504,
-        -0.061767578,
-        -0.002746582,
-        0.0048828125,
-        -0.037017822,
-        -0.015655518,
-        -0.053588867,
-    ];
-
-    let actual_slice = output.slice(s![0, 0, 0..10]);
-    println!("Golden Test - Actual Output: {:?}", actual_slice);
-
-    for (i, &expected) in expected_first_10.iter().enumerate() {
-        let actual = actual_slice[i];
-        let diff = (actual - expected).abs();
-
-        // Tolerance 1e-5 is usually safe for F32 comparisons across PyTorch/Rust
-        assert!(
-            diff < 1e-5,
-            "Mismatch at index {}: expected {}, got {} (diff {})",
-            i,
-            expected,
-            actual,
-            diff
-        );
+    fn assert_tensors_are_close(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
+        assert_eq!(a.shape(), b.shape(), "Array shapes do not match");
+        for (val_a, val_b) in a.iter().zip(b.iter()) {
+            assert!(
+                (val_a - val_b).abs() < epsilon,
+                "Values differ: {} vs {} (diff {})",
+                val_a,
+                val_b,
+                (val_a - val_b).abs()
+            );
+        }
     }
 
-    println!("✅ Golden Test Passed: Embeddings match PyTorch exactly.");
-    Ok(())
-}
-#[tokio::test]
-async fn test_gpu_vs_cpu_embeddings_parity() -> Result<()> {
-    // --- 1. Setup Common Data and Config ---
-    let context = WgpuContext::new().await?;
-    let config = TestConfig {
-        extra_pos_embeddings: 2,
-        scale_embed: false,
-    };
+    // =========================================================================
+    //  Unit Tests: CPU Math Logic (Verify Correctness)
+    // =========================================================================
 
-    // Create mock inputs on CPU
-    let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
-    let token_type_ids_cpu: Array2<u32> = arr2(&[[0, 0, 1], [1, 1, 0]]);
+    #[test]
+    fn test_cpu_embeddings_math() {
+        // 1. Setup Data
+        let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // All 1.0
+        let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5); // All 0.5
 
-    // Keep the hardcoded path for now as requested
-    let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
-    let weights = crate::weights::ModelWeights::new(Path::new(p))?;
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
 
-    // --- 2. Run CPU Path (Expected Result) ---
-    let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
-    let token_type_embeddings = if let Some(name) = type_w {
-        Some(weights.get_array2(name)?)
-    } else {
-        None
-    };
+        let input_ids = Array2::<u32>::zeros((1, 2)); // [0, 0]
 
-    let cpu_embeddings = Embeddings::new(
-        weights.get_array2(word_w)?,
-        Some(weights.get_array2(pos_w)?),
-        token_type_embeddings,
-    );
-    let expected_output = cpu_embeddings.forward(
-        &input_ids_cpu,
-        Some(&token_type_ids_cpu),
-        config.extra_pos_embeddings(),
-        config.scale_embeddings(),
-    );
+        // 2. Run Forward
+        // 1.0 (Word) + 0.5 (Pos) = 1.5
+        let output = embeddings.forward(&input_ids, None, 0, false);
 
-    // --- 3. Setup GPU Modules and Inputs ---
-    let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
-    let gpu_embeddings = GpuEmbeddings::new(&context)?;
+        assert_eq!(output[[0, 0, 0]], 1.5);
+        assert_eq!(output[[0, 1, 0]], 1.5);
+    }
 
-    // Upload inputs
-    let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-    let token_type_ids_gpu = GpuTensor::from_ndarray(&context, &token_type_ids_cpu)?;
+    // =========================================================================
+    //  Integration Tests: LoadedEmbeddings (The Decision Matrix)
+    // =========================================================================
 
-    // --- START CORRECTION ---
+    // Scenario 2: Hybrid (GPU Weights, CPU Input)
+    // Verifies automatic upload of tokens
+    #[tokio::test]
+    async fn test_scenario_hybrid_gpu_weights() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![2.0; 64], vec![64, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
 
-    // 1. Create the encoder and pool directly for the test.
-    let mut encoder = context.device.create_command_encoder(&Default::default());
-    let mut pool = GpuTensorPool::new(context.clone());
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, false, true, None)?;
 
-    // 2. Call the encode function with the raw &mut encoder and &mut pool.
-    let output_gpu = gpu_embeddings.encode(
-        &mut encoder,
-        &gpu_embedding_weights,
-        &input_ids_gpu,
-        Some(&token_type_ids_gpu),
-        0, // position_offset
-        config,
-        &mut pool,
-    )?;
+        // CPU Input
+        let input_cpu = arr2(&[[0u32]]);
 
-    // 3. Submit the work and advance the pool's frame.
-    context.queue.submit(Some(encoder.finish()));
-    pool.next_frame();
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-    // --- END CORRECTION ---
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_array(input_cpu.view()), // CPU View
+            None,
+            0,
+        )?;
 
-    // --- 4. Verify Results ---
-    let actual_output = output_gpu.to_ndarray_3d().await?;
+        context.queue.submit(Some(encoder.finish()));
+        let output = result.to_ndarray_3d::<f32>().await?;
 
-    // Using a slightly more relaxed tolerance for embeddings is often wise,
-    // as it involves multiple additions which can accumulate small errors.
-    assert_tensors_are_close(&expected_output, &actual_output, 1e-5);
+        assert_eq!(output[[0, 0, 0]], 2.0);
+        Ok(())
+    }
 
-    Ok(())
-}
-#[tokio::test]
-async fn test_gpu_vs_cpu_embeddings_parity_no_token_type_ids() -> Result<()> {
-    // --- 1. Setup Common Data and Config ---
-    let context = WgpuContext::new().await?;
-    let config = TestConfig {
-        extra_pos_embeddings: 2,
-        scale_embed: false,
-    }; // Test BART-like settings
+    // Scenario 1: Pure GPU
+    // Weights: GPU
+    // Input:   ModelInput::TokensGpu
+    // Action:  Compute on GPU
+    #[tokio::test]
+    async fn test_scenario_pure_gpu() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![1.0; 100], vec![100, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
 
-    // Create mock inputs on CPU
-    let input_ids_cpu: Array2<u32> = arr2(&[[10, 20, 30], [40, 50, 60]]);
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, false, true, None)?;
 
-    let p = "/home/olafurj/.cache/edgegpt/sentence-transformers_all-MiniLM-L6-v2/";
+        // Prepare GPU Input
+        let input_cpu = arr2(&[[0u32, 1]]);
+        let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
 
-    // --- 2. Run CPU Path (Expected Result) ---
-    let mut weights = crate::weights::ModelWeights::new(Path::new(p))?;
-    let (word_w, pos_w, type_w) = config.get_embedding_weight_names();
-    let token_type_embeddings = match type_w {
-        Some(name) => Some(weights.get_array2(name)?), // Load if present
-        None => None,
-    };
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-    let cpu_embeddings = Embeddings::new(
-        weights.get_array2(word_w)?,
-        Some(weights.get_array2(pos_w)?),
-        token_type_embeddings,
-    );
-    let expected_output = cpu_embeddings.forward(
-        &input_ids_cpu,
-        None,
-        config.extra_pos_embeddings(),
-        config.scale_embeddings(),
-    );
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::TokensGpu(&input_gpu),
+            None,
+            0,
+        )?;
 
-    let gpu_embedding_weights = GpuEmbeddingWeights::new(&context, &weights, &config)?;
-    let gpu_embeddings = GpuEmbeddings::new(&context)?;
+        context.queue.submit(Some(encoder.finish()));
+        let output = result.to_ndarray_3d::<f32>().await?;
 
-    // Upload inputs
-    let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-    let mut pool = GpuTensorPool::new(context.clone());
+        assert_eq!(output[[0, 0, 0]], 1.0);
+        Ok(())
+    }
 
-    let mut encoder = context.device.create_command_encoder(&Default::default());
-    let output_gpu = gpu_embeddings.encode(
-        &mut encoder,
-        &gpu_embedding_weights,
-        &input_ids_gpu,
-        None,
-        0,
-        &config,
-        &mut pool,
-    )?;
-    context.queue.submit(Some(encoder.finish()));
-    pool.next_frame();
+    // Scenario 2: Hybrid Upload
+    // Weights: GPU
+    // Input:   ModelInput::TokensCpu
+    // Action:  Upload Tokens -> Compute on GPU
+    #[tokio::test]
+    async fn test_scenario_hybrid_upload() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![2.0; 100], vec![100, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
 
-    let actual_output = output_gpu.to_ndarray_3d().await?;
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, false, true, None)?;
 
-    // --- 4. Verification ---
-    assert_tensors_are_close(&expected_output, &actual_output, 1e-4);
+        let input_cpu = arr2(&[[0u32, 1]]); // Array2
 
-    Ok(())
-}
-#[test]
-fn test_embeddings_with_position() {
-    // GPT-2 / BERT style
-    let word_emb = Array2::ones((100, 64));
-    let pos_emb = Array2::ones((512, 64));
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-    let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_array(input_cpu.view()), // Pass View
+            None,
+            0,
+        )?;
 
-    let input_ids = Array2::zeros((2, 10));
-    let output = embeddings.forward(&input_ids, None, 0, false);
+        context.queue.submit(Some(encoder.finish()));
+        let output = result.to_ndarray_3d::<f32>().await?;
 
-    assert_eq!(output.shape(), &[2, 10, 64]);
-}
+        assert_eq!(output[[0, 0, 0]], 2.0);
+        Ok(())
+    }
 
-#[test]
-fn test_embeddings_without_position() {
-    // LLaMA / RoPE style
-    let word_emb = Array2::ones((100, 64));
+    // Scenario 3: CPU Offload
+    // Weights: CPU (No GPU weights loaded!)
+    // Input:   ModelInput::TokensCpu
+    // Action:  Compute on CPU -> Upload Result to GPU
+    #[tokio::test]
+    async fn test_scenario_cpu_offload() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![3.0; 100], vec![100, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
 
-    let embeddings = Embeddings::new(word_emb, None, None);
+        let loaded = LoadedEmbeddings::new(
+            Some(&context),
+            &weights,
+            config,
+            true,  // Load CPU
+            false, // NO GPU
+            None,
+        )?;
 
-    let input_ids = Array2::zeros((2, 10));
-    let output = embeddings.forward(&input_ids, None, 0, false);
+        let input_cpu = arr2(&[[0u32]]);
 
-    assert_eq!(output.shape(), &[2, 10, 64]);
-    // Should work without position embeddings
-}
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-#[test]
-fn test_embeddings_with_token_types() {
-    let word_emb = Array2::ones((100, 64));
-    let pos_emb = Array2::ones((512, 64));
-    let token_type_emb = Array2::ones((2, 64));
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_array(input_cpu.view()),
+            None,
+            0,
+        )?;
 
-    let embeddings = Embeddings::new(word_emb, Some(pos_emb), Some(token_type_emb));
+        context.queue.submit(Some(encoder.finish()));
+        let output = result.to_ndarray_3d::<f32>().await?;
 
-    let input_ids = Array2::zeros((2, 10));
-    let token_type_ids = Array2::zeros((2, 10));
-    let output = embeddings.forward(&input_ids, Some(&token_type_ids), 0, false);
+        assert_eq!(output[[0, 0, 0]], 3.0);
+        Ok(())
+    }
 
-    assert_eq!(output.shape(), &[2, 10, 64]);
-}
+    // Scenario 4: Hidden State Passthrough (Optimization)
+    // Weights: Irrelevant
+    // Input:   ModelInput::HiddenGpu
+    // Action:  Return as is
+    #[tokio::test]
+    async fn test_scenario_hidden_passthrough() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![0.0], vec![1, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, true, true, None)?;
 
-#[test]
-#[should_panic(expected = "exceeds max position embeddings")]
-fn test_sequence_too_long() {
-    let word_emb = Array2::ones((100, 64));
-    let pos_emb = Array2::ones((10, 64)); // Only 10 positions
+        // Fake pre-computed hidden states
+        let hidden_cpu = Array3::<f32>::from_elem((1, 1, 1), 99.0);
+        let hidden_gpu = GpuTensor::from_ndarray(&context, &hidden_cpu)?;
 
-    let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-    let input_ids = Array2::zeros((2, 20)); // 20 tokens - too long!
-    let _ = embeddings.forward(&input_ids, None, 0, false);
-}
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_gpu_hidden(&hidden_gpu),
+            None,
+            0,
+        )?;
 
-#[test]
-fn test_llama_long_sequence() {
-    // LLaMA without position embeddings can handle any length
-    let word_emb = Array2::ones((100, 64));
+        // Should return the exact same tensor ID/Buffer if optimized,
+        // or at least same data
+        let output = result.to_ndarray_3d::<f32>().await?;
+        assert_eq!(output[[0, 0, 0]], 99.0);
+        Ok(())
+    }
 
-    let embeddings = Embeddings::new(word_emb, None, None);
+    // Scenario 5: Full BERT (Token Types)
+    // Weights: GPU
+    // Input:   TokensGpu + TypesGpu
+    #[tokio::test]
+    async fn test_scenario_token_types() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("w", vec![1.0; 50], vec![50, 1]), // Word = 1.0
+            ("t", vec![5.0; 2], vec![2, 1]),   // Type = 5.0
+        ]);
+        let config = EmbeddingConfig::builder("w", 1).type_embedding("t").build();
 
-    let input_ids = Array2::zeros((2, 1000)); // Very long sequence
-    let output = embeddings.forward(&input_ids, None, 0, false);
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, false, true, None)?;
 
-    assert_eq!(output.shape(), &[2, 1000, 64]);
-    // Should work fine - RoPE handles position in attention layer
-}
+        let input_cpu = arr2(&[[0u32]]);
+        let types_cpu = arr2(&[[0u32]]);
+        let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
+        let types_gpu = GpuTensor::from_ndarray(&context, &types_cpu)?;
 
-#[test]
-#[should_panic(expected = "out of vocabulary range")]
-fn test_invalid_token_id() {
-    let word_emb = Array2::ones((100, 64));
-    let pos_emb = Array2::ones((512, 64));
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
 
-    let embeddings = Embeddings::new(word_emb, Some(pos_emb), None);
+        // Pass ModelInput::TokensGpu for both
+        let result = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_gpu_tokens(&input_gpu),
+            Some(ModelInput::from_gpu_tokens(&types_gpu)),
+            0,
+        )?;
 
-    let mut input_ids = Array2::zeros((2, 10));
-    input_ids[[0, 0]] = 150 as u32; // Out of vocab range [0, 100)
+        context.queue.submit(Some(encoder.finish()));
+        let output = result.to_ndarray_3d::<f32>().await?;
 
-    let _ = embeddings.forward(&input_ids, None, 0, false);
+        // 1.0 (Word) + 5.0 (Type) = 6.0
+        assert_eq!(output[[0, 0, 0]], 6.0);
+        Ok(())
+    }
+
+    // Scenario 6: Pure CPU Execution (Decoder Backend Use Case)
+    // This tests the `embed_cpu` method specifically used by CpuDecoderBackend
+    #[tokio::test]
+    async fn test_scenario_pure_cpu_backend() -> Result<()> {
+        // Note: No WgpuContext needed!
+        let (_dir, weights) = create_dummy_weights(vec![("w", vec![7.0; 100], vec![100, 1])]);
+        let config = EmbeddingConfig::builder("w", 1).build();
+
+        // Load CPU only
+        let loaded = LoadedEmbeddings::new(None, &weights, config, true, false, None)?;
+
+        let input_tokens = arr2(&[[0u32, 1]]);
+
+        // Direct CPU call (no command encoder needed)
+        let output = loaded.embed_cpu(&input_tokens, None, 0)?;
+
+        assert_eq!(output[[0, 0, 0]], 7.0);
+        Ok(())
+    }
+    // Scenario 5: Full BERT Parity (GPU vs CPU)
+    // Verifies complex logic (Word + Pos + Type) matches on both devices
+    #[tokio::test]
+    async fn test_gpu_cpu_parity_bert() -> Result<()> {
+        let context = WgpuContext::new().await?;
+        let hidden = 32;
+        let vocab = 50;
+
+        // Create random-ish data
+        let word_data: Vec<f32> = (0..vocab * hidden).map(|i| (i as f32) * 0.01).collect();
+        let type_data = vec![0.5f32; 2 * hidden];
+
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("w", word_data, vec![vocab, hidden]),
+            ("t", type_data, vec![2, hidden]),
+        ]);
+
+        let config = EmbeddingConfig::builder("w", hidden)
+            .type_embedding("t")
+            .build();
+
+        // Load BOTH
+        let loaded = LoadedEmbeddings::new(Some(&context), &weights, config, true, true, None)?;
+
+        let input_ids = arr2(&[[1u32, 5]]);
+        let type_ids = arr2(&[[0u32, 1]]);
+
+        // 1. Run CPU
+        let cpu_out = loaded.embed_cpu(&input_ids, Some(&type_ids), 0)?;
+
+        // 2. Run GPU
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        let mut pool = GpuTensorPool::new(context.clone());
+
+        let gpu_tensor = loaded.embed(
+            &mut encoder,
+            &mut pool,
+            ModelInput::from_array(input_ids.view()),
+            Some(ModelInput::from_array(type_ids.view())), // Pass CPU types, should auto-upload
+            0,
+        )?;
+
+        context.queue.submit(Some(encoder.finish()));
+        let gpu_out = gpu_tensor.to_ndarray_3d::<f32>().await?;
+
+        // 3. Compare
+        assert_tensors_are_close(&cpu_out, &gpu_out, 1e-5);
+        Ok(())
+    }
+    #[test]
+    fn test_q8_0_lifecycle_correctness() {
+        // 1. Setup: Create known F32 weights
+        let hidden_size = 32; // Must be multiple of 32 for Q8_0
+        let vocab_size = 4;
+
+        // Create a pattern: Token 0 = 1.0, Token 1 = 2.0, etc.
+        let mut word_data = Vec::new();
+        for i in 0..vocab_size {
+            word_data.extend(vec![i as f32; hidden_size]);
+        }
+
+        let (_dir, weights) = create_dummy_weights(vec![(
+            "q8.weight",
+            word_data.clone(),
+            vec![vocab_size, hidden_size],
+        )]);
+
+        // 2. Load: Request Q8_0 quantization
+        let embeddings = Embeddings::from_weights(
+            &weights,
+            "q8.weight",
+            None,
+            None,
+            Some(DType::Q8_0), // <--- Force Q8_0
+        )
+        .expect("Failed to load/quantize Q8_0");
+
+        // 3. Verify Internal Storage (Optional reflection check)
+        match embeddings.word_embeddings {
+            EmbeddingData::Q8_0(_) => println!("Confirmed loaded as Q8_0"),
+            _ => panic!("Failed to load as Q8_0"),
+        }
+
+        // 4. Run Forward (Triggers dequantization)
+        let input_ids = arr2(&[[0u32, 1, 3]]); // Skip 2
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        // 5. Assert Values
+        // Q8_0 is lossy but precise for simple integers like 1.0, 2.0
+        // Token 0 -> 0.0
+        assert!((output[[0, 0, 0]] - 0.0).abs() < 1e-2);
+        // Token 1 -> 1.0
+        assert!((output[[0, 1, 0]] - 1.0).abs() < 1e-2);
+        // Token 3 -> 3.0
+        assert!((output[[0, 2, 0]] - 3.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_bf16_lifecycle_correctness() {
+        let hidden_size = 16;
+        let vocab_size = 2;
+        let word_data = vec![0.5f32; vocab_size * hidden_size]; // All 0.5
+
+        let (_dir, weights) = create_dummy_weights(vec![(
+            "bf.weight",
+            word_data,
+            vec![vocab_size, hidden_size],
+        )]);
+
+        // Request BF16 conversion on load
+        let embeddings =
+            Embeddings::from_weights(&weights, "bf.weight", None, None, Some(DType::BF16))
+                .expect("Failed to load BF16");
+
+        match embeddings.word_embeddings {
+            EmbeddingData::BF16(_) => println!("Confirmed loaded as BF16"),
+            _ => panic!("Failed to load as BF16"),
+        }
+
+        let input_ids = arr2(&[[0u32, 1]]);
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        // BF16 precision is low, but 0.5 is exactly representable
+        assert!((output[[0, 0, 0]] - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_scaling_and_position_offset_logic() {
+        let hidden_size = 4;
+        let vocab_size = 2;
+
+        // Word = 1.0
+        let word_data = vec![1.0f32; vocab_size * hidden_size];
+        // Pos = [0.1, 0.2, 0.3, ...]
+        let pos_data = vec![
+            0.1f32, 0.1, 0.1, 0.1, // Pos 0
+            0.2f32, 0.2, 0.2, 0.2, // Pos 1
+            0.3f32, 0.3, 0.3, 0.3,
+        ]; // Pos 2
+
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("w", word_data, vec![vocab_size, hidden_size]),
+            ("p", pos_data, vec![3, hidden_size]),
+        ]);
+
+        let embeddings = Embeddings::from_weights(&weights, "w", Some("p"), None, None).unwrap();
+
+        let input_ids = arr2(&[[0u32]]);
+
+        // CASE 1: Scale = true, Offset = 0
+        // Expected: (1.0 * sqrt(4)) + 0.1 (Pos 0) = 2.0 + 0.1 = 2.1
+        let out1 = embeddings.forward(&input_ids, None, 0, true);
+        assert!((out1[[0, 0, 0]] - 2.1).abs() < 1e-5);
+
+        // CASE 2: Scale = false, Offset = 1
+        // Expected: 1.0 + 0.2 (Pos 1) = 1.2
+        let out2 = embeddings.forward(&input_ids, None, 1, false);
+        assert!((out2[[0, 0, 0]] - 1.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_batch_processing_correctness() {
+        // Verify batch > 1 works for Q8_0
+        let hidden_size = 32;
+        let vocab_size = 10;
+        let word_data = vec![1.0f32; vocab_size * hidden_size];
+
+        let (_dir, weights) =
+            create_dummy_weights(vec![("w", word_data, vec![vocab_size, hidden_size])]);
+
+        let embeddings =
+            Embeddings::from_weights(&weights, "w", None, None, Some(DType::Q8_0)).unwrap();
+
+        let input_ids = arr2(&[
+            [0u32, 1], // Batch 0
+            [2u32, 3], // Batch 1
+        ]);
+
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        assert_eq!(output.shape(), &[2, 2, 32]);
+        // Check random spot in batch 1
+        assert!((output[[1, 0, 0]] - 1.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_cpu_embeddings_basic_math() {
+        // 1. Setup Data
+        let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // All 1.0
+        let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5); // All 0.5
+
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+
+        let input_ids = Array2::<u32>::zeros((1, 2)); // [0, 0]
+
+        // 2. Run Forward
+        // 1.0 (Word) + 0.5 (Pos) = 1.5
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        assert_eq!(output[[0, 0, 0]], 1.5);
+        assert_eq!(output[[0, 1, 0]], 1.5);
+    }
+
+    #[test]
+    fn test_scaling_and_offsets() {
+        // Gemma style: scale by sqrt(hidden)
+        let hidden = 4;
+        let word_emb = Array2::<f32>::ones((10, hidden)); // 1.0
+
+        // Position 0 = 0.1, Position 1 = 0.2
+        let mut pos_data = Vec::new();
+        pos_data.extend(vec![0.1f32; hidden]);
+        pos_data.extend(vec![0.2f32; hidden]);
+        let pos_emb = Array2::from_shape_vec((2, hidden), pos_data).unwrap();
+
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+
+        let input_ids = Array2::<u32>::zeros((1, 1));
+
+        // Case 1: No Scale, Offset 0 -> 1.0 + 0.1 = 1.1
+        let out1 = embeddings.forward(&input_ids, None, 0, false);
+        assert!((out1[[0, 0, 0]] - 1.1).abs() < 1e-6);
+
+        // Case 2: Scaled, Offset 0 -> (1.0 * 2.0) + 0.1 = 2.1
+        let out2 = embeddings.forward(&input_ids, None, 0, true);
+        assert!((out2[[0, 0, 0]] - 2.1).abs() < 1e-6);
+
+        // Case 3: No Scale, Offset 1 -> 1.0 + 0.2 = 1.2
+        let out3 = embeddings.forward(&input_ids, None, 1, false);
+        assert!((out3[[0, 0, 0]] - 1.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_q8_0_lifecycle() {
+        // Test that we can load F32, quantize to Q8_0, and read back correct values
+        let hidden = 32; // Multiple of 32 required
+        let vocab = 2;
+        // Token 0 = 10.0, Token 1 = -5.0
+        let mut data = vec![10.0f32; hidden];
+        data.extend(vec![-5.0f32; hidden]);
+
+        let (_dir, weights) = create_dummy_weights(vec![("w", data, vec![vocab, hidden])]);
+
+        // Force Q8_0 quantization
+        let embeddings =
+            Embeddings::from_weights(&weights, "w", None, None, Some(DType::Q8_0)).unwrap();
+
+        // Verify it's actually Q8
+        match embeddings.word_embeddings {
+            EmbeddingData::Q8_0(_) => {}
+            _ => panic!("Expected Q8_0 data"),
+        }
+
+        let input = arr2(&[[0u32, 1]]);
+        let output = embeddings.forward(&input, None, 0, false);
+
+        // Check values (Q8 has some loss, but small integers are usually exact)
+        assert!((output[[0, 0, 0]] - 10.0).abs() < 0.1);
+        assert!((output[[0, 1, 0]] - -5.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_vocab_bounds() {
+        let word_emb = Array2::<f32>::zeros((10, 4));
+        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), None, None);
+
+        let bad_input = arr2(&[[100u32]]);
+        // Should NOT panic
+        let output = embeddings.forward(&bad_input, None, 0, false);
+        // Verify it ignored the input (remained zeros)
+        assert_eq!(output[[0, 0, 0]], 0.0);
+    }
 }

@@ -228,6 +228,7 @@ impl LoadedEmbeddings {
                 &config.word_embedding,
                 config.position_embedding.as_deref(),
                 config.type_embedding.as_deref(),
+                target_dtype,
             )?)
         } else {
             None
@@ -282,6 +283,9 @@ impl LoadedEmbeddings {
             EmbeddingData::BF16(arc_w) => {
                 // You need to add LinearLayer::from_arc_bf16 too!
                 Some(LinearLayer::from_arc_bf16(arc_w.clone(), None))
+            },
+            EmbeddingData::Q8_0(arc_q) => {
+                Some(LinearLayer::from_arc_q8_0(arc_q.clone(), None))
             }
         })
     }

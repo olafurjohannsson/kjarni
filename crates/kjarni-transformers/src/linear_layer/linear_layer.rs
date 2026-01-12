@@ -314,6 +314,15 @@ impl LinearLayer {
         }
     }
 
+    // Q8_0 Sharing
+    pub fn from_arc_q8_0(weights: Arc<QuantizedMatrix<BlockQ8_0>>, bias: impl Into<Option<Array1<f32>>>) -> Self {
+        Self {
+            data: LinearData::Q8_0(weights),
+            bias: bias.into(),
+            f32_strategy: F32MatmulStrategy::CustomSimd,
+        }
+    }
+
     /// Computes matrix multiplication with automatic kernel dispatch.
     ///
     /// Performs `C = A @ W^T + b` where `A` is the input activation and `W` is the
