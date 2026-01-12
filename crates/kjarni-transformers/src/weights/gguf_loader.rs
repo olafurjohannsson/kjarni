@@ -31,13 +31,13 @@
 //! - Q8_0 (8-bit quantization)
 //! - Q4_K, Q6_K (k-quant formats)
 
-use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::DType;
+use crate::tensor::raw_tensor::TensorView;
+use crate::weights::WeightLoader;
 use crate::weights::mmap_cache::get_or_create_mmap;
 use crate::weights::model_weights::AttentionLayout;
-use crate::weights::WeightLoader;
-use anyhow::{anyhow, Context, Result};
-use gguf_rs::{ByteOrder, GGUFContainer, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE};
+use anyhow::{Context, Result, anyhow};
+use gguf_rs::{ByteOrder, FILE_MAGIC_GGUF_BE, FILE_MAGIC_GGUF_LE, GGUFContainer};
 use memmap2::Mmap;
 use serde_json::Value;
 use std::any::Any;
@@ -131,8 +131,8 @@ impl GgufLoader {
     /// ```
     pub fn new(path: &Path) -> Result<Self> {
         // 1. Open file for header parsing
-        let mut header_file = File::open(path)
-            .with_context(|| format!("Failed to open GGUF file: {:?}", path))?;
+        let mut header_file =
+            File::open(path).with_context(|| format!("Failed to open GGUF file: {:?}", path))?;
 
         // 2. Determine byte order from magic number
         let byte_order = {
@@ -140,17 +140,19 @@ impl GgufLoader {
             header_file
                 .read_exact(&mut magic)
                 .context("Failed to read GGUF magic number")?;
-            
+
             let magic_val = i32::from_le_bytes(magic);
             match magic_val {
                 FILE_MAGIC_GGUF_LE => ByteOrder::LE,
                 FILE_MAGIC_GGUF_BE => ByteOrder::BE,
-                _ => return Err(anyhow!(
-                    "Invalid GGUF magic number: {:#010x}. Expected {:#010x} (LE) or {:#010x} (BE)",
-                    magic_val,
-                    FILE_MAGIC_GGUF_LE,
-                    FILE_MAGIC_GGUF_BE
-                )),
+                _ => {
+                    return Err(anyhow!(
+                        "Invalid GGUF magic number: {:#010x}. Expected {:#010x} (LE) or {:#010x} (BE)",
+                        magic_val,
+                        FILE_MAGIC_GGUF_LE,
+                        FILE_MAGIC_GGUF_BE
+                    ));
+                }
             }
         };
 
@@ -224,9 +226,10 @@ impl GgufLoader {
     ///
     /// A `TensorView` containing the raw bytes, shape, and dtype.
     pub fn get_raw_from_gguf_name(&self, gguf_name: &str) -> Result<TensorView<'_>> {
-        let info = self.tensor_map.get(gguf_name).ok_or_else(|| {
-            anyhow!("Tensor '{}' not found in GGUF file", gguf_name)
-        })?;
+        let info = self
+            .tensor_map
+            .get(gguf_name)
+            .ok_or_else(|| anyhow!("Tensor '{}' not found in GGUF file", gguf_name))?;
 
         let dtype = Self::ggml_type_to_dtype(info.kind)?;
 
@@ -252,7 +255,7 @@ impl GgufLoader {
     }
 
     /// Convert GGML type ID to internal DType.
-    fn ggml_type_to_dtype(kind: u32) -> Result<DType> {
+    pub(crate) fn ggml_type_to_dtype(kind: u32) -> Result<DType> {
         match kind {
             0 => Ok(DType::F32),
             1 => Ok(DType::F16),
@@ -274,17 +277,17 @@ impl GgufLoader {
     /// - `"model.embed_tokens.weight"` → `"token_embd.weight"`
     /// - `"model.layers.0.self_attn.q_proj.weight"` → `"blk.0.attn_q.weight"`
     /// - `"model.norm.weight"` → `"output_norm.weight"`
-    fn translate_name(&self, name: &str) -> String {
+    pub(crate) fn translate_name(&self, name: &str) -> String {
         // Embedding layer
         if name == "model.embed_tokens.weight" {
             return "token_embd.weight".to_string();
         }
-        
+
         // Final normalization
         if name == "model.norm.weight" {
             return "output_norm.weight".to_string();
         }
-        
+
         // LM head
         if name == "lm_head.weight" {
             return "output.weight".to_string();
@@ -304,17 +307,17 @@ impl GgufLoader {
                     "self_attn.k_proj.weight" => "attn_k.weight",
                     "self_attn.v_proj.weight" => "attn_v.weight",
                     "self_attn.o_proj.weight" => "attn_output.weight",
-                    
+
                     // FFN
                     "post_attention_layernorm.weight" => "ffn_norm.weight",
                     "mlp.gate_proj.weight" => "ffn_gate.weight",
                     "mlp.up_proj.weight" => "ffn_up.weight",
                     "mlp.down_proj.weight" => "ffn_down.weight",
-                    
+
                     // Pass through unknown suffixes
                     _ => suffix.as_str(),
                 };
-                
+
                 return format!("blk.{}.{}", layer_idx, translated_suffix);
             }
         }
@@ -382,37 +385,37 @@ impl GgufLoader {
         self.tensor_map.len()
     }
 
-/// Print all tensors for debugging.
-pub fn debug_print_tensors(&self) {
-    println!("=== GGUF Tensors ({} total) ===", self.tensor_map.len());
-    
-    let mut names: Vec<_> = self.tensor_map.keys().collect();
-    names.sort();
-    
-    for name in names {
-        let info = &self.tensor_map[name];
-        let dtype_name = match info.kind {
-            0 => "F32",
-            1 => "F16",
-            8 => "Q8_0",
-            12 => "Q4_K",
-            14 => "Q6_K",
-            30 => "BF16",
-            other => {
-                // Use the value in the output
-                println!(
-                    "  {}: dtype=Unknown({}), shape={:?}, size={} bytes",
-                    name, other, info.shape, info.size
-                );
-                continue;
-            }
-        };
-        println!(
-            "  {}: dtype={}, shape={:?}, size={} bytes",
-            name, dtype_name, info.shape, info.size
-        );
+    /// Print all tensors for debugging.
+    pub fn debug_print_tensors(&self) {
+        println!("=== GGUF Tensors ({} total) ===", self.tensor_map.len());
+
+        let mut names: Vec<_> = self.tensor_map.keys().collect();
+        names.sort();
+
+        for name in names {
+            let info = &self.tensor_map[name];
+            let dtype_name = match info.kind {
+                0 => "F32",
+                1 => "F16",
+                8 => "Q8_0",
+                12 => "Q4_K",
+                14 => "Q6_K",
+                30 => "BF16",
+                other => {
+                    // Use the value in the output
+                    println!(
+                        "  {}: dtype=Unknown({}), shape={:?}, size={} bytes",
+                        name, other, info.shape, info.size
+                    );
+                    continue;
+                }
+            };
+            println!(
+                "  {}: dtype={}, shape={:?}, size={} bytes",
+                name, dtype_name, info.shape, info.size
+            );
+        }
     }
-}
 }
 
 impl GgufHfMapper for GgufLoader {
@@ -447,28 +450,27 @@ impl GgufHfMapper for GgufLoader {
                     "ffn_down.weight" => "mlp.down_proj.weight",
                     _ => return None,
                 };
-                
+
                 return Some(format!("model.layers.{}.{}", layer_idx, hf_suffix));
             }
         }
-        
+
         None
     }
 }
-
 
 impl WeightLoader for GgufLoader {
     fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
         let gguf_name = self.translate_name(name);
 
         // Handle tied weights: if lm_head not found, use embeddings
-        let gguf_name =
-            if gguf_name == "output.weight" && !self.tensor_map.contains_key(&gguf_name) {
-                log::debug!("LM head not found, using tied embeddings (token_embd.weight)");
-                "token_embd.weight".to_string()
-            } else {
-                gguf_name
-            };
+        let gguf_name = if gguf_name == "output.weight" && !self.tensor_map.contains_key(&gguf_name)
+        {
+            log::debug!("LM head not found, using tied embeddings (token_embd.weight)");
+            "token_embd.weight".to_string()
+        } else {
+            gguf_name
+        };
 
         let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
             anyhow!(
@@ -530,26 +532,76 @@ impl WeightLoader for GgufLoader {
 mod tests {
     use super::*;
 
+    // --- Helper to mock loader for testing translate_name ---
+    fn create_mock_loader() -> GgufLoader {
+        GgufLoader {
+            mmap: Arc::new(unsafe { Mmap::map(&File::open("/dev/null").unwrap()).unwrap() }), // Dummy
+            tensor_map: HashMap::new(),
+            metadata: BTreeMap::new(),
+            architecture: "llama".to_string(),
+            data_start_offset: 0,
+        }
+    }
+
+    #[test]
+    fn test_dtype_conversion() {
+        assert_eq!(GgufLoader::ggml_type_to_dtype(0).unwrap(), DType::F32);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(1).unwrap(), DType::F16);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(8).unwrap(), DType::Q8_0);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(12).unwrap(), DType::Q4_K);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(14).unwrap(), DType::Q6_K);
+        assert_eq!(GgufLoader::ggml_type_to_dtype(30).unwrap(), DType::BF16);
+
+        assert!(GgufLoader::ggml_type_to_dtype(999).is_err());
+    }
+
     #[test]
     fn test_name_translation_embeddings() {
         // Test the translation logic by checking expected outputs
         // Note: We can't easily test private methods, but we can test via contains()
-        
+
         // These are the expected translations:
         let translations = vec![
             ("model.embed_tokens.weight", "token_embd.weight"),
             ("model.norm.weight", "output_norm.weight"),
             ("lm_head.weight", "output.weight"),
-            ("model.layers.0.self_attn.q_proj.weight", "blk.0.attn_q.weight"),
-            ("model.layers.0.self_attn.k_proj.weight", "blk.0.attn_k.weight"),
-            ("model.layers.0.self_attn.v_proj.weight", "blk.0.attn_v.weight"),
-            ("model.layers.0.self_attn.o_proj.weight", "blk.0.attn_output.weight"),
-            ("model.layers.0.input_layernorm.weight", "blk.0.attn_norm.weight"),
-            ("model.layers.0.post_attention_layernorm.weight", "blk.0.ffn_norm.weight"),
-            ("model.layers.0.mlp.gate_proj.weight", "blk.0.ffn_gate.weight"),
+            (
+                "model.layers.0.self_attn.q_proj.weight",
+                "blk.0.attn_q.weight",
+            ),
+            (
+                "model.layers.0.self_attn.k_proj.weight",
+                "blk.0.attn_k.weight",
+            ),
+            (
+                "model.layers.0.self_attn.v_proj.weight",
+                "blk.0.attn_v.weight",
+            ),
+            (
+                "model.layers.0.self_attn.o_proj.weight",
+                "blk.0.attn_output.weight",
+            ),
+            (
+                "model.layers.0.input_layernorm.weight",
+                "blk.0.attn_norm.weight",
+            ),
+            (
+                "model.layers.0.post_attention_layernorm.weight",
+                "blk.0.ffn_norm.weight",
+            ),
+            (
+                "model.layers.0.mlp.gate_proj.weight",
+                "blk.0.ffn_gate.weight",
+            ),
             ("model.layers.0.mlp.up_proj.weight", "blk.0.ffn_up.weight"),
-            ("model.layers.0.mlp.down_proj.weight", "blk.0.ffn_down.weight"),
-            ("model.layers.15.self_attn.q_proj.weight", "blk.15.attn_q.weight"),
+            (
+                "model.layers.0.mlp.down_proj.weight",
+                "blk.0.ffn_down.weight",
+            ),
+            (
+                "model.layers.15.self_attn.q_proj.weight",
+                "blk.15.attn_q.weight",
+            ),
         ];
 
         // Can't test directly without a GGUF file, but document expected behavior
@@ -567,10 +619,19 @@ mod tests {
         assert!(matches!(GgufLoader::ggml_type_to_dtype(0), Ok(DType::F32)));
         assert!(matches!(GgufLoader::ggml_type_to_dtype(1), Ok(DType::F16)));
         assert!(matches!(GgufLoader::ggml_type_to_dtype(8), Ok(DType::Q8_0)));
-        assert!(matches!(GgufLoader::ggml_type_to_dtype(12), Ok(DType::Q4_K)));
-        assert!(matches!(GgufLoader::ggml_type_to_dtype(14), Ok(DType::Q6_K)));
-        assert!(matches!(GgufLoader::ggml_type_to_dtype(30), Ok(DType::BF16)));
-        
+        assert!(matches!(
+            GgufLoader::ggml_type_to_dtype(12),
+            Ok(DType::Q4_K)
+        ));
+        assert!(matches!(
+            GgufLoader::ggml_type_to_dtype(14),
+            Ok(DType::Q6_K)
+        ));
+        assert!(matches!(
+            GgufLoader::ggml_type_to_dtype(30),
+            Ok(DType::BF16)
+        ));
+
         // Unknown types should error
         assert!(GgufLoader::ggml_type_to_dtype(99).is_err());
         assert!(GgufLoader::ggml_type_to_dtype(255).is_err());
@@ -580,20 +641,47 @@ mod tests {
     fn test_gguf_hf_mapper_reverse() {
         // Test reverse mapping (GGUF → HF)
         // This tests the GgufHfMapper trait implementation
-        
+
         let expected_reverse = vec![
             ("token_embd.weight", Some("model.embed_tokens.weight")),
             ("output_norm.weight", Some("model.norm.weight")),
             ("output.weight", Some("lm_head.weight")),
-            ("blk.0.attn_q.weight", Some("model.layers.0.self_attn.q_proj.weight")),
-            ("blk.0.attn_k.weight", Some("model.layers.0.self_attn.k_proj.weight")),
-            ("blk.0.attn_v.weight", Some("model.layers.0.self_attn.v_proj.weight")),
-            ("blk.0.attn_output.weight", Some("model.layers.0.self_attn.o_proj.weight")),
-            ("blk.0.attn_norm.weight", Some("model.layers.0.input_layernorm.weight")),
-            ("blk.0.ffn_norm.weight", Some("model.layers.0.post_attention_layernorm.weight")),
-            ("blk.0.ffn_gate.weight", Some("model.layers.0.mlp.gate_proj.weight")),
-            ("blk.0.ffn_up.weight", Some("model.layers.0.mlp.up_proj.weight")),
-            ("blk.0.ffn_down.weight", Some("model.layers.0.mlp.down_proj.weight")),
+            (
+                "blk.0.attn_q.weight",
+                Some("model.layers.0.self_attn.q_proj.weight"),
+            ),
+            (
+                "blk.0.attn_k.weight",
+                Some("model.layers.0.self_attn.k_proj.weight"),
+            ),
+            (
+                "blk.0.attn_v.weight",
+                Some("model.layers.0.self_attn.v_proj.weight"),
+            ),
+            (
+                "blk.0.attn_output.weight",
+                Some("model.layers.0.self_attn.o_proj.weight"),
+            ),
+            (
+                "blk.0.attn_norm.weight",
+                Some("model.layers.0.input_layernorm.weight"),
+            ),
+            (
+                "blk.0.ffn_norm.weight",
+                Some("model.layers.0.post_attention_layernorm.weight"),
+            ),
+            (
+                "blk.0.ffn_gate.weight",
+                Some("model.layers.0.mlp.gate_proj.weight"),
+            ),
+            (
+                "blk.0.ffn_up.weight",
+                Some("model.layers.0.mlp.up_proj.weight"),
+            ),
+            (
+                "blk.0.ffn_down.weight",
+                Some("model.layers.0.mlp.down_proj.weight"),
+            ),
             ("unknown.tensor", None),
         ];
 

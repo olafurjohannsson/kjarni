@@ -206,8 +206,8 @@ mod rope_decoder_gpu_test {
             hidden,
             heads,
             LinearLayer::from(gen_w((hidden, hidden), 0.001)), // Q
-            LinearLayer::from(gen_w((hidden, hidden / heads * kv_heads), 0.002)), // K
-            LinearLayer::from(gen_w((hidden, hidden / heads * kv_heads), 0.003)), // V
+            LinearLayer::from(gen_w((hidden / heads * kv_heads, hidden), 0.002)), // K
+            LinearLayer::from(gen_w((hidden / heads * kv_heads, hidden), 0.003)), // V
             LinearLayer::from(gen_w((hidden, hidden), 0.004)), // O
             Some(kv_heads),
         );

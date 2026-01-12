@@ -192,6 +192,21 @@ pub trait CpuDecoder: Send + Sync {
 
     fn num_layers(&self) -> usize;
 
+    /// Apply final layer normalization.
+    ///
+    /// For Llama: RMSNorm
+    /// For BERT: LayerNorm
+    /// For GPT-2: LayerNorm (or none, handled in LM head)
+    ///
+    /// # Arguments
+    ///
+    /// * `hidden_states` - Output from `forward_layers`
+    ///
+    /// # Returns
+    ///
+    /// Normalized hidden states, ready for LM head projection.
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
+
     fn forward_new(
         &self,
         hidden_states: &Array3<f32>,
@@ -209,16 +224,20 @@ pub trait CpuDecoder: Send + Sync {
         )
     }
 
-    fn forward(
+    // =========================================================================
+    // Convenience Methods (default implementations)
+    // =========================================================================
+
+    /// Forward through all layers.
+    fn forward_all_layers(
         &self,
-        input: ModelInput<'_>,
+        hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Array3<f32>> {
-        let hidden = self.embed_and_normalize(input, position_offset)?;
         self.forward_layers(
-            &hidden,
+            hidden_states,
             attention_mask,
             position_offset,
             cache,
@@ -226,6 +245,43 @@ pub trait CpuDecoder: Send + Sync {
             self.num_layers(),
         )
     }
+
+    /// Full decoder pass: layers + final norm.
+    ///
+    /// This is the most common usage pattern.
+    fn forward(
+        &self,
+        hidden_states: &Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
+        let output = self.forward_all_layers(
+            hidden_states,
+            attention_mask,
+            position_offset,
+            cache,
+        )?;
+        self.final_norm(&output)
+    }
+
+    // fn forward(
+    //     &self,
+    //     input: ModelInput<'_>,
+    //     attention_mask: &Array2<f32>,
+    //     position_offset: usize,
+    //     cache: Option<&mut dyn Cache>,
+    // ) -> Result<Array3<f32>> {
+    //     let hidden = self.embed_and_normalize(input, position_offset)?;
+    //     self.forward_layers(
+    //         &hidden,
+    //         attention_mask,
+    //         position_offset,
+    //         cache,
+    //         0,
+    //         self.num_layers(),
+    //     )
+    // }
 }
 
 // ============================================================================

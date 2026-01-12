@@ -251,30 +251,30 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     step: usize,
 ) -> Result<bool> {
     // --- DEBUG PRINT START ---
-    log::info!("\n--- Step {} ---", step);
-    for (i, beam) in ctx.beams.iter().enumerate() {
-        // Just like Python, skip decoding everything if it gets too slow,
-        // but for debugging this single sentence it's fine.
-        let text = ctx
-            .model
-            .tokenizer()
-            .decode(&beam.tokens, false)
-            .unwrap_or_default();
-        let safe_text = text.replace('\n', " ");
+    // log::info!("\n--- Step {} ---", step);
+    // for (i, beam) in ctx.beams.iter().enumerate() {
+    //     // Just like Python, skip decoding everything if it gets too slow,
+    //     // but for debugging this single sentence it's fine.
+    //     let text = ctx
+    //         .model
+    //         .tokenizer()
+    //         .decode(&beam.tokens, false)
+    //         .unwrap_or_default();
+    //     let safe_text = text.replace('\n', " ");
 
-        // Show last 5 tokens for ID comparison
-        let len = beam.tokens.len();
-        let start = if len > 5 { len - 5 } else { 0 };
-        let last_ids = &beam.tokens[start..];
+    //     // Show last 5 tokens for ID comparison
+    //     let len = beam.tokens.len();
+    //     let start = if len > 5 { len - 5 } else { 0 };
+    //     let last_ids = &beam.tokens[start..];
 
-        log::info!(
-            "Beam {}: {:?} | Score: {:.4} | \"{}\"",
-            i,
-            last_ids,
-            beam.score,
-            safe_text
-        );
-    }
+    //     log::info!(
+    //         "Beam {}: {:?} | Score: {:.4} | \"{}\"",
+    //         i,
+    //         last_ids,
+    //         beam.score,
+    //         safe_text
+    //     );
+    // }
     // --- DEBUG PRINT END ---
     // 1. Model Forward
     let logits_3d = ctx
