@@ -64,6 +64,7 @@ mod utils;
 pub mod chat;
 pub mod classifier;
 pub mod embedder;
+pub mod reranker;
 mod generation;
 
 pub mod common;

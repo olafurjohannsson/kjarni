@@ -318,6 +318,8 @@ pub struct ModelLoadConfig {
     pub target_dtype: Option<DType>,
     /// Quantize the language model head to this data type.
     pub quantize_lm_head: Option<DType>,
+    /// Quantize the embeddings to this data type.
+    pub quantize_embeddings: Option<DType>,
     /// Pre-allocate KV cache for this batch size.
     pub max_batch_size: Option<usize>,
     /// Pre-allocate KV cache for this sequence length.
@@ -333,6 +335,7 @@ impl Default for ModelLoadConfig {
             offload_lm_head: false,
             target_dtype: None, // Default to "detect from file"
             quantize_lm_head: None,
+            quantize_embeddings: None,
             max_batch_size: None,
             max_sequence_length: None,
             use_gguf: false,

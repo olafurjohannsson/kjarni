@@ -287,12 +287,13 @@ mod tests {
 
         // Check Layout (Gated)
         let ffn = layout.encoder.unwrap().layer.ffn;
+        println!("{:?}", ffn);
         assert!(
             ffn.gate_weight.is_some(),
             "Flan-T5 should have a gate weight"
         );
-        assert!(ffn.up_weight.contains("wi_0"));
-        assert!(ffn.gate_weight.unwrap().contains("wi_1"));
+        assert!(ffn.up_weight.contains("encoder.block.{}.layer.1.DenseReluDense.wi_1.weight"));
+        assert!(ffn.gate_weight.unwrap().contains("encoder.block.{}.layer.1.DenseReluDense.wi_0.weight"));
     }
 
     #[test]

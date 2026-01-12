@@ -8,25 +8,23 @@
 //! - Type conversion helpers
 //! - The callback pattern for safe tensor access
 //!
-//! # Example
+//! # Memory-Efficient Access
+//!
+//! Prefer the callback-based `with_raw_tensor` method which keeps data mmap'd:
 //!
 //! ```ignore
-//! // Load from directory (auto-detects format)
-//! let weights = ModelWeights::new(Path::new("/models/llama-7b"))?;
-//!
-//! // Check what's available
-//! if weights.contains("model.layers.0.self_attn.q_proj.weight") {
-//!     println!("Found attention weights");
-//! }
-//!
-//! // Load typed arrays
-//! let bias = weights.get_array1("model.layers.0.self_attn.q_proj.bias")?;
-//!
-//! // Or use the callback pattern for raw access
-//! weights.with_raw_tensor("model.embed_tokens.weight", |view| {
-//!     println!("Embedding shape: {:?}", view.shape);
-//!     Ok(())
+//! // GOOD: Data stays on disk, only pages touched are loaded
+//! weights.with_raw_tensor("layer.weight", |view| {
+//!     // Process view.bytes directly
+//!     build_linear_layer(view)
 //! })?;
+//! ```
+//!
+//! Avoid the `get_array*` methods which eagerly load into RAM:
+//!
+//! ```ignore
+//! // BAD: Allocates full tensor in RAM
+//! let array = weights.get_array2("layer.weight")?;
 //! ```
 
 use super::gguf_loader::GgufLoader;
@@ -78,19 +76,15 @@ struct ModelWeightsInner {
 /// `ModelWeights` is `Clone` and thread-safe. Multiple clones share the same
 /// underlying mmap through `Arc`.
 ///
-/// # Example
+/// # Preferred Usage Pattern
+///
+/// Use `with_raw_tensor` for memory-efficient access:
 ///
 /// ```ignore
-/// let weights = ModelWeights::new(Path::new("./model"))?;
-///
-/// // Get typed arrays
-/// let weight = weights.get_array2("encoder.layer.0.attention.self.query.weight")?;
-/// let bias = weights.get_array1("encoder.layer.0.attention.self.query.bias")?;
-///
-/// // Or use callback for raw access
 /// weights.with_raw_tensor("embedding.weight", |view| {
-///     println!("Shape: {:?}, DType: {:?}", view.shape, view.dtype);
-///     process_tensor(view)
+///     // Build your layer directly from view.bytes
+///     // No extra allocation needed
+///     LinearLayer::from_view(view, dtype)
 /// })?;
 /// ```
 pub struct ModelWeights {
@@ -126,16 +120,6 @@ impl ModelWeights {
     /// - Path doesn't exist
     /// - No supported weight format found
     /// - Format-specific parse errors
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Load from directory
-    /// let weights = ModelWeights::new(Path::new("./llama-7b"))?;
-    ///
-    /// // Load GGUF directly
-    /// let weights = ModelWeights::new(Path::new("./model.gguf"))?;
-    /// ```
     pub fn new(path: &Path) -> Result<Self> {
         // Case 1: Direct GGUF file
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
@@ -189,7 +173,7 @@ impl ModelWeights {
 
         if path.exists() {
             // Assume SafeTensors for other files
-            let loader = Box::new(SafeTensorsLoader::new(path)?);
+            let loader = Box::new(SafeTensorsLoader::new(path)?) as Box<dyn WeightLoader + Send + Sync>;
             return Ok(Self {
                 inner: Arc::new(ModelWeightsInner {
                     loader,
@@ -327,14 +311,19 @@ impl ModelWeights {
     }
 
     // =========================================================================
-    // Tensor Loading - Callback Pattern
+    // Tensor Loading - Callback Pattern (PREFERRED)
     // =========================================================================
 
     /// Process a tensor's raw bytes through a callback.
     ///
-    /// This is the recommended way to access tensor data. The callback pattern
+    /// **This is the recommended way to access tensor data.** The callback pattern
     /// ensures that the `TensorView` is consumed immediately, preventing mmap
     /// pages from being held resident longer than necessary.
+    ///
+    /// # Memory Efficiency
+    ///
+    /// Data remains on disk until accessed. Only the pages touched during the
+    /// callback are loaded into RAM, and they can be evicted after use.
     ///
     /// # Arguments
     ///
@@ -344,8 +333,9 @@ impl ModelWeights {
     /// # Example
     ///
     /// ```ignore
-    /// let weight = weights.with_raw_tensor("layer.weight", |view| {
-    ///     convert_tensor(view, target_dtype)
+    /// // Build a linear layer without extra allocation
+    /// let layer = weights.with_raw_tensor("layer.weight", |view| {
+    ///     LinearLayer::from_bytes(&view.bytes, view.shape, view.dtype)
     /// })?;
     /// ```
     pub fn with_raw_tensor<R, F>(&self, name: &str, f: F) -> Result<R>
@@ -359,7 +349,9 @@ impl ModelWeights {
     /// Resolve the dtype of a tensor, optionally overriding.
     ///
     /// If `override_dtype` is provided, returns it directly.
-    /// Otherwise, reads the tensor's native dtype.
+    /// Otherwise, reads the tensor's native dtype from metadata.
+    ///
+    /// This is efficient - it only reads the tensor header, not the data.
     pub fn resolve_dtype(&self, tensor_name: &str, override_dtype: Option<DType>) -> Result<DType> {
         if let Some(dt) = override_dtype {
             return Ok(dt);
@@ -369,12 +361,27 @@ impl ModelWeights {
     }
 
     // =========================================================================
-    // Tensor Loading - Typed Accessors
+    // Tensor Loading - Eager (DEPRECATED)
     // =========================================================================
 
-
-    
     /// Get a typed CPU tensor.
+    ///
+    /// # ⚠️ Memory Warning
+    ///
+    /// This method eagerly loads the entire tensor into RAM. For large models,
+    /// prefer using `with_raw_tensor` with a callback that processes data
+    /// incrementally or builds GPU buffers directly.
+    ///
+    /// # When to Use
+    ///
+    /// - Small tensors (biases, layer norms)
+    /// - CPU-only inference where you need the full array
+    /// - Debugging/inspection
+    ///
+    /// # When to Avoid
+    ///
+    /// - Large weight matrices (attention projections, embeddings)
+    /// - When building GPU buffers (use `with_raw_tensor` → GPU upload)
     pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
         self.with_raw_tensor(name, |raw| {
             if self.inner.is_gguf {
@@ -392,24 +399,80 @@ impl ModelWeights {
     }
 
     /// Get a 1D f32 array.
+    ///
+    /// # ⚠️ Memory Warning
+    ///
+    /// Eagerly loads the tensor into RAM and converts to f32.
+    /// Only use for small tensors like biases.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Eagerly loads tensor into RAM. Use `with_raw_tensor` for memory-efficient access."
+    )]
     pub fn get_array1(&self, name: &str) -> Result<Array1<f32>> {
+        #[allow(deprecated)]
         self.get_typed_tensor(name)?
             .to_array1_f32()
             .map_err(|e| anyhow!("Failed to load '{}': {}", name, e))
     }
 
     /// Get a 2D f32 array.
+    ///
+    /// # ⚠️ Memory Warning
+    ///
+    /// Eagerly loads the tensor into RAM and converts to f32.
+    /// For a 4096x4096 weight matrix, this allocates ~64MB.
+    /// Prefer `with_raw_tensor` for large matrices.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Eagerly loads tensor into RAM. Use `with_raw_tensor` for memory-efficient access."
+    )]
     pub fn get_array2(&self, name: &str) -> Result<Array2<f32>> {
+        #[allow(deprecated)]
         self.get_typed_tensor(name)?
             .to_array2_f32()
             .map_err(|e| anyhow!("Failed to load '{}': {}", name, e))
     }
 
     /// Get a 3D f32 array.
+    ///
+    /// # ⚠️ Memory Warning
+    ///
+    /// Eagerly loads the tensor into RAM and converts to f32.
+    /// Prefer `with_raw_tensor` for large tensors.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Eagerly loads tensor into RAM. Use `with_raw_tensor` for memory-efficient access."
+    )]
     pub fn get_array3(&self, name: &str) -> Result<Array3<f32>> {
+        #[allow(deprecated)]
         self.get_typed_tensor(name)?
             .to_array3_f32()
             .map_err(|e| anyhow!("Failed to load '{}': {}", name, e))
+    }
+
+    // =========================================================================
+    // Efficient Accessors (for small tensors)
+    // =========================================================================
+
+    /// Get tensor shape without loading data.
+    ///
+    /// This is efficient - only reads tensor metadata.
+    pub fn tensor_shape(&self, name: &str) -> Result<Vec<usize>> {
+        self.with_raw_tensor(name, |view| Ok(view.shape.clone()))
+    }
+
+    /// Get tensor dtype without loading data.
+    ///
+    /// This is efficient - only reads tensor metadata.
+    pub fn tensor_dtype(&self, name: &str) -> Result<DType> {
+        self.with_raw_tensor(name, |view| Ok(view.dtype))
+    }
+
+    /// Get tensor size in bytes.
+    ///
+    /// This is efficient - only reads tensor metadata.
+    pub fn tensor_size_bytes(&self, name: &str) -> Result<usize> {
+        self.with_raw_tensor(name, |view| Ok(view.bytes.len()))
     }
 }
 
@@ -420,6 +483,11 @@ impl ModelWeights {
 /// Copy bytes to a typed vector, handling alignment.
 ///
 /// Tries zero-copy cast first, falls back to byte-by-byte copy if misaligned.
+///
+/// # ⚠️ Memory Warning
+///
+/// This allocates a new Vec with the full tensor data.
+/// Use only when you truly need an owned copy.
 pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<T> {
     if let Ok(slice) = bytemuck::try_cast_slice(bytes) {
         slice.to_vec()
@@ -432,6 +500,11 @@ pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<
 }
 
 /// Convert a TensorView to a typed CpuTensor.
+///
+/// # ⚠️ Memory Warning
+///
+/// This allocates a new array with the full tensor data.
+/// Prefer processing `TensorView.bytes` directly when possible.
 pub fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
     match raw.dtype {
         DType::F32 => Ok(CpuTensor::F32(ArrayD::from_shape_vec(
@@ -465,5 +538,188 @@ pub fn raw_to_typed(raw: TensorView<'_>) -> Result<CpuTensor> {
         })),
         
         _ => Err(anyhow!("Unsupported dtype for conversion: {:?}", raw.dtype)),
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    /// Helper to create a minimal safetensors file for testing.
+ /// Helper to create a minimal safetensors file for testing.
+    fn create_test_safetensors(dir: &TempDir, tensors: &[(&str, Vec<f32>, Vec<usize>)]) -> Result<()> {
+        use safetensors::tensor::{Dtype, TensorView as StTensorView};
+        use std::collections::HashMap;
+
+        // Convert tensors to the format safetensors expects
+        let stored: Vec<(String, Vec<usize>, Vec<u8>)> = tensors
+            .iter()
+            .map(|(name, values, shape)| {
+                let bytes: Vec<u8> = values.iter().flat_map(|f| f.to_le_bytes()).collect();
+                (name.to_string(), shape.clone(), bytes)
+            })
+            .collect();
+
+        let mut tensor_map = HashMap::new();
+        for (name, shape, bytes) in &stored {
+            tensor_map.insert(
+                name.clone(),
+                StTensorView::new(Dtype::F32, shape.clone(), bytes)?,
+            );
+        }
+
+        let file_path = dir.path().join("model.safetensors");
+        safetensors::serialize_to_file(&tensor_map, &None, &file_path)?;
+
+        // Write config.json
+        std::fs::write(
+            dir.path().join("config.json"),
+            r#"{"model_type": "bert", "hidden_size": 4}"#,
+        )?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_model_weights_new_safetensors() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("test.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        assert!(!weights.is_gguf());
+        assert!(weights.contains("test.weight"));
+        assert!(!weights.contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_model_weights_with_raw_tensor() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("layer.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+
+        let result = weights.with_raw_tensor("layer.weight", |view| {
+            assert_eq!(view.shape, vec![2, 2]);
+            assert_eq!(view.dtype, DType::F32);
+            assert_eq!(view.bytes.len(), 16); // 4 floats * 4 bytes
+            Ok(view.shape.iter().product::<usize>())
+        }).unwrap();
+
+        assert_eq!(result, 4);
+    }
+
+    #[test]
+    fn test_tensor_shape_without_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("big.weight", vec![0.0; 1000], vec![10, 100]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        
+        // This should be cheap - doesn't load the data
+        let shape = weights.tensor_shape("big.weight").unwrap();
+        assert_eq!(shape, vec![10, 100]);
+    }
+
+    #[test]
+    fn test_tensor_dtype() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("test.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        let dtype = weights.tensor_dtype("test.weight").unwrap();
+        assert_eq!(dtype, DType::F32);
+    }
+
+    #[test]
+    fn test_model_type_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("test.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        assert!(weights.is_bert());
+        assert!(!weights.is_distilbert());
+        assert!(!weights.is_roberta());
+    }
+
+    #[test]
+    fn test_resolve_dtype_with_override() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("test.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+
+        // With override
+        let dtype = weights.resolve_dtype("test.weight", Some(DType::F16)).unwrap();
+        assert_eq!(dtype, DType::F16);
+
+        // Without override - reads from tensor
+        let dtype = weights.resolve_dtype("test.weight", None).unwrap();
+        assert_eq!(dtype, DType::F32);
+    }
+
+    #[test]
+    fn test_missing_tensor_error() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("exists.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        
+        let result = weights.with_raw_tensor("does_not_exist", |_| Ok(()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_config_json_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_safetensors(&dir, &[
+            ("test.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).unwrap();
+        let config = weights.config_json();
+        
+        assert!(config.contains("bert"));
+        assert!(config.contains("hidden_size"));
+    }
+
+    #[test]
+    fn test_cast_or_copy_aligned() {
+        let floats = vec![1.0f32, 2.0, 3.0, 4.0];
+        let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+        
+        let result: Vec<f32> = cast_or_copy(&bytes);
+        assert_eq!(result, floats);
+    }
+
+    #[test]
+    fn test_cast_or_copy_misaligned() {
+        let floats = vec![1.0f32, 2.0, 3.0, 4.0];
+        let mut bytes: Vec<u8> = vec![0]; // 1-byte offset
+        bytes.extend(floats.iter().flat_map(|f| f.to_le_bytes()));
+        
+        // Skip first byte to get misaligned slice
+        let result: Vec<f32> = cast_or_copy(&bytes[1..]);
+        assert_eq!(result, floats);
     }
 }

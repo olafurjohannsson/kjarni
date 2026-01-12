@@ -35,6 +35,7 @@ impl KjarniConfig {
             offload_lm_head: self.load.offload_lm_head,
             target_dtype: parse_dtype(&self.load.dtype),
             quantize_lm_head: self.load.quantize_lm_head.as_ref().and_then(|s| parse_quantize(s)),
+            quantize_embeddings: self.load.quantize_embeddings.as_ref().and_then(|s| parse_quantize(s)),
             use_gguf: self.load.prefer_gguf,
             max_batch_size: self.load.max_batch_size,
             max_sequence_length: self.load.max_sequence_length,

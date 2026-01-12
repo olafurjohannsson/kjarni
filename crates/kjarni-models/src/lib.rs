@@ -57,7 +57,7 @@ pub mod sequence_classifier;
 
 pub use models::cross_encoder::CrossEncoder;
 pub use models::sentence_encoder::{BertConfig, DistilBertConfig, MpnetConfig, SentenceEncoder};
-pub use sequence_classifier::{MiniLMCrossEncoderConfig, SequenceClassifier};
+pub use sequence_classifier::{SequenceClassifier};
 // pub use text_generation::TextGenerator;
 // pub use generation::Generator;
 

@@ -23,9 +23,9 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
+use crate::sequence_classifier::configs::RobertaConfig;
 
 use super::configs::{BertConfig, DistilBertConfig};
-use crate::sequence_classifier::RobertaConfig; // todo: not sure about this
 
 
 // =============================================================================
@@ -48,17 +48,11 @@ pub struct SentenceEncoder {
 impl EncoderModelFactory for SentenceEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
         // Auto-detect config type from JSON
-        if weights
-            .config_json()
-            .contains("\"model_type\": \"distilbert\"")
-            || weights
-                .config_json()
-                .contains("\"model_type\":\"distilbert\"")
-        {
-            Ok(Arc::new(DistilBertConfig::from_json(&weights.config_json())?))
-        } else if weights.config_json().contains("\"model_type\": \"roberta\"")
-            || weights.config_json().contains("\"model_type\":\"roberta\"")
-        {
+        if weights.is_distilbert() {
+            Ok(Arc::new(DistilBertConfig::from_json(
+                &weights.config_json(),
+            )?))
+        } else if weights.is_roberta() || weights.is_distilroberta() {
             Ok(Arc::new(RobertaConfig::from_json(&weights.config_json())?))
         } else {
             // Default to BertConfig for BERT-like models

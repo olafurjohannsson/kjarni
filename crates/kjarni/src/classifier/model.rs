@@ -232,10 +232,10 @@ impl Classifier {
 
         let inner = SequenceClassifier::from_pretrained(
             path,
-            model_type,
             device,
             context,
             load_config,
+            Some(model_type),
         )
         .map_err(|e| ClassifierError::LoadFailed {
             model: path.display().to_string(),
@@ -314,7 +314,7 @@ impl Classifier {
         // Get raw scores
         let raw_scores = self
             .inner
-            .classify_with_scores(text)
+            .classify_scores(text)
             .await
             .map_err(ClassifierError::ClassificationFailed)?;
 
@@ -423,7 +423,7 @@ impl Classifier {
     pub async fn classify_scores(&self, text: &str) -> ClassifierResult<Vec<f32>> {
         let scores = self
             .inner
-            .classify_with_scores(text)
+            .classify_scores(text)
             .await
             .map_err(ClassifierError::ClassificationFailed)?;
 

@@ -458,6 +458,9 @@ pub struct ModelOverride {
     pub offload_lm_head: Option<bool>,
     #[serde(default)]
     pub quantize_lm_head: Option<String>,
+
+    #[serde(default)]
+    pub quantize_embeddings: Option<String>,
     
     /// Generation overrides (for decoder models)
     #[serde(default)]
@@ -491,6 +494,8 @@ pub struct LoadTaskConfig {
     #[serde(default)]
     pub quantize_lm_head: Option<String>,
     #[serde(default)]
+    pub quantize_embeddings: Option<String>,
+    #[serde(default)]
     pub prefer_gguf: bool,
     #[serde(default)]
     pub max_batch_size: Option<usize>,
@@ -505,6 +510,7 @@ impl Default for LoadTaskConfig {
             offload_embeddings: false,
             offload_lm_head: false,
             quantize_lm_head: None,
+            quantize_embeddings: None,
             prefer_gguf: false,
             max_batch_size: None,
             max_sequence_length: None,

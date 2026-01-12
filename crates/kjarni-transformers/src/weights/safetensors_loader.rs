@@ -281,10 +281,132 @@ impl WeightLoader for SafeTensorsLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safetensors::tensor::{Dtype, TensorView as StTensorView};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn create_safetensors_file(
+        dir: &TempDir,
+        filename: &str,
+        tensors: &[(&str, Vec<f32>, Vec<usize>)],
+    ) -> Result<()> {
+        let stored: Vec<(String, Vec<usize>, Vec<u8>)> = tensors
+            .iter()
+            .map(|(name, values, shape)| {
+                let bytes: Vec<u8> = values.iter().flat_map(|f| f.to_le_bytes()).collect();
+                (name.to_string(), shape.clone(), bytes)
+            })
+            .collect();
+
+        let mut tensor_map = HashMap::new();
+        for (name, shape, bytes) in &stored {
+            tensor_map.insert(
+                name.clone(),
+                StTensorView::new(Dtype::F32, shape.clone(), bytes)?,
+            );
+        }
+
+        let file_path = dir.path().join(filename);
+        safetensors::serialize_to_file(&tensor_map, &None, &file_path)?;
+        Ok(())
+    }
 
     #[test]
-    fn test_contains() {
-        // This test would need a real safetensors file
-        // For now, just verify the API compiles
+    fn test_single_file_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        create_safetensors_file(&dir, "model.safetensors", &[
+            ("layer1.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
+            ("layer1.bias", vec![0.1, 0.2], vec![2]),
+        ]).unwrap();
+
+        let loader = SafeTensorsLoader::new(dir.path()).unwrap();
+        
+        assert_eq!(loader.tensor_count(), 2);
+        assert_eq!(loader.shard_count(), 1);
+        assert!(loader.contains("layer1.weight"));
+        assert!(loader.contains("layer1.bias"));
+        assert!(!loader.contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_tensor_names() {
+        let dir = tempfile::tempdir().unwrap();
+        create_safetensors_file(&dir, "model.safetensors", &[
+            ("a.weight", vec![1.0], vec![1]),
+            ("b.weight", vec![2.0], vec![1]),
+            ("c.weight", vec![3.0], vec![1]),
+        ]).unwrap();
+
+        let loader = SafeTensorsLoader::new(dir.path()).unwrap();
+        let names = loader.tensor_names();
+        
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"a.weight"));
+        assert!(names.contains(&"b.weight"));
+        assert!(names.contains(&"c.weight"));
+    }
+
+    #[test]
+    fn test_get_raw_tensor() {
+        let dir = tempfile::tempdir().unwrap();
+        let values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        create_safetensors_file(&dir, "model.safetensors", &[
+            ("test.weight", values.clone(), vec![2, 3]),
+        ]).unwrap();
+
+        let loader = SafeTensorsLoader::new(dir.path()).unwrap();
+        let view = loader.get_raw("test.weight").unwrap();
+        
+        assert_eq!(view.name, "test.weight");
+        assert_eq!(view.shape, vec![2, 3]);
+        assert_eq!(view.dtype, DType::F32);
+        assert_eq!(view.bytes.len(), 24); // 6 floats * 4 bytes
+    }
+
+    #[test]
+    fn test_missing_tensor_error() {
+        let dir = tempfile::tempdir().unwrap();
+        create_safetensors_file(&dir, "model.safetensors", &[
+            ("exists.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        let loader = SafeTensorsLoader::new(dir.path()).unwrap();
+        let result = loader.get_raw("does_not_exist");
+        
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("not found"));
+    }
+
+    #[test]
+    fn test_direct_file_path() {
+        let dir = tempfile::tempdir().unwrap();
+        create_safetensors_file(&dir, "model.safetensors", &[
+            ("test.weight", vec![1.0], vec![1]),
+        ]).unwrap();
+
+        // Load directly from file path
+        let file_path = dir.path().join("model.safetensors");
+        let loader = SafeTensorsLoader::new(&file_path).unwrap();
+        
+        assert!(loader.contains("test.weight"));
+    }
+
+    #[test]
+    fn test_invalid_path_error() {
+        let result = SafeTensorsLoader::new(Path::new("/nonexistent/path/to/model"));
+        assert!(result.is_err());
+    }
+
+    // Note: Sharded model test would require creating index.json and multiple shard files
+    // which is more complex. Here's a skeleton:
+    #[test]
+    #[ignore] // Enable when you want to test sharded loading
+    fn test_sharded_model_loading() {
+        // Would need to create:
+        // - model.safetensors.index.json with weight_map
+        // - model-00001-of-00002.safetensors
+        // - model-00002-of-00002.safetensors
+        todo!("Implement sharded model test")
     }
 }

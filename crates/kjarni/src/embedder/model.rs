@@ -38,6 +38,19 @@ impl Embedder {
         Self::builder(model).build().await
     }
 
+    /// Load an embedder from a local path.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let embedder = Embedder::from_path("/models/my-custom-encoder")
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn from_path(path: impl Into<std::path::PathBuf>) -> EmbedderBuilder {
+        EmbedderBuilder::new("custom").model_path(path)
+    }
+
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: EmbedderBuilder) -> EmbedderResult<Self> {
         // 1. Resolve model type
