@@ -304,8 +304,13 @@ impl CpuDecoderOps for Gpt2Model {
         Ok(Array2::ones((1, total_len)))
     }
 
-    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
-        unimplemented!()
+    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
+        let decoder: &Gpt2CpuDecoder = self
+            .cpu_decoder
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No GPT2 CPU Decoder"))?;
+        let tokens = decoder.embeddings.forward(&tokens, None, pos, false);
+        Ok(tokens)
     }
 }
 

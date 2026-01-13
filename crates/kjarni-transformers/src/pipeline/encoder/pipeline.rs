@@ -77,6 +77,7 @@ impl EncoderPipeline {
         context: Option<Arc<WgpuContext>>,
         config: EncoderPipelineConfig,
     ) -> Result<Self> {
+        assert!(cpu_encoder.is_some() || gpu_encoder.is_some());
         let pipeline = Self {
             embeddings,
             cpu_encoder,
@@ -128,6 +129,10 @@ impl EncoderPipeline {
         
         if plan.needs_gpu() && self.context.is_none() {
             return Err(anyhow!("Plan requires GPU but no WgpuContext available"));
+        }
+
+        if plan.needs_cpu() && self.cpu_encoder.is_none() {
+            return Err(anyhow!("Plan requires CPU encoder but not loaded"));
         }
         
         Ok(())

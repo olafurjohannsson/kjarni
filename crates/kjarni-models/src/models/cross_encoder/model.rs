@@ -4,8 +4,10 @@
 //! Unlike bi-encoders (which encode texts separately), cross-encoders
 //! process the pair together for more accurate scoring.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor};
+use kjarni_transformers::models::base::ModelInput;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -18,15 +20,15 @@ use kjarni_transformers::{
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
     },
-    models::{LanguageModel, ModelType},
     models::base::ModelLoadConfig,
+    models::{LanguageModel, ModelType},
     pipeline::{EncoderLoader, EncoderModelFactory, EncoderPipeline},
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 
+use crate::BertConfig;
 use crate::sequence_classifier::configs::MiniLMCrossEncoderConfig;
-use crate::{BertConfig};
 
 // =============================================================================
 // Cross Encoder
@@ -50,8 +52,13 @@ pub struct CrossEncoder {
 impl EncoderModelFactory for CrossEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
         // Cross-encoders are typically BERT-based
-        if weights.config_json().contains("cross-encoder/ms-marco-MiniLM") {
-            Ok(Arc::new(MiniLMCrossEncoderConfig::from_json(weights.config_json())?))
+        if weights
+            .config_json()
+            .contains("cross-encoder/ms-marco-MiniLM")
+        {
+            Ok(Arc::new(MiniLMCrossEncoderConfig::from_json(
+                weights.config_json(),
+            )?))
         } else {
             // Default to BERT config
             Ok(Arc::new(BertConfig::from_json(weights.config_json())?))
@@ -87,6 +94,9 @@ impl EncoderModelFactory for CrossEncoder {
                     layout.clone(),
                     load_config,
                 )?) as Box<dyn GpuEncoder>);
+            }
+            _ => {
+                panic!("No CPU or GPU encoder on CrossEncoder, will not work!");
             }
         }
 
@@ -172,7 +182,10 @@ impl CrossEncoder {
     /// Score a single query-document pair.
     pub async fn predict_pair(&self, query: &str, document: &str) -> Result<f32> {
         let scores = self.predict_pairs(&[(query, document)]).await?;
-        scores.into_iter().next().ok_or_else(|| anyhow!("No score returned"))
+        scores
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No score returned"))
     }
 
     /// Score multiple query-document pairs.
@@ -182,7 +195,8 @@ impl CrossEncoder {
         }
 
         // Tokenize pairs - the tokenizer handles [CLS] query [SEP] document [SEP]
-        let encodings = self.tokenizer
+        let encodings = self
+            .tokenizer
             .encode_batch(pairs.to_vec(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
@@ -201,15 +215,45 @@ impl CrossEncoder {
             }
         }
 
-        // Forward through encoder
-        let hidden_states = self.pipeline
-            .cpu_encoder()
-            .ok_or_else(|| anyhow!("No CPU encoder available"))?
-            .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
-            .last_hidden_state;
+        let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
+            ops.encoder()
+                .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
+                .last_hidden_state
+        } else if let Some(ops) = self.encoder_gpu_ops() {
+            let context = self
+                .context()
+                .ok_or_else(|| anyhow!("GPU model missing context"))?;
+            let pool = context.get_inference_pool();
+            let mut pool_guard = pool.lock().await;
+            let mut frame = GpuFrameContext::new(&context, pool_guard);
+            let (encoder_cmd, pool_ref) = frame.resources();
 
-        // Forward through head
-        let logits = self.pipeline
+            // Upload data to GPU
+            let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids)?;
+            let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask)?;
+            let token_types_gpu = GpuTensor::from_ndarray(&context, &token_type_ids)?;
+            // Run the forward pass
+            let gpu_output = ops.encoder().forward(
+                encoder_cmd,
+                pool_ref,
+                ModelInput::TokensGpu(&input_ids_gpu),
+                &attention_mask_gpu,
+                Some(ModelInput::TokensGpu(&token_types_gpu)),
+            )?;
+
+            frame.finish();
+
+            // Download the result back to CPU
+            gpu_output.last_hidden_state.to_ndarray_3d().await?
+        } else {
+            return Err(anyhow!(
+                "No available CPU or GPU encoder implementation for this model."
+            ));
+        };
+
+        // Forward through head // TODO: lm head on GPU
+        let logits = self
+            .pipeline
             .cpu_head()
             .ok_or_else(|| anyhow!("No classification head available"))?
             .forward(&hidden_states, Some(&attention_mask))?;
@@ -281,46 +325,86 @@ impl CrossEncoder {
 // =============================================================================
 
 impl LanguageModel for CrossEncoder {
-    fn vocab_size(&self) -> usize { self.pipeline.vocab_size() }
-    fn hidden_size(&self) -> usize { self.pipeline.hidden_size() }
-    fn num_layers(&self) -> usize { self.pipeline.num_layers() }
-    fn num_heads(&self) -> usize { self.config.metadata().num_attention_heads }
-    fn context_size(&self) -> usize { self.pipeline.max_seq_length() }
-    fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
-    fn bos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[CLS]") }
-    fn eos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[SEP]") }
-    fn pad_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[PAD]") }
-    fn forced_bos_token_id(&self) -> Option<u32> { None }
-    fn forced_eos_token_id(&self) -> Option<u32> { None }
+    fn vocab_size(&self) -> usize {
+        self.pipeline.vocab_size()
+    }
+    fn hidden_size(&self) -> usize {
+        self.pipeline.hidden_size()
+    }
+    fn num_layers(&self) -> usize {
+        self.pipeline.num_layers()
+    }
+    fn num_heads(&self) -> usize {
+        self.config.metadata().num_attention_heads
+    }
+    fn context_size(&self) -> usize {
+        self.pipeline.max_seq_length()
+    }
+    fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[CLS]")
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[SEP]")
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[PAD]")
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn forced_eos_token_id(&self) -> Option<u32> {
+        None
+    }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
         Err(anyhow!("CrossEncoder does not use KV cache"))
     }
 }
 
 impl InferenceModel for CrossEncoder {
-    fn device(&self) -> Device { self.pipeline.plan().layers }
-    fn context(&self) -> Option<Arc<WgpuContext>> { self.pipeline.context().cloned() }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn device(&self) -> Device {
+        self.pipeline.plan().layers
+    }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        self.pipeline.context().cloned()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl CpuEncoderOps for CrossEncoder {
     fn encoder(&self) -> &dyn CpuEncoder {
-        self.pipeline.cpu_encoder().expect("CPU encoder not available")
+        self.pipeline
+            .cpu_encoder()
+            .expect("CPU encoder not available")
     }
 }
 
 impl GpuEncoderOps for CrossEncoder {
     fn encoder(&self) -> &dyn GpuEncoder {
-        self.pipeline.gpu_encoder().expect("GPU encoder not available")
+        self.pipeline
+            .gpu_encoder()
+            .expect("GPU encoder not available")
     }
 }
 
 #[async_trait]
 impl EncoderLanguageModel for CrossEncoder {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
-        if self.pipeline.cpu_encoder().is_some() { Some(self) } else { None }
+        if self.pipeline.cpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
     fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
-        if self.pipeline.gpu_encoder().is_some() { Some(self) } else { None }
+        if self.pipeline.gpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
 }

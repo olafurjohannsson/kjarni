@@ -392,8 +392,10 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         println!("=== STEP 1: EMBEDDINGS ===\n");
 
         // CPU: Use the new ModelInput with ArrayView2
+        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+
         let cpu_embeddings =
-            cpu_decoder.embed(ModelInput::TokensCpu(input_ids.view()), position_offset)?;
+            ops.embed(&input_ids, position_offset)?;
         println!("CPU embeddings shape: {:?}", cpu_embeddings.shape());
         println!(
             "CPU embeddings first 5: {:?}",
@@ -738,9 +740,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         // ========================================================================
         println!("=== STEP 1: EMBEDDINGS ===\n");
 
-        // CPU: Use the new ModelInput with ArrayView2
+        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+
         let cpu_embeddings =
-            cpu_decoder.embed(ModelInput::TokensCpu(input_ids.view()), position_offset)?;
+            ops.embed(&input_ids, position_offset)?;
+
+        // CPU: Use the new ModelInput with ArrayView2
+        // let cpu_embeddings =
+        //     cpu_decoder.embed(ModelInput::TokensCpu(input_ids.view()), position_offset)?;
         println!("CPU embeddings shape: {:?}", cpu_embeddings.shape());
         println!(
             "CPU embeddings first 5: {:?}",
@@ -1134,8 +1141,13 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         // ========================================================================
         println!("=== STEP 4: FULL FORWARD ===\n");
 
+        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+
+        let cpu_embeddings =
+            ops.embed(&input_ids, position_offset)?;
+
         let cpu_full = cpu_decoder.forward(
-            ModelInput::TokensCpu(input_ids.view()),
+            &cpu_embeddings,
             &attention_mask,
             position_offset,
             None,

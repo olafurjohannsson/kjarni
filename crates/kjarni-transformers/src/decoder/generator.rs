@@ -83,6 +83,7 @@ use anyhow::{Result, anyhow};
 use futures_core::stream::Stream;
 use futures_util::TryStreamExt;
 use log::{debug, info, trace};
+use ndarray::Array2;
 use std::sync::Arc;
 
 /// Orchestrates autoregressive text generation for decoder-only models.
@@ -711,7 +712,46 @@ impl DecoderGenerator {
     // }
 }
 
-async fn run_generation_loop(
+/// Runs the autoregressive generation loop.
+///
+/// This function orchestrates the full generation process:
+/// 1. Setup: Allocate cache, prepare decode token
+/// 2. Prefill: Process prompt, populate KV cache
+/// 3. Emit prompt tokens to stream
+/// 4. Decode loop: Generate tokens one at a time
+///
+/// # Arguments
+///
+/// * `model` - The decoder language model
+/// * `backend` - CPU or GPU backend for forward passes
+/// * `input_tokens` - Tokenized prompt
+/// * `config` - Generation parameters (max tokens, sampling, etc.)
+/// * `tx` - Channel to send generated tokens
+/// * `cancellation` - Optional cancellation token for early stopping
+///
+/// # Token Flow
+///
+/// ```text
+/// input_tokens (Vec<u32>)
+///        │
+///        ▼
+/// Array2<u32> ─────► prefill() ─────► first logits
+///        │                                  │
+///        │                                  ▼
+///        │                            sample_token()
+///        │                                  │
+///        ▼                                  ▼
+/// emit prompt tokens              ┌─────────────────┐
+///        │                        │  Decode Loop    │
+///        │                        │  ┌───────────┐  │
+///        └────────────────────────┤  │ update    │  │
+///                                 │  │ decode    │  │
+///                                 │  │ sample    │  │
+///                                 │  │ emit      │  │
+///                                 │  └───────────┘  │
+///                                 └─────────────────┘
+/// ```
+pub async fn run_generation_loop(
     model: Arc<dyn DecoderLanguageModel + Send + Sync>,
     backend: AnyDecoderBackend,
     input_tokens: Vec<u32>,
@@ -720,7 +760,10 @@ async fn run_generation_loop(
     cancellation: Option<CancellationToken>,
 ) -> Result<()> {
     let prompt_len = input_tokens.len();
-    let mut tokens = input_tokens;
+
+    if prompt_len == 0 {
+        return Err(anyhow!("Cannot generate from empty prompt"));
+    }
 
     // --- Limits & Setup ---
     let context_limit = model.context_size();
@@ -733,48 +776,59 @@ async fn run_generation_loop(
         AutoregressiveLoop::Legacy => max_len + 1,
         AutoregressiveLoop::Pipelined => max_len,
     };
+
     debug!(
-        "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
+        "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}, backend={}",
         prompt_len,
         max_len,
         cache_capacity,
-        model.autoregressive_loop()
+        model.autoregressive_loop(),
+        backend.backend_type()
     );
-    let mut cache = model.new_cache(1, cache_capacity, 0)?;
-    let mut token_tensor = backend.new_token_tensor()?;
+
+    // Allocate KV cache
+    let mut cache = model.new_cache(1, cache_capacity, 1)?;
+
+    // Allocate reusable decode token for the hot loop
+    let mut decode_token = backend.new_decode_token()?;
+
+    // Track all tokens for repetition penalty
+    let mut all_tokens = input_tokens.clone();
 
     // --- Prefill ---
     let mut stats = GenerationStats::new();
     stats.start_prefill(prompt_len);
 
+    // Create Array2 view of input tokens for prefill
+    let tokens_array = Array2::from_shape_vec((1, prompt_len), input_tokens.clone())
+        .map_err(|e| anyhow!("Failed to create token array: {}", e))?;
+
     let mut next_token_logits = backend
-        .prefill(model.as_ref(), &tokens, cache.as_mut())
+        .prefill(model.as_ref(), &tokens_array, cache.as_mut())
         .await?;
 
     stats.end_prefill();
 
     // --- Emit Prompt Tokens ---
     let tokenizer = model.tokenizer();
-    for &token_id in &tokens {
+
+    for &token_id in &input_tokens {
         // Check cancellation
-        if let Some(c) = &cancellation {
+        if let Some(ref c) = cancellation {
             if c.is_cancelled() {
+                debug!("Generation cancelled during prompt emission");
                 return Ok(());
             }
         }
 
-        if tokens.len() >= context_limit {
-            debug!("Context limit reached ({}), stopping.", context_limit);
-            break;
-        }
-
+        // Skip BOS token in output
         if Some(token_id) == model.bos_token_id() {
             continue;
         }
 
         let text = tokenizer
             .decode(&[token_id], false)
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| anyhow!("Tokenizer decode error: {}", e))?;
 
         // Send to channel
         if tx
@@ -786,46 +840,60 @@ async fn run_generation_loop(
             .await
             .is_err()
         {
-            return Ok(()); // Receiver dropped
+            debug!("Receiver dropped, stopping generation");
+            return Ok(());
         }
     }
 
     // --- Decode Loop ---
     let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
     let stop_tokens = model.stop_token_ids();
+    let mut seq_len = prompt_len + 1; // Current sequence length for decode_one
 
-    for _step in 0..max_new_tokens {
-        if let Some(c) = &cancellation {
+    for step in 0..max_new_tokens {
+        // Check cancellation
+        if let Some(ref c) = cancellation {
             if c.is_cancelled() {
+                debug!("Generation cancelled at step {}", step);
                 break;
             }
         }
 
-        if tokens.len() >= context_limit {
+        // Check context limit
+        if all_tokens.len() >= context_limit {
             debug!("Context limit reached ({}), stopping.", context_limit);
             break;
         }
 
-        if tokens.len() >= max_len {
+        // Check max length
+        if all_tokens.len() >= max_len {
+            debug!("Max length reached ({}), stopping.", max_len);
             break;
         }
 
-        // Sample
+        // --- Sampling ---
         let mut logits = next_token_logits.clone();
+
+        // Apply repetition penalty
         if config.repetition_penalty != 1.0 {
-            apply_repetition_penalty_mut(&mut logits, &tokens, config.repetition_penalty);
+            apply_repetition_penalty_mut(&mut logits, &all_tokens, config.repetition_penalty);
         }
+
+        // Apply no-repeat n-gram blocking
         if config.no_repeat_ngram_size > 0 {
-            apply_no_repeat_ngram(&mut logits, &tokens, config.no_repeat_ngram_size);
+            apply_no_repeat_ngram(&mut logits, &all_tokens, config.no_repeat_ngram_size);
         }
 
+        // Sample next token
         let next_token = sample_token(logits, &config.strategy)?;
-        tokens.push(next_token);
 
-        // Emit
+        // Add to token history
+        all_tokens.push(next_token);
+
+        // --- Emit Generated Token ---
         let text = tokenizer
             .decode(&[next_token], false)
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| anyhow!("Tokenizer decode error: {}", e))?;
 
         if tx
             .send(Ok(StreamedToken {
@@ -836,22 +904,88 @@ async fn run_generation_loop(
             .await
             .is_err()
         {
+            debug!("Receiver dropped at step {}, stopping", step);
             break;
         }
 
         stats.record_token();
 
+        // Check for stop tokens
         if stop_tokens.contains(&next_token) {
+            debug!("Stop token {} generated at step {}", next_token, step);
             break;
         }
 
-        // Compute Next
-        backend.update_token_tensor(&mut token_tensor, next_token)?;
+        // --- Compute Next Token Logits ---
+        backend.update_decode_token(&mut decode_token, next_token)?;
+
         next_token_logits = backend
-            .decode_one(model.as_ref(), &token_tensor, tokens.len(), cache.as_mut())
+            .decode_one(model.as_ref(), &decode_token, seq_len, cache.as_mut())
             .await?;
+
+        seq_len += 1;
     }
 
     stats.print_summary();
     Ok(())
+}
+
+/// Simplified generation that returns all tokens at once (non-streaming).
+///
+/// This is a convenience wrapper around `run_generation_loop` for cases
+/// where streaming is not needed.
+pub async fn generate_tokens(
+    model: Arc<dyn DecoderLanguageModel + Send + Sync>,
+    backend: AnyDecoderBackend,
+    input_tokens: Vec<u32>,
+    config: GenerationConfig,
+) -> Result<Vec<u32>> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+
+    // Spawn generation task
+    let handle = tokio::spawn(async move {
+        run_generation_loop(model, backend, input_tokens, config, tx, None).await
+    });
+
+    // Collect generated tokens
+    let mut generated = Vec::new();
+    while let Some(result) = rx.recv().await {
+        match result {
+            Ok(token) => {
+                if token.token_type == TokenType::Generated {
+                    generated.push(token.id);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Wait for generation to complete
+    handle.await??;
+
+    Ok(generated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_type_equality() {
+        assert_eq!(TokenType::Prompt, TokenType::Prompt);
+        assert_eq!(TokenType::Generated, TokenType::Generated);
+        assert_ne!(TokenType::Prompt, TokenType::Generated);
+    }
+
+    #[test]
+    fn test_streamed_token_debug() {
+        let token = StreamedToken {
+            text: "hello".to_string(),
+            id: 42,
+            token_type: TokenType::Generated,
+        };
+        let debug_str = format!("{:?}", token);
+        assert!(debug_str.contains("hello"));
+        assert!(debug_str.contains("42"));
+    }
 }

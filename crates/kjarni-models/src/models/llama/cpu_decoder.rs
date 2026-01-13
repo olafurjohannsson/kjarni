@@ -139,11 +139,11 @@ impl LlamaCpuDecoder {
             .as_ref()
             .expect("Llama layout must have a decoder section");
         if target_dtype.is_some() {
-            println!("Creating Llama CPU Decoder with dtype {:?}", target_dtype);    
+            println!("Creating Llama CPU Decoder with dtype {:?}", target_dtype);
         } else {
             println!("No dtype set on Llama CPU Decoder!");
         }
-        
+
         let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
         println!("  [LlamaCpu] Pre-Layers RAM: {:.2} MB", start_ram);
 
@@ -156,7 +156,11 @@ impl LlamaCpuDecoder {
         // )?;
 
         let mid_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-        println!("  [LlamaCpu] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)", mid_ram, mid_ram - start_ram);
+        println!(
+            "  [LlamaCpu] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)",
+            mid_ram,
+            mid_ram - start_ram
+        );
 
         let final_norm = RMSNorm::new(
             weights.get_array1(decoder_layout.final_norm_weight.as_ref().unwrap())?,
@@ -175,7 +179,11 @@ impl LlamaCpuDecoder {
             )?);
         }
         let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-        println!("  [LlamaCpu] Post-Layers RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
+        println!(
+            "  [LlamaCpu] Post-Layers RAM: {:.2} MB (Delta: {:.2} MB)",
+            end_ram,
+            end_ram - mid_ram
+        );
         Ok(Self {
             // embeddings,
             layers,
@@ -252,36 +260,22 @@ impl CpuDecoder for LlamaCpuDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn head_dim(&self) -> usize {
+        0
+    }
+    fn hidden_size(&self) -> usize {
+        0
+    }
+    fn num_attention_heads(&self) -> usize {
+        0
+    }
 
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         Ok(self.final_norm.forward_3d(hidden_states))
-    }
-
-    fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
-        match input {
-            ModelInput::TokensCpu(ids) => {
-                let seq_len = ids.len();
-                // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-                unimplemented!()
-                // Ok(self
-                //     .embeddings
-                //     .forward(&ids.to_owned(), None, position_offset, false))
-            }
-            ModelInput::HiddenCpu(hidden) => Ok(hidden.to_owned()),
-            _ => Err(anyhow!(
-                "LlamaCpuDecoder received GPU input. Transfer to CPU first."
-            )),
-        }
-    }
-
-    fn embed_and_normalize(
-        &self,
-        input: ModelInput<'_>,
-        position_offset: usize,
-    ) -> Result<Array3<f32>> {
-        // Llama is Pre-Norm (Norm is inside the layer).
-        // No initial LayerNorm exists before the first block.
-        self.embed(input, position_offset)
     }
 
     fn forward_layers(
@@ -348,48 +342,20 @@ impl CpuDecoder for LlamaCpuDecoder {
 
     fn forward(
         &self,
-        input: ModelInput<'_>,
+        hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Array3<f32>> {
-        let t_start = Instant::now();
-
-        // 1. Embed & Normalize
-        let t_embed = Instant::now();
-        let hidden = self.embed_and_normalize(input, position_offset)?;
-        let d_embed = t_embed.elapsed();
-
-        // 2. Run Layers
-        let t_layers = Instant::now();
         let mut output = self.forward_layers(
-            &hidden,
+            &hidden_states,
             attention_mask,
             position_offset,
             cache,
             0,
             self.num_layers(),
         )?;
-        let d_layers = t_layers.elapsed();
-
-        // 3. Final Norm
-        let t_norm = Instant::now();
         output = self.final_norm.forward_3d(&output);
-        let d_norm = t_norm.elapsed();
-
-        let d_total = t_start.elapsed();
-
-        if d_total.as_millis() > 1 {
-            log::info!(
-                "[Model Forward Perf] Total: {:?}, Embed: {:?}, Layers (x{}): {:?}, Final Norm: {:?}",
-                d_total,
-                d_embed,
-                self.num_layers(),
-                d_layers,
-                d_norm
-            );
-        }
-
         Ok(output)
     }
 }
@@ -562,7 +528,7 @@ mod llama_test {
                     Some(ModelType::Llama3_2_1B_Instruct),
                 )?;
                 let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-                
+
                 println!("Model 1 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
 
                 let model_st = LlamaModel::from_pretrained(
@@ -649,7 +615,7 @@ mod llama_test {
                 println!("Skipping 3B test: Files not found.");
             } else {
                 let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-                
+
                 let model_gguf = LlamaModel::from_pretrained(
                     gguf_3b_path,
                     Device::Cpu,
@@ -658,11 +624,8 @@ mod llama_test {
                     Some(ModelType::Llama3_2_3B_Instruct),
                 )?;
                 let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-                
+
                 println!("Model 3 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
-                
-                
-                
 
                 let model_st = LlamaModel::from_pretrained(
                     st_3b_path,

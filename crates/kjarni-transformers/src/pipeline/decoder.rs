@@ -225,17 +225,35 @@ mod decoder_pipeline_test {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
-        fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
-            let (batch, seq) = match input {
-                ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
-                _ => (1, 1),
-            };
-            Ok(Array3::zeros((batch, seq, 1)))
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
         }
+        fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+            unimplemented!()
+        }
+        fn head_dim(&self) -> usize {
+            0
+        }
+        fn hidden_size(&self) -> usize {
+            0
+        }
+        fn num_kv_heads(&self) -> usize {
+            0
+        }
+        fn num_attention_heads(&self) -> usize {
+            0
+        }
+        // fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
+        //     let (batch, seq) = match input {
+        //         ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
+        //         _ => (1, 1),
+        //     };
+        //     Ok(Array3::zeros((batch, seq, 1)))
+        // }
 
-        fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
-            self.embed(input, offset)
-        }
+        // fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
+        //     self.embed(input, offset)
+        // }
         fn forward_layers(
             &self,
             _: &Array3<f32>,

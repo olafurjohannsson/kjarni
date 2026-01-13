@@ -403,10 +403,8 @@ impl CpuDecoderOps for LlamaModel {
 
 
     // CpuDecoderOps (for Autoregressive Decoders)
-    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
-        // Hardcode None because Llama/GPT don't use it
-        let token_arr = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
-        self.pipeline.embeddings().embed_cpu(&token_arr, None, pos)
+    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
+        self.pipeline.embeddings().embed_cpu(&tokens, None, pos)
     }
 }
 
