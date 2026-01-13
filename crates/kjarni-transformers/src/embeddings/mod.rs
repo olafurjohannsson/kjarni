@@ -1,5 +1,6 @@
 mod loader;
 
+use std::ops::AddAssign;
 use std::sync::Arc;
 
 use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
@@ -187,17 +188,24 @@ impl Embeddings {
             // Safe slice logic
             let effective_end = end_idx.min(max_position);
             let len = effective_end.saturating_sub(start_idx);
-
             if len > 0 {
                 let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);
-                // Add to the corresponding part of hidden
-                // Note: If batch > 1, this needs broadcasting or iteration
-                // Assuming standard broadcasting works for shape [seq, hidden] vs [batch, seq, hidden]
-                for mut batch_slice in hidden.axis_iter_mut(Axis(0)) {
-                    let mut seq_slice = batch_slice.slice_mut(s![0..len, ..]);
-                    seq_slice += &pos_slice;
-                }
+                // Shape [len, hidden] -> add batch axis to broadcast
+                let pos_broadcast = pos_slice.insert_axis(Axis(0)); // shape [1, len, hidden_size]
+
+                // Slice hidden and broadcast addition
+                hidden.slice_mut(s![.., 0..len, ..]).add_assign(&pos_broadcast);
             }
+            // if len > 0 {
+            //     let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);
+            //     // Add to the corresponding part of hidden
+            //     // Note: If batch > 1, this needs broadcasting or iteration
+            //     // Assuming standard broadcasting works for shape [seq, hidden] vs [batch, seq, hidden]
+            //     for mut batch_slice in hidden.axis_iter_mut(Axis(0)) {
+            //         let mut seq_slice = batch_slice.slice_mut(s![0..len, ..]);
+            //         seq_slice += &pos_slice;
+            //     }
+            // }
         }
 
         if let Some(ref token_type_emb) = self.token_type_embeddings {

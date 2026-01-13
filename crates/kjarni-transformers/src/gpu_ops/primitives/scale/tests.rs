@@ -24,7 +24,7 @@ async fn test_gpu_scale_out_of_place() -> Result<()> {
     scale_kernel.encode_out_of_place(&mut encoder, &gpu_input, &gpu_output, scale_factor);
     context.queue.submit(std::iter::once(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     let cpu_expected = &cpu_input * scale_factor;

@@ -45,41 +45,29 @@ use wgpu::CommandEncoder;
 /// and coordinate the `prefill` (prompt processing) and `decode_one` (token generation) phases.
 #[async_trait]
 pub trait DecoderGenerationBackend: Send + Sync {
-    /// The specific tensor type used to hold the generated token sequence.
-    /// This allows the backend to keep tokens on CPU (`Array2`) or GPU (`GpuTensor`).
-    type Tensor: Send + Sync;
+    /// Token tensor for decode loop (GPU: GpuTensor, CPU: Array2<u32>)
+    type DecodeToken: Send + Sync;
 
-    // --- Memory Management ---
+    /// Allocate reusable single-token tensor
+    fn new_decode_token(&self) -> Result<Self::DecodeToken>;
 
-    /// Creates the initial tensor populated with prompt tokens.
-    fn prime_tokens(&self, tokens: &[u32]) -> Result<Self::Tensor>;
+    /// Update decode tensor with new token ID (fast write)
+    fn update_decode_token(&self, tensor: &mut Self::DecodeToken, token_id: u32) -> Result<()>;
 
-    /// Allocates a tensor to hold a single new token.
-    fn new_token_tensor(&self) -> Result<Self::Tensor>;
-
-    /// Efficiently updates the single-token tensor with the next ID.
-    /// This avoids memory reallocation during the hot generation loop.
-    fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_token_id: u32) -> Result<()>;
-
-    // --- Execution Phase ---
-
-    /// Processes the prompt tokens to populate the KV Cache.
-    /// Returns the logits for the last token in the prompt.
+    /// Process prompt, populate cache, return first logits
     async fn prefill(
         &self,
         model: &dyn DecoderLanguageModel,
-        initial_tokens: &[u32],
+        tokens: &Array2<u32>,  // Always CPU
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>>;
 
-    /// Decodes a single step.
-    /// Returns the logits for the next token prediction.
+    /// Process single token, return next logits
     async fn decode_one(
         &self,
         model: &dyn DecoderLanguageModel,
-        // token_id: u32,
-        token_tensor: &Self::Tensor,
-        seq_len: usize, // Total sequence length (past + 1)
+        token: &Self::DecodeToken,
+        seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>>;
 }
@@ -165,21 +153,32 @@ pub trait GpuDecoder: Send + Sync {
 /// Defines the synchronous interface for a CPU-native Transformer Decoder.
 /// Mirrors `GpuDecoder` structure for symmetry.
 pub trait CpuDecoder: Send + Sync {
-    
-    // fn layers(&self)
+
+    // =========================================================================
+    // Downcasting
+    // =========================================================================
 
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    // fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>>;
+    // =========================================================================
+    // Core Forward Pass
+    // =========================================================================
 
-    fn embed_and_normalize(
-        &self,
-        input: ModelInput<'_>,
-        position_offset: usize,
-    ) -> Result<Array3<f32>>;
-
+    /// Forward pass through transformer layers.
+    /// Applies attention, feed-forward, residuals, etc.
+    ///
+    /// # Arguments
+    /// * `hidden_states` - Input hidden states of shape `[Batch, SeqLen, Hidden]`.
+    /// * `attention_mask` - Attention mask of shape `[Batch, SeqLen, SeqLen]`.
+    /// * `position_offset` - Offset for positional embeddings (for generation).
+    /// * `cache` - Optional KV cache for autoregressive decoding.
+    /// * `start_layer` - Index of the first layer to process (inclusive).
+    /// * `end_layer` - Index of the last layer to process (exclusive).
+    ///
+    /// # Returns
+    /// * Output hidden states of shape `[Batch, SeqLen, Hidden]`.
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
@@ -190,7 +189,7 @@ pub trait CpuDecoder: Send + Sync {
         end_layer: usize,
     ) -> Result<Array3<f32>>;
 
-    fn num_layers(&self) -> usize;
+    
 
     /// Apply final layer normalization.
     ///
@@ -205,23 +204,27 @@ pub trait CpuDecoder: Send + Sync {
     /// # Returns
     ///
     /// Normalized hidden states, ready for LM head projection.
+    /// Apply final layer normalization (RMSNorm/LayerNorm).
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
 
-    fn forward_new(
-        &self,
-        hidden_states: &Array3<f32>,
-        attention_mask: &Array2<f32>,
-        position_offset: usize,
-        cache: Option<&mut dyn Cache>,
-    ) -> Result<Array3<f32>> {
-        self.forward_layers(
-            &hidden_states,
-            attention_mask,
-            position_offset,
-            cache,
-            0,
-            self.num_layers(),
-        )
+    // =========================================================================
+    // Metadata
+    // =========================================================================
+
+    fn num_layers(&self) -> usize;
+    fn hidden_size(&self) -> usize;
+    fn num_attention_heads(&self) -> usize;
+
+    // =========================================================================
+    // Metadata (optional, with defaults)
+    // =========================================================================
+
+    fn num_kv_heads(&self) -> usize {
+        self.num_attention_heads()
+    }
+
+    fn head_dim(&self) -> usize {
+        self.hidden_size() / self.num_attention_heads()
     }
 
     // =========================================================================
@@ -294,6 +297,9 @@ pub trait CpuDecoderOps: Send + Sync {
     /// Access the underlying CPU compute component.
     fn decoder(&self) -> &dyn CpuDecoder;
 
+    /// Embed tokens to hidden states.
+    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>>;
+
     /// Handles model-specific projection logic (e.g., MatMul vs Norm+MatMul).
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
 
@@ -301,7 +307,33 @@ pub trait CpuDecoderOps: Send + Sync {
     /// Allows models to implement Sliding Window or Alibi logic.
     fn get_attention_mask(&self, seq_len: usize, past_len: usize) -> Result<Array2<f32>>;
 
-    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>>;
+    // =========================================================================
+    // Default Implementations
+    // =========================================================================
+
+    /// Full forward pass: embed → layers → norm.
+    fn forward(
+        &self,
+        tokens: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
+        let hidden = self.embed(tokens, position_offset)?;
+        self.decoder().forward(&hidden, attention_mask, position_offset, cache)
+    }
+
+    /// Full inference path: tokens → hidden → logits.
+    fn forward_to_logits(
+        &self,
+        tokens: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        position_offset: usize,
+        cache: Option<&mut dyn Cache>,
+    ) -> Result<Array3<f32>> {
+        let hidden = self.forward(tokens, attention_mask, position_offset, cache)?;
+        self.project_to_logits(&hidden)
+    }
 }
 
 /// Logic specific to GPU execution.
@@ -386,8 +418,11 @@ pub trait DecoderLanguageModel: LanguageModel {
         // Use model-specific mask generation
         let attention_mask = ops.get_attention_mask(seq_len, 0)?;
 
+        let tokens = ops.embed(&input_ids, 0)?;
+
         let decoder_output = ops.decoder().forward(
-            ModelInput::from_tokens(input_ids.as_slice().unwrap()),
+            // ModelInput::from_tokens(input_ids.as_slice().unwrap()),
+            &tokens,
             &attention_mask,
             0,
             None,

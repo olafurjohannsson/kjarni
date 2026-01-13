@@ -172,15 +172,27 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
     async fn prefill(
         &self,
         model: &dyn DecoderLanguageModel,
-        initial_tokens: &[u32],
+        initial_tokens: &mut Self::Tensor,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         match self {
             AnyDecoderBackend::Cpu(backend) => {
-                backend.prefill(model, initial_tokens, cache).await
+                let concrete = initial_tokens
+                    .downcast_mut::<Array2<u32>>()
+                    .ok_or_else(|| anyhow!(
+                        "Type mismatch: CPU backend expected Array2<u32>, got different type. \
+                         This is a bug - tensor was created by wrong backend."
+                    ))?;
+                backend.prefill(model, concrete, cache).await
             }
             AnyDecoderBackend::Gpu(backend) => {
-                backend.prefill(model, initial_tokens, cache).await
+                let concrete = initial_tokens
+                    .downcast_mut::<GpuTensor>()
+                    .ok_or_else(|| anyhow!(
+                        "Type mismatch: GPU backend expected GpuTensor, got different type. \
+                         This is a bug - tensor was created by wrong backend."
+                    ))?;
+                backend.prefill(model, concrete, cache).await
             }
         }
     }

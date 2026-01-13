@@ -81,7 +81,7 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
     context.queue.submit(Some(encoder.finish()));
 
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
 

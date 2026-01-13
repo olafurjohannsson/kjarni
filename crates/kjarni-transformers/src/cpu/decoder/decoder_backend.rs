@@ -207,7 +207,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
     async fn prefill(
         &self,
         model: &dyn DecoderLanguageModel,
-        initial_tokens: &[u32],
+        initial_tokens: &mut Self::Tensor,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         if initial_tokens.is_empty() {
@@ -278,9 +278,12 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 
         // Extract token ID from tensor
         let token_id = token_tensor[[0, 0]];
-        let token_slice = [token_id];
-        // let hidden_states: Array3<f32> = ops.embed(&token_slice, 0)?;
-        let input = ModelInput::from_tokens(&token_slice);
+        // let token_slice = [token_id];
+        
+        let token_array = Array2::from_elem((1, 1), token_id);
+
+        let hidden_states: Array3<f32> = ops.embed(&token_array, 0)?;
+        // let input = ModelInput::from_tokens(&token_slice);
 
         // Build attention mask
         // Mask length varies by autoregressive loop type
@@ -301,14 +304,23 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 
         // Forward pass
         let decoder_output = ops.decoder().forward(
-            input,
+            &hidden_states,
             &attention_mask,
             past_len,
             Some(cache),
         )?;
 
+        let normalized = ops.decoder().final_norm(&decoder_output)?;
+
+        // let decoder_output = ops.decoder().forward(
+        //     input,
+        //     &attention_mask,
+        //     past_len,
+        //     Some(cache),
+        // )?;
+
         // Project to logits and extract single position
-        let logits_3d = ops.project_to_logits(&decoder_output)?;
+        let logits_3d = ops.project_to_logits(&normalized)?;
 
         // Shape: [1, 1, vocab_size] → [vocab_size]
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
@@ -320,7 +332,7 @@ impl CpuDecoderBackend {
     fn prefill_pipelined(
         &self,
         ops: &dyn CpuDecoderOps,
-        tokens: &[u32],
+        tokens: &Array2<u32>,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         let prompt_len = tokens.len();
@@ -330,11 +342,13 @@ impl CpuDecoderBackend {
 
         // let hidden_states: Array3<f32> = ops.embed(tokens, 0)?;
 
-        let input = ModelInput::from_tokens(tokens);
+        // let input = ModelInput::from_tokens(tokens);
+
+        let hidden_states = ops.embed(tokens, 0)?;
 
         // Single forward pass
         let decoder_output = ops.decoder().forward(
-            input,
+            &hidden_states,
             &attention_mask,
             0, // Position offset is 0 for prefill
             Some(cache),
@@ -351,28 +365,35 @@ impl CpuDecoderBackend {
     fn prefill_legacy(
         &self,
         ops: &dyn CpuDecoderOps,
-        tokens: &[u32],
+        tokens: &Array2<u32>,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
         let prompt_len = tokens.len();
 
+        let hidden_states = ops.embed(tokens, 0)?;
+
         // Phase 1: Fill cache with all tokens (no projection)
         let mask_full = Array2::ones((1, prompt_len));
         ops.decoder().forward(
-            ModelInput::from_tokens(tokens),
+            // ModelInput::from_tokens(tokens),
+            &hidden_states,
             &mask_full,
             0,
             Some(cache),
         )?;
 
         // Phase 2: Re-process last token to get logits
-        let last_token = tokens[prompt_len - 1];
-        let last_token_slice = [last_token];
+        let last_token = tokens.row(0)[prompt_len - 1]; //tokens[prompt_len - 1];
+        // let last_token_slice = [last_token];
+        let last_token_array = Array2::from_elem((1, 1), last_token);
+
+        let hidden_states = ops.embed(&last_token_array, 0)?;
 
         let mask_step = ops.get_attention_mask(1, prompt_len)?;
 
         let decoder_output = ops.decoder().forward(
-            ModelInput::from_tokens(&last_token_slice),
+            // ModelInput::from_tokens(&last_token_slice),
+            &hidden_states,
             &mask_step,
             prompt_len, // Offset
             Some(cache),

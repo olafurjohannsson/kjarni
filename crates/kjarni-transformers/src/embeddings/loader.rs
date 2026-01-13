@@ -345,8 +345,9 @@ impl LoadedEmbeddings {
         Ok(cpu_layer.forward(
             token_ids,
             token_type_ids,
-            position_offset + self.config.position_offset,
-            self.config.scale_embeddings,
+            position_offset + 0, //self.config.position_offset,
+            false,
+            // self.config.scale_embeddings,
         ))
     }
 

@@ -260,7 +260,7 @@ impl CpuDecoderOps for MockDecoderModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         &self.decoder
     }
-    fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
+    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
         Ok(Array3::zeros((1, 1, self.hidden_size())))
     }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
@@ -292,21 +292,59 @@ impl CpuDecoder for MockCpuDecoder {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(hidden_states.clone())
+    }
+    fn forward(
+            &self,
+            hidden_states: &Array3<f32>,
+            attention_mask: &Array2<f32>,
+            position_offset: usize,
+            cache: Option<&mut dyn Cache>,
+        ) -> Result<Array3<f32>> {
+        // Just pass through
+        Ok(hidden_states.clone())
+    }
+    fn forward_all_layers(
+            &self,
+            hidden_states: &Array3<f32>,
+            attention_mask: &Array2<f32>,
+            position_offset: usize,
+            cache: Option<&mut dyn Cache>,
+        ) -> Result<Array3<f32>> {
+        // Just pass through
+        Ok(hidden_states.clone())
+    }
+    fn head_dim(&self) -> usize {
+        self.hidden_size
+    }
+    fn hidden_size(&self) -> usize {
+        self.hidden_size
+    }
+    fn num_attention_heads(&self) -> usize {
+        1
+    }
+    fn num_kv_heads(&self) -> usize {
+        1
+    }
     fn num_layers(&self) -> usize {
         self.num_layers
     }
 
-    fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
-        let (batch, seq) = match input {
-            ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
-            _ => (1, 1),
-        };
-        Ok(Array3::zeros((batch, seq, self.hidden_size)))
-    }
+    // fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
+    //     let (batch, seq) = match input {
+    //         ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
+    //         _ => (1, 1),
+    //     };
+    //     Ok(Array3::zeros((batch, seq, self.hidden_size)))
+    // }
 
-    fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
-        self.embed(input, offset)
-    }
+    // fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
+    //     self.embed(input, offset)
+    // }
 
     fn forward_layers(
         &self,

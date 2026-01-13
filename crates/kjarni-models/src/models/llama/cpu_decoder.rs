@@ -85,7 +85,7 @@ use kjarni_transformers::{
 /// - Enable AVX2/FMA CPU features at compile time
 /// - Use quantized formats (Q4_K) for models >3B parameters
 pub struct LlamaCpuDecoder {
-    pub embeddings: Embeddings,
+    // pub embeddings: Embeddings,
     pub layers: Vec<CpuRoPEDecoderLayer>,
     pub final_norm: RMSNorm,
     pub metadata: ModelMetadata,
@@ -147,13 +147,13 @@ impl LlamaCpuDecoder {
         let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
         println!("  [LlamaCpu] Pre-Layers RAM: {:.2} MB", start_ram);
 
-        let embeddings = Embeddings::from_weights(
-            weights,
-            &layout.token_embedding,
-            decoder_layout.position_embedding.as_deref(), // Correctly access nested field
-            decoder_layout.token_type_embedding.as_deref(),
-            target_dtype,
-        )?;
+        // let embeddings = Embeddings::from_weights(
+        //     weights,
+        //     &layout.token_embedding,
+        //     decoder_layout.position_embedding.as_deref(), // Correctly access nested field
+        //     decoder_layout.token_type_embedding.as_deref(),
+        //     target_dtype,
+        // )?;
 
         let mid_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
         println!("  [LlamaCpu] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)", mid_ram, mid_ram - start_ram);
@@ -177,7 +177,7 @@ impl LlamaCpuDecoder {
         let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
         println!("  [LlamaCpu] Post-Layers RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
         Ok(Self {
-            embeddings,
+            // embeddings,
             layers,
             final_norm,
             metadata,
@@ -252,15 +252,20 @@ impl CpuDecoder for LlamaCpuDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(self.final_norm.forward_3d(hidden_states))
+    }
+
     fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
         match input {
             ModelInput::TokensCpu(ids) => {
                 let seq_len = ids.len();
                 // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-                
-                Ok(self
-                    .embeddings
-                    .forward(&ids.to_owned(), None, position_offset, false))
+                unimplemented!()
+                // Ok(self
+                //     .embeddings
+                //     .forward(&ids.to_owned(), None, position_offset, false))
             }
             ModelInput::HiddenCpu(hidden) => Ok(hidden.to_owned()),
             _ => Err(anyhow!(

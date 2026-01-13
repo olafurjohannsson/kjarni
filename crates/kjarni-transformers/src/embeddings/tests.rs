@@ -83,6 +83,52 @@ mod embeddings_tests {
         assert_eq!(output[[0, 1, 0]], 1.5);
     }
 
+    #[test]
+    fn test_position_embedding_broadcasting_batch() {
+        // Setup: word embeddings = 1.0, position embeddings = 0.5
+        let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // 10 words, hidden 4
+        let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5);  // 10 positions, hidden 4
+
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+
+        let input_ids = Array2::<u32>::zeros((2, 3)); // batch 2, seq 3
+
+        // Forward pass
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        // Each element = word (1.0) + pos (0.5) = 1.5
+        for b in 0..2 {
+            for s in 0..3 {
+                for h in 0..4 {
+                    assert_eq!(output[[b, s, h]], 1.5);
+                }
+            }
+        }
+    }
+    #[test]
+    fn test_position_embedding_with_offset() {
+        // Setup: word embeddings = 1.0, position embeddings = increasing values
+        let word_emb = Array2::<f32>::from_elem((10, 2), 1.0); 
+        let pos_emb = Array2::<f32>::from_shape_fn((10, 2), |(i, j)| i as f32 * 0.1 + j as f32);
+
+        let embeddings =
+            Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+
+        let input_ids = Array2::<u32>::zeros((1, 4)); // batch 1, seq 4
+
+        // Use position_offset = 2 → slice positions 2..6 (but max 10)
+        let output = embeddings.forward(&input_ids, None, 2, false);
+
+        // Check first sequence position: word=1.0 + pos_emb[2] = 1.0 + 0.2, 1.0 + 1.2
+        assert_eq!(output[[0, 0, 0]], 1.0 + 0.2);
+        assert_eq!(output[[0, 0, 1]], 1.0 + 1.2);
+
+        // Check last sequence position: word=1.0 + pos_emb[5] = 1.0 + 0.5, 1.0 + 1.5
+        assert_eq!(output[[0, 3, 0]], 1.0 + 0.5);
+        assert_eq!(output[[0, 3, 1]], 1.0 + 1.5);
+    }
+
     // =========================================================================
     //  Integration Tests: LoadedEmbeddings (The Decision Matrix)
     // =========================================================================
@@ -117,6 +163,91 @@ mod embeddings_tests {
         assert_eq!(output[[0, 0, 0]], 2.0);
         Ok(())
     }
+
+    #[test]
+    fn test_scaling_embeddings() {
+        let hidden_size = 4;
+        let word_emb = Array2::<f32>::from_elem((5, hidden_size), 1.0);
+        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), None, None);
+
+        let input_ids = Array2::<u32>::zeros((1, 2));
+
+        let output = embeddings.forward(&input_ids, None, 0, true); // scaling enabled
+        let scale = (hidden_size as f32).sqrt();
+
+        for b in 0..1 {
+            for s in 0..2 {
+                for h in 0..hidden_size {
+                    assert_eq!(output[[b, s, h]], 1.0 * scale);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_token_type_embeddings() {
+        let hidden_size = 3;
+        let word_emb = Array2::<f32>::from_elem((5, hidden_size), 1.0);
+        let token_type_emb = Array2::<f32>::from_shape_fn((2, hidden_size), |(i, j)| i as f32 + 0.1 * j as f32);
+
+        let embeddings = Embeddings::new(
+            EmbeddingData::F32(Arc::new(word_emb)),
+            None,
+            Some(token_type_emb),
+        );
+
+        let input_ids = Array2::<u32>::zeros((1, 2));
+        let type_ids = Array2::<u32>::from_elem((1, 2), 1); // Use second row
+
+        let output = embeddings.forward(&input_ids, Some(&type_ids), 0, false);
+
+        // Expected: word=1.0 + token_type_emb[1]
+        for b in 0..1 {
+            for s in 0..2 {
+                for h in 0..hidden_size {
+                    let expected = 1.0 + (1.0 + 0.1 * h as f32);
+                    assert_eq!(output[[b, s, h]], expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_batch_sequence_broadcasting() {
+        let word_emb = Array2::<f32>::from_elem((5, 2), 1.0);
+        let pos_emb = Array2::<f32>::from_elem((5, 2), 0.5);
+
+        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+
+        let input_ids = Array2::<u32>::zeros((3, 4)); // batch 3, seq 4
+        let output = embeddings.forward(&input_ids, None, 0, false);
+
+        for b in 0..3 {
+            for s in 0..4 {
+                for h in 0..2 {
+                    assert_eq!(output[[b, s, h]], 1.5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_position_offset_clamping() {
+        let word_emb = Array2::<f32>::from_elem((5, 2), 1.0);
+        let pos_emb = Array2::<f32>::from_elem((3, 2), 0.5); // shorter than sequence
+
+        let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
+        let input_ids = Array2::<u32>::zeros((1, 4));
+        
+        let output = embeddings.forward(&input_ids, None, 1, false); // offset 1
+
+        // Only positions 1..3 are added (2 positions)
+        assert_eq!(output[[0, 0, 0]], 1.0 + 0.5); // first seq position added
+        assert_eq!(output[[0, 1, 0]], 1.0 + 0.5); // second seq position added
+        assert_eq!(output[[0, 2, 0]], 1.0);       // beyond pos_emb -> only word embedding
+        assert_eq!(output[[0, 3, 0]], 1.0);       // beyond pos_emb
+    }
+
 
     // Scenario 1: Pure GPU
     // Weights: GPU

@@ -48,6 +48,33 @@ mod decoder_backend_test {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
+        fn hidden_size(&self) -> usize {
+            10
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+            Ok(hidden_states.clone())
+        }
+        fn forward_all_layers(
+                &self,
+                hidden_states: &Array3<f32>,
+                attention_mask: &Array2<f32>,
+                position_offset: usize,
+                cache: Option<&mut dyn Cache>,
+            ) -> Result<Array3<f32>> {
+            Ok(hidden_states.clone())
+        }
+        fn head_dim(&self) -> usize {
+            10
+        }
+        fn num_attention_heads(&self) -> usize {
+            1
+        }
+        fn num_kv_heads(&self) -> usize {
+            1
+        }
         fn num_layers(&self) -> usize {
             1
         }
@@ -55,15 +82,12 @@ mod decoder_backend_test {
         // We only care that forward is called. Return dummy data.
         fn forward(
             &self,
-            input: ModelInput<'_>,
+            input: &Array3<f32>,
             _mask: &Array2<f32>,
             _pos: usize,
             _cache: Option<&mut dyn Cache>,
         ) -> Result<Array3<f32>> {
-            let (b, s) = match input {
-                ModelInput::TokensCpu(t) => (t.shape()[0], t.shape()[1]),
-                _ => (1, 1),
-            };
+            let (b, s) = (input.shape()[0], input.shape()[1]);
             Ok(Array3::zeros((b, s, 10))) // Hidden size 10
         }
 
@@ -80,21 +104,21 @@ mod decoder_backend_test {
             unimplemented!()
         }
 
-        fn embed(
-            &self,
-            input: ModelInput<'_>,
-            position_offset: usize,
-        ) -> anyhow::Result<Array3<f32>> {
-            todo!()
-        }
+        // fn embed(
+        //     &self,
+        //     input: ModelInput<'_>,
+        //     position_offset: usize,
+        // ) -> anyhow::Result<Array3<f32>> {
+        //     todo!()
+        // }
 
-        fn embed_and_normalize(
-            &self,
-            input: ModelInput<'_>,
-            position_offset: usize,
-        ) -> anyhow::Result<Array3<f32>> {
-            todo!()
-        }
+        // fn embed_and_normalize(
+        //     &self,
+        //     input: ModelInput<'_>,
+        //     position_offset: usize,
+        // ) -> anyhow::Result<Array3<f32>> {
+        //     todo!()
+        // }
     }
 
     // The Ops Mock captures calls to verify logic
@@ -213,9 +237,9 @@ mod decoder_backend_test {
             &MockDecoder
         }
 
-        fn embed(&self, _tokens: &[u32], _pos: usize) -> Result<Array3<f32>> {
+        fn embed(&self, _tokens: &Array2<u32>, _pos: usize) -> Result<Array3<f32>> {
             self.embed_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Array3::zeros((1, _tokens.len(), 10)))
+            Ok(Array3::zeros((1, _tokens.shape()[1], 10)))
         }
 
         fn project_to_logits(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
@@ -263,8 +287,9 @@ mod decoder_backend_test {
         let backend = CpuDecoderBackend;
         let mut cache = MockCache;
         let tokens = vec![1, 2, 3, 4];
+        let token_array = Array2::from_shape_vec((1, tokens.len()), tokens).unwrap();
 
-        let logits = backend.prefill(&model, &tokens, &mut cache).await?;
+        let logits = backend.prefill(&model, &token_array, &mut cache).await?;
 
         // Verify logic:
         // Pipelined should call forward (project_to_logits) EXACTLY ONCE
@@ -286,8 +311,8 @@ mod decoder_backend_test {
         let backend = CpuDecoderBackend;
         let mut cache = MockCache;
         let tokens = vec![1, 2, 3, 4];
-
-        let logits = backend.prefill(&model, &tokens, &mut cache).await?;
+        let token_array = Array2::from_shape_vec((1, tokens.len()), tokens).unwrap();
+        let logits = backend.prefill(&model, &token_array, &mut cache).await?;
 
         // Legacy should call forward TWICE:
         // 1. Cache fill (tokens 0..3) -> No projection (usually)
@@ -336,7 +361,7 @@ mod decoder_backend_test {
         let backend = CpuDecoderBackend;
         let mut cache = MockCache;
 
-        let err = backend.prefill(&model, &[], &mut cache).await;
+        let err = backend.prefill(&model, &mut Array2::zeros((1, 0)), &mut cache).await;
         assert!(err.is_err());
         assert_eq!(
             err.unwrap_err().to_string(),
@@ -345,5 +370,4 @@ mod decoder_backend_test {
     }
 
 
-    
 }

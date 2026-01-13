@@ -356,7 +356,7 @@ async fn test_swiglu_ffn_parity() -> Result<()> {
     );
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
 
@@ -469,7 +469,7 @@ pub async fn forward_llama_with_debug(
     );
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     encoder = context.device.create_command_encoder(&Default::default());
@@ -516,7 +516,7 @@ pub async fn forward_llama_with_debug(
     );
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     encoder = context.device.create_command_encoder(&Default::default());
@@ -529,7 +529,7 @@ pub async fn forward_llama_with_debug(
     );
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     encoder = context.device.create_command_encoder(&Default::default());
@@ -550,7 +550,7 @@ pub async fn forward_llama_with_debug(
     );
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     encoder = context.device.create_command_encoder(&Default::default());
@@ -572,7 +572,7 @@ pub async fn forward_llama_with_debug(
     let ffn_out_gpu = ffn_out_2d_gpu.view(vec![b, s, h]);
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     encoder = context.device.create_command_encoder(&Default::default());
@@ -750,7 +750,7 @@ async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
 
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     assert_tensors_are_close_4d(
@@ -927,7 +927,7 @@ async fn test_rope_parity_single_token() -> Result<()> {
     gpu_rope.encode(&mut encoder, &input_gpu, &output_gpu, position_offset);
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
 
@@ -992,7 +992,7 @@ async fn test_rope_parity_multiple_tokens() -> Result<()> {
     gpu_rope.encode(&mut encoder, &k_gpu, &k_rot_gpu, position_offset);
     context.queue.submit(Some(encoder.finish()));
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-        Ok(status) => println!("GPU Poll OK: {:?}", status),
+        Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
         Err(e) => panic!("GPU Poll Failed: {:?}", e),
     }
     assert_tensors_are_close_4d(&expected_q_rot, &q_rot_gpu, "RoPE multi-token Q", 1e-5).await;

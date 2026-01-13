@@ -137,7 +137,7 @@ impl GpuProfiler {
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
 
         match context.device.poll(wgpu::PollType::wait_indefinitely()) {
-            Ok(status) => println!("GPU Poll OK: {:?}", status),
+            Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
             Err(e) => panic!("GPU Poll Failed: {:?}", e), // remove panic?
         }
         rx.receive().await.unwrap().expect("RX ERROR"); // TODO: do better

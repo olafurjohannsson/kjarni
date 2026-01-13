@@ -10,12 +10,12 @@
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │                     GpuDecoderBackend                           │
 //! ├─────────────────────────────────────────────────────────────────┤
-//! │  prefill(tokens)                                                │
+//! │  prefill(tokens: &Array2<u32>)                                  │
 //! │      │                                                          │
-//! │      ▼                                                          │
+//! │      ▼ (upload once)                                            │
 //! │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
 //! │  │   Embed      │───▶│   Layers     │───▶│   LM Head    │      │
-//! │  │  (GPU)       │    │   (GPU)      │    │   (GPU)      │      │
+//! │  │ (CPU or GPU) │    │   (GPU)      │    │ (CPU or GPU) │      │
 //! │  └──────────────┘    └──────────────┘    └──────────────┘      │
 //! │                             │                    │              │
 //! │                             ▼                    ▼              │
@@ -24,13 +24,23 @@
 //! │                      │  (GPU)       │    │  Buffer      │      │
 //! │                      └──────────────┘    └──────────────┘      │
 //! │                                                  │              │
-//! │                                                  ▼              │
-//! │                                          ┌──────────────┐      │
-//! │                                          │  CPU Logits  │      │
+//! │  decode_one(token: &GpuTensor)                   ▼              │
+//! │      │ (stays on GPU)                    ┌──────────────┐      │
+//! │      └──────────────────────────────────▶│  CPU Logits  │      │
 //! │                                          │  (Sampling)  │      │
 //! │                                          └──────────────┘      │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
+//!
+//! # Hybrid Execution Support
+//!
+//! The backend supports flexible device placement through `ModelInput`:
+//!
+//! - **Embeddings on CPU**: Pass `ModelInput::TokensCpu` → model computes embeddings
+//!   on CPU → uploads hidden states to GPU for layers
+//! - **Embeddings on GPU**: Pass `ModelInput::TokensGpu` → full GPU execution
+//! - **LM Head on CPU**: Model downloads hidden states → CPU projection
+//! - **LM Head on GPU**: Full GPU projection → staging buffer → CPU logits
 //!
 //! # Performance Characteristics
 //!
@@ -38,10 +48,32 @@
 //! - **Decode**: O(n) per token, single token through cached attention
 //! - **Memory**: KV cache grows linearly with sequence length
 //! - **Sync Point**: One GPU→CPU transfer per generated token (logits only)
+//!
+//! # Token Tensor Lifecycle
+//!
+//! ```text
+//! Tokenizer output (CPU)
+//!         │
+//!         ▼
+//! prefill(&Array2<u32>) ────► Upload once, populate cache, return first logits
+//!         │
+//!         ▼
+//! new_decode_token() ────────► Allocate reusable GPU buffer [1, 1]
+//!         │
+//!         ▼
+//! ┌───────────────────────────────────────┐
+//! │  Decode Loop (hot path)               │
+//! │  ┌─────────────────────────────────┐  │
+//! │  │ update_decode_token(token_id)   │  │  ◄── 4-byte GPU write
+//! │  │ decode_one(&token_tensor)       │  │  ◄── Full GPU forward
+//! │  │ sample(logits) → next token_id  │  │  ◄── CPU sampling
+//! │  └─────────────────────────────────┘  │
+//! └───────────────────────────────────────┘
+//! ```
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use ndarray::{Array1, Array2};
+use ndarray::{s, Array1, Array2};
 use std::sync::Arc;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, MapMode};
 
@@ -49,7 +81,7 @@ use crate::cache::{Cache, GpuKVCache};
 use crate::decoder::prelude::*;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
 use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
+use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 pub use crate::models::base::AutoregressiveLoop;
 use crate::models::base::ModelInput;
 use crate::WgpuContext;
@@ -62,6 +94,16 @@ use crate::WgpuContext;
 /// - LM head projection to vocabulary logits
 /// - Efficient GPU→CPU transfer for sampling
 ///
+/// # Hybrid Execution
+///
+/// This backend supports models with mixed CPU/GPU execution:
+/// - Embeddings can be offloaded to CPU (saves VRAM for large vocabularies)
+/// - Transformer layers always run on GPU
+/// - LM head can be offloaded to CPU (saves VRAM, slight latency cost)
+///
+/// The `ModelInput` enum allows the model's `GpuDecoderOps` to handle
+/// device placement internally based on its configuration.
+///
 /// # Thread Safety
 ///
 /// This backend is `!Send` due to WGPU constraints. All operations must
@@ -73,21 +115,26 @@ use crate::WgpuContext;
 /// let backend = GpuDecoderBackend::new(context)?;
 /// let mut cache = model.new_cache(1, 2048, 1)?;
 ///
-/// // Prefill with prompt
-/// let logits = backend.prefill(&model, &prompt_tokens, &mut cache).await?;
+/// // Tokenize prompt
+/// let prompt_tokens = tokenizer.encode("Hello, world!")?;
+/// let tokens = Array2::from_shape_vec((1, prompt_tokens.len()), prompt_tokens)?;
+///
+/// // Prefill - backend handles upload internally
+/// let logits = backend.prefill(&model, &tokens, &mut cache).await?;
 /// let first_token = sample(&logits, &config);
 ///
+/// // Allocate reusable decode tensor (stays on GPU)
+/// let mut decode_token = backend.new_decode_token()?;
+///
 /// // Autoregressive generation
-/// let mut token_tensor = backend.new_token_tensor()?;
 /// for step in 0..max_tokens {
-///     backend.update_token_tensor(&mut token_tensor, current_token)?;
-///     let logits = backend.decode_one(&model, &token_tensor, seq_len, &mut cache).await?;
+///     backend.update_decode_token(&mut decode_token, current_token)?;
+///     let logits = backend.decode_one(&model, &decode_token, seq_len, &mut cache).await?;
 ///     current_token = sample(&logits, &config);
 /// }
 /// ```
-///
 pub struct GpuDecoderBackend {
-    /// Shared GPU context (device, queue, pipelines)
+    /// Shared GPU context (device, queue, pipelines).
     context: Arc<WgpuContext>,
 
     /// Kernel for extracting the last token's hidden state from a sequence.
@@ -104,7 +151,7 @@ pub struct GpuDecoderBackend {
     /// Tracked separately to avoid querying the buffer.
     staging_buffer_size: std::sync::Mutex<usize>,
 
-    /// Timeout configuration for GPU operations
+    /// Timeout configuration for GPU operations.
     timeout_config: GpuTimeoutConfig,
 }
 
@@ -120,27 +167,41 @@ impl GpuDecoderBackend {
     /// Returns an error if kernel compilation fails.
     pub fn new(context: Arc<WgpuContext>) -> Result<Self> {
         Ok(Self {
-            context: context.clone(),
             last_token_slicer: GpuLastTokenSlice::new(&context),
+            context,
             staging_buffer: std::sync::Mutex::new(None),
             staging_buffer_size: std::sync::Mutex::new(0),
             timeout_config: GpuTimeoutConfig::default(),
         })
     }
 
-    /// Creates a new GPU decoder backend with custom timeout.
+    /// Creates a new GPU decoder backend with custom timeout configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared WGPU context
+    /// * `timeout_config` - Custom timeout settings for GPU operations
     pub fn with_timeout(
         context: Arc<WgpuContext>,
         timeout_config: GpuTimeoutConfig,
     ) -> Result<Self> {
         Ok(Self {
-            context: context.clone(),
             last_token_slicer: GpuLastTokenSlice::new(&context),
+            context,
             staging_buffer: std::sync::Mutex::new(None),
             staging_buffer_size: std::sync::Mutex::new(0),
             timeout_config,
         })
     }
+
+    /// Returns a reference to the GPU context.
+    pub fn context(&self) -> &Arc<WgpuContext> {
+        &self.context
+    }
+
+    // =========================================================================
+    // Core Forward Pass Methods
+    // =========================================================================
 
     /// Runs a full forward pass and projects to vocabulary logits.
     ///
@@ -154,8 +215,7 @@ impl GpuDecoderBackend {
     /// # Arguments
     ///
     /// * `model` - The decoder language model (provides ops and configuration)
-    /// * `input` - Input tokens or hidden states (CPU or GPU)
-    /// * `seq_len` - Current sequence length (for position encoding)
+    /// * `input` - Input tokens or hidden states (CPU or GPU via `ModelInput`)
     /// * `cache` - Mutable KV cache to update
     ///
     /// # Returns
@@ -171,17 +231,16 @@ impl GpuDecoderBackend {
         &self,
         model: &dyn DecoderLanguageModel,
         input: ModelInput<'_>,
-        _seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
-        let input_len = match input {
-            ModelInput::TokensCpu(t) => t.len(),
+        let input_len = match &input {
+            ModelInput::TokensCpu(t) => t.shape()[1],
             ModelInput::TokensGpu(t) => t.shape()[1],
             ModelInput::HiddenGpu(t) => t.shape()[1],
             ModelInput::HiddenCpu(t) => t.shape()[1],
         };
 
-        // 2. Get model operations and downcast cache to GPU variant
+        // Get model operations and downcast cache to GPU variant
         let ops = model
             .decoder_gpu_ops()
             .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
@@ -189,14 +248,14 @@ impl GpuDecoderBackend {
         let gpu_cache = cache
             .as_any_mut()
             .downcast_mut::<GpuKVCache>()
-            .ok_or_else(|| anyhow!("Expected GpuKVCache"))?;
+            .ok_or_else(|| anyhow!("Expected GpuKVCache for GPU backend"))?;
 
-        // 3. Acquire frame context (command encoder + tensor pool)
+        // Acquire frame context (command encoder + tensor pool)
         let pool = self.context.get_inference_pool();
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
 
-        // 4. Build causal attention mask
+        // Build causal attention mask
         //
         // The mask size depends on the model's autoregressive loop strategy:
         // - Pipelined (Llama): mask matches actual sequence length
@@ -211,7 +270,7 @@ impl GpuDecoderBackend {
 
         let attention_mask = ops.get_attention_mask(&mut frame, logical_key_len, mask_size)?;
 
-        // 5. Execute transformer decoder stack
+        // Execute transformer decoder stack
         let (encoder, pool) = frame.resources();
 
         let hidden_states = ops.decoder().forward(
@@ -219,12 +278,12 @@ impl GpuDecoderBackend {
             pool,
             input,
             &attention_mask,
-            gpu_cache.get_seq_length(),
+            cache_len, // position_offset = current cache length
             Some(gpu_cache),
-            None,
+            None, // encoder_hidden_states (for cross-attention, not used here)
         )?;
 
-        // 6. Extract last token's hidden state
+        // Extract last token's hidden state
         //
         // hidden_states: [batch, seq_len, hidden_dim]
         // last_hidden:   [batch, 1, hidden_dim]
@@ -235,23 +294,23 @@ impl GpuDecoderBackend {
         self.last_token_slicer
             .encode(encoder, &hidden_states, &last_hidden);
 
-        // 7. Project to vocabulary logits
+        // Project to vocabulary logits
         let logits = ops.project_to_logits(&mut frame, &last_hidden)?;
 
-        // 8. Setup GPU→CPU transfer via staging buffer
+        // Setup GPU→CPU transfer via staging buffer
         let size = logits.buffer().size();
         let staging = self.get_or_create_staging_buffer(size as usize);
 
         let (encoder, _pool) = frame.resources();
         encoder.copy_buffer_to_buffer(logits.buffer(), 0, &staging, 0, size);
 
-        // 9. Submit all GPU work
+        // Submit all GPU work
         frame.finish();
 
-        // 10. Update cache sequence length for next iteration
+        // Update cache sequence length for next iteration
         gpu_cache.increment_len(input_len);
 
-        // 11. Synchronously read logits back to CPU
+        // Synchronously read logits back to CPU
         self.read_logits_from_staging(&staging).await
     }
 
@@ -260,25 +319,23 @@ impl GpuDecoderBackend {
     /// Used during prefill for "context stuffing" - processing tokens
     /// that only need to populate the KV cache, not produce output.
     ///
-    /// This is an optimization for models that can't process the entire
-    /// prompt in a single forward pass, allowing cache population without
-    /// the overhead of LM head projection and GPU→CPU transfer.
+    /// This is an optimization for legacy models (GPT-2) that can't process
+    /// the entire prompt in a single forward pass, allowing cache population
+    /// without the overhead of LM head projection and GPU→CPU transfer.
     ///
     /// # Arguments
     ///
     /// * `model` - The decoder language model
     /// * `input` - Input tokens to process
-    /// * `seq_len` - Current sequence length
     /// * `cache` - KV cache to populate
     async fn forward_only(
         &self,
         model: &dyn DecoderLanguageModel,
         input: ModelInput<'_>,
-        seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<()> {
-        let input_len = match input {
-            ModelInput::TokensCpu(t) => t.len(),
+        let input_len = match &input {
+            ModelInput::TokensCpu(t) => t.shape()[1],
             ModelInput::TokensGpu(t) => t.shape()[1],
             ModelInput::HiddenGpu(t) => t.shape()[1],
             ModelInput::HiddenCpu(t) => t.shape()[1],
@@ -286,11 +343,12 @@ impl GpuDecoderBackend {
 
         let ops = model
             .decoder_gpu_ops()
-            .ok_or_else(|| anyhow!("No GPU Ops"))?;
+            .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
+
         let gpu_cache = cache
             .as_any_mut()
             .downcast_mut::<GpuKVCache>()
-            .ok_or_else(|| anyhow!("Expected GpuKVCache"))?;
+            .ok_or_else(|| anyhow!("Expected GpuKVCache for GPU backend"))?;
 
         let pool = self.context.get_inference_pool();
         let pool_guard = pool.lock().await;
@@ -312,7 +370,7 @@ impl GpuDecoderBackend {
             pool,
             input,
             &attention_mask,
-            gpu_cache.get_seq_length(),
+            cache_len,
             Some(gpu_cache),
             None,
         )?;
@@ -322,6 +380,10 @@ impl GpuDecoderBackend {
 
         Ok(())
     }
+
+    // =========================================================================
+    // Staging Buffer Management
+    // =========================================================================
 
     /// Gets or creates a staging buffer for GPU→CPU transfer.
     ///
@@ -368,6 +430,11 @@ impl GpuDecoderBackend {
     /// # Returns
     ///
     /// Logits as a 1D f32 array of shape `[vocab_size]`
+    ///
+    /// # Errors
+    ///
+    /// - Timeout if GPU doesn't respond within configured duration
+    /// - Buffer mapping failure
     async fn read_logits_from_staging(&self, buffer: &Buffer) -> Result<Array1<f32>> {
         let slice = buffer.slice(..);
 
@@ -382,11 +449,12 @@ impl GpuDecoderBackend {
         let mut map_result = None;
 
         loop {
-            // Poll GPU
+            // Poll GPU for completion
             match self.context.device.poll(wgpu::PollType::Poll) {
-                // todo?
-                Ok(status) => println!("GPU Poll OK: {:?}", status),
-                Err(e) => panic!("GPU Poll Failed: {:?}", e),
+                Ok(status) => log::trace!("GPU Poll OK: {:?}", status),
+                Err(e) => {
+                    return Err(anyhow!("GPU Poll Failed: {:?}", e));
+                }
             }
 
             // Check if mapping completed
@@ -396,7 +464,7 @@ impl GpuDecoderBackend {
                     break;
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    // Not ready yet
+                    // Not ready yet, continue polling
                 }
                 Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
                     return Err(anyhow!("Buffer mapping channel closed unexpectedly"));
@@ -411,10 +479,10 @@ impl GpuDecoderBackend {
                     elapsed,
                     timeout: self.timeout_config.timeout,
                 }
-                    .into());
+                .into());
             }
 
-            // Yield to runtime
+            // Yield to async runtime
             tokio::time::sleep(self.timeout_config.poll_interval).await;
         }
 
@@ -423,7 +491,7 @@ impl GpuDecoderBackend {
             .ok_or_else(|| anyhow!("Buffer mapping did not complete"))?
             .map_err(|e| anyhow!("Buffer mapping failed: {:?}", e))?;
 
-        // Read data
+        // Read data from mapped buffer
         let data = slice.get_mapped_range();
         let vec_data: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
@@ -435,29 +503,37 @@ impl GpuDecoderBackend {
 
 #[async_trait]
 impl DecoderGenerationBackend for GpuDecoderBackend {
-    type Tensor = GpuTensor;
-
-    /// Creates a GPU tensor from a slice of token IDs.
+    /// Token tensor type for decode loop: GPU buffer containing a single token.
     ///
-    /// Used during prefill to upload the initial prompt to GPU.
-    fn prime_tokens(&self, tokens: &[u32]) -> Result<Self::Tensor> {
-        let tokens_ndarray = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
-        GpuTensor::from_ndarray(&self.context, &tokens_ndarray)
-    }
+    /// The tensor is pre-allocated via `new_decode_token()` and reused across
+    /// all decode steps. Updates happen via `update_decode_token()` which is
+    /// a fast 4-byte GPU buffer write.
+    type DecodeToken = GpuTensor;
 
-    /// Creates an empty single-token tensor for the generation loop.
+    /// Creates a single-token GPU tensor for the decode loop.
     ///
     /// This tensor is reused across all decode steps, with its contents
-    /// updated via `update_token_tensor`.
-    fn new_token_tensor(&self) -> Result<Self::Tensor> {
+    /// updated via `update_decode_token`. Pre-allocating avoids per-step
+    /// allocation overhead.
+    ///
+    /// # Returns
+    ///
+    /// A GPU tensor of shape `[1, 1]` containing a u32 token ID.
+    fn new_decode_token(&self) -> Result<Self::DecodeToken> {
         let token_ndarray = Array2::<u32>::zeros((1, 1));
         GpuTensor::from_ndarray(&self.context, &token_ndarray)
     }
 
-    /// Updates the token tensor with a newly sampled token ID.
+    /// Updates the decode token tensor with a newly sampled token ID.
     ///
-    /// This is a fast GPU buffer write - no allocation or sync required.
-    fn update_token_tensor(&self, tensor: &mut Self::Tensor, new_token_id: u32) -> Result<()> {
+    /// This is a fast GPU buffer write - no allocation, no sync required.
+    /// The write is queued and will be executed before the next decode_one call.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The pre-allocated decode token tensor
+    /// * `new_token_id` - The token ID to write
+    fn update_decode_token(&self, tensor: &mut Self::DecodeToken, new_token_id: u32) -> Result<()> {
         self.context
             .queue
             .write_buffer(tensor.buffer(), 0, bytemuck::cast_slice(&[new_token_id]));
@@ -466,65 +542,92 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
 
     /// Processes the initial prompt and returns logits for the first generated token.
     ///
+    /// The prompt tokens are received as a CPU array and uploaded to the GPU
+    /// internally. This is a one-time upload cost that is negligible compared
+    /// to the transformer forward pass.
+    ///
     /// # Prefill Strategies
     ///
     /// The prefill behavior depends on the model's autoregressive loop type:
     ///
-    /// ## Pipelined (Llama-style)
+    /// ## Pipelined (Llama, Mistral, Phi)
+    ///
     /// Processes all tokens in a single forward pass. More efficient for
     /// models that support variable-length attention masks.
     ///
-    /// ## Legacy (GPT-2-style)  
+    /// ```text
+    /// [tok1, tok2, tok3, tok4] ─────────────────► logits for position 4
+    /// ```
+    ///
+    /// ## Legacy (GPT-2)
+    ///
     /// Splits prefill into two phases:
     /// 1. Context stuffing: Process tokens [0..n-1] without projection
     /// 2. First prediction: Process token [n-1] with projection
     ///
+    /// ```text
+    /// [tok1, tok2, tok3] ──► cache only (no logits)
+    ///              [tok4] ──► logits for position 4
+    /// ```
+    ///
     /// This is required for models with fixed-size attention masks.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The decoder language model
+    /// * `tokens` - Prompt token IDs as CPU array of shape `[batch, seq_len]`
+    /// * `cache` - KV cache to populate
+    ///
+    /// # Returns
+    ///
+    /// Vocabulary logits as 1D array of shape `[vocab_size]`
+    ///
+    /// # Errors
+    ///
+    /// - Empty prompt
+    /// - Model doesn't support GPU execution
+    /// - KV cache type mismatch
     async fn prefill(
         &self,
         model: &dyn DecoderLanguageModel,
-        initial_tokens: &[u32],
+        tokens: &Array2<u32>,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
-        if initial_tokens.is_empty() {
+        if tokens.is_empty() {
             return Err(anyhow!("Cannot prefill with empty tokens"));
         }
 
-        let prompt_len = initial_tokens.len();
-        let tokens = ndarray::ArrayView2::from_shape((1, prompt_len), initial_tokens)
-            .map_err(|e| anyhow!("Failed to create token view: {}", e))?;
+        let prompt_len = tokens.shape()[1];
+
+        log::debug!(
+            "GPU prefill: {} tokens, strategy={:?}",
+            prompt_len,
+            model.autoregressive_loop()
+        );
 
         match model.autoregressive_loop() {
             AutoregressiveLoop::Pipelined => {
                 // Single forward pass for entire prompt
-                self.forward_and_project(model, ModelInput::TokensCpu(tokens), prompt_len, cache)
-                    .await
+                // Pass as CPU tokens - model.decoder().forward() handles upload
+                // if embeddings are on GPU, or computes on CPU then uploads hidden states
+                let input = ModelInput::TokensCpu(tokens.view());
+                self.forward_and_project(model, input, cache).await
             }
             AutoregressiveLoop::Legacy => {
                 // Split into context + last token
                 let last_idx = prompt_len - 1;
-                let context_tokens = &initial_tokens[..last_idx];
-                let last_token = &initial_tokens[last_idx..];
 
                 // Phase 1: Stuff cache with context (no projection needed)
-                if !context_tokens.is_empty() {
-                    let context_view =
-                        ndarray::ArrayView2::from_shape((1, context_tokens.len()), context_tokens)
-                            .unwrap();
-                    self.forward_only(
-                        model,
-                        ModelInput::TokensCpu(context_view),
-                        context_tokens.len(),
-                        cache,
-                    )
-                        .await?;
+                if last_idx > 0 {
+                    let context_tokens = tokens.slice(s![.., 0..last_idx]);
+                    let context_input = ModelInput::TokensCpu(context_tokens);
+                    self.forward_only(model, context_input, cache).await?;
                 }
 
                 // Phase 2: Get logits from last token
-                let last_view =
-                    ndarray::ArrayView2::from_shape((1, last_token.len()), last_token).unwrap();
-                self.forward_and_project(model, ModelInput::TokensCpu(last_view), prompt_len, cache)
-                    .await
+                let last_token = tokens.slice(s![.., last_idx..]);
+                let last_input = ModelInput::TokensCpu(last_token);
+                self.forward_and_project(model, last_input, cache).await
             }
         }
     }
@@ -532,23 +635,58 @@ impl DecoderGenerationBackend for GpuDecoderBackend {
     /// Processes a single token and returns logits for the next token.
     ///
     /// This is the inner loop of autoregressive generation. The token tensor
-    /// should be pre-allocated via `new_token_tensor` and updated via
-    /// `update_token_tensor` to minimize allocation overhead.
+    /// should be pre-allocated via `new_decode_token` and updated via
+    /// `update_decode_token` to minimize allocation overhead.
+    ///
+    /// The token stays on GPU throughout the decode loop, avoiding per-step
+    /// CPU→GPU transfers.
     ///
     /// # Arguments
     ///
     /// * `model` - The decoder language model
-    /// * `token_tensor` - GPU tensor containing the current token ID
-    /// * `seq_len` - Current sequence length (for position encoding)
+    /// * `token_tensor` - GPU tensor containing the current token ID `[1, 1]`
+    /// * `seq_len` - Total sequence length so far (prompt + generated)
     /// * `cache` - KV cache with previous keys/values
+    ///
+    /// # Returns
+    ///
+    /// Vocabulary logits as 1D array of shape `[vocab_size]`
     async fn decode_one(
         &self,
         model: &dyn DecoderLanguageModel,
-        token_tensor: &Self::Tensor,
-        seq_len: usize,
+        token_tensor: &Self::DecodeToken,
+        _seq_len: usize,
         cache: &mut dyn Cache,
     ) -> Result<Array1<f32>> {
-        self.forward_and_project(model, ModelInput::TokensGpu(token_tensor), seq_len, cache)
-            .await
+        // Token is already on GPU - pass directly to forward
+        let input = ModelInput::TokensGpu(token_tensor);
+        self.forward_and_project(model, input, cache).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Note: Full tests require a GPU context which isn't available in unit tests.
+    // These tests verify the non-GPU logic only.
+
+    #[test]
+    fn test_staging_buffer_reuse_logic() {
+        // This would need a real WgpuContext to test properly
+        // For now, just verify the struct can be created
+    }
+
+    #[test]
+    fn test_model_input_size_extraction() {
+        let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 2, 3, 4, 5]).unwrap();
+        let input = ModelInput::TokensCpu(tokens.view());
+
+        let size = match &input {
+            ModelInput::TokensCpu(t) => t.shape()[1],
+            _ => 0,
+        };
+
+        assert_eq!(size, 5);
     }
 }

@@ -1,5 +1,5 @@
 use kjarni_models::models::llama::model::LlamaModel;
-use kjarni_transformers::common::GenerationConfig;
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::stats::GenerationStats;
@@ -18,8 +18,8 @@ async fn main() -> anyhow::Result<()> {
     let prompt = "Describe the theory of relativity in simple terms(max 50 words):\n";
     let config = GenerationConfig {
         max_new_tokens: Some(150),
-        // strategy: DecodingStrategy::Greedy,
-        repetition_penalty: 1.2,
+        strategy: DecodingStrategy::Greedy,
+        repetition_penalty: 1.0,
         ..Default::default()
     };
 
@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         offload_lm_head: false,
         target_dtype: None,
         quantize_lm_head: None, // Some(DType::Q8_0),
-        use_gguf: true,
+        use_gguf: false,
         ..Default::default()
     };
     // let model_gpu = LlamaModel::from_registry(
@@ -61,13 +61,20 @@ async fn main() -> anyhow::Result<()> {
     //
     // io::stdout().flush().unwrap();
     GenerationStats::enable();
-    // let model_cpu = LlamaModel::from_registry(
-    //     ModelType::Llama3_2_3B_Instruct,
-    //     None,
-    //     Device::Cpu,
-    //     None,
-    //     Some(d),
-    // ).await?;
+    let model_cpu = LlamaModel::from_registry(
+        ModelType::Llama3_2_3B_Instruct,
+        None,
+        Device::Cpu,
+        None,
+        Some(d),
+    ).await?;
+        let model_gpu = LlamaModel::from_registry(
+        ModelType::Llama3_2_3B_Instruct,
+        None,
+        Device::Wgpu,
+        None,
+        Some(d),
+    ).await?;
     //  let qwen_cpu = QwenModel::from_registry(
     //     ModelType::Qwen2,
     //     None,
@@ -77,17 +84,25 @@ async fn main() -> anyhow::Result<()> {
     // ).await?;
     let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf");
 
-    let model_cpu = LlamaModel::from_pretrained(
-        model_path,
-        Device::Cpu,
-        None, // No WgpuContext for CPU
-        Some(d),
-        Some(ModelType::Llama3_2_3B_Instruct),
-    )?;
+    // let model_cpu = LlamaModel::from_pretrained(
+    //     model_path,
+    //     Device::Cpu,
+    //     None, // No WgpuContext for CPU
+    //     Some(d),
+    //     Some(ModelType::Llama3_2_3B_Instruct),
+    // )?;
     let generator_cpu = DecoderGenerator::new(Arc::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config, None).await?;
     futures_util::pin_mut!(stream_cpu);
     while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {
+        print!("{}", token.text);
+        io::stdout().flush().unwrap();
+    }
+    println!();
+    let generator_gpu = DecoderGenerator::new(Arc::new(model_gpu))?;
+    let mut stream_gpu = generator_gpu.generate_stream(prompt, &config, None).await?;
+    futures_util::pin_mut!(stream_gpu);
+    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }

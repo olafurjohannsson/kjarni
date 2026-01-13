@@ -399,6 +399,9 @@ impl CpuDecoderOps for LlamaModel {
         ))
         // Ok(kjarni_transformers::utils::create_causal_mask(seq_len, _past_len))
     }
+
+
+
     // CpuDecoderOps (for Autoregressive Decoders)
     fn embed(&self, tokens: &[u32], pos: usize) -> Result<Array3<f32>> {
         // Hardcode None because Llama/GPT don't use it
