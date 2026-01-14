@@ -1,0 +1,13 @@
+# kjarni-ffi/bindings/python/pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kjarni"
+version = "0.1.0"
+description = "Fast ML inference library"
+requires-python = ">=3.8"
+
+[tool.setuptools.package-data]
+kjarni = ["*.so", "*.dylib", "*.dll", "lib/*"]

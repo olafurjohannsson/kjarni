@@ -336,7 +336,6 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 
         // Embed the single token
         let hidden_states: Array3<f32> = ops.embed(token_tensor, past_len)?;
-        println!("hidden_states: {}", hidden_states.len());
 
         // Build attention mask
         // Mask length varies by autoregressive loop type

@@ -1,63 +1,3 @@
-// use edgemodels::sentence_encoder::SentenceEncoder;
-// use edgemodels::cross_encoder::CrossEncoder;
-
-// use anyhow::Result;
-// use edgetransformers::models::ModelType;
-// use edgetransformers::prelude::*;
-// use std::sync::Arc;
-// use tokio::sync::Mutex;
-
-// pub mod ffi;
-// pub mod model_manager;
-// pub mod utils;
-// pub mod edge_gpt;
-
-// #[derive(Default)]
-// struct ModelManager {
-//     cross_encoder: Mutex<Option<CrossEncoder>>,
-//     sentence_encoder: Mutex<Option<SentenceEncoder>>,
-// }
-
-// /// The main, user-friendly entry point for all edgeGPT capabilities.
-// pub struct EdgeGPT {
-//     models: Arc<ModelManager>,
-//     device: Device,
-//     context: Option<Arc<WgpuContext>>,
-// }
-
-// impl EdgeGPT {
-//     pub fn new(device: Device, context: Option<Arc<WgpuContext>>) -> Self {
-//         Self {
-//             models: Arc::new(ModelManager::default()),
-//             device,
-//             context,
-//         }
-//     }
-//     pub async fn encode_batch(&self, sentences: &[&str]) -> Result<Vec<Vec<f32>>> {
-//         let mut model_guard = self.models.sentence_encoder.lock().await;
-
-//         if model_guard.is_none() {
-//             *model_guard = Some(
-//                 SentenceEncoder::from_registry(
-//                     ModelType::MiniLML6V2,
-//                     None,
-//                     self.device,
-//                     self.context.clone(),
-//                 )
-//                 .await?,
-//             );
-//             println!("Sentence encoding model loaded.");
-//         }
-
-//         let encoder = model_guard.as_ref().unwrap();
-//         encoder.encode_batch(sentences).await
-//     }
-
-// }
-//! EdgeGPT - Simple, batteries-included API for edge AI
-//!
-//! This crate provides a high-level API for running transformer models
-//! on edge devices, with Python and C bindings.
 
 
 mod utils;
@@ -75,6 +15,10 @@ pub use utils::*;
 pub use kjarni_models::models::cross_encoder::CrossEncoder;
 pub use kjarni_models::models::sentence_encoder::SentenceEncoder;
 pub use kjarni_models::SequenceClassifier;
+
+pub use crate::classifier::Classifier;
+pub use crate::embedder::Embedder;
+pub use crate::reranker::Reranker;
 
 // Re-export core types
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};

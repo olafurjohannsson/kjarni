@@ -64,7 +64,7 @@ impl Seq2SeqLoader {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
-        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors).await?;
+        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors, true).await?;
 
         let context = if device.is_gpu() && context.is_none() {
             Some(WgpuContext::new().await?)

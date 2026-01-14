@@ -2,6 +2,7 @@
 members = [
     "crates/kjarni",
     "crates/kjarni-cli",
+    "crates/kjarni-ffi",
     "crates/kjarni-transformers", 
     "crates/kjarni-search",     
     "crates/kjarni-rag", 

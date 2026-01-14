@@ -290,16 +290,6 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
-        println!(
-            "[DEBUG] Attention Mask being passed to layer 0:\n{:?}",
-            attention_mask
-        );
-        println!("\n--- [DEBUG] TRACING HIDDEN STATE THROUGH ENCODER ---");
-        println!(
-            "  - Before Layer 0 (Initial Embeddings): Mean = {:.6}, Std Dev = {:.6}",
-            hidden.mean().unwrap(),
-            hidden.std(0.0)
-        );
         for (i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
             hidden = layer.forward(
                 hidden,
@@ -308,14 +298,7 @@ impl CpuEncoder for CpuTransformerEncoder {
                 is_prenorm,
                 self.rope.as_deref(),
             )?;
-            println!(
-                "  - After Layer {}: Mean = {:.6}, Std Dev = {:.6}",
-                i,
-                hidden.mean().unwrap(),
-                hidden.std(0.0)
-            );
         }
-        println!("--- [DEBUG] END OF ENCODER TRACE ---");
         Ok(hidden)
     }
 

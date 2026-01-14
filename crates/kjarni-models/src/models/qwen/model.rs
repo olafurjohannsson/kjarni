@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
@@ -16,22 +16,20 @@ use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDe
 use crate::models::qwen::config::QwenConfig;
 
 use kjarni_transformers::{
+    ChatTemplate,
+    WgpuContext,
     // Add generic chat templates if available, or custom Qwen template
     cache::{Cache, CpuKVCache, GpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
     gpu_ops::{GpuFrameContext, GpuTensor},
-    models::base::{AutoregressiveLoop, ModelLoadConfig}
-
-    ,
+    models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
     rope::loader::LoadedRoPE,
-    tensor::{DType},
+    tensor::DType,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    ChatTemplate,
-    WgpuContext,
 };
 
 pub struct QwenModel {
@@ -63,7 +61,6 @@ impl DecoderModelFactory for QwenModel {
         let mut cpu = None;
         let mut gpu = None;
 
-        
         if device.is_cpu() || load_config.offload_embeddings {
             cpu = Some(Box::new(LlamaCpuDecoder::new(
                 weights,
@@ -72,9 +69,9 @@ impl DecoderModelFactory for QwenModel {
                 rope.cpu.clone(),
                 load_config.target_dtype,
             )?) as Box<dyn CpuDecoder>);
-        }
-
-        else if let Some(ctx) = context && device.is_gpu() {
+        } else if let Some(ctx) = context
+            && device.is_gpu()
+        {
             gpu = Some(Box::new(LlamaGpuDecoder::new(
                 ctx,
                 weights,
@@ -125,7 +122,7 @@ impl QwenModel {
             context,
             load_config,
         )
-            .await
+        .await
     }
     pub fn from_pretrained(
         model_path: &Path,
@@ -307,13 +304,16 @@ impl CpuDecoderOps for QwenModel {
         self.pipeline.lm_head().forward_cpu(h)
     }
     fn get_attention_mask(&self, seq: usize, past: usize) -> Result<Array2<f32>> {
-        Ok(kjarni_transformers::utils::create_causal_mask(seq, past))
+        Ok(kjarni_transformers::utils::create_causal_mask(
+            seq,
+            seq + past,
+        ))
         // Ok(kjarni_transformers::utils::create_full_attention_mask(
         //     1, seq,
         // ))
     }
     fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
-        unimplemented!()
+        self.pipeline.embeddings().embed_cpu(tokens, None, pos)
     }
 }
 
@@ -328,22 +328,8 @@ impl GpuDecoderOps for QwenModel {
         max: usize,
     ) -> Result<GpuTensor> {
         let mask: Vec<f32> = (0..max).map(|i| if i < seq { 1.0 } else { 0.0 }).collect();
-        GpuTensor::create(
-            ctx.context,
-            &mask,
-            vec![1, max],
-            "AttentionMask"
-        )
-        // GpuTensor::from_raw(
-        //     ctx.context,
-        //     &TensorView {
-        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask).to_vec()),
-        //         shape: vec![1, max],
-        //         dtype: DType::F32,
-        //         name: "AttentionMask".to_string(),
-        //     },
-        //     "AttentionMask",
-        // )
+
+        GpuTensor::create(ctx.context, &mask, vec![1, max], "AttentionMask")
     }
     fn project_to_logits(&self, ctx: &mut GpuFrameContext, h: &GpuTensor) -> Result<GpuTensor> {
         let lm = self.pipeline.lm_head();

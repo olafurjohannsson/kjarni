@@ -257,30 +257,14 @@ impl CpuSequenceClassificationHead {
         if batch == 0 || seq_len == 0 {
             return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
         }
-
         // ========================================================================
-        // --- [DEBUG] TRACE INSIDE THE CLASSIFICATION HEAD ---
-        // ========================================================================
-        println!("\n--- [DEBUG] TRACING INSIDE HEAD ---");
-        println!(
-            "  - Step 0 (Input Hidden State): Mean = {:.6}, Std Dev = {:.6}",
-            encoder_hidden_states.mean().unwrap(),
-            encoder_hidden_states.std(0.0)
-        );
-        // ========================================================================
-
         // 1. POOLING
         let sequence_embedding = match self.pooling_strategy {
             PoolingStrategy::Cls => encoder_hidden_states.slice(s![.., 0, ..]).to_owned(),
             PoolingStrategy::LastToken => {
                 if let Some(mask) = attention_mask {
-                    // Standard case: Use mask to find last token
                     last_token_pool(encoder_hidden_states, mask)?
                 } else {
-                    // --- FIX START ---
-                    // Special case for BART Decoder Output:
-                    // The input is [Batch, 1, Hidden].
-                    // Since seq_len is 1, the "last token" is just the only token.
                     if seq_len == 1 {
                         encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
                     } else {
@@ -288,7 +272,6 @@ impl CpuSequenceClassificationHead {
                             "LastToken pooling requires an attention mask for seq_len > 1"
                         ));
                     }
-                    // --- FIX END ---
                 }
             }
             _ => {
@@ -299,62 +282,23 @@ impl CpuSequenceClassificationHead {
             }
         };
 
-        // ========================================================================
-        println!(
-            "  - Step 1 (After Pooling):      Mean = {:.6}, Std Dev = {:.6}",
-            sequence_embedding.mean().unwrap(),
-            sequence_embedding.std(0.0)
-        );
 
         // ========================================================================
-
-        // 2. PRE-CLASSIFIER (DENSE LAYER) + ACTIVATION
+        // PRE-CLASSIFIER (DENSE LAYER) + ACTIVATION
         let features = if let Some(ref pooler) = self.pooler {
-            // This case is for BERT-style heads with a "pooler" layer.
             let mut pooled = pooler.matmul(&sequence_embedding.view());
-            println!(
-                "  - Step 2 (After Pooler Matmul):  Mean = {:.6}, Std Dev = {:.6}",
-                pooled.mean().unwrap(),
-                pooled.std(0.0)
-            );
             self.apply_activation_inplace(&mut pooled);
-            println!(
-                "  - Step 3 (After Activation):   Mean = {:.6}, Std Dev = {:.6}",
-                pooled.mean().unwrap(),
-                pooled.std(0.0)
-            );
             pooled
         } else if let Some(ref pre_classifier) = self.pre_classifier {
-            // This case is for BART/RoBERTa/DistilBERT style heads with a "pre_classifier" or "dense" layer.
             let mut pre_out = pre_classifier.matmul(&sequence_embedding.view());
-            println!(
-                "  - Step 2 (After Pre-Classifier Matmul): Mean = {:.6}, Std Dev = {:.6}",
-                pre_out.mean().unwrap(),
-                pre_out.std(0.0)
-            );
             self.apply_activation_inplace(&mut pre_out);
-            println!(
-                "  - Step 3 (After Activation):          Mean = {:.6}, Std Dev = {:.6}",
-                pre_out.mean().unwrap(),
-                pre_out.std(0.0)
-            );
             pre_out
         } else {
             // This is for simple heads with no intermediate layer.
             sequence_embedding
         };
 
-        // 3. FINAL CLASSIFIER (OUT_PROJ)
         let logits = self.classifier.matmul(&features.view());
-
-        // ========================================================================
-        println!(
-            "  - Step 4 (Final Logits):       Mean = {:.6}, Std Dev = {:.6}",
-            logits.mean().unwrap(),
-            logits.std(0.0)
-        );
-        println!("--- [DEBUG] END OF HEAD TRACE ---");
-        // ========================================================================
 
         Ok(logits)
     }
@@ -791,20 +735,26 @@ mod classification_head_tests {
     fn test_distilbert_head_golden() -> Result<()> {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
-        
+
         let distil_pre_classifier_weight_data = vec![
             0.059639, 0.059092, -0.408543, -0.289997, -0.492805, -0.461038, 0.492895, 0.413113,
             0.118579, 0.474389, -0.181088, -0.285172, 0.426260, -0.026483, 0.094946, 0.295581,
             0.263484, -0.286297, -0.193368, -0.461447, 0.022029, -0.179258, 0.107378, 0.023262,
             0.426268, 0.043063, 0.250572, 0.157776, 0.443614, -0.207854, 0.417489, 0.358624,
         ];
-        w.insert("pre_classifier.weight".into(), distil_pre_classifier_weight_data);
+        w.insert(
+            "pre_classifier.weight".into(),
+            distil_pre_classifier_weight_data,
+        );
         s.insert("pre_classifier.weight".into(), vec![8, 4]);
-        
+
         let distil_pre_classifier_bias_data = vec![
             0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000,
         ];
-        w.insert("pre_classifier.bias".into(), distil_pre_classifier_bias_data);
+        w.insert(
+            "pre_classifier.bias".into(),
+            distil_pre_classifier_bias_data,
+        );
         s.insert("pre_classifier.bias".into(), vec![8]);
 
         let distil_classifier_weight_data = vec![
@@ -813,19 +763,19 @@ mod classification_head_tests {
         ];
         w.insert("classifier.weight".into(), distil_classifier_weight_data);
         s.insert("classifier.weight".into(), vec![2, 8]);
-        
-        let distil_classifier_bias_data = vec![
-            0.010000, 0.010000,
-        ];
+
+        let distil_classifier_bias_data = vec![0.010000, 0.010000];
         w.insert("classifier.bias".into(), distil_classifier_bias_data);
         s.insert("classifier.bias".into(), vec![2]);
 
         let (weights, _tmp) = create_test_weights(w, s)?;
 
         let pre_classifier = LinearLayer::builder(&weights, "pre_classifier.weight")
-            .with_optional_bias(Some("pre_classifier.bias")).build()?;
+            .with_optional_bias(Some("pre_classifier.bias"))
+            .build()?;
         let classifier = LinearLayer::builder(&weights, "classifier.weight")
-            .with_optional_bias(Some("classifier.bias")).build()?;
+            .with_optional_bias(Some("classifier.bias"))
+            .build()?;
 
         let head = CpuSequenceClassificationHead::with_config(
             None,
@@ -833,7 +783,7 @@ mod classification_head_tests {
             classifier,
             HeadActivation::Relu,
             PoolingStrategy::Cls,
-            None
+            None,
         )?;
 
         // UPDATE: Use the correct inputs from the Python output
@@ -847,7 +797,7 @@ mod classification_head_tests {
         // UPDATE: Use correct logits
         let golden_data = vec![0.070543, -0.038873];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
-        
+
         let diff = (&output - &golden).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
         println!("DistilBERT Head Max Diff: {}", max_diff);
@@ -862,30 +812,30 @@ mod classification_head_tests {
     fn test_simple_head_golden() -> Result<()> {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
-        
+
         let simple_classifier_weight_data = vec![
             0.330252, -0.373889, 0.407470, 0.319927, 0.420103, -0.383355, -0.335608, 0.237919,
         ];
         w.insert("classifier.weight".into(), simple_classifier_weight_data);
         s.insert("classifier.weight".into(), vec![2, 4]);
 
-        let simple_classifier_bias_data = vec![
-            0.010000, 0.010000,
-        ];
+        let simple_classifier_bias_data = vec![0.010000, 0.010000];
         w.insert("classifier.bias".into(), simple_classifier_bias_data);
         s.insert("classifier.bias".into(), vec![2]);
 
         let (weights, _tmp) = create_test_weights(w, s)?;
 
         let classifier = LinearLayer::builder(&weights, "classifier.weight")
-            .with_optional_bias(Some("classifier.bias")).build()?;
+            .with_optional_bias(Some("classifier.bias"))
+            .build()?;
 
         let head = CpuSequenceClassificationHead::with_config(
-            None, None, 
+            None,
+            None,
             classifier,
-            HeadActivation::None, 
+            HeadActivation::None,
             PoolingStrategy::Cls,
-            None
+            None,
         )?;
 
         // UPDATE: Use correct inputs from Python output
@@ -899,7 +849,7 @@ mod classification_head_tests {
         // UPDATE: Use correct logits
         let golden_data = vec![0.124054, 0.096558];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
-        
+
         let diff = (&output - &golden).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
         println!("Simple Head Max Diff: {}", max_diff);
@@ -914,7 +864,7 @@ mod classification_head_tests {
     fn test_gelu_head_golden() -> Result<()> {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
-        
+
         let gelu_dense_weight_data = vec![
             0.072198, 0.053876, 0.486830, 0.108030, -0.265344, -0.050821, 0.174336, 0.248007,
             0.060109, -0.332623, -0.166670, -0.035248, 0.133244, 0.269246, -0.285298, 0.281496,
@@ -923,7 +873,7 @@ mod classification_head_tests {
         ];
         w.insert("dense.weight".into(), gelu_dense_weight_data);
         s.insert("dense.weight".into(), vec![8, 4]);
-        
+
         let gelu_dense_bias_data = vec![
             0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000, 0.010000,
         ];
@@ -936,25 +886,27 @@ mod classification_head_tests {
         ];
         w.insert("out_proj.weight".into(), gelu_out_proj_weight_data);
         s.insert("out_proj.weight".into(), vec![2, 8]);
-        
-        let gelu_out_proj_bias_data = vec![
-            0.010000, 0.010000,
-        ];
+
+        let gelu_out_proj_bias_data = vec![0.010000, 0.010000];
         w.insert("out_proj.bias".into(), gelu_out_proj_bias_data);
         s.insert("out_proj.bias".into(), vec![2]);
 
         let (weights, _tmp) = create_test_weights(w, s)?;
 
-        let dense = LinearLayer::builder(&weights, "dense.weight").with_optional_bias(Some("dense.bias")).build()?;
-        let out_proj = LinearLayer::builder(&weights, "out_proj.weight").with_optional_bias(Some("out_proj.bias")).build()?;
+        let dense = LinearLayer::builder(&weights, "dense.weight")
+            .with_optional_bias(Some("dense.bias"))
+            .build()?;
+        let out_proj = LinearLayer::builder(&weights, "out_proj.weight")
+            .with_optional_bias(Some("out_proj.bias"))
+            .build()?;
 
         let head = CpuSequenceClassificationHead::with_config(
             None,
             Some(dense),
             out_proj,
-            HeadActivation::Gelu, 
+            HeadActivation::Gelu,
             PoolingStrategy::Cls,
-            None
+            None,
         )?;
 
         // UPDATE: Use correct inputs
@@ -968,7 +920,7 @@ mod classification_head_tests {
         // UPDATE: Use correct logits
         let golden_data = vec![0.004101, 0.051191];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
-        
+
         let diff = (&output - &golden).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
         println!("GELU Head Max Diff: {}", max_diff);

@@ -392,11 +392,12 @@ impl CpuDecoderOps for LlamaModel {
         self.pipeline.lm_head().forward_cpu(hidden_states)
     }
 
-    fn get_attention_mask(&self, seq_len: usize, _past_len: usize) -> Result<Array2<f32>> {
+    fn get_attention_mask(&self, seq: usize, past: usize) -> Result<Array2<f32>> {
         // Llama uses full attention (no sliding window in base model)
-        Ok(kjarni_transformers::utils::create_full_attention_mask(
-            1, seq_len,
-        ))
+        // Ok(kjarni_transformers::utils::create_full_attention_mask(
+        //     1, seq_len,
+        // ))
+        Ok(kjarni_transformers::utils::create_causal_mask(seq, seq + past))
         // Ok(kjarni_transformers::utils::create_causal_mask(seq_len, _past_len))
     }
 
@@ -422,29 +423,14 @@ impl GpuDecoderOps for LlamaModel {
     fn get_attention_mask(
         &self,
         ctx: &mut GpuFrameContext,
-        seq_len: usize,
-        max_len: usize,
+        seq: usize,
+        max: usize,
     ) -> Result<GpuTensor> {
-        // Create a simple padding mask: 1.0 for valid positions, 0.0 for padding
-        // The actual causal masking is handled inside the attention kernel
-        let mask_data: Vec<f32> = (0..max_len)
-            .map(|i| if i < seq_len { 1.0 } else { 0.0 })
+        let mask: Vec<f32> = (0..max)
+            .map(|i| if i < seq { 1.0 } else { 0.0 })
             .collect();
-
-        let shape = vec![1, max_len];
-
-        GpuTensor::create(ctx.context, &mask_data, shape, "AttentionMask")
-
-        // GpuTensor::from_raw(
-        //     ctx.context,
-        //     &TensorView {
-        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
-        //         shape: vec![1, max_len],
-        //         dtype: DType::F32,
-        //         name: "AttentionMask".to_string(),
-        //     },
-        //     "AttentionMask",
-        // )
+            
+        GpuTensor::create(ctx.context, &mask, vec![1, max], "AttentionMask")
     }
 
     fn project_to_logits(

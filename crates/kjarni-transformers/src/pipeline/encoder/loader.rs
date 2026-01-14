@@ -77,7 +77,7 @@ impl EncoderLoader {
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
         
         // Download model files
-        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors).await?;
+        download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors, true).await?;
         
         // Create GPU context if needed
         let context = if device.is_gpu() && context.is_none() {

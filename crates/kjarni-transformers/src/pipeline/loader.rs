@@ -77,7 +77,7 @@ impl GenericLoader {
             WeightsFormat::SafeTensors
         };
 
-        download_model_files(&model_dir, &info.paths, format).await?;
+        download_model_files(&model_dir, &info.paths, format, true).await?;
 
         let context = if device.is_gpu() && context.is_none() {
             Some(WgpuContext::new().await?)

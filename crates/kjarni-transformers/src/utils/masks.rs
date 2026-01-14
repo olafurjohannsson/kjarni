@@ -179,7 +179,7 @@ pub fn create_causal_mask(q_len: usize, total_len: usize) -> Array2<f32> {
 ///
 /// Returns [batch_size, seq_len, seq_len]
 pub fn create_batched_causal_mask(batch_size: usize, seq_len: usize) -> Array3<f32> {
-    let single_mask = create_causal_mask(seq_len, 0);
+    let single_mask = create_causal_mask(seq_len, seq_len);
     let mut batched = Array3::zeros((batch_size, seq_len, seq_len));
 
     for b in 0..batch_size {

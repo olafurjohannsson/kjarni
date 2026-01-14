@@ -115,6 +115,12 @@ impl EmbedderBuilder {
         self
     }
 
+    /// Set model name from registry.
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
     // =========================================================================
     // Loading Configuration
     // =========================================================================

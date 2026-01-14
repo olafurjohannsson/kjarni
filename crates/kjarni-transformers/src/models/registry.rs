@@ -1202,49 +1202,58 @@ pub async fn download_model_files(
     model_dir: &Path,
     paths: &ModelPaths,
     format: WeightsFormat,
+    quiet: bool,
 ) -> Result<PathBuf> {
     tokio::fs::create_dir_all(model_dir).await?;
 
     // 1. ALWAYS download metadata from the Base Repo (Reliable)
     //    This solves the "Missing tokenizer.json in GGUF repo" issue.
-    download_file(model_dir, "tokenizer.json", paths.tokenizer_url).await?;
-    download_file(model_dir, "config.json", paths.config_url).await?;
+    download_file(model_dir, "tokenizer.json", paths.tokenizer_url, quiet).await?;
+    download_file(model_dir, "config.json", paths.config_url, quiet).await?;
 
     // 2. Decide which weights to download
     let use_gguf = matches!(format, WeightsFormat::GGUF) && paths.gguf_url.is_some();
 
     if use_gguf {
-        println!("  → Selecting GGUF format (Optimized)");
+        if !quiet {
+            eprintln!("  → Selecting GGUF format (Optimized)");
+        }
         let url = paths.gguf_url.unwrap();
         let filename = "model.gguf";
 
-        download_file(model_dir, filename, url).await?;
+        download_file(model_dir, filename, url, quiet).await?;
         Ok(model_dir.join(filename))
     } else {
-        println!("  → Selecting SafeTensors format (High Precision)");
+        if !quiet {
+            eprintln!("  → Selecting SafeTensors format (High Precision)");
+        }
 
         // Fallback to SafeTensors if GGUF requested but not available
         if matches!(format, WeightsFormat::GGUF) {
-            println!("  ! GGUF not available for this model, falling back to SafeTensors.");
+            eprintln!("  ! GGUF not available for this model, falling back to SafeTensors.");
         }
 
         if paths.weights_url.ends_with(".index.json") {
-            download_sharded_weights(model_dir, paths.weights_url).await?;
+            download_sharded_weights(model_dir, paths.weights_url, quiet).await?;
             Ok(model_dir.join("model.safetensors.index.json"))
         } else {
-            download_file(model_dir, "model.safetensors", paths.weights_url).await?;
+            download_file(model_dir, "model.safetensors", paths.weights_url, quiet).await?;
             Ok(model_dir.join("model.safetensors"))
         }
     }
 }
 
-async fn download_file(model_dir: &Path, filename: &str, url: &str) -> Result<()> {
+async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool) -> Result<()> {
     let local_path = model_dir.join(filename);
     if local_path.exists() {
-        println!("  ✓ {} (cached)", filename);
+        if !quiet {
+            eprintln!("  ✓ {} (cached)", filename);
+        }
         return Ok(());
     }
-    println!("  ↓ {}...", filename);
+    if !quiet {
+        eprintln!("  ↓ {}...", filename);
+    }
 
     let client = reqwest::Client::new();
     let mut req = client.get(url);
@@ -1266,9 +1275,9 @@ async fn download_file(model_dir: &Path, filename: &str, url: &str) -> Result<()
     Ok(())
 }
 
-async fn download_sharded_weights(model_dir: &Path, index_url: &str) -> Result<()> {
+async fn download_sharded_weights(model_dir: &Path, index_url: &str, quiet: bool) -> Result<()> {
     // 1. Download index
-    download_file(model_dir, "model.safetensors.index.json", index_url).await?;
+    download_file(model_dir, "model.safetensors.index.json", index_url, quiet).await?;
 
     // 2. Parse index
     let index_path = model_dir.join("model.safetensors.index.json");
@@ -1291,8 +1300,10 @@ async fn download_sharded_weights(model_dir: &Path, index_url: &str) -> Result<(
 
     for (i, shard) in shards.iter().enumerate() {
         let url = format!("{}/{}", base_url, shard);
-        println!("  Processing shard {}/{}...", i + 1, shards.len());
-        download_file(model_dir, shard, &url).await?;
+        if !quiet {
+            eprintln!("  Processing shard {}/{}...", i + 1, shards.len());
+        }
+        download_file(model_dir, shard, &url, quiet).await?;
     }
 
     Ok(())

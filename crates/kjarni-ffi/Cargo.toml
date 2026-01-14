@@ -1,0 +1,22 @@
+[package]
+name = "kjarni-ffi"
+version = "0.1.0"
+edition = "2024"
+description = "C FFI bindings for Kjarni"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[features]
+default = []
+c-bindings = []
+
+[dependencies]
+kjarni = { path = "../kjarni" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+
+[build-dependencies]
+cbindgen = "0.29.2"
+
+[package.metadata.cargo-rpath]
+lib-path = "$ORIGIN"
