@@ -1,10 +1,9 @@
-use crate::activations::Activation;
+use crate::activations::{apply_activation_2d, Activation};
 use crate::linear_layer::LinearLayer;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 use rayon::prelude::*;
 use std::time::Instant;
-
 /// A high-performance SwiGLU Feed-Forward Network.
 ///
 /// This struct orchestrates the SwiGLU operation, a key component in modern
@@ -61,47 +60,65 @@ impl SwiGluFeedForward {
             self.forward_prefill(hidden)
         }
     }
-    pub fn forward_2d(&self, hidden: &Array2<f32>) -> Result<Array2<f32>> {
-        let (rows, dim) = hidden.dim();
+    // pub fn forward_2d(&self, hidden: &Array2<f32>) -> Result<Array2<f32>> {
+    //     let (rows, dim) = hidden.dim();
 
-        // 1. Gate & Up
+    //     // 1. Gate & Up
+    //     let mut gate_out = self.gate.matmul(&hidden.view());
+    //     let up_out = self.up.matmul(&hidden.view());
+
+    //     // 2. Activation
+    //     silu_parallel(&mut gate_out);
+    //     // self.apply_activation(&mut gate_out);
+    //     let activated = gate_out * up_out;
+
+    //     // 3. Down
+    //     let output_2d = self.down.matmul(&activated.view());
+
+    //     Ok(output_2d)
+    // }
+    pub fn forward_2d(&self, hidden: &Array2<f32>) -> Result<Array2<f32>> {
+        // 1. Gate & Up Projections
         let mut gate_out = self.gate.matmul(&hidden.view());
         let up_out = self.up.matmul(&hidden.view());
 
-        // 2. Activation
-        silu_parallel(&mut gate_out);
-        // self.apply_activation(&mut gate_out);
+        // 2. Activation (Gate = Act(Gate))
+        // We use the centralized activation logic here
+        apply_activation_2d(&mut gate_out, self.activation);
+
+        // 3. Element-wise Mult (Gate * Up)
+        // Note: ndarray handles SIMD for element-wise ops automatically in many cases
         let activated = gate_out * up_out;
 
-        // 3. Down
+        // 4. Down Projection
         let output_2d = self.down.matmul(&activated.view());
 
         Ok(output_2d)
     }
-    /// Hyper-optimized path for the decode step (batch=1, seq=1).
-    /// Uses a specialized, fused SIMD kernel for the gate/up projections.
+     /// Hyper-optimized path for the decode step (batch=1, seq=1).
     fn forward_decode(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden_dim) = hidden.dim();
-        let hidden_2d = hidden.view().into_shape_with_order((batch, hidden_dim))?;
+        // Flatten [B, S, H] -> [B*S, H]
+        let hidden_2d = hidden.view().into_shape_with_order((batch * seq, hidden_dim))?;
 
         let t_total = Instant::now();
 
-        // --- Step 1: Call the clean, safe, fused kernel dispatcher from the `ops` module ---
+        // --- Step 1: Gate & Up ---
         let t_gate_up = Instant::now();
-
-        // let (mut gate_out, up_out) = rayon::join(
-        //     || self.gate.matmul(&hidden_2d),
-        //     || self.up.matmul(&hidden_2d),
-        // );
+        
+        // In a real optimized scenario, you might use rayon::join here, 
+        // but for safety/simplicity we run sequential or rely on internal BLAS threading.
         let mut gate_out = self.gate.matmul(&hidden_2d);
-        let mut up_out = self.up.matmul(&hidden_2d);
+        let up_out = self.up.matmul(&hidden_2d);
 
         let d_gate_up = t_gate_up.elapsed();
 
         // --- Step 2: Activation & Element-wise Ops ---
         let t_act = Instant::now();
-        silu_parallel(&mut gate_out);
-        // self.apply_activation(&mut gate_out);
+        
+        // Apply activation in-place to gate_out
+        apply_activation_2d(&mut gate_out, self.activation);
+        
         let activated = gate_out * up_out;
         let d_act = t_act.elapsed();
 
@@ -111,20 +128,102 @@ impl SwiGluFeedForward {
         let d_down = t_down.elapsed();
 
         let d_total = t_total.elapsed();
+        // Only log if it's unusually slow (microsecond logging usually too verbose)
         if d_total.as_millis() > 1 {
-            log::info!(
-                "[FFN Perf DECODE] Total: {:?}, Gate+Up Fused: {:?}, Activation: {:?}, Down Matmul: {:?}",
-                d_total,
-                d_gate_up,
-                d_act,
-                d_down
+            log::debug!(
+                "[FFN DECODE] Total: {:?}, Gate+Up: {:?}, Act: {:?}, Down: {:?}",
+                d_total, d_gate_up, d_act, d_down
             );
         }
 
         Ok(output_2d.into_shape_with_order((batch, seq, self.down.out_features()))?)
     }
+    // /// Hyper-optimized path for the decode step (batch=1, seq=1).
+    // /// Uses a specialized, fused SIMD kernel for the gate/up projections.
+    // fn forward_decode(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
+    //     let (batch, seq, hidden_dim) = hidden.dim();
+    //     let hidden_2d = hidden.view().into_shape_with_order((batch, hidden_dim))?;
 
-    /// Parallel path for the prefill step (seq > 1).
+    //     let t_total = Instant::now();
+
+    //     // --- Step 1: Call the clean, safe, fused kernel dispatcher from the `ops` module ---
+    //     let t_gate_up = Instant::now();
+
+    //     // let (mut gate_out, up_out) = rayon::join(
+    //     //     || self.gate.matmul(&hidden_2d),
+    //     //     || self.up.matmul(&hidden_2d),
+    //     // );
+    //     let mut gate_out = self.gate.matmul(&hidden_2d);
+    //     let mut up_out = self.up.matmul(&hidden_2d);
+
+    //     let d_gate_up = t_gate_up.elapsed();
+
+    //     // --- Step 2: Activation & Element-wise Ops ---
+    //     let t_act = Instant::now();
+    //     silu_parallel(&mut gate_out);
+    //     // self.apply_activation(&mut gate_out);
+    //     let activated = gate_out * up_out;
+    //     let d_act = t_act.elapsed();
+
+    //     // --- Step 3: Down Projection ---
+    //     let t_down = Instant::now();
+    //     let output_2d = self.down.matmul(&activated.view());
+    //     let d_down = t_down.elapsed();
+
+    //     let d_total = t_total.elapsed();
+    //     if d_total.as_millis() > 1 {
+    //         log::info!(
+    //             "[FFN Perf DECODE] Total: {:?}, Gate+Up Fused: {:?}, Activation: {:?}, Down Matmul: {:?}",
+    //             d_total,
+    //             d_gate_up,
+    //             d_act,
+    //             d_down
+    //         );
+    //     }
+
+    //     Ok(output_2d.into_shape_with_order((batch, seq, self.down.out_features()))?)
+    // }
+
+    // /// Parallel path for the prefill step (seq > 1).
+    // fn forward_prefill(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
+    //     let (batch, seq, hidden_dim) = hidden.dim();
+    //     let hidden_2d = hidden.view().into_shape_with_order((batch * seq, hidden_dim))?;
+
+    //     let t_total = Instant::now();
+
+    //     let t_gate_up = Instant::now();
+    //     // let (mut gate_out, up_out) = rayon::join(
+    //     //     || self.gate.matmul(&hidden_2d.view()),
+    //     //     || self.up.matmul(&hidden_2d.view()),
+    //     // );
+    //     let mut gate_out = self.gate.matmul(&hidden_2d);
+    //     let mut up_out = self.up.matmul(&hidden_2d);
+    //     let d_gate_up = t_gate_up.elapsed();
+
+    //     let t_act = Instant::now();
+    //     // silu_parallel(&mut gate_out);
+    //     self.apply_activation(&mut gate_out);
+    //     let activated = gate_out * up_out;
+    //     let d_act = t_act.elapsed();
+
+    //     let t_down = Instant::now();
+    //     let output_2d = self.down.matmul(&activated.view());
+    //     let d_down = t_down.elapsed();
+
+    //     let d_total = t_total.elapsed();
+    //     if d_total.as_millis() > 5 {
+    //         log::info!(
+    //             "[FFN Perf PREFILL] Total: {:?}, Gate+Up Parallel: {:?}, Activation: {:?}, Down Matmul: {:?}",
+    //             d_total,
+    //             d_gate_up,
+    //             d_act,
+    //             d_down
+    //         );
+    //     }
+
+    //     Ok(output_2d.into_shape_with_order((batch, seq, self.down.out_features()))?)
+    // }
+        /// Parallel path for the prefill step (seq > 1).
     fn forward_prefill(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, hidden_dim) = hidden.dim();
         let hidden_2d = hidden.view().into_shape_with_order((batch * seq, hidden_dim))?;
@@ -132,17 +231,15 @@ impl SwiGluFeedForward {
         let t_total = Instant::now();
 
         let t_gate_up = Instant::now();
-        // let (mut gate_out, up_out) = rayon::join(
-        //     || self.gate.matmul(&hidden_2d.view()),
-        //     || self.up.matmul(&hidden_2d.view()),
-        // );
         let mut gate_out = self.gate.matmul(&hidden_2d);
-        let mut up_out = self.up.matmul(&hidden_2d);
+        let up_out = self.up.matmul(&hidden_2d);
         let d_gate_up = t_gate_up.elapsed();
 
         let t_act = Instant::now();
-        // silu_parallel(&mut gate_out);
-        self.apply_activation(&mut gate_out);
+        
+        // Use centralized activation
+        apply_activation_2d(&mut gate_out, self.activation);
+        
         let activated = gate_out * up_out;
         let d_act = t_act.elapsed();
 
@@ -152,12 +249,9 @@ impl SwiGluFeedForward {
 
         let d_total = t_total.elapsed();
         if d_total.as_millis() > 5 {
-            log::info!(
-                "[FFN Perf PREFILL] Total: {:?}, Gate+Up Parallel: {:?}, Activation: {:?}, Down Matmul: {:?}",
-                d_total,
-                d_gate_up,
-                d_act,
-                d_down
+            log::debug!(
+                "[FFN PREFILL] Total: {:?}, Gate+Up: {:?}, Act: {:?}, Down: {:?}",
+                d_total, d_gate_up, d_act, d_down
             );
         }
 
@@ -172,5 +266,130 @@ fn silu_parallel(x: &mut Array2<f32>) {
         slice.par_iter_mut().for_each(|v| *v /= 1.0 + (-*v).exp());
     } else {
         x.par_mapv_inplace(|v| v / (1.0 + (-v).exp()));
+    }
+}
+
+
+
+
+// ========================================================================
+//  TEST SUITE
+// ========================================================================
+
+#[cfg(test)]
+mod swiglu_tests {
+    use super::*;
+    use ndarray::{Array2, Array3};
+    use crate::activations::Activation;
+    use crate::linear_layer::LinearLayer; 
+
+    // --- Helpers ---
+
+    /// Custom assertion to print detailed differences if tolerance is exceeded.
+    fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tol: f32) {
+        assert_eq!(a.dim(), b.dim(), "Dimensions mismatch");
+        let diff = a - b;
+        let max_diff = diff.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+        
+        if max_diff > tol {
+            panic!(
+                "Mismatch exceeding tolerance {}.\nMax Diff: {}\nGot:      {:?}\nExpected: {:?}", 
+                tol, max_diff, a, b
+            );
+        }
+    }
+
+    /// Creates a LinearLayer from flat data.
+    /// Shape expected: (out_features, in_features)
+    fn mock_linear(weights_data: Vec<f32>, shape: (usize, usize)) -> LinearLayer {
+        let weights = Array2::from_shape_vec(shape, weights_data).unwrap();
+        LinearLayer::new_f32(weights, None) 
+    }
+
+    /// Generic test runner that sets up the exact environment from the Python script.
+    fn run_golden_test(activation: Activation, expected_flat: Vec<f32>) -> Result<()> {
+        // === SETUP DATA (From Python) ===
+        // Batch=1, Seq=2, In=2, Hidden=2, Out=2
+
+        // Input: [0.5, -0.5, 0.1, 0.2]
+        let input_data = vec![
+            0.5, -0.5, 
+            0.10000000149011612, 0.20000000298023224
+        ];
+        let input = Array3::from_shape_vec((1, 2, 2), input_data)?;
+
+        // Gate Weights (Out=2, In=2)
+        // [0.2, -0.1, 
+        //  0.3,  0.4]
+        let w_gate_data = vec![
+            0.20000000298023224, -0.10000000149011612, 
+            0.30000001192092896, 0.4000000059604645
+        ];
+        let gate = mock_linear(w_gate_data, (2, 2));
+
+        // Up Weights (Out=2, In=2)
+        // [ 0.5, 0.1, 
+        //  -0.2, 0.3]
+        let w_up_data = vec![
+            0.5, 0.10000000149011612, 
+            -0.20000000298023224, 0.30000001192092896
+        ];
+        let up = mock_linear(w_up_data, (2, 2));
+
+        // Down Weights (Out=2, In=2)
+        // [ 0.1, 0.2, 
+        //  -0.1, 0.1]
+        let w_down_data = vec![
+            0.10000000149011612, 0.20000000298023224, 
+            -0.10000000149011612, 0.10000000149011612
+        ];
+        let down = mock_linear(w_down_data, (2, 2));
+
+        // === EXECUTION ===
+        let ffn = SwiGluFeedForward::new(gate, up, down, activation);
+        let output = ffn.forward(&input)?;
+        
+        // === VERIFICATION ===
+        let expected = Array3::from_shape_vec((1, 2, 2), expected_flat)?;
+        
+        // Tolerance: 1e-5 to handle the float string parsing differences
+        // between Python print output and Rust f32.
+        assert_all_close(&output, &expected, 1e-5);
+        
+        Ok(())
+    }
+
+    // ========================================================================
+    //  Golden Value Tests
+    // ========================================================================
+
+    #[test]
+    fn test_swiglu_golden_relu() -> Result<()> {
+        let expected = vec![0.003, -0.003, 0.00088, 0.00044];
+        run_golden_test(Activation::Relu, expected)
+    }
+
+    #[test]
+    fn test_swiglu_golden_gelu() -> Result<()> {
+        let expected = vec![0.002879, -0.001079, 0.000479, 0.000239];
+        run_golden_test(Activation::Gelu, expected)
+    }
+
+    #[test]
+    fn test_swiglu_golden_gelu_new() -> Result<()> {
+        let expected = vec![0.002879, -0.001079, 0.000479, 0.000239];
+        run_golden_test(Activation::GeluNew, expected)
+    }
+
+    #[test]
+    fn test_swiglu_golden_silu() -> Result<()> {
+        let expected = vec![0.002831, -0.001003, 0.000464, 0.000232];
+        run_golden_test(Activation::SilU, expected)
+    }
+
+    #[test]
+    fn test_swiglu_golden_tanh() -> Result<()> {
+        let expected = vec![0.005476, -0.001729, 0.000876, 0.000438];
+        run_golden_test(Activation::Tanh, expected)
     }
 }

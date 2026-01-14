@@ -119,3 +119,117 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
     }
     acc
 }
+
+#[cfg(all(test, any(target_arch = "x86", target_arch = "x86_64")))]
+mod q4k_q8k_test {
+    use super::*;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use half::f16;
+
+    // Import the official scalar implementation for ground truth
+    use crate::cpu::kernels::dequantize::dequantize_q4_k_block;
+
+    // =======================================================================
+    //  Helpers
+    // =======================================================================
+
+    // Q8_K is used specifically as an input format for these dot products.
+    // It's simple enough to keep local, or you could add it to dequantize.rs too.
+    fn dequantize_q8k_to_f32(block: &BlockQ8_K) -> Vec<f32> {
+        block.qs.iter()
+            .map(|&q| q as f32 * block.d)
+            .collect()
+    }
+
+    // =======================================================================
+    //  Ground Truth Logic
+    // =======================================================================
+
+    fn ground_truth_dot_product(w_blocks: &[BlockQ4_K], q_blocks: &[BlockQ8_K]) -> f32 {
+        let mut total = 0.0;
+        // Buffer for dequantized weights
+        let mut w_f32 = [0.0f32; QK_K];
+
+        for (w, q) in w_blocks.iter().zip(q_blocks.iter()) {
+            // 1. Use the shared scalar dequantization logic
+            dequantize_q4_k_block(w, &mut w_f32);
+            
+            // 2. Dequantize input
+            let q_f32 = dequantize_q8k_to_f32(q);
+            
+            // 3. Simple dot product
+            total += w_f32.iter()
+                .zip(q_f32.iter())
+                .map(|(a, b)| a * b)
+                .sum::<f32>();
+        }
+        total
+    }
+
+    // =======================================================================
+    //  Test Setup
+    // =======================================================================
+
+    fn get_rng() -> StdRng {
+        StdRng::seed_from_u64(42)
+    }
+
+    fn random_q4k_block(rng: &mut StdRng) -> BlockQ4_K {
+        let mut scales = [0u8; 12];
+        let mut qs = [0u8; QK_K / 2];
+        rng.fill(&mut scales);
+        rng.fill(&mut qs);
+        BlockQ4_K {
+            d: f16::from_f32(rng.gen_range(0.5..1.5)),
+            dmin: f16::from_f32(rng.gen_range(0.0..0.5)),
+            scales,
+            qs,
+        }
+    }
+
+    fn random_q8k_block(rng: &mut StdRng) -> BlockQ8_K {
+        let mut qs = [0i8; 256];
+        let mut bsums = [0i16; 16];
+        rng.fill(&mut qs);
+        
+        // Ensure bsums match the data (required for the integer kernel)
+        for i in 0..16 {
+            let sum: i32 = qs[i*16..(i+1)*16].iter().map(|&x| x as i32).sum();
+            bsums[i] = sum as i16;
+        }
+
+        BlockQ8_K {
+            d: rng.gen_range(0.001..0.1),
+            qs,
+            bsums,
+        }
+    }
+
+    #[test]
+    fn test_avx2_q4k_q8k_correctness() {
+        if !is_x86_feature_detected!("avx2") {
+            println!("Skipping AVX2 test");
+            return;
+        }
+        let mut rng = get_rng();
+        let n = QK_K * 4; 
+
+        let w_blocks: Vec<BlockQ4_K> = (0..4).map(|_| random_q4k_block(&mut rng)).collect();
+        let q_blocks: Vec<BlockQ8_K> = (0..4).map(|_| random_q8k_block(&mut rng)).collect();
+
+        // 1. Ground Truth (Shared Scalar Logic)
+        let expected = ground_truth_dot_product(&w_blocks, &q_blocks);
+
+        // 2. AVX2 Implementation
+        let actual = unsafe { vec_dot_q4k_q8k_avx2(n, &w_blocks, &q_blocks) };
+
+        // 3. Compare
+        // Tolerance: The integer kernel has slight precision differences vs float
+        let diff = (expected - actual).abs();
+        let rel_err = diff / expected.abs().max(1.0);
+
+        assert!(rel_err < 5e-4, 
+            "AVX2 mismatch! Expected: {}, Actual: {}, RelErr: {}", 
+            expected, actual, rel_err);
+    }
+}

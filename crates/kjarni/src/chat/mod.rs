@@ -175,3 +175,131 @@ pub fn available_models() -> Vec<&'static str> {
 pub fn suggested_models() -> Vec<&'static str> {
     validation::suggest_chat_models()
 }
+
+
+
+#[cfg(test)]
+mod chat_integration_tests {
+    use super::*;
+    use crate::chat::Chat;
+    use crate::chat::presets::ChatPreset;
+    use crate::common::DownloadPolicy;
+    use crate::chat::types::Role;
+    use futures_util::StreamExt;
+
+    /// Helper to load the lightweight Qwen 0.5B model.
+    /// This will download the model (~300MB) if not present.
+    async fn load_real_model() -> Chat {
+        let model_name = ChatPreset::FAST.model; // "qwen2.5-0.5b-instruct"
+        
+        println!("Loading test model: {}...", model_name);
+        
+        Chat::builder(model_name)
+            .download_policy(DownloadPolicy::IfMissing)
+            // Use CPU to ensure tests pass everywhere, even without GPU setup
+            .device(crate::common::KjarniDevice::Cpu) 
+            .quiet()
+            .build()
+            .await
+            .expect("Failed to load Qwen 0.5B for testing. Do you have internet?")
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires model download and CPU inference time"]
+    async fn test_real_blocking_conversation_flow() {
+        let chat = load_real_model().await;
+        let mut convo = chat.conversation();
+
+        // 1. First Turn
+        let response1 = convo.send("Hello! Answer with exactly one word: 'Hi'.").await.unwrap();
+        println!("Response 1: {}", response1);
+        
+        assert!(!response1.is_empty());
+        assert_eq!(convo.len(), 2, "History should contain User + Assistant");
+        
+        let msgs = convo.history().messages();
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[1].role, Role::Assistant);
+
+        // 2. Second Turn (Context Awareness)
+        let response2 = convo.send("What word did you just say?").await.unwrap();
+        println!("Response 2: {}", response2);
+        
+        assert!(!response2.is_empty());
+        assert_eq!(convo.len(), 4, "History should contain 4 messages");
+        
+        // Basic sanity check that the model is actually working contextually
+        let response_lower = response2.to_lowercase();
+        assert!(response_lower.contains("hi"), "Model should recall previous context");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_real_streaming_manual_flow() {
+        let chat = load_real_model().await;
+        let mut convo = chat.conversation();
+
+        // 1. Manual User Push
+        convo.push_user("Count from 1 to 3. Format: '1, 2, 3'.");
+        assert_eq!(convo.len(), 1);
+
+        // 2. Stream
+        let mut stream = convo.stream_next().await.unwrap();
+        let mut full_response = String::new();
+
+        while let Some(token_res) = stream.next().await {
+            let token = token_res.unwrap();
+            print!("{}", token); // Print to stdout to see progress
+            full_response.push_str(&token);
+        }
+        println!(); // Newline
+
+        assert!(!full_response.is_empty());
+        // Streaming does NOT auto-add to history in ChatConversation
+        assert_eq!(convo.len(), 1, "History should still only have User message");
+
+        // 3. Manual Assistant Push
+        convo.push_assistant(&full_response);
+        assert_eq!(convo.len(), 2);
+        assert_eq!(convo.history().messages().last().unwrap().content, full_response);
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_real_system_prompt_adherence() {
+        let chat = load_real_model().await;
+        
+        // Initialize conversation with a specific persona
+        let mut convo = ChatConversation::with_system(&chat, "You are a pirate. End every sentence with 'Arrr!'.".to_string());
+        
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.history().messages()[0].role, Role::System);
+
+        let response = convo.send("Who are you?").await.unwrap();
+        println!("Pirate Response: {}", response);
+
+        assert!(response.to_lowercase().contains("arrr"), "Model should follow system prompt instructions");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires model download"]
+    async fn test_clear_history_with_real_model() {
+        let chat = load_real_model().await;
+        let mut convo = chat.conversation();
+
+        convo.send("My favorite color is Blue.").await.unwrap();
+        assert_eq!(convo.len(), 2);
+
+        // Clear history
+        convo.clear(false);
+        assert!(convo.is_empty());
+
+        // Ask about context - model should hallucinate or say it doesn't know
+        let response = convo.send("What is my favorite color?").await.unwrap();
+        println!("Memory Wipe Response: {}", response);
+        
+        let lower = response.to_lowercase();
+        assert!(!lower.contains("blue") || lower.contains("don't know") || lower.contains("tell me"), 
+            "Model should not recall cleared context");
+    }
+}

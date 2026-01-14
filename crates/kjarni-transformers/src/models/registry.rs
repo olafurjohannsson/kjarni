@@ -557,7 +557,7 @@ impl ModelType {
             Self::ToxicBertMultilingual => "toxic-bert",
 
             // Edge LLMs
-            Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b",
+            Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b-instruct",
             Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b", // Fixed: was "wen2.5-1.5b"
             Self::Llama3_2_1B_Instruct => "llama3.2-1b-instruct",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b-instruct",

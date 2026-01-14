@@ -213,9 +213,9 @@ mod rope_decoder_gpu_test {
         );
 
         let feed_forward = SwiGluFeedForward::new(
-            LinearLayer::from(gen_w((hidden, intermediate), 0.01)), // Gate
-            LinearLayer::from(gen_w((hidden, intermediate), 0.02)), // Up
-            LinearLayer::from(gen_w((intermediate, hidden), 0.03)), // Down
+            LinearLayer::from(gen_w((intermediate, hidden), 0.01)), // Gate
+            LinearLayer::from(gen_w((intermediate, hidden), 0.02)), // Up
+            LinearLayer::from(gen_w((hidden, intermediate), 0.03)), // Down
             crate::activations::Activation::SilU,
         );
 

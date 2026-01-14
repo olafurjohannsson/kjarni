@@ -1,142 +1,83 @@
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import math
 
-def print_rust(name, tensor):
-    data = tensor.detach().numpy().flatten()
-    print(f"\n// {name} Shape: {list(tensor.shape)}")
-    print(f"let {name}_data = vec![")
-    for i in range(0, len(data), 8):
-        chunk = data[i:i+8]
-        line = ", ".join(f"{x:.6f}" for x in chunk)
-        print(f"    {line},")
-    print("];")
+def gelu_new_manual(x):
+    """
+    Manual implementation of GELU (tanh approximation) for older PyTorch versions.
+    Formula: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+    """
+    return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
-def make_deterministic(model, seed=42):
-    torch.manual_seed(seed)
-    with torch.no_grad():
-        count = 1
-        for name, param in model.named_parameters():
-            if 'weight' in name and len(param.shape) >= 2:
-                # Linear weights
-                num = param.numel()
-                vals = torch.arange(count, count + num).float() * 0.001
-                param.copy_(vals.view(param.shape))
-                count += num
-            elif 'bias' in name:
-                param.fill_(0.01)
-            elif 'weight' in name and len(param.shape) == 1:
-                # LayerNorm
-                param.fill_(1.0)
-
-# ==============================================================================
-# MOCK BERT (Simplified for Golden generation)
-# ==============================================================================
-class MockBert(nn.Module):
-    def __init__(self, vocab, hidden, layers):
-        super().__init__()
-        self.embeddings = nn.Embedding(vocab, hidden)
-        self.ln1 = nn.LayerNorm(hidden)
-        # Simple Encoder Layer: FC -> Add -> Norm
-        self.layers = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(hidden, hidden),
-                nn.LayerNorm(hidden)
-            ) for _ in range(layers)
-        ])
+def generate_golden():
+    print("Generating Golden Values for SwiGluFeedForward...")
     
-    def forward(self, input_ids):
-        x = self.embeddings(input_ids)
-        x = self.ln1(x)
-        for layer in self.layers:
-            # Simple residual connection simulation
-            # x + Linear(x) -> Norm
-            linear, norm = layer[0], layer[1]
-            out = linear(x)
-            x = norm(x + out)
-        return x
-
-def run():
-    torch.manual_seed(42)
-    VOCAB = 20
-    HIDDEN = 4
-    LAYERS = 1
+    # 1. Setup Data
+    # Batch=1, Seq=2, In=2, Hidden=2, Out=2
     
-    model = MockBert(VOCAB, HIDDEN, LAYERS)
-    make_deterministic(model)
-    model.eval()
-
-    # --- Inputs ---
-    # Batch size 2, Max Seq 5
-    # Seq 1: [CLS, A, B, C, SEP] -> Length 5
-    # Seq 2: [CLS, D, SEP, PAD, PAD] -> Length 3
-    input_ids = torch.tensor([
-        [1, 5, 6, 7, 2],
-        [1, 8, 2, 0, 0]
-    ], dtype=torch.long)
+    # Input: [1, 2, 2]
+    x = torch.tensor([[[0.5, -0.5], [0.1, 0.2]]])
     
-    # Attention Mask (1=Real, 0=Pad)
-    mask = torch.tensor([
-        [1, 1, 1, 1, 1],
-        [1, 1, 1, 0, 0]
-    ], dtype=torch.float) # Float for math
-
-    # 1. Hidden States
-    with torch.no_grad():
-        hidden = model(input_ids)
+    # Weights (Out, In)
+    w_gate = torch.tensor([
+        [0.2, -0.1], 
+        [0.3,  0.4]
+    ])
     
-    print("=== ENCODER GOLDEN VALUES ===")
+    w_up = torch.tensor([
+        [0.5,  0.1], 
+        [-0.2, 0.3]
+    ])
     
-    # Dump Weights for Rust init
-    print_rust("emb_weight", model.embeddings.weight)
-    print_rust("emb_ln_w", model.ln1.weight)
-    print_rust("emb_ln_b", model.ln1.bias)
-    print_rust("l0_fc_w", model.layers[0][0].weight)
-    print_rust("l0_fc_b", model.layers[0][0].bias)
-    print_rust("l0_ln_w", model.layers[0][1].weight)
-    print_rust("l0_ln_b", model.layers[0][1].bias)
-
-    print_rust("hidden_states", hidden)
-
-    # 2. Pooling Strategies
+    w_down = torch.tensor([
+        [0.1,  0.2],
+        [-0.1, 0.1]
+    ])
     
-    # A. Mean Pooling (Sum / Count)
-    # Mask hidden states first (multiply by 0 for pads)
-    mask_expanded = mask.unsqueeze(-1) # [B, S, 1]
-    masked_hidden = hidden * mask_expanded
-    sum_hidden = torch.sum(masked_hidden, dim=1) # [B, H]
-    sum_mask = torch.sum(mask_expanded, dim=1)   # [B, 1]
-    pool_mean = sum_hidden / sum_mask
-    print_rust("pool_mean", pool_mean)
+    print("\n=== RUST SETUP DATA ===")
+    print(f"// Input [1, 2, 2]")
+    print(f"let input_data = vec!{x.flatten().tolist()};")
+    print(f"// Gate Weights [2, 2]")
+    print(f"let w_gate_data = vec!{w_gate.flatten().tolist()};")
+    print(f"// Up Weights [2, 2]")
+    print(f"let w_up_data = vec!{w_up.flatten().tolist()};")
+    print(f"// Down Weights [2, 2]")
+    print(f"let w_down_data = vec!{w_down.flatten().tolist()};")
 
-    # B. CLS Pooling (Index 0)
-    pool_cls = hidden[:, 0, :]
-    print_rust("pool_cls", pool_cls)
+    # 2. Define Activations
+    activations = {
+        "Relu": lambda x: F.relu(x),
+        "Gelu": lambda x: F.gelu(x), # Standard Exact GELU
+        "GeluNew": lambda x: gelu_new_manual(x), # Manual implementation for compatibility
+        "SilU": lambda x: F.silu(x),
+        "Tanh": lambda x: torch.tanh(x),
+    }
 
-    # C. Max Pooling (Max over seq where mask=1)
-    # Set padded values to -inf before max
-    neg_inf = torch.zeros_like(hidden) - 1e9
-    # If mask is 1, keep hidden. If 0, use neg_inf.
-    # Note: mask is [B, S]. hidden is [B, S, H].
-    # We need to broadcast mask correctly.
-    hidden_for_max = torch.where(mask_expanded.bool(), hidden, neg_inf)
-    pool_max, _ = torch.max(hidden_for_max, dim=1)
-    print_rust("pool_max", pool_max)
-
-    # D. Last Token Pooling
-    # Indices of last real token: [4, 2]
-    # We gather from the sequence dim
-    last_indices = mask.sum(dim=1).long() - 1 # [4, 2]
-    # Gather: [B, H]
-    pool_last = torch.stack([hidden[i, idx, :] for i, idx in enumerate(last_indices)])
-    print_rust("pool_last", pool_last)
-
-    # 3. Normalization (L2 Norm)
-    # We will test normalization on the MEAN pooled output
-    norm = torch.norm(pool_mean, p=2, dim=1, keepdim=True)
-    normed_mean = pool_mean / norm
-    print_rust("normed_mean", normed_mean)
+    # 3. Compute and Print
+    print("\n=== RUST GOLDEN VALUES ===")
+    
+    for name, act_fn in activations.items():
+        # A. Gate Projection
+        gate_out = F.linear(x, w_gate)
+        
+        # B. Up Projection
+        up_out = F.linear(x, w_up)
+        
+        # C. Activation
+        activated_gate = act_fn(gate_out)
+        
+        # D. Element-wise Multiply
+        inter = activated_gate * up_out
+        
+        # E. Down Projection
+        out = F.linear(inter, w_down)
+        
+        flat_out = out.flatten().tolist()
+        formatted_out = [float(f"{v:.6f}") for v in flat_out]
+        
+        print(f"\n// Activation: {name}")
+        print(f"// Expected Output")
+        print(f"let expected_{name.lower()} = vec!{formatted_out};")
 
 if __name__ == "__main__":
-    torch.set_printoptions(precision=6, sci_mode=False)
-    run()
+    generate_golden()
