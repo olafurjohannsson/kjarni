@@ -14,7 +14,7 @@ c-bindings = []
 [dependencies]
 kjarni = { path = "../kjarni" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
-
+serde_json = "1.0"
 [build-dependencies]
 cbindgen = "0.29.2"
 

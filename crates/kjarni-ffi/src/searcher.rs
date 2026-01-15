@@ -4,9 +4,9 @@ use crate::callback::{
     is_cancelled, FfiProgressCallback, KjarniCancelToken, KjarniProgressCallbackFn,
 };
 use crate::error::set_last_error;
-use crate::{get_runtime, KjarniDevice, KjarniError};
-use kjarni::searcher::{SearchOptions, SearchResult, Searcher, SearcherError};
-use kjarni_rag::{MetadataFilter, SearchMode};
+use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
+use kjarni::{SearchMode, SearchResult};
+use kjarni::searcher::{SearchOptions, Searcher, SearcherError};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
@@ -172,9 +172,9 @@ pub struct KjarniSearcher {
 pub unsafe extern "C" fn kjarni_searcher_new(
     config: *const KjarniSearcherConfig,
     out: *mut *mut KjarniSearcher,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let default_config = kjarni_searcher_config_default();
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         let model_name = if !config.model_name.is_null() {
             match CStr::from_ptr(config.model_name).to_str() {
                 Ok(s) => s,
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         } else {
             "minilm-l6-v2"
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         if !config.cache_dir.is_null() {
             match CStr::from_ptr(config.cache_dir).to_str() {
                 Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -214,12 +214,12 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         if !config.rerank_model.is_null() {
             match CStr::from_ptr(config.rerank_model).to_str() {
                 Ok(s) => builder = builder.reranker(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
         // Defaults
-        builder = builder.default_mode(config.default_mode.into());
+        // builder = builder.default_mode(config.default_mode.into());
         if config.default_top_k > 0 {
             builder = builder.default_top_k(config.default_top_k);
         }
@@ -227,7 +227,7 @@ pub unsafe extern "C" fn kjarni_searcher_new(
 
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniError::LoadFailed
+            KjarniErrorCode::LoadFailed
         })
     });
 
@@ -235,7 +235,7 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         Ok(searcher) => {
             let handle = Box::new(KjarniSearcher { inner: searcher });
             *out = Box::into_raw(handle);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => e,
     }
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn kjarni_searcher_search(
     index_path: *const c_char,
     query: *const c_char,
     out: *mut KjarniSearchResults,
-) -> KjarniError {
+) -> KjarniErrorCode {
     let options = kjarni_search_options_default();
     kjarni_searcher_search_with_options(searcher, index_path, query, &options, out)
 }
@@ -269,21 +269,21 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
     query: *const c_char,
     options: *const KjarniSearchOptions,
     out: *mut KjarniSearchResults,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if searcher.is_null() || index_path.is_null() || query.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let searcher_ref = &(*searcher).inner;
 
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let query = match CStr::from_ptr(query).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     // Build SearchOptions
@@ -313,29 +313,29 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
         }
 
         // Build metadata filter
-        let mut filter = MetadataFilter::default();
-        let mut has_filter = false;
+        // let mut filter = MetadataFilter::default();
+        // let mut has_filter = false;
 
-        if !opts.source_pattern.is_null() {
-            if let Ok(s) = CStr::from_ptr(opts.source_pattern).to_str() {
-                filter = filter.source(s);
-                has_filter = true;
-            }
-        }
+        // if !opts.source_pattern.is_null() {
+        //     if let Ok(s) = CStr::from_ptr(opts.source_pattern).to_str() {
+        //         filter = filter.source(s);
+        //         has_filter = true;
+        //     }
+        // }
 
-        if !opts.filter_key.is_null() && !opts.filter_value.is_null() {
-            if let (Ok(k), Ok(v)) = (
-                CStr::from_ptr(opts.filter_key).to_str(),
-                CStr::from_ptr(opts.filter_value).to_str(),
-            ) {
-                filter = filter.must(k, v);
-                has_filter = true;
-            }
-        }
+        // if !opts.filter_key.is_null() && !opts.filter_value.is_null() {
+        //     if let (Ok(k), Ok(v)) = (
+        //         CStr::from_ptr(opts.filter_key).to_str(),
+        //         CStr::from_ptr(opts.filter_value).to_str(),
+        //     ) {
+        //         filter = filter.must(k, v);
+        //         has_filter = true;
+        //     }
+        // }
 
-        if has_filter {
-            search_opts.filter = Some(filter);
-        }
+        // if has_filter {
+        //     search_opts.filter = Some(filter);
+        // }
     }
 
     let result = get_runtime().block_on(async {
@@ -347,15 +347,15 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
     match result {
         Ok(results) => {
             *out = KjarniSearchResults::from_results(results);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniSearchResults::empty();
             match e {
-                SearcherError::IndexNotFound(_) => KjarniError::ModelNotFound,
-                SearcherError::DimensionMismatch { .. } => KjarniError::InvalidConfig,
-                _ => KjarniError::InferenceFailed,
+                SearcherError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
+                SearcherError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
+                _ => KjarniErrorCode::InferenceFailed,
             }
         }
     }
@@ -368,30 +368,30 @@ pub unsafe extern "C" fn kjarni_search_keywords(
     query: *const c_char,
     top_k: usize,
     out: *mut KjarniSearchResults,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if index_path.is_null() || query.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let query = match CStr::from_ptr(query).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     match Searcher::search_keywords(index_path, query, top_k) {
         Ok(results) => {
             *out = KjarniSearchResults::from_results(results);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniSearchResults::empty();
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::callback::{
     KjarniProgressCallbackFn,
 };
 use crate::error::set_last_error;
-use crate::{get_runtime, KjarniDevice, KjarniError};
+use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use kjarni::indexer::{Indexer, IndexerError, IndexInfo, IndexStats};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
@@ -126,9 +126,9 @@ pub struct KjarniIndexer {
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
     out: *mut *mut KjarniIndexer,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let default_config = kjarni_indexer_config_default();
@@ -143,7 +143,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
         let model_name = if !config.model_name.is_null() {
             match CStr::from_ptr(config.model_name).to_str() {
                 Ok(s) => s,
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         } else {
             "minilm-l6-v2" // Default
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
         if !config.cache_dir.is_null() {
             match CStr::from_ptr(config.cache_dir).to_str() {
                 Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -177,7 +177,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
                     let exts: Vec<&str> = s.split(',').map(|e| e.trim()).collect();
                     builder = builder.extensions(&exts);
                 }
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -189,7 +189,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
                         builder = builder.exclude(pattern);
                     }
                 }
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
 
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniError::LoadFailed
+            KjarniErrorCode::LoadFailed
         })
     });
 
@@ -211,7 +211,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
         Ok(indexer) => {
             let handle = Box::new(KjarniIndexer { inner: indexer });
             *out = Box::into_raw(handle);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => e,
     }
@@ -234,7 +234,7 @@ pub unsafe extern "C" fn kjarni_indexer_create(
     num_inputs: usize,
     force: i32,
     out: *mut KjarniIndexStats,
-) -> KjarniError {
+) -> KjarniErrorCode {
     kjarni_indexer_create_with_callback(
         indexer, index_path, inputs, num_inputs, force, None, ptr::null_mut(), ptr::null(), out,
     )
@@ -252,14 +252,14 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     out: *mut KjarniIndexStats,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     if num_inputs == 0 {
         set_last_error("No input paths specified");
-        return KjarniError::InvalidConfig;
+        return KjarniErrorCode::InvalidConfig;
     }
 
     let indexer_ref = &(*indexer).inner;
@@ -267,7 +267,7 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     // Convert index path
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     // Convert input paths
@@ -275,11 +275,11 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     for i in 0..num_inputs {
         let input_ptr = *inputs.add(i);
         if input_ptr.is_null() {
-            return KjarniError::NullPointer;
+            return KjarniErrorCode::NullPointer;
         }
         match CStr::from_ptr(input_ptr).to_str() {
             Ok(s) => input_vec.push(s),
-            Err(_) => return KjarniError::InvalidUtf8,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
         }
     }
 
@@ -295,8 +295,8 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
                 index_path,
                 &input_vec,
                 force != 0,
-                ffi_callback.as_ref(),
-                &check_cancel,
+                // ffi_callback.as_ref(),
+                // &check_cancel,
             )
             .await
     });
@@ -304,15 +304,15 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     match result {
         Ok(stats) => {
             *out = stats.into();
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             match e {
-                IndexerError::Cancelled => KjarniError::Cancelled,
-                IndexerError::IndexExists(_) => KjarniError::InvalidConfig,
-                IndexerError::IndexNotFound(_) => KjarniError::ModelNotFound,
-                _ => KjarniError::InferenceFailed,
+                IndexerError::Cancelled => KjarniErrorCode::Cancelled,
+                IndexerError::IndexExists(_) => KjarniErrorCode::InvalidConfig,
+                IndexerError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
+                _ => KjarniErrorCode::InferenceFailed,
             }
         }
     }
@@ -326,7 +326,7 @@ pub unsafe extern "C" fn kjarni_indexer_add(
     inputs: *const *const c_char,
     num_inputs: usize,
     documents_added: *mut usize,
-) -> KjarniError {
+) -> KjarniErrorCode {
     kjarni_indexer_add_with_callback(
         indexer,
         index_path,
@@ -350,59 +350,59 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     documents_added: *mut usize,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     if num_inputs == 0 {
         *documents_added = 0;
-        return KjarniError::Ok;
+        return KjarniErrorCode::Ok;
     }
 
     let indexer_ref = &(*indexer).inner;
 
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let mut input_vec = Vec::with_capacity(num_inputs);
     for i in 0..num_inputs {
         let input_ptr = *inputs.add(i);
         if input_ptr.is_null() {
-            return KjarniError::NullPointer;
+            return KjarniErrorCode::NullPointer;
         }
         match CStr::from_ptr(input_ptr).to_str() {
             Ok(s) => input_vec.push(s),
-            Err(_) => return KjarniError::InvalidUtf8,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
         }
     }
+    unimplemented!()
+    // let ffi_callback = FfiProgressCallback::new(progress_callback, user_data);
+    // let check_cancel = move || is_cancelled(cancel_token);
 
-    let ffi_callback = FfiProgressCallback::new(progress_callback, user_data);
-    let check_cancel = move || is_cancelled(cancel_token);
+    // let result = get_runtime().block_on(async {
+    //     indexer_ref
+    //         .add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), &check_cancel)
+    //         .await
+    // });
 
-    let result = get_runtime().block_on(async {
-        indexer_ref
-            .add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), &check_cancel)
-            .await
-    });
-
-    match result {
-        Ok(count) => {
-            *documents_added = count;
-            KjarniError::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            *documents_added = 0;
-            match e {
-                IndexerError::Cancelled => KjarniError::Cancelled,
-                IndexerError::DimensionMismatch { .. } => KjarniError::InvalidConfig,
-                _ => KjarniError::InferenceFailed,
-            }
-        }
-    }
+    // match result {
+    //     Ok(count) => {
+    //         *documents_added = count;
+    //         KjarniErrorCode::Ok
+    //     }
+    //     Err(e) => {
+    //         set_last_error(e.to_string());
+    //         *documents_added = 0;
+    //         match e {
+    //             IndexerError::Cancelled => KjarniErrorCode::Cancelled,
+    //             IndexerError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
+    //             _ => KjarniErrorCode::InferenceFailed,
+    //         }
+    //     }
+    // }
 }
 
 /// Get index information (static - no indexer needed)
@@ -410,45 +410,45 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
     out: *mut KjarniIndexInfo,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if index_path.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     match Indexer::info(index_path) {
         Ok(info) => {
             *out = KjarniIndexInfo::from_info(info);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
-            KjarniError::ModelNotFound
+            KjarniErrorCode::ModelNotFound
         }
     }
 }
 
 /// Delete an index
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniError {
+pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode {
     if index_path.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     match Indexer::delete(index_path) {
-        Ok(()) => KjarniError::Ok,
+        Ok(()) => KjarniErrorCode::Ok,
         Err(e) => {
             set_last_error(e.to_string());
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }
@@ -464,10 +464,11 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer
 
     let name = (*indexer).inner.model_name();
     MODEL_NAME_BUF = CString::new(name).ok();
-    MODEL_NAME_BUF
-        .as_ref()
-        .map(|c| c.as_ptr())
-        .unwrap_or(ptr::null())
+    unimplemented!()
+    // MODEL_NAME_BUF
+    //     .as_ref()
+    //     .map(|c| c.as_ptr())
+    //     .unwrap_or(ptr::null())
 }
 
 #[unsafe(no_mangle)]

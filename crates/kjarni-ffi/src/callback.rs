@@ -4,7 +4,7 @@ use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use kjarni::ProgressStage;
+use kjarni::{Progress, ProgressStage};
 
 /// Progress stage enum for FFI
 #[repr(C)]
@@ -118,7 +118,7 @@ impl FfiProgressCallback {
         })
     }
     
-    pub fn report(&self, progress: &kjarni_rag::Progress, message: Option<&str>) {
+    pub fn report(&self, progress: &Progress, message: Option<&str>) {
         if let Some(cb) = self.callback {
             let message_ptr = if let Some(msg) = message {
                 if let Ok(cstr) = std::ffi::CString::new(msg) {
@@ -134,7 +134,7 @@ impl FfiProgressCallback {
             let ffi_progress = KjarniProgress {
                 stage: progress.stage.into(),
                 current: progress.current,
-                total: progress.total,
+                total: progress.total.unwrap_or(0),
                 message: message_ptr,
             };
             

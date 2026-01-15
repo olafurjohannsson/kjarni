@@ -1,6 +1,6 @@
 // kjarni/src/searcher/types.rs
 
-use kjarni_rag::{MetadataFilter, SearchMode};
+use kjarni_rag::{MetadataFilter, SearchMode, SearchResult};
 use std::collections::HashMap;
 
 /// Search options
@@ -36,19 +36,6 @@ impl SearchOptions {
     }
 }
 
-/// Single search result
-#[derive(Debug, Clone)]
-pub struct SearchResult {
-    /// Relevance score
-    pub score: f32,
-    /// Document ID in index
-    pub document_id: usize,
-    /// Document text
-    pub text: String,
-    /// Document metadata
-    pub metadata: HashMap<String, String>,
-}
-
 /// Error types for search
 #[derive(Debug, thiserror::Error)]
 pub enum SearcherError {
@@ -70,14 +57,3 @@ pub enum SearcherError {
 
 pub type SearcherResult<T> = Result<T, SearcherError>;
 
-
-impl From<kjarni_rag::SearchResult> for SearchResult {
-    fn from(r: kjarni_rag::SearchResult) -> Self {
-        Self {
-            score: r.score,
-            document_id: r.document_id,
-            text: r.text,
-            metadata: r.metadata,
-        }
-    }
-}

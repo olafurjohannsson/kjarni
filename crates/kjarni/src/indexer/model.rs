@@ -43,6 +43,21 @@ impl Indexer {
     pub fn builder(model: &str) -> IndexerBuilder {
         IndexerBuilder::new(model)
     }
+    // add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), &check_cancel)
+    //         .await
+
+    pub fn add_with_callback(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        _callback: Option<&Arc<dyn Fn(&Progress, Option<&str>) + Send + Sync>>,
+        _cancel_token: &Option<watch::Receiver<bool>>,
+    ) -> IndexerResult<usize> {
+        // For FFI: currently just calls add()
+        unimplemented!()
+
+    }
+
     pub(crate) async fn from_builder(builder: IndexerBuilder) -> IndexerResult<Self> {
         // Build embedder
         let mut embedder_builder = Embedder::builder(&builder.model);
