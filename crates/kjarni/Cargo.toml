@@ -31,7 +31,8 @@ pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
 thiserror = "2.0.17"
 futures-util = "0.3.31"
 toml = "0.8.10"
-
+walkdir = "2.5.0"
+glob-match = "0.2"
 [features]
 default = []
 python = ["pyo3"]

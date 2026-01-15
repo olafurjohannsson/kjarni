@@ -48,7 +48,8 @@ pub use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 pub use kjarni_transformers::cpu::encoder::traits::EncoderLanguageModel;
 
 pub use kjarni_rag::{
-    config::IndexConfig, segment::{Segment, SegmentBuilder, SegmentMeta}, DocumentLoader, IndexReader, IndexWriter, LoaderConfig,
+    DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, Progress,
+    ProgressCallback, ProgressStage,
     SearchIndex,
     SplitterConfig,
     TextSplitter,

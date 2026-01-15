@@ -1,9 +1,17 @@
+use std::path::PathBuf;
+
 // kjarni/src/searcher/builder.rs
+use kjarni_rag::SearchMode;
+use kjarni_rag::ProgressCallback;
+use kjarni_transformers::Device;
+
+use crate::Searcher;
+use crate::searcher::SearcherResult;
 
 pub struct SearcherBuilder {
     // Embedder config
     pub(crate) model: String,
-    pub(crate) device: DeviceConfig,
+    pub(crate) device: Device,
     pub(crate) cache_dir: Option<PathBuf>,
     
     // Reranker config (optional)
@@ -22,7 +30,7 @@ impl SearcherBuilder {
     pub fn new(model: &str) -> Self {
         Self {
             model: model.to_string(),
-            device: DeviceConfig::Cpu,
+            device: Device::Cpu,
             cache_dir: None,
             rerank_model: None,
             default_mode: SearchMode::Hybrid,
@@ -33,10 +41,10 @@ impl SearcherBuilder {
     }
     
     // Device
-    pub fn cpu(mut self) -> Self { self.device = DeviceConfig::Cpu; self }
-    pub fn gpu(mut self) -> Self { self.device = DeviceConfig::Gpu; self }
+    pub fn cpu(mut self) -> Self { self.device = Device::Cpu; self }
+    pub fn gpu(mut self) -> Self { self.device = Device::Wgpu; self }
     pub fn device(mut self, d: &str) -> Self {
-        self.device = if d == "gpu" { DeviceConfig::Gpu } else { DeviceConfig::Cpu };
+        self.device = if d == "gpu" { Device::Wgpu } else { Device::Cpu };
         self
     }
     

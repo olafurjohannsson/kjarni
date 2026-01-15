@@ -68,7 +68,7 @@ impl KjarniIndexInfo {
 }
 
 /// Free index info strings
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
     if !info.path.is_null() {
         let _ = CString::from_raw(info.path);
@@ -98,7 +98,7 @@ pub struct KjarniIndexerConfig {
 }
 
 /// Get default indexer configuration
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     KjarniIndexerConfig {
         device: KjarniDevice::Cpu,
@@ -122,7 +122,7 @@ pub struct KjarniIndexer {
 }
 
 /// Create a new Indexer
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
     out: *mut *mut KjarniIndexer,
@@ -218,7 +218,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
 }
 
 /// Free an Indexer
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
     if !indexer.is_null() {
         let _ = Box::from_raw(indexer);
@@ -226,7 +226,7 @@ pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
 }
 
 /// Create a new index (simple version, outputs to stderr)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create(
     indexer: *mut KjarniIndexer,
     index_path: *const c_char,
@@ -241,7 +241,7 @@ pub unsafe extern "C" fn kjarni_indexer_create(
 }
 
 /// Create a new index with progress callback
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     indexer: *mut KjarniIndexer,
     index_path: *const c_char,
@@ -319,7 +319,7 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
 }
 
 /// Add documents to existing index
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add(
     indexer: *mut KjarniIndexer,
     index_path: *const c_char,
@@ -340,7 +340,7 @@ pub unsafe extern "C" fn kjarni_indexer_add(
 }
 
 /// Add documents with progress callback
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     indexer: *mut KjarniIndexer,
     index_path: *const c_char,
@@ -406,7 +406,7 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
 }
 
 /// Get index information (static - no indexer needed)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
     out: *mut KjarniIndexInfo,
@@ -433,7 +433,7 @@ pub unsafe extern "C" fn kjarni_index_info(
 }
 
 /// Delete an index
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniError {
     if index_path.is_null() {
         return KjarniError::NullPointer;
@@ -454,7 +454,7 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
 }
 
 // Accessors
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer) -> *const c_char {
     static mut MODEL_NAME_BUF: Option<CString> = None;
 
@@ -470,7 +470,7 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer
         .unwrap_or(ptr::null())
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {
         return 0;
@@ -478,7 +478,7 @@ pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer)
     (*indexer).inner.dimension()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {
         return 0;

@@ -31,14 +31,14 @@ pub struct Progress {
     pub stage: ProgressStage,
     /// Current item number
     pub current: usize,
-    /// Total items (0 if unknown)
-    pub total: usize,
+    /// Total items
+    pub total: Option<usize>,
     /// Optional message (for FFI, this is index into a message buffer)
     pub message_len: usize,
 }
 
 impl Progress {
-    pub fn new(stage: ProgressStage, current: usize, total: usize) -> Self {
+    pub fn new(stage: ProgressStage, current: usize, total: Option<usize>) -> Self {
         Self {
             stage,
             current,
@@ -48,23 +48,23 @@ impl Progress {
     }
     
     pub fn scanning(current: usize) -> Self {
-        Self::new(ProgressStage::Scanning, current, 0)
+        Self::new(ProgressStage::Scanning, current, None)
     }
     
-    pub fn loading(current: usize, total: usize) -> Self {
+    pub fn loading(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Loading, current, total)
     }
     
-    pub fn embedding(current: usize, total: usize) -> Self {
+    pub fn embedding(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Embedding, current, total)
     }
     
-    pub fn writing(current: usize, total: usize) -> Self {
+    pub fn writing(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Writing, current, total)
     }
     
     pub fn committing() -> Self {
-        Self::new(ProgressStage::Committing, 0, 0)
+        Self::new(ProgressStage::Committing, 0, None)
     }
 }
 
@@ -155,8 +155,8 @@ impl ProgressReporter {
         }
         
         // Print progress
-        if progress.total > 0 {
-            eprint!("\r  [{}/{}]", progress.current, progress.total);
+        if progress.total.unwrap_or(0) > 0 {
+            eprint!("\r  [{}/{}]", progress.current, progress.total.unwrap_or(0));
             if let Some(msg) = message {
                 eprint!(" {}", truncate_path(msg, 50));
             }

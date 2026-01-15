@@ -87,7 +87,7 @@ impl KjarniSearchResults {
 }
 
 /// Free search results
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_search_results_free(results: KjarniSearchResults) {
     if !results.results.is_null() && results.len > 0 {
         let slice = std::slice::from_raw_parts_mut(results.results, results.len);
@@ -123,7 +123,7 @@ pub struct KjarniSearchOptions {
 }
 
 /// Get default search options
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kjarni_search_options_default() -> KjarniSearchOptions {
     KjarniSearchOptions {
         mode: -1,       // Use default
@@ -149,7 +149,7 @@ pub struct KjarniSearcherConfig {
 }
 
 /// Get default searcher configuration
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kjarni_searcher_config_default() -> KjarniSearcherConfig {
     KjarniSearcherConfig {
         device: KjarniDevice::Cpu,
@@ -168,7 +168,7 @@ pub struct KjarniSearcher {
 }
 
 /// Create a new Searcher
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_new(
     config: *const KjarniSearcherConfig,
     out: *mut *mut KjarniSearcher,
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn kjarni_searcher_new(
 }
 
 /// Free a Searcher
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_free(searcher: *mut KjarniSearcher) {
     if !searcher.is_null() {
         let _ = Box::from_raw(searcher);
@@ -250,7 +250,7 @@ pub unsafe extern "C" fn kjarni_searcher_free(searcher: *mut KjarniSearcher) {
 }
 
 /// Search with default options
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_search(
     searcher: *mut KjarniSearcher,
     index_path: *const c_char,
@@ -262,7 +262,7 @@ pub unsafe extern "C" fn kjarni_searcher_search(
 }
 
 /// Search with custom options
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_search_with_options(
     searcher: *mut KjarniSearcher,
     index_path: *const c_char,
@@ -362,7 +362,7 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
 }
 
 /// Static keyword search (no embedder needed)
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_search_keywords(
     index_path: *const c_char,
     query: *const c_char,
@@ -397,7 +397,7 @@ pub unsafe extern "C" fn kjarni_search_keywords(
 }
 
 // Accessors
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_has_reranker(searcher: *const KjarniSearcher) -> bool {
     if searcher.is_null() {
         return false;
@@ -405,7 +405,7 @@ pub unsafe extern "C" fn kjarni_searcher_has_reranker(searcher: *const KjarniSea
     (*searcher).inner.has_reranker()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_default_mode(
     searcher: *const KjarniSearcher,
 ) -> KjarniSearchMode {
@@ -419,7 +419,7 @@ pub unsafe extern "C" fn kjarni_searcher_default_mode(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_default_top_k(searcher: *const KjarniSearcher) -> usize {
     if searcher.is_null() {
         return 10;

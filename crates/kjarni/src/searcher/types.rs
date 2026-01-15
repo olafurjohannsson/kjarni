@@ -1,6 +1,6 @@
 // kjarni/src/searcher/types.rs
 
-use kjarni_rag::MetadataFilter;
+use kjarni_rag::{MetadataFilter, SearchMode};
 use std::collections::HashMap;
 
 /// Search options
@@ -69,3 +69,15 @@ pub enum SearcherError {
 }
 
 pub type SearcherResult<T> = Result<T, SearcherError>;
+
+
+impl From<kjarni_rag::SearchResult> for SearchResult {
+    fn from(r: kjarni_rag::SearchResult) -> Self {
+        Self {
+            score: r.score,
+            document_id: r.document_id,
+            text: r.text,
+            metadata: r.metadata,
+        }
+    }
+}

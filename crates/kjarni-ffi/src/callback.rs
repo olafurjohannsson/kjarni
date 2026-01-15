@@ -4,6 +4,8 @@ use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use kjarni::ProgressStage;
+
 /// Progress stage enum for FFI
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,16 +19,16 @@ pub enum KjarniProgressStage {
     Reranking = 6,
 }
 
-impl From<kjarni_rag::ProgressStage> for KjarniProgressStage {
-    fn from(stage: kjarni_rag::ProgressStage) -> Self {
+impl From<ProgressStage> for KjarniProgressStage {
+    fn from(stage: ProgressStage) -> Self {
         match stage {
-            kjarni_rag::ProgressStage::Scanning => KjarniProgressStage::Scanning,
-            kjarni_rag::ProgressStage::Loading => KjarniProgressStage::Loading,
-            kjarni_rag::ProgressStage::Embedding => KjarniProgressStage::Embedding,
-            kjarni_rag::ProgressStage::Writing => KjarniProgressStage::Writing,
-            kjarni_rag::ProgressStage::Committing => KjarniProgressStage::Committing,
-            kjarni_rag::ProgressStage::Searching => KjarniProgressStage::Searching,
-            kjarni_rag::ProgressStage::Reranking => KjarniProgressStage::Reranking,
+            ProgressStage::Scanning => KjarniProgressStage::Scanning,
+            ProgressStage::Loading => KjarniProgressStage::Loading,
+            ProgressStage::Embedding => KjarniProgressStage::Embedding,
+            ProgressStage::Writing => KjarniProgressStage::Writing,
+            ProgressStage::Committing => KjarniProgressStage::Committing,
+            ProgressStage::Searching => KjarniProgressStage::Searching,
+            ProgressStage::Reranking => KjarniProgressStage::Reranking,
         }
     }
 }
@@ -55,7 +57,7 @@ pub struct KjarniCancelToken {
 }
 
 /// Create a new cancellation token
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
     let token = KjarniCancelToken {
         inner: Arc::new(AtomicBool::new(false)),
@@ -64,7 +66,7 @@ pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
 }
 
 /// Cancel the operation associated with this token
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToken) {
     if !token.is_null() {
         (*token).inner.store(true, Ordering::SeqCst);
@@ -72,7 +74,7 @@ pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToke
 }
 
 /// Check if token is cancelled
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_is_cancelled(token: *const KjarniCancelToken) -> bool {
     if token.is_null() {
         return false;
@@ -81,7 +83,7 @@ pub unsafe extern "C" fn kjarni_cancel_token_is_cancelled(token: *const KjarniCa
 }
 
 /// Reset the cancellation token
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken) {
     if !token.is_null() {
         (*token).inner.store(false, Ordering::SeqCst);
@@ -89,7 +91,7 @@ pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken
 }
 
 /// Free a cancellation token
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_free(token: *mut KjarniCancelToken) {
     if !token.is_null() {
         let _ = Box::from_raw(token);

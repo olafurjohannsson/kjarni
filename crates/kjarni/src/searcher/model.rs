@@ -1,8 +1,11 @@
 // kjarni/src/searcher/model.rs
 
-use crate::embedder::Embedder;
+use crate::searcher::{SearchOptions, SearcherError, SearcherResult};
+use crate::searcher::types::SearchResult;
+use crate::{embedder::Embedder, searcher::SearcherBuilder};
 use crate::reranker::Reranker;
 use kjarni_rag::{IndexReader, MetadataFilter, SearchMode};
+use kjarni_transformers::Device;
 
 pub struct Searcher {
     embedder: Embedder,
@@ -15,6 +18,49 @@ pub struct Searcher {
 impl Searcher {
     pub fn builder(model: &str) -> SearcherBuilder {
         SearcherBuilder::new(model)
+    }
+
+pub(crate) async fn from_builder(builder: SearcherBuilder) -> SearcherResult<Self> {
+        // Build embedder
+        let mut embedder_builder = Embedder::builder(&builder.model);
+        
+        match builder.device {
+            Device::Wgpu => embedder_builder = embedder_builder.gpu(),
+            Device::Cpu => embedder_builder = embedder_builder.cpu(),
+        }
+        
+        if let Some(ref cache_dir) = builder.cache_dir {
+            embedder_builder = embedder_builder.cache_dir(cache_dir);
+        }
+        
+        let embedder = embedder_builder.build().await
+            .map_err(SearcherError::EmbedderError)?;
+        
+        // Build reranker if specified
+        let reranker = if let Some(ref rerank_model) = builder.rerank_model {
+            let mut reranker_builder = Reranker::builder(rerank_model);
+            
+            match builder.device {
+                Device::Wgpu => reranker_builder = reranker_builder.gpu(),
+                Device::Cpu => reranker_builder = reranker_builder.cpu(),
+            }
+            
+            if let Some(ref cache_dir) = builder.cache_dir {
+                reranker_builder = reranker_builder.cache_dir(cache_dir);
+            }
+            
+            Some(reranker_builder.build().await.map_err(SearcherError::RerankerError)?)
+        } else {
+            None
+        };
+        
+        Ok(Self {
+            embedder,
+            reranker,
+            default_mode: builder.default_mode,
+            default_top_k: builder.default_top_k,
+            quiet: builder.quiet,
+        })
     }
     
     pub async fn new(model: &str) -> SearcherResult<Self> {
