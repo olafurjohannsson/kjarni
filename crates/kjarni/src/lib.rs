@@ -6,6 +6,8 @@ pub mod classifier;
 pub mod embedder;
 pub mod reranker;
 mod generation;
+pub mod indexer;
+pub mod searcher;
 
 pub mod common;
 pub use kjarni_transformers::PoolingStrategy;

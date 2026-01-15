@@ -1,16 +1,22 @@
 //! Kjarni FFI - C bindings for Kjarni ML library
 //!
 //! This crate provides C-compatible bindings for use from C, C++, C#, Go, Python, etc.
-
+mod callback;
 mod error;
 mod embedder;
 mod classifier;
 mod reranker;
+mod indexer;
+mod searcher;
 
+
+pub use callback::*;
 pub use error::*;
 pub use embedder::*;
 pub use classifier::*;
 pub use reranker::*;
+pub use indexer::*;
+pub use searcher::*;
 
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;

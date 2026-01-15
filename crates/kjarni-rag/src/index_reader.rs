@@ -54,7 +54,7 @@ impl MetadataFilter {
         if !self.source_patterns.is_empty() {
             if let Some(source) = metadata.get("source") {
                 let matches_pattern = self.source_patterns.iter()
-                    .any(|p| glob_match(p, source));
+                    .any(|p| glob_match::glob_match(p, source));
                 if !matches_pattern {
                     return false;
                 }
