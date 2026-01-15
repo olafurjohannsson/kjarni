@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::ffi::CString;
+use std::ffi::c_char;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -10,7 +11,7 @@ thread_local! {
 /// Error codes returned by Kjarni FFI functions.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KjarniError {
+pub enum KjarniErrorCode {
     /// Operation completed successfully
     Ok = 0,
     /// Null pointer passed to function
@@ -45,30 +46,47 @@ pub fn set_last_error(msg: impl Into<String>) {
     });
 }
 
+// pub fn map_internal_result<T>(
+//     result: Result<T, crate::error::KjarniError>,
+// ) -> Result<T, KjarniErrorCode> {
+//     result.map_err(|e| {
+//         set_last_error(e.to_string());
+//         KjarniErrorCode::from(e)
+//     })
+// }
+
+
 /// Map a Result to KjarniError, setting the error message if Err.
-pub fn map_result<T, E: std::fmt::Display>(result: Result<T, E>, err_code: KjarniError) -> Result<T, KjarniError> {
+pub fn map_result<T, E: std::fmt::Display>(result: Result<T, E>, err_code: KjarniErrorCode) -> Result<T, KjarniErrorCode> {
     result.map_err(|e| {
         set_last_error(e.to_string());
         err_code
     })
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn kjarni_error_code_to_string(
+    err: KjarniErrorCode
+) -> *const c_char {
+    kjarni_error_name(err)
+}
+
 /// Get the name of an error code as a C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn kjarni_error_name(err: KjarniError) -> *const std::ffi::c_char {
+pub extern "C" fn kjarni_error_name(err: KjarniErrorCode) -> *const std::ffi::c_char {
     let name: &'static [u8] = match err {
-        KjarniError::Ok => b"KJARNI_OK\0",
-        KjarniError::NullPointer => b"KJARNI_ERROR_NULL_POINTER\0",
-        KjarniError::InvalidUtf8 => b"KJARNI_ERROR_INVALID_UTF8\0",
-        KjarniError::ModelNotFound => b"KJARNI_ERROR_MODEL_NOT_FOUND\0",
-        KjarniError::LoadFailed => b"KJARNI_ERROR_LOAD_FAILED\0",
-        KjarniError::InferenceFailed => b"KJARNI_ERROR_INFERENCE_FAILED\0",
-        KjarniError::GpuUnavailable => b"KJARNI_ERROR_GPU_UNAVAILABLE\0",
-        KjarniError::InvalidConfig => b"KJARNI_ERROR_INVALID_CONFIG\0",
-        KjarniError::Cancelled => b"KJARNI_ERROR_CANCELLED\0",
-        KjarniError::Timeout => b"KJARNI_ERROR_TIMEOUT\0",
-        KjarniError::StreamEnded => b"KJARNI_ERROR_STREAM_ENDED\0",
-        KjarniError::Unknown => b"KJARNI_ERROR_UNKNOWN\0",
+        KjarniErrorCode::Ok => b"KJARNI_OK\0",
+        KjarniErrorCode::NullPointer => b"KJARNI_ERROR_NULL_POINTER\0",
+        KjarniErrorCode::InvalidUtf8 => b"KJARNI_ERROR_INVALID_UTF8\0",
+        KjarniErrorCode::ModelNotFound => b"KJARNI_ERROR_MODEL_NOT_FOUND\0",
+        KjarniErrorCode::LoadFailed => b"KJARNI_ERROR_LOAD_FAILED\0",
+        KjarniErrorCode::InferenceFailed => b"KJARNI_ERROR_INFERENCE_FAILED\0",
+        KjarniErrorCode::GpuUnavailable => b"KJARNI_ERROR_GPU_UNAVAILABLE\0",
+        KjarniErrorCode::InvalidConfig => b"KJARNI_ERROR_INVALID_CONFIG\0",
+        KjarniErrorCode::Cancelled => b"KJARNI_ERROR_CANCELLED\0",
+        KjarniErrorCode::Timeout => b"KJARNI_ERROR_TIMEOUT\0",
+        KjarniErrorCode::StreamEnded => b"KJARNI_ERROR_STREAM_ENDED\0",
+        KjarniErrorCode::Unknown => b"KJARNI_ERROR_UNKNOWN\0",
     };
     name.as_ptr() as *const std::ffi::c_char
 }

@@ -95,7 +95,7 @@ namespace Kjarni
         // Error Codes (same as before)
         // =================================================================
 
-        public enum KjarniError
+        public enum KjarniErrorCode
         {
             Ok = 0,
             NullPointer = 1,
@@ -278,11 +278,11 @@ namespace Kjarni
         public static extern void kjarni_clear_error();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr kjarni_error_name(KjarniError err);
+        public static extern IntPtr kjarni_error_name(KjarniErrorCode err);
 
         // Global
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_init();
+        public static extern KjarniErrorCode kjarni_init();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr kjarni_version();
@@ -308,7 +308,7 @@ namespace Kjarni
         public static extern KjarniEmbedderConfig kjarni_embedder_config_default();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_embedder_new(
+        public static extern KjarniErrorCode kjarni_embedder_new(
             ref KjarniEmbedderConfig config,
             out IntPtr handle);
 
@@ -316,20 +316,20 @@ namespace Kjarni
         public static extern void kjarni_embedder_free(IntPtr handle);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_embedder_encode(
+        public static extern KjarniErrorCode kjarni_embedder_encode(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
             out KjarniFloatArray result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_embedder_encode_batch(
+        public static extern KjarniErrorCode kjarni_embedder_encode_batch(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str)] string[] texts,
             UIntPtr numTexts,
             out KjarniFloat2DArray result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_embedder_similarity(
+        public static extern KjarniErrorCode kjarni_embedder_similarity(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string text1,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string text2,
@@ -343,7 +343,7 @@ namespace Kjarni
         public static extern KjarniClassifierConfig kjarni_classifier_config_default();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_classifier_new(
+        public static extern KjarniErrorCode kjarni_classifier_new(
             ref KjarniClassifierConfig config,
             out IntPtr handle);
 
@@ -351,7 +351,7 @@ namespace Kjarni
         public static extern void kjarni_classifier_free(IntPtr handle);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_classifier_classify(
+        public static extern KjarniErrorCode kjarni_classifier_classify(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
             out KjarniClassResults result);
@@ -364,7 +364,7 @@ namespace Kjarni
         public static extern KjarniRerankerConfig kjarni_reranker_config_default();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_reranker_new(
+        public static extern KjarniErrorCode kjarni_reranker_new(
             ref KjarniRerankerConfig config,
             out IntPtr handle);
 
@@ -372,14 +372,14 @@ namespace Kjarni
         public static extern void kjarni_reranker_free(IntPtr handle);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_reranker_score(
+        public static extern KjarniErrorCode kjarni_reranker_score(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string document,
             out float result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_reranker_rerank(
+        public static extern KjarniErrorCode kjarni_reranker_rerank(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
             [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str)] string[] documents,
@@ -387,7 +387,7 @@ namespace Kjarni
             out KjarniRerankResults result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern KjarniError kjarni_reranker_rerank_top_k(
+        public static extern KjarniErrorCode kjarni_reranker_rerank_top_k(
             IntPtr handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
             [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str)] string[] documents,
@@ -399,9 +399,9 @@ namespace Kjarni
         // Helpers
         // =================================================================
 
-        public static void CheckError(KjarniError err)
+        public static void CheckError(KjarniErrorCode err)
         {
-            if (err != KjarniError.Ok)
+            if (err != KjarniErrorCode.Ok)
             {
                 var msgPtr = kjarni_last_error_message();
                 var msg = msgPtr != IntPtr.Zero
@@ -420,9 +420,9 @@ namespace Kjarni
 
     public class KjarniException : Exception
     {
-        public Native.KjarniError ErrorCode { get; }
+        public Native.KjarniErrorCode ErrorCode { get; }
 
-        public KjarniException(string message, Native.KjarniError code)
+        public KjarniException(string message, Native.KjarniErrorCode code)
             : base(message)
         {
             ErrorCode = code;

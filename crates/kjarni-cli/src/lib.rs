@@ -328,6 +328,12 @@ pub enum Commands {
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
+        /// Reranking model (optional)
+        /// Use a cross-encoder model to rerank initial results
+        /// Example: --rerank-model "ms-marco-minilm"
+        #[arg(long, default_value = None)]
+        rerank_model: Option<String>,
+
         /// Output format: json, jsonl, text
         #[arg(short, long, default_value = "text")]
         format: String,
@@ -380,6 +386,7 @@ pub enum ModelCommands {
     Download {
         name: String,
         gguf: bool,
+        quiet: bool,
     },
 
     Remove {

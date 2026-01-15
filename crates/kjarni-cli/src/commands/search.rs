@@ -1,15 +1,8 @@
 //! Search command using production index
 
 use anyhow::{anyhow, Result};
-
-use kjarni::{
-    registry,
-    SentenceEncoder,
-    ModelArchitecture,
-    ModelType,
-    Device,
-};
 use kjarni::{IndexReader, SearchMode};
+use kjarni::embedder::Embedder;
 
 pub async fn run(
     index_path: &str,
@@ -17,11 +10,12 @@ pub async fn run(
     top_k: usize,
     mode: &str,
     model: &str,
+    rerank_model: Option<&str>,
     format: &str,
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Open index
+    // Open index
     let reader = IndexReader::open(index_path)?;
 
     if reader.is_empty() {
@@ -33,33 +27,37 @@ pub async fn run(
             reader.len(), reader.segment_count());
     }
 
-    // 2. Parse search mode
+    // Parse search mode
     let search_mode: SearchMode = mode.parse()
         .map_err(|e: String| anyhow!(e))?;
 
-    // 3. Search based on mode
-    let results = match search_mode {
+    // If rerank model is provided, we will fetch more results initially
+    let fetch_k = if rerank_model.is_some() { top_k * 5 } else { top_k };
+
+    // Search based on mode
+    let mut results = match search_mode {
         SearchMode::Keyword => {
             if !quiet {
                 eprintln!("Searching with BM25...");
             }
-            reader.search_keywords(query, top_k)
+            reader.search_keywords(query, fetch_k)
         }
         SearchMode::Semantic => {
             let query_embedding = get_query_embedding(query, model, &reader, gpu, quiet).await?;
             if !quiet {
                 eprintln!("Searching semantically...");
             }
-            reader.search_semantic(&query_embedding, top_k)
+            reader.search_semantic(&query_embedding, fetch_k)
         }
         SearchMode::Hybrid => {
             let query_embedding = get_query_embedding(query, model, &reader, gpu, quiet).await?;
             if !quiet {
                 eprintln!("Searching with hybrid (BM25 + semantic)...");
             }
-            reader.search_hybrid(query, &query_embedding, top_k)
+            reader.search_hybrid(query, &query_embedding, fetch_k)
         }
     };
+
 
     if results.is_empty() {
         if !quiet {
@@ -67,6 +65,47 @@ pub async fn run(
         }
         return Ok(());
     }
+
+    // Optional re rank
+    if let Some(reranker_name) = rerank_model {
+        if !quiet {
+            eprintln!("Reranking top {} results with '{}'...", results.len(), reranker_name);
+        }
+
+        // Load Reranker
+        let mut builder = kjarni::reranker::Reranker::builder(reranker_name).quiet(quiet);
+        if gpu { builder = builder.gpu(); }
+        
+        let reranker = builder.build().await.map_err(|e| anyhow!(e))?;
+
+        // Prepare inputs
+        let texts: Vec<&str> = results.iter().map(|r| r.text.as_str()).collect();
+        
+        // Run Reranker (returns sorted results)
+        let reranked_results = reranker.rerank(query, &texts).await.map_err(|e| anyhow!(e))?;
+        
+        // Reconstruct the final list based on reranker output
+        let mut new_results = Vec::with_capacity(reranked_results.len());
+        
+        for rr in reranked_results {
+            // rr.index is the index into our `texts` (and thus `results`) vector
+            let mut original_result = results[rr.index].clone();
+            
+            // Update the score to the high-precision cross-encoder score
+            original_result.score = rr.score;
+            
+            new_results.push(original_result);
+        }
+        
+        // Truncate to the requested top_k (reranker might have returned fewer if threshold used, but here we just clamp)
+        if new_results.len() > top_k {
+            new_results.truncate(top_k);
+        }
+        
+        results = new_results;
+    }
+
+
 
     // 4. Output results
     output_results(&results, format)?;
@@ -81,39 +120,30 @@ async fn get_query_embedding(
     gpu: bool,
     quiet: bool,
 ) -> Result<Vec<f32>> {
-    let device = if gpu { Device::Wgpu } else { Device::Cpu };
-
-    let model_type = ModelType::from_cli_name(model)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
-
-    if model_type.architecture() != ModelArchitecture::Bert {
-        return Err(anyhow!("Model '{}' is not an encoder.", model));
+    // Use high-level Embedder builder
+    let mut builder = Embedder::builder(model).quiet(quiet);
+    
+    if gpu {
+        builder = builder.gpu();
+    } else {
+        builder = builder.cpu();
     }
 
-    if !registry::is_model_downloaded(model)? {
-        if !quiet {
-            eprintln!("Downloading model '{}'...", model);
-        }
-        registry::download_model(model, false).await?;
-    }
-
-    if !quiet {
-        eprintln!("Loading encoder '{}'...", model);
-    }
-
-    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
+    let embedder = builder.build().await.map_err(|e| anyhow!(e))?;
 
     // Verify dimension matches
-    let embedding = encoder.encode(query).await?;
-    if embedding.len() != reader.dimension() {
+    if embedder.dimension() != reader.dimension() {
         return Err(anyhow!(
-            "Dimension mismatch: encoder produces {}, index expects {}.\n\
+            "Dimension mismatch: index expects {}, model '{}' produces {}.\n\
              Use the same model that created the index.",
-            embedding.len(),
-            reader.dimension()
+            reader.dimension(),
+            embedder.model_name(),
+            embedder.dimension()
         ));
     }
 
+    // Generate embedding
+    let embedding = embedder.embed(query).await.map_err(|e| anyhow!(e))?;
     Ok(embedding)
 }
 
@@ -156,7 +186,6 @@ fn output_results(results: &[kjarni::SearchResult], format: &str) -> Result<()> 
             }
         }
         "docs" => {
-            // Just output documents (for piping)
             for r in results {
                 println!("{}", r.text);
             }

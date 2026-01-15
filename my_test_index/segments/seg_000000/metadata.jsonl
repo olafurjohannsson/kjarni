@@ -1,0 +1,9 @@
+{"source":"rag_test_data/apple_iphone.txt","chunk_index":"0","total_chunks":"1"}
+{"source":"rag_test_data/rust_game.txt","chunk_index":"0","total_chunks":"1"}
+{"source":"rag_test_data/fruit_banana.txt","chunk_index":"0","total_chunks":"1"}
+{"chunk_index":"0","total_chunks":"1","source":"rag_test_data/fruit_apple.txt"}
+{"chunk_index":"0","total_chunks":"1","source":"rag_test_data/not_fruit.txt"}
+{"chunk_index":"0","source":"rag_test_data/apple_cider.txt","total_chunks":"1"}
+{"total_chunks":"1","source":"rag_test_data/apple_finance.txt","chunk_index":"0"}
+{"chunk_index":"0","total_chunks":"1","source":"rag_test_data/rust_code.txt"}
+{"source":"rag_test_data/rust_metal.txt","chunk_index":"0","total_chunks":"1"}

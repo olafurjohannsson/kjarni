@@ -10,6 +10,81 @@ use super::segment::Segment;
 use kjarni_search::hybrid::hybrid_search;
 use crate::SearchResult;
 
+/// Filter for metadata-based search
+#[derive(Debug, Clone, Default)]
+pub struct MetadataFilter {
+    /// Required key-value matches (AND logic)
+    pub must_match: HashMap<String, String>,
+    /// At least one must match (OR logic)  
+    pub should_match: Vec<HashMap<String, String>>,
+    /// Must NOT have these values
+    pub must_not_match: HashMap<String, String>,
+    /// Source file patterns (glob)
+    pub source_patterns: Vec<String>,
+}
+
+
+impl MetadataFilter {
+    pub fn matches(&self, metadata: &HashMap<String, String>) -> bool {
+        // Check must_match (all must be present and equal)
+        for (k, v) in &self.must_match {
+            if metadata.get(k) != Some(v) {
+                return false;
+            }
+        }
+        
+        // Check must_not_match
+        for (k, v) in &self.must_not_match {
+            if metadata.get(k) == Some(v) {
+                return false;
+            }
+        }
+        
+        // Check should_match (at least one group must match)
+        if !self.should_match.is_empty() {
+            let any_match = self.should_match.iter().any(|group| {
+                group.iter().all(|(k, v)| metadata.get(k) == Some(v))
+            });
+            if !any_match {
+                return false;
+            }
+        }
+        
+        // Check source patterns
+        if !self.source_patterns.is_empty() {
+            if let Some(source) = metadata.get("source") {
+                let matches_pattern = self.source_patterns.iter()
+                    .any(|p| glob_match(p, source));
+                if !matches_pattern {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        
+        true
+    }
+    
+    /// Builder: require source to match pattern
+    pub fn source(mut self, pattern: &str) -> Self {
+        self.source_patterns.push(pattern.to_string());
+        self
+    }
+    
+    /// Builder: require metadata key=value
+    pub fn must(mut self, key: &str, value: &str) -> Self {
+        self.must_match.insert(key.to_string(), value.to_string());
+        self
+    }
+    
+    /// Builder: exclude if key=value
+    pub fn must_not(mut self, key: &str, value: &str) -> Self {
+        self.must_not_match.insert(key.to_string(), value.to_string());
+        self
+    }
+}
+
 /// Reads and searches a segmented index
 pub struct IndexReader {
     root: PathBuf,
@@ -17,6 +92,51 @@ pub struct IndexReader {
     segments: Vec<Segment>,
     total_docs: usize,
 }
+
+impl IndexReader {
+    /// Search with metadata filtering
+    pub fn search_semantic_filtered(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        filter: &MetadataFilter,
+    ) -> Vec<SearchResult> {
+        // Get more results, then filter
+        let candidates = self.search_semantic(query_embedding, limit * 3);
+        self.apply_filter(candidates, filter, limit)
+    }
+    
+    /// Search keywords with filter
+    pub fn search_keywords_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        filter: &MetadataFilter,
+    ) -> Vec<SearchResult> {
+        let candidates = self.search_keywords(query, limit * 3);
+        self.apply_filter(candidates, filter, limit)
+    }
+    
+    /// Hybrid search with filter
+    pub fn search_hybrid_filtered(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        limit: usize,
+        filter: &MetadataFilter,
+    ) -> Vec<SearchResult> {
+        let candidates = self.search_hybrid(query, query_embedding, limit * 3);
+        self.apply_filter(candidates, filter, limit)
+    }
+    
+    fn apply_filter(&self, results: Vec<SearchResult>, filter: &MetadataFilter, limit: usize) -> Vec<SearchResult> {
+        results.into_iter()
+            .filter(|r| filter.matches(&r.metadata))
+            .take(limit)
+            .collect()
+    }
+}
+
 
 impl IndexReader {
     /// Open an index for reading

@@ -1,0 +1,1 @@
+A banana is a fruit.

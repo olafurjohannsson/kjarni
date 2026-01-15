@@ -48,7 +48,7 @@ pub async fn ensure_model_downloaded(
             }
 
             let info = model_type.info();
-            download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors)
+            download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors, quiet)
                 .await
                 .map_err(|e| KjarniError::DownloadFailed {
                     model: model_type.cli_name().to_string(),

@@ -19,6 +19,8 @@ pub use kjarni_models::SequenceClassifier;
 pub use crate::classifier::Classifier;
 pub use crate::embedder::Embedder;
 pub use crate::reranker::Reranker;
+pub use crate::indexer::Indexer;
+pub use crate::searcher::Searcher;
 
 // Re-export core types
 pub use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};

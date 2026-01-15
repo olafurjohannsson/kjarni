@@ -162,6 +162,7 @@ impl Generator {
                         &model_type.cache_dir(&cache_dir),
                         &model_type.info().paths,
                         kjarni_transformers::models::registry::WeightsFormat::SafeTensors,
+                        builder.quiet,
                     )
                     .await
                     .map_err(|e| GeneratorError::DownloadFailed {

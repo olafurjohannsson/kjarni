@@ -16,7 +16,7 @@ print(f'Kjarni version: {version()}')
 # KJARNI
 # -------------------------------------------------
 print('\n--- Kjarni Embedder ---')
-kjarni = Embedder(quiet=True)
+kjarni = Embedder(quiet=True, model='minilm-l6-v2')
 
 text = "Hello, world!"
 k_embedding = np.array(kjarni.encode(text), dtype=np.float32)
@@ -31,12 +31,6 @@ print(f'Kjarni similarity(cat, dog): {k_sim:.6f}')
 # SENTENCE TRANSFORMERS
 # -------------------------------------------------
 print('\n--- SentenceTransformers ---')
-
-# IMPORTANT:
-# Use the SAME model family as Kjarni internally
-# Example guesses (adjust if needed):
-#   "sentence-transformers/all-MiniLM-L6-v2"
-#   "sentence-transformers/all-mpnet-base-v2"
 model_name = "sentence-transformers/all-MiniLM-L6-v2"
 
 st = SentenceTransformer(model_name)

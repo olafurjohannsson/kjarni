@@ -20,17 +20,37 @@ pub const TEXT_EXTENSIONS: &[&str] = &[
     "lua", "pl", "php", "ex", "exs", "clj", "hs",
 ];
 
-/// Configuration for document loading
+
 #[derive(Debug, Clone)]
 pub struct LoaderConfig {
-    /// Splitter configuration
     pub splitter: SplitterConfig,
-    /// Whether to recurse into subdirectories
     pub recursive: bool,
-    /// File extensions to include (empty = use defaults)
-    pub extensions: Vec<String>,
-    /// Whether to include hidden files
+    pub extensions: Vec<String>,        // If empty, use defaults
+    pub exclude_patterns: Vec<String>,  // NEW: glob patterns to exclude
     pub include_hidden: bool,
+    pub max_file_size: Option<usize>,   // NEW: skip files larger than this
+}
+
+impl LoaderConfig {
+    /// Add extension to include
+    pub fn with_extension(mut self, ext: &str) -> Self {
+        self.extensions.push(ext.to_lowercase());
+        self
+    }
+    
+    /// Add multiple extensions
+    pub fn with_extensions(mut self, exts: &[&str]) -> Self {
+        for ext in exts {
+            self.extensions.push(ext.to_lowercase());
+        }
+        self
+    }
+    
+    /// Exclude files matching pattern (e.g., "*.min.js", "node_modules/**")
+    pub fn exclude(mut self, pattern: &str) -> Self {
+        self.exclude_patterns.push(pattern.to_string());
+        self
+    }
 }
 
 impl Default for LoaderConfig {
@@ -39,7 +59,9 @@ impl Default for LoaderConfig {
             splitter: SplitterConfig::default(),
             recursive: true,
             extensions: vec![],
+            exclude_patterns: vec![],
             include_hidden: false,
+            max_file_size: None,
         }
     }
 }

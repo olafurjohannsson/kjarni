@@ -56,7 +56,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Model '{}' not found locally. Downloading...", model);
         }
-        registry::download_model(model, false).await?;
+        registry::download_model(model, false, quiet).await?;
         if !quiet {
             eprintln!();
         }

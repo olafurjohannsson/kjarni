@@ -5,6 +5,7 @@ pub mod loader;
 pub mod segment;
 pub mod index_writer;
 pub mod index_reader;
+pub mod progress;
 
 pub use search_index::SearchIndex;
 pub use splitter::{TextSplitter, SplitterConfig};
@@ -12,6 +13,7 @@ pub use loader::{DocumentLoader, LoaderConfig};
 pub use segment::{SegmentBuilder};
 pub use index_writer::IndexWriter;
 pub use index_reader::IndexReader;
+pub use progress::{Progress, ProgressStage, ProgressCallback};
 
 pub use kjarni_search::{
     Bm25Index,
@@ -23,5 +25,5 @@ pub use kjarni_search::{
 };
 
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;

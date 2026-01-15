@@ -83,7 +83,7 @@ pub fn get_model_info(name: &str) -> Result<ModelEntry> {
 
 /// Download a model by CLI name
 /// Updated to accept format preference
-pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
+pub async fn download_model(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
     let model_type = ModelType::from_cli_name(name).ok_or_else(|| {
         anyhow!(
             "Unknown model: '{}'. Run 'kjarni model list' to see available models.",
@@ -119,7 +119,7 @@ pub async fn download_model(name: &str, prefer_gguf: bool) -> Result<()> {
     println!("  Destination: {}", model_dir.display());
     println!();
 
-    download_model_files(&model_dir, &info.paths, format).await?;
+    download_model_files(&model_dir, &info.paths, format, quiet).await?;
 
     println!();
     println!("✓ Download complete!");

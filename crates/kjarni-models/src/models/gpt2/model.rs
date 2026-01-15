@@ -110,6 +110,7 @@ impl Gpt2Model {
             &model_dir,
             &model_type.info().paths,
             kjarni_transformers::models::registry::WeightsFormat::SafeTensors,
+            true,
         )
         .await?;
         Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)

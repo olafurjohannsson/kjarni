@@ -36,7 +36,7 @@ pub async fn run(
         if !quiet {
             eprintln!("Downloading model '{}'...", model);
         }
-        registry::download_model(model, false).await?;
+        registry::download_model(model, false, quiet).await?;
     }
 
     if !quiet {

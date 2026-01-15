@@ -1,6 +1,6 @@
 //! Reranker FFI bindings
 
-use crate::{get_runtime, KjarniError, KjarniDevice};
+use crate::{get_runtime, KjarniErrorCode, KjarniDevice};
 use crate::error::set_last_error;
 use kjarni::Reranker;
 use std::ffi::{c_char, c_float, CStr, CString};
@@ -83,9 +83,9 @@ pub struct KjarniReranker {
 pub unsafe extern "C" fn kjarni_reranker_new(
     config: *const KjarniRerankerConfig,
     out: *mut *mut KjarniReranker,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let default_config = kjarni_reranker_config_default();
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
         let model_name = if !config.model_name.is_null() {
             match CStr::from_ptr(config.model_name).to_str() {
                 Ok(s) => s,
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         } else {
             "cross-encoder-minilm"  // Default cross-encoder
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
         if !config.cache_dir.is_null() {
             match CStr::from_ptr(config.cache_dir).to_str() {
                 Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
         if !config.model_path.is_null() {
             match CStr::from_ptr(config.model_path).to_str() {
                 Ok(s) => builder = builder.model_path(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
 
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniError::LoadFailed
+            KjarniErrorCode::LoadFailed
         })
     });
 
@@ -138,7 +138,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
         Ok(reranker) => {
             let handle = Box::new(KjarniReranker { inner: reranker });
             *out = Box::into_raw(handle);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => e,
     }
@@ -159,21 +159,21 @@ pub unsafe extern "C" fn kjarni_reranker_score(
     query: *const c_char,
     document: *const c_char,
     out: *mut c_float,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if reranker.is_null() || query.is_null() || document.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let reranker_ref = &(*reranker).inner;
 
     let query = match CStr::from_ptr(query).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let document = match CStr::from_ptr(document).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let result = get_runtime().block_on(async {
@@ -183,12 +183,12 @@ pub unsafe extern "C" fn kjarni_reranker_score(
     match result {
         Ok(score) => {
             *out = score;
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = 0.0;
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }
@@ -201,21 +201,21 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
     documents: *const *const c_char,
     num_docs: usize,
     out: *mut KjarniRerankResults,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if reranker.is_null() || query.is_null() || documents.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     if num_docs == 0 {
         *out = KjarniRerankResults::empty();
-        return KjarniError::Ok;
+        return KjarniErrorCode::Ok;
     }
 
     let reranker_ref = &(*reranker).inner;
 
     let query = match CStr::from_ptr(query).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     // Convert documents
@@ -223,11 +223,11 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
     for i in 0..num_docs {
         let doc_ptr = *documents.add(i);
         if doc_ptr.is_null() {
-            return KjarniError::NullPointer;
+            return KjarniErrorCode::NullPointer;
         }
         match CStr::from_ptr(doc_ptr).to_str() {
             Ok(s) => doc_vec.push(s.to_string()),
-            Err(_) => return KjarniError::InvalidUtf8,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
         }
     }
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
@@ -242,12 +242,12 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
                 .map(|r| (r.index, r.score))
                 .collect();
             *out = KjarniRerankResults::from_results(ranked);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniRerankResults::empty();
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }
@@ -261,21 +261,21 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
     num_docs: usize,
     top_k: usize,
     out: *mut KjarniRerankResults,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if reranker.is_null() || query.is_null() || documents.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     if num_docs == 0 {
         *out = KjarniRerankResults::empty();
-        return KjarniError::Ok;
+        return KjarniErrorCode::Ok;
     }
 
     let reranker_ref = &(*reranker).inner;
 
     let query = match CStr::from_ptr(query).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     // Convert documents
@@ -283,11 +283,11 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
     for i in 0..num_docs {
         let doc_ptr = *documents.add(i);
         if doc_ptr.is_null() {
-            return KjarniError::NullPointer;
+            return KjarniErrorCode::NullPointer;
         }
         match CStr::from_ptr(doc_ptr).to_str() {
             Ok(s) => doc_vec.push(s.to_string()),
-            Err(_) => return KjarniError::InvalidUtf8,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
         }
     }
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
@@ -302,12 +302,12 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
                 .map(|r| (r.index, r.score))
                 .collect();
             *out = KjarniRerankResults::from_results(ranked);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniRerankResults::empty();
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }

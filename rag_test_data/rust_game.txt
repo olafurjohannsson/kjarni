@@ -1,0 +1,1 @@
+In the game Rust, handling server errors requires a restart.

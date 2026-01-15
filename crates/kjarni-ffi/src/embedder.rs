@@ -1,6 +1,6 @@
 //! Embedder FFI bindings
 
-use crate::{get_runtime, KjarniError, KjarniFloatArray, KjarniFloat2DArray};
+use crate::{get_runtime, KjarniErrorCode, KjarniFloatArray, KjarniFloat2DArray};
 use crate::error::{set_last_error, map_result};
 use kjarni::Embedder;
 use std::ffi::{c_char, c_float, CStr};
@@ -61,9 +61,9 @@ pub struct KjarniEmbedder {
 pub unsafe extern "C" fn kjarni_embedder_new(
     config: *const KjarniEmbedderConfig,
     out: *mut *mut KjarniEmbedder,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     // Use defaults if config is null
@@ -83,7 +83,7 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         if !config.cache_dir.is_null() {
             match CStr::from_ptr(config.cache_dir).to_str() {
                 Ok(s) => builder = builder.cache_dir(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         if !config.model_name.is_null() {
             match CStr::from_ptr(config.model_name).to_str() {
                 Ok(s) => builder = builder.model(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -99,7 +99,7 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         if !config.model_path.is_null() {
             match CStr::from_ptr(config.model_path).to_str() {
                 Ok(s) => builder = builder.model_path(s),
-                Err(_) => return Err(KjarniError::InvalidUtf8),
+                Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         }
 
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         // Build
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniError::LoadFailed
+            KjarniErrorCode::LoadFailed
         })
     });
 
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         Ok(embedder) => {
             let handle = Box::new(KjarniEmbedder { inner: embedder });
             *out = Box::into_raw(handle);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => e,
     }
@@ -148,15 +148,15 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
     embedder: *mut KjarniEmbedder,
     text: *const c_char,
     out: *mut KjarniFloatArray,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if embedder.is_null() || text.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let embedder = &(*embedder).inner;
     let text = match CStr::from_ptr(text).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let result = get_runtime().block_on(async {
@@ -166,12 +166,12 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
     match result {
         Ok(embedding) => {
             *out = KjarniFloatArray::from_vec(embedding);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniFloatArray::empty();
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }
@@ -189,14 +189,14 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     texts: *const *const c_char,
     num_texts: usize,
     out: *mut KjarniFloat2DArray,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if embedder.is_null() || texts.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     if num_texts == 0 {
         *out = KjarniFloat2DArray::empty();
-        return KjarniError::Ok;
+        return KjarniErrorCode::Ok;
     }
 
     let embedder_ref = &(*embedder).inner;
@@ -206,11 +206,11 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     for i in 0..num_texts {
         let text_ptr = *texts.add(i);
         if text_ptr.is_null() {
-            return KjarniError::NullPointer;
+            return KjarniErrorCode::NullPointer;
         }
         match CStr::from_ptr(text_ptr).to_str() {
             Ok(s) => text_vec.push(s.to_string()),
-            Err(_) => return KjarniError::InvalidUtf8,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
         }
     }
 
@@ -223,12 +223,12 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     match result {
         Ok(embeddings) => {
             *out = KjarniFloat2DArray::from_vecs(embeddings);
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = KjarniFloat2DArray::empty();
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }
@@ -245,21 +245,21 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
     text1: *const c_char,
     text2: *const c_char,
     out: *mut c_float,
-) -> KjarniError {
+) -> KjarniErrorCode {
     if embedder.is_null() || text1.is_null() || text2.is_null() || out.is_null() {
-        return KjarniError::NullPointer;
+        return KjarniErrorCode::NullPointer;
     }
 
     let embedder_ref = &(*embedder).inner;
 
     let text1 = match CStr::from_ptr(text1).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let text2 = match CStr::from_ptr(text2).to_str() {
         Ok(s) => s,
-        Err(_) => return KjarniError::InvalidUtf8,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
     let result = get_runtime().block_on(async {
@@ -269,12 +269,12 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
     match result {
         Ok(sim) => {
             *out = sim;
-            KjarniError::Ok
+            KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
             *out = 0.0;
-            KjarniError::InferenceFailed
+            KjarniErrorCode::InferenceFailed
         }
     }
 }

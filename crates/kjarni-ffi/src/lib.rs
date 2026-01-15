@@ -31,9 +31,9 @@ pub(crate) fn get_runtime() -> &'static Runtime {
 
 /// Initialize the Kjarni runtime. Optional - auto-initialized on first use.
 #[unsafe(no_mangle)]
-pub extern "C" fn kjarni_init() -> KjarniError {
+pub extern "C" fn kjarni_init() -> KjarniErrorCode {
     let _ = get_runtime();
-    KjarniError::Ok
+    KjarniErrorCode::Ok
 }
 
 /// Shutdown and cleanup. Call before process exit.

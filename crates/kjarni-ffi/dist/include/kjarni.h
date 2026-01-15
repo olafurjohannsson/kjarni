@@ -14,56 +14,56 @@
 /**
  * Error codes returned by Kjarni FFI functions.
  */
-typedef enum KjarniKjarniError {
+typedef enum KjarniKjarniErrorCode {
     /**
      * Operation completed successfully
      */
-    KJARNI_KJARNI_ERROR_OK = 0,
+    KJARNI_KJARNI_ERROR_CODE_OK = 0,
     /**
      * Null pointer passed to function
      */
-    KJARNI_KJARNI_ERROR_NULL_POINTER = 1,
+    KJARNI_KJARNI_ERROR_CODE_NULL_POINTER = 1,
     /**
      * Invalid UTF-8 string
      */
-    KJARNI_KJARNI_ERROR_INVALID_UTF8 = 2,
+    KJARNI_KJARNI_ERROR_CODE_INVALID_UTF8 = 2,
     /**
      * Model not found in registry
      */
-    KJARNI_KJARNI_ERROR_MODEL_NOT_FOUND = 3,
+    KJARNI_KJARNI_ERROR_CODE_MODEL_NOT_FOUND = 3,
     /**
      * Failed to load model
      */
-    KJARNI_KJARNI_ERROR_LOAD_FAILED = 4,
+    KJARNI_KJARNI_ERROR_CODE_LOAD_FAILED = 4,
     /**
      * Inference operation failed
      */
-    KJARNI_KJARNI_ERROR_INFERENCE_FAILED = 5,
+    KJARNI_KJARNI_ERROR_CODE_INFERENCE_FAILED = 5,
     /**
      * GPU not available
      */
-    KJARNI_KJARNI_ERROR_GPU_UNAVAILABLE = 6,
+    KJARNI_KJARNI_ERROR_CODE_GPU_UNAVAILABLE = 6,
     /**
      * Invalid configuration
      */
-    KJARNI_KJARNI_ERROR_INVALID_CONFIG = 7,
+    KJARNI_KJARNI_ERROR_CODE_INVALID_CONFIG = 7,
     /**
      * Operation was cancelled
      */
-    KJARNI_KJARNI_ERROR_CANCELLED = 8,
+    KJARNI_KJARNI_ERROR_CODE_CANCELLED = 8,
     /**
      * Operation timed out
      */
-    KJARNI_KJARNI_ERROR_TIMEOUT = 9,
+    KJARNI_KJARNI_ERROR_CODE_TIMEOUT = 9,
     /**
      * Stream has ended
      */
-    KJARNI_KJARNI_ERROR_STREAM_ENDED = 10,
+    KJARNI_KJARNI_ERROR_CODE_STREAM_ENDED = 10,
     /**
      * Unknown error
      */
-    KJARNI_KJARNI_ERROR_UNKNOWN = 255,
-} KjarniKjarniError;
+    KJARNI_KJARNI_ERROR_CODE_UNKNOWN = 255,
+} KjarniKjarniErrorCode;
 
 /**
  * Device selection for inference.
@@ -245,7 +245,7 @@ typedef struct KjarniKjarniRerankerConfig {
 /**
  * Initialize the Kjarni runtime. Optional - auto-initialized on first use.
  */
-kjarni_ enum KjarniKjarniError kjarni_init( void );
+kjarni_ enum KjarniKjarniErrorCode kjarni_init( void );
 
 /**
  * Shutdown and cleanup. Call before process exit.
@@ -277,10 +277,12 @@ kjarni_ void kjarni_string_free( char *s );
  */
 kjarni_ void kjarni_string_array_free( struct KjarniKjarniStringArray arr );
 
+kjarni_ const char *kjarni_error_code_to_string( enum KjarniKjarniErrorCode err );
+
 /**
  * Get the name of an error code as a C string.
  */
-kjarni_ const char *kjarni_error_name( enum KjarniKjarniError err );
+kjarni_ const char *kjarni_error_name( enum KjarniKjarniErrorCode err );
 
 /**
  * Get the last error message. Returns NULL if no error.
@@ -306,8 +308,8 @@ kjarni_ struct KjarniKjarniEmbedderConfig kjarni_embedder_config_default( void )
  * - The returned handle must be freed with `kjarni_embedder_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_embedder_new( const struct KjarniKjarniEmbedderConfig *config,
-                                            struct KjarniKjarniEmbedder **out );
+enum KjarniKjarniErrorCode kjarni_embedder_new( const struct KjarniKjarniEmbedderConfig *config,
+                                                struct KjarniKjarniEmbedder **out );
 
 /**
  * Free an Embedder instance.
@@ -328,9 +330,9 @@ kjarni_ void kjarni_embedder_free( struct KjarniKjarniEmbedder *embedder );
  * - The returned array must be freed with `kjarni_float_array_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_embedder_encode( struct KjarniKjarniEmbedder *embedder,
-                                               const char *text,
-                                               struct KjarniKjarniFloatArray *out );
+enum KjarniKjarniErrorCode kjarni_embedder_encode( struct KjarniKjarniEmbedder *embedder,
+                                                   const char *text,
+                                                   struct KjarniKjarniFloatArray *out );
 
 /**
  * Encode multiple texts to embedding vectors.
@@ -342,10 +344,10 @@ enum KjarniKjarniError kjarni_embedder_encode( struct KjarniKjarniEmbedder *embe
  * - The returned array must be freed with `kjarni_float_2d_array_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_embedder_encode_batch( struct KjarniKjarniEmbedder *embedder,
-                                                     const char *const *texts,
-                                                     uintptr_t num_texts,
-                                                     struct KjarniKjarniFloat2DArray *out );
+enum KjarniKjarniErrorCode kjarni_embedder_encode_batch( struct KjarniKjarniEmbedder *embedder,
+                                                         const char *const *texts,
+                                                         uintptr_t num_texts,
+                                                         struct KjarniKjarniFloat2DArray *out );
 
 /**
  * Compute cosine similarity between two texts.
@@ -356,10 +358,10 @@ enum KjarniKjarniError kjarni_embedder_encode_batch( struct KjarniKjarniEmbedder
  * - `out` must be a valid pointer
  */
 kjarni_
-enum KjarniKjarniError kjarni_embedder_similarity( struct KjarniKjarniEmbedder *embedder,
-                                                   const char *text1,
-                                                   const char *text2,
-                                                   float *out );
+enum KjarniKjarniErrorCode kjarni_embedder_similarity( struct KjarniKjarniEmbedder *embedder,
+                                                       const char *text1,
+                                                       const char *text2,
+                                                       float *out );
 
 /**
  * Get the embedding dimension.
@@ -388,8 +390,8 @@ kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default( vo
  * - The returned handle must be freed with `kjarni_classifier_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_classifier_new( const struct KjarniKjarniClassifierConfig *config,
-                                              struct KjarniKjarniClassifier **out );
+enum KjarniKjarniErrorCode kjarni_classifier_new( const struct KjarniKjarniClassifierConfig *config,
+                                                  struct KjarniKjarniClassifier **out );
 
 /**
  * Free a Classifier.
@@ -406,9 +408,9 @@ kjarni_ void kjarni_classifier_free( struct KjarniKjarniClassifier *classifier )
  * - Results must be freed with `kjarni_class_results_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_classifier_classify( struct KjarniKjarniClassifier *classifier,
-                                                   const char *text,
-                                                   struct KjarniKjarniClassResults *out );
+enum KjarniKjarniErrorCode kjarni_classifier_classify( struct KjarniKjarniClassifier *classifier,
+                                                       const char *text,
+                                                       struct KjarniKjarniClassResults *out );
 
 /**
  * Get the classifier's labels.
@@ -419,8 +421,8 @@ enum KjarniKjarniError kjarni_classifier_classify( struct KjarniKjarniClassifier
  * - Results must be freed with `kjarni_string_array_free`
  */
 kjarni_
-enum KjarniKjarniError kjarni_classifier_labels( const struct KjarniKjarniClassifier *classifier,
-                                                 struct KjarniKjarniStringArray *out );
+enum KjarniKjarniErrorCode kjarni_classifier_labels( const struct KjarniKjarniClassifier *classifier,
+                                                     struct KjarniKjarniStringArray *out );
 
 /**
  * Get number of labels.
@@ -441,8 +443,8 @@ kjarni_ struct KjarniKjarniRerankerConfig kjarni_reranker_config_default( void )
  * Create a new Reranker
  */
 kjarni_
-enum KjarniKjarniError kjarni_reranker_new( const struct KjarniKjarniRerankerConfig *config,
-                                            struct KjarniKjarniReranker **out );
+enum KjarniKjarniErrorCode kjarni_reranker_new( const struct KjarniKjarniRerankerConfig *config,
+                                                struct KjarniKjarniReranker **out );
 
 /**
  * Free a Reranker
@@ -453,30 +455,30 @@ kjarni_ void kjarni_reranker_free( struct KjarniKjarniReranker *reranker );
  * Score a single query-document pair
  */
 kjarni_
-enum KjarniKjarniError kjarni_reranker_score( struct KjarniKjarniReranker *reranker,
-                                              const char *query,
-                                              const char *document,
-                                              float *out );
+enum KjarniKjarniErrorCode kjarni_reranker_score( struct KjarniKjarniReranker *reranker,
+                                                  const char *query,
+                                                  const char *document,
+                                                  float *out );
 
 /**
  * Rerank documents by relevance to query
  */
 kjarni_
-enum KjarniKjarniError kjarni_reranker_rerank( struct KjarniKjarniReranker *reranker,
-                                               const char *query,
-                                               const char *const *documents,
-                                               uintptr_t num_docs,
-                                               struct KjarniKjarniRerankResults *out );
+enum KjarniKjarniErrorCode kjarni_reranker_rerank( struct KjarniKjarniReranker *reranker,
+                                                   const char *query,
+                                                   const char *const *documents,
+                                                   uintptr_t num_docs,
+                                                   struct KjarniKjarniRerankResults *out );
 
 /**
  * Rerank and return top-k results
  */
 kjarni_
-enum KjarniKjarniError kjarni_reranker_rerank_top_k( struct KjarniKjarniReranker *reranker,
-                                                     const char *query,
-                                                     const char *const *documents,
-                                                     uintptr_t num_docs,
-                                                     uintptr_t top_k,
-                                                     struct KjarniKjarniRerankResults *out );
+enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k( struct KjarniKjarniReranker *reranker,
+                                                         const char *query,
+                                                         const char *const *documents,
+                                                         uintptr_t num_docs,
+                                                         uintptr_t top_k,
+                                                         struct KjarniKjarniRerankResults *out );
 
 #endif  /* KJARNI_FFI_H */

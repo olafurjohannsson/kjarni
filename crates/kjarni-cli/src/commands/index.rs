@@ -1,19 +1,15 @@
 //! Index management commands
-//!
-//! Uses production-grade segmented index that:
-//! - Streams documents to disk (no OOM)
-//! - Memory-maps vectors for search
-//! - Handles 100GB+ datasets
-
 use anyhow::{Result, anyhow};
 use kjarni::Chunk;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use tokio::sync::mpsc;
 use tokio::sync::Semaphore;
 use std::sync::Arc;
-use kjarni::{Device, ModelArchitecture, ModelType, SentenceEncoder, registry};
+
+// Use high-level Embedder instead of low-level SentenceEncoder
+use kjarni::embedder::Embedder;
+
 use kjarni::{DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, SplitterConfig};
 use kjarni_cli::IndexCommands;
 
@@ -81,15 +77,13 @@ async fn create(
         ));
     }
 
-    // 1. Load encoder and determine dimension
-    let encoder = load_encoder(model, gpu, quiet).await?;
-    let dimension = {
-        let sample = encoder.encode("dimension probe").await?;
-        sample.len()
-    };
+    // 1. Load embedder (Handles download, validation, device automatically)
+    let embedder = load_embedder(model, gpu, quiet).await?;
+    let dimension = embedder.dimension();
 
     if !quiet {
-        eprintln!("Embedding dimension: {}", dimension);
+        eprintln!("Model: {}", embedder.model_name());
+        eprintln!("Dimension: {}", dimension);
     }
 
     // 2. Create index writer
@@ -105,7 +99,7 @@ async fn create(
     // 3. Process documents
     let total_indexed = process_inputs(
         &mut writer,
-        &encoder,
+        &embedder,
         inputs,
         chunk_size,
         chunk_overlap,
@@ -126,7 +120,6 @@ async fn create(
         eprintln!("  Documents: {}", total_indexed);
         eprintln!("  Dimension: {}", dimension);
 
-        // Show size
         if let Ok(size) = calculate_index_size(output) {
             eprintln!("  Size: {}", format_size(size));
         }
@@ -158,28 +151,24 @@ async fn add(
         eprintln!("Opened index with {} documents", initial_count);
     }
 
-    // 2. Load encoder
-    let encoder = load_encoder(model, gpu, quiet).await?;
+    // 2. Load embedder
+    let embedder = load_embedder(model, gpu, quiet).await?;
 
     // Verify dimension matches
-    let encoder_dim = {
-        let sample = encoder.encode("dimension probe").await?;
-        sample.len()
-    };
-
-    if encoder_dim != dimension {
+    if embedder.dimension() != dimension {
         return Err(anyhow!(
-            "Dimension mismatch: index has {}, encoder produces {}.\n\
+            "Dimension mismatch: index has {}, model '{}' produces {}.\n\
              Use the same model that was used to create the index.",
             dimension,
-            encoder_dim
+            embedder.model_name(),
+            embedder.dimension()
         ));
     }
 
     // 3. Process new documents
     let added = process_inputs(
         &mut writer,
-        &encoder,
+        &embedder,
         inputs,
         chunk_size,
         chunk_overlap,
@@ -201,7 +190,7 @@ async fn add(
 
 async fn process_inputs(
     writer: &mut IndexWriter,
-    encoder: &SentenceEncoder,
+    embedder: &Embedder,
     inputs: &[String],
     chunk_size: usize,
     chunk_overlap: usize,
@@ -216,18 +205,14 @@ async fn process_inputs(
         },
         ..Default::default()
     };
-    // Wrap loader in Arc so threads can share it
     let loader = Arc::new(DocumentLoader::new(loader_config));
 
     // 2. Setup Concurrency
-    // Channel for sending loaded chunks to the main encoder loop
     let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64); 
-    
-    // Semaphore to limit concurrent file reads (adjust based on your CPU/IO)
     let concurrency_limit = 16; 
     let semaphore = Arc::new(Semaphore::new(concurrency_limit));
 
-    // 3. Spawn Producer Task (Walks files and spawns workers)
+    // 3. Spawn Producer Task
     let inputs_owned = inputs.to_vec();
     let loader_ref = loader.clone();
     let quiet_clone = quiet;
@@ -240,10 +225,8 @@ async fn process_inputs(
             for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
                 if !entry.file_type().is_file() { continue; }
                 
-                // Only process supported extensions
                 if !loader_ref.is_supported_extension(entry.path()) { continue; }
 
-                // Acquire permit (backpressure)
                 let permit = match semaphore.clone().acquire_owned().await {
                     Ok(p) => p,
                     Err(_) => break,
@@ -252,18 +235,11 @@ async fn process_inputs(
                 let loader = loader_ref.clone();
                 let tx = tx.clone();
                 let file_path = entry.path().to_owned();
-                let quiet = quiet_clone;
+                // let quiet = quiet_clone;
 
-                // Spawn a worker for this file
                 tokio::spawn(async move {
-                    // Move permit into task (it drops when task finishes)
                     let _p = permit; 
                     
-                    if !quiet {
-                        // eprintln!("Processing: {:?}", file_path); // Optional: verbose logging
-                    }
-
-                    // Run CPU-intensive split in blocking thread to avoid stalling async runtime
                     let result = tokio::task::spawn_blocking(move || {
                         loader.load_file(&file_path)
                     }).await;
@@ -276,15 +252,13 @@ async fn process_inputs(
                 });
             }
         }
-        // tx drops here, which eventually closes the channel and stops the receiver loop
     });
 
-    // 4. Consumer Loop (Main thread: Batching -> Encoding -> Writing)
+    // 4. Consumer Loop
     let mut batch_texts: Vec<String> = Vec::with_capacity(ENCODE_BATCH_SIZE);
     let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(ENCODE_BATCH_SIZE);
     let mut total_indexed = 0;
 
-    // Receive chunks as they finish processing
     while let Some(chunks) = rx.recv().await {
         for chunk in chunks {
             batch_texts.push(chunk.text);
@@ -293,7 +267,7 @@ async fn process_inputs(
             if batch_texts.len() >= ENCODE_BATCH_SIZE {
                 total_indexed += flush_batch(
                     writer,
-                    encoder,
+                    embedder,
                     &mut batch_texts,
                     &mut batch_metadata,
                 ).await?;
@@ -305,11 +279,10 @@ async fn process_inputs(
         }
     }
 
-    // Process remaining batch
     if !batch_texts.is_empty() {
         total_indexed += flush_batch(
             writer,
-            encoder,
+            embedder,
             &mut batch_texts,
             &mut batch_metadata,
         ).await?;
@@ -322,68 +295,19 @@ async fn process_inputs(
     Ok(total_indexed)
 }
 
-/// Helper function to process a single file and handle batch flushing
-/// This replaces the closure and allows async/await
-async fn process_file_step(
-    writer: &mut IndexWriter,
-    encoder: &SentenceEncoder,
-    loader: &DocumentLoader,
-    path: &Path,
-    batch_texts: &mut Vec<String>,
-    batch_metadata: &mut Vec<HashMap<String, String>>,
-    total_indexed: &mut usize,
-    quiet: bool,
-) -> Result<()> {
-    // Optional: Check extension before loading to save IO
-    if !loader.is_supported_extension(path) {
-        return Ok(());
-    }
-    if !quiet {
-        eprintln!("Reading file: {:?}", path); 
-    }
-
-    // Load only THIS file into memory
-    let chunks = match loader.load_file(path) {
-        Ok(c) => c,
-        Err(_) => return Ok(()), // Skip failed files
-    };
-
-    for chunk in chunks {
-        batch_texts.push(chunk.text);
-        batch_metadata.push(chunk.metadata.to_hashmap());
-
-        // Check if batch is full
-        if batch_texts.len() >= ENCODE_BATCH_SIZE {
-            *total_indexed += flush_batch(
-                writer,
-                encoder,
-                batch_texts,
-                batch_metadata,
-            ).await?;
-
-            if !quiet {
-                eprint!("\r  Indexed {} documents", *total_indexed);
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Encode a batch and write to index
 async fn flush_batch(
     writer: &mut IndexWriter,
-    encoder: &SentenceEncoder,
+    embedder: &Embedder,
     texts: &mut Vec<String>,
     metadata: &mut Vec<HashMap<String, String>>,
 ) -> Result<usize> {
     let count = texts.len();
 
-    // Encode batch
+    // High-level API call
     let texts_ref: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-    let embeddings = encoder.encode_batch(&texts_ref).await?;
+    let embeddings = embedder.embed_batch(&texts_ref).await?;
 
-    // Write to index
     for ((text, meta), embedding) in texts.drain(..).zip(metadata.drain(..)).zip(embeddings) {
         writer.add(&text, &embedding, Some(&meta))?;
     }
@@ -406,7 +330,6 @@ fn info(index_path: &str) -> Result<()> {
         println!("Total size:     {}", format_size(size));
     }
 
-    // Show sample documents
     if !reader.is_empty() {
         println!();
         println!("Sample documents:");
@@ -422,7 +345,7 @@ fn info(index_path: &str) -> Result<()> {
     println!("Segments:");
     let segments_dir = Path::new(index_path).join("segments");
     if segments_dir.exists() {
-        let mut entries: Vec<_> = fs::read_dir(&segments_dir)?
+        let mut entries: Vec<_> = std::fs::read_dir(&segments_dir)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
             .collect();
@@ -430,7 +353,7 @@ fn info(index_path: &str) -> Result<()> {
 
         for entry in entries {
             let meta_path = entry.path().join("segment.json");
-            if let Ok(content) = fs::read_to_string(&meta_path) {
+            if let Ok(content) = std::fs::read_to_string(&meta_path) {
                 if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
                     let doc_count = meta["doc_count"].as_u64().unwrap_or(0);
                     let name = entry.file_name();
@@ -444,56 +367,28 @@ fn info(index_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Load and prepare encoder model
-async fn load_encoder(model: &str, gpu: bool, quiet: bool) -> Result<SentenceEncoder> {
-    let device = if gpu { Device::Wgpu } else { Device::Cpu };
-
-    let model_type = ModelType::from_cli_name(model).ok_or_else(|| {
-        let mut msg = format!("Unknown model: '{}'.", model);
-        let suggestions = ModelType::find_similar(model);
-        if !suggestions.is_empty() {
-            msg.push_str("\n\nDid you mean?");
-            for (name, _) in suggestions.iter().take(3) {
-                msg.push_str(&format!("\n  - {}", name));
-            }
-        }
-        anyhow!(msg)
-    })?;
-
-    if model_type.architecture() != ModelArchitecture::Bert {
-        return Err(anyhow!(
-            "Model '{}' is not an encoder. Use an encoder model like minilm-l6-v2.",
-            model
-        ));
+/// Helper to load embedder using high-level builder
+async fn load_embedder(model: &str, gpu: bool, quiet: bool) -> Result<Embedder> {
+    let mut builder = Embedder::builder(model)
+        .quiet(quiet);
+    
+    if gpu {
+        builder = builder.gpu();
+    } else {
+        builder = builder.cpu();
     }
 
-    if !registry::is_model_downloaded(model)? {
-        if !quiet {
-            eprintln!("Downloading model '{}'...", model);
-        }
-        registry::download_model(model, false).await?;
-    }
-
-    if !quiet {
-        eprintln!("Loading encoder '{}'...", model);
-    }
-
-    SentenceEncoder::from_registry(model_type, None, device, None, None).await
+    // The builder handles validation, downloading, and loading
+    builder.build().await.map_err(|e| anyhow!(e))
 }
 
-/// Calculate total size of index directory
 fn calculate_index_size(path: &str) -> Result<u64> {
     let mut total = 0u64;
-
-    for entry in walkdir::WalkDir::new(path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             total += entry.metadata().map(|m| m.len()).unwrap_or(0);
         }
     }
-
     Ok(total)
 }
 

@@ -7,7 +7,7 @@ use std::path::Path;
 pub async fn run(action: ModelCommands) -> Result<()> {
     match action {
         ModelCommands::List { arch, task, downloaded } => list(arch, task, downloaded),
-        ModelCommands::Download { name, gguf } => download(&name, gguf).await,
+        ModelCommands::Download { name, gguf, quiet } => download(&name, gguf, quiet).await,
         ModelCommands::Remove { name } => remove(&name),
         ModelCommands::Info { name } => info(&name),
         ModelCommands::Search { query } => search(&query),
@@ -260,8 +260,8 @@ fn has_gguf_downloaded(model_type: &ModelType) -> bool {
     model_dir.join("model.gguf").exists()
 }
 
-async fn download(name: &str, prefer_gguf: bool) -> Result<()> {
-    registry::download_model(name, prefer_gguf).await
+async fn download(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
+    registry::download_model(name, prefer_gguf, quiet).await
 }
 
 fn info(name: &str) -> Result<()> {
