@@ -831,6 +831,50 @@ pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> A
 pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     let (batch, heads, seq1, dim) = a.dim();
     let seq2 = b.shape()[3];
+    
+    // 1. Initialize output
+    let mut output = Array4::<f32>::zeros((batch, heads, seq1, seq2));
+
+    // 2. Parallelize over BATCH only.
+    // This creates 120 tasks. Each task handles 12 heads sequentially.
+    // This avoids the "IncompatibleLayout" crash because we don't reshape the whole array.
+    Zip::from(output.outer_iter_mut())
+        .and(a.outer_iter())
+        .and(b.outer_iter())
+        .par_for_each(|mut out_b, a_b, b_b| {
+            
+            // Iterate over HEADS (Sequential per thread)
+            Zip::from(out_b.outer_iter_mut())
+                .and(a_b.outer_iter())
+                .and(b_b.outer_iter())
+                .for_each(|mut out_h, a_h, b_h| {
+                    
+                    // 3. Handle Memory Layout Gracefully
+                    // as_standard_layout() is effectively free if the data is already contiguous.
+                    // If the data is strided (permuted), it creates a small temporary copy
+                    // which is required for Faer anyway.
+                    let a_s = a_h.as_standard_layout();
+                    let b_s = b_h.as_standard_layout();
+                    let o_s = out_h.as_slice_mut().expect("Output buffer must be contiguous");
+
+                    faer::linalg::matmul::matmul(
+                        faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
+                        faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
+                        faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
+                        None,
+                        1.0,
+                        Parallelism::None, // No internal threads; we are already parallel
+                    );
+                });
+        });
+        
+    output
+}
+
+#[inline]
+pub fn matmul_4d_old(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
+    let (batch, heads, seq1, dim) = a.dim();
+    let seq2 = b.shape()[3];
     let mut output = Array4::<f32>::zeros((batch, heads, seq1, seq2));
 
     Zip::from(output.outer_iter_mut())

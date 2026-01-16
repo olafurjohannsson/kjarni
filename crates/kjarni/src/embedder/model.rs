@@ -146,6 +146,10 @@ impl Embedder {
             .map_err(EmbedderError::EmbeddingFailed)
     }
 
+    pub async fn embed_batch_flat(&self, texts: &[&str]) -> EmbedderResult<(Vec<f32>, usize, usize)> {
+        self.inner.encode_batch_flat(texts).await.map_err(EmbedderError::EmbeddingFailed)
+    }
+
     /// Embed multiple texts.
     pub async fn embed_batch(&self, texts: &[&str]) -> EmbedderResult<Vec<Vec<f32>>> {
         self.embed_batch_with_config(texts, &EmbeddingOverrides::default())

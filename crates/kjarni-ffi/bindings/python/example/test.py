@@ -31,11 +31,11 @@ print(f'Kjarni similarity(cat, dog): {k_sim:.6f}')
 # SENTENCE TRANSFORMERS
 # -------------------------------------------------
 print('\n--- SentenceTransformers ---')
-model_name = "sentence-transformers/all-MiniLM-L6-v2"
+model_name = "/home/olafurj/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2/"
 
 st = SentenceTransformer(model_name)
 
-st_embedding = st.encode(text, convert_to_numpy=True, normalize_embeddings=False)
+st_embedding = st.encode(text, convert_to_numpy=True, normalize_embeddings=True)
 
 print(f'ST dim: {len(st_embedding)}')
 print(f'ST first 5: {st_embedding[:5]}')

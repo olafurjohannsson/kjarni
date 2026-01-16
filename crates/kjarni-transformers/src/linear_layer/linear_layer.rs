@@ -97,6 +97,8 @@ pub enum F32MatmulStrategy {
     /// Expects weights in `[OutFeatures, InFeatures]` layout (the standard layout).
     /// This is the default strategy and matches most model weight formats.
     CustomSimd,
+
+    FaerOutIn,
 }
 
 /// A CPU-based linear transformation layer (y = xW^T + b).
@@ -323,6 +325,14 @@ impl LinearLayer {
         }
     }
 
+    pub fn new_f32_with_strategy(weights: Array2<f32>, bias: impl Into<Option<Array1<f32>>>, strategy: F32MatmulStrategy) -> Self {
+        Self {
+            data: LinearData::F32(Arc::new(weights)),
+            bias: bias.into(),
+            f32_strategy: strategy,
+        }
+    }
+
     /// Computes matrix multiplication with automatic kernel dispatch.
     ///
     /// Performs `C = A @ W^T + b` where `A` is the input activation and `W` is the
@@ -351,6 +361,7 @@ impl LinearLayer {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::Faer => tensor_ops::matmul_2d_faer(input, &w.view()),
                 F32MatmulStrategy::CustomSimd => ops::matmul::matmul_2d_cpu_f32(input, &w.view()),
+                F32MatmulStrategy::FaerOutIn => ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view())
             },
             LinearData::BF16(w) => ops::matmul::matmul_2d_cpu_bf16(input, &w.view()),
             LinearData::Q8_0(w) => ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks),
@@ -435,6 +446,7 @@ impl LinearLayer {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::Faer => w.shape()[1],
                 F32MatmulStrategy::CustomSimd => w.shape()[0],
+                F32MatmulStrategy::FaerOutIn => w.shape()[0]
             },
             LinearData::BF16(w) => w.shape()[0],
             LinearData::Q8_0(w) => w.shape[0],
@@ -450,6 +462,7 @@ impl LinearLayer {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::Faer => w.shape()[0],
                 F32MatmulStrategy::CustomSimd => w.shape()[1],
+                F32MatmulStrategy::FaerOutIn => w.shape()[1]
             },
             LinearData::BF16(w) => w.shape()[1],
             LinearData::Q8_0(w) => w.shape[1],
@@ -630,5 +643,83 @@ impl From<Array2<bf16>> for LinearLayer {
 impl From<(Array2<bf16>, Array1<f32>)> for LinearLayer {
     fn from((weights, bias): (Array2<bf16>, Array1<f32>)) -> Self {
         LinearLayer::new_bf16(weights, Some(bias))
+    }
+}
+
+
+#[cfg(test)]
+mod matmul_speed_test {
+    use super::*;
+    use ndarray::{Array2, Array1};
+    use std::time::{Instant, Duration};
+
+    // ------------------------------------------------------------------
+    // BENCHMARK SETTINGS (MiniLM Batch=120)
+    // ------------------------------------------------------------------
+    const BATCH: usize = 120;
+    const SEQ_LEN: usize = 32;
+    const M: usize = BATCH * SEQ_LEN; // 3840 rows (Tokens)
+    const K: usize = 384;             // In Features (Hidden Dim)
+    const N: usize = 1536;            // Out Features (Intermediate Dim)
+    const ITERATIONS: u32 = 100;
+
+    fn get_input() -> Array2<f32> {
+        Array2::from_shape_fn((M, K), |(i, j)| ((i + j) % 100) as f32 / 100.0)
+    }
+
+    fn get_weights_standard() -> Array2<f32> {
+        // [Out, In] -> This is how Safetensors/PyTorch saves them
+        Array2::from_shape_fn((N, K), |(i, j)| ((i * j) % 100) as f32 / 100.0)
+    }
+
+    fn get_weights_transposed() -> Array2<f32> {
+        // [In, Out] -> Simulating a load-time transpose
+        Array2::from_shape_fn((K, N), |(i, j)| ((i * j) % 100) as f32 / 100.0)
+    }
+
+    fn run_benchmark(strategy: F32MatmulStrategy, weights: Array2<f32>, name: &str) {
+        let input = get_input();
+        let layer = LinearLayer::new_f32_with_strategy(weights, None, strategy);
+
+        // Warmup
+        let _ = layer.matmul(&input.view());
+
+        let start = Instant::now();
+        for _ in 0..ITERATIONS {
+            let output = layer.matmul(&input.view());
+            std::hint::black_box(output);
+        }
+        let duration = start.elapsed();
+        
+        // GFLOPS Calculation: 2 * M * N * K
+        let total_ops = 2.0 * M as f64 * N as f64 * K as f64 * ITERATIONS as f64;
+        let gflops = total_ops / (duration.as_secs_f64() * 1e9);
+
+        println!(
+            "Strategy: {:<20} | Latency: {:>8.2?} | Speed: {:>6.2} GFLOPS",
+            name, duration / ITERATIONS, gflops
+        );
+    }
+
+    // 1. Current Implementation (Standard Weights, Manual SIMD)
+    #[test]
+    fn bench_1_custom_simd() {
+        let weights = get_weights_standard(); // [N, K]
+        run_benchmark(F32MatmulStrategy::CustomSimd, weights, "Custom Simd");
+    }
+
+    // 2. Proposed Fix (Standard Weights, Faer with .transpose())
+    #[test]
+    fn bench_2_faer_out_in() {
+        let weights = get_weights_standard(); // [N, K]
+        run_benchmark(F32MatmulStrategy::FaerOutIn, weights, "Faer (Virtual Transpose)");
+    }
+
+    // 3. Alternative Fix (Pre-Transposed Weights, Normal Faer)
+    #[test]
+    fn bench_3_faer_normal() {
+        let weights = get_weights_transposed(); // [K, N]
+        // This simulates doing the transpose ONCE during model loading
+        run_benchmark(F32MatmulStrategy::Faer, weights, "Faer (Load Transpose)");
     }
 }

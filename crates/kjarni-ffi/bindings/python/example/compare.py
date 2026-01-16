@@ -39,7 +39,7 @@ sentences = [
 # BENCHMARK SETTINGS
 # -------------------------------------------------
 
-RUNS = 100
+RUNS = 10
 TEXTS = sentences
 
 def benchmark(fn):
@@ -55,7 +55,7 @@ def benchmark(fn):
 # -------------------------------------------------
 
 print("\n--- Kjarni Embedder (batch) ---")
-kjarni = Embedder(quiet=True, model="minilm-l6-v2")
+kjarni = Embedder(quiet=True, model="minilm-l6-v2", device="cpu")
 
 # Warm-up
 _ = kjarni.encode_batch(TEXTS)
@@ -77,14 +77,14 @@ print(f"Kjarni similarity(cat, dog): {k_sim:.6f}")
 # -------------------------------------------------
 
 print("\n--- SentenceTransformers (batch) ---")
-model_name = "sentence-transformers/all-MiniLM-L6-v2"
+model_name = "/home/olafurj/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2/"
 st = SentenceTransformer(model_name)
 
 # Warm-up
-_ = st.encode(TEXTS, convert_to_numpy=True, normalize_embeddings=False)
+_ = st.encode(TEXTS, convert_to_numpy=True, normalize_embeddings=True)
 
 def st_batch():
-    _ = st.encode(TEXTS, convert_to_numpy=True, normalize_embeddings=False)
+    _ = st.encode(TEXTS, convert_to_numpy=True, normalize_embeddings=True)
 
 st_mean, st_std = benchmark(st_batch)
 

@@ -118,11 +118,8 @@ pub trait EncoderLanguageModel: LanguageModel {
             ));
         }
 
-        // 1. Use the new helper to get encodings. The tokenizer (now correctly configured
-        //    with padding) will handle everything, including the attention mask.
         let encodings = self.encode_batch_texts(texts)?;
 
-        // 2. Extract the IDs and mask from the tokenizer's output.
         let batch_size = encodings.len();
         if batch_size == 0 {
             return Ok((
@@ -183,10 +180,8 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
             return Ok(Vec::new());
         }
 
-        // 1. Get the base hidden states from the core trait.
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
-        // 2. Apply the application-specific pooling logic.
         // Apply pooling to the whole batch
         let mut pooled = match config.pooling_strategy {
             PoolingStrategy::Cls => {

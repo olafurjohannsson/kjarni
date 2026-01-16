@@ -1,5 +1,5 @@
 """High-level Embedder API."""
-
+import numpy as np
 from typing import Optional, List, Sequence
 from ctypes import c_void_p, c_char_p, c_float, byref, POINTER
 
@@ -66,6 +66,7 @@ class Embedder:
             Embedding vector as list of floats
         """
         result = KjarniFloatArray()
+
         err = _lib.kjarni_embedder_encode(
             self._handle,
             text.encode("utf-8"),
@@ -77,7 +78,7 @@ class Embedder:
         result.free()
         return embedding
 
-    def encode_batch(self, texts: Sequence[str]) -> List[List[float]]:
+    def encode_batch(self, texts: Sequence[str]) -> np.ndarray:
         """Encode multiple texts.
         
         Args:
@@ -103,7 +104,7 @@ class Embedder:
         )
         check_error(err)
 
-        embeddings = result.to_list()
+        embeddings = result.to_numpy()
         result.free()
         return embeddings
 

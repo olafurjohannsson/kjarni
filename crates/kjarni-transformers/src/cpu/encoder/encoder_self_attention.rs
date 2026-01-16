@@ -28,7 +28,7 @@
 use crate::activations::softmax_4d_inplace;
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE;
-use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d};
+use crate::utils::linear_algebra::{apply_attention_mask, matmul_4d, matmul_4d_old};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, s};
 

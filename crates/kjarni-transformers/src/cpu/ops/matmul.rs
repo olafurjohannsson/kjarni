@@ -310,6 +310,36 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
     c
 }
 
+use faer::{MatRef, MatMut, Parallelism};
+
+pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
+    let (m, k) = a.dim();
+    let (n, k2) = b_weights.dim();
+    assert_eq!(k, k2, "Matmul dimension mismatch");
+
+    let mut c = Array2::<f32>::zeros((m, n));
+
+    let a_slice = a.as_slice().expect("A must be contiguous");
+    let b_slice = b_weights.as_slice().expect("B must be contiguous");
+    let c_slice = c.as_slice_mut().expect("C must be contiguous");
+
+    // Remove ::<f32>. Rust infers the types automatically.
+    let mat_a = faer::mat::from_row_major_slice(a_slice, m, k);
+    let mat_b = faer::mat::from_row_major_slice(b_slice, n, k);
+    let mut mat_c = faer::mat::from_row_major_slice_mut(c_slice, m, n);
+
+    faer::linalg::matmul::matmul(
+        mat_c,
+        mat_a,
+        mat_b.transpose(), // This results in Contiguous x Contiguous dot products
+        None,
+        1.0,
+        Parallelism::Rayon(0),
+    );
+
+    c
+}
+
 /// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
 ///
 /// This is the highest-precision matmul variant, used when accuracy is paramount

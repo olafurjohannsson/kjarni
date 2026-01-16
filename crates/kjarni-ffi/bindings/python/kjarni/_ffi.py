@@ -8,6 +8,7 @@ from ctypes import (
 from pathlib import Path
 import platform
 import json
+import numpy as np
 from typing import Optional, Callable
 
 def _find_library():
@@ -109,6 +110,29 @@ class KjarniFloat2DArray(Structure):
         ("rows", c_size_t),
         ("cols", c_size_t),
     ]
+
+    def to_numpy(self) -> np.ndarray:
+        """Convert to NumPy array efficiently."""
+        if not self.data or self.rows == 0 or self.cols == 0:
+            return np.empty((0, 0), dtype=np.float32)
+
+        # 1. Create a ctypes array type of the correct size
+        # This describes the memory layout without allocating
+        total_size = self.rows * self.cols
+        c_array_type = c_float * total_size
+
+        # 2. Cast the void/float pointer to this array type
+        # address of contents gives us the raw memory address
+        c_array = c_array_type.from_address(ctypes.addressof(self.data.contents))
+
+        # 3. Create NumPy wrapper
+        # np.ctypeslib.as_array creates a view (zero-copy)
+        raw_view = np.ctypeslib.as_array(c_array)
+
+        # 4. Reshape and Copy
+        # We MUST .copy() here because result.free() will be called 
+        # immediately after this returns, which would kill the view.
+        return raw_view.reshape((self.rows, self.cols)).copy()
 
     def to_list(self) -> list:
         if not self.data or self.rows == 0 or self.cols == 0:

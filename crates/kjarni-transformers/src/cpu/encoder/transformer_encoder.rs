@@ -8,7 +8,7 @@ use crate::activations::Activation;
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
-use crate::linear_layer::LinearLayer;
+use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
 use crate::normalization::RMSNorm;
 use crate::rope::RoPE;
@@ -74,7 +74,7 @@ impl CpuTransformerEncoder {
             // Helper to resolve optional bias names safely
             let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
 
-            // --- ATTENTION LOADING (Fused vs Standard) ---
+            let f32_strategy = F32MatmulStrategy::CustomSimd;
 
             let q_name = name(&encoder_layout.layer.self_attn.q_weight);
             let k_name = name(&encoder_layout.layer.self_attn.k_weight);
@@ -120,14 +120,17 @@ impl CpuTransformerEncoder {
                     LinearLayer::builder(weights, &q_name)
                         .with_optional_bias(q_bias.as_deref())
                         .with_target_dtype(dtype)
+                        .with_f32_strategy(Some(f32_strategy))
                         .build()?,
                     LinearLayer::builder(weights, &k_name)
                         .with_optional_bias(k_bias.as_deref())
                         .with_target_dtype(dtype)
+                        .with_f32_strategy(Some(f32_strategy))
                         .build()?,
                     LinearLayer::builder(weights, &v_name)
                         .with_optional_bias(v_bias.as_deref())
                         .with_target_dtype(dtype)
+                        .with_f32_strategy(Some(f32_strategy))
                         .build()?,
                 )
             };
@@ -138,6 +141,7 @@ impl CpuTransformerEncoder {
                         resolve_bias(&encoder_layout.layer.self_attn.o_bias).as_deref(),
                     )
                     .with_target_dtype(dtype)
+                    .with_f32_strategy(Some(f32_strategy))
                     .build()?;
 
             let self_attn = EncoderSelfAttention::new(
@@ -154,6 +158,7 @@ impl CpuTransformerEncoder {
             let up_proj = LinearLayer::builder(weights, &name(&encoder_layout.layer.ffn.up_weight))
                 .with_optional_bias(resolve_bias(&encoder_layout.layer.ffn.up_bias).as_deref())
                 .with_target_dtype(dtype)
+                .with_f32_strategy(Some(f32_strategy))
                 .build()?;
 
             let down_proj =
@@ -162,6 +167,7 @@ impl CpuTransformerEncoder {
                         resolve_bias(&encoder_layout.layer.ffn.down_bias).as_deref(),
                     )
                     .with_target_dtype(dtype)
+                    .with_f32_strategy(Some(f32_strategy))
                     .build()?;
 
             // Handle Gate (Optional, for SwiGLU models like Nomic)
@@ -169,6 +175,7 @@ impl CpuTransformerEncoder {
                 Some(
                     LinearLayer::builder(weights, &name(gate_name))
                         .with_target_dtype(dtype)
+                        .with_f32_strategy(Some(f32_strategy))
                         .build()?,
                 )
             } else {

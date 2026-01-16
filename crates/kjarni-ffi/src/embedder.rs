@@ -217,12 +217,14 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     let text_refs: Vec<&str> = text_vec.iter().map(|s| s.as_str()).collect();
 
     let result = get_runtime().block_on(async {
-        embedder_ref.embed_batch(&text_refs).await
+        embedder_ref.embed_batch_flat(&text_refs).await
+        // embedder_ref.embed_batch(&text_refs).await
     });
 
     match result {
-        Ok(embeddings) => {
-            *out = KjarniFloat2DArray::from_vecs(embeddings);
+        Ok((embeddings, rows, cols)) => {
+            // *out = KjarniFloat2DArray::from_vecs(embeddings);
+            *out = KjarniFloat2DArray::from_flat(embeddings, rows, cols);
             KjarniErrorCode::Ok
         }
         Err(e) => {

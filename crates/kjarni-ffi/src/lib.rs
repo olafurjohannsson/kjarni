@@ -38,10 +38,22 @@ pub(crate) fn get_runtime() -> &'static Runtime {
 /// Initialize the Kjarni runtime. Optional - auto-initialized on first use.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_init() -> KjarniErrorCode {
+    // 1. Initialize Rayon Global Thread Pool (Compute)
+    // We explicitly set this to physical cores to maximize AVX/SIMD throughput.
+    // This fixes the issue where Rayon defaults to 1 thread when loaded inside Python.
+    let physical_cores = num_cpus::get_physical();
+    
+    // build_global() returns an Err if the pool is already initialized.
+    // We intentionally ignore the error because it means we are good to go.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(physical_cores)
+        .build_global();
+
+    // 2. Initialize Tokio Runtime (Async/IO)
     let _ = get_runtime();
+
     KjarniErrorCode::Ok
 }
-
 /// Shutdown and cleanup. Call before process exit.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_shutdown() {
@@ -97,6 +109,23 @@ impl KjarniFloat2DArray {
         let flat: Vec<f32> = vecs.into_iter().flatten().collect();
         let boxed = flat.into_boxed_slice();
         let data = Box::into_raw(boxed) as *mut f32;
+        Self { data, rows, cols }
+    }
+
+    pub fn from_flat(v: Vec<f32>, rows: usize, cols: usize) -> Self {
+        // Ensure the vector length matches dimensions
+        assert_eq!(v.len(), rows * cols, "Vector length must match rows*cols");
+
+        // Convert Vec to Boxed Slice to prevent deallocation
+        let mut boxed_slice = v.into_boxed_slice();
+        
+        // Get the raw pointer
+        let data = boxed_slice.as_mut_ptr();
+        
+        // Forget the box so Rust doesn't free the memory at end of scope
+        // Ownership is now passed to C (and eventually Python)
+        std::mem::forget(boxed_slice);
+
         Self { data, rows, cols }
     }
     

@@ -1,8 +1,11 @@
+use std::time::Instant;
+
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
 use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4};
+use ndarray::{Array2, Array3, Array4, ArrayView3};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 /// A generic encoder transformer layer supporting:
 /// - BERT, RoBERTa, BART (post-norm)
@@ -13,6 +16,17 @@ pub struct EncoderLayer {
     pub self_attn_layer_norm: Normalization,
     pub feedforward: FeedForward,
     pub ffn_layer_norm: Normalization,
+}
+
+/// Parallel in-place addition: a += b
+pub fn add_inplace(a: &mut Array3<f32>, b: &ArrayView3<f32>) {
+    let a_slice = a.as_slice_mut().expect("A must be contiguous");
+    let b_slice = b.as_slice().expect("B must be contiguous");
+    
+    // Parallelize the loop using Rayon
+    a_slice.par_iter_mut()
+           .zip(b_slice.par_iter())
+           .for_each(|(x, y)| *x += *y);
 }
 
 impl EncoderLayer {
@@ -58,26 +72,54 @@ impl EncoderLayer {
     /// x ──┬── LN ──► Attention ──┬──► + ──┬── LN ──► FFN ──┬──► + ──► out
     ///     └─────────────────────►┘        └────────────────►┘
     /// ```
-    fn forward_prenorm(
+ fn forward_prenorm(
         &self,
-        hidden: Array3<f32>,
+        mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
         position_bias: Option<&Array4<f32>>,
         rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
-        // Attention block
-        let residual = &hidden;
+        let layer_start = Instant::now();
+        let (b, s, d) = hidden.dim();
+        // 1. Attention Block
+        // let residual = &hidden;
         let normed = self.self_attn_layer_norm.forward(&hidden);
+        
+        let t_attn_start = Instant::now();
         let attn_out = self
             .self_attn
             .forward(&normed, attention_mask, position_bias, rope)?;
-        let hidden = residual + &attn_out;
+        let t_attn = t_attn_start.elapsed();
 
-        // FFN block
+        // Note: &residual + &attn_out allocates a NEW array. 
+        // This is a memory copy operation!
+        // let hidden = residual + &attn_out;
+        add_inplace(&mut hidden, &attn_out.view());
+
+        // 2. FFN Block
         let residual = &hidden;
         let normed = self.ffn_layer_norm.forward(&hidden);
+
+        let t_ffn_start = Instant::now();
         let ffn_out = self.feedforward.forward(&normed)?;
+        let t_ffn = t_ffn_start.elapsed();
+
         let hidden = residual + &ffn_out;
+
+        let total = layer_start.elapsed();
+
+        // Only print if it's taking a significant amount of time (e.g. > 1ms)
+        // to avoid spamming for small inputs.
+        if total.as_millis() > 5 {
+             println!(
+                "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
+                b, s, d, // <--- PRINT SHAPE
+                total.as_millis(),
+                t_attn.as_millis(),
+                t_ffn.as_millis(),
+                (total - t_attn - t_ffn).as_millis()
+            );
+        }
 
         Ok(hidden)
     }
@@ -90,26 +132,51 @@ impl EncoderLayer {
     /// ```
     fn forward_postnorm(
         &self,
-        hidden: Array3<f32>,
+        mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
         position_bias: Option<&Array4<f32>>,
         rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
-        // Attention block
-        let attn_residual = &hidden;
+        let layer_start = Instant::now();
+        let (b, s, d) = hidden.dim();
+        // 1. Attention Block
+        // let attn_residual = &hidden;
+        
+        let t_attn_start = Instant::now();
         let attn_out =
             self.self_attn
-                .forward(&attn_residual, attention_mask, position_bias, rope)?;
+                .forward(&hidden, attention_mask, position_bias, rope)?;
+        let t_attn = t_attn_start.elapsed();
 
+        // Overhead: Addition + LayerNorm
+        // let i = &(attn_residual + &attn_out);
+        add_inplace(&mut hidden, &attn_out.view());
         let ffn_input = self
             .self_attn_layer_norm
-            .forward(&(attn_residual + &attn_out));
+            .forward(&hidden);
 
-        // FFN block
+        // 2. FFN Block
         let ffn_residual = &ffn_input;
+        
+        let t_ffn_start = Instant::now();
         let ffn_out = self.feedforward.forward(&ffn_residual)?;
+        let t_ffn = t_ffn_start.elapsed();
 
+        // Overhead: Addition + LayerNorm
         let hidden = self.ffn_layer_norm.forward(&(ffn_residual + &ffn_out));
+        
+        let total = layer_start.elapsed();
+
+        if total.as_millis() > 5 {
+             println!(
+                "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
+                b, s, d, // <--- PRINT SHAPE
+                total.as_millis(),
+                t_attn.as_millis(),
+                t_ffn.as_millis(),
+                (total - t_attn - t_ffn).as_millis()
+            );
+        }
 
         Ok(hidden)
     }
