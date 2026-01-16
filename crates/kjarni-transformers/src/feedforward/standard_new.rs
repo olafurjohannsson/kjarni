@@ -4,8 +4,8 @@ use anyhow::Result;
 use ndarray::{Array3};
 
 pub struct StdFeedForwardNew {
-    fc1: LinearLayer,
-    fc2: LinearLayer,
+    pub fc1: LinearLayer,
+    pub fc2: LinearLayer,
     activation: Activation,
 }
 

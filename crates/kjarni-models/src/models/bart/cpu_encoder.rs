@@ -133,6 +133,8 @@ impl BartCpuEncoder {
             layers.push(EncoderLayer {
                 self_attn,
                 self_attn_layer_norm,
+                optimized_attention: None,
+                optimized_feedforward: None,
                 feedforward,
                 ffn_layer_norm,
             });

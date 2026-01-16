@@ -10,7 +10,6 @@ pub mod indexer;
 pub mod searcher;
 
 pub mod common;
-use kjarni_rag::MetadataFilter;
 pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API
 pub use utils::*;
@@ -56,6 +55,8 @@ pub use kjarni_rag::{
     TextSplitter,
     
 };
+
+pub use kjarni_rag::MetadataFilter;
 
 pub use kjarni_search::{Bm25Index, Chunk, ChunkMetadata, SearchMode, SearchResult, VectorStore};
 

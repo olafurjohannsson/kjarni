@@ -16,8 +16,6 @@ use tokio::sync::watch;
 pub struct Indexer {
     embedder: Embedder,
     loader_config: LoaderConfig,
-    exclude_patterns: Vec<String>,
-    max_file_size: Option<usize>,
     chunk_size: usize,
     chunk_overlap: usize,
     max_docs_per_segment: usize,
@@ -26,6 +24,7 @@ pub struct Indexer {
     progress_callback: Option<ProgressCallback>,
     cancel_token: Option<watch::Receiver<bool>>,
 }
+
 fn calculate_index_size(path: &str) -> Result<u64> {
     let mut total = 0u64;
     for entry in walkdir::WalkDir::new(path)
@@ -38,24 +37,11 @@ fn calculate_index_size(path: &str) -> Result<u64> {
     }
     Ok(total)
 }
+
 impl Indexer {
     /// Create with builder pattern
     pub fn builder(model: &str) -> IndexerBuilder {
         IndexerBuilder::new(model)
-    }
-    // add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), &check_cancel)
-    //         .await
-
-    pub fn add_with_callback(
-        &self,
-        index_path: &str,
-        inputs: &[&str],
-        _callback: Option<&Arc<dyn Fn(&Progress, Option<&str>) + Send + Sync>>,
-        _cancel_token: &Option<watch::Receiver<bool>>,
-    ) -> IndexerResult<usize> {
-        // For FFI: currently just calls add()
-        unimplemented!()
-
     }
 
     pub(crate) async fn from_builder(builder: IndexerBuilder) -> IndexerResult<Self> {
@@ -95,8 +81,6 @@ impl Indexer {
         Ok(Self {
             embedder,
             loader_config,
-            exclude_patterns: builder.exclude_patterns,
-            max_file_size: builder.max_file_size,
             chunk_size: builder.chunk_size,
             chunk_overlap: builder.chunk_overlap,
             max_docs_per_segment: builder.max_docs_per_segment,
@@ -106,6 +90,7 @@ impl Indexer {
             cancel_token: builder.cancel_token,
         })
     }
+
     /// Create with default settings
     pub async fn new(model: &str) -> IndexerResult<Self> {
         Self::builder(model).build().await
@@ -117,7 +102,7 @@ impl Indexer {
             return Err(IndexerError::IndexNotFound(index_path.to_string()));
         }
 
-        let reader = IndexReader::open(index_path).map_err(|e| IndexerError::IndexingFailed(e))?;
+        let reader = IndexReader::open(index_path).map_err(IndexerError::IndexingFailed)?;
 
         let size_bytes = calculate_index_size(index_path).unwrap_or(0);
 
@@ -139,7 +124,7 @@ impl Indexer {
             dimension: reader.dimension(),
             size_bytes,
             embedding_model,
-            created_at: None, // TODO: read from config
+            created_at: None,
         })
     }
 
@@ -151,9 +136,16 @@ impl Indexer {
         std::fs::remove_dir_all(index_path).map_err(|e| IndexerError::IndexingFailed(e.into()))
     }
 
+    // =========================================================================
+    // CREATE METHODS
+    // =========================================================================
+
     /// Create a new index from files/directories
     pub async fn create(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<IndexStats> {
-        self.create_with_options(index_path, inputs, false).await
+        self.create_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
+            index_path, inputs, false, None, None,
+        )
+        .await
     }
 
     /// Create with force overwrite option
@@ -163,6 +155,41 @@ impl Indexer {
         inputs: &[&str],
         force: bool,
     ) -> IndexerResult<IndexStats> {
+        self.create_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
+            index_path, inputs, force, None, None,
+        )
+        .await
+    }
+
+    /// Create with callback and cancellation support (for FFI)
+    pub async fn create_with_callback<F, C>(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        force: bool,
+        on_progress: Option<F>,
+        is_cancelled: Option<C>,
+    ) -> IndexerResult<IndexStats>
+    where
+        F: Fn(ProgressStage, usize, usize, Option<&str>),
+        C: Fn() -> bool,
+    {
+        self.create_impl(index_path, inputs, force, on_progress, is_cancelled)
+            .await
+    }
+
+    async fn create_impl<F, C>(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        force: bool,
+        on_progress: Option<F>,
+        is_cancelled: Option<C>,
+    ) -> IndexerResult<IndexStats>
+    where
+        F: Fn(ProgressStage, usize, usize, Option<&str>),
+        C: Fn() -> bool,
+    {
         if inputs.is_empty() {
             return Err(IndexerError::NoInputs);
         }
@@ -180,6 +207,16 @@ impl Indexer {
         let start = std::time::Instant::now();
         let dimension = self.embedder.dimension();
 
+        // Helper to report progress
+        let report = |stage, current, total, msg: Option<&str>| {
+            if let Some(ref cb) = on_progress {
+                cb(stage, current, total, msg);
+            }
+        };
+
+        // Helper to check cancellation
+        let check_cancelled = || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
+
         // Create index writer
         let config = IndexConfig {
             dimension,
@@ -189,101 +226,38 @@ impl Indexer {
         };
 
         let mut writer =
-            IndexWriter::open(index_path, config).map_err(|e| IndexerError::IndexingFailed(e))?;
+            IndexWriter::open(index_path, config).map_err(IndexerError::IndexingFailed)?;
 
-        // Process files
-        let stats = self.process_inputs(&mut writer, inputs).await?;
+        // Collect files
+        report(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
+        let files = self.collect_files(inputs)?;
+        let total_files = files.len();
 
-        // Commit
-        writer
-            .commit()
-            .map_err(|e| IndexerError::IndexingFailed(e))?;
-
-        let size_bytes = calculate_index_size(index_path).unwrap_or(0);
-
-        Ok(IndexStats {
-            documents_indexed: stats.0,
-            chunks_created: stats.1,
-            dimension,
-            size_bytes,
-            files_processed: stats.2,
-            files_skipped: stats.3,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        })
-    }
-
-    /// Add documents to existing index
-    pub async fn add(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
-        if inputs.is_empty() {
-            return Err(IndexerError::NoInputs);
+        if check_cancelled() {
+            return Err(IndexerError::Cancelled);
         }
-
-        if !Path::new(index_path).exists() {
-            return Err(IndexerError::IndexNotFound(index_path.to_string()));
-        }
-
-        // Open existing
-        let mut writer =
-            IndexWriter::open_existing(index_path).map_err(|e| IndexerError::IndexingFailed(e))?;
-
-        // Validate dimension
-        if writer.dimension() != self.embedder.dimension() {
-            return Err(IndexerError::DimensionMismatch {
-                index_dim: writer.dimension(),
-                model_dim: self.embedder.dimension(),
-            });
-        }
-
-        let (docs_added, _, _, _) = self.process_inputs(&mut writer, inputs).await?;
-
-        writer
-            .commit()
-            .map_err(|e| IndexerError::IndexingFailed(e))?;
-
-        Ok(docs_added)
-    }
-
-    // Internal: process input files
-    async fn process_inputs(
-        &self,
-        writer: &mut IndexWriter,
-        inputs: &[&str],
-    ) -> IndexerResult<(usize, usize, usize, usize)> {
-        // Returns (docs_indexed, chunks_created, files_processed, files_skipped)
 
         let loader = DocumentLoader::new(self.loader_config.clone());
 
-        let mut total_docs = 0;
-        let mut total_chunks = 0;
-        let mut files_processed = 0;
-        let mut files_skipped = 0;
+        let mut total_docs = 0usize;
+        let mut total_chunks = 0usize;
+        let mut files_processed = 0usize;
+        let mut files_skipped = 0usize;
 
         let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
         let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
 
-        // Collect all files
-        self.report_progress(Progress {
-            stage: ProgressStage::Scanning,
-            current: 0,
-            total: None,
-            message_len: 0,
-        });
-
-        let files = self.collect_files(inputs)?;
-        let total_files = files.len();
-
         for (file_idx, file_path) in files.iter().enumerate() {
-            // Check cancellation
-            if self.is_cancelled() {
+            if check_cancelled() {
                 return Err(IndexerError::Cancelled);
             }
 
-            self.report_progress(Progress {
-                stage: ProgressStage::Loading,
-                current: file_idx,
-                total: Some(total_files),
-                message_len: 0,
-            });
+            report(
+                ProgressStage::Loading,
+                file_idx,
+                total_files,
+                Some(&file_path.to_string_lossy()),
+            );
 
             match loader.load_file(file_path) {
                 Ok(chunks) => {
@@ -295,17 +269,16 @@ impl Indexer {
                         batch_metadata.push(chunk.metadata.to_hashmap());
 
                         if batch_texts.len() >= self.batch_size {
+                            if check_cancelled() {
+                                return Err(IndexerError::Cancelled);
+                            }
+
+                            report(ProgressStage::Embedding, total_docs, 0, None);
+
                             let added = self
-                                .flush_batch(writer, &mut batch_texts, &mut batch_metadata)
+                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                                 .await?;
                             total_docs += added;
-
-                            self.report_progress(Progress {
-                                stage: ProgressStage::Embedding,
-                                current: total_docs,
-                                total: None,
-                                message_len: 0,
-                            });
                         }
                     }
                 }
@@ -320,21 +293,183 @@ impl Indexer {
 
         // Flush remaining
         if !batch_texts.is_empty() {
+            report(ProgressStage::Embedding, total_docs, 0, None);
             let added = self
-                .flush_batch(writer, &mut batch_texts, &mut batch_metadata)
+                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
                 .await?;
             total_docs += added;
         }
 
-        self.report_progress(Progress {
-            stage: ProgressStage::Committing,
-            current: total_docs,
-            total: Some(total_docs),
-            message_len: 0,
-        });
+        report(
+            ProgressStage::Committing,
+            total_docs,
+            total_docs,
+            Some("Finalizing index..."),
+        );
 
-        Ok((total_docs, total_chunks, files_processed, files_skipped))
+        writer.commit().map_err(IndexerError::IndexingFailed)?;
+
+        let size_bytes = calculate_index_size(index_path).unwrap_or(0);
+
+        Ok(IndexStats {
+            documents_indexed: total_docs,
+            chunks_created: total_chunks,
+            dimension,
+            size_bytes,
+            files_processed,
+            files_skipped,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+        })
     }
+
+    // =========================================================================
+    // ADD METHODS
+    // =========================================================================
+
+    /// Add documents to existing index
+    pub async fn add(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
+        self.add_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
+            index_path, inputs, None, None,
+        )
+        .await
+    }
+
+    /// Add with callback support (for FFI)
+    pub async fn add_with_callback<F, C>(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        on_progress: Option<F>,
+        is_cancelled: Option<C>,
+    ) -> IndexerResult<usize>
+    where
+        F: Fn(ProgressStage, usize, usize, Option<&str>),
+        C: Fn() -> bool,
+    {
+        self.add_impl(index_path, inputs, on_progress, is_cancelled)
+            .await
+    }
+
+    async fn add_impl<F, C>(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        on_progress: Option<F>,
+        is_cancelled: Option<C>,
+    ) -> IndexerResult<usize>
+    where
+        F: Fn(ProgressStage, usize, usize, Option<&str>),
+        C: Fn() -> bool,
+    {
+        if inputs.is_empty() {
+            return Ok(0);
+        }
+
+        if !Path::new(index_path).exists() {
+            return Err(IndexerError::IndexNotFound(index_path.to_string()));
+        }
+
+        // Helper to report progress
+        let report = |stage, current, total, msg: Option<&str>| {
+            if let Some(ref cb) = on_progress {
+                cb(stage, current, total, msg);
+            }
+        };
+
+        // Helper to check cancellation
+        let check_cancelled = || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
+
+        // Open existing index for appending
+        let mut writer =
+            IndexWriter::open_existing(index_path).map_err(IndexerError::IndexingFailed)?;
+
+        // Validate dimension matches
+        if writer.dimension() != self.embedder.dimension() {
+            return Err(IndexerError::DimensionMismatch {
+                index_dim: writer.dimension(),
+                model_dim: self.embedder.dimension(),
+            });
+        }
+
+        // Collect files
+        report(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
+        let files = self.collect_files(inputs)?;
+        let total_files = files.len();
+
+        if check_cancelled() {
+            return Err(IndexerError::Cancelled);
+        }
+
+        let loader = DocumentLoader::new(self.loader_config.clone());
+
+        let mut total_docs = 0usize;
+        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
+        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
+
+        for (file_idx, file_path) in files.iter().enumerate() {
+            if check_cancelled() {
+                return Err(IndexerError::Cancelled);
+            }
+
+            report(
+                ProgressStage::Loading,
+                file_idx,
+                total_files,
+                Some(&file_path.to_string_lossy()),
+            );
+
+            match loader.load_file(file_path) {
+                Ok(chunks) => {
+                    for chunk in chunks {
+                        batch_texts.push(chunk.text);
+                        batch_metadata.push(chunk.metadata.to_hashmap());
+
+                        if batch_texts.len() >= self.batch_size {
+                            if check_cancelled() {
+                                return Err(IndexerError::Cancelled);
+                            }
+
+                            report(ProgressStage::Embedding, total_docs, 0, None);
+
+                            let added = self
+                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                                .await?;
+                            total_docs += added;
+                        }
+                    }
+                }
+                Err(e) => {
+                    if !self.quiet {
+                        eprintln!("Warning: Failed to load {}: {}", file_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // Flush remaining
+        if !batch_texts.is_empty() {
+            report(ProgressStage::Embedding, total_docs, 0, None);
+            let added = self
+                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                .await?;
+            total_docs += added;
+        }
+
+        report(
+            ProgressStage::Committing,
+            total_docs,
+            total_docs,
+            Some("Finalizing..."),
+        );
+
+        writer.commit().map_err(IndexerError::IndexingFailed)?;
+
+        Ok(total_docs)
+    }
+
+    // =========================================================================
+    // INTERNAL HELPERS
+    // =========================================================================
 
     async fn flush_batch(
         &self,
@@ -349,12 +484,12 @@ impl Indexer {
             .embedder
             .embed_batch(&texts_ref)
             .await
-            .map_err(|e| IndexerError::EmbedderError(e))?;
+            .map_err(IndexerError::EmbedderError)?;
 
         for ((text, meta), embedding) in texts.drain(..).zip(metadata.drain(..)).zip(embeddings) {
             writer
                 .add(&text, &embedding, Some(&meta))
-                .map_err(|e| IndexerError::IndexingFailed(e))?;
+                .map_err(IndexerError::IndexingFailed)?;
         }
 
         Ok(count)
@@ -460,14 +595,27 @@ impl Indexer {
         }
     }
 
-    // Accessors
+    // =========================================================================
+    // ACCESSORS
+    // =========================================================================
+
     pub fn model_name(&self) -> &str {
         self.embedder.model_name()
     }
+
     pub fn dimension(&self) -> usize {
         self.embedder.dimension()
     }
+
     pub fn chunk_size(&self) -> usize {
         self.chunk_size
+    }
+
+    pub fn batch_size(&self) -> usize {
+        self.batch_size
+    }
+
+    pub fn is_quiet(&self) -> bool {
+        self.quiet
     }
 }

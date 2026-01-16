@@ -78,7 +78,7 @@ print(f"Kjarni similarity(cat, dog): {k_sim:.6f}")
 
 print("\n--- SentenceTransformers (batch) ---")
 model_name = "/home/olafurj/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2/"
-st = SentenceTransformer(model_name)
+st = SentenceTransformer(model_name, device="cpu")
 
 # Warm-up
 _ = st.encode(TEXTS, convert_to_numpy=True, normalize_embeddings=True)

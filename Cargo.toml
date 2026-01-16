@@ -36,6 +36,9 @@ faer = "0.20"
 
 ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] }
 
+#intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"] }
+#cblas-sys = { version = "0.1.4", default-features = false }
+
 # GPU / Numerics
 wgpu = "27.0.1"
 pollster = "0.3"

@@ -1,11 +1,16 @@
 use std::time::Instant;
 
+use crate::cpu::encoder::optimized_layer::{
+    EncoderScratch, OptimizedFeedForward, OptimizedSelfAttention, fused_residual_layernorm,
+};
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
 use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3};
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// A generic encoder transformer layer supporting:
 /// - BERT, RoBERTa, BART (post-norm)
@@ -13,8 +18,11 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallel
 /// - Any bidirectional encoder architecture
 pub struct EncoderLayer {
     pub self_attn: EncoderSelfAttention,
+    pub optimized_attention: Option<OptimizedSelfAttention>,
+
     pub self_attn_layer_norm: Normalization,
     pub feedforward: FeedForward,
+    pub optimized_feedforward: Option<OptimizedFeedForward>,
     pub ffn_layer_norm: Normalization,
 }
 
@@ -22,11 +30,12 @@ pub struct EncoderLayer {
 pub fn add_inplace(a: &mut Array3<f32>, b: &ArrayView3<f32>) {
     let a_slice = a.as_slice_mut().expect("A must be contiguous");
     let b_slice = b.as_slice().expect("B must be contiguous");
-    
+
     // Parallelize the loop using Rayon
-    a_slice.par_iter_mut()
-           .zip(b_slice.par_iter())
-           .for_each(|(x, y)| *x += *y);
+    a_slice
+        .par_iter_mut()
+        .zip(b_slice.par_iter())
+        .for_each(|(x, y)| *x += *y);
 }
 
 impl EncoderLayer {
@@ -38,10 +47,22 @@ impl EncoderLayer {
     ) -> Self {
         Self {
             self_attn,
+            optimized_attention: None,
+            optimized_feedforward: None,
             self_attn_layer_norm,
             feedforward,
             ffn_layer_norm,
         }
+    }
+
+    pub fn with_optimized(
+        mut self,
+        optimized_attention: OptimizedSelfAttention,
+        optimized_feedforward: OptimizedFeedForward,
+    ) -> Self {
+        self.optimized_attention = Some(optimized_attention);
+        self.optimized_feedforward = Some(optimized_feedforward);
+        self
     }
 
     /// Forward pass with configurable norm order
@@ -62,17 +83,10 @@ impl EncoderLayer {
         if is_prenorm {
             self.forward_prenorm(hidden, attention_mask, position_bias, rope)
         } else {
-            self.forward_postnorm(hidden, attention_mask, position_bias, rope)
+            self.forward_postnorm2(hidden, attention_mask, position_bias, rope)
         }
     }
-
-    /// Pre-norm: LN → Sublayer → Residual (T5, GPT-2, LLaMA style)
-    ///
-    /// ```text
-    /// x ──┬── LN ──► Attention ──┬──► + ──┬── LN ──► FFN ──┬──► + ──► out
-    ///     └─────────────────────►┘        └────────────────►┘
-    /// ```
- fn forward_prenorm(
+    fn forward_prenorm(
         &self,
         mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
@@ -84,14 +98,14 @@ impl EncoderLayer {
         // 1. Attention Block
         // let residual = &hidden;
         let normed = self.self_attn_layer_norm.forward(&hidden);
-        
+
         let t_attn_start = Instant::now();
         let attn_out = self
             .self_attn
             .forward(&normed, attention_mask, position_bias, rope)?;
         let t_attn = t_attn_start.elapsed();
 
-        // Note: &residual + &attn_out allocates a NEW array. 
+        // Note: &residual + &attn_out allocates a NEW array.
         // This is a memory copy operation!
         // let hidden = residual + &attn_out;
         add_inplace(&mut hidden, &attn_out.view());
@@ -111,9 +125,11 @@ impl EncoderLayer {
         // Only print if it's taking a significant amount of time (e.g. > 1ms)
         // to avoid spamming for small inputs.
         if total.as_millis() > 5 {
-             println!(
-                "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-                b, s, d, // <--- PRINT SHAPE
+            println!(
+                "PRENORM SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
+                b,
+                s,
+                d, // <--- PRINT SHAPE
                 total.as_millis(),
                 t_attn.as_millis(),
                 t_ffn.as_millis(),
@@ -124,13 +140,7 @@ impl EncoderLayer {
         Ok(hidden)
     }
 
-    /// Post-norm: Sublayer → Residual → LN (BERT, BART, RoBERTa style)
-    ///
-    /// ```text
-    /// x ──┬──► Attention ──┬──► + ──► LN ──┬──► FFN ──┬──► + ──► LN ──► out
-    ///     └────────────────►┘              └──────────►┘
-    /// ```
-    fn forward_postnorm(
+    pub fn forward_postnorm(
         &self,
         mut hidden: Array3<f32>,
         attention_mask: &Array2<f32>,
@@ -141,36 +151,36 @@ impl EncoderLayer {
         let (b, s, d) = hidden.dim();
         // 1. Attention Block
         // let attn_residual = &hidden;
-        
+
         let t_attn_start = Instant::now();
-        let attn_out =
-            self.self_attn
-                .forward(&hidden, attention_mask, position_bias, rope)?;
+        let attn_out = self
+            .self_attn
+            .forward(&hidden, attention_mask, position_bias, rope)?;
         let t_attn = t_attn_start.elapsed();
 
         // Overhead: Addition + LayerNorm
         // let i = &(attn_residual + &attn_out);
         add_inplace(&mut hidden, &attn_out.view());
-        let ffn_input = self
-            .self_attn_layer_norm
-            .forward(&hidden);
+        let ffn_input = self.self_attn_layer_norm.forward(&hidden);
 
         // 2. FFN Block
         let ffn_residual = &ffn_input;
-        
+
         let t_ffn_start = Instant::now();
         let ffn_out = self.feedforward.forward(&ffn_residual)?;
         let t_ffn = t_ffn_start.elapsed();
 
         // Overhead: Addition + LayerNorm
         let hidden = self.ffn_layer_norm.forward(&(ffn_residual + &ffn_out));
-        
+
         let total = layer_start.elapsed();
 
         if total.as_millis() > 5 {
-             println!(
+            println!(
                 "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-                b, s, d, // <--- PRINT SHAPE
+                b,
+                s,
+                d, // <--- PRINT SHAPE
                 total.as_millis(),
                 t_attn.as_millis(),
                 t_ffn.as_millis(),
@@ -180,6 +190,121 @@ impl EncoderLayer {
 
         Ok(hidden)
     }
+    /// Post-norm: Sublayer → Residual → LN (BERT, BART, RoBERTa style)
+    ///
+    /// ```text
+    /// x ──┬──► Attention ──┬──► + ──► LN ──┬──► FFN ──┬──► + ──► LN ──► out
+    ///     └────────────────►┘              └──────────►┘
+    /// ```
+    pub fn forward_postnorm2(
+        &self,
+        mut hidden: Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_bias: Option<&Array4<f32>>,
+        rope: Option<&RoPE>,
+    ) -> Result<Array3<f32>> {
+        let layer_start = Instant::now();
+        let (b, s, d) = hidden.dim();
+        let tokens = b * s;
+
+        // Get intermediate dim from the feedforward layer
+        let intermediate_dim = self.feedforward.out_features(); // You may need to expose this
+
+        // Create scratch buffers (ideally pass this in from encoder level for reuse)
+        let mut scratch = EncoderScratch::new(b, s, d, self.self_attn.num_heads, intermediate_dim);
+
+        // =======================================================================
+        // 1. ATTENTION BLOCK
+        // =======================================================================
+        let t_attn_start = Instant::now();
+
+        let opt_attn = self
+            .optimized_attention
+            .as_ref()
+            .expect("Optimized attention not initialized");
+        opt_attn.forward(&hidden, attention_mask, position_bias, rope, &mut scratch)?;
+
+        let t_attn = t_attn_start.elapsed();
+
+        // =======================================================================
+        // 2. POST-ATTENTION: Fused Residual + LayerNorm
+        //    output = LayerNorm(hidden + attn_out)
+        // =======================================================================
+        let t_overhead_start = Instant::now();
+
+        // Reshape attention output from [tokens, hidden] to [batch, seq, hidden]
+        let attn_out_3d = scratch.output_2d.view().into_shape((b, s, d))?;
+
+        // Allocate buffer for post-attention layernorm output (this becomes FFN input)
+        let mut ffn_input = Array3::<f32>::zeros((b, s, d));
+
+        fused_residual_layernorm(
+            &mut ffn_input,
+            &attn_out_3d,   // "input" - the attention output
+            &hidden.view(), // "residual" - the original hidden state
+            self.self_attn_layer_norm.gamma(),
+            self.self_attn_layer_norm.beta().unwrap(),
+            self.self_attn_layer_norm.eps(),
+        );
+
+        // =======================================================================
+        // 3. FFN BLOCK
+        // =======================================================================
+        let t_ffn_start = Instant::now();
+
+        // Reshape for FFN: [batch, seq, hidden] -> [tokens, hidden]
+        let ffn_input_2d = ffn_input.view().into_shape((tokens, d))?;
+
+        // Prepare output buffer for FFN
+        let mut ffn_output_2d = Array2::<f32>::zeros((tokens, d));
+
+        let opt_ffn = self
+            .optimized_feedforward
+            .as_ref()
+            .expect("Optimized feedforward not initialized");
+        opt_ffn.forward(&ffn_input_2d, &mut scratch.intermediate, &mut ffn_output_2d);
+
+        let t_ffn = t_ffn_start.elapsed();
+
+        // =======================================================================
+        // 4. POST-FFN: Fused Residual + LayerNorm
+        //    output = LayerNorm(ffn_input + ffn_out)
+        // =======================================================================
+
+        // Reshape FFN output back to 3D
+        let ffn_output_3d = ffn_output_2d.view().into_shape((b, s, d))?;
+
+        // Final output buffer
+        let mut output = Array3::<f32>::zeros((b, s, d));
+
+        fused_residual_layernorm(
+            &mut output,
+            &ffn_output_3d,    // "input" - the FFN output
+            &ffn_input.view(), // "residual" - the FFN input (post-attn layernorm output)
+            self.ffn_layer_norm.gamma(),
+            self.ffn_layer_norm.beta().unwrap(),
+            self.ffn_layer_norm.eps(),
+        );
+
+        let total = layer_start.elapsed();
+        let t_overhead = total - t_attn - t_ffn;
+
+        if total.as_millis() > 5 {
+            println!(
+                "POSTNORM SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
+                b,
+                s,
+                d,
+                total.as_millis(),
+                t_attn.as_millis(),
+                t_ffn.as_millis(),
+                t_overhead.as_millis()
+            );
+            println!("Rayon threads: {}", rayon::current_num_threads());
+        }
+
+        Ok(output)
+    }
 }
 
 #[cfg(test)]
@@ -188,6 +313,7 @@ mod encoder_layer_tests {
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
+    use crate::pipeline::CpuLayerFactory;
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
     fn create_deterministic_layer(
@@ -247,10 +373,10 @@ mod encoder_layer_tests {
         let fc2_b = Array1::from_elem(hidden_size, bias_val);
 
         let feedforward = FeedForward::Standard(StdFeedForward::new(
-            fc1_w,
-            fc1_b,
-            fc2_w,
-            fc2_b,
+            fc1_w.clone(),
+            fc1_b.clone(),
+            fc2_w.clone(),
+            fc2_b.clone(),
             Activation::Gelu, // Using Standard Gelu (not New/Tanh) to match Python default
         ));
 
@@ -261,7 +387,26 @@ mod encoder_layer_tests {
             1e-5,
         ));
 
-        EncoderLayer::new(self_attn, ln1, feedforward, ln2)
+        let optimized_attention = OptimizedSelfAttention::new(
+            self_attn.q_proj.clone(),
+            self_attn.k_proj.clone(),
+            self_attn.v_proj.clone(),
+            self_attn.out_proj.clone(),
+            num_heads,
+            true,
+        );
+
+        let optimized_feedforward = OptimizedFeedForward::new(
+            LinearLayer::new_f32(fc1_w, Some(fc1_b)),
+            LinearLayer::new_f32(fc2_w, Some(fc2_b)),
+            Activation::Gelu,
+        );
+        
+
+        let mut layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2);
+        layer = layer.with_optimized(optimized_attention, optimized_feedforward);
+
+        layer
     }
 
     #[test]

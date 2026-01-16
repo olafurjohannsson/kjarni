@@ -45,25 +45,25 @@ pub struct IndexInfo {
 pub enum IndexerError {
     #[error("No input paths specified")]
     NoInputs,
-    
+
     #[error("Path not found: {0}")]
     PathNotFound(String),
-    
+
     #[error("Index already exists at {0}. Use force=true to overwrite.")]
     IndexExists(String),
-    
+
     #[error("Index not found at {0}")]
     IndexNotFound(String),
-    
+
     #[error("Failed to load embedder: {0}")]
     EmbedderError(#[from] crate::embedder::EmbedderError),
-    
+
     #[error("Indexing failed: {0}")]
     IndexingFailed(#[from] anyhow::Error),
-    
+
     #[error("Dimension mismatch: index has {index_dim}, model produces {model_dim}")]
     DimensionMismatch { index_dim: usize, model_dim: usize },
-    
+
     #[error("Operation cancelled")]
     Cancelled,
 }

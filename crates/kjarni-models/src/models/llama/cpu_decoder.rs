@@ -50,20 +50,7 @@ use ndarray::{Array2, Array3, Axis, s};
 use std::time::Instant;
 
 use kjarni_transformers::{
-    Normalization, WgpuContext,
-    cache::CpuKVCache,
-    decoder::prelude::*,
-    embeddings::Embeddings,
-    feedforward::SwiGluFeedForward,
-    linear_layer::LinearLayer,
-    models::base::ModelInput,
-    normalization::RMSNorm,
-    pipeline::CpuLayerFactory,
-    rope::RoPE,
-    stats::GenerationStats,
-    tensor::DType,
-    traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    Normalization, WgpuContext, activations::Activation, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, models::base::ModelInput, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, stats::GenerationStats, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 /// CPU-based Llama decoder implementation with RoPE and SwiGLU.
@@ -206,28 +193,24 @@ impl LlamaCpuDecoder {
             .as_ref()
             .expect("Llama layout must have a decoder section");
         let layer_layout = &decoder_layout.layer;
-
-        let attention: DecoderAttention = CpuLayerFactory::build_decoder_attention(
-            weights,
+        let factory = CpuLayerFactory::new(weights).with_target_dtype(target_dtype);
+        let attention: DecoderAttention = factory.build_decoder_attention(
             meta,
             &decoder_layout.layer.self_attn,
             i,
-            target_dtype,
         )?;
 
         let feed_forward =
-            CpuLayerFactory::build_swiglu_ffn(weights, &decoder_layout.layer.ffn, i, target_dtype)?;
+            factory.build_swiglu_ffn(&decoder_layout.layer.ffn, Activation::SilU, i)?;
 
-        let attention_norm = CpuLayerFactory::build_norm(
-            weights,
+        let attention_norm = factory.build_norm(
             &layer_layout.self_attn.norm_weight,
             &layer_layout.self_attn.norm_bias,
             meta.norm_eps,
             i,
         )?;
 
-        let ffn_norm = CpuLayerFactory::build_norm(
-            weights,
+        let ffn_norm = factory.build_norm(
             &layer_layout.ffn.norm_weight,
             &layer_layout.ffn.norm_bias,
             meta.norm_eps,

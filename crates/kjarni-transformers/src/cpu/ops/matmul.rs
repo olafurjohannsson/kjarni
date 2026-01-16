@@ -746,3 +746,574 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
 
     output
 }
+
+// Add this to matmul.rs
+
+/// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
+/// 
+/// Batched version using the 4x3 block kernel for improved throughput on
+/// multi-token inputs (encoding/prefill). Falls back to `matmul_2d_cpu_f32`
+/// for single-token (decode) inputs.
+///
+/// # Arguments
+///
+/// * `a` - Input activation matrix of shape `[batch, in_features]`.
+/// * `b_weights` - Weight matrix of shape `[out_features, in_features]`.
+/// * `bias` - Optional bias vector of shape `[out_features]`.
+///
+/// # Returns
+///
+/// Output matrix of shape `[batch, out_features]`.
+pub fn matmul_2d_cpu_f32_batched(
+    a: &ArrayView2<f32>, 
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+) -> Array2<f32> {
+    let (m, k) = a.dim();
+    let (n, k2) = b_weights.dim();
+    assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
+    
+    if let Some(b) = bias {
+        assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
+    }
+
+    // For single token, use the decode-optimized path
+    if m == 1 {
+        let mut result = matmul_2d_cpu_f32(a, b_weights);
+        if let Some(b) = bias {
+            let out_slice = result.as_slice_mut().unwrap();
+            for (i, val) in out_slice.iter_mut().enumerate() {
+                *val += b[i];
+            }
+        }
+        return result;
+    }
+
+    let mut c = Array2::<f32>::zeros((m, n));
+    
+    let a_s = a.as_standard_layout();
+    let b_s = b_weights.as_standard_layout();
+    let a_slice = a_s.as_slice().expect("Input must be contiguous");
+    let b_slice = b_s.as_slice().expect("Weights must be contiguous");
+    let c_slice = c.as_slice_mut().expect("Output must be contiguous");
+
+    const BLOCK_SIZE: usize = 64;
+
+    c_slice
+        .par_chunks_mut(BLOCK_SIZE * n)
+        .zip(a_slice.par_chunks(BLOCK_SIZE * k))
+        .for_each(|(out_block, in_block)| {
+            let weights_ptr = b_slice.as_ptr();
+            let bias_ptr = bias.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
+
+            let num_tokens = in_block.len() / k;
+            let mut t = 0;
+
+            // === MAIN LOOP: Process 4 tokens × 3 outputs at a time ===
+            while t + 4 <= num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+                let mut j = 0;
+
+                // 4x3 kernel loop
+                while j + 3 <= n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let out_ptr = unsafe { out_block.as_mut_ptr().add(t * n + j) };
+                    let b_ptr = if !bias_ptr.is_null() {
+                        unsafe { bias_ptr.add(j) }
+                    } else {
+                        std::ptr::null()
+                    };
+
+                    unsafe {
+                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                            kernels::x86::f32::matmul_block_4x3_f32(
+                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
+                            );
+                        }
+                    }
+                    j += 3;
+                }
+
+                // Remaining output features (n % 3 != 0)
+                while j < n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    for row in 0..4 {
+                        let a_row = unsafe { in_ptr.add(row * k) };
+                        let dst = unsafe { out_block.as_mut_ptr().add((t + row) * n + j) };
+
+                        let mut sum = 0.0f32;
+                        for i in 0..k {
+                            sum += unsafe { *a_row.add(i) * *w_ptr.add(i) };
+                        }
+                        unsafe { *dst = sum + b_val };
+                    }
+                    j += 1;
+                }
+                t += 4;
+            }
+
+            // === CLEANUP: Remaining tokens (num_tokens % 4 != 0) ===
+            while t < num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+
+                for j in 0..n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    let mut sum = 0.0f32;
+                    for i in 0..k {
+                        sum += unsafe { *in_ptr.add(i) * *w_ptr.add(i) };
+                    }
+                    out_block[t * n + j] = sum + b_val;
+                }
+                t += 1;
+            }
+        });
+
+    c
+}
+
+// =========================================================================
+// TESTS
+// =========================================================================
+
+#[cfg(test)]
+mod matmul_tests {
+    use super::*;
+    use ndarray::Array2;
+    use std::time::Instant;
+
+    // =========================================================================
+    // Test Utilities
+    // =========================================================================
+
+    fn make_input(rows: usize, cols: usize, seed: usize) -> Array2<f32> {
+        let data: Vec<f32> = (0..rows * cols)
+            .map(|i| ((i + seed) % 1000) as f32 * 0.001 - 0.5)
+            .collect();
+        Array2::from_shape_vec((rows, cols), data).unwrap()
+    }
+
+    fn make_bias(n: usize, base: f32) -> Vec<f32> {
+        (0..n).map(|i| base + i as f32 * 0.0001).collect()
+    }
+
+    fn max_diff(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
+    }
+
+    fn mean_diff(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
+        let sum: f32 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum();
+        sum / a.len() as f32
+    }
+
+    /// Reference implementation using the known-working matmul_2d_cpu_f32
+    fn reference_matmul_with_bias(
+        a: &ArrayView2<f32>,
+        b: &ArrayView2<f32>,
+        bias: Option<&[f32]>,
+    ) -> Array2<f32> {
+        let mut result = matmul_2d_cpu_f32(a, b);
+        if let Some(bias) = bias {
+            for mut row in result.rows_mut() {
+                for (val, &b) in row.iter_mut().zip(bias.iter()) {
+                    *val += b;
+                }
+            }
+        }
+        result
+    }
+
+    // =========================================================================
+    // F32 Standard Path Tests (matmul_2d_cpu_f32)
+    // =========================================================================
+
+    #[test]
+    fn test_f32_decode_tiny() {
+        let (m, k, n) = (1, 4, 4);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let result = matmul_2d_cpu_f32(&a.view(), &b.view());
+
+        assert_eq!(result.dim(), (m, n));
+        println!("\n=== F32 Decode Tiny (m={}, k={}, n={}) ===", m, k, n);
+        println!("Output shape: {:?}", result.dim());
+    }
+
+    #[test]
+    fn test_f32_decode_medium() {
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let result = matmul_2d_cpu_f32(&a.view(), &b.view());
+
+        assert_eq!(result.dim(), (m, n));
+        println!("\n=== F32 Decode Medium (m={}, k={}, n={}) ===", m, k, n);
+    }
+
+    #[test]
+    fn test_f32_prefill_small() {
+        let (m, k, n) = (8, 64, 128);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let result = matmul_2d_cpu_f32(&a.view(), &b.view());
+
+        assert_eq!(result.dim(), (m, n));
+        println!("\n=== F32 Prefill Small (m={}, k={}, n={}) ===", m, k, n);
+    }
+
+    // =========================================================================
+    // F32 Batched Path Tests (matmul_2d_cpu_f32_batched)
+    // =========================================================================
+
+    #[test]
+    fn test_batched_parity_tiny_no_bias() {
+        let (m, k, n) = (4, 4, 3);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Tiny No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_tiny_with_bias() {
+        let (m, k, n) = (4, 4, 3);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Tiny With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_small_no_bias() {
+        // Tests main 4x3 loop with exact multiple of 3 outputs
+        let (m, k, n) = (8, 32, 12); // n=12 is divisible by 3
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Small No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_small_remainder_outputs() {
+        // Tests output remainder loop (n % 3 != 0)
+        let (m, k, n) = (8, 32, 14); // n=14 leaves remainder of 2
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Small Remainder Outputs (m={}, k={}, n={}, n%3={}) ===", m, k, n, n % 3);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_small_remainder_tokens() {
+        // Tests token cleanup loop (m % 4 != 0)
+        let (m, k, n) = (10, 32, 12); // m=10 leaves remainder of 2 tokens
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Small Remainder Tokens (m={}, k={}, m%4={}) ===", m, k, m % 4);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_small_both_remainders() {
+        // Tests both remainder loops
+        let (m, k, n) = (10, 32, 14); // m%4=2, n%3=2
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Both Remainders (m={}, k={}, n={}, m%4={}, n%3={}) ===", 
+                 m, k, n, m % 4, n % 3);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_medium_no_bias() {
+        // Medium test - this is where the previous bug showed up
+        let (m, k, n) = (64, 128, 256);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        let mean = mean_diff(&expected, &actual);
+        println!("\n=== Batched Parity Medium No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_medium_with_bias() {
+        let (m, k, n) = (64, 128, 256);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        let diff = max_diff(&expected, &actual);
+        let mean = mean_diff(&expected, &actual);
+        println!("\n=== Batched Parity Medium With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_large_no_bias() {
+        // MiniLM-like dimensions
+        let (m, k, n) = (120 * 24, 384, 384); // batch=120, seq=24
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        let mean = mean_diff(&expected, &actual);
+        println!("\n=== Batched Parity Large (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_minilm_ffn() {
+        // MiniLM FFN layer dimensions
+        let (m, k, n) = (120 * 24, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        let diff = max_diff(&expected, &actual);
+        let mean = mean_diff(&expected, &actual);
+        println!("\n=== Batched Parity MiniLM FFN (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_parity_non_aligned_k() {
+        // k not divisible by 8 (tests SIMD remainder)
+        let (m, k, n) = (8, 37, 12);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), None);
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Parity Non-Aligned K (k={}, k%8={}) ===", k, k % 8);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_single_token_fallback() {
+        // m=1 should fall back to decode path
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let actual = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        let diff = max_diff(&expected, &actual);
+        println!("\n=== Batched Single Token Fallback ===");
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    // =========================================================================
+    // BF16 Tests
+    // =========================================================================
+
+    #[test]
+    fn test_bf16_decode() {
+        use half::bf16;
+        
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b_f32 = make_input(n, k, 100);
+        let b_bf16: Array2<bf16> = b_f32.mapv(bf16::from_f32);
+
+        let result = matmul_2d_cpu_bf16(&a.view(), &b_bf16.view());
+
+        // Compare against F32 result (allowing for BF16 precision loss)
+        let expected = matmul_2d_cpu_f32(&a.view(), &b_f32.view());
+        let diff = max_diff(&expected, &result);
+
+        println!("\n=== BF16 Decode (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff vs F32: {:.2e}", diff);
+        // BF16 has ~3 decimal digits of precision, so expect ~1e-3 error
+        assert!(diff < 1e-2, "BF16 diff {} too large", diff);
+    }
+
+    #[test]
+    fn test_bf16_prefill() {
+        use half::bf16;
+        
+        let (m, k, n) = (32, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b_f32 = make_input(n, k, 100);
+        let b_bf16: Array2<bf16> = b_f32.mapv(bf16::from_f32);
+
+        let result = matmul_2d_cpu_bf16(&a.view(), &b_bf16.view());
+        let expected = matmul_2d_cpu_f32(&a.view(), &b_f32.view());
+        let diff = max_diff(&expected, &result);
+
+        println!("\n=== BF16 Prefill (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff vs F32: {:.2e}", diff);
+        assert!(diff < 1e-2, "BF16 diff {} too large", diff);
+    }
+
+    // =========================================================================
+    // Performance Benchmarks
+    // =========================================================================
+
+    #[test]
+    fn perf_f32_standard_vs_batched() {
+        let (m, k, n) = (120 * 24, 384, 1536); // MiniLM FFN
+        let iterations = 10;
+
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        // Warmup
+        let _ = matmul_2d_cpu_f32(&a.view(), &b.view());
+        let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        // Benchmark standard (no bias - bias added separately)
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut result = matmul_2d_cpu_f32(&a.view(), &b.view());
+            // Add bias like LinearLayer::matmul does
+            for mut row in result.rows_mut() {
+                for (val, &b) in row.iter_mut().zip(bias.iter()) {
+                    *val += b;
+                }
+            }
+            std::hint::black_box(result);
+        }
+        let std_time = start.elapsed();
+
+        // Benchmark batched (bias inline)
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let result = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+            std::hint::black_box(result);
+        }
+        let batched_time = start.elapsed();
+
+        let ops = 2 * m * k * n * iterations;
+        let std_gflops = ops as f64 / std_time.as_secs_f64() / 1e9;
+        let batched_gflops = ops as f64 / batched_time.as_secs_f64() / 1e9;
+
+        println!("\n=== PERF: Standard vs Batched F32 Matmul ===");
+        println!("Dimensions: m={}, k={}, n={}", m, k, n);
+        println!("Standard (row-parallel): {:?} ({:.2} GFLOPS)", std_time / iterations as u32, std_gflops);
+        println!("Batched (4x3 blocks):    {:?} ({:.2} GFLOPS)", batched_time / iterations as u32, batched_gflops);
+        println!("Speedup: {:.2}x", std_time.as_secs_f64() / batched_time.as_secs_f64());
+    }
+
+    #[test]
+    fn perf_bf16_decode_vs_prefill() {
+        use half::bf16;
+        
+        let k = 384;
+        let n = 1536;
+        let iterations = 100;
+
+        let a_decode = make_input(1, k, 0);
+        let a_prefill = make_input(32, k, 0);
+        let b_f32 = make_input(n, k, 100);
+        let b_bf16: Array2<bf16> = b_f32.mapv(bf16::from_f32);
+
+        // Warmup
+        let _ = matmul_2d_cpu_bf16(&a_decode.view(), &b_bf16.view());
+        let _ = matmul_2d_cpu_bf16(&a_prefill.view(), &b_bf16.view());
+
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let result = matmul_2d_cpu_bf16(&a_decode.view(), &b_bf16.view());
+            std::hint::black_box(result);
+        }
+        let decode_time = start.elapsed();
+
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let result = matmul_2d_cpu_bf16(&a_prefill.view(), &b_bf16.view());
+            std::hint::black_box(result);
+        }
+        let prefill_time = start.elapsed();
+
+        println!("\n=== PERF: BF16 Decode vs Prefill ===");
+        println!("Decode (m=1):   {:?} per call", decode_time / iterations as u32);
+        println!("Prefill (m=32): {:?} per call", prefill_time / iterations as u32);
+        println!("Tokens/sec decode:  {:.0}", iterations as f64 / decode_time.as_secs_f64());
+        println!("Tokens/sec prefill: {:.0}", 32.0 * iterations as f64 / prefill_time.as_secs_f64());
+    }
+}

@@ -1,7 +1,7 @@
 //! Searcher FFI bindings
 
 use crate::callback::{
-    is_cancelled, FfiProgressCallback, KjarniCancelToken, KjarniProgressCallbackFn,
+    is_cancelled, FfiCallback, KjarniCancelToken, KjarniProgressCallbackFn,
 };
 use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
@@ -313,29 +313,29 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
         }
 
         // Build metadata filter
-        // let mut filter = MetadataFilter::default();
-        // let mut has_filter = false;
+        let mut filter = kjarni::MetadataFilter::default();
+        let mut has_filter = false;
 
-        // if !opts.source_pattern.is_null() {
-        //     if let Ok(s) = CStr::from_ptr(opts.source_pattern).to_str() {
-        //         filter = filter.source(s);
-        //         has_filter = true;
-        //     }
-        // }
+        if !opts.source_pattern.is_null() {
+            if let Ok(s) = CStr::from_ptr(opts.source_pattern).to_str() {
+                filter = filter.source(s);
+                has_filter = true;
+            }
+        }
 
-        // if !opts.filter_key.is_null() && !opts.filter_value.is_null() {
-        //     if let (Ok(k), Ok(v)) = (
-        //         CStr::from_ptr(opts.filter_key).to_str(),
-        //         CStr::from_ptr(opts.filter_value).to_str(),
-        //     ) {
-        //         filter = filter.must(k, v);
-        //         has_filter = true;
-        //     }
-        // }
+        if !opts.filter_key.is_null() && !opts.filter_value.is_null() {
+            if let (Ok(k), Ok(v)) = (
+                CStr::from_ptr(opts.filter_key).to_str(),
+                CStr::from_ptr(opts.filter_value).to_str(),
+            ) {
+                filter = filter.must(k, v);
+                has_filter = true;
+            }
+        }
 
-        // if has_filter {
-        //     search_opts.filter = Some(filter);
-        // }
+        if has_filter {
+            search_opts.filter = Some(filter);
+        }
     }
 
     let result = get_runtime().block_on(async {

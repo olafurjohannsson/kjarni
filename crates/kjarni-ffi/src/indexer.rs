@@ -1,11 +1,11 @@
 //! Indexer FFI bindings
 
 use crate::callback::{
-    is_cancelled, FfiProgressCallback, KjarniCancelToken, KjarniProgress,
+    is_cancelled, KjarniCancelToken, KjarniProgress,
     KjarniProgressCallbackFn,
 };
 use crate::error::set_last_error;
-use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
+use crate::{FfiCallback, KjarniDevice, KjarniErrorCode, get_runtime};
 use kjarni::indexer::{Indexer, IndexerError, IndexInfo, IndexStats};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
@@ -257,20 +257,13 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
         return KjarniErrorCode::NullPointer;
     }
 
-    if num_inputs == 0 {
-        set_last_error("No input paths specified");
-        return KjarniErrorCode::InvalidConfig;
-    }
-
     let indexer_ref = &(*indexer).inner;
 
-    // Convert index path
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    // Convert input paths
     let mut input_vec = Vec::with_capacity(num_inputs);
     for i in 0..num_inputs {
         let input_ptr = *inputs.add(i);
@@ -283,39 +276,58 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
         }
     }
 
-    // Setup progress callback wrapper
-    let ffi_callback = FfiProgressCallback::new(progress_callback, user_data);
+    // Create callback wrapper
+    // let progress_wrapper = ProgressCallbackWrapper::new(progress_callback, user_data);
+    
+    // // Create progress closure that calls FFI callback
+    // let on_progress = progress_wrapper.as_ref().map(|w| {
+    //     move |stage: kjarni_rag::ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+    //         let ffi_stage = match stage {
+    //             kjarni_rag::ProgressStage::Scanning => KjarniProgressStage::Scanning,
+    //             kjarni_rag::ProgressStage::Loading => KjarniProgressStage::Loading,
+    //             kjarni_rag::ProgressStage::Embedding => KjarniProgressStage::Embedding,
+    //             kjarni_rag::ProgressStage::Writing => KjarniProgressStage::Writing,
+    //             kjarni_rag::ProgressStage::Committing => KjarniProgressStage::Committing,
+    //             kjarni_rag::ProgressStage::Searching => KjarniProgressStage::Searching,
+    //             kjarni_rag::ProgressStage::Reranking => KjarniProgressStage::Reranking,
+    //         };
+    //         w.report(ffi_stage, current, total, msg);
+    //     }
+    // });
+    unimplemented!()
+    // Create cancellation closure
+    // let is_cancelled = if !cancel_token.is_null() {
+    //     Some(move || crate::callback::is_cancelled(cancel_token))
+    // } else {
+    //     None
+    // };
 
-    // Create cancel check function
-    let check_cancel = move || is_cancelled(cancel_token);
+    // let result = get_runtime().block_on(async {
+    //     indexer_ref
+    //         .create_with_callback(
+    //             index_path,
+    //             &input_vec,
+    //             force != 0,
+    //             on_progress,
+    //             is_cancelled,
+    //         )
+    //         .await
+    // });
 
-    let result = get_runtime().block_on(async {
-        indexer_ref
-            .create_with_options(
-                index_path,
-                &input_vec,
-                force != 0,
-                // ffi_callback.as_ref(),
-                // &check_cancel,
-            )
-            .await
-    });
-
-    match result {
-        Ok(stats) => {
-            *out = stats.into();
-            KjarniErrorCode::Ok
-        }
-        Err(e) => {
-            set_last_error(e.to_string());
-            match e {
-                IndexerError::Cancelled => KjarniErrorCode::Cancelled,
-                IndexerError::IndexExists(_) => KjarniErrorCode::InvalidConfig,
-                IndexerError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
-                _ => KjarniErrorCode::InferenceFailed,
-            }
-        }
-    }
+    // match result {
+    //     Ok(stats) => {
+    //         *out = stats.into();
+    //         KjarniErrorCode::Ok
+    //     }
+    //     Err(e) => {
+    //         set_last_error(e.to_string());
+    //         match e {
+    //             IndexerError::Cancelled => KjarniErrorCode::Cancelled,
+    //             IndexerError::IndexExists(_) => KjarniErrorCode::InvalidConfig,
+    //             _ => KjarniErrorCode::InferenceFailed,
+    //         }
+    //     }
+    // }
 }
 
 /// Add documents to existing index
@@ -379,12 +391,11 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
         }
     }
     unimplemented!()
-    // let ffi_callback = FfiProgressCallback::new(progress_callback, user_data);
+    // let ffi_callback = FfiCallback::new(progress_callback, user_data);
     // let check_cancel = move || is_cancelled(cancel_token);
-
     // let result = get_runtime().block_on(async {
     //     indexer_ref
-    //         .add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), &check_cancel)
+    //         .add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), Some(&check_cancel))
     //         .await
     // });
 
@@ -456,19 +467,25 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
 // Accessors
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer) -> *const c_char {
-    static mut MODEL_NAME_BUF: Option<CString> = None;
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    
+    static MODEL_NAME_BUF: OnceLock<Mutex<CString>> = OnceLock::new();
 
     if indexer.is_null() {
         return ptr::null();
     }
 
     let name = (*indexer).inner.model_name();
-    MODEL_NAME_BUF = CString::new(name).ok();
-    unimplemented!()
-    // MODEL_NAME_BUF
-    //     .as_ref()
-    //     .map(|c| c.as_ptr())
-    //     .unwrap_or(ptr::null())
+    let mutex = MODEL_NAME_BUF.get_or_init(|| Mutex::new(CString::default()));
+    
+    if let Ok(mut guard) = mutex.lock() {
+        if let Ok(cstr) = CString::new(name) {
+            *guard = cstr;
+            return guard.as_ptr();
+        }
+    }
+    ptr::null()
 }
 
 #[unsafe(no_mangle)]

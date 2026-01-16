@@ -24,6 +24,14 @@ impl FeedForward {
             FeedForward::Legacy(ffn) => ffn.forward(input),
         }
     }
+    pub fn out_features(&self) -> usize {
+        match self {
+            FeedForward::Standard(ffn) => ffn.dense1_weight.shape()[0],
+            FeedForward::StandardNew(ffn) => ffn.fc1.out_features(),
+            FeedForward::SwiGLU(swiglu) => swiglu.up.out_features(),
+            FeedForward::Legacy(ffn) => ffn.dense1_weight.shape()[0],
+        }
+    }
 }
 
 

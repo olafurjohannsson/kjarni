@@ -5,6 +5,7 @@ use ndarray::{Array2, Array3, s};
 
 use crate::Normalization;
 use crate::activations::Activation;
+use crate::cpu::encoder::optimized_layer::{OptimizedFeedForward, OptimizedSelfAttention};
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
@@ -147,11 +148,28 @@ impl CpuTransformerEncoder {
             let self_attn = EncoderSelfAttention::new(
                 meta.hidden_size,
                 meta.num_attention_heads,
+                q_proj.clone(),
+                k_proj.clone(),
+                v_proj.clone(),
+                out_proj.clone(),
+            );
+            
+            //   q_proj: LinearLayer,
+            //         k_proj: LinearLayer,
+            //         v_proj: LinearLayer,
+            //         out_proj: LinearLayer,
+            //         num_heads: usize,
+            //         scale_qk: bool,
+            let optimized_attention: OptimizedSelfAttention = OptimizedSelfAttention::new(
                 q_proj,
                 k_proj,
                 v_proj,
                 out_proj,
+                meta.num_attention_heads,
+                true,
             );
+
+        
 
             // --- FEED FORWARD LOADING ---
 
@@ -186,18 +204,24 @@ impl CpuTransformerEncoder {
                 // If we have a Gate layer, it's SwiGLU (Nomic/Llama)
                 FeedForward::SwiGLU(crate::feedforward::SwiGluFeedForward::new(
                     gate,      // Gate
-                    up_proj,   // Up
-                    down_proj, // Down
+                    up_proj.clone(),   // Up
+                    down_proj.clone(), // Down
                     Activation::SilU,
                 ))
             } else {
                 // If no Gate, it's Standard (BERT/MiniLM/DistilBERT)
                 FeedForward::StandardNew(crate::feedforward::StdFeedForwardNew::new(
-                    up_proj,         // FC1
-                    down_proj,       // FC2
+                    up_proj.clone(),         // FC1
+                    down_proj.clone(),       // FC2
                     meta.activation, // Gelu/Relu
                 ))
             };
+
+             let optimized_feedforward: OptimizedFeedForward = OptimizedFeedForward::new(
+                up_proj,
+                down_proj,
+                meta.activation,
+            );
 
             // --- NORMALIZATION ---
 
@@ -237,6 +261,8 @@ impl CpuTransformerEncoder {
 
             layers.push(EncoderLayer {
                 self_attn,
+                optimized_attention: Some(optimized_attention),
+                optimized_feedforward: Some(optimized_feedforward),
                 self_attn_layer_norm,
                 feedforward,
                 ffn_layer_norm,
@@ -249,7 +275,7 @@ impl CpuTransformerEncoder {
         } else {
             None
         };
-
+        
         Ok(Self {
             embeddings,
             embeddings_layer_norm,

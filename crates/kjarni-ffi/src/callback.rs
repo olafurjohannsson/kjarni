@@ -1,10 +1,13 @@
 //! FFI callback infrastructure for progress reporting and streaming
+//!
+//! This module provides a unified callback pattern that works for:
+//! - Progress reporting during indexing
+//! - Token streaming during decoding (future)
+//! - Any other streaming/progress use case
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-use kjarni::{Progress, ProgressStage};
 
 /// Progress stage enum for FFI
 #[repr(C)]
@@ -19,20 +22,6 @@ pub enum KjarniProgressStage {
     Reranking = 6,
 }
 
-impl From<ProgressStage> for KjarniProgressStage {
-    fn from(stage: ProgressStage) -> Self {
-        match stage {
-            ProgressStage::Scanning => KjarniProgressStage::Scanning,
-            ProgressStage::Loading => KjarniProgressStage::Loading,
-            ProgressStage::Embedding => KjarniProgressStage::Embedding,
-            ProgressStage::Writing => KjarniProgressStage::Writing,
-            ProgressStage::Committing => KjarniProgressStage::Committing,
-            ProgressStage::Searching => KjarniProgressStage::Searching,
-            ProgressStage::Reranking => KjarniProgressStage::Reranking,
-        }
-    }
-}
-
 /// Progress data passed to callbacks
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -40,32 +29,35 @@ pub struct KjarniProgress {
     pub stage: KjarniProgressStage,
     pub current: usize,
     pub total: usize,
-    /// Message string (may be NULL)
     pub message: *const c_char,
 }
 
-/// Progress callback function pointer type
-/// 
-/// Arguments:
-/// - progress: Progress data
-/// - user_data: User-provided context pointer
+/// Generic callback function pointer type for progress
 pub type KjarniProgressCallbackFn = Option<extern "C" fn(progress: KjarniProgress, user_data: *mut c_void)>;
 
-/// Cancellation token handle
+/// Token callback for streaming (future use)
+#[repr(C)]
+pub struct KjarniToken {
+    pub text: *const c_char,
+    pub token_id: u32,
+    pub is_special: bool,
+}
+
+/// Generic callback for token streaming
+pub type KjarniTokenCallbackFn = Option<extern "C" fn(token: KjarniToken, user_data: *mut c_void) -> bool>;
+
+/// Cancellation token
 pub struct KjarniCancelToken {
     pub(crate) inner: Arc<AtomicBool>,
 }
 
-/// Create a new cancellation token
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
-    let token = KjarniCancelToken {
+    Box::into_raw(Box::new(KjarniCancelToken {
         inner: Arc::new(AtomicBool::new(false)),
-    };
-    Box::into_raw(Box::new(token))
+    }))
 }
 
-/// Cancel the operation associated with this token
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToken) {
     if !token.is_null() {
@@ -73,16 +65,11 @@ pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToke
     }
 }
 
-/// Check if token is cancelled
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_is_cancelled(token: *const KjarniCancelToken) -> bool {
-    if token.is_null() {
-        return false;
-    }
-    (*token).inner.load(Ordering::SeqCst)
+    if token.is_null() { false } else { (*token).inner.load(Ordering::SeqCst) }
 }
 
-/// Reset the cancellation token
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken) {
     if !token.is_null() {
@@ -90,7 +77,6 @@ pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken
     }
 }
 
-/// Free a cancellation token
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_free(token: *mut KjarniCancelToken) {
     if !token.is_null() {
@@ -98,55 +84,80 @@ pub unsafe extern "C" fn kjarni_cancel_token_free(token: *mut KjarniCancelToken)
     }
 }
 
-/// Helper to invoke FFI callback from Rust
-pub(crate) struct FfiProgressCallback {
-    callback: KjarniProgressCallbackFn,
-    user_data: *mut c_void,
-    message_buffer: std::cell::RefCell<std::ffi::CString>,
+/// Check if cancelled (internal helper)
+pub fn is_cancelled(token: *const KjarniCancelToken) -> bool {
+    if token.is_null() { false } else { unsafe { (*token).inner.load(Ordering::SeqCst) } }
 }
 
-// SAFETY: We're careful about the raw pointer usage
-unsafe impl Send for FfiProgressCallback {}
-unsafe impl Sync for FfiProgressCallback {}
+/// Wrapper that adapts FFI callback to Rust closure
+/// This is the key abstraction that makes callbacks reusable
+pub struct FfiCallback<T> {
+    callback: Option<extern "C" fn(T, *mut c_void)>,
+    user_data: *mut c_void,
+}
 
-impl FfiProgressCallback {
-    pub fn new(callback: KjarniProgressCallbackFn, user_data: *mut c_void) -> Option<Self> {
-        callback.map(|_| Self {
-            callback,
-            user_data,
-            message_buffer: std::cell::RefCell::new(std::ffi::CString::default()),
-        })
+unsafe impl<T> Send for FfiCallback<T> {}
+unsafe impl<T> Sync for FfiCallback<T> {}
+
+impl<T> FfiCallback<T> {
+    pub fn new(callback: Option<extern "C" fn(T, *mut c_void)>, user_data: *mut c_void) -> Self {
+        Self { callback, user_data }
     }
     
-    pub fn report(&self, progress: &Progress, message: Option<&str>) {
+    pub fn is_some(&self) -> bool {
+        self.callback.is_some()
+    }
+    
+    pub fn call(&self, value: T) {
         if let Some(cb) = self.callback {
-            let message_ptr = if let Some(msg) = message {
-                if let Ok(cstr) = std::ffi::CString::new(msg) {
-                    *self.message_buffer.borrow_mut() = cstr;
-                    self.message_buffer.borrow().as_ptr()
-                } else {
-                    std::ptr::null()
-                }
-            } else {
-                std::ptr::null()
-            };
-            
-            let ffi_progress = KjarniProgress {
-                stage: progress.stage.into(),
-                current: progress.current,
-                total: progress.total.unwrap_or(0),
-                message: message_ptr,
-            };
-            
-            cb(ffi_progress, self.user_data);
+            cb(value, self.user_data);
         }
     }
 }
 
-/// Check if a cancel token is cancelled (helper for internal use)
-pub(crate) fn is_cancelled(token: *const KjarniCancelToken) -> bool {
-    if token.is_null() {
-        return false;
-    }
-    unsafe { (*token).inner.load(Ordering::SeqCst) }
+/// Progress callback wrapper with message buffer
+pub struct ProgressCallbackWrapper {
+    inner: FfiCallback<KjarniProgress>,
+    message_buf: std::cell::UnsafeCell<Option<CString>>,
 }
+
+unsafe impl Send for ProgressCallbackWrapper {}
+unsafe impl Sync for ProgressCallbackWrapper {}
+
+impl ProgressCallbackWrapper {
+    pub fn new(callback: KjarniProgressCallbackFn, user_data: *mut c_void) -> Option<Self> {
+        if callback.is_some() {
+            Some(Self {
+                inner: FfiCallback::new(callback, user_data),
+                message_buf: std::cell::UnsafeCell::new(None),
+            })
+        } else {
+            None
+        }
+    }
+    
+    pub fn report(&self, stage: KjarniProgressStage, current: usize, total: usize, message: Option<&str>) {
+        let message_ptr = if let Some(msg) = message {
+            if let Ok(cstr) = CString::new(msg) {
+                unsafe {
+                    *self.message_buf.get() = Some(cstr);
+                    (*self.message_buf.get()).as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null())
+                }
+            } else {
+                std::ptr::null()
+            }
+        } else {
+            std::ptr::null()
+        };
+        
+        self.inner.call(KjarniProgress {
+            stage,
+            current,
+            total,
+            message: message_ptr,
+        });
+    }
+}
+
+
+
