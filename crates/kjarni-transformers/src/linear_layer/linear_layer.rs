@@ -355,26 +355,90 @@ impl LinearLayer {
     /// let output = layer.matmul(&input.view());
     /// assert_eq!(output.shape(), &[1, 4096]);
     /// ```
-    #[inline]
-    pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
-        let mut result = match &self.data {
-            LinearData::F32(w) => match self.f32_strategy {
-                F32MatmulStrategy::Faer => tensor_ops::matmul_2d_faer(input, &w.view()),
-                F32MatmulStrategy::CustomSimd => ops::matmul::matmul_2d_cpu_f32(input, &w.view()),
-                F32MatmulStrategy::FaerOutIn => ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view())
-            },
-            LinearData::BF16(w) => ops::matmul::matmul_2d_cpu_bf16(input, &w.view()),
-            LinearData::Q8_0(w) => ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks),
-            LinearData::Q6_K(w) => ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks),
-            LinearData::Q4_K(w) => ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks),
-        };
-
-        if let Some(b) = &self.bias {
-            result.outer_iter_mut().for_each(|mut row| row += b);
+#[inline]
+pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
+    match &self.data {
+        LinearData::F32(w) => match self.f32_strategy {
+            F32MatmulStrategy::CustomSimd => {
+                let (m, _) = input.dim();
+                if m == 1 {
+                    // Decode path - add bias manually after
+                    let mut result = ops::matmul::matmul_2d_cpu_f32(input, &w.view());
+                    if let Some(b) = &self.bias {
+                        // Single row, just add directly
+                        let out = result.as_slice_mut().unwrap();
+                        let bias = b.as_slice().unwrap();
+                        for (o, &b) in out.iter_mut().zip(bias.iter()) {
+                            *o += b;
+                        }
+                    }
+                    result
+                } else {
+                    // Batch path - pass bias to kernel (fused, faster)
+                    ops::matmul::matmul_2d_cpu_f32_batched(
+                        input, 
+                        &w.view(), 
+                        self.bias.as_ref().map(|b| b.as_slice().unwrap())
+                    )
+                }
+            }
+            F32MatmulStrategy::Faer => {
+                let mut result = tensor_ops::matmul_2d_faer(input, &w.view());
+                if let Some(b) = &self.bias {
+                    for mut row in result.rows_mut() {
+                        row += b;
+                    }
+                }
+                result
+            }
+            F32MatmulStrategy::FaerOutIn => {
+                let mut result = ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view());
+                if let Some(b) = &self.bias {
+                    for mut row in result.rows_mut() {
+                        row += b;
+                    }
+                }
+                result
+            }
+        },
+        LinearData::BF16(w) => {
+            let mut result = ops::matmul::matmul_2d_cpu_bf16(input, &w.view());
+            if let Some(b) = &self.bias {
+                for mut row in result.rows_mut() {
+                    row += b;
+                }
+            }
+            result
         }
-
-        result
+        LinearData::Q8_0(w) => {
+            let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
+            if let Some(b) = &self.bias {
+                for mut row in result.rows_mut() {
+                    row += b;
+                }
+            }
+            result
+        }
+        LinearData::Q6_K(w) => {
+            let mut result = ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks);
+            if let Some(b) = &self.bias {
+                for mut row in result.rows_mut() {
+                    row += b;
+                }
+            }
+            result
+        }
+        LinearData::Q4_K(w) => {
+            let mut result = ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks);
+            if let Some(b) = &self.bias {
+                for mut row in result.rows_mut() {
+                    row += b;
+                }
+            }
+            result
+        }
     }
+}
     /// Converts this layer to a quantized format.
     ///
     /// Creates a new `LinearLayer` with quantized weights for reduced memory usage.

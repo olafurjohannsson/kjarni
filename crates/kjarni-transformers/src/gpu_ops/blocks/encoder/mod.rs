@@ -1,13 +1,13 @@
+use crate::WgpuContext;
 use crate::activations;
+use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
 use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
 use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::Kernel;
-use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::GpuAttentionWeights};
 use crate::traits::ModelMetadata;
-use crate::WgpuContext;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -61,7 +61,6 @@ pub struct GpuEncoderLayer {
     add: GpuAdd,
 }
 
-
 impl GpuEncoderLayer {
     /// Creates a new encoder layer.
     ///
@@ -82,7 +81,7 @@ impl GpuEncoderLayer {
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
         self_attn_ln_weights: GpuNormalizationWeights, // Changed to Enum
-        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights,             // Changed to Enum
+        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights, // Changed to Enum
         ffn_ln_weights: GpuNormalizationWeights,       // Changed to Enum
         activation: activations::Activation,
         meta: &ModelMetadata,
@@ -93,17 +92,19 @@ impl GpuEncoderLayer {
         // Initialize Attention
         let self_attn = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
 
-        // Initialize Normalization (Logic to pick LayerNorm vs RMSNorm moved to caller usually, 
+        // Initialize Normalization (Logic to pick LayerNorm vs RMSNorm moved to caller usually,
         // but if passed as Enum weights, we need matching Enum compute).
         // Note: The Weights Enum usually dictates the Compute Enum type.
         // Assuming caller passed correct weights, we create matching compute ops.
 
         let create_norm = |w: &GpuNormalizationWeights| -> GpuNormalization {
             match w {
-                GpuNormalizationWeights::LayerNorm(_) =>
-                    GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps)),
-                GpuNormalizationWeights::RMSNorm(_) =>
-                    GpuNormalization::RMSNorm(crate::gpu_ops::blocks::rms_norm::GpuRMSNorm::new(context, meta.norm_eps)),
+                GpuNormalizationWeights::LayerNorm(_) => {
+                    GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps))
+                }
+                GpuNormalizationWeights::RMSNorm(_) => GpuNormalization::RMSNorm(
+                    crate::gpu_ops::blocks::rms_norm::GpuRMSNorm::new(context, meta.norm_eps),
+                ),
             }
         };
 
@@ -111,7 +112,9 @@ impl GpuEncoderLayer {
         let ffn_layer_norm = create_norm(&ffn_ln_weights);
 
         // Initialize FFN (Enum handles dispatch internally)
-        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForwardStd::new(context, activation)?);
+        let feedforward = crate::gpu_ops::blocks::GpuFeedForward::Standard(GpuFeedForwardStd::new(
+            context, activation,
+        )?);
 
         // Primitives
         let add = GpuAdd::new(context);
@@ -190,25 +193,24 @@ impl GpuEncoderLayer {
 
         // 3. Residual connection
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
-        self.add.encode(encoder, &[residual, &attn_out], &attn_block_output);
+        self.add
+            .encode(encoder, &[residual, &attn_out], &attn_block_output);
 
         // 4. Pre-norm before FFN
         let residual_2 = &attn_block_output;
         let ln2_out = pool.get(residual_2.shape().to_vec());
-        self.ffn_layer_norm.encode(
-            encoder,
-            &self.ffn_ln_weights,
-            residual_2,
-            &ln2_out,
-        );
+        self.ffn_layer_norm
+            .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
 
         // 5. FFN
         let ffn_out = GpuTensorPool::get(pool, ln2_out.shape().to_vec());
-        self.feedforward.encode(encoder, &self.ff_weights, &ln2_out, &ffn_out, pool);
+        self.feedforward
+            .encode(encoder, &self.ff_weights, &ln2_out, &ffn_out, pool);
 
         // 6. Residual connection
         let final_output = pool.get(residual_2.shape().to_vec());
-        self.add.encode(encoder, &[residual_2, &ffn_out], &final_output);
+        self.add
+            .encode(encoder, &[residual_2, &ffn_out], &final_output);
 
         Ok(final_output)
     }
@@ -249,248 +251,40 @@ impl GpuEncoderLayer {
         // 3. FFN
         let residual_2 = &attn_block_output;
         let ffn_out = GpuTensorPool::get(pool, residual_2.shape().to_vec());
-        self.feedforward.encode(encoder, &self.ff_weights, residual_2, &ffn_out, pool);
+        self.feedforward
+            .encode(encoder, &self.ff_weights, residual_2, &ffn_out, pool);
 
         // 4. Residual + LayerNorm
         let add_2_out = pool.get(residual_2.shape().to_vec());
-        self.add.encode(encoder, &[residual_2, &ffn_out], &add_2_out);
+        self.add
+            .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
 
         let final_output = pool.get(residual_2.shape().to_vec());
-        self.ffn_layer_norm.encode(
-            encoder,
-            &self.ffn_ln_weights,
-            &add_2_out,
-            &final_output,
-        );
+        self.ffn_layer_norm
+            .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
 
         Ok(final_output)
     }
 }
-// use anyhow::Result;
-// use std::sync::Arc;
-
-// use crate::WgpuContext;
-// use crate::activations;
-// use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
-// use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-// use crate::gpu_ops::blocks::ffn::{GpuFeedForward, GpuFeedForwardWeights};
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
-// use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-// use crate::gpu_ops::primitives::add::GpuAdd;
-// use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
-// use crate::traits::ModelMetadata;
-
-// pub struct GpuEncoderLayer {
-//     self_attn: GpuAttention,
-//     attention: GpuEncoderSelfAttention,
-//     self_attn_weights: GpuAttentionWeights,
-//     self_attn_layer_norm: GpuLayerNorm,
-//     self_attn_ln_weights: GpuLayerNormWeights,
-
-//     feedforward: GpuFeedForward,
-//     ff_weights: GpuFeedForwardWeights,
-//     ffn_layer_norm: GpuLayerNorm,
-//     ffn_ln_weights: GpuLayerNormWeights,
-
-//     add: GpuAdd,
-// }
-
-// impl GpuEncoderLayer {
-//     pub fn new(
-//         context: &Arc<WgpuContext>,
-//         self_attn_weights: GpuAttentionWeights,
-//         self_attn_ln_weights: GpuLayerNormWeights,
-//         ff_weights: GpuFeedForwardWeights,
-//         ffn_ln_weights: GpuLayerNormWeights,
-//         activation: activations::Activation,
-//         meta: &ModelMetadata,
-//     ) -> Result<Self> {
-//         let hidden_size = meta.hidden_size as u32;
-//         let num_heads = meta.num_attention_heads as u32;
-
-//         // In Encoders, KV heads usually equal Attention heads.
-//         // Metadata provides this logic (falling back to num_heads if not specified).
-//         let num_kv_heads = meta.num_kv_heads as u32;
-
-//         // 1. Initialize Attention Engine
-//         let self_attn = GpuAttention::new(context, hidden_size, num_heads, num_kv_heads);
-
-//         // 2. Initialize LayerNorm Engines (using Metadata eps)
-//         let self_attn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
-//         let ffn_layer_norm = GpuLayerNorm::new(context, meta.norm_eps);
-
-//         // 3. Initialize FFN Engine
-//         let feedforward = GpuFeedForward::new(context, activation)?;
-
-//         // 4. Initialize Math Engine
-//         let add = GpuAdd::new(context);
-
-//         let attention = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
-
-//         Ok(Self {
-//             self_attn,
-//             attention,
-//             self_attn_weights,
-//             self_attn_layer_norm,
-//             self_attn_ln_weights,
-//             feedforward,
-//             ff_weights,
-//             ffn_layer_norm,
-//             ffn_ln_weights,
-//             add,
-//         })
-//     }
-
-//     pub fn forward(
-//         &self,
-//         encoder: &mut wgpu::CommandEncoder,
-//         hidden_states: &GpuTensor,
-//         attention_mask: &GpuTensor,
-//         meta: &ModelMetadata, // Use Metadata struct
-//         pool: &mut GpuTensorPool,
-//     ) -> Result<GpuTensor> {
-//         // Dispatch based on architectural style defined in metadata
-//         // BERT/RoBERTa = Post-Norm (false)
-//         // Llama/Modern Encoders = Pre-Norm (true)
-//         if meta.is_prenorm {
-//             self.forward_prenorm(encoder, hidden_states, attention_mask, pool)
-//         } else {
-//             self.forward_postnorm(encoder, hidden_states, attention_mask, pool)
-//         }
-//     }
-
-//     fn forward_prenorm(
-//         &self,
-//         encoder: &mut wgpu::CommandEncoder,
-//         hidden_states: &GpuTensor,
-//         attention_mask: &GpuTensor,
-//         pool: &mut GpuTensorPool,
-//     ) -> Result<GpuTensor> {
-//         let residual = hidden_states;
-
-//         let ln1_out = pool.get(hidden_states.shape().to_vec());
-//         self.self_attn_layer_norm.encode(
-//             encoder,
-//             &self.self_attn_ln_weights,
-//             hidden_states,
-//             &ln1_out,
-//         );
-
-//         let (new_k, new_v) =
-//             self.self_attn
-//                 .project_kv(encoder, &ln1_out, &self.self_attn_weights, 0, pool, None);
-//         let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
-//         let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
-
-//         let attn_out = self.self_attn.attend(
-//             encoder,
-//             &ln1_out, // Query
-//             &self.self_attn_weights,
-//             attention_mask,
-//             false,                        // is_causal is false for encoders
-//             (&new_k_split, &new_v_split), // K and V are from the input itself
-//             0,                            // No position offset
-//             pool,
-//         );
-
-//         let attn_block_output = pool.get(hidden_states.shape().to_vec());
-//         self.add
-//             .encode(encoder, &[residual, &attn_out], &attn_block_output);
-
-//         let residual_2 = &attn_block_output;
-
-//         let ln2_out = pool.get(residual_2.shape().to_vec());
-//         self.ffn_layer_norm
-//             .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
-
-//         let ffn_out = self
-//             .feedforward
-//             .encode(encoder, &ln2_out, &self.ff_weights, pool);
-
-//         let final_output = pool.get(residual_2.shape().to_vec());
-//         self.add
-//             .encode(encoder, &[residual_2, &ffn_out], &final_output);
-
-//         Ok(final_output)
-//     }
-
-//     /// The forward pass logic for a Post-Normalization architecture (e.g., BERT style).
-//     pub fn forward_postnorm(
-//         &self,
-//         encoder: &mut wgpu::CommandEncoder,
-//         hidden_states: &GpuTensor,
-//         attention_mask: &GpuTensor,
-//         pool: &mut GpuTensorPool,
-//     ) -> Result<GpuTensor> {
-//         let residual = hidden_states;
-
-//         let (new_k, new_v) = self.self_attn.project_kv(
-//             encoder,
-//             hidden_states,
-//             &self.self_attn_weights,
-//             0,
-//             pool,
-//             None,
-//         );
-//         let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
-//         let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
-
-//         let attn_out = self.self_attn.attend(
-//             encoder,
-//             hidden_states, // Query
-//             &self.self_attn_weights,
-//             attention_mask,
-//             false, // is_causal
-//             (&new_k_split, &new_v_split),
-//             0,
-//             pool,
-//         );
-
-//         let add_1_out = pool.get(hidden_states.shape().to_vec());
-//         self.add.encode(encoder, &[residual, &attn_out], &add_1_out);
-
-//         let attn_block_output = pool.get(hidden_states.shape().to_vec());
-//         self.self_attn_layer_norm.encode(
-//             encoder,
-//             &self.self_attn_ln_weights,
-//             &add_1_out,
-//             &attn_block_output,
-//         );
-
-//         let residual_2 = &attn_block_output;
-
-//         let ffn_out = self
-//             .feedforward
-//             .encode(encoder, residual_2, &self.ff_weights, pool);
-
-//         let add_2_out = pool.get(residual_2.shape().to_vec());
-//         self.add
-//             .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
-
-//         let final_output = pool.get(residual_2.shape().to_vec());
-//         self.ffn_layer_norm
-//             .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
-
-//         Ok(final_output)
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WgpuContext;
     use crate::activations::Activation;
     use crate::cpu::encoder::encoder_layer::EncoderLayer;
     use crate::cpu::encoder::encoder_self_attention::EncoderSelfAttention;
     use crate::feedforward::{FeedForward, StdFeedForward};
+    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
-    use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::normalization::LayerNorm;
-    use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
-    use crate::WgpuContext;
+    use crate::traits::{
+        AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout,
+    };
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
@@ -498,13 +292,14 @@ mod tests {
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()
     }
-#[tokio::test]
+    #[tokio::test]
     async fn test_bart_weights_loading_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
 
         // Path to your model
-        let model_path = std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
-        
+        let model_path =
+            std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
+
         // Skip test if file doesn't exist (prevents CI failures if local path is missing)
         if !model_path.exists() {
             println!("Skipping test: Model path not found at {:?}", model_path);
@@ -519,16 +314,11 @@ mod tests {
         // --- Method 1: The "Production" Path (Zero-Copy) ---
         // Uses GpuTensor::from_model_weights. This exercises the logic we just wrote.
         // We pass None for target_dt to accept the file's native dtype (likely F32 for BART).
-        let q_gpu_production = GpuTensor::from_model_weights(
-            &ctx, 
-            &weights, 
-            tensor_name, 
-            None, 
-            "production_q"
-        )?;
+        let q_gpu_production =
+            GpuTensor::from_model_weights(&ctx, &weights, tensor_name, None, "production_q")?;
 
         // --- Method 2: The "Reference" Path (CPU Roundtrip) ---
-        // Forces a load to CPU RAM via ndarray, then uploads. 
+        // Forces a load to CPU RAM via ndarray, then uploads.
         // This is our "ground truth" for value correctness.
         let q_cpu_arr = weights.get_array2(tensor_name)?;
         let q_gpu_reference = GpuTensor::from_ndarray(&ctx, &q_cpu_arr)?;
@@ -537,13 +327,12 @@ mod tests {
 
         // 1. Check Metadata
         assert_eq!(
-            q_gpu_production.shape(), 
-            q_gpu_reference.shape(), 
+            q_gpu_production.shape(),
+            q_gpu_reference.shape(),
             "Shapes mismatch between loading methods"
         );
         assert_eq!(
-            q_gpu_production.dtype, 
-            q_gpu_reference.dtype, 
+            q_gpu_production.dtype, q_gpu_reference.dtype,
             "DType mismatch (Production: {:?}, Reference: {:?})",
             q_gpu_production.dtype, q_gpu_reference.dtype
         );
@@ -582,16 +371,18 @@ mod tests {
             }
         }
 
-        assert!(max_diff < 1e-5, "Weights differ significantly based on loading method!");
+        assert!(
+            max_diff < 1e-5,
+            "Weights differ significantly based on loading method!"
+        );
 
-        // 5. Cleanup 
+        // 5. Cleanup
         // (Optional: clear mmap cache if this was a huge model to free RAM for other tests)
         drop(weights); // Drop struct first
         crate::weights::clear_mmap_cache();
 
         Ok(())
     }
-
 
     fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
         assert_eq!(cpu.shape(), gpu.shape(), "{} shape mismatch", name);
@@ -678,7 +469,11 @@ mod tests {
                 LinearLayer::new_f32(v_w.clone(), Some(v_b.clone())),
                 LinearLayer::new_f32(o_w.clone(), Some(o_b.clone())),
             );
-            let self_attn_ln = crate::Normalization::LayerNorm(LayerNorm::new(attn_ln_w.clone(), attn_ln_b.clone(), eps));
+            let self_attn_ln = crate::Normalization::LayerNorm(LayerNorm::new(
+                attn_ln_w.clone(),
+                attn_ln_b.clone(),
+                eps,
+            ));
 
             let ffn = FeedForward::Standard(StdFeedForward::new(
                 fc1_w.clone(),
@@ -687,7 +482,11 @@ mod tests {
                 fc2_b.clone(),
                 Activation::Gelu,
             ));
-            let ffn_ln = crate::Normalization::LayerNorm(LayerNorm::new(ffn_ln_w.clone(), ffn_ln_b.clone(), eps));
+            let ffn_ln = crate::Normalization::LayerNorm(LayerNorm::new(
+                ffn_ln_w.clone(),
+                ffn_ln_b.clone(),
+                eps,
+            ));
 
             EncoderLayer::new(self_attn, self_attn_ln, ffn, ffn_ln)
         };
@@ -705,17 +504,20 @@ mod tests {
                 Some(GpuTensor::from_ndarray(&ctx, &o_b)?),
             )?;
 
-            let self_attn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
-                GpuTensor::from_ndarray(&ctx, &attn_ln_w)?,
-                GpuTensor::from_ndarray(&ctx, &attn_ln_b)?,
-            )?);
+            let self_attn_ln_weights =
+                GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
+                    GpuTensor::from_ndarray(&ctx, &attn_ln_w)?,
+                    GpuTensor::from_ndarray(&ctx, &attn_ln_b)?,
+                )?);
 
-            let ff_weights = crate::gpu_ops::blocks::GpuFeedForwardWeights::Standard(GpuFeedForwardWeightsStd::new(
-                GpuTensor::from_ndarray(&ctx, &fc1_w)?,
-                GpuTensor::from_ndarray(&ctx, &fc1_b)?,
-                GpuTensor::from_ndarray(&ctx, &fc2_w)?,
-                GpuTensor::from_ndarray(&ctx, &fc2_b)?,
-            )?);
+            let ff_weights = crate::gpu_ops::blocks::GpuFeedForwardWeights::Standard(
+                GpuFeedForwardWeightsStd::new(
+                    GpuTensor::from_ndarray(&ctx, &fc1_w)?,
+                    GpuTensor::from_ndarray(&ctx, &fc1_b)?,
+                    GpuTensor::from_ndarray(&ctx, &fc2_w)?,
+                    GpuTensor::from_ndarray(&ctx, &fc2_b)?,
+                )?,
+            );
 
             let ffn_ln_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                 GpuTensor::from_ndarray(&ctx, &ffn_ln_w)?,
@@ -797,9 +599,9 @@ mod tests {
         fn model_type(&self) -> &str {
             "mock"
         }
-fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
         fn metadata(&self) -> crate::traits::ModelMetadata {
             crate::traits::ModelMetadata {
                 decoder_layers: None,

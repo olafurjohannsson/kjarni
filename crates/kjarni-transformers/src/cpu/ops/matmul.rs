@@ -361,7 +361,6 @@ pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) 
 /// # Performance
 ///
 /// Uses AVX2+FMA on x86_64, NEON on aarch64, with scalar fallback.
-/// For maximum performance on F32 weights, consider using the `faer` library
 /// via [`crate::utils::tensor_ops::matmul_2d_faer`] instead.
 pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim(); // m = batch size, k = input features
