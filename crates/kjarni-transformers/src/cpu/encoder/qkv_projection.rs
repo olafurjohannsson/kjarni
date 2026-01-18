@@ -386,7 +386,7 @@ mod tests {
             create_test_layer(hidden, hidden),
         );
         let max_batch = 1;
-        let max_seq = tokens;  // 256
+        let max_seq = tokens; // 256
         let mut buffers =
             EncoderBuffers::new(max_batch, max_seq, hidden, num_heads, intermediate, true);
         let input = Array2::from_elem((tokens, hidden), 0.5f32);
@@ -738,9 +738,9 @@ mod qkv_projection_tests {
         let hidden = 384;
         let tokens = 256;
         let intermediate = 1536;
-        let max_batch = 32;
+        let max_batch = 1;
         let num_heads = 6;
-        let max_seq = 1024;
+        let max_seq = tokens;
 
         let q = make_linear_layer(hidden, hidden, 0, true);
         let k = make_linear_layer(hidden, hidden, 1000, true);
@@ -757,9 +757,9 @@ mod qkv_projection_tests {
             EncoderBuffers::new(max_batch, max_seq, hidden, num_heads, intermediate, true);
         proj.forward_noalloc(&input.view(), &mut buffers);
 
-        let q_diff = max_diff(&q_alloc, &buffers.q);
-        let k_diff = max_diff(&k_alloc, &buffers.k);
-        let v_diff = max_diff(&v_alloc, &buffers.v);
+        let q_diff = max_diff(&q_alloc, &buffers.q.slice(s![..tokens, ..]).to_owned());
+        let k_diff = max_diff(&k_alloc, &buffers.k.slice(s![..tokens, ..]).to_owned());
+        let v_diff = max_diff(&v_alloc, &buffers.v.slice(s![..tokens, ..]).to_owned());
 
         println!("\n=== test_noalloc_fused_matches_alloc ===");
         println!("Q diff: {:.2e}", q_diff);
@@ -777,7 +777,7 @@ mod qkv_projection_tests {
         let tokens = 2880;
         let intermediate = 1536;
         let max_batch = 1;
-        let max_seq = 1024;
+        let max_seq = tokens;
         let num_heads = 6;
 
         let q = make_linear_layer(hidden, hidden, 0, true);
@@ -802,9 +802,18 @@ mod qkv_projection_tests {
         fused.forward_noalloc(&input.view(), &mut buffers_fused);
         separate.forward_noalloc(&input.view(), &mut buffers_sep);
 
-        let q_diff = max_diff(&buffers_fused.q, &buffers_sep.q);
-        let k_diff = max_diff(&buffers_fused.k, &buffers_sep.k);
-        let v_diff = max_diff(&buffers_fused.v, &buffers_sep.v);
+        let q_diff = max_diff(
+            &buffers_fused.q.slice(s![..tokens, ..]).to_owned(),
+            &buffers_sep.q.slice(s![..tokens, ..]).to_owned(),
+        );
+        let k_diff = max_diff(
+            &buffers_fused.k.slice(s![..tokens, ..]).to_owned(),
+            &buffers_sep.k.slice(s![..tokens, ..]).to_owned(),
+        );
+        let v_diff = max_diff(
+            &buffers_fused.v.slice(s![..tokens, ..]).to_owned(),
+            &buffers_sep.v.slice(s![..tokens, ..]).to_owned(),
+        );
 
         println!("\n=== test_noalloc_fused_matches_noalloc_separate ===");
         println!("Config: tokens={}, hidden={}", tokens, hidden);
@@ -1419,13 +1428,13 @@ mod qkv_strategy_benchmark {
         println!("║           Testing the high-level API                                 ║");
         println!("╚══════════════════════════════════════════════════════════════════════╝");
 
-    let configs = [
-        // (name, tokens, hidden, intermediate, num_heads, iterations, warmup)
-        ("Decode", 1, 384, 1536, 6, 1000, 100),
-        ("Small batch", 64, 384, 1536, 6, 200, 20),
-        ("MiniLM batch", 2880, 384, 1536, 6, 50, 5),
-        ("BERT-base", 2048, 768, 3072, 12, 30, 3),
-    ];
+        let configs = [
+            // (name, tokens, hidden, intermediate, num_heads, iterations, warmup)
+            ("Decode", 1, 384, 1536, 6, 1000, 100),
+            ("Small batch", 64, 384, 1536, 6, 200, 20),
+            ("MiniLM batch", 2880, 384, 1536, 6, 50, 5),
+            ("BERT-base", 2048, 768, 3072, 12, 30, 3),
+        ];
 
         for (name, tokens, hidden, intermediate, num_heads, iterations, warmup) in configs {
             let q = make_linear_layer(hidden, hidden, 0, true);

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
+use crate::cpu::strategy::ComputeStrategy;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
@@ -60,20 +61,35 @@ pub trait EncoderLanguageModel: LanguageModel {
         attention_mask: &Array2<u32>,
     ) -> Result<(Array3<f32>, Array2<f32>)> {
         let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
+        let (batch_size, seq_len) = input_ids.dim();
+        let tokens = batch_size * seq_len;
+        let hidden = self.hidden_size();
+        let compute_strategy = ComputeStrategy::select(tokens, hidden);
 
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
             let encoder: &dyn CpuEncoder = ops.encoder();
-            let (batch_size, seq_len) = input_ids.dim();
-            
-            let mut buffers = encoder.create_buffers(
-                batch_size,
-                seq_len,
-            );
 
-            encoder
+            let hidden_states = if compute_strategy.use_scratch_buffers == false {
+                // Allocating was faster for medium batches (16-512 tokens)
+                encoder
+                    .forward(input_ids, &attention_mask_f32, None)?
+                    .last_hidden_state
+            } else {
+                let mut buffers = encoder.create_buffers(batch_size, seq_len);
+                #[cfg(debug_assertions)]
+                {
+                    let buf_desc: String = buffers.memory_breakdown();
+                    println!(
+                        "Encoder buffers allocated for batch_size={}, seq_len={}: {}",
+                        batch_size, seq_len, buf_desc
+                    );
+                }
+                encoder
                     .forward_with_buffers(input_ids, &attention_mask_f32, None, &mut buffers)?
                     .last_hidden_state
+            };
 
+            hidden_states
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
                 .context()
@@ -151,9 +167,6 @@ pub trait EncoderLanguageModel: LanguageModel {
         let input_ids = Array2::from_shape_vec((batch_size, sequence_length), input_ids_vec)?;
         let attention_mask =
             Array2::from_shape_vec((batch_size, sequence_length), attention_mask_vec)?;
-
-        
-
 
         self.get_hidden_states_batch_from_ids(&input_ids, &attention_mask)
             .await

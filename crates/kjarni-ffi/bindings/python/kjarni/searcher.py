@@ -1,7 +1,30 @@
-"""High-level Searcher API."""
+"""High-level Searcher API for Kjarni.
 
-from typing import Optional, List, Dict, Any, NamedTuple
-from ctypes import c_void_p, c_char_p, c_size_t, c_int32, c_float, c_bool, byref, POINTER
+This module provides a Pythonic interface to the Kjarni searcher, which performs
+semantic, keyword, and hybrid search over vector indexes created by the Indexer.
+
+Example:
+    >>> from kjarni import Searcher, SearchMode
+    >>> 
+    >>> # Create a searcher
+    >>> searcher = Searcher(model="minilm-l6-v2")
+    >>> 
+    >>> # Search an index
+    >>> results = searcher.search("my_index", "What is machine learning?")
+    >>> for r in results:
+    ...     print(f"{r.score:.4f}: {r.text[:50]}...")
+    >>> 
+    >>> # Search with options
+    >>> results = searcher.search(
+    ...     "my_index",
+    ...     "neural networks",
+    ...     mode=SearchMode.SEMANTIC,
+    ...     top_k=5,
+    ... )
+"""
+
+from typing import Optional, List, Dict, Any
+from ctypes import c_void_p, c_char_p, c_size_t, c_int32, c_float, c_bool, byref
 from dataclasses import dataclass
 from enum import Enum
 
@@ -12,7 +35,13 @@ from ._ffi import (
 
 
 class SearchMode(Enum):
-    """Search mode."""
+    """Search mode determining how queries are processed.
+    
+    Attributes:
+        KEYWORD: BM25-based text matching only
+        SEMANTIC: Embedding-based vector similarity only
+        HYBRID: Combined keyword + semantic with reciprocal rank fusion (recommended)
+    """
     KEYWORD = KjarniSearchMode.KEYWORD
     SEMANTIC = KjarniSearchMode.SEMANTIC
     HYBRID = KjarniSearchMode.HYBRID
@@ -20,7 +49,14 @@ class SearchMode(Enum):
 
 @dataclass
 class SearchResult:
-    """Single search result."""
+    """A single search result.
+    
+    Attributes:
+        score: Relevance score (higher is better, scale varies by search mode)
+        document_id: Document ID within the index
+        text: The matched text chunk
+        metadata: Associated metadata (source file, chunk index, custom fields)
+    """
     score: float
     document_id: int
     text: str
@@ -30,11 +66,34 @@ class SearchResult:
 class Searcher:
     """Document searcher for RAG applications.
     
+    The Searcher performs queries against vector indexes created by the Indexer.
+    It supports three search modes:
+    
+    - **Keyword**: BM25 text matching, good for exact term matching
+    - **Semantic**: Vector similarity, good for conceptual matching
+    - **Hybrid**: Combined approach using reciprocal rank fusion (recommended)
+    
+    Optionally, a cross-encoder reranker can be configured to improve result
+    quality by re-scoring the top candidates.
+    
+    Args:
+        model: Embedding model name (must match the model used to create the index)
+        device: Compute device - "cpu" or "gpu" (default: "cpu")
+        cache_dir: Directory to cache downloaded models (default: system cache)
+        rerank_model: Optional cross-encoder model for reranking results
+        default_mode: Default search mode (default: HYBRID)
+        default_top_k: Default number of results (default: 10)
+        quiet: Suppress progress output (default: False)
+    
     Example:
+        >>> # Basic searcher
         >>> searcher = Searcher(model="minilm-l6-v2")
-        >>> results = searcher.search("my_index", "What is Python?")
-        >>> for r in results:
-        ...     print(f"{r.score:.4f}: {r.text[:50]}...")
+        >>> 
+        >>> # Searcher with reranking
+        >>> searcher = Searcher(
+        ...     model="minilm-l6-v2",
+        ...     rerank_model="ms-marco-MiniLM-L-6-v2",
+        ... )
     """
 
     def __init__(
@@ -47,17 +106,6 @@ class Searcher:
         default_top_k: int = 10,
         quiet: bool = False,
     ):
-        """Create a new Searcher.
-        
-        Args:
-            model: Embedding model name (must match index)
-            device: "cpu" or "gpu"
-            cache_dir: Directory to cache models
-            rerank_model: Optional cross-encoder for reranking
-            default_mode: Default search mode
-            default_top_k: Default number of results
-            quiet: Suppress progress output
-        """
         config = _lib.kjarni_searcher_config_default()
         config.device = KjarniDevice.GPU if device == "gpu" else KjarniDevice.CPU
         config.model_name = model.encode("utf-8")
@@ -93,18 +141,41 @@ class Searcher:
         """Search an index.
         
         Args:
-            index_path: Path to the index
-            query: Search query
+            index_path: Path to the index directory
+            query: Search query string
             mode: Search mode (None = use default)
             top_k: Number of results (None = use default)
-            rerank: Use reranker (None = auto)
-            threshold: Minimum score threshold
-            source_pattern: Filter by source file pattern (glob)
+            rerank: Use reranker (None = auto, use if configured)
+            threshold: Minimum score threshold (results below this are filtered)
+            source_pattern: Filter by source file pattern (glob syntax, e.g. "*.md")
             filter_key: Metadata key to filter on
-            filter_value: Required metadata value
+            filter_value: Required value for filter_key
             
         Returns:
-            List of SearchResult
+            List of SearchResult objects, sorted by relevance (highest first)
+            
+        Raises:
+            KjarniException: If the index doesn't exist or search fails
+            
+        Example:
+            >>> # Basic search
+            >>> results = searcher.search("my_index", "machine learning")
+            >>> 
+            >>> # Search with options
+            >>> results = searcher.search(
+            ...     "my_index",
+            ...     "neural networks",
+            ...     mode=SearchMode.SEMANTIC,
+            ...     top_k=5,
+            ...     threshold=0.5,
+            ... )
+            >>> 
+            >>> # Search with filtering
+            >>> results = searcher.search(
+            ...     "my_index",
+            ...     "API reference",
+            ...     source_pattern="*.md",
+            ... )
         """
         options = _lib.kjarni_search_options_default()
         
@@ -153,15 +224,26 @@ class Searcher:
         query: str,
         top_k: int = 10,
     ) -> List[SearchResult]:
-        """Static keyword search (BM25) - no embedder needed.
+        """Static keyword search (BM25) - no embedding model needed.
+        
+        This is a convenience method for pure keyword search that doesn't
+        require loading an embedding model. Useful for quick text matching
+        or when you only need BM25 results.
         
         Args:
-            index_path: Path to the index
-            query: Search query
-            top_k: Number of results
+            index_path: Path to the index directory
+            query: Search query string
+            top_k: Maximum number of results (default: 10)
             
         Returns:
-            List of SearchResult
+            List of SearchResult objects, sorted by BM25 score
+            
+        Raises:
+            KjarniException: If the index doesn't exist or search fails
+            
+        Example:
+            >>> # Quick keyword search without loading embedder
+            >>> results = Searcher.search_keywords("my_index", "Python tutorial")
         """
         results = KjarniSearchResults()
         err = _lib.kjarni_search_keywords(
@@ -188,7 +270,7 @@ class Searcher:
 
     @property
     def has_reranker(self) -> bool:
-        """Check if reranker is configured."""
+        """Check if a reranker is configured."""
         return _lib.kjarni_searcher_has_reranker(self._handle)
 
     @property
@@ -201,3 +283,17 @@ class Searcher:
     def default_top_k(self) -> int:
         """Get the default number of results."""
         return _lib.kjarni_searcher_default_top_k(self._handle)
+
+    @property
+    def model_name(self) -> str:
+        """Get the embedding model name."""
+        name = _lib.kjarni_searcher_model_name(self._handle)
+        return name.decode("utf-8") if name else ""
+
+    @property
+    def reranker_model(self) -> Optional[str]:
+        """Get the reranker model name, or None if not configured."""
+        name = _lib.kjarni_searcher_reranker_model(self._handle)
+        if name:
+            return name.decode("utf-8")
+        return None

@@ -6,7 +6,6 @@ use ndarray::{Array2, Array3, s};
 use crate::Normalization;
 use crate::activations::Activation;
 use crate::cpu::encoder::buffers::EncoderBuffers;
-use crate::cpu::encoder::optimized_layer::{OptimizedFeedForward, OptimizedSelfAttention};
 use crate::cpu::encoder::traits::CpuEncoderOutput;
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,

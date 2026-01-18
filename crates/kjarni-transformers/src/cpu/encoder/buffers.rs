@@ -76,6 +76,9 @@ pub struct EncoderBuffers {
     /// FFN output [max_tokens, hidden]
     pub ffn_output: Array2<f32>,
 
+    /// Layer norm scratch buffer [max_tokens, hidden]
+    pub norm_scratch: Array2<f32>,
+
     // =========================================================================
     // Configuration (stored for validation and resizing)
     // =========================================================================
@@ -144,6 +147,7 @@ impl EncoderBuffers {
             attn_output: Array2::zeros((max_tokens, hidden)),
             ffn_intermediate: Array2::zeros((max_tokens, intermediate_dim)),
             ffn_output: Array2::zeros((max_tokens, hidden)),
+            norm_scratch: Array2::zeros((max_tokens, hidden)),
             
             // Config
             max_batch,
@@ -342,6 +346,7 @@ impl EncoderBuffers {
         let qkv = max_tokens * self.hidden * 4 * 3; // q, k, v
         let outputs = max_tokens * self.hidden * 4 * 2; // attn_output, ffn_output
         let ffn = max_tokens * self.intermediate_dim * 4;
+        let norm = max_tokens * self.hidden * 4;
         let qkv_scratch = if self.use_fused_qkv {
             max_tokens * 3 * self.hidden * 4
         } else {
@@ -351,8 +356,8 @@ impl EncoderBuffers {
         // 4D buffers
         let attn_scores = self.max_batch * self.num_heads * self.max_seq * self.max_seq * 4;
         let attn_context = self.max_batch * self.num_heads * self.max_seq * self.head_dim * 4;
-        
-        qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context
+
+        qkv + outputs + ffn + qkv_scratch + attn_scores + attn_context + norm
     }
     
     /// Returns memory usage breakdown as a formatted string.
@@ -370,10 +375,11 @@ impl EncoderBuffers {
         let attn_output = max_tokens * self.hidden * 4;
         let ffn_inter = max_tokens * self.intermediate_dim * 4;
         let ffn_out = max_tokens * self.hidden * 4;
-        
+        let norm = max_tokens * self.hidden * 4;
+
         format!(
             "Q/K/V: {:.2} MB, QKV scratch: {:.2} MB, Attn scores: {:.2} MB, \
-             Attn context: {:.2} MB, Attn output: {:.2} MB, FFN inter: {:.2} MB, FFN out: {:.2} MB",
+             Attn context: {:.2} MB, Attn output: {:.2} MB, FFN inter: {:.2} MB, FFN out: {:.2} MB, Norm: {:.2} MB",
             qkv as f64 / 1024.0 / 1024.0,
             qkv_scratch as f64 / 1024.0 / 1024.0,
             attn_scores as f64 / 1024.0 / 1024.0,
@@ -381,6 +387,7 @@ impl EncoderBuffers {
             attn_output as f64 / 1024.0 / 1024.0,
             ffn_inter as f64 / 1024.0 / 1024.0,
             ffn_out as f64 / 1024.0 / 1024.0,
+            norm as f64 / 1024.0 / 1024.0,
         )
     }
 }

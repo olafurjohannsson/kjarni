@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ndarray::Array1;
 
-use crate::cpu::encoder::optimized_layer::{OptimizedFeedForward, OptimizedSelfAttention};
 use crate::cpu::encoder_decoder::{
     decoder_cross_attn::DecoderCrossAttention, decoder_cross_attn_layer::CrossDecoderLayer,
 };
@@ -208,41 +207,7 @@ impl<'a> Seq2SeqFactory<'a> {
 
         Ok(LayerNorm::new(weight, bias, eps))
     }
-    pub fn build_optimized_feedforward(
-        &self,
-        layout: &FeedForwardLayout,
-        activation: Activation,
-        layer_idx: usize,
-    ) -> Result<OptimizedFeedForward> {
-        let up = self.build_linear(&layout.up_weight, layout.up_bias.as_deref(), layer_idx)?;
-        let down = self.build_linear(&layout.down_weight, layout.down_bias.as_deref(), layer_idx)?;
-        let ff = OptimizedFeedForward::new(up, down, activation);
-        
-        Ok(ff)
-    }
-     pub fn build_optimized_self_attention(
-        &self,
-        layout: &AttentionLayout,
-        hidden_size: usize,
-        num_heads: usize,
-        layer_idx: usize,
-    ) -> Result<OptimizedSelfAttention> {
-        let q = self.build_linear(&layout.q_weight, layout.q_bias.as_deref(), layer_idx)?;
-        let k = self.build_linear(&layout.k_weight, layout.k_bias.as_deref(), layer_idx)?;
-        let v = self.build_linear(&layout.v_weight, layout.v_bias.as_deref(), layer_idx)?;
-        let o = self.build_linear(&layout.o_weight, layout.o_bias.as_deref(), layer_idx)?;
-
-        let attention = OptimizedSelfAttention::new(
-            q,
-            k,
-            v,
-            o,
-            num_heads,
-            true
-        );
-
-        Ok(attention)
-    }
+   
     /// Build standard FFN from FeedForwardLayout.
     pub fn build_standard_ffn(
         &self,

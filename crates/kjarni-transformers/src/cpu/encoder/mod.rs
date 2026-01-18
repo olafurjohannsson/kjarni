@@ -18,7 +18,6 @@ mod gpu;
 pub mod pooler;
 pub mod qkv;
 pub mod traits;
-pub mod optimized_layer;
 pub mod buffers;
 pub mod qkv_projection;
 pub use encoder_self_attention::EncoderSelfAttention;

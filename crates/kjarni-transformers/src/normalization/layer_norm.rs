@@ -1,7 +1,7 @@
 //! Layer normalization implementation
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array3, ArrayView3, Axis, Ix1};
+use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
 
@@ -40,6 +40,29 @@ impl LayerNorm {
         };
 
         Ok(Self { weight, bias, eps })
+    }
+
+    #[inline]
+    pub fn forward_2d_noalloc(&self, input: &ArrayView2<f32>, output: &mut ArrayViewMut2<f32>) {
+        let hidden = input.shape()[1];
+        let tokens = input.shape()[0];
+
+        for t in 0..tokens {
+            let row = input.row(t);
+            let mut out_row = output.row_mut(t);
+
+            // Compute mean
+            let mean = row.sum() / hidden as f32;
+
+            // Compute variance
+            let var = row.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / hidden as f32;
+
+            // Normalize and scale
+            let std_inv = 1.0 / (var + self.eps).sqrt();
+            for i in 0..hidden {
+                out_row[i] = (row[i] - mean) * std_inv * self.weight[i] + self.bias[i];
+            }
+        }
     }
 
     /// Apply layer norm to a 3D tensor of activations.

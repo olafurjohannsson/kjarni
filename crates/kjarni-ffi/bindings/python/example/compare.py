@@ -88,12 +88,12 @@ def st_batch():
 
 st_mean, st_std = benchmark(st_batch)
 
-st_embedding = st.encode("Hello, world!", convert_to_numpy=True)
+st_embedding = st.encode("Hello, world!", convert_to_numpy=True, normalize_embeddings=True)
 print(f"ST dim: {len(st_embedding)}")
 print(f"ST first 5: {st_embedding[:5]}")
 
-st_cat = st.encode("cat", convert_to_numpy=True)
-st_dog = st.encode("dog", convert_to_numpy=True)
+st_cat = st.encode("cat", convert_to_numpy=True, normalize_embeddings=True)
+st_dog = st.encode("dog", convert_to_numpy=True, normalize_embeddings=True)
 st_sim = cos_sim(st_cat, st_dog).item()
 print(f"ST similarity(cat, dog): {st_sim:.6f}")
 

@@ -1,9 +1,6 @@
 use std::time::Instant;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
-use crate::cpu::encoder::optimized_layer::{
-    EncoderScratch, OptimizedFeedForward, OptimizedSelfAttention, fused_residual_layernorm,
-};
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
 use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};

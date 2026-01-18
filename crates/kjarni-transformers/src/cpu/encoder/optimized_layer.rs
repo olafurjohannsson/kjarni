@@ -518,13 +518,7 @@ pub fn fused_residual_layernorm(
 // =============================================================================
 
 impl LinearLayer {
-    /// Get a view of the weights [out_features, in_features]
-    pub fn weights_view(&self) -> ArrayView2<f32> {
-        match self.data {
-            crate::linear_layer::LinearData::F32(ref w) => w.view(),
-            _ => panic!("Only f32 LinearLayer supported in optimized path"),
-        }
-    }
+    
 
     /// Get weights as a contiguous slice (ensures standard layout)
     pub fn weights_slice(&self) -> &[f32] {
@@ -543,15 +537,7 @@ impl LinearLayer {
         //     .expect("Weights must be contiguous row-major")
     }
 
-    /// Get reference to bias if present
-    pub fn bias(&self) -> Option<&Array1<f32>> {
-        self.bias.as_ref()
-    }
-
-    /// Get bias as slice if present
-    pub fn bias_slice(&self) -> Option<&[f32]> {
-        self.bias.as_ref().map(|b| b.as_slice().unwrap())
-    }
+    
 
     /// Matmul that writes directly to pre-allocated output buffer
     pub fn matmul_into(&self, input: &ArrayView2<f32>, output: &mut Array2<f32>) {

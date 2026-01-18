@@ -3,7 +3,7 @@ pub mod rms_norm;
 
 pub use crate::normalization::{layer_norm::LayerNorm, rms_norm::RMSNorm};
 
-use ndarray::{Array1, Array3};
+use ndarray::{Array1, Array3, ArrayView2, ArrayViewMut2};
 
 /// Normalization type for decoder layers
 pub enum Normalization {
@@ -16,6 +16,12 @@ impl Normalization {
         match self {
             Normalization::LayerNorm(ln) => ln.forward_3d(input),
             Normalization::RMSNorm(rms) => rms.forward_3d(input),
+        }
+    }
+    pub fn forward_2d_noalloc(&self, input: &ArrayView2<f32>, output: &mut ArrayViewMut2<f32>) {
+        match self {
+            Normalization::LayerNorm(ln) => ln.forward_2d_noalloc(input, output),
+            Normalization::RMSNorm(rms) => panic!("RMSNorm does not support noalloc 2D forward"),
         }
     }
     pub fn as_rms_norm(&self) -> Option<&RMSNorm> {
