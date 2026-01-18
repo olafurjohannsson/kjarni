@@ -217,6 +217,7 @@ mod tests {
         ModelMetadata {
             decoder_layers: None,
             hidden_size: 4,
+            intermediate_size: 0,
             num_layers: 1,
             num_attention_heads: 2,
             num_kv_heads: 1,

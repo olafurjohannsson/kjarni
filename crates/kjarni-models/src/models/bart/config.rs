@@ -155,6 +155,7 @@ impl ModelConfig for BartConfig {
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
             decoder_layers: Some(self.decoder_layers),
+            intermediate_size: self.intermediate_size(),
         }
     }
 

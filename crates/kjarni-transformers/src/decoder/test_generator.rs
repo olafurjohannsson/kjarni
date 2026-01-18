@@ -40,6 +40,7 @@ impl ModelConfig for MockConfig {
             num_layers: 1,
             num_attention_heads: 1,
             num_kv_heads: 1,
+            intermediate_size: 0,
             head_dim: self.hidden_size,
             vocab_size: self.vocab_size,
             max_seq_len: 1024,

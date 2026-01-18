@@ -130,6 +130,7 @@ impl BertConfig {
             .or(self.max_position_embeddings)
             .unwrap_or(512)
     }
+    
 }
 
 impl ModelConfig for BertConfig {
@@ -138,6 +139,14 @@ impl ModelConfig for BertConfig {
             "nomic_bert"
         } else {
             "bert"
+        }
+    }
+    fn intermediate_size(&self) -> usize {
+        if self.intermediate_size > 0 {
+            self.intermediate_size
+        } else {
+            // Fallback: 4 * hidden_size
+            self.hidden_size * 4
         }
     }
     fn as_any(&self) -> &dyn std::any::Any {
@@ -175,6 +184,7 @@ impl ModelConfig for BertConfig {
                 _ => Activation::Gelu,
             },
             decoder_layers: None,
+            intermediate_size: self.intermediate_size(),
             rope_theta,
             rope_scaling: None,
 
@@ -347,6 +357,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            intermediate_size: self.intermediate_size(),
         }
     }
 
@@ -564,6 +575,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            intermediate_size: self.intermediate_size(),
         }
     }
 

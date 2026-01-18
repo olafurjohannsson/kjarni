@@ -338,6 +338,7 @@ mod decoder_pipeline_test {
         fn metadata(&self) -> ModelMetadata {
             ModelMetadata {
                 decoder_layers: None,
+                intermediate_size: 0,
                 hidden_size: self.hidden,
                 num_layers: 1,
                 num_attention_heads: 1,

@@ -30,7 +30,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
             max_seq_len: self.max_position,
             scale_embeddings: self.scale,
             normalize_embedding: false,
-
+            intermediate_size: 0,
             // --- Fixed Defaults for Testing ---
             num_layers: 1,
             num_attention_heads: 4,

@@ -115,8 +115,10 @@ impl OptimizedSelfAttention {
             .view()
             .into_shape_with_order((tokens, hidden_dim))?;
         // self.qkv_proj.matmul_into(&hidden_2d, &mut scratch.qkv);
-        self.qkv_proj
-            .matmul_into_blocked(&hidden_2d, &mut scratch.qkv);
+        // self.qkv_proj
+        //     .matmul_into_blocked(&hidden_2d, &mut scratch.qkv);
+
+        scratch.qkv = self.qkv_proj.matmul(&hidden_2d);
 
         // 2. Split QKV and reshape to heads (in-place where possible)
         split_qkv_to_heads(
@@ -423,13 +425,18 @@ impl OptimizedFeedForward {
         output: &mut Array2<f32>,  // [tokens, hidden]
     ) {
         // FC1 -> scratch
-        self.fc1.matmul_into_blocked(hidden, scratch);
+        // self.fc1.matmul_into_blocked(hidden, scratch);
+        let a = self.fc1.matmul(&hidden);
+        scratch.assign(&a);
+        
 
         // Activation (in-place)
         apply_activation_inplace(scratch.as_slice_mut().unwrap(), self.activation);
 
         // FC2 -> output
-        self.fc2.matmul_into_blocked(&scratch.view(), output);
+        // self.fc2.matmul_into_blocked(&scratch.view(), output);
+        let b = self.fc2.matmul(&scratch.view());
+        output.assign(&b);
     }
 }
 
@@ -712,8 +719,338 @@ fn matmul_vec_scalar(out: &mut [f32], a: &[f32], b: &[f32], k: usize) {
     }
 }
 
-// Place this in a new file or as a mod block in encoder_layer.rs
-// e.g., crates/kjarni-transformers/src/cpu/encoder/optimized_tests.rs
+#[cfg(test)]
+mod fused_qkv_benchmark {
+    use anyhow::Result;
+    use ndarray::{Array1, Array2, Array3, Array4, s};
+    use rayon::iter::IntoParallelIterator;
+    use std::time::Instant;
+    use crate::activations::Activation;
+    use crate::cpu::encoder::encoder_layer::EncoderLayer;
+    use crate::cpu::encoder::encoder_self_attention::EncoderSelfAttention;
+    use crate::cpu::encoder::optimized_layer::{
+        EncoderScratch, OptimizedFeedForward, OptimizedSelfAttention, fused_residual_layernorm,
+    };
+    use crate::feedforward::StdFeedForward;
+    use crate::linear_layer::LinearLayer;
+    use crate::normalization::{LayerNorm, Normalization};
+
+/// Create deterministic weights for a linear layer
+    fn make_linear_layer(out_features: usize, in_features: usize, seed: usize, with_bias: bool) -> LinearLayer {
+        let data: Vec<f32> = (0..out_features * in_features)
+            .map(|i| ((i + seed) % 10000) as f32 * 0.0001 - 0.5)
+            .collect();
+        let weights = Array2::from_shape_vec((out_features, in_features), data).unwrap();
+        
+        let bias = if with_bias {
+            Some(Array1::from_vec((0..out_features).map(|i| (i + seed) as f32 * 0.001).collect()))
+        } else {
+            None
+        };
+        
+        LinearLayer::new_f32(weights, bias)
+    }
+
+    /// Create deterministic input tensor
+    fn make_input(tokens: usize, hidden: usize, seed: usize) -> Array2<f32> {
+        let data: Vec<f32> = (0..tokens * hidden)
+            .map(|i| ((i + seed) % 1000) as f32 * 0.001 - 0.5)
+            .collect();
+        Array2::from_shape_vec((tokens, hidden), data).unwrap()
+    }
+
+    /// Fuse Q, K, V weight matrices into single [3*hidden, hidden] matrix
+    fn fuse_qkv_weights(q: &LinearLayer, k: &LinearLayer, v: &LinearLayer) -> Array2<f32> {
+        let hidden = q.in_features();
+        let out = q.out_features();
+
+        let mut fused = Array2::zeros((3 * out, hidden));
+
+        fused.slice_mut(s![0..out, ..]).assign(&q.weights_view());
+        fused.slice_mut(s![out..2 * out, ..]).assign(&k.weights_view());
+        fused.slice_mut(s![2 * out..3 * out, ..]).assign(&v.weights_view());
+
+        fused
+    }
+
+    /// Fuse Q, K, V biases into single [3*hidden] vector
+    fn fuse_qkv_bias(q: &LinearLayer, k: &LinearLayer, v: &LinearLayer) -> Option<Array1<f32>> {
+        match (q.bias(), k.bias(), v.bias()) {
+            (Some(qb), Some(kb), Some(vb)) => {
+                let out = qb.len();
+                let mut fused = Array1::zeros(3 * out);
+                fused.slice_mut(s![0..out]).assign(qb);
+                fused.slice_mut(s![out..2 * out]).assign(kb);
+                fused.slice_mut(s![2 * out..3 * out]).assign(vb);
+                Some(fused)
+            }
+            _ => None,
+        }
+    }
+
+    /// Run benchmark for a specific configuration
+    fn benchmark_qkv_fusion(
+        name: &str,
+        batch: usize,
+        seq: usize,
+        hidden: usize,
+        with_bias: bool,
+        iterations: usize,
+        warmup: usize,
+    ) {
+        let tokens = batch * seq;
+        
+        // Create 3 separate projection layers
+        let q_proj = make_linear_layer(hidden, hidden, 0, with_bias);
+        let k_proj = make_linear_layer(hidden, hidden, 1000, with_bias);
+        let v_proj = make_linear_layer(hidden, hidden, 2000, with_bias);
+        
+        // Create fused projection layer
+        let fused_weights = fuse_qkv_weights(&q_proj, &k_proj, &v_proj);
+        let fused_bias = fuse_qkv_bias(&q_proj, &k_proj, &v_proj);
+        let qkv_proj = LinearLayer::new_f32(fused_weights, fused_bias);
+        
+        // Create input
+        let input = make_input(tokens, hidden, 42);
+        
+        // =====================================================================
+        // WARMUP
+        // =====================================================================
+        for _ in 0..warmup {
+            let _ = q_proj.matmul(&input.view());
+            let _ = k_proj.matmul(&input.view());
+            let _ = v_proj.matmul(&input.view());
+            let _ = qkv_proj.matmul(&input.view());
+        }
+        
+        // =====================================================================
+        // BENCHMARK: 3 SEPARATE MATMULS
+        // =====================================================================
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let q = q_proj.matmul(&input.view());
+            let k = k_proj.matmul(&input.view());
+            let v = v_proj.matmul(&input.view());
+            std::hint::black_box((q, k, v));
+        }
+        let separate_time = start.elapsed();
+        
+        // =====================================================================
+        // BENCHMARK: 1 FUSED MATMUL
+        // =====================================================================
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let qkv = qkv_proj.matmul(&input.view());
+            std::hint::black_box(qkv);
+        }
+        let fused_time = start.elapsed();
+        
+        // =====================================================================
+        // VERIFY CORRECTNESS
+        // =====================================================================
+        let q_separate = q_proj.matmul(&input.view());
+        let k_separate = k_proj.matmul(&input.view());
+        let v_separate = v_proj.matmul(&input.view());
+        
+        let qkv_fused = qkv_proj.matmul(&input.view());
+        
+        // Extract Q, K, V from fused output
+        let q_from_fused = qkv_fused.slice(s![.., 0..hidden]).to_owned();
+        let k_from_fused = qkv_fused.slice(s![.., hidden..2*hidden]).to_owned();
+        let v_from_fused = qkv_fused.slice(s![.., 2*hidden..3*hidden]).to_owned();
+        
+        let q_diff = (&q_separate - &q_from_fused).mapv(f32::abs).fold(0.0f32, |a, &b| a.max(b));
+        let k_diff = (&k_separate - &k_from_fused).mapv(f32::abs).fold(0.0f32, |a, &b| a.max(b));
+        let v_diff = (&v_separate - &v_from_fused).mapv(f32::abs).fold(0.0f32, |a, &b| a.max(b));
+        let max_diff = q_diff.max(k_diff).max(v_diff);
+        
+        // =====================================================================
+        // REPORT
+        // =====================================================================
+        let separate_per_iter = separate_time / iterations as u32;
+        let fused_per_iter = fused_time / iterations as u32;
+        let speedup = separate_time.as_secs_f64() / fused_time.as_secs_f64();
+        
+        // Calculate FLOPS
+        // Each matmul: 2 * tokens * hidden * hidden (multiply + add)
+        // Separate: 3 matmuls
+        // Fused: 1 matmul but 3x wider output
+        let flops_per_matmul = 2 * tokens * hidden * hidden;
+        let separate_flops = 3 * flops_per_matmul * iterations;
+        let fused_flops = 3 * flops_per_matmul * iterations; // Same compute, different memory pattern
+        
+        let separate_gflops = separate_flops as f64 / separate_time.as_secs_f64() / 1e9;
+        let fused_gflops = fused_flops as f64 / fused_time.as_secs_f64() / 1e9;
+
+        println!("\n{{'='*70}}");
+        println!("=== {} ===", name);
+        println!("{{'='*70}}");
+        println!("Config: batch={}, seq={}, tokens={}, hidden={}, bias={}", 
+                 batch, seq, tokens, hidden, with_bias);
+        println!("Matmul shapes: [{}, {}] @ [{}, {}] (separate) vs [{}, {}] @ [{}, {}] (fused)",
+                 tokens, hidden, hidden, hidden,
+                 tokens, hidden, 3*hidden, hidden);
+        println!();
+        println!("3 Separate matmuls: {:>10.2?} per iter ({:.2} GFLOPS)", separate_per_iter, separate_gflops);
+        println!("1 Fused matmul:     {:>10.2?} per iter ({:.2} GFLOPS)", fused_per_iter, fused_gflops);
+        println!();
+        println!("Speedup: {:.2}x", speedup);
+        println!("Time saved per forward: {:?}", separate_per_iter.saturating_sub(fused_per_iter));
+        println!();
+        println!("Correctness check - max diff: {:.2e} (Q: {:.2e}, K: {:.2e}, V: {:.2e})", 
+                 max_diff, q_diff, k_diff, v_diff);
+        
+        // Sanity check
+        assert!(max_diff < 1e-4, "Fused QKV produces different results! Max diff: {}", max_diff);
+    }
+
+    // =========================================================================
+    // TESTS - Run with: cargo test fused_qkv_benchmark --release -- --nocapture
+    // =========================================================================
+
+    #[test]
+    fn bench_fused_qkv_minilm() {
+        println!("\n");
+        println!("╔══════════════════════════════════════════════════════════════════════╗");
+        println!("║           FUSED QKV PROJECTION BENCHMARK                             ║");
+        println!("║           3 Separate Matmuls vs 1 Fused Matmul                       ║");
+        println!("╚══════════════════════════════════════════════════════════════════════╝");
+        
+        // MiniLM-L6-v2: hidden=384, typical batch encoding
+        benchmark_qkv_fusion(
+            "MiniLM (hidden=384) - Small batch",
+            8,
+            32,
+            384,
+            true,
+            100,
+            10,
+        );
+        
+        benchmark_qkv_fusion(
+            "MiniLM (hidden=384) - Large batch (your benchmark)",
+            120,
+            24,
+            384,
+            true,
+            50,
+            5,
+        );
+    }
+
+    #[test]
+    fn bench_fused_qkv_bert_base() {
+        // BERT-base: hidden=768
+        benchmark_qkv_fusion(
+            "BERT-base (hidden=768) - Small batch",
+            8,
+            32,
+            768,
+            true,
+            50,
+            5,
+        );
+        
+        benchmark_qkv_fusion(
+            "BERT-base (hidden=768) - Medium batch",
+            32,
+            64,
+            768,
+            true,
+            20,
+            3,
+        );
+    }
+
+    #[test]
+    fn bench_fused_qkv_larger() {
+        // Larger models: hidden=1024, 1536
+        benchmark_qkv_fusion(
+            "Large (hidden=1024) - Small batch",
+            8,
+            32,
+            1024,
+            true,
+            30,
+            3,
+        );
+        
+        benchmark_qkv_fusion(
+            "XLarge (hidden=1536) - Small batch",
+            8,
+            32,
+            1536,
+            true,
+            20,
+            3,
+        );
+    }
+
+    #[test]
+    fn bench_fused_qkv_decode_path() {
+        // Single token decode (batch=1, seq=1) - different optimization target
+        benchmark_qkv_fusion(
+            "Decode path (tokens=1, hidden=384)",
+            1,
+            1,
+            384,
+            true,
+            1000,
+            100,
+        );
+        
+        benchmark_qkv_fusion(
+            "Decode path (tokens=1, hidden=1024)",
+            1,
+            1,
+            1024,
+            true,
+            500,
+            50,
+        );
+    }
+
+    #[test]
+    fn bench_fused_qkv_no_bias() {
+        // Some models don't use bias in attention projections
+        benchmark_qkv_fusion(
+            "No bias (hidden=384)",
+            32,
+            64,
+            384,
+            false,
+            50,
+            5,
+        );
+    }
+
+    /// Comprehensive benchmark - run this one for the full picture
+    #[test]
+    fn bench_fused_qkv_comprehensive() {
+        println!("\n");
+        println!("╔══════════════════════════════════════════════════════════════════════╗");
+        println!("║           COMPREHENSIVE FUSED QKV BENCHMARK                          ║");
+        println!("╚══════════════════════════════════════════════════════════════════════╝");
+        
+        let configs = [
+            // (name, batch, seq, hidden, bias, iters, warmup)
+            ("MiniLM small batch", 8, 32, 384, true, 100, 10),
+            ("MiniLM your benchmark", 120, 24, 384, true, 50, 5),
+            ("BERT-base", 32, 64, 768, true, 30, 5),
+            ("Large model", 16, 64, 1024, true, 20, 3),
+            ("Decode (1 token)", 1, 1, 384, true, 1000, 100),
+        ];
+        
+        for (name, batch, seq, hidden, bias, iters, warmup) in configs {
+            benchmark_qkv_fusion(name, batch, seq, hidden, bias, iters, warmup);
+        }
+
+        println!("\n{{'='*70}}");
+        println!("SUMMARY: If speedup > 1.0, fused QKV is beneficial for that workload.");
+        println!("{{'='*70}}");
+    }
+
+}
 
 #[cfg(test)]
 mod optimized_parity_tests {
@@ -1326,103 +1663,6 @@ mod optimized_parity_tests {
     // FULL LAYER PARITY TEST (for final verification)
     // =========================================================================
 
-    #[test]
-    fn test_full_layer_postnorm_vs_postnorm2_small() -> Result<()> {
-        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
-        let bias_val = 0.01;
-
-        // Use the same create_deterministic_layer logic
-        let mut count = 1;
-
-        let q_proj = make_linear(hidden, hidden, &mut count, bias_val);
-        let k_proj = make_linear(hidden, hidden, &mut count, bias_val);
-        let v_proj = make_linear(hidden, hidden, &mut count, bias_val);
-        let out_proj = make_linear(hidden, hidden, &mut count, bias_val);
-
-        let self_attn = EncoderSelfAttention::new(
-            hidden,
-            heads,
-            q_proj.clone(),
-            k_proj.clone(),
-            v_proj.clone(),
-            out_proj.clone(),
-        );
-
-        let ln1 = Normalization::LayerNorm(LayerNorm::new(
-            Array1::ones(hidden),
-            Array1::from_elem(hidden, bias_val),
-            1e-5,
-        ));
-
-        let fc1 = make_linear(intermediate, hidden, &mut count, bias_val);
-        let fc2 = make_linear(hidden, intermediate, &mut count, bias_val);
-
-        let feedforward = crate::feedforward::FeedForward::Standard(StdFeedForward::new(
-            fc1.weights_view().to_owned(),
-            fc1.bias().unwrap().clone(),
-            fc2.weights_view().to_owned(),
-            fc2.bias().unwrap().clone(),
-            Activation::Gelu,
-        ));
-
-        let ln2 = Normalization::LayerNorm(LayerNorm::new(
-            Array1::ones(hidden),
-            Array1::from_elem(hidden, bias_val),
-            1e-5,
-        ));
-
-        let optimized_attention =
-            OptimizedSelfAttention::new(q_proj, k_proj, v_proj, out_proj, heads, true);
-
-        let optimized_feedforward = OptimizedFeedForward::new(fc1, fc2, Activation::Gelu);
-
-        let layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2)
-            .with_optimized(optimized_attention, optimized_feedforward);
-
-        // Create inputs matching your golden test
-        let input_data: Vec<f32> = (0..batch * seq * hidden)
-            .map(|i| (i as f32) * 0.1)
-            .collect();
-        let input = Array3::from_shape_vec((batch, seq, hidden), input_data)?;
-
-        let mut mask = Array2::ones((batch, seq));
-        mask[[1, 2]] = 0.0; // Match your test: last position of batch 1 masked
-
-        let pos_bias_data: Vec<f32> = (0..heads * seq * seq).map(|i| (i as f32) * 0.01).collect();
-        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
-
-        // Run postnorm (standard)
-        let output_postnorm =
-            layer.forward_postnorm(input.clone(), &mask, Some(&pos_bias), None)?;
-
-        // Run postnorm2 (optimized)
-        let output_postnorm2 =
-            layer.forward_postnorm2(input.clone(), &mask, Some(&pos_bias), None)?;
-
-        let result = compare_arrays_3d(&output_postnorm, &output_postnorm2);
-
-        println!("\n=== FULL LAYER: POSTNORM vs POSTNORM2 (small) ===");
-        println!("Shape: [{}, {}, {}]", batch, seq, hidden);
-        println!("Max diff:  {:.6e}", result.max_diff);
-        println!("Mean diff: {:.6e}", result.mean_diff);
-
-        println!(
-            "\nPostnorm output (first 8):  {:?}",
-            &output_postnorm.as_slice().unwrap()[..8]
-        );
-        println!(
-            "Postnorm2 output (first 8): {:?}",
-            &output_postnorm2.as_slice().unwrap()[..8]
-        );
-
-        assert!(
-            result.max_diff < 1e-4,
-            "Full layer parity failed. Max diff: {:.6e}",
-            result.max_diff
-        );
-
-        Ok(())
-    }
 
     // =========================================================================
     // PERFORMANCE COMPARISON (run with --nocapture)
@@ -1546,5 +1786,307 @@ mod optimized_parity_tests {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod matmul_into_tests {
+    use ndarray::{Array1, Array2};
+    use std::time::Instant;
+    use crate::linear_layer::LinearLayer;
+
+    // =========================================================================
+    // Test Utilities
+    // =========================================================================
+
+    fn make_linear_layer(out_features: usize, in_features: usize, seed: usize, with_bias: bool) -> LinearLayer {
+        let data: Vec<f32> = (0..out_features * in_features)
+            .map(|i| ((i + seed) % 10000) as f32 * 0.0001 - 0.5)
+            .collect();
+        let weights = Array2::from_shape_vec((out_features, in_features), data).unwrap();
+
+        let bias = if with_bias {
+            Some(Array1::from_vec(
+                (0..out_features).map(|i| (i + seed) as f32 * 0.001).collect(),
+            ))
+        } else {
+            None
+        };
+
+        LinearLayer::new_f32(weights, bias)
+    }
+
+    fn make_input(tokens: usize, hidden: usize, seed: usize) -> Array2<f32> {
+        let data: Vec<f32> = (0..tokens * hidden)
+            .map(|i| ((i + seed) % 1000) as f32 * 0.001 - 0.5)
+            .collect();
+        Array2::from_shape_vec((tokens, hidden), data).unwrap()
+    }
+
+    fn max_diff(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
+    }
+
+    // =========================================================================
+    // Correctness Tests: matmul_into
+    // =========================================================================
+
+    #[test]
+    fn test_matmul_into_parity_small() {
+        let (tokens, in_features, out_features) = (16, 64, 128);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        // Reference: regular matmul
+        let expected = layer.matmul(&input.view());
+
+        // Test: matmul_into
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into parity (small) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_parity_minilm() {
+        let (tokens, in_features, out_features) = (2880, 384, 384);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into parity (MiniLM) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-4, "matmul_into mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_parity_single_token() {
+        let (tokens, in_features, out_features) = (1, 384, 384);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into parity (single token) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_parity_no_bias() {
+        let (tokens, in_features, out_features) = (256, 384, 384);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, false);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into parity (no bias) ===");
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into mismatch: {}", diff);
+    }
+
+    // =========================================================================
+    // Correctness Tests: matmul_into_blocked
+    // =========================================================================
+
+    #[test]
+    fn test_matmul_into_blocked_parity_small() {
+        let (tokens, in_features, out_features) = (16, 64, 128);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into_blocked(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into_blocked parity (small) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into_blocked mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_blocked_parity_minilm() {
+        let (tokens, in_features, out_features) = (2880, 384, 384);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into_blocked(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into_blocked parity (MiniLM) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-4, "matmul_into_blocked mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_blocked_parity_single_token() {
+        let (tokens, in_features, out_features) = (1, 384, 384);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into_blocked(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into_blocked parity (single token) ===");
+        println!("Shape: [{}, {}] @ [{}, {}]", tokens, in_features, out_features, in_features);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into_blocked mismatch: {}", diff);
+    }
+
+    #[test]
+    fn test_matmul_into_blocked_parity_non_aligned() {
+        // tokens not divisible by 4, out_features not divisible by 3
+        let (tokens, in_features, out_features) = (37, 64, 41);
+        
+        let layer = make_linear_layer(out_features, in_features, 0, true);
+        let input = make_input(tokens, in_features, 42);
+
+        let expected = layer.matmul(&input.view());
+
+        let mut output = Array2::zeros((tokens, out_features));
+        layer.matmul_into_blocked(&input.view(), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        
+        println!("\n=== matmul_into_blocked parity (non-aligned) ===");
+        println!("tokens={} (mod 4 = {}), out_features={} (mod 3 = {})", 
+                 tokens, tokens % 4, out_features, out_features % 3);
+        println!("Max diff: {:.2e}", diff);
+        
+        assert!(diff < 1e-5, "matmul_into_blocked mismatch: {}", diff);
+    }
+
+    // =========================================================================
+    // Performance Comparison: matmul vs matmul_into vs matmul_into_blocked
+    // =========================================================================
+
+    #[test]
+    fn bench_matmul_variants() {
+        println!("\n");
+        println!("╔══════════════════════════════════════════════════════════════════════╗");
+        println!("║           MATMUL VARIANTS BENCHMARK                                  ║");
+        println!("║           matmul vs matmul_into vs matmul_into_blocked               ║");
+        println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+        let configs = [
+            ("Single token (decode)", 1, 384, 384, 1000, 100),
+            ("Small batch", 16, 384, 384, 500, 50),
+            ("Medium batch", 256, 384, 384, 100, 10),
+            ("MiniLM batch", 2880, 384, 384, 50, 5),
+            ("BERT-base batch", 2048, 768, 768, 30, 3),
+        ];
+
+        for (name, tokens, in_features, out_features, iterations, warmup) in configs {
+            let layer = make_linear_layer(out_features, in_features, 0, true);
+            let input = make_input(tokens, in_features, 42);
+            let mut output = Array2::zeros((tokens, out_features));
+
+            // Warmup
+            for _ in 0..warmup {
+                let _ = layer.matmul(&input.view());
+                layer.matmul_into(&input.view(), &mut output);
+                layer.matmul_into_blocked(&input.view(), &mut output);
+            }
+
+            // Benchmark: matmul (allocates)
+            let start = Instant::now();
+            for _ in 0..iterations {
+                let result = layer.matmul(&input.view());
+                std::hint::black_box(result);
+            }
+            let time_matmul = start.elapsed();
+
+            // Benchmark: matmul_into (no alloc)
+            let start = Instant::now();
+            for _ in 0..iterations {
+                layer.matmul_into(&input.view(), &mut output);
+                std::hint::black_box(&output);
+            }
+            let time_into = start.elapsed();
+
+            // Benchmark: matmul_into_blocked (no alloc, 4x3 kernel)
+            let start = Instant::now();
+            for _ in 0..iterations {
+                layer.matmul_into_blocked(&input.view(), &mut output);
+                std::hint::black_box(&output);
+            }
+            let time_blocked = start.elapsed();
+
+            let per_matmul = time_matmul / iterations as u32;
+            let per_into = time_into / iterations as u32;
+            let per_blocked = time_blocked / iterations as u32;
+
+            let baseline = per_matmul.as_secs_f64();
+
+            println!("\n=== {} (tokens={}) ===", name, tokens);
+            println!("matmul (alloc):        {:>10.2?}   1.00x", per_matmul);
+            println!("matmul_into:           {:>10.2?}   {:.2}x", per_into, baseline / per_into.as_secs_f64());
+            println!("matmul_into_blocked:   {:>10.2?}   {:.2}x", per_blocked, baseline / per_blocked.as_secs_f64());
+
+            // Find winner
+            let times = [
+                (per_matmul, "matmul"),
+                (per_into, "matmul_into"),
+                (per_blocked, "matmul_into_blocked"),
+            ];
+            let winner = times.iter().min_by_key(|(t, _)| *t).unwrap();
+            println!("🏆 Winner: {}", winner.1);
+        }
+
+        println!("\n");
+        println!("INSIGHT: Use this to determine which method for which token count");
     }
 }

@@ -527,6 +527,7 @@ mod tests {
                 decoder_layers: None,
                 hidden_size,
                 num_layers: 1,
+                intermediate_size: 0,
                 num_attention_heads: num_heads,
                 num_kv_heads: num_heads,
                 head_dim: hidden_size / num_heads,
@@ -605,6 +606,7 @@ mod tests {
         fn metadata(&self) -> crate::traits::ModelMetadata {
             crate::traits::ModelMetadata {
                 decoder_layers: None,
+                intermediate_size: 0,
                 hidden_size: self.hidden_size,
                 num_layers: 1,
                 num_attention_heads: self.num_heads,

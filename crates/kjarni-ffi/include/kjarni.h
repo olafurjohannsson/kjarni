@@ -117,7 +117,9 @@ typedef struct KjarniKjarniClassifier KjarniKjarniClassifier;
 typedef struct KjarniKjarniEmbedder KjarniKjarniEmbedder;
 
 /**
- * Opaque handle to an Indexer
+ * Opaque handle to an Indexer instance.
+ *
+ * Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`.
  */
 typedef struct KjarniKjarniIndexer KjarniKjarniIndexer;
 
@@ -280,51 +282,129 @@ typedef struct KjarniKjarniRerankerConfig {
 } KjarniKjarniRerankerConfig;
 
 /**
- * Information about an existing index
+ * Information about an existing index.
+ *
+ * Retrieved via `kjarni_index_info`. The caller must free this struct
+ * using `kjarni_index_info_free` to avoid memory leaks.
  */
 typedef struct KjarniKjarniIndexInfo {
+    /**
+     * Path to the index directory (must be freed)
+     */
     char *path;
+    /**
+     * Total number of documents in the index
+     */
     uintptr_t document_count;
+    /**
+     * Number of index segments
+     */
     uintptr_t segment_count;
+    /**
+     * Embedding dimension
+     */
     uintptr_t dimension;
+    /**
+     * Total size on disk in bytes
+     */
     uint64_t size_bytes;
+    /**
+     * Embedding model name used to create the index (may be NULL, must be freed if not)
+     */
     char *embedding_model;
 } KjarniKjarniIndexInfo;
 
 /**
- * Configuration for creating an Indexer
+ * Configuration for creating an Indexer.
+ *
+ * Use `kjarni_indexer_config_default()` to get sensible defaults,
+ * then modify fields as needed before passing to `kjarni_indexer_new()`.
  */
 typedef struct KjarniKjarniIndexerConfig {
+    /**
+     * Device to run embeddings on (CPU or GPU)
+     */
     enum KjarniKjarniDevice device;
+    /**
+     * Directory to cache downloaded models (NULL = system default)
+     */
     const char *cache_dir;
+    /**
+     * Embedding model name (NULL = "minilm-l6-v2")
+     */
     const char *model_name;
+    /**
+     * Maximum chunk size in characters
+     */
     uintptr_t chunk_size;
+    /**
+     * Overlap between adjacent chunks in characters
+     */
     uintptr_t chunk_overlap;
+    /**
+     * Batch size for embedding operations
+     */
     uintptr_t batch_size;
     /**
-     * Comma-separated list of extensions (NULL = use defaults)
+     * Comma-separated list of file extensions to include (NULL = use defaults)
      */
     const char *extensions;
     /**
-     * Comma-separated list of exclude patterns
+     * Comma-separated list of glob patterns to exclude
      */
     const char *exclude_patterns;
+    /**
+     * Whether to recurse into subdirectories (1 = true, 0 = false)
+     */
     int32_t recursive;
+    /**
+     * Whether to include hidden files (1 = true, 0 = false)
+     */
     int32_t include_hidden;
+    /**
+     * Maximum file size in bytes (0 = no limit)
+     */
     uintptr_t max_file_size;
+    /**
+     * Suppress progress output to stderr (1 = quiet, 0 = verbose)
+     */
     int32_t quiet;
 } KjarniKjarniIndexerConfig;
 
 /**
- * Statistics returned after indexing
+ * Statistics returned after indexing operations.
+ *
+ * This struct is returned by `kjarni_indexer_create` and contains
+ * information about what was indexed and how long it took.
  */
 typedef struct KjarniKjarniIndexStats {
+    /**
+     * Number of document chunks indexed (after splitting)
+     */
     uintptr_t documents_indexed;
+    /**
+     * Number of chunks created from source files
+     */
     uintptr_t chunks_created;
+    /**
+     * Embedding dimension used
+     */
     uintptr_t dimension;
+    /**
+     * Total index size on disk in bytes
+     */
     uint64_t size_bytes;
+    /**
+     * Number of source files successfully processed
+     */
     uintptr_t files_processed;
+    /**
+     * Number of source files skipped (errors, unsupported format, too large)
+     */
     uintptr_t files_skipped;
+    /**
+     * Total time taken in milliseconds
+     */
     uint64_t elapsed_ms;
 } KjarniKjarniIndexStats;
 
@@ -658,29 +738,84 @@ enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k( struct KjarniKjarniRera
                                                          struct KjarniKjarniRerankResults *out );
 
 /**
- * Free index info strings
+ * Free memory allocated for index info strings.
+ *
+ * # Safety
+ *
+ * Must only be called once per `KjarniIndexInfo` returned from `kjarni_index_info`.
  */
 kjarni_ void kjarni_index_info_free( struct KjarniKjarniIndexInfo info );
 
 /**
- * Get default indexer configuration
+ * Get default indexer configuration.
+ *
+ * Returns a configuration with sensible defaults:
+ * - CPU device
+ * - minilm-l6-v2 model
+ * - 512 character chunks with 50 character overlap
+ * - 32 batch size
+ * - 10MB max file size
+ * - Recursive directory traversal
+ * - Hidden files excluded
  */
 kjarni_ struct KjarniKjarniIndexerConfig kjarni_indexer_config_default( void );
 
 /**
- * Create a new Indexer
+ * Create a new Indexer.
+ *
+ * # Arguments
+ *
+ * * `config` - Configuration options (NULL for defaults)
+ * * `out` - Pointer to receive the created indexer handle
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, error code otherwise.
+ * On error, call `kjarni_last_error_message()` for details.
+ *
+ * # Safety
+ *
+ * - `out` must be a valid pointer
+ * - The returned handle must be freed with `kjarni_indexer_free`
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_new( const struct KjarniKjarniIndexerConfig *config,
                                                struct KjarniKjarniIndexer **out );
 
 /**
- * Free an Indexer
+ * Free an Indexer handle.
+ *
+ * # Safety
+ *
+ * - `indexer` must be a handle returned by `kjarni_indexer_new`
+ * - Must not be called more than once per handle
+ * - Handle must not be used after freeing
  */
 kjarni_ void kjarni_indexer_free( struct KjarniKjarniIndexer *indexer );
 
 /**
- * Create a new index (simple version, outputs to stderr)
+ * Create a new index from files/directories (simple version).
+ *
+ * This is the simple API without progress callbacks. For progress reporting
+ * and cancellation support, use `kjarni_indexer_create_with_callback`.
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle from `kjarni_indexer_new`
+ * * `index_path` - Path where the index will be created
+ * * `inputs` - Array of file/directory paths to index
+ * * `num_inputs` - Number of elements in `inputs` array
+ * * `force` - If non-zero, overwrite existing index at `index_path`
+ * * `out` - Pointer to receive indexing statistics
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, error code otherwise.
+ *
+ * # Safety
+ *
+ * - All pointers must be valid
+ * - `inputs` must contain at least `num_inputs` valid C strings
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_create( struct KjarniKjarniIndexer *indexer,
@@ -691,7 +826,42 @@ enum KjarniKjarniErrorCode kjarni_indexer_create( struct KjarniKjarniIndexer *in
                                                   struct KjarniKjarniIndexStats *out );
 
 /**
- * Create a new index with progress callback
+ * Create a new index with progress callback and cancellation support.
+ *
+ * This is the full-featured API that supports:
+ * - Progress reporting via callback
+ * - Cancellation via cancel token
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle from `kjarni_indexer_new`
+ * * `index_path` - Path where the index will be created
+ * * `inputs` - Array of file/directory paths to index
+ * * `num_inputs` - Number of elements in `inputs` array
+ * * `force` - If non-zero, overwrite existing index at `index_path`
+ * * `progress_callback` - Optional callback for progress updates (may be NULL)
+ * * `user_data` - Opaque pointer passed to callback (may be NULL)
+ * * `cancel_token` - Optional cancellation token (may be NULL)
+ * * `out` - Pointer to receive indexing statistics
+ *
+ * # Callback
+ *
+ * The progress callback receives a `KjarniProgress` struct with:
+ * - `stage`: Current operation (scanning, loading, embedding, etc.)
+ * - `current`: Current item number
+ * - `total`: Total items (may be 0 if unknown)
+ * - `message`: Optional status message (may be NULL)
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
+ * or other error code on failure.
+ *
+ * # Safety
+ *
+ * - All non-optional pointers must be valid
+ * - `inputs` must contain at least `num_inputs` valid C strings
+ * - Callback must be thread-safe if indexer uses multiple threads
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback( struct KjarniKjarniIndexer *indexer,
@@ -705,7 +875,28 @@ enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback( struct KjarniKja
                                                                 struct KjarniKjarniIndexStats *out );
 
 /**
- * Add documents to existing index
+ * Add documents to an existing index (simple version).
+ *
+ * This is the simple API without progress callbacks. For progress reporting
+ * and cancellation support, use `kjarni_indexer_add_with_callback`.
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle from `kjarni_indexer_new`
+ * * `index_path` - Path to existing index
+ * * `inputs` - Array of file/directory paths to add
+ * * `num_inputs` - Number of elements in `inputs` array
+ * * `documents_added` - Pointer to receive count of documents added
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, error code otherwise.
+ *
+ * # Safety
+ *
+ * - All pointers must be valid
+ * - `inputs` must contain at least `num_inputs` valid C strings
+ * - Index at `index_path` must exist and be compatible (same embedding dimension)
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_add( struct KjarniKjarniIndexer *indexer,
@@ -715,7 +906,33 @@ enum KjarniKjarniErrorCode kjarni_indexer_add( struct KjarniKjarniIndexer *index
                                                uintptr_t *documents_added );
 
 /**
- * Add documents with progress callback
+ * Add documents to an existing index with progress callback and cancellation support.
+ *
+ * This is the full-featured API that supports:
+ * - Progress reporting via callback
+ * - Cancellation via cancel token
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle from `kjarni_indexer_new`
+ * * `index_path` - Path to existing index
+ * * `inputs` - Array of file/directory paths to add
+ * * `num_inputs` - Number of elements in `inputs` array
+ * * `progress_callback` - Optional callback for progress updates (may be NULL)
+ * * `user_data` - Opaque pointer passed to callback (may be NULL)
+ * * `cancel_token` - Optional cancellation token (may be NULL)
+ * * `documents_added` - Pointer to receive count of documents added
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
+ * or other error code on failure.
+ *
+ * # Safety
+ *
+ * - All non-optional pointers must be valid
+ * - `inputs` must contain at least `num_inputs` valid C strings
+ * - Index at `index_path` must exist and be compatible
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback( struct KjarniKjarniIndexer *indexer,
@@ -728,21 +945,91 @@ enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback( struct KjarniKjarni
                                                              uintptr_t *documents_added );
 
 /**
- * Get index information (static - no indexer needed)
+ * Get information about an existing index.
+ *
+ * This is a static function that doesn't require an Indexer handle.
+ *
+ * # Arguments
+ *
+ * * `index_path` - Path to the index directory
+ * * `out` - Pointer to receive index information
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, error code otherwise.
+ *
+ * # Safety
+ *
+ * - All pointers must be valid
+ * - Caller must free the returned `KjarniIndexInfo` with `kjarni_index_info_free`
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_index_info( const char *index_path,
                                               struct KjarniKjarniIndexInfo *out );
 
 /**
- * Delete an index
+ * Delete an index.
+ *
+ * This permanently removes the index directory and all its contents.
+ * This is a static function that doesn't require an Indexer handle.
+ *
+ * # Arguments
+ *
+ * * `index_path` - Path to the index directory to delete
+ *
+ * # Returns
+ *
+ * `KjarniErrorCode::Ok` on success, error code otherwise.
+ *
+ * # Safety
+ *
+ * - `index_path` must be a valid C string
  */
 kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete( const char *index_path );
 
+/**
+ * Get the embedding model name used by the indexer.
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle
+ *
+ * # Returns
+ *
+ * Pointer to model name string, or NULL if indexer is NULL.
+ * The returned pointer is valid until the next call to this function.
+ *
+ * # Safety
+ *
+ * - `indexer` must be a valid handle or NULL
+ * - Returned string must not be modified or freed
+ */
 kjarni_ const char *kjarni_indexer_model_name( const struct KjarniKjarniIndexer *indexer );
 
+/**
+ * Get the embedding dimension used by the indexer.
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle
+ *
+ * # Returns
+ *
+ * Embedding dimension, or 0 if indexer is NULL.
+ */
 kjarni_ uintptr_t kjarni_indexer_dimension( const struct KjarniKjarniIndexer *indexer );
 
+/**
+ * Get the chunk size configured for the indexer.
+ *
+ * # Arguments
+ *
+ * * `indexer` - Indexer handle
+ *
+ * # Returns
+ *
+ * Chunk size in characters, or 0 if indexer is NULL.
+ */
 kjarni_ uintptr_t kjarni_indexer_chunk_size( const struct KjarniKjarniIndexer *indexer );
 
 /**

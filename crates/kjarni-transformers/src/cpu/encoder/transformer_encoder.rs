@@ -5,7 +5,9 @@ use ndarray::{Array2, Array3, s};
 
 use crate::Normalization;
 use crate::activations::Activation;
+use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::optimized_layer::{OptimizedFeedForward, OptimizedSelfAttention};
+use crate::cpu::encoder::traits::CpuEncoderOutput;
 use crate::cpu::encoder::{
     CpuEncoder, encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention,
 };
@@ -153,23 +155,6 @@ impl CpuTransformerEncoder {
                 v_proj.clone(),
                 out_proj.clone(),
             );
-            
-            //   q_proj: LinearLayer,
-            //         k_proj: LinearLayer,
-            //         v_proj: LinearLayer,
-            //         out_proj: LinearLayer,
-            //         num_heads: usize,
-            //         scale_qk: bool,
-            let optimized_attention: OptimizedSelfAttention = OptimizedSelfAttention::new(
-                q_proj,
-                k_proj,
-                v_proj,
-                out_proj,
-                meta.num_attention_heads,
-                true,
-            );
-
-        
 
             // --- FEED FORWARD LOADING ---
 
@@ -203,7 +188,7 @@ impl CpuTransformerEncoder {
             let feedforward = if let Some(gate) = gate_proj {
                 // If we have a Gate layer, it's SwiGLU (Nomic/Llama)
                 FeedForward::SwiGLU(crate::feedforward::SwiGluFeedForward::new(
-                    gate,      // Gate
+                    gate,              // Gate
                     up_proj.clone(),   // Up
                     down_proj.clone(), // Down
                     Activation::SilU,
@@ -211,17 +196,11 @@ impl CpuTransformerEncoder {
             } else {
                 // If no Gate, it's Standard (BERT/MiniLM/DistilBERT)
                 FeedForward::StandardNew(crate::feedforward::StdFeedForwardNew::new(
-                    up_proj.clone(),         // FC1
-                    down_proj.clone(),       // FC2
-                    meta.activation, // Gelu/Relu
+                    up_proj.clone(),   // FC1
+                    down_proj.clone(), // FC2
+                    meta.activation,   // Gelu/Relu
                 ))
             };
-
-             let optimized_feedforward: OptimizedFeedForward = OptimizedFeedForward::new(
-                up_proj,
-                down_proj,
-                meta.activation,
-            );
 
             // --- NORMALIZATION ---
 
@@ -261,8 +240,6 @@ impl CpuTransformerEncoder {
 
             layers.push(EncoderLayer {
                 self_attn,
-                optimized_attention: Some(optimized_attention),
-                optimized_feedforward: Some(optimized_feedforward),
                 self_attn_layer_norm,
                 feedforward,
                 ffn_layer_norm,
@@ -275,7 +252,7 @@ impl CpuTransformerEncoder {
         } else {
             None
         };
-        
+
         Ok(Self {
             embeddings,
             embeddings_layer_norm,
@@ -283,6 +260,78 @@ impl CpuTransformerEncoder {
             metadata: meta,
             rope,
         })
+    }
+}
+
+impl CpuTransformerEncoder {
+    /// Forward pass through layers with pre-allocated buffers (no allocation in hot path).
+    ///
+    /// # Note
+    ///
+    /// Still allocates: RoPE, 4D attention matmuls, reshape/permute, layer norm.
+    pub fn forward_layers_noalloc(
+        &self,
+        hidden_states: &mut Array3<f32>,
+        attention_mask: &Array2<f32>,
+        start_layer: usize,
+        end_layer: usize,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<()> {
+        let (batch, seq, _) = hidden_states.dim();
+
+        #[cfg(debug_assertions)]
+        buffers.ensure_capacity(batch, seq);
+
+        for layer in &self.layers[start_layer..end_layer] {
+            layer.forward_noalloc(
+                hidden_states,
+                attention_mask,
+                None,
+                self.metadata.is_prenorm,
+                self.rope.as_deref(),
+                buffers,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Full forward pass with external buffer (caller owns buffers).
+    ///
+    /// This is the recommended API for hot paths where you reuse buffers.
+    ///
+    /// # Note
+    ///
+    /// Still allocates: embeddings, layer norm, RoPE, 4D attention matmuls.
+    pub fn forward_noalloc(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<u32>>,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<CpuEncoderOutput> {
+        // Embeddings still allocate (could optimize later)
+        let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
+
+        // Forward through layers (noalloc for layer computations)
+        self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
+
+        Ok(CpuEncoderOutput {
+            last_hidden_state: hidden,
+        })
+    }
+
+    /// Creates appropriately sized buffers for this encoder.
+    ///
+    /// Call once and reuse across forward passes.
+    pub fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        EncoderBuffers::new_auto(
+            max_batch,
+            max_seq,
+            self.metadata.hidden_size,
+            self.metadata.num_attention_heads,
+            self.metadata.intermediate_size,
+        )
     }
 }
 
@@ -296,6 +345,36 @@ impl InferenceModel for CpuTransformerEncoder {
 }
 
 impl CpuEncoder for CpuTransformerEncoder {
+    fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        EncoderBuffers::new_auto(
+            max_batch,
+            max_seq,
+            self.metadata.hidden_size,
+            self.metadata.num_attention_heads,
+            self.metadata.intermediate_size,
+        )
+    }
+    fn forward_with_buffers(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<u32>>,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<CpuEncoderOutput> {
+        let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        
+        self.forward_layers_noalloc(
+            &mut hidden,
+            attention_mask,
+            0,
+            self.num_layers(),
+            buffers,
+        )?;
+        
+        Ok(CpuEncoderOutput {
+            last_hidden_state: hidden,
+        })
+    }
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
         self.embeddings.forward(
             input_ids,

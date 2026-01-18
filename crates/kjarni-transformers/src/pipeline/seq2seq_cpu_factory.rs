@@ -441,8 +441,6 @@ impl<'a> Seq2SeqFactory<'a> {
 
         Ok(EncoderLayer {
             self_attn,
-            optimized_attention: None,
-            optimized_feedforward: None,
             self_attn_layer_norm,
             feedforward,
             ffn_layer_norm,

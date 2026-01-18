@@ -2,19 +2,9 @@ use crate::models::bart::config::BartConfig;
 use anyhow::Result;
 use async_trait::async_trait;
 use kjarni_transformers::{
-    activations::Activation, cpu::encoder::{encoder_layer::EncoderLayer, prelude::*},
-    embeddings::Embeddings,
-    encoder_decoder::traits::CpuCrossDecoder,
-    feedforward::{FeedForward, StdFeedForward},
-    linear_layer::LinearLayer,
-    models::base::ModelLoadConfig,
-    normalization::{LayerNorm, RMSNorm},
-    traits::{
+    Normalization, WgpuContext, activations::Activation, cpu::encoder::{buffers::EncoderBuffers, encoder_layer::EncoderLayer, prelude::*}, embeddings::Embeddings, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelLoadConfig, normalization::{LayerNorm, RMSNorm}, traits::{
         Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
-    },
-    weights::ModelWeights,
-    Normalization,
-    WgpuContext,
+    }, weights::ModelWeights
 };
 use ndarray::{Array2, Array3};
 use std::sync::Arc;
@@ -133,8 +123,6 @@ impl BartCpuEncoder {
             layers.push(EncoderLayer {
                 self_attn,
                 self_attn_layer_norm,
-                optimized_attention: None,
-                optimized_feedforward: None,
                 feedforward,
                 ffn_layer_norm,
             });
@@ -172,6 +160,16 @@ impl CpuEncoder for BartCpuEncoder {
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
         self.embeddings
             .forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
+    }
+
+    fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        EncoderBuffers::new_auto(
+            max_batch,
+            max_seq,
+            self.meta.hidden_size,
+            self.meta.num_attention_heads,
+            self.meta.intermediate_size,
+        )
     }
 
     /// Compute embeddings + initial normalization

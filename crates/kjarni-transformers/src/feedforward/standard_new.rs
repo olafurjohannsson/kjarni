@@ -1,7 +1,8 @@
-use crate::activations::{Activation, apply_activation_2d};
+use crate::activations::{Activation, apply_activation_2d, apply_activation_2d_mut};
 use crate::linear_layer::LinearLayer;
+use crate::cpu::encoder::buffers::EncoderBuffers;
 use anyhow::Result;
-use ndarray::{Array3};
+use ndarray::{Array3, ArrayView2, s};
 
 pub struct StdFeedForwardNew {
     pub fc1: LinearLayer,
@@ -41,6 +42,63 @@ impl StdFeedForwardNew {
         let output = self.fc2.matmul(&intermediate.view());
 
         Ok(output.into_shape_with_order((batch, seq, self.fc2.out_features()))?)
+    }
+
+    /// Forward pass writing to pre-allocated EncoderBuffers (no allocation).
+    ///
+    /// Uses `buffers.ffn_intermediate` for hidden activations.
+    /// Writes output to `buffers.ffn_output`.
+    ///
+    /// # Arguments
+    ///
+    /// * `hidden` - Input tensor [tokens, hidden]
+    /// * `buffers` - Pre-allocated encoder buffers
+    ///
+    /// # Panics
+    ///
+    /// In debug mode, panics if buffer dimensions don't match.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut buffers = EncoderBuffers::new_auto(1024, 768, 3072);
+    /// ffn.forward_noalloc(&hidden_2d, &mut buffers);
+    /// // Result in buffers.ffn_output
+    /// ```
+    pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
+        let tokens = hidden.shape()[0];
+        let intermediate_dim = self.fc1.out_features();
+        
+
+        #[cfg(debug_assertions)]
+        {
+            buffers.ensure_capacity_tokens(tokens);
+            if buffers.intermediate_dim() != intermediate_dim {
+                panic!(
+                    "FFN intermediate dimension mismatch: layer has {}, buffer has {}",
+                    intermediate_dim,
+                    buffers.intermediate_dim()
+                );
+            }
+        }
+
+        // FC1 into ffn_intermediate
+        self.fc1.matmul_noalloc(hidden, &mut buffers.ffn_intermediate);
+
+        // Apply activation in-place
+        // Only apply to the actual tokens, not the full buffer capacity
+        {
+            let mut intermediate_slice = buffers
+                .ffn_intermediate
+                .slice_mut(s![..tokens, ..intermediate_dim]);
+            apply_activation_2d_mut(&mut intermediate_slice, self.activation);
+        }
+
+        // FC2 into ffn_output
+        let intermediate_view = buffers
+            .ffn_intermediate
+            .slice(s![..tokens, ..intermediate_dim]);
+        self.fc2.matmul_noalloc(&intermediate_view, &mut buffers.ffn_output);
     }
 
 }

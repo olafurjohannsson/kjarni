@@ -1,24 +1,54 @@
 //! Indexer FFI bindings
+//!
+//! This module provides C-compatible bindings for the Kjarni indexer functionality.
+//! The indexer allows creating and managing vector indexes for RAG (Retrieval Augmented Generation)
+//! applications.
+//!
+//! # Architecture
+//!
+//! The FFI layer is intentionally thin:
+//! - Simple functions (`kjarni_indexer_create`, `kjarni_indexer_add`) call the Rust API directly
+//! - Callback functions (`kjarni_indexer_create_with_callback`, etc.) wrap FFI callbacks and pass them through
+//!
+//! # Thread Safety
+//!
+//! All functions are thread-safe. The underlying Indexer uses async operations
+//! which are executed on a shared Tokio runtime.
 
 use crate::callback::{
-    is_cancelled, KjarniCancelToken, KjarniProgress,
-    KjarniProgressCallbackFn,
+    is_cancelled, KjarniCancelToken, KjarniProgress, KjarniProgressCallbackFn,
+    KjarniProgressStage,
 };
 use crate::error::set_last_error;
-use crate::{FfiCallback, KjarniDevice, KjarniErrorCode, get_runtime};
+use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
+use kjarni::ProgressStage;
 use kjarni::indexer::{Indexer, IndexerError, IndexInfo, IndexStats};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 
-/// Statistics returned after indexing
+// =============================================================================
+// FFI Structures
+// =============================================================================
+
+/// Statistics returned after indexing operations.
+///
+/// This struct is returned by `kjarni_indexer_create` and contains
+/// information about what was indexed and how long it took.
 #[repr(C)]
 pub struct KjarniIndexStats {
+    /// Number of document chunks indexed (after splitting)
     pub documents_indexed: usize,
+    /// Number of chunks created from source files
     pub chunks_created: usize,
+    /// Embedding dimension used
     pub dimension: usize,
+    /// Total index size on disk in bytes
     pub size_bytes: u64,
+    /// Number of source files successfully processed
     pub files_processed: usize,
+    /// Number of source files skipped (errors, unsupported format, too large)
     pub files_skipped: usize,
+    /// Total time taken in milliseconds
     pub elapsed_ms: u64,
 }
 
@@ -36,15 +66,24 @@ impl From<IndexStats> for KjarniIndexStats {
     }
 }
 
-/// Information about an existing index
+/// Information about an existing index.
+///
+/// Retrieved via `kjarni_index_info`. The caller must free this struct
+/// using `kjarni_index_info_free` to avoid memory leaks.
 #[repr(C)]
 pub struct KjarniIndexInfo {
+    /// Path to the index directory (must be freed)
     pub path: *mut c_char,
+    /// Total number of documents in the index
     pub document_count: usize,
+    /// Number of index segments
     pub segment_count: usize,
+    /// Embedding dimension
     pub dimension: usize,
+    /// Total size on disk in bytes
     pub size_bytes: u64,
-    pub embedding_model: *mut c_char, // May be NULL
+    /// Embedding model name used to create the index (may be NULL, must be freed if not)
+    pub embedding_model: *mut c_char,
 }
 
 impl KjarniIndexInfo {
@@ -67,7 +106,11 @@ impl KjarniIndexInfo {
     }
 }
 
-/// Free index info strings
+/// Free memory allocated for index info strings.
+///
+/// # Safety
+///
+/// Must only be called once per `KjarniIndexInfo` returned from `kjarni_index_info`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
     if !info.path.is_null() {
@@ -78,26 +121,48 @@ pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
     }
 }
 
-/// Configuration for creating an Indexer
+/// Configuration for creating an Indexer.
+///
+/// Use `kjarni_indexer_config_default()` to get sensible defaults,
+/// then modify fields as needed before passing to `kjarni_indexer_new()`.
 #[repr(C)]
 pub struct KjarniIndexerConfig {
+    /// Device to run embeddings on (CPU or GPU)
     pub device: KjarniDevice,
+    /// Directory to cache downloaded models (NULL = system default)
     pub cache_dir: *const c_char,
+    /// Embedding model name (NULL = "minilm-l6-v2")
     pub model_name: *const c_char,
+    /// Maximum chunk size in characters
     pub chunk_size: usize,
+    /// Overlap between adjacent chunks in characters
     pub chunk_overlap: usize,
+    /// Batch size for embedding operations
     pub batch_size: usize,
-    /// Comma-separated list of extensions (NULL = use defaults)
+    /// Comma-separated list of file extensions to include (NULL = use defaults)
     pub extensions: *const c_char,
-    /// Comma-separated list of exclude patterns
+    /// Comma-separated list of glob patterns to exclude
     pub exclude_patterns: *const c_char,
+    /// Whether to recurse into subdirectories (1 = true, 0 = false)
     pub recursive: i32,
+    /// Whether to include hidden files (1 = true, 0 = false)
     pub include_hidden: i32,
-    pub max_file_size: usize, // 0 = no limit
+    /// Maximum file size in bytes (0 = no limit)
+    pub max_file_size: usize,
+    /// Suppress progress output to stderr (1 = quiet, 0 = verbose)
     pub quiet: i32,
 }
 
-/// Get default indexer configuration
+/// Get default indexer configuration.
+///
+/// Returns a configuration with sensible defaults:
+/// - CPU device
+/// - minilm-l6-v2 model
+/// - 512 character chunks with 50 character overlap
+/// - 32 batch size
+/// - 10MB max file size
+/// - Recursive directory traversal
+/// - Hidden files excluded
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     KjarniIndexerConfig {
@@ -116,12 +181,33 @@ pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     }
 }
 
-/// Opaque handle to an Indexer
+// =============================================================================
+// Indexer Handle
+// =============================================================================
+
+/// Opaque handle to an Indexer instance.
+///
+/// Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`.
 pub struct KjarniIndexer {
     inner: Indexer,
 }
 
-/// Create a new Indexer
+/// Create a new Indexer.
+///
+/// # Arguments
+///
+/// * `config` - Configuration options (NULL for defaults)
+/// * `out` - Pointer to receive the created indexer handle
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, error code otherwise.
+/// On error, call `kjarni_last_error_message()` for details.
+///
+/// # Safety
+///
+/// - `out` must be a valid pointer
+/// - The returned handle must be freed with `kjarni_indexer_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
@@ -146,7 +232,7 @@ pub unsafe extern "C" fn kjarni_indexer_new(
                 Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         } else {
-            "minilm-l6-v2" // Default
+            "minilm-l6-v2"
         };
 
         let mut builder = Indexer::builder(model_name);
@@ -217,7 +303,13 @@ pub unsafe extern "C" fn kjarni_indexer_new(
     }
 }
 
-/// Free an Indexer
+/// Free an Indexer handle.
+///
+/// # Safety
+///
+/// - `indexer` must be a handle returned by `kjarni_indexer_new`
+/// - Must not be called more than once per handle
+/// - Handle must not be used after freeing
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
     if !indexer.is_null() {
@@ -225,7 +317,81 @@ pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
     }
 }
 
-/// Create a new index (simple version, outputs to stderr)
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Convert Rust ProgressStage to FFI KjarniProgressStage
+fn convert_stage(stage: ProgressStage) -> KjarniProgressStage {
+    match stage {
+        ProgressStage::Scanning => KjarniProgressStage::Scanning,
+        ProgressStage::Loading => KjarniProgressStage::Loading,
+        ProgressStage::Embedding => KjarniProgressStage::Embedding,
+        ProgressStage::Writing => KjarniProgressStage::Writing,
+        ProgressStage::Committing => KjarniProgressStage::Committing,
+        ProgressStage::Searching => KjarniProgressStage::Searching,
+        ProgressStage::Reranking => KjarniProgressStage::Reranking,
+    }
+}
+
+/// Convert IndexerError to appropriate error code
+fn indexer_error_to_code(e: &IndexerError) -> KjarniErrorCode {
+    match e {
+        IndexerError::Cancelled => KjarniErrorCode::Cancelled,
+        IndexerError::IndexExists(_) => KjarniErrorCode::InvalidConfig,
+        IndexerError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
+        IndexerError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
+        IndexerError::NoInputs => KjarniErrorCode::InvalidConfig,
+        IndexerError::PathNotFound(_) => KjarniErrorCode::ModelNotFound,
+        _ => KjarniErrorCode::InferenceFailed,
+    }
+}
+
+/// Parse input paths from FFI array
+unsafe fn parse_inputs<'a>(
+    inputs: *const *const c_char,
+    num_inputs: usize,
+) -> Result<Vec<&'a str>, KjarniErrorCode> {
+    let mut input_vec = Vec::with_capacity(num_inputs);
+    for i in 0..num_inputs {
+        let input_ptr = *inputs.add(i);
+        if input_ptr.is_null() {
+            return Err(KjarniErrorCode::NullPointer);
+        }
+        match CStr::from_ptr(input_ptr).to_str() {
+            Ok(s) => input_vec.push(s),
+            Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
+        }
+    }
+    Ok(input_vec)
+}
+
+// =============================================================================
+// Create Index Functions
+// =============================================================================
+
+/// Create a new index from files/directories (simple version).
+///
+/// This is the simple API without progress callbacks. For progress reporting
+/// and cancellation support, use `kjarni_indexer_create_with_callback`.
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle from `kjarni_indexer_new`
+/// * `index_path` - Path where the index will be created
+/// * `inputs` - Array of file/directory paths to index
+/// * `num_inputs` - Number of elements in `inputs` array
+/// * `force` - If non-zero, overwrite existing index at `index_path`
+/// * `out` - Pointer to receive indexing statistics
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, error code otherwise.
+///
+/// # Safety
+///
+/// - All pointers must be valid
+/// - `inputs` must contain at least `num_inputs` valid C strings
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create(
     indexer: *mut KjarniIndexer,
@@ -235,12 +401,80 @@ pub unsafe extern "C" fn kjarni_indexer_create(
     force: i32,
     out: *mut KjarniIndexStats,
 ) -> KjarniErrorCode {
-    kjarni_indexer_create_with_callback(
-        indexer, index_path, inputs, num_inputs, force, None, ptr::null_mut(), ptr::null(), out,
-    )
+    // Validate pointers
+    if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
+        return KjarniErrorCode::NullPointer;
+    }
+
+    let indexer_ref = &(*indexer).inner;
+
+    // Parse index path
+    let index_path = match CStr::from_ptr(index_path).to_str() {
+        Ok(s) => s,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
+    };
+
+    // Parse input paths
+    let input_vec = match parse_inputs(inputs, num_inputs) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    // Call the simple Rust API directly (no callbacks)
+    let result = get_runtime().block_on(async {
+        indexer_ref
+            .create_with_options(index_path, &input_vec, force != 0)
+            .await
+    });
+
+    match result {
+        Ok(stats) => {
+            *out = stats.into();
+            KjarniErrorCode::Ok
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            indexer_error_to_code(&e)
+        }
+    }
 }
 
-/// Create a new index with progress callback
+/// Create a new index with progress callback and cancellation support.
+///
+/// This is the full-featured API that supports:
+/// - Progress reporting via callback
+/// - Cancellation via cancel token
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle from `kjarni_indexer_new`
+/// * `index_path` - Path where the index will be created
+/// * `inputs` - Array of file/directory paths to index
+/// * `num_inputs` - Number of elements in `inputs` array
+/// * `force` - If non-zero, overwrite existing index at `index_path`
+/// * `progress_callback` - Optional callback for progress updates (may be NULL)
+/// * `user_data` - Opaque pointer passed to callback (may be NULL)
+/// * `cancel_token` - Optional cancellation token (may be NULL)
+/// * `out` - Pointer to receive indexing statistics
+///
+/// # Callback
+///
+/// The progress callback receives a `KjarniProgress` struct with:
+/// - `stage`: Current operation (scanning, loading, embedding, etc.)
+/// - `current`: Current item number
+/// - `total`: Total items (may be 0 if unknown)
+/// - `message`: Optional status message (may be NULL)
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
+/// or other error code on failure.
+///
+/// # Safety
+///
+/// - All non-optional pointers must be valid
+/// - `inputs` must contain at least `num_inputs` valid C strings
+/// - Callback must be thread-safe if indexer uses multiple threads
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     indexer: *mut KjarniIndexer,
@@ -253,84 +487,110 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     cancel_token: *const KjarniCancelToken,
     out: *mut KjarniIndexStats,
 ) -> KjarniErrorCode {
+    // Validate required pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
 
     let indexer_ref = &(*indexer).inner;
 
+    // Parse index path
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let mut input_vec = Vec::with_capacity(num_inputs);
-    for i in 0..num_inputs {
-        let input_ptr = *inputs.add(i);
-        if input_ptr.is_null() {
-            return KjarniErrorCode::NullPointer;
+    // Parse input paths
+    let input_vec = match parse_inputs(inputs, num_inputs) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    // Create progress callback closure
+    // We always create a closure to avoid generic type inference issues
+    // The closure checks internally if the FFI callback is present
+    let on_progress = move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+        if let Some(callback) = progress_callback {
+            let ffi_stage = convert_stage(stage);
+            
+            // Convert message to C string (temporary, valid for callback duration)
+            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+            let msg_ptr = msg_cstring
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(ptr::null());
+
+            let progress = KjarniProgress {
+                stage: ffi_stage,
+                current,
+                total,
+                message: msg_ptr,
+            };
+
+            callback(progress, user_data);
         }
-        match CStr::from_ptr(input_ptr).to_str() {
-            Ok(s) => input_vec.push(s),
-            Err(_) => return KjarniErrorCode::InvalidUtf8,
+    };
+
+    // Create cancellation check closure
+    let is_cancelled_fn = move || -> bool {
+        if cancel_token.is_null() {
+            false
+        } else {
+            is_cancelled(cancel_token)
+        }
+    };
+
+    // Call the Rust API with callbacks
+    let result = get_runtime().block_on(async {
+        indexer_ref
+            .create_with_callback(
+                index_path,
+                &input_vec,
+                force != 0,
+                Some(on_progress),
+                Some(is_cancelled_fn),
+            )
+            .await
+    });
+
+    match result {
+        Ok(stats) => {
+            *out = stats.into();
+            KjarniErrorCode::Ok
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            indexer_error_to_code(&e)
         }
     }
-
-    // Create callback wrapper
-    // let progress_wrapper = ProgressCallbackWrapper::new(progress_callback, user_data);
-    
-    // // Create progress closure that calls FFI callback
-    // let on_progress = progress_wrapper.as_ref().map(|w| {
-    //     move |stage: kjarni_rag::ProgressStage, current: usize, total: usize, msg: Option<&str>| {
-    //         let ffi_stage = match stage {
-    //             kjarni_rag::ProgressStage::Scanning => KjarniProgressStage::Scanning,
-    //             kjarni_rag::ProgressStage::Loading => KjarniProgressStage::Loading,
-    //             kjarni_rag::ProgressStage::Embedding => KjarniProgressStage::Embedding,
-    //             kjarni_rag::ProgressStage::Writing => KjarniProgressStage::Writing,
-    //             kjarni_rag::ProgressStage::Committing => KjarniProgressStage::Committing,
-    //             kjarni_rag::ProgressStage::Searching => KjarniProgressStage::Searching,
-    //             kjarni_rag::ProgressStage::Reranking => KjarniProgressStage::Reranking,
-    //         };
-    //         w.report(ffi_stage, current, total, msg);
-    //     }
-    // });
-    unimplemented!()
-    // Create cancellation closure
-    // let is_cancelled = if !cancel_token.is_null() {
-    //     Some(move || crate::callback::is_cancelled(cancel_token))
-    // } else {
-    //     None
-    // };
-
-    // let result = get_runtime().block_on(async {
-    //     indexer_ref
-    //         .create_with_callback(
-    //             index_path,
-    //             &input_vec,
-    //             force != 0,
-    //             on_progress,
-    //             is_cancelled,
-    //         )
-    //         .await
-    // });
-
-    // match result {
-    //     Ok(stats) => {
-    //         *out = stats.into();
-    //         KjarniErrorCode::Ok
-    //     }
-    //     Err(e) => {
-    //         set_last_error(e.to_string());
-    //         match e {
-    //             IndexerError::Cancelled => KjarniErrorCode::Cancelled,
-    //             IndexerError::IndexExists(_) => KjarniErrorCode::InvalidConfig,
-    //             _ => KjarniErrorCode::InferenceFailed,
-    //         }
-    //     }
-    // }
 }
 
-/// Add documents to existing index
+// =============================================================================
+// Add to Index Functions
+// =============================================================================
+
+/// Add documents to an existing index (simple version).
+///
+/// This is the simple API without progress callbacks. For progress reporting
+/// and cancellation support, use `kjarni_indexer_add_with_callback`.
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle from `kjarni_indexer_new`
+/// * `index_path` - Path to existing index
+/// * `inputs` - Array of file/directory paths to add
+/// * `num_inputs` - Number of elements in `inputs` array
+/// * `documents_added` - Pointer to receive count of documents added
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, error code otherwise.
+///
+/// # Safety
+///
+/// - All pointers must be valid
+/// - `inputs` must contain at least `num_inputs` valid C strings
+/// - Index at `index_path` must exist and be compatible (same embedding dimension)
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add(
     indexer: *mut KjarniIndexer,
@@ -339,19 +599,76 @@ pub unsafe extern "C" fn kjarni_indexer_add(
     num_inputs: usize,
     documents_added: *mut usize,
 ) -> KjarniErrorCode {
-    kjarni_indexer_add_with_callback(
-        indexer,
-        index_path,
-        inputs,
-        num_inputs,
-        None,
-        ptr::null_mut(),
-        ptr::null(),
-        documents_added,
-    )
+    // Validate pointers
+    if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
+        return KjarniErrorCode::NullPointer;
+    }
+
+    // Handle empty input
+    if num_inputs == 0 {
+        *documents_added = 0;
+        return KjarniErrorCode::Ok;
+    }
+
+    let indexer_ref = &(*indexer).inner;
+
+    // Parse index path
+    let index_path = match CStr::from_ptr(index_path).to_str() {
+        Ok(s) => s,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
+    };
+
+    // Parse input paths
+    let input_vec = match parse_inputs(inputs, num_inputs) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    // Call the simple Rust API directly (no callbacks)
+    let result = get_runtime().block_on(async {
+        indexer_ref.add(index_path, &input_vec).await
+    });
+
+    match result {
+        Ok(count) => {
+            *documents_added = count;
+            KjarniErrorCode::Ok
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            *documents_added = 0;
+            indexer_error_to_code(&e)
+        }
+    }
 }
 
-/// Add documents with progress callback
+/// Add documents to an existing index with progress callback and cancellation support.
+///
+/// This is the full-featured API that supports:
+/// - Progress reporting via callback
+/// - Cancellation via cancel token
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle from `kjarni_indexer_new`
+/// * `index_path` - Path to existing index
+/// * `inputs` - Array of file/directory paths to add
+/// * `num_inputs` - Number of elements in `inputs` array
+/// * `progress_callback` - Optional callback for progress updates (may be NULL)
+/// * `user_data` - Opaque pointer passed to callback (may be NULL)
+/// * `cancel_token` - Optional cancellation token (may be NULL)
+/// * `documents_added` - Pointer to receive count of documents added
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
+/// or other error code on failure.
+///
+/// # Safety
+///
+/// - All non-optional pointers must be valid
+/// - `inputs` must contain at least `num_inputs` valid C strings
+/// - Index at `index_path` must exist and be compatible
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     indexer: *mut KjarniIndexer,
@@ -363,10 +680,12 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     cancel_token: *const KjarniCancelToken,
     documents_added: *mut usize,
 ) -> KjarniErrorCode {
+    // Validate required pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
         return KjarniErrorCode::NullPointer;
     }
 
+    // Handle empty input
     if num_inputs == 0 {
         *documents_added = 0;
         return KjarniErrorCode::Ok;
@@ -374,49 +693,90 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
 
     let indexer_ref = &(*indexer).inner;
 
+    // Parse index path
     let index_path = match CStr::from_ptr(index_path).to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let mut input_vec = Vec::with_capacity(num_inputs);
-    for i in 0..num_inputs {
-        let input_ptr = *inputs.add(i);
-        if input_ptr.is_null() {
-            return KjarniErrorCode::NullPointer;
+    // Parse input paths
+    let input_vec = match parse_inputs(inputs, num_inputs) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    // Create progress callback closure
+    let on_progress = move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+        if let Some(callback) = progress_callback {
+            let ffi_stage = convert_stage(stage);
+            
+            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+            let msg_ptr = msg_cstring
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(ptr::null());
+
+            let progress = KjarniProgress {
+                stage: ffi_stage,
+                current,
+                total,
+                message: msg_ptr,
+            };
+
+            callback(progress, user_data);
         }
-        match CStr::from_ptr(input_ptr).to_str() {
-            Ok(s) => input_vec.push(s),
-            Err(_) => return KjarniErrorCode::InvalidUtf8,
+    };
+
+    // Create cancellation check closure
+    let is_cancelled_fn = move || -> bool {
+        if cancel_token.is_null() {
+            false
+        } else {
+            is_cancelled(cancel_token)
+        }
+    };
+
+    // Call the Rust API with callbacks
+    let result = get_runtime().block_on(async {
+        indexer_ref
+            .add_with_callback(index_path, &input_vec, Some(on_progress), Some(is_cancelled_fn))
+            .await
+    });
+
+    match result {
+        Ok(count) => {
+            *documents_added = count;
+            KjarniErrorCode::Ok
+        }
+        Err(e) => {
+            set_last_error(e.to_string());
+            *documents_added = 0;
+            indexer_error_to_code(&e)
         }
     }
-    unimplemented!()
-    // let ffi_callback = FfiCallback::new(progress_callback, user_data);
-    // let check_cancel = move || is_cancelled(cancel_token);
-    // let result = get_runtime().block_on(async {
-    //     indexer_ref
-    //         .add_with_callback(index_path, &input_vec, ffi_callback.as_ref(), Some(&check_cancel))
-    //         .await
-    // });
-
-    // match result {
-    //     Ok(count) => {
-    //         *documents_added = count;
-    //         KjarniErrorCode::Ok
-    //     }
-    //     Err(e) => {
-    //         set_last_error(e.to_string());
-    //         *documents_added = 0;
-    //         match e {
-    //             IndexerError::Cancelled => KjarniErrorCode::Cancelled,
-    //             IndexerError::DimensionMismatch { .. } => KjarniErrorCode::InvalidConfig,
-    //             _ => KjarniErrorCode::InferenceFailed,
-    //         }
-    //     }
-    // }
 }
 
-/// Get index information (static - no indexer needed)
+// =============================================================================
+// Index Management Functions
+// =============================================================================
+
+/// Get information about an existing index.
+///
+/// This is a static function that doesn't require an Indexer handle.
+///
+/// # Arguments
+///
+/// * `index_path` - Path to the index directory
+/// * `out` - Pointer to receive index information
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, error code otherwise.
+///
+/// # Safety
+///
+/// - All pointers must be valid
+/// - Caller must free the returned `KjarniIndexInfo` with `kjarni_index_info_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
@@ -443,7 +803,22 @@ pub unsafe extern "C" fn kjarni_index_info(
     }
 }
 
-/// Delete an index
+/// Delete an index.
+///
+/// This permanently removes the index directory and all its contents.
+/// This is a static function that doesn't require an Indexer handle.
+///
+/// # Arguments
+///
+/// * `index_path` - Path to the index directory to delete
+///
+/// # Returns
+///
+/// `KjarniErrorCode::Ok` on success, error code otherwise.
+///
+/// # Safety
+///
+/// - `index_path` must be a valid C string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode {
     if index_path.is_null() {
@@ -464,12 +839,32 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
     }
 }
 
-// Accessors
+// =============================================================================
+// Accessor Functions
+// =============================================================================
+
+/// Get the embedding model name used by the indexer.
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle
+///
+/// # Returns
+///
+/// Pointer to model name string, or NULL if indexer is NULL.
+/// The returned pointer is valid until the next call to this function.
+///
+/// # Safety
+///
+/// - `indexer` must be a valid handle or NULL
+/// - Returned string must not be modified or freed
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer) -> *const c_char {
     use std::sync::Mutex;
     use std::sync::OnceLock;
-    
+
+    // Static buffer to hold the model name between calls
+    // This is a simple approach that works for single-threaded access patterns
     static MODEL_NAME_BUF: OnceLock<Mutex<CString>> = OnceLock::new();
 
     if indexer.is_null() {
@@ -478,7 +873,7 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer
 
     let name = (*indexer).inner.model_name();
     let mutex = MODEL_NAME_BUF.get_or_init(|| Mutex::new(CString::default()));
-    
+
     if let Ok(mut guard) = mutex.lock() {
         if let Ok(cstr) = CString::new(name) {
             *guard = cstr;
@@ -488,6 +883,15 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer
     ptr::null()
 }
 
+/// Get the embedding dimension used by the indexer.
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle
+///
+/// # Returns
+///
+/// Embedding dimension, or 0 if indexer is NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {
@@ -496,6 +900,15 @@ pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer)
     (*indexer).inner.dimension()
 }
 
+/// Get the chunk size configured for the indexer.
+///
+/// # Arguments
+///
+/// * `indexer` - Indexer handle
+///
+/// # Returns
+///
+/// Chunk size in characters, or 0 if indexer is NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {

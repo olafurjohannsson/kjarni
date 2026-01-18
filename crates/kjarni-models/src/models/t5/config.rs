@@ -110,6 +110,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             normalization_strategy: NormalizationStrategy::RMSNorm, // T5LayerNorm is effectively RMSNorm
             no_scale_qk: true,
             decoder_layers: self.num_decoder_layers,
+            intermediate_size: 0,
         }
     }
 

@@ -285,6 +285,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
+            intermediate_size: self.intermediate_size(),
         }
     }
 

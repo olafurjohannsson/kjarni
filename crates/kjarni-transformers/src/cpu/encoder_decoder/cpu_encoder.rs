@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
 use std::sync::Arc;
 
-use crate::cpu::encoder_decoder::relative_position_bias::T5RelativePositionBias;
+use crate::cpu::{encoder::buffers::EncoderBuffers, encoder_decoder::relative_position_bias::T5RelativePositionBias};
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
     Normalization, WgpuContext,
@@ -449,6 +449,18 @@ impl InferenceModel for Seq2SeqCPUEncoder {
 
 #[async_trait]
 impl CpuEncoder for Seq2SeqCPUEncoder {
+
+    fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        let intermediate_size = self.layers[0].feedforward.out_features();
+        EncoderBuffers::new_auto(
+            max_batch,
+            max_seq,
+            self.meta.hidden_size,
+            self.meta.num_attention_heads,
+            self.meta.intermediate_size,
+        )
+    }
+
     fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
         self.embeddings
             .as_ref()
@@ -554,6 +566,7 @@ mod seq2seq_encoder_tests {
                 num_kv_heads: self.num_heads,
                 head_dim: self.hidden_size / self.num_heads,
                 vocab_size: self.vocab_size,
+                intermediate_size: 0,
                 max_seq_len: 1024,
                 norm_eps: 1e-5,
                 activation: Activation::Gelu,

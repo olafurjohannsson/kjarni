@@ -67,6 +67,8 @@ use half::bf16;
 use ndarray::{Array2, ArrayView2};
 use rayon::prelude::*;
 
+
+
 /// Computes `C = A @ B^T` for F32 input `A` and Q8_0 quantized weight matrix `B`.
 ///
 /// Q8_0 is an 8-bit block-quantized format where each block contains 32 int8 values
@@ -340,6 +342,297 @@ pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) 
     c
 }
 
+/// No-alloc version of matmul_2d_cpu_f32
+/// 
+/// Computes `C = A @ B^T + bias` for F32 input `A` and F32 weight matrix `B`,
+/// writing directly to a pre-allocated output buffer.
+///
+/// Uses the vec kernel - optimized for decode (m=1) and small batches.
+///
+/// # Arguments
+///
+/// * `a` - Input activation matrix of shape `[batch, in_features]`.
+/// * `b_weights` - Weight matrix of shape `[out_features, in_features]`.
+/// * `bias` - Optional bias vector of shape `[out_features]`.
+/// * `output` - Pre-allocated output matrix of shape `[batch, out_features]`.
+///
+/// # Panics
+///
+/// Panics if dimensions don't match.
+pub fn matmul_2d_f32_noalloc(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    let (m, k) = a.dim();
+    let (n, k2) = b_weights.dim();
+    
+    debug_assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
+    debug_assert_eq!(output.dim(), (m, n), "Output shape mismatch: expected ({}, {}), got {:?}", m, n, output.dim());
+    if let Some(b) = bias {
+        debug_assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
+    }
+
+    // Ensure inputs are contiguous
+    let a_s = a.as_standard_layout();
+    let b_s = b_weights.as_standard_layout();
+    let a_slice = a_s.as_slice().expect("Input tensor 'a' must be contiguous");
+    let b_slice = b_s.as_slice().expect("Weight tensor 'b' must be contiguous");
+
+    if m == 1 {
+        // === DECODE PATH ===
+        // Parallelize over output features for single-token inference
+        let out_slice = output.as_slice_mut().unwrap();
+        let num_threads = rayon::current_num_threads();
+        let chunk_size = (n + num_threads - 1) / num_threads;
+
+        out_slice
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_idx, out_chunk)| {
+                let b_row_start_idx = chunk_idx * chunk_size;
+                let b_chunk_ptr = unsafe { b_slice.as_ptr().add(b_row_start_idx * k) };
+
+                unsafe {
+                    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                        kernels::x86::f32::matmul_vec_f32(
+                            out_chunk,
+                            a_slice.as_ptr(),
+                            b_chunk_ptr,
+                            k,
+                        );
+                        
+                        // Fuse bias addition
+                        if let Some(bias) = bias {
+                            let bias_start = b_row_start_idx;
+                            for (i, val) in out_chunk.iter_mut().enumerate() {
+                                *val += bias[bias_start + i];
+                            }
+                        }
+                        return;
+                    }
+                    
+                    #[cfg(target_arch = "aarch64")]
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        kernels::aarch64::f32::matmul_vec_f32_neon(
+                            out_chunk,
+                            a_slice.as_ptr(),
+                            b_chunk_ptr,
+                            k,
+                        );
+                        
+                        if let Some(bias) = bias {
+                            let bias_start = b_row_start_idx;
+                            for (i, val) in out_chunk.iter_mut().enumerate() {
+                                *val += bias[bias_start + i];
+                            }
+                        }
+                        return;
+                    }
+                    
+                    // Scalar fallback
+                    let b_rows = &b_slice[b_row_start_idx * k..];
+                    kernels::scalar::matmul_vec_f32_scalar(out_chunk, a_slice, b_rows, k);
+                    
+                    if let Some(bias) = bias {
+                        let bias_start = b_row_start_idx;
+                        for (i, val) in out_chunk.iter_mut().enumerate() {
+                            *val += bias[bias_start + i];
+                        }
+                    }
+                }
+            });
+    } else {
+        // === PREFILL PATH ===
+        // Parallelize over batch rows
+        let bias_slice = bias;
+        
+        output
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(a.outer_iter())
+            .for_each(|(mut c_row, a_row)| {
+                let a_row_slice = a_row.as_slice().unwrap();
+                let out_slice = c_row.as_slice_mut().unwrap();
+
+                unsafe {
+                    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                        kernels::x86::f32::matmul_vec_f32(
+                            out_slice,
+                            a_row_slice.as_ptr(),
+                            b_slice.as_ptr(),
+                            k,
+                        );
+                        
+                        if let Some(bias) = bias_slice {
+                            for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
+                                *val += b;
+                            }
+                        }
+                        return;
+                    }
+                    
+                    #[cfg(target_arch = "aarch64")]
+                    if std::arch::is_aarch64_feature_detected!("neon") {
+                        kernels::aarch64::f32::matmul_vec_f32_neon(
+                            out_slice,
+                            a_row_slice.as_ptr(),
+                            b_slice.as_ptr(),
+                            k,
+                        );
+                        
+                        if let Some(bias) = bias_slice {
+                            for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
+                                *val += b;
+                            }
+                        }
+                        return;
+                    }
+                    
+                    kernels::scalar::matmul_vec_f32_scalar(out_slice, a_row_slice, b_slice, k);
+                    
+                    if let Some(bias) = bias_slice {
+                        for (val, &b) in out_slice.iter_mut().zip(bias.iter()) {
+                            *val += b;
+                        }
+                    }
+                }
+            });
+    }
+}
+
+/// No-alloc version of matmul_2d_cpu_f32_batched
+///
+/// Computes `C = A @ B^T + bias` for F32 input `A` and F32 weight matrix `B`,
+/// writing directly to a pre-allocated output buffer.
+///
+/// Uses the 4x3 block kernel - optimized for large batches (m >= ~1000).
+/// Falls back to `matmul_2d_f32_noalloc` for single-token inputs.
+///
+/// # Arguments
+///
+/// * `a` - Input activation matrix of shape `[batch, in_features]`.
+/// * `b_weights` - Weight matrix of shape `[out_features, in_features]`.
+/// * `bias` - Optional bias vector of shape `[out_features]`.
+/// * `output` - Pre-allocated output matrix of shape `[batch, out_features]`.
+///
+/// # Panics
+///
+/// Panics if dimensions don't match.
+pub fn matmul_2d_f32_batched_noalloc(
+    a: &ArrayView2<f32>,
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+    output: &mut Array2<f32>,
+) {
+    let (m, k) = a.dim();
+    let (n, k2) = b_weights.dim();
+    
+    debug_assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
+    debug_assert_eq!(output.dim(), (m, n), "Output shape mismatch: expected ({}, {}), got {:?}", m, n, output.dim());
+    if let Some(b) = bias {
+        debug_assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
+    }
+
+    // For single token, use the vec-kernel optimized path
+    if m == 1 {
+        return matmul_2d_f32_noalloc(a, b_weights, bias, output);
+    }
+
+    let a_s = a.as_standard_layout();
+    let b_s = b_weights.as_standard_layout();
+    let a_slice = a_s.as_slice().expect("Input must be contiguous");
+    let b_slice = b_s.as_slice().expect("Weights must be contiguous");
+    let c_slice = output.as_slice_mut().expect("Output must be contiguous");
+
+    const BLOCK_SIZE: usize = 64;
+
+    c_slice
+        .par_chunks_mut(BLOCK_SIZE * n)
+        .zip(a_slice.par_chunks(BLOCK_SIZE * k))
+        .for_each(|(out_block, in_block)| {
+            let weights_ptr = b_slice.as_ptr();
+            let bias_ptr = bias.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
+
+            let num_tokens = in_block.len() / k;
+            let mut t = 0;
+
+            // === MAIN LOOP: Process 4 tokens × 3 outputs at a time ===
+            while t + 4 <= num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+                let mut j = 0;
+
+                // 4x3 kernel loop
+                while j + 3 <= n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let out_ptr = unsafe { out_block.as_mut_ptr().add(t * n + j) };
+                    let b_ptr = if !bias_ptr.is_null() {
+                        unsafe { bias_ptr.add(j) }
+                    } else {
+                        std::ptr::null()
+                    };
+
+                    unsafe {
+                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                            kernels::x86::f32::matmul_block_4x3_f32(
+                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
+                            );
+                        }
+                    }
+                    j += 3;
+                }
+
+                // Remaining output features (n % 3 != 0)
+                while j < n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    for row in 0..4 {
+                        let a_row = unsafe { in_ptr.add(row * k) };
+                        let dst = unsafe { out_block.as_mut_ptr().add((t + row) * n + j) };
+
+                        let mut sum = 0.0f32;
+                        for i in 0..k {
+                            sum += unsafe { *a_row.add(i) * *w_ptr.add(i) };
+                        }
+                        unsafe { *dst = sum + b_val };
+                    }
+                    j += 1;
+                }
+                t += 4;
+            }
+
+            // === CLEANUP: Remaining tokens (num_tokens % 4 != 0) ===
+            while t < num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+
+                for j in 0..n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    let mut sum = 0.0f32;
+                    for i in 0..k {
+                        sum += unsafe { *in_ptr.add(i) * *w_ptr.add(i) };
+                    }
+                    out_block[t * n + j] = sum + b_val;
+                }
+                t += 1;
+            }
+        });
+}
+
 /// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
 ///
 /// This is the highest-precision matmul variant, used when accuracy is paramount
@@ -453,6 +746,141 @@ pub fn matmul_2d_cpu_f32(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Ar
                 }
             });
     }
+    c
+}
+
+/// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
+/// 
+/// Batched version using the 4x3 block kernel for improved throughput on
+/// multi-token inputs (encoding/prefill). Falls back to `matmul_2d_cpu_f32`
+/// for single-token (decode) inputs.
+///
+/// # Arguments
+///
+/// * `a` - Input activation matrix of shape `[batch, in_features]`.
+/// * `b_weights` - Weight matrix of shape `[out_features, in_features]`.
+/// * `bias` - Optional bias vector of shape `[out_features]`.
+///
+/// # Returns
+///
+/// Output matrix of shape `[batch, out_features]`.
+pub fn matmul_2d_cpu_f32_batched(
+    a: &ArrayView2<f32>, 
+    b_weights: &ArrayView2<f32>,
+    bias: Option<&[f32]>,
+) -> Array2<f32> {
+    let (m, k) = a.dim();
+    let (n, k2) = b_weights.dim();
+    assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
+    
+    if let Some(b) = bias {
+        assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
+    }
+
+    // For single token, use the decode-optimized path
+    if m == 1 {
+        let mut result = matmul_2d_cpu_f32(a, b_weights);
+        if let Some(b) = bias {
+            let out_slice = result.as_slice_mut().unwrap();
+            for (i, val) in out_slice.iter_mut().enumerate() {
+                *val += b[i];
+            }
+        }
+        return result;
+    }
+
+    let mut c = Array2::<f32>::zeros((m, n));
+    
+    let a_s = a.as_standard_layout();
+    let b_s = b_weights.as_standard_layout();
+    let a_slice = a_s.as_slice().expect("Input must be contiguous");
+    let b_slice = b_s.as_slice().expect("Weights must be contiguous");
+    let c_slice = c.as_slice_mut().expect("Output must be contiguous");
+
+    const BLOCK_SIZE: usize = 64;
+
+    c_slice
+        .par_chunks_mut(BLOCK_SIZE * n)
+        .zip(a_slice.par_chunks(BLOCK_SIZE * k))
+        .for_each(|(out_block, in_block)| {
+            let weights_ptr = b_slice.as_ptr();
+            let bias_ptr = bias.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
+
+            let num_tokens = in_block.len() / k;
+            let mut t = 0;
+
+            // === MAIN LOOP: Process 4 tokens × 3 outputs at a time ===
+            while t + 4 <= num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+                let mut j = 0;
+
+                // 4x3 kernel loop
+                while j + 3 <= n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let out_ptr = unsafe { out_block.as_mut_ptr().add(t * n + j) };
+                    let b_ptr = if !bias_ptr.is_null() {
+                        unsafe { bias_ptr.add(j) }
+                    } else {
+                        std::ptr::null()
+                    };
+
+                    unsafe {
+                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                            kernels::x86::f32::matmul_block_4x3_f32(
+                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
+                            );
+                        }
+                    }
+                    j += 3;
+                }
+
+                // Remaining output features (n % 3 != 0)
+                while j < n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    for row in 0..4 {
+                        let a_row = unsafe { in_ptr.add(row * k) };
+                        let dst = unsafe { out_block.as_mut_ptr().add((t + row) * n + j) };
+
+                        let mut sum = 0.0f32;
+                        for i in 0..k {
+                            sum += unsafe { *a_row.add(i) * *w_ptr.add(i) };
+                        }
+                        unsafe { *dst = sum + b_val };
+                    }
+                    j += 1;
+                }
+                t += 4;
+            }
+
+            // === CLEANUP: Remaining tokens (num_tokens % 4 != 0) ===
+            while t < num_tokens {
+                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
+
+                for j in 0..n {
+                    let w_ptr = unsafe { weights_ptr.add(j * k) };
+                    let b_val = if !bias_ptr.is_null() {
+                        unsafe { *bias_ptr.add(j) }
+                    } else {
+                        0.0
+                    };
+
+                    let mut sum = 0.0f32;
+                    for i in 0..k {
+                        sum += unsafe { *in_ptr.add(i) * *w_ptr.add(i) };
+                    }
+                    out_block[t * n + j] = sum + b_val;
+                }
+                t += 1;
+            }
+        });
+
     c
 }
 
@@ -746,142 +1174,7 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
     output
 }
 
-// Add this to matmul.rs
 
-/// Computes `C = A @ B^T` for F32 input `A` and F32 weight matrix `B`.
-/// 
-/// Batched version using the 4x3 block kernel for improved throughput on
-/// multi-token inputs (encoding/prefill). Falls back to `matmul_2d_cpu_f32`
-/// for single-token (decode) inputs.
-///
-/// # Arguments
-///
-/// * `a` - Input activation matrix of shape `[batch, in_features]`.
-/// * `b_weights` - Weight matrix of shape `[out_features, in_features]`.
-/// * `bias` - Optional bias vector of shape `[out_features]`.
-///
-/// # Returns
-///
-/// Output matrix of shape `[batch, out_features]`.
-pub fn matmul_2d_cpu_f32_batched(
-    a: &ArrayView2<f32>, 
-    b_weights: &ArrayView2<f32>,
-    bias: Option<&[f32]>,
-) -> Array2<f32> {
-    let (m, k) = a.dim();
-    let (n, k2) = b_weights.dim();
-    assert_eq!(k, k2, "Matmul dimension mismatch: A[k]={} != B[k]={}", k, k2);
-    
-    if let Some(b) = bias {
-        assert_eq!(b.len(), n, "Bias length {} != out_features {}", b.len(), n);
-    }
-
-    // For single token, use the decode-optimized path
-    if m == 1 {
-        let mut result = matmul_2d_cpu_f32(a, b_weights);
-        if let Some(b) = bias {
-            let out_slice = result.as_slice_mut().unwrap();
-            for (i, val) in out_slice.iter_mut().enumerate() {
-                *val += b[i];
-            }
-        }
-        return result;
-    }
-
-    let mut c = Array2::<f32>::zeros((m, n));
-    
-    let a_s = a.as_standard_layout();
-    let b_s = b_weights.as_standard_layout();
-    let a_slice = a_s.as_slice().expect("Input must be contiguous");
-    let b_slice = b_s.as_slice().expect("Weights must be contiguous");
-    let c_slice = c.as_slice_mut().expect("Output must be contiguous");
-
-    const BLOCK_SIZE: usize = 64;
-
-    c_slice
-        .par_chunks_mut(BLOCK_SIZE * n)
-        .zip(a_slice.par_chunks(BLOCK_SIZE * k))
-        .for_each(|(out_block, in_block)| {
-            let weights_ptr = b_slice.as_ptr();
-            let bias_ptr = bias.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
-
-            let num_tokens = in_block.len() / k;
-            let mut t = 0;
-
-            // === MAIN LOOP: Process 4 tokens × 3 outputs at a time ===
-            while t + 4 <= num_tokens {
-                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
-                let mut j = 0;
-
-                // 4x3 kernel loop
-                while j + 3 <= n {
-                    let w_ptr = unsafe { weights_ptr.add(j * k) };
-                    let out_ptr = unsafe { out_block.as_mut_ptr().add(t * n + j) };
-                    let b_ptr = if !bias_ptr.is_null() {
-                        unsafe { bias_ptr.add(j) }
-                    } else {
-                        std::ptr::null()
-                    };
-
-                    unsafe {
-                        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-                        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                            kernels::x86::f32::matmul_block_4x3_f32(
-                                out_ptr, n, in_ptr, w_ptr, k, b_ptr,
-                            );
-                        }
-                    }
-                    j += 3;
-                }
-
-                // Remaining output features (n % 3 != 0)
-                while j < n {
-                    let w_ptr = unsafe { weights_ptr.add(j * k) };
-                    let b_val = if !bias_ptr.is_null() {
-                        unsafe { *bias_ptr.add(j) }
-                    } else {
-                        0.0
-                    };
-
-                    for row in 0..4 {
-                        let a_row = unsafe { in_ptr.add(row * k) };
-                        let dst = unsafe { out_block.as_mut_ptr().add((t + row) * n + j) };
-
-                        let mut sum = 0.0f32;
-                        for i in 0..k {
-                            sum += unsafe { *a_row.add(i) * *w_ptr.add(i) };
-                        }
-                        unsafe { *dst = sum + b_val };
-                    }
-                    j += 1;
-                }
-                t += 4;
-            }
-
-            // === CLEANUP: Remaining tokens (num_tokens % 4 != 0) ===
-            while t < num_tokens {
-                let in_ptr = unsafe { in_block.as_ptr().add(t * k) };
-
-                for j in 0..n {
-                    let w_ptr = unsafe { weights_ptr.add(j * k) };
-                    let b_val = if !bias_ptr.is_null() {
-                        unsafe { *bias_ptr.add(j) }
-                    } else {
-                        0.0
-                    };
-
-                    let mut sum = 0.0f32;
-                    for i in 0..k {
-                        sum += unsafe { *in_ptr.add(i) * *w_ptr.add(i) };
-                    }
-                    out_block[t * n + j] = sum + b_val;
-                }
-                t += 1;
-            }
-        });
-
-    c
-}
 
 // =========================================================================
 // TESTS
@@ -1314,5 +1607,471 @@ mod matmul_tests {
         println!("Prefill (m=32): {:?} per call", prefill_time / iterations as u32);
         println!("Tokens/sec decode:  {:.0}", iterations as f64 / decode_time.as_secs_f64());
         println!("Tokens/sec prefill: {:.0}", 32.0 * iterations as f64 / prefill_time.as_secs_f64());
+    }
+
+    // =========================================================================
+    // No-Alloc Tests (matmul_2d_f32_noalloc)
+    // =========================================================================
+
+    #[test]
+    fn test_noalloc_decode_no_bias() {
+        let (m, k, n) = (1, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), None, &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Decode No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_noalloc_decode_with_bias() {
+        let (m, k, n) = (1, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Decode With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_noalloc_decode_ffn_dims() {
+        // FFN up-projection: 384 -> 1536
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Decode FFN Dims (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_noalloc_small_batch_no_bias() {
+        let (m, k, n) = (16, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), None, &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Small Batch No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_noalloc_small_batch_with_bias() {
+        let (m, k, n) = (16, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Small Batch With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_noalloc_medium_batch() {
+        let (m, k, n) = (256, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Medium Batch (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    // =========================================================================
+    // No-Alloc Batched Tests (matmul_2d_f32_batched_noalloc)
+    // =========================================================================
+
+    #[test]
+    fn test_batched_noalloc_single_token_fallback() {
+        // Should fall back to vec kernel
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Single Token Fallback ===");
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_tiny_no_bias() {
+        let (m, k, n) = (4, 4, 3);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), None, &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Tiny No Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_tiny_with_bias() {
+        let (m, k, n) = (4, 4, 3);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Tiny With Bias (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_remainder_outputs() {
+        // n % 3 != 0
+        let (m, k, n) = (8, 32, 14);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Remainder Outputs (n={}, n%3={}) ===", n, n % 3);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_remainder_tokens() {
+        // m % 4 != 0
+        let (m, k, n) = (10, 32, 12);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Remainder Tokens (m={}, m%4={}) ===", m, m % 4);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_both_remainders() {
+        // m % 4 != 0 AND n % 3 != 0
+        let (m, k, n) = (10, 32, 14);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Both Remainders (m%4={}, n%3={}) ===", m % 4, n % 3);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_medium() {
+        let (m, k, n) = (64, 128, 256);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        let mean = mean_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Medium (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_large_minilm() {
+        // MiniLM-like dimensions
+        let (m, k, n) = (120 * 24, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        let mean = mean_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Large MiniLM (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_minilm_ffn() {
+        // MiniLM FFN dimensions
+        let (m, k, n) = (120 * 24, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), Some(&bias));
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        let mean = mean_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc MiniLM FFN (m={}, k={}, n={}) ===", m, k, n);
+        println!("Max diff:  {:.2e}", diff);
+        println!("Mean diff: {:.2e}", mean);
+        assert!(diff < 1e-3, "Max diff {} exceeds tolerance", diff);
+    }
+
+    #[test]
+    fn test_batched_noalloc_non_aligned_k() {
+        // k % 8 != 0 (tests SIMD remainder in 4x3 kernel)
+        let (m, k, n) = (8, 37, 12);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+
+        let expected = reference_matmul_with_bias(&a.view(), &b.view(), None);
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), None, &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== Batched No-Alloc Non-Aligned K (k={}, k%8={}) ===", k, k % 8);
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
+    }
+
+    // =========================================================================
+    // Cross-Validation: Allocating vs No-Alloc
+    // =========================================================================
+
+    #[test]
+    fn test_noalloc_matches_allocating_decode() {
+        let (m, k, n) = (1, 384, 1536);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        // Allocating version
+        let mut expected = matmul_2d_cpu_f32(&a.view(), &b.view());
+        for (val, &b) in expected.as_slice_mut().unwrap().iter_mut().zip(bias.iter()) {
+            *val += b;
+        }
+
+        // No-alloc version
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Matches Allocating (Decode) ===");
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "No-alloc should match allocating exactly");
+    }
+
+    #[test]
+    fn test_noalloc_matches_allocating_batched() {
+        let (m, k, n) = (256, 384, 384);
+        let a = make_input(m, k, 0);
+        let b = make_input(n, k, 100);
+        let bias = make_bias(n, 0.01);
+
+        // Allocating version
+        let expected = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+
+        // No-alloc version
+        let mut output = Array2::zeros((m, n));
+        matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+
+        let diff = max_diff(&expected, &output);
+        println!("\n=== No-Alloc Matches Allocating (Batched) ===");
+        println!("Max diff: {:.2e}", diff);
+        assert!(diff < 1e-6, "No-alloc should match allocating exactly");
+    }
+
+    // =========================================================================
+    // Performance Comparison
+    // =========================================================================
+
+    #[test]
+    fn bench_noalloc_vs_allocating() {
+        use std::time::Instant;
+
+        println!("\n");
+        println!("╔══════════════════════════════════════════════════════════════════════╗");
+        println!("║           NO-ALLOC VS ALLOCATING BENCHMARK                           ║");
+        println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+        let configs = [
+            ("Decode (m=1)", 1, 384, 1536, 1000, 100),
+            ("Small batch (m=16)", 16, 384, 384, 500, 50),
+            ("Medium batch (m=256)", 256, 384, 384, 100, 10),
+            ("Large batch (m=2880)", 2880, 384, 384, 50, 5),
+        ];
+
+        for (name, m, k, n, iterations, warmup) in configs {
+            let a = make_input(m, k, 0);
+            let b = make_input(n, k, 100);
+            let bias = make_bias(n, 0.01);
+            let mut output = Array2::zeros((m, n));
+
+            // Warmup
+            for _ in 0..warmup {
+                if m == 1 {
+                    let mut r = matmul_2d_cpu_f32(&a.view(), &b.view());
+                    for (val, &b) in r.as_slice_mut().unwrap().iter_mut().zip(bias.iter()) {
+                        *val += b;
+                    }
+                } else {
+                    let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+                }
+                matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+            }
+
+            // Benchmark allocating
+            let start = Instant::now();
+            for _ in 0..iterations {
+                if m == 1 {
+                    let mut r = matmul_2d_cpu_f32(&a.view(), &b.view());
+                    for (val, &b) in r.as_slice_mut().unwrap().iter_mut().zip(bias.iter()) {
+                        *val += b;
+                    }
+                    std::hint::black_box(r);
+                } else {
+                    let r = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+                    std::hint::black_box(r);
+                }
+            }
+            let alloc_time = start.elapsed();
+
+            // Benchmark no-alloc
+            let start = Instant::now();
+            for _ in 0..iterations {
+                matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+                std::hint::black_box(&output);
+            }
+            let noalloc_time = start.elapsed();
+
+            let alloc_per = alloc_time / iterations as u32;
+            let noalloc_per = noalloc_time / iterations as u32;
+            let speedup = alloc_time.as_secs_f64() / noalloc_time.as_secs_f64();
+
+            println!("\n=== {} ===", name);
+            println!("Allocating: {:>10.2?}", alloc_per);
+            println!("No-alloc:   {:>10.2?}", noalloc_per);
+            println!("Speedup:    {:.2}x", speedup);
+        }
+    }
+
+    #[test]
+    fn bench_batched_noalloc_vs_allocating() {
+        use std::time::Instant;
+
+        println!("\n");
+        println!("╔══════════════════════════════════════════════════════════════════════╗");
+        println!("║           BATCHED NO-ALLOC VS ALLOCATING BENCHMARK                   ║");
+        println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+        let configs = [
+            ("MiniLM QKV (m=2880, n=384)", 2880, 384, 384, 50, 5),
+            ("MiniLM FFN up (m=2880, n=1536)", 2880, 384, 1536, 30, 3),
+            ("MiniLM FFN down (m=2880, n=384)", 2880, 1536, 384, 30, 3),
+            ("BERT QKV (m=2048, n=768)", 2048, 768, 768, 20, 3),
+        ];
+
+        for (name, m, k, n, iterations, warmup) in configs {
+            let a = make_input(m, k, 0);
+            let b = make_input(n, k, 100);
+            let bias = make_bias(n, 0.01);
+            let mut output = Array2::zeros((m, n));
+
+            // Warmup
+            for _ in 0..warmup {
+                let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+                matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+            }
+
+            // Benchmark allocating
+            let start = Instant::now();
+            for _ in 0..iterations {
+                let r = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
+                std::hint::black_box(r);
+            }
+            let alloc_time = start.elapsed();
+
+            // Benchmark no-alloc
+            let start = Instant::now();
+            for _ in 0..iterations {
+                matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
+                std::hint::black_box(&output);
+            }
+            let noalloc_time = start.elapsed();
+
+            let alloc_per = alloc_time / iterations as u32;
+            let noalloc_per = noalloc_time / iterations as u32;
+            let speedup = alloc_time.as_secs_f64() / noalloc_time.as_secs_f64();
+
+            println!("\n=== {} ===", name);
+            println!("Allocating: {:>10.2?}", alloc_per);
+            println!("No-alloc:   {:>10.2?}", noalloc_per);
+            println!("Speedup:    {:.2}x", speedup);
+        }
     }
 }

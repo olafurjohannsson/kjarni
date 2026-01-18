@@ -78,6 +78,7 @@ pub struct ModelMetadata {
     pub normalization_strategy: NormalizationStrategy,
     pub no_scale_qk: bool,
     pub decoder_layers: Option<usize>,
+    pub intermediate_size: usize,
 }
 
 /// Naming templates for a standard attention block (self- or cross-attention).
@@ -190,6 +191,11 @@ pub trait ModelConfig: Send + Sync {
         self.metadata().activation
     }
 
+    fn intermediate_size(&self) -> usize {
+        // Typical FFN intermediate size is 4x hidden size
+        self.hidden_size() * 4
+    }
+
     fn eos_token_id(&self) -> Option<u32> {
         None
     }
@@ -258,6 +264,7 @@ mod tests {
             num_kv_heads: 4,
             head_dim: 32,
             vocab_size: 1000,
+            intermediate_size: 0,
             max_seq_len: 512,
             norm_eps: 1e-5,
             activation: Activation::Gelu,

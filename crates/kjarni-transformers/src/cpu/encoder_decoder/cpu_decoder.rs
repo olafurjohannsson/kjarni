@@ -770,6 +770,7 @@ mod seq2seq_decoder_tests {
                 vocab_size: self.vocab_size,
                 max_seq_len: 1024,
                 norm_eps: 1e-5,
+                intermediate_size: 0,
                 activation: Activation::Gelu,
                 rope_theta: None,
                 rope_scaling: None,

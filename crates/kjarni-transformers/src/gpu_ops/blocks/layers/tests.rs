@@ -49,6 +49,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             hidden_size: self.hidden_size,
             num_layers: 1,
             decoder_layers: None,
+            intermediate_size: 0,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
             head_dim: self.hidden_size / self.num_attention_heads,

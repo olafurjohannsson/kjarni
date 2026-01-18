@@ -1,6 +1,6 @@
 use libm::{erff, expf, tanhf};
 use ndarray::parallel::prelude::*;
-use ndarray::{Array1, Array2, Array3, Array4, Axis, s};
+use ndarray::{Array1, Array2, Array3, Array4, ArrayViewMut2, Axis, s};
 use ndarray::{ArrayBase, DataMut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -105,6 +105,29 @@ fn apply_activation_slice(slice: &mut [f32], activation: Activation, use_paralle
 
         (Activation::Tanh, true) => slice.par_iter_mut().for_each(|x| *x = tanh_scalar(*x)),
         (Activation::Tanh, false) => slice.iter_mut().for_each(|x| *x = tanh_scalar(*x)),
+    }
+}
+
+
+pub fn apply_activation_2d_mut(arr: &mut ArrayViewMut2<f32>, activation: Activation) {
+    let use_parallel = arr.len() >= PARALLEL_THRESHOLD;
+    if let Some(slice) = arr.as_slice_mut() {
+        apply_activation_slice(slice, activation, use_parallel);
+    } else {
+        // Fallback for non-contiguous arrays
+        let use_parallel = arr.len() >= PARALLEL_THRESHOLD;
+        match (activation, use_parallel) {
+            (Activation::Gelu, true) => arr.par_mapv_inplace(gelu_scalar),
+            (Activation::Gelu, false) => arr.mapv_inplace(gelu_scalar),
+            (Activation::GeluNew, true) => arr.par_mapv_inplace(gelu_new_scalar),
+            (Activation::GeluNew, false) => arr.mapv_inplace(gelu_new_scalar),
+            (Activation::Relu, true) => arr.par_mapv_inplace(relu_scalar),
+            (Activation::Relu, false) => arr.mapv_inplace(relu_scalar),
+            (Activation::SilU, true) => arr.par_mapv_inplace(silu_scalar),
+            (Activation::SilU, false) => arr.mapv_inplace(silu_scalar),
+            (Activation::Tanh, true) => arr.par_mapv_inplace(tanh_scalar),
+            (Activation::Tanh, false) => arr.mapv_inplace(tanh_scalar),
+        }
     }
 }
 

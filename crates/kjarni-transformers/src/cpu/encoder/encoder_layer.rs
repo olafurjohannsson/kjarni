@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::optimized_layer::{
     EncoderScratch, OptimizedFeedForward, OptimizedSelfAttention, fused_residual_layernorm,
 };
@@ -7,7 +8,7 @@ use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
 use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, ArrayView3};
+use ndarray::{Array2, Array3, Array4, ArrayView3, s};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -18,11 +19,8 @@ use rayon::iter::{
 /// - Any bidirectional encoder architecture
 pub struct EncoderLayer {
     pub self_attn: EncoderSelfAttention,
-    pub optimized_attention: Option<OptimizedSelfAttention>,
-
     pub self_attn_layer_norm: Normalization,
     pub feedforward: FeedForward,
-    pub optimized_feedforward: Option<OptimizedFeedForward>,
     pub ffn_layer_norm: Normalization,
 }
 
@@ -47,22 +45,125 @@ impl EncoderLayer {
     ) -> Self {
         Self {
             self_attn,
-            optimized_attention: None,
-            optimized_feedforward: None,
             self_attn_layer_norm,
             feedforward,
             ffn_layer_norm,
         }
     }
 
-    pub fn with_optimized(
-        mut self,
-        optimized_attention: OptimizedSelfAttention,
-        optimized_feedforward: OptimizedFeedForward,
-    ) -> Self {
-        self.optimized_attention = Some(optimized_attention);
-        self.optimized_feedforward = Some(optimized_feedforward);
-        self
+    // Forward pass with pre-allocated buffers (no allocation in hot path).
+    ///
+    /// # Note
+    ///
+    /// Still allocates: RoPE, 4D attention matmuls, reshape/permute operations.
+    pub fn forward_noalloc(
+        &self,
+        hidden: &mut Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_bias: Option<&ndarray::Array4<f32>>,
+        is_prenorm: bool,
+        rope: Option<&RoPE>,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<()> {
+        if is_prenorm {
+            self.forward_prenorm_noalloc(hidden, attention_mask, position_bias, rope, buffers)
+        } else {
+            self.forward_postnorm_noalloc(hidden, attention_mask, position_bias, rope, buffers)
+        }
+    }
+
+    fn forward_prenorm_noalloc(
+        &self,
+        hidden: &mut Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_bias: Option<&ndarray::Array4<f32>>,
+        rope: Option<&RoPE>,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<()> {
+        let (batch, seq, hidden_dim) = hidden.dim();
+        let tokens = batch * seq;
+
+        // 1. Pre-norm for attention
+        let normed = self.self_attn_layer_norm.forward(hidden);
+
+        // 2. Self attention (writes to buffers.attn_output)
+        self.self_attn
+            .forward_noalloc(&normed, attention_mask, position_bias, rope, buffers)?;
+
+        // 3. Residual: hidden = hidden + attn_output
+        {
+            let attn_out_slice = buffers.attn_output.slice(s![..tokens, ..]);
+            let hidden_flat = hidden.as_slice_mut().unwrap();
+            let attn_flat = attn_out_slice.as_slice().unwrap();
+            for (h, a) in hidden_flat.iter_mut().zip(attn_flat.iter()) {
+                *h += a;
+            }
+        }
+
+        // 4. Pre-norm for FFN
+        let normed_ffn = self.ffn_layer_norm.forward(hidden);
+        let normed_ffn_2d = normed_ffn
+            .view()
+            .into_shape_with_order((tokens, hidden_dim))?;
+
+        // 5. FFN (writes to buffers.ffn_output)
+        self.feedforward.forward_noalloc(&normed_ffn_2d, buffers);
+
+        // 6. Residual: hidden = hidden + ffn_output
+        {
+            let ffn_out_slice = buffers.ffn_output.slice(s![..tokens, ..]);
+            let hidden_flat = hidden.as_slice_mut().unwrap();
+            let ffn_flat = ffn_out_slice.as_slice().unwrap();
+            for (h, f) in hidden_flat.iter_mut().zip(ffn_flat.iter()) {
+                *h += f;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn forward_postnorm_noalloc(
+        &self,
+        hidden: &mut Array3<f32>,
+        attention_mask: &Array2<f32>,
+        position_bias: Option<&ndarray::Array4<f32>>,
+        rope: Option<&RoPE>,
+        buffers: &mut EncoderBuffers,
+    ) -> Result<()> {
+        let (batch, seq, hidden_dim) = hidden.dim();
+        let tokens = batch * seq;
+
+        // 1. Self attention (writes to buffers.attn_output)
+        self.self_attn
+            .forward_noalloc(hidden, attention_mask, position_bias, rope, buffers)?;
+
+        // 2. Residual + norm: hidden = norm(hidden + attn_output)
+        {
+            let attn_out_slice = buffers.attn_output.slice(s![..tokens, ..]);
+            let hidden_flat = hidden.as_slice_mut().unwrap();
+            let attn_flat = attn_out_slice.as_slice().unwrap();
+            for (h, a) in hidden_flat.iter_mut().zip(attn_flat.iter()) {
+                *h += a;
+            }
+        }
+        *hidden = self.self_attn_layer_norm.forward(hidden);
+
+        // 3. FFN
+        let hidden_2d = hidden.view().into_shape_with_order((tokens, hidden_dim))?;
+        self.feedforward.forward_noalloc(&hidden_2d, buffers);
+
+        // 4. Residual + norm: hidden = norm(hidden + ffn_output)
+        {
+            let ffn_out_slice = buffers.ffn_output.slice(s![..tokens, ..]);
+            let hidden_flat = hidden.as_slice_mut().unwrap();
+            let ffn_flat = ffn_out_slice.as_slice().unwrap();
+            for (h, f) in hidden_flat.iter_mut().zip(ffn_flat.iter()) {
+                *h += f;
+            }
+        }
+        *hidden = self.ffn_layer_norm.forward(hidden);
+
+        Ok(())
     }
 
     /// Forward pass with configurable norm order
@@ -83,7 +184,7 @@ impl EncoderLayer {
         if is_prenorm {
             self.forward_prenorm(hidden, attention_mask, position_bias, rope)
         } else {
-            self.forward_postnorm2(hidden, attention_mask, position_bias, rope)
+            self.forward_postnorm(hidden, attention_mask, position_bias, rope)
         }
     }
     fn forward_prenorm(
@@ -190,121 +291,6 @@ impl EncoderLayer {
 
         Ok(hidden)
     }
-    /// Post-norm: Sublayer → Residual → LN (BERT, BART, RoBERTa style)
-    ///
-    /// ```text
-    /// x ──┬──► Attention ──┬──► + ──► LN ──┬──► FFN ──┬──► + ──► LN ──► out
-    ///     └────────────────►┘              └──────────►┘
-    /// ```
-    pub fn forward_postnorm2(
-        &self,
-        mut hidden: Array3<f32>,
-        attention_mask: &Array2<f32>,
-        position_bias: Option<&Array4<f32>>,
-        rope: Option<&RoPE>,
-    ) -> Result<Array3<f32>> {
-        let layer_start = Instant::now();
-        let (b, s, d) = hidden.dim();
-        let tokens = b * s;
-
-        // Get intermediate dim from the feedforward layer
-        let intermediate_dim = self.feedforward.out_features(); // You may need to expose this
-
-        // Create scratch buffers (ideally pass this in from encoder level for reuse)
-        let mut scratch = EncoderScratch::new(b, s, d, self.self_attn.num_heads, intermediate_dim);
-
-        // =======================================================================
-        // 1. ATTENTION BLOCK
-        // =======================================================================
-        let t_attn_start = Instant::now();
-
-        let opt_attn = self
-            .optimized_attention
-            .as_ref()
-            .expect("Optimized attention not initialized");
-        opt_attn.forward(&hidden, attention_mask, position_bias, rope, &mut scratch)?;
-
-        let t_attn = t_attn_start.elapsed();
-
-        // =======================================================================
-        // 2. POST-ATTENTION: Fused Residual + LayerNorm
-        //    output = LayerNorm(hidden + attn_out)
-        // =======================================================================
-        let t_overhead_start = Instant::now();
-
-        // Reshape attention output from [tokens, hidden] to [batch, seq, hidden]
-        let attn_out_3d = scratch.output_2d.view().into_shape((b, s, d))?;
-
-        // Allocate buffer for post-attention layernorm output (this becomes FFN input)
-        let mut ffn_input = Array3::<f32>::zeros((b, s, d));
-
-        fused_residual_layernorm(
-            &mut ffn_input,
-            &attn_out_3d,   // "input" - the attention output
-            &hidden.view(), // "residual" - the original hidden state
-            self.self_attn_layer_norm.gamma(),
-            self.self_attn_layer_norm.beta().unwrap(),
-            self.self_attn_layer_norm.eps(),
-        );
-
-        // =======================================================================
-        // 3. FFN BLOCK
-        // =======================================================================
-        let t_ffn_start = Instant::now();
-
-        // Reshape for FFN: [batch, seq, hidden] -> [tokens, hidden]
-        let ffn_input_2d = ffn_input.view().into_shape((tokens, d))?;
-
-        // Prepare output buffer for FFN
-        let mut ffn_output_2d = Array2::<f32>::zeros((tokens, d));
-
-        let opt_ffn = self
-            .optimized_feedforward
-            .as_ref()
-            .expect("Optimized feedforward not initialized");
-        opt_ffn.forward(&ffn_input_2d, &mut scratch.intermediate, &mut ffn_output_2d);
-
-        let t_ffn = t_ffn_start.elapsed();
-
-        // =======================================================================
-        // 4. POST-FFN: Fused Residual + LayerNorm
-        //    output = LayerNorm(ffn_input + ffn_out)
-        // =======================================================================
-
-        // Reshape FFN output back to 3D
-        let ffn_output_3d = ffn_output_2d.view().into_shape((b, s, d))?;
-
-        // Final output buffer
-        let mut output = Array3::<f32>::zeros((b, s, d));
-
-        fused_residual_layernorm(
-            &mut output,
-            &ffn_output_3d,    // "input" - the FFN output
-            &ffn_input.view(), // "residual" - the FFN input (post-attn layernorm output)
-            self.ffn_layer_norm.gamma(),
-            self.ffn_layer_norm.beta().unwrap(),
-            self.ffn_layer_norm.eps(),
-        );
-
-        let total = layer_start.elapsed();
-        let t_overhead = total - t_attn - t_ffn;
-
-        if total.as_millis() > 5 {
-            println!(
-                "POSTNORM SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-                b,
-                s,
-                d,
-                total.as_millis(),
-                t_attn.as_millis(),
-                t_ffn.as_millis(),
-                t_overhead.as_millis()
-            );
-            println!("Rayon threads: {}", rayon::current_num_threads());
-        }
-
-        Ok(output)
-    }
 }
 
 #[cfg(test)]
@@ -387,26 +373,412 @@ mod encoder_layer_tests {
             1e-5,
         ));
 
-        let optimized_attention = OptimizedSelfAttention::new(
-            self_attn.q_proj.clone(),
-            self_attn.k_proj.clone(),
-            self_attn.v_proj.clone(),
-            self_attn.out_proj.clone(),
-            num_heads,
-            true,
-        );
-
-        let optimized_feedforward = OptimizedFeedForward::new(
-            LinearLayer::new_f32(fc1_w, Some(fc1_b)),
-            LinearLayer::new_f32(fc2_w, Some(fc2_b)),
-            Activation::Gelu,
-        );
-        
-
         let mut layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2);
-        layer = layer.with_optimized(optimized_attention, optimized_feedforward);
 
         layer
+    }
+    #[test]
+    fn test_noalloc_attention_only() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (4, 16, 32, 128, 4);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_data: Vec<f32> = (0..batch * seq * hidden)
+            .map(|i| (i as f32 * 0.001) % 1.0)
+            .collect();
+        let input = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+
+        let mask: Array2<f32> = Array2::ones((batch, seq)); // All 1s for simplicity
+
+        // Test attention only
+        let tokens = batch * seq;
+        let hidden_2d = input.view().into_shape_with_order((tokens, hidden))?;
+
+        // Allocating
+        let (q_alloc, k_alloc, v_alloc) = layer.self_attn.qkv_proj.forward(&hidden_2d);
+
+        // NoAlloc
+        let use_fused = hidden <= 512;
+        let mut buffers = EncoderBuffers::new(batch, seq, hidden, heads, intermediate, use_fused);
+        layer
+            .self_attn
+            .qkv_proj
+            .forward_noalloc(&hidden_2d, &mut buffers);
+
+        let q_diff = (&q_alloc - &buffers.q.slice(s![..tokens, ..]))
+            .mapv(|x| x.abs())
+            .fold(0.0f32, |a, b| f32::max(a, *b));
+        let k_diff = (&k_alloc - &buffers.k.slice(s![..tokens, ..]))
+            .mapv(|x| x.abs())
+            .fold(0.0f32, |a, b| f32::max(a, *b));
+        let v_diff = (&v_alloc - &buffers.v.slice(s![..tokens, ..]))
+            .mapv(|x| x.abs())
+            .fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!(
+            "QKV diffs: Q={:.6e}, K={:.6e}, V={:.6e}",
+            q_diff, k_diff, v_diff
+        );
+
+        assert!(q_diff < 1e-4, "Q mismatch: {}", q_diff);
+        assert!(k_diff < 1e-4, "K mismatch: {}", k_diff);
+        assert!(v_diff < 1e-4, "V mismatch: {}", v_diff);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_golden_prenorm_noalloc() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_hidden_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let mut input = Array3::from_shape_vec((batch, seq, hidden), input_hidden_data)?;
+
+        let input_mask_data = vec![1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000];
+        let mask = Array2::from_shape_vec((batch, seq), input_mask_data)?;
+
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        // Create buffers
+        let mut buffers =
+            EncoderBuffers::new(batch, seq, hidden, heads, intermediate, hidden <= 512);
+
+        // Run forward_noalloc (modifies input in-place)
+        layer.forward_noalloc(&mut input, &mask, Some(&pos_bias), true, None, &mut buffers)?;
+
+        // Validate against golden values
+        let golden_output_prenorm_data = vec![
+            0.030466, 0.131298, 0.232129, 0.332961, 0.430466, 0.531298, 0.632130, 0.732961,
+            0.830467, 0.931298, 1.032130, 1.132961, 1.230467, 1.331298, 1.432130, 1.532961,
+            1.630466, 1.731298, 1.832129, 1.932961, 2.030467, 2.131298, 2.232130, 2.332961,
+        ];
+        let golden = Array3::from_shape_vec((batch, seq, hidden), golden_output_prenorm_data)?;
+
+        let diff = &input - &golden;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Pre-Norm NoAlloc Max Diff: {:.6}", max_diff);
+
+        assert!(
+            max_diff < 1e-4,
+            "Pre-norm noalloc golden value mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_golden_postnorm_noalloc() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_hidden_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let mut input = Array3::from_shape_vec((batch, seq, hidden), input_hidden_data)?;
+
+        let input_mask_data = vec![1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000];
+        let mask = Array2::from_shape_vec((batch, seq), input_mask_data)?;
+
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        let mut buffers =
+            EncoderBuffers::new(batch, seq, hidden, heads, intermediate, hidden <= 512);
+
+        layer.forward_noalloc(
+            &mut input,
+            &mask,
+            Some(&pos_bias),
+            false,
+            None,
+            &mut buffers,
+        )?;
+
+        let golden_output_postnorm_data = vec![
+            -1.331634, -0.437211, 0.457211, 1.351634, -1.331634, -0.437212, 0.457212, 1.351634,
+            -1.331634, -0.437211, 0.457212, 1.351634, -1.331634, -0.437211, 0.457211, 1.351634,
+            -1.331634, -0.437211, 0.457211, 1.351634, -1.331634, -0.437211, 0.457211, 1.351634,
+        ];
+        let golden = Array3::from_shape_vec((batch, seq, hidden), golden_output_postnorm_data)?;
+
+        let diff = &input - &golden;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Post-Norm NoAlloc Max Diff: {:.6}", max_diff);
+
+        assert!(
+            max_diff < 1e-4,
+            "Post-norm noalloc golden value mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_noalloc_matches_alloc_prenorm() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let input_alloc = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+        let mut input_noalloc = Array3::from_shape_vec((batch, seq, hidden), input_data)?;
+
+        let mask_data = vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        let mask = Array2::from_shape_vec((batch, seq), mask_data)?;
+
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        // Allocating version
+        let output_alloc = layer.forward(input_alloc, &mask, Some(&pos_bias), true, None)?;
+
+        // NoAlloc version
+        let mut buffers =
+            EncoderBuffers::new(batch, seq, hidden, heads, intermediate, hidden <= 512);
+        layer.forward_noalloc(
+            &mut input_noalloc,
+            &mask,
+            Some(&pos_bias),
+            true,
+            None,
+            &mut buffers,
+        )?;
+
+        let diff = &output_alloc - &input_noalloc;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Prenorm Alloc vs NoAlloc Max Diff: {:.6e}", max_diff);
+
+        assert!(
+            max_diff < 1e-5,
+            "Prenorm alloc vs noalloc mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_noalloc_matches_alloc_postnorm() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_data = vec![
+            0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
+            0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
+            1.600000, 1.700000, 1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000,
+        ];
+        let input_alloc = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+        let mut input_noalloc = Array3::from_shape_vec((batch, seq, hidden), input_data)?;
+
+        let mask_data = vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0];
+        let mask = Array2::from_shape_vec((batch, seq), mask_data)?;
+
+        let pos_bias_data = vec![
+            0.000000, 0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000,
+            0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
+            0.160000, 0.170000,
+        ];
+        let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
+
+        // Allocating version
+        let output_alloc = layer.forward(input_alloc, &mask, Some(&pos_bias), false, None)?;
+
+        // NoAlloc version
+        let mut buffers =
+            EncoderBuffers::new(batch, seq, hidden, heads, intermediate, hidden <= 512);
+        layer.forward_noalloc(
+            &mut input_noalloc,
+            &mask,
+            Some(&pos_bias),
+            false,
+            None,
+            &mut buffers,
+        )?;
+
+        let diff = &output_alloc - &input_noalloc;
+        let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+        println!("Postnorm Alloc vs NoAlloc Max Diff: {:.6e}", max_diff);
+
+        assert!(
+            max_diff < 1e-5,
+            "Postnorm alloc vs noalloc mismatch. Max diff: {}",
+            max_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_noalloc_ffn_only() -> Result<()> {
+        let (batch, seq, hidden, intermediate, _heads) = (4, 16, 32, 128, 4);
+
+        let layer = create_deterministic_layer(hidden, intermediate, 4);
+
+        let input_data: Vec<f32> = (0..batch * seq * hidden)
+            .map(|i| (i as f32 * 0.001) % 1.0)
+            .collect();
+        let input_3d = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+
+        let tokens = batch * seq;
+        let input_2d = input_3d.view().into_shape_with_order((tokens, hidden))?;
+
+        let output_alloc = layer.feedforward.forward(&input_3d)?;
+        let output_alloc_2d = output_alloc.into_shape_with_order((tokens, hidden))?;
+
+        let mut buffers = EncoderBuffers::new(batch, seq, hidden, 4, intermediate, true);
+        layer
+            .feedforward
+            .forward_noalloc(&input_2d.view(), &mut buffers);
+
+        // Use relative tolerance for large values
+        let mut max_rel_diff = 0.0f32;
+        let noalloc_slice = buffers.ffn_output.slice(s![..tokens, ..]);
+        for t in 0..tokens {
+            for h in 0..hidden {
+                let a = output_alloc_2d[[t, h]];
+                let b = noalloc_slice[[t, h]];
+                let abs_diff = (a - b).abs();
+                let rel_diff = if a.abs() > 1.0 {
+                    abs_diff / a.abs()
+                } else {
+                    abs_diff
+                };
+                max_rel_diff = max_rel_diff.max(rel_diff);
+            }
+        }
+
+        println!("FFN max relative diff: {:.6e}", max_rel_diff);
+
+        assert!(
+            max_rel_diff < 1e-5,
+            "FFN mismatch: relative diff {}",
+            max_rel_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_noalloc_larger_batch() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (4, 16, 32, 128, 4);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        let input_data: Vec<f32> = (0..batch * seq * hidden)
+            .map(|i| (i as f32 * 0.001) % 1.0)
+            .collect();
+        let input_alloc = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+        let mut input_noalloc = Array3::from_shape_vec((batch, seq, hidden), input_data)?;
+
+        let mask_data: Vec<f32> = (0..batch * seq)
+            .map(|i| if i % 5 == 0 { 0.0 } else { 1.0 })
+            .collect();
+        let mask = Array2::from_shape_vec((batch, seq), mask_data)?;
+
+        let output_alloc = layer.forward(input_alloc, &mask, None, true, None)?;
+
+        let use_fused = hidden <= 512;
+        let mut buffers = EncoderBuffers::new(batch, seq, hidden, heads, intermediate, use_fused);
+        layer.forward_noalloc(&mut input_noalloc, &mask, None, true, None, &mut buffers)?;
+
+        // Use relative tolerance
+        let mut max_rel_diff = 0.0f32;
+        for ((_, a), (_, b)) in output_alloc
+            .indexed_iter()
+            .zip(input_noalloc.indexed_iter())
+        {
+            let abs_diff = (a - b).abs();
+            let rel_diff = if a.abs() > 1.0 {
+                abs_diff / a.abs()
+            } else {
+                abs_diff
+            };
+            max_rel_diff = max_rel_diff.max(rel_diff);
+        }
+
+        println!("Larger batch max relative diff: {:.6e}", max_rel_diff);
+
+        assert!(
+            max_rel_diff < 1e-3,
+            "Larger batch mismatch. Max relative diff: {}",
+            max_rel_diff
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_noalloc_buffer_reuse() -> Result<()> {
+        let (batch, seq, hidden, intermediate, heads) = (2, 4, 8, 32, 2);
+
+        let layer = create_deterministic_layer(hidden, intermediate, heads);
+
+        // Create buffers once
+        let mut buffers = EncoderBuffers::new(batch, seq, hidden, heads, intermediate, true);
+
+        // Run multiple forward passes reusing the same buffers
+        for iteration in 0..3 {
+            let input_data: Vec<f32> = (0..batch * seq * hidden)
+                .map(|i| ((i + iteration * 100) as f32 * 0.01) % 2.0)
+                .collect();
+            let input_alloc = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
+            let mut input_noalloc = Array3::from_shape_vec((batch, seq, hidden), input_data)?;
+
+            let mask = Array2::ones((batch, seq));
+
+            let output_alloc = layer.forward(input_alloc, &mask, None, true, None)?;
+            layer.forward_noalloc(&mut input_noalloc, &mask, None, true, None, &mut buffers)?;
+
+            let diff = &output_alloc - &input_noalloc;
+            let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
+
+            println!(
+                "Iteration {} - Alloc vs NoAlloc Max Diff: {:.6e}",
+                iteration, max_diff
+            );
+
+            assert!(
+                max_diff < 1e-4,
+                "Buffer reuse iteration {} mismatch. Max diff: {}",
+                iteration,
+                max_diff
+            );
+        }
+
+        Ok(())
     }
 
     #[test]

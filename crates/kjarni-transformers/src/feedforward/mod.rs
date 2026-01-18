@@ -1,11 +1,12 @@
 use anyhow::Result;
-use ndarray::Array3;
+use ndarray::{Array3, ArrayView2};
 
 pub mod legacy;
 pub mod standard;
 pub mod swiglu;
 pub mod standard_new;
 
+use crate::cpu::encoder::buffers::EncoderBuffers;
 pub use crate::feedforward::{legacy::LegacyFeedForward, swiglu::SwiGluFeedForward, standard::StdFeedForward, standard_new::StdFeedForwardNew};
 
 pub enum FeedForward {
@@ -30,6 +31,13 @@ impl FeedForward {
             FeedForward::StandardNew(ffn) => ffn.fc1.out_features(),
             FeedForward::SwiGLU(swiglu) => swiglu.up.out_features(),
             FeedForward::Legacy(ffn) => ffn.dense1_weight.shape()[0],
+        }
+    }
+    pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
+        match self {
+            FeedForward::StandardNew(ffn) => ffn.forward_noalloc(hidden, buffers),
+            FeedForward::Standard(ffn) => ffn.forward_noalloc(hidden, buffers),
+            _ => panic!("No-alloc forward not implemented for this FeedForward type"),
         }
     }
 }

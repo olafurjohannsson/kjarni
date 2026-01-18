@@ -39,18 +39,21 @@
 //! - [`ModelWeights`] — Loading weights from safetensors/GGUF files.
 //! - [`DType`] — Supported data types.
 
-use crate::{cpu::{
-    kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
-    ops,
-}, tensor::raw_tensor::TensorView};
+use crate::{
+    cpu::{
+        kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+        ops,
+    },
+    tensor::raw_tensor::TensorView,
+};
 
+use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::linear_layer::LinearLayerBuilder;
 use crate::tensor::{DType, QuantizedMatrix};
 use crate::utils::tensor_ops;
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use half::bf16;
 use ndarray::{Array1, Array2, ArrayView2};
 use std::borrow::Cow;
@@ -209,6 +212,10 @@ impl LinearData {
 }
 
 impl LinearLayer {
+    /// Threshold for switching from vec kernel to batched 4x3 kernel.
+    /// Based on benchmarks: vec kernel wins for m < ~1000, batched wins for m >= ~1000.
+    const BATCH_KERNEL_THRESHOLD: usize = 1000;
+
     /// Creates a new zero-initialized `LinearLayer` with the specified dimensions and dtype.
     ///
     /// # Arguments
@@ -317,7 +324,10 @@ impl LinearLayer {
     }
 
     // Q8_0 Sharing
-    pub fn from_arc_q8_0(weights: Arc<QuantizedMatrix<BlockQ8_0>>, bias: impl Into<Option<Array1<f32>>>) -> Self {
+    pub fn from_arc_q8_0(
+        weights: Arc<QuantizedMatrix<BlockQ8_0>>,
+        bias: impl Into<Option<Array1<f32>>>,
+    ) -> Self {
         Self {
             data: LinearData::Q8_0(weights),
             bias: bias.into(),
@@ -325,11 +335,69 @@ impl LinearLayer {
         }
     }
 
-    pub fn new_f32_with_strategy(weights: Array2<f32>, bias: impl Into<Option<Array1<f32>>>, strategy: F32MatmulStrategy) -> Self {
+    pub fn new_f32_with_strategy(
+        weights: Array2<f32>,
+        bias: impl Into<Option<Array1<f32>>>,
+        strategy: F32MatmulStrategy,
+    ) -> Self {
         Self {
             data: LinearData::F32(Arc::new(weights)),
             bias: bias.into(),
             f32_strategy: strategy,
+        }
+    }
+
+    /// Computes matrix multiplication writing to a pre-allocated output buffer.
+    ///
+    /// Performs `output = input @ W^T + b` where `W` is the weight matrix stored
+    /// in this layer. Avoids allocation overhead by writing directly to `output`.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input tensor of shape `[batch, in_features]`. Must be contiguous.
+    /// * `output` - Pre-allocated output tensor of shape `[batch, out_features]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics (in debug mode) if output dimensions don't match expected shape.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LinearLayer::new_f32(weights, Some(bias));
+    /// let input = Array2::<f32>::zeros((batch, 2048));
+    /// let mut output = Array2::<f32>::zeros((batch, 4096));
+    /// layer.matmul_noalloc(&input.view(), &mut output);
+    /// ```
+    #[inline]
+    pub fn matmul_noalloc(&self, input: &ArrayView2<f32>, output: &mut Array2<f32>) {
+        match &self.data {
+            LinearData::F32(w) => match self.f32_strategy {
+                F32MatmulStrategy::CustomSimd => {
+                    let (m, _) = input.dim();
+                    let bias = self.bias.as_ref().map(|b| b.as_slice().unwrap());
+
+                    if m < Self::BATCH_KERNEL_THRESHOLD {
+                        // Vec kernel: better for decode and small batches
+                        ops::matmul::matmul_2d_f32_noalloc(input, &w.view(), bias, output);
+                    } else {
+                        // 4x3 block kernel: better for large batches
+                        ops::matmul::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
+                    }
+                }
+                F32MatmulStrategy::Faer | F32MatmulStrategy::FaerOutIn => {
+                    // Faer doesn't have a no-alloc API, fall back to allocating
+                    // and copy to output
+                    let result = self.matmul(input);
+                    output.assign(&result);
+                }
+            },
+            LinearData::BF16(_) | LinearData::Q8_0(_) | LinearData::Q6_K(_) | LinearData::Q4_K(_) => {
+                // Quantized/BF16 paths don't have no-alloc versions yet
+                // Fall back to allocating and copy
+                let result = self.matmul(input);
+                output.assign(&result);
+            }
         }
     }
 
@@ -355,35 +423,54 @@ impl LinearLayer {
     /// let output = layer.matmul(&input.view());
     /// assert_eq!(output.shape(), &[1, 4096]);
     /// ```
-#[inline]
-pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
-    match &self.data {
-        LinearData::F32(w) => match self.f32_strategy {
-            F32MatmulStrategy::CustomSimd => {
-                let (m, _) = input.dim();
-                if m == 1 {
-                    // Decode path - add bias manually after
-                    let mut result = ops::matmul::matmul_2d_cpu_f32(input, &w.view());
+    #[inline]
+    pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
+        match &self.data {
+            LinearData::F32(w) => match self.f32_strategy {
+                F32MatmulStrategy::CustomSimd => {
+                    let (m, _) = input.dim();
+                    if m == 1 {
+                        // Decode path - add bias manually after
+                        let mut result = ops::matmul::matmul_2d_cpu_f32(input, &w.view());
+                        if let Some(b) = &self.bias {
+                            // Single row, just add directly
+                            let out = result.as_slice_mut().unwrap();
+                            let bias = b.as_slice().unwrap();
+                            for (o, &b) in out.iter_mut().zip(bias.iter()) {
+                                *o += b;
+                            }
+                        }
+                        result
+                    } else {
+                        // Batch path - pass bias to kernel (fused, faster)
+                        ops::matmul::matmul_2d_cpu_f32_batched(
+                            input,
+                            &w.view(),
+                            self.bias.as_ref().map(|b| b.as_slice().unwrap()),
+                        )
+                    }
+                }
+                F32MatmulStrategy::Faer => {
+                    let mut result = tensor_ops::matmul_2d_faer(input, &w.view());
                     if let Some(b) = &self.bias {
-                        // Single row, just add directly
-                        let out = result.as_slice_mut().unwrap();
-                        let bias = b.as_slice().unwrap();
-                        for (o, &b) in out.iter_mut().zip(bias.iter()) {
-                            *o += b;
+                        for mut row in result.rows_mut() {
+                            row += b;
                         }
                     }
                     result
-                } else {
-                    // Batch path - pass bias to kernel (fused, faster)
-                    ops::matmul::matmul_2d_cpu_f32_batched(
-                        input, 
-                        &w.view(), 
-                        self.bias.as_ref().map(|b| b.as_slice().unwrap())
-                    )
                 }
-            }
-            F32MatmulStrategy::Faer => {
-                let mut result = tensor_ops::matmul_2d_faer(input, &w.view());
+                F32MatmulStrategy::FaerOutIn => {
+                    let mut result = ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view());
+                    if let Some(b) = &self.bias {
+                        for mut row in result.rows_mut() {
+                            row += b;
+                        }
+                    }
+                    result
+                }
+            },
+            LinearData::BF16(w) => {
+                let mut result = ops::matmul::matmul_2d_cpu_bf16(input, &w.view());
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -391,8 +478,8 @@ pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
                 }
                 result
             }
-            F32MatmulStrategy::FaerOutIn => {
-                let mut result = ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view());
+            LinearData::Q8_0(w) => {
+                let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -400,45 +487,26 @@ pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
                 }
                 result
             }
-        },
-        LinearData::BF16(w) => {
-            let mut result = ops::matmul::matmul_2d_cpu_bf16(input, &w.view());
-            if let Some(b) = &self.bias {
-                for mut row in result.rows_mut() {
-                    row += b;
+            LinearData::Q6_K(w) => {
+                let mut result = ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks);
+                if let Some(b) = &self.bias {
+                    for mut row in result.rows_mut() {
+                        row += b;
+                    }
                 }
+                result
             }
-            result
-        }
-        LinearData::Q8_0(w) => {
-            let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
-            if let Some(b) = &self.bias {
-                for mut row in result.rows_mut() {
-                    row += b;
+            LinearData::Q4_K(w) => {
+                let mut result = ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks);
+                if let Some(b) = &self.bias {
+                    for mut row in result.rows_mut() {
+                        row += b;
+                    }
                 }
+                result
             }
-            result
-        }
-        LinearData::Q6_K(w) => {
-            let mut result = ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks);
-            if let Some(b) = &self.bias {
-                for mut row in result.rows_mut() {
-                    row += b;
-                }
-            }
-            result
-        }
-        LinearData::Q4_K(w) => {
-            let mut result = ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks);
-            if let Some(b) = &self.bias {
-                for mut row in result.rows_mut() {
-                    row += b;
-                }
-            }
-            result
         }
     }
-}
     /// Converts this layer to a quantized format.
     ///
     /// Creates a new `LinearLayer` with quantized weights for reduced memory usage.
@@ -510,7 +578,7 @@ pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::Faer => w.shape()[1],
                 F32MatmulStrategy::CustomSimd => w.shape()[0],
-                F32MatmulStrategy::FaerOutIn => w.shape()[0]
+                F32MatmulStrategy::FaerOutIn => w.shape()[0],
             },
             LinearData::BF16(w) => w.shape()[0],
             LinearData::Q8_0(w) => w.shape[0],
@@ -526,7 +594,7 @@ pub fn matmul(&self, input: &ArrayView2<f32>) -> Array2<f32> {
             LinearData::F32(w) => match self.f32_strategy {
                 F32MatmulStrategy::Faer => w.shape()[0],
                 F32MatmulStrategy::CustomSimd => w.shape()[1],
-                F32MatmulStrategy::FaerOutIn => w.shape()[1]
+                F32MatmulStrategy::FaerOutIn => w.shape()[1],
             },
             LinearData::BF16(w) => w.shape()[1],
             LinearData::Q8_0(w) => w.shape[1],
@@ -710,12 +778,11 @@ impl From<(Array2<bf16>, Array1<f32>)> for LinearLayer {
     }
 }
 
-
 #[cfg(test)]
 mod matmul_speed_test {
     use super::*;
-    use ndarray::{Array2, Array1};
-    use std::time::{Instant, Duration};
+    use ndarray::{Array1, Array2};
+    use std::time::{Duration, Instant};
 
     // ------------------------------------------------------------------
     // BENCHMARK SETTINGS (MiniLM Batch=120)
@@ -723,8 +790,8 @@ mod matmul_speed_test {
     const BATCH: usize = 120;
     const SEQ_LEN: usize = 32;
     const M: usize = BATCH * SEQ_LEN; // 3840 rows (Tokens)
-    const K: usize = 384;             // In Features (Hidden Dim)
-    const N: usize = 1536;            // Out Features (Intermediate Dim)
+    const K: usize = 384; // In Features (Hidden Dim)
+    const N: usize = 1536; // Out Features (Intermediate Dim)
     const ITERATIONS: u32 = 100;
 
     fn get_input() -> Array2<f32> {
@@ -754,14 +821,16 @@ mod matmul_speed_test {
             std::hint::black_box(output);
         }
         let duration = start.elapsed();
-        
+
         // GFLOPS Calculation: 2 * M * N * K
         let total_ops = 2.0 * M as f64 * N as f64 * K as f64 * ITERATIONS as f64;
         let gflops = total_ops / (duration.as_secs_f64() * 1e9);
 
         println!(
             "Strategy: {:<20} | Latency: {:>8.2?} | Speed: {:>6.2} GFLOPS",
-            name, duration / ITERATIONS, gflops
+            name,
+            duration / ITERATIONS,
+            gflops
         );
     }
 
@@ -776,7 +845,11 @@ mod matmul_speed_test {
     #[test]
     fn bench_2_faer_out_in() {
         let weights = get_weights_standard(); // [N, K]
-        run_benchmark(F32MatmulStrategy::FaerOutIn, weights, "Faer (Virtual Transpose)");
+        run_benchmark(
+            F32MatmulStrategy::FaerOutIn,
+            weights,
+            "Faer (Virtual Transpose)",
+        );
     }
 
     // 3. Alternative Fix (Pre-Transposed Weights, Normal Faer)

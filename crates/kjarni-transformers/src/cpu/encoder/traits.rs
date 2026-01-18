@@ -3,6 +3,9 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
+use std::sync::Arc;
+
+use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
@@ -56,25 +59,30 @@ pub trait EncoderLanguageModel: LanguageModel {
         input_ids: &Array2<u32>,
         attention_mask: &Array2<u32>,
     ) -> Result<(Array3<f32>, Array2<f32>)> {
-        // We can provide a default implementation that dispatches to the correct backend.
-        // This is the core logic that makes the trait so powerful.
-
-        // Convert the u32 attention mask to f32 for the CPU backend's forward_layers method.
         let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
 
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
-            // --- CPU PATH ---
-            // This reuses the existing `forward` method on the low-level trait.
-            ops.encoder()
-                .forward(input_ids, &attention_mask_f32, None)?
-                .last_hidden_state
+            let encoder: &dyn CpuEncoder = ops.encoder();
+            let (batch_size, seq_len) = input_ids.dim();
+            
+            let mut buffers = encoder.create_buffers(
+                batch_size,
+                seq_len,
+            );
+
+            encoder
+                    .forward_with_buffers(input_ids, &attention_mask_f32, None, &mut buffers)?
+                    .last_hidden_state
+
         } else if let Some(ops) = self.encoder_gpu_ops() {
-            // --- GPU PATH ---
             let context = self
                 .context()
                 .ok_or_else(|| anyhow!("GPU model missing context"))?;
-            let pool = context.get_inference_pool();
-            let mut pool_guard = pool.lock().await;
+
+            let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> =
+                context.get_inference_pool();
+
+            let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&context, pool_guard);
             let (encoder_cmd, pool_ref) = frame.resources();
 
@@ -144,8 +152,9 @@ pub trait EncoderLanguageModel: LanguageModel {
         let attention_mask =
             Array2::from_shape_vec((batch_size, sequence_length), attention_mask_vec)?;
 
-        // 3. Call the `from_ids` method, which already contains the dispatch logic.
-        //    This completely eliminates the duplicated CPU/GPU logic.
+        
+
+
         self.get_hidden_states_batch_from_ids(&input_ids, &attention_mask)
             .await
     }
@@ -277,6 +286,21 @@ pub trait CpuEncoder: Send + Sync {
 
     /// Hidden dimension of the model.
     fn hidden_size(&self) -> usize;
+
+    /// Creates buffers for noalloc forward passes.
+    fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers;
+
+    /// Forward with pre-allocated buffers (optional, has default impl).
+    fn forward_with_buffers(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<u32>>,
+        _: &mut EncoderBuffers,
+    ) -> Result<CpuEncoderOutput> {
+        // Default: just use regular forward (for encoders that don't support noalloc)
+        self.forward(input_ids, attention_mask, token_type_ids)
+    }
 
     /// Full forward pass through the encoder.
     ///
@@ -459,6 +483,9 @@ mod tests_trait {
     }
 
     impl CpuEncoder for MockCpuEncoder {
+        fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+            unimplemented!()
+        }
         fn embed(
             &self,
             _input_ids: &Array2<u32>,
@@ -488,8 +515,12 @@ mod tests_trait {
             Ok(hidden_states.clone())
         }
 
-        fn num_layers(&self) -> usize { 1 }
-        fn hidden_size(&self) -> usize { self.hidden_size }
+        fn num_layers(&self) -> usize {
+            1
+        }
+        fn hidden_size(&self) -> usize {
+            self.hidden_size
+        }
     }
 
     struct MockModel {
@@ -498,83 +529,156 @@ mod tests_trait {
 
     // Minimal Trait Impls for MockModel
     impl LanguageModel for MockModel {
-        fn vocab_size(&self) -> usize { 100 }
-        fn hidden_size(&self) -> usize { self.encoder.hidden_size }
-        fn num_layers(&self) -> usize { 1 }
-        fn num_heads(&self) -> usize { 1 }
-        fn context_size(&self) -> usize { 128 }
-        fn tokenizer(&self) -> &tokenizers::Tokenizer { unimplemented!() }
-        fn bos_token_id(&self) -> Option<u32> { None }
-        fn eos_token_id(&self) -> Option<u32> { None }
-        fn pad_token_id(&self) -> Option<u32> { None }
-        fn forced_bos_token_id(&self) -> Option<u32> { None }
-        fn forced_eos_token_id(&self) -> Option<u32> { None }
-        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> { unimplemented!() }
+        fn vocab_size(&self) -> usize {
+            100
+        }
+        fn hidden_size(&self) -> usize {
+            self.encoder.hidden_size
+        }
+        fn num_layers(&self) -> usize {
+            1
+        }
+        fn num_heads(&self) -> usize {
+            1
+        }
+        fn context_size(&self) -> usize {
+            128
+        }
+        fn tokenizer(&self) -> &tokenizers::Tokenizer {
+            unimplemented!()
+        }
+        fn bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn pad_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
+            unimplemented!()
+        }
     }
 
     impl crate::traits::InferenceModel for MockModel {
-        fn device(&self) -> crate::traits::Device { crate::traits::Device::Cpu }
-        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> { None }
-        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn device(&self) -> crate::traits::Device {
+            crate::traits::Device::Cpu
+        }
+        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> {
+            None
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     impl CpuEncoderOps for MockModel {
-        fn encoder(&self) -> &dyn CpuEncoder { &self.encoder }
+        fn encoder(&self) -> &dyn CpuEncoder {
+            &self.encoder
+        }
     }
 
     impl EncoderLanguageModel for MockModel {
-        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> { Some(self) }
-        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> { None }
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
+            Some(self)
+        }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
+            None
+        }
     }
 
     // ========================================================================
     //  MOCK INFRASTRUCTURE (For Golden Pooling Test)
     // ========================================================================
-    
+
     // Allows us to inject EXACT golden hidden states regardless of encoder logic
     struct MockGoldenEncoder {
         hidden_states: Array3<f32>,
     }
 
     impl LanguageModel for MockGoldenEncoder {
-        fn vocab_size(&self) -> usize { 0 }
-        fn hidden_size(&self) -> usize { 4 }
-        fn num_layers(&self) -> usize { 1 }
-        fn num_heads(&self) -> usize { 1 }
-        fn context_size(&self) -> usize { 5 }
-        fn tokenizer(&self) -> &tokenizers::Tokenizer { unimplemented!() }
-        fn bos_token_id(&self) -> Option<u32> { None }
-        fn eos_token_id(&self) -> Option<u32> { None }
-        fn pad_token_id(&self) -> Option<u32> { None }
-        fn forced_bos_token_id(&self) -> Option<u32> { None }
-        fn forced_eos_token_id(&self) -> Option<u32> { None }
-        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> { unimplemented!() }
+        fn vocab_size(&self) -> usize {
+            0
+        }
+        fn hidden_size(&self) -> usize {
+            4
+        }
+        fn num_layers(&self) -> usize {
+            1
+        }
+        fn num_heads(&self) -> usize {
+            1
+        }
+        fn context_size(&self) -> usize {
+            5
+        }
+        fn tokenizer(&self) -> &tokenizers::Tokenizer {
+            unimplemented!()
+        }
+        fn bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn pad_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
+            unimplemented!()
+        }
     }
 
     impl InferenceModel for MockGoldenEncoder {
-        fn device(&self) -> crate::traits::Device { crate::traits::Device::Cpu }
-        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> { None }
-        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn device(&self) -> crate::traits::Device {
+            crate::traits::Device::Cpu
+        }
+        fn context(&self) -> Option<std::sync::Arc<WgpuContext>> {
+            None
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     #[async_trait]
     impl EncoderLanguageModel for MockGoldenEncoder {
-        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> { None }
-        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> { None }
-        
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
+            None
+        }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
+            None
+        }
+
         // Override to return GOLDEN data directly
-        async fn get_hidden_states_batch(&self, _texts: &[&str]) -> Result<(Array3<f32>, Array2<f32>)> {
+        async fn get_hidden_states_batch(
+            &self,
+            _texts: &[&str],
+        ) -> Result<(Array3<f32>, Array2<f32>)> {
             // Mask from Python script:
             // [1, 1, 1, 1, 1]
             // [1, 1, 1, 0, 0]
-            let mask = Array2::from_shape_vec((2, 5), vec![
-                1.0, 1.0, 1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0, 0.0, 0.0
-            ]).unwrap();
+            let mask = Array2::from_shape_vec(
+                (2, 5),
+                vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0],
+            )
+            .unwrap();
             Ok((self.hidden_states.clone(), mask))
         }
     }
-
 
     // ========================================================================
     //  TESTS
@@ -609,10 +713,10 @@ mod tests_trait {
     fn test_l2_normalize_inplace() {
         let mut data = Array2::from_shape_vec((2, 2), vec![3.0, 4.0, 1.0, 1.0]).unwrap();
         l2_normalize_inplace(&mut data);
-        
+
         assert!((data[[0, 0]] - 0.6).abs() < 1e-6);
         assert!((data[[0, 1]] - 0.8).abs() < 1e-6);
-        
+
         let val = 1.0 / 2.0f32.sqrt();
         assert!((data[[1, 0]] - val).abs() < 1e-6);
         assert!((data[[1, 1]] - val).abs() < 1e-6);
@@ -630,7 +734,9 @@ mod tests_trait {
             -1.331581, -0.437193, 0.457193, 1.351581, -1.331581, -0.437193, 0.457193, 1.351581,
         ];
         let hidden = Array3::from_shape_vec((2, 5, 4), hidden_states_data)?;
-        let model = MockGoldenEncoder { hidden_states: hidden };
+        let model = MockGoldenEncoder {
+            hidden_states: hidden,
+        };
 
         // --- TEST A: MEAN POOLING ---
         let config_mean = EncodingConfig {
@@ -638,14 +744,19 @@ mod tests_trait {
             normalize: false, // Check raw first
         };
         let out_mean = model.encode_batch(&["a", "b"], &config_mean).await?;
-        
+
         let pool_mean_data = vec![
             -1.331581, -0.437193, 0.457194, 1.351580, -1.331581, -0.437193, 0.457193, 1.351581,
         ];
         for (i, row) in out_mean.iter().enumerate() {
             for (j, val) in row.iter().enumerate() {
                 let golden = pool_mean_data[i * 4 + j];
-                assert!((val - golden).abs() < 1e-5, "Mean Pooling: Got {}, Expected {}", val, golden);
+                assert!(
+                    (val - golden).abs() < 1e-5,
+                    "Mean Pooling: Got {}, Expected {}",
+                    val,
+                    golden
+                );
             }
         }
 

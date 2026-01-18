@@ -217,6 +217,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             normalization_strategy: kjarni_transformers::traits::NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
             decoder_layers: None,
+            intermediate_size: self.intermediate_size(),
         }
     }
 

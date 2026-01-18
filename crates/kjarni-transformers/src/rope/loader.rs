@@ -61,6 +61,7 @@ mod loaded_rope {
             rope_scaling: None,
             // ... defaults ...
             decoder_layers: None,
+            intermediate_size: 0,
             num_layers: 1,
             vocab_size: 100,
             norm_eps: 1e-5,
