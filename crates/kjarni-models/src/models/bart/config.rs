@@ -159,6 +159,11 @@ impl ModelConfig for BartConfig {
         }
     }
 
+    fn intermediate_size(&self) -> usize {
+        self.encoder_ffn_dim
+    }
+    
+
     fn layout(&self) -> ModelLayout {
         let shared = self.get_shared_weight_name();
 

@@ -12,6 +12,12 @@ namespace Kjarni.Tests
     {
         static void Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "benchmark")
+            {
+                EmbedderBenchmark.Run();
+                return;
+            }
+
             Console.WriteLine();
             Console.WriteLine(new string('=', 60));
             Console.WriteLine("KJARNI C# TEST SUITE");

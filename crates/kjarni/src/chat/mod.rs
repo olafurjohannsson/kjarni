@@ -325,14 +325,23 @@ fn test_history_management() {
     assert_eq!(msgs[1].role, Role::Assistant);
     assert_eq!(msgs[1].content, "Assistant 1");
 
-    // 2. Clear keeping system
+    // 2. Clear keeping system - but there's no system, so should be empty
     history.clear(true);
-    assert_eq!(history.len(), 1);
-    assert_eq!(history.messages()[0].role, Role::System);
+    assert_eq!(history.len(), 0);  // No system message was added
 
-    // 3. Full clear
-    history.clear(false);
-    assert!(history.is_empty());
+    // 3. Test with system message
+    let mut history_with_system = History::with_system("You are helpful.");
+    history_with_system.push_user("Hello");
+    history_with_system.push_assistant("Hi!");
+    assert_eq!(history_with_system.len(), 3);
+
+    history_with_system.clear(true);
+    assert_eq!(history_with_system.len(), 1);
+    assert_eq!(history_with_system.messages()[0].role, Role::System);
+
+    // 4. Full clear
+    history_with_system.clear(false);
+    assert!(history_with_system.is_empty());
 }
 
 #[test]

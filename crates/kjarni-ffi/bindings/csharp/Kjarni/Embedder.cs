@@ -87,7 +87,7 @@ namespace Kjarni
 
             if (texts.Length == 0) return Array.Empty<float[]>();
 
-            
+
             using var utf8Texts = new Utf8StringArray(texts);
             var err = Native.kjarni_embedder_encode_batch(_handle, utf8Texts.Pointers, (UIntPtr)utf8Texts.Length, out var result);
             Native.CheckError(err);
@@ -134,12 +134,18 @@ namespace Kjarni
                 Native.kjarni_embedder_free(_handle);
                 _disposed = true;
             }
+            GC.SuppressFinalize(this);
         }
 
         private void ThrowIfDisposed()
         {
             if (_disposed)
                 throw new ObjectDisposedException(nameof(Embedder));
+        }
+
+        ~Embedder()
+        {
+            Dispose();
         }
     }
 }

@@ -192,8 +192,7 @@ pub trait ModelConfig: Send + Sync {
     }
 
     fn intermediate_size(&self) -> usize {
-        // Typical FFN intermediate size is 4x hidden size
-        self.hidden_size() * 4
+        0
     }
 
     fn eos_token_id(&self) -> Option<u32> {

@@ -1,4 +1,6 @@
 //! Layer normalization implementation
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
@@ -14,6 +16,124 @@ pub struct LayerNorm {
     pub bias: Array1<f32>,
     pub eps: f32,
 }
+
+#[inline]
+#[cfg(target_arch = "x86_64")]
+unsafe fn hsum_avx(v: __m256) -> f32 {
+    let hi = _mm256_extractf128_ps(v, 1);
+    let lo = _mm256_castps256_ps128(v);
+    let sum128 = _mm_add_ps(hi, lo);
+    let hi64 = _mm_movehl_ps(sum128, sum128);
+    let sum64 = _mm_add_ps(sum128, hi64);
+    let hi32 = _mm_shuffle_ps(sum64, sum64, 1);
+    _mm_cvtss_f32(_mm_add_ss(sum64, hi32))
+}
+
+impl LayerNorm {
+    #[inline]
+    pub fn forward_2d_noalloc_simd(
+        &self,
+        input: &ArrayView2<f32>,
+        output: &mut ArrayViewMut2<f32>,
+    ) {
+        let tokens = input.shape()[0];
+        let hidden = input.shape()[1];
+
+        // Fall back to scalar for non-aligned or small hidden dims
+        if hidden % 8 != 0 || hidden < 64 {
+            return self.forward_2d_noalloc_scalar(input, output);
+        }
+
+        let eps = self.eps;
+        let weight = self.weight.as_slice().unwrap();
+        let bias = self.bias.as_slice().unwrap();
+
+        for t in 0..tokens {
+            let in_ptr = input.row(t).as_ptr();
+            let out_ptr = output.row_mut(t).as_mut_ptr();
+
+            unsafe {
+                // Compute sum using SIMD
+                let mut sum_vec = _mm256_setzero_ps();
+                for i in (0..hidden).step_by(8) {
+                    let v = _mm256_loadu_ps(in_ptr.add(i));
+                    sum_vec = _mm256_add_ps(sum_vec, v);
+                }
+                let sum = hsum_avx(sum_vec);
+                let mean = sum / hidden as f32;
+                let mean_vec = _mm256_set1_ps(mean);
+
+                // Compute variance using SIMD
+                let mut var_vec = _mm256_setzero_ps();
+                for i in (0..hidden).step_by(8) {
+                    let v = _mm256_loadu_ps(in_ptr.add(i));
+                    let diff = _mm256_sub_ps(v, mean_vec);
+                    var_vec = _mm256_fmadd_ps(diff, diff, var_vec);
+                }
+                let var = hsum_avx(var_vec) / hidden as f32;
+                let inv_std = 1.0 / (var + eps).sqrt();
+                let inv_std_vec = _mm256_set1_ps(inv_std);
+
+                // Normalize, scale, shift using SIMD
+                for i in (0..hidden).step_by(8) {
+                    let v = _mm256_loadu_ps(in_ptr.add(i));
+                    let w = _mm256_loadu_ps(weight.as_ptr().add(i));
+                    let b = _mm256_loadu_ps(bias.as_ptr().add(i));
+
+                    let normed = _mm256_mul_ps(_mm256_sub_ps(v, mean_vec), inv_std_vec);
+                    let scaled = _mm256_fmadd_ps(normed, w, b);
+
+                    _mm256_storeu_ps(out_ptr.add(i), scaled);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn forward_2d_noalloc_scalar(
+        &self,
+        input: &ArrayView2<f32>,
+        output: &mut ArrayViewMut2<f32>,
+    ) {
+        let tokens = input.shape()[0];
+        let hidden = input.shape()[1];
+        let eps = self.eps;
+        let weight = self.weight.as_slice().unwrap();
+        let bias = self.bias.as_slice().unwrap();
+
+        // Process each token (row)
+        for t in 0..tokens {
+            let input_row = input.row(t);
+            let mut output_row = output.row_mut(t);
+
+            let in_slice = input_row.as_slice().unwrap();
+            let out_slice = output_row.as_slice_mut().unwrap();
+
+            // Compute mean (single pass)
+            let mut sum = 0.0f32;
+            for i in 0..hidden {
+                sum += in_slice[i];
+            }
+            let mean = sum / hidden as f32;
+
+            // Compute variance (single pass)
+            let mut var_sum = 0.0f32;
+            for i in 0..hidden {
+                let diff = in_slice[i] - mean;
+                var_sum += diff * diff;
+            }
+            let inv_std = 1.0 / (var_sum / hidden as f32 + eps).sqrt();
+
+            // Normalize, scale, shift (single pass, SIMD-friendly)
+            for i in 0..hidden {
+                out_slice[i] = (in_slice[i] - mean) * inv_std * weight[i] + bias[i];
+            }
+        }
+
+        
+    }
+}
+
 impl LayerNorm {
     pub fn new(weight: Array1<f32>, bias: Array1<f32>, eps: f32) -> Self {
         Self { weight, bias, eps }
@@ -47,22 +167,24 @@ impl LayerNorm {
         let hidden = input.shape()[1];
         let tokens = input.shape()[0];
 
-        for t in 0..tokens {
-            let row = input.row(t);
-            let mut out_row = output.row_mut(t);
+        self.forward_2d_noalloc_simd(input, output);
 
-            // Compute mean
-            let mean = row.sum() / hidden as f32;
+        // for t in 0..tokens {
+        //     let row = input.row(t);
+        //     let mut out_row = output.row_mut(t);
 
-            // Compute variance
-            let var = row.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / hidden as f32;
+        //     // Compute mean
+        //     let mean = row.sum() / hidden as f32;
 
-            // Normalize and scale
-            let std_inv = 1.0 / (var + self.eps).sqrt();
-            for i in 0..hidden {
-                out_row[i] = (row[i] - mean) * std_inv * self.weight[i] + self.bias[i];
-            }
-        }
+        //     // Compute variance
+        //     let var = row.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / hidden as f32;
+
+        //     // Normalize and scale
+        //     let std_inv = 1.0 / (var + self.eps).sqrt();
+        //     for i in 0..hidden {
+        //         out_row[i] = (row[i] - mean) * std_inv * self.weight[i] + self.bias[i];
+        //     }
+        // }
     }
 
     /// Apply layer norm to a 3D tensor of activations.

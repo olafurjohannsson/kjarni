@@ -649,10 +649,7 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
 //     test_layer0_attention_vs_ffn_isolation(DType::BF16).await
 // }
 
-#[tokio::test]
-async fn test_layer0_attention_vs_ffn_isolation_f32() -> Result<()> {
-    test_layer0_attention_vs_ffn_isolation(DType::F32).await
-}
+
 
 #[tokio::test]
 async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {

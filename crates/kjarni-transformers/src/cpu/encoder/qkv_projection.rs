@@ -386,7 +386,7 @@ mod tests {
             create_test_layer(hidden, hidden),
         );
         let max_batch = 1;
-        let max_seq = tokens; // 256
+        let max_seq = tokens;
         let mut buffers =
             EncoderBuffers::new(max_batch, max_seq, hidden, num_heads, intermediate, true);
         let input = Array2::from_elem((tokens, hidden), 0.5f32);
@@ -397,25 +397,25 @@ mod tests {
         // Forward without allocation
         qkv.forward_noalloc(&input.view(), &mut buffers);
 
-        // Compare results
+        // Compare results - use max difference instead of sum
         let q_diff = (&q_alloc - &buffers.q.slice(s![..tokens, ..]))
             .mapv(|x| x.abs())
-            .sum();
+            .fold(0.0f32, |a, &b| a.max(b));
         let k_diff = (&k_alloc - &buffers.k.slice(s![..tokens, ..]))
             .mapv(|x| x.abs())
-            .sum();
+            .fold(0.0f32, |a, &b| a.max(b));
         let v_diff = (&v_alloc - &buffers.v.slice(s![..tokens, ..]))
             .mapv(|x| x.abs())
-            .sum();
+            .fold(0.0f32, |a, &b| a.max(b));
 
-        assert!(q_diff < 1e-4, "Q mismatch: {}", q_diff);
-        assert!(k_diff < 1e-4, "K mismatch: {}", k_diff);
-        assert!(v_diff < 1e-4, "V mismatch: {}", v_diff);
+        assert!(q_diff < 1e-5, "Q mismatch: {}", q_diff);
+        assert!(k_diff < 1e-5, "K mismatch: {}", k_diff);
+        assert!(v_diff < 1e-5, "V mismatch: {}", v_diff);
     }
 
     #[test]
     fn test_forward_noalloc_separate() {
-        let hidden = 768; // > 512, will use separate
+        let hidden = 768;
         let tokens = 32;
         let intermediate = 3072;
         let max_batch = 1;
@@ -438,12 +438,12 @@ mod tests {
         // Forward without allocation
         qkv.forward_noalloc(&input.view(), &mut buffers);
 
-        // Compare results
+        // Compare results - use max difference
         let q_diff = (&q_alloc - &buffers.q.slice(s![..tokens, ..]))
             .mapv(|x| x.abs())
-            .sum();
+            .fold(0.0f32, |a, &b| a.max(b));
 
-        assert!(q_diff < 1e-4, "Q mismatch: {}", q_diff);
+        assert!(q_diff < 1e-5, "Q mismatch: {}", q_diff);
     }
 }
 // =============================================================================
@@ -1256,6 +1256,7 @@ mod qkv_strategy_benchmark {
     // =========================================================================
 
     #[test]
+    #[ignore] // Ignored by default due to long runtime
     fn bench_qkv_recommendation_matrix() {
         println!("\n");
         println!("╔══════════════════════════════════════════════════════════════════════╗");

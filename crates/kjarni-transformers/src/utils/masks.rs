@@ -465,15 +465,40 @@ mod masking_tests {
     // ========================================================================
 
     #[test]
-    #[should_panic(expected = "cannot be less than")]
-    fn test_create_batched_causal_mask_panic() {
-        // This function in your source code calls `create_causal_mask(seq_len, 0)`.
-        // Since 0 < seq_len, it hits the panic condition we added in `create_causal_mask`.
-        //
-        // FIX SUGGESTION in source:
-        // Change: create_causal_mask(seq_len, 0)
-        // To:     create_causal_mask(seq_len, seq_len)
-        create_batched_causal_mask(1, 5);
+    fn test_create_batched_causal_mask() {
+        let mask = create_batched_causal_mask(2, 4);
+
+        assert_eq!(mask.dim(), (2, 4, 4));
+
+        // Verify causal pattern: lower triangle (including diagonal) is 1.0, upper triangle is 0.0 or -inf
+        for b in 0..2 {
+            for i in 0..4 {
+                for j in 0..4 {
+                    if j <= i {
+                        // Can attend to current and previous positions
+                        assert_eq!(
+                            mask[[b, i, j]],
+                            1.0,
+                            "Expected 1.0 at [{}, {}, {}]",
+                            b,
+                            i,
+                            j
+                        );
+                    } else {
+                        // Cannot attend to future positions (either 0.0 or -inf depending on implementation)
+                        assert!(
+                            mask[[b, i, j]] == 0.0
+                                || (mask[[b, i, j]].is_infinite() && mask[[b, i, j]] < 0.0),
+                            "Expected 0.0 or -inf at [{}, {}, {}], got {}",
+                            b,
+                            i,
+                            j,
+                            mask[[b, i, j]]
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

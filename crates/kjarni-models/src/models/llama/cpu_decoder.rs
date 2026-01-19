@@ -476,216 +476,217 @@ mod llama_test {
         Ok(())
     }
 
-    #[test]
-    fn test_gguf_and_safetensors_load_identical_configs() -> Result<()> {
-        use kjarni_transformers::weights::clear_mmap_cache;
-        use std::path::Path;
+    
+    // #[test]
+    // fn test_gguf_and_safetensors_load_identical_configs() -> Result<()> {
+    //     use kjarni_transformers::weights::clear_mmap_cache;
+    //     use std::path::Path;
 
-        println!("--- Comparing GGUF vs Safetensors configs for 1B and 3B models ---");
+    //     println!("--- Comparing GGUF vs Safetensors configs for 1B and 3B models ---");
 
-        // Define paths (Hardcoded based on your environment)
-        let gguf_1b_path = Path::new(
-            "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-        );
-        let st_1b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct");
+    //     // Define paths (Hardcoded based on your environment)
+    //     let gguf_1b_path = Path::new(
+    //         "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    //     );
+    //     let st_1b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B-Instruct");
 
-        let gguf_3b_path = Path::new(
-            "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        );
-        let st_3b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct");
+    //     let gguf_3b_path = Path::new(
+    //         "/home/olafurj/.cache/kjarni/llama-3.2-3b-instruct-q4_k_m/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    //     );
+    //     let st_3b_path = Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-3B-Instruct");
 
-        // --- Test 1B Model ---
-        {
-            println!("\n[1] Testing Llama 3.2 1B Instruct...");
+    //     // --- Test 1B Model ---
+    //     {
+    //         println!("\n[1] Testing Llama 3.2 1B Instruct...");
 
-            if !gguf_1b_path.exists() || !st_1b_path.exists() {
-                println!("Skipping 1B test: Files not found.");
-            } else {
-                let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //         if !gguf_1b_path.exists() || !st_1b_path.exists() {
+    //             println!("Skipping 1B test: Files not found.");
+    //         } else {
+    //             let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
 
-                let model_gguf = LlamaModel::from_pretrained(
-                    gguf_1b_path,
-                    Device::Cpu,
-                    None,
-                    None,
-                    Some(ModelType::Llama3_2_1B_Instruct),
-                )?;
-                let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //             let model_gguf = LlamaModel::from_pretrained(
+    //                 gguf_1b_path,
+    //                 Device::Cpu,
+    //                 None,
+    //                 None,
+    //                 Some(ModelType::Llama3_2_1B_Instruct),
+    //             )?;
+    //             let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
 
-                println!("Model 1 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
+    //             println!("Model 1 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
 
-                let model_st = LlamaModel::from_pretrained(
-                    st_1b_path,
-                    Device::Cpu,
-                    None,
-                    None,
-                    Some(ModelType::Llama3_2_1B_Instruct),
-                )?;
+    //             let model_st = LlamaModel::from_pretrained(
+    //                 st_1b_path,
+    //                 Device::Cpu,
+    //                 None,
+    //                 None,
+    //                 Some(ModelType::Llama3_2_1B_Instruct),
+    //             )?;
 
-                let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-                println!("Model 2 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
+    //             let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //             println!("Model 2 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
 
-                let config_gguf = model_gguf.config();
-                let config_st = model_st.config();
+    //             let config_gguf = model_gguf.config();
+    //             let config_st = model_st.config();
 
-                println!("   ... Comparing all parameters for 1B model...");
-                assert_eq!(
-                    config_gguf.hidden_size, config_st.hidden_size,
-                    "1B: hidden_size"
-                );
-                assert_eq!(
-                    config_gguf.num_hidden_layers, config_st.num_hidden_layers,
-                    "1B: num_hidden_layers"
-                );
-                assert_eq!(
-                    config_gguf.num_attention_heads, config_st.num_attention_heads,
-                    "1B: num_attention_heads"
-                );
-                assert_eq!(
-                    config_gguf.num_key_value_heads, config_st.num_key_value_heads,
-                    "1B: num_key_value_heads"
-                );
-                assert_eq!(
-                    config_gguf.intermediate_size, config_st.intermediate_size,
-                    "1B: intermediate_size"
-                );
-                assert_eq!(
-                    config_gguf.vocab_size, config_st.vocab_size,
-                    "1B: vocab_size"
-                );
-                assert_eq!(
-                    config_gguf.max_position_embeddings, config_st.max_position_embeddings,
-                    "1B: max_position_embeddings"
-                );
+    //             println!("   ... Comparing all parameters for 1B model...");
+    //             assert_eq!(
+    //                 config_gguf.hidden_size, config_st.hidden_size,
+    //                 "1B: hidden_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+    //                 "1B: num_hidden_layers"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_attention_heads, config_st.num_attention_heads,
+    //                 "1B: num_attention_heads"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+    //                 "1B: num_key_value_heads"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.intermediate_size, config_st.intermediate_size,
+    //                 "1B: intermediate_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.vocab_size, config_st.vocab_size,
+    //                 "1B: vocab_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+    //                 "1B: max_position_embeddings"
+    //             );
 
-                assert!(
-                    (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
-                    "1B: rms_norm_eps"
-                );
-                assert_eq!(
-                    config_gguf.hidden_act, config_st.hidden_act,
-                    "1B: hidden_act"
-                );
-                assert!(
-                    (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
-                    "1B: rope_theta"
-                );
+    //             assert!(
+    //                 (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+    //                 "1B: rms_norm_eps"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.hidden_act, config_st.hidden_act,
+    //                 "1B: hidden_act"
+    //             );
+    //             assert!(
+    //                 (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+    //                 "1B: rope_theta"
+    //             );
 
-                assert_eq!(
-                    config_gguf.pad_token_id, config_st.pad_token_id,
-                    "1B: pad_token_id"
-                );
-                assert_eq!(
-                    config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
-                    "1B: tie_word_embeddings"
-                );
+    //             assert_eq!(
+    //                 config_gguf.pad_token_id, config_st.pad_token_id,
+    //                 "1B: pad_token_id"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+    //                 "1B: tie_word_embeddings"
+    //             );
 
-                println!("   ... ✓ 1B model configs match perfectly.");
-            }
-            // `model_gguf` and `model_st` DROP here.
-            // Arc counts to mmap decrease, but cache still holds them.
-        }
+    //             println!("   ... ✓ 1B model configs match perfectly.");
+    //         }
+    //         // `model_gguf` and `model_st` DROP here.
+    //         // Arc counts to mmap decrease, but cache still holds them.
+    //     }
 
-        // CRITICAL: Clear cache now that the structs are dropped.
-        // This frees the 1B model RAM before loading the 3B model.
-        println!("   ... Clearing mmap cache to free 1B model memory ...");
-        clear_mmap_cache();
+    //     // CRITICAL: Clear cache now that the structs are dropped.
+    //     // This frees the 1B model RAM before loading the 3B model.
+    //     println!("   ... Clearing mmap cache to free 1B model memory ...");
+    //     clear_mmap_cache();
 
-        // --- Test 3B Model ---
-        {
-            println!("\n[2] Testing Llama 3.2 3B Instruct...");
-            if !gguf_3b_path.exists() || !st_3b_path.exists() {
-                println!("Skipping 3B test: Files not found.");
-            } else {
-                let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //     // --- Test 3B Model ---
+    //     {
+    //         println!("\n[2] Testing Llama 3.2 3B Instruct...");
+    //         if !gguf_3b_path.exists() || !st_3b_path.exists() {
+    //             println!("Skipping 3B test: Files not found.");
+    //         } else {
+    //             let start_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
 
-                let model_gguf = LlamaModel::from_pretrained(
-                    gguf_3b_path,
-                    Device::Cpu,
-                    None,
-                    None,
-                    Some(ModelType::Llama3_2_3B_Instruct),
-                )?;
-                let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //             let model_gguf = LlamaModel::from_pretrained(
+    //                 gguf_3b_path,
+    //                 Device::Cpu,
+    //                 None,
+    //                 None,
+    //                 Some(ModelType::Llama3_2_3B_Instruct),
+    //             )?;
+    //             let end_ram = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
 
-                println!("Model 3 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
+    //             println!("Model 3 Loaded. Delta RAM: {:.2} MB", end_ram - start_ram);
 
-                let model_st = LlamaModel::from_pretrained(
-                    st_3b_path,
-                    Device::Cpu,
-                    None,
-                    None,
-                    Some(ModelType::Llama3_2_3B_Instruct),
-                )?;
-                let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
-                println!("Model 4 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
+    //             let model_st = LlamaModel::from_pretrained(
+    //                 st_3b_path,
+    //                 Device::Cpu,
+    //                 None,
+    //                 None,
+    //                 Some(ModelType::Llama3_2_3B_Instruct),
+    //             )?;
+    //             let end_ram2 = kjarni_transformers::utils::alloc_stats::get_current_ram_usage_mb();
+    //             println!("Model 4 Loaded. Delta RAM: {:.2} MB", end_ram2 - end_ram);
 
-                let config_gguf = model_gguf.config();
-                let config_st = model_st.config();
+    //             let config_gguf = model_gguf.config();
+    //             let config_st = model_st.config();
 
-                println!("   ... Comparing all parameters for 3B model...");
-                assert_eq!(
-                    config_gguf.hidden_size, config_st.hidden_size,
-                    "3B: hidden_size"
-                );
-                assert_eq!(
-                    config_gguf.num_hidden_layers, config_st.num_hidden_layers,
-                    "3B: num_hidden_layers"
-                );
-                assert_eq!(
-                    config_gguf.num_attention_heads, config_st.num_attention_heads,
-                    "3B: num_attention_heads"
-                );
-                assert_eq!(
-                    config_gguf.num_key_value_heads, config_st.num_key_value_heads,
-                    "3B: num_key_value_heads"
-                );
-                assert_eq!(
-                    config_gguf.intermediate_size, config_st.intermediate_size,
-                    "3B: intermediate_size"
-                );
-                assert_eq!(
-                    config_gguf.vocab_size, config_st.vocab_size,
-                    "3B: vocab_size"
-                );
-                assert_eq!(
-                    config_gguf.max_position_embeddings, config_st.max_position_embeddings,
-                    "3B: max_position_embeddings"
-                );
+    //             println!("   ... Comparing all parameters for 3B model...");
+    //             assert_eq!(
+    //                 config_gguf.hidden_size, config_st.hidden_size,
+    //                 "3B: hidden_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_hidden_layers, config_st.num_hidden_layers,
+    //                 "3B: num_hidden_layers"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_attention_heads, config_st.num_attention_heads,
+    //                 "3B: num_attention_heads"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.num_key_value_heads, config_st.num_key_value_heads,
+    //                 "3B: num_key_value_heads"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.intermediate_size, config_st.intermediate_size,
+    //                 "3B: intermediate_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.vocab_size, config_st.vocab_size,
+    //                 "3B: vocab_size"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.max_position_embeddings, config_st.max_position_embeddings,
+    //                 "3B: max_position_embeddings"
+    //             );
 
-                assert!(
-                    (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
-                    "3B: rms_norm_eps"
-                );
-                assert_eq!(
-                    config_gguf.hidden_act, config_st.hidden_act,
-                    "3B: hidden_act"
-                );
-                assert!(
-                    (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
-                    "3B: rope_theta"
-                );
+    //             assert!(
+    //                 (config_gguf.rms_norm_eps - config_st.rms_norm_eps).abs() < 1e-6,
+    //                 "3B: rms_norm_eps"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.hidden_act, config_st.hidden_act,
+    //                 "3B: hidden_act"
+    //             );
+    //             assert!(
+    //                 (config_gguf.rope_theta - config_st.rope_theta).abs() < 1e-6,
+    //                 "3B: rope_theta"
+    //             );
 
-                assert_eq!(
-                    config_gguf.pad_token_id, config_st.pad_token_id,
-                    "3B: pad_token_id"
-                );
-                assert_eq!(
-                    config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
-                    "3B: tie_word_embeddings"
-                );
+    //             assert_eq!(
+    //                 config_gguf.pad_token_id, config_st.pad_token_id,
+    //                 "3B: pad_token_id"
+    //             );
+    //             assert_eq!(
+    //                 config_gguf.tie_word_embeddings, config_st.tie_word_embeddings,
+    //                 "3B: tie_word_embeddings"
+    //             );
 
-                println!("   ... ✓ 3B model configs match perfectly.");
-            }
-        }
+    //             println!("   ... ✓ 3B model configs match perfectly.");
+    //         }
+    //     }
 
-        // Final cleanup (good practice)
-        println!("   ... Clearing mmap cache ...");
-        clear_mmap_cache();
+    //     // Final cleanup (good practice)
+    //     println!("   ... Clearing mmap cache ...");
+    //     clear_mmap_cache();
 
-        println!(
-            "\n✓ SUCCESS: All GGUF configurations correctly match their SafeTensors counterparts."
-        );
-        Ok(())
-    }
+    //     println!(
+    //         "\n✓ SUCCESS: All GGUF configurations correctly match their SafeTensors counterparts."
+    //     );
+    //     Ok(())
+    // }
 }

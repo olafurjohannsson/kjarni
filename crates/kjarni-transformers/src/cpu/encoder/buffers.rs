@@ -454,16 +454,17 @@ mod tests {
         // Calculate expected
         let max_tokens = 128;
         let qkv = max_tokens * 768 * 4 * 3;
-        let outputs = max_tokens * 768 * 4 * 2;
+        let outputs = max_tokens * 768 * 4 * 2; // attn_output, ffn_output
         let ffn = max_tokens * 3072 * 4;
+        let norm = max_tokens * 768 * 4; // norm_scratch - THIS WAS MISSING
         let attn_scores = 1 * 12 * 128 * 128 * 4;
         let attn_context = 1 * 12 * 128 * 64 * 4;
-        let expected = qkv + outputs + ffn + attn_scores + attn_context;
+        let expected = qkv + outputs + ffn + norm + attn_scores + attn_context;
         
         assert_eq!(buffers.memory_usage(), expected);
         
         println!("Memory for batch=1, seq=128, BERT-base: {:.2} MB", 
-                 buffers.memory_usage() as f64 / 1024.0 / 1024.0);
+                buffers.memory_usage() as f64 / 1024.0 / 1024.0);
         println!("Breakdown: {}", buffers.memory_breakdown());
     }
 
