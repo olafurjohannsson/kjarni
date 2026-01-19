@@ -109,7 +109,7 @@ impl Chat {
         let mut gen_builder = GeneratorBuilder::new(&builder.model)
             .device(builder.device)
             .download_policy(builder.download_policy);
-        
+
         if builder.quiet {
             gen_builder = gen_builder.quiet();
         }
@@ -392,11 +392,22 @@ impl Chat {
         prompt: &str,
         runtime_overrides: &GenerationOverrides,
     ) -> ChatResult<String> {
-        self.generator
+        let response = self
+            .generator
             .generate_with_config(prompt, runtime_overrides)
             .await
-            .map_err(|e| ChatError::GenerationFailed(e.into()))
-            .map(|s| s.trim().to_string())
+            .map_err(|e| ChatError::GenerationFailed(e.into()))?;
+
+        let mut cleaned = response.trim().to_string();
+
+        // Strip stop sequences defined by the chat template
+        for stop_seq in self.chat_template().stop_sequences() {
+            if let Some(stripped) = cleaned.strip_suffix(&stop_seq) {
+                cleaned = stripped.trim().to_string();
+            }
+        }
+
+        Ok(cleaned)
     }
 
     /// Generate streaming using channel approach.

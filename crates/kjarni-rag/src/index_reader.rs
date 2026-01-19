@@ -365,3 +365,747 @@ impl IndexReader {
         self.segments.len()
     }
 }
+
+#[cfg(test)]
+mod index_reader_tests {
+    use std::collections::HashMap;
+
+    use crate::index_reader::MetadataFilter;
+
+    // ============================================================================
+    // METADATA FILTER CONSTRUCTION TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_filter_default() {
+        let filter = MetadataFilter::default();
+
+        assert!(filter.must_match.is_empty());
+        assert!(filter.should_match.is_empty());
+        assert!(filter.must_not_match.is_empty());
+        assert!(filter.source_patterns.is_empty());
+    }
+
+    #[test]
+    fn test_filter_builder_must() {
+        let filter = MetadataFilter::default()
+            .must("category", "news")
+            .must("language", "en");
+
+        assert_eq!(filter.must_match.len(), 2);
+        assert_eq!(filter.must_match.get("category"), Some(&"news".to_string()));
+        assert_eq!(filter.must_match.get("language"), Some(&"en".to_string()));
+    }
+
+    #[test]
+    fn test_filter_builder_must_not() {
+        let filter = MetadataFilter::default()
+            .must_not("status", "draft")
+            .must_not("visibility", "private");
+
+        assert_eq!(filter.must_not_match.len(), 2);
+        assert_eq!(
+            filter.must_not_match.get("status"),
+            Some(&"draft".to_string())
+        );
+        assert_eq!(
+            filter.must_not_match.get("visibility"),
+            Some(&"private".to_string())
+        );
+    }
+
+    #[test]
+    fn test_filter_builder_source() {
+        let filter = MetadataFilter::default()
+            .source("*.txt")
+            .source("docs/*.md");
+
+        assert_eq!(filter.source_patterns.len(), 2);
+        assert!(filter.source_patterns.contains(&"*.txt".to_string()));
+        assert!(filter.source_patterns.contains(&"docs/*.md".to_string()));
+    }
+
+    #[test]
+    fn test_filter_builder_chained() {
+        let filter = MetadataFilter::default()
+            .must("type", "article")
+            .must_not("archived", "true")
+            .source("*.md");
+
+        assert_eq!(filter.must_match.len(), 1);
+        assert_eq!(filter.must_not_match.len(), 1);
+        assert_eq!(filter.source_patterns.len(), 1);
+    }
+
+    // ============================================================================
+    // METADATA FILTER MATCHES TESTS - MUST_MATCH
+    // ============================================================================
+
+    #[test]
+    fn test_matches_empty_filter() {
+        let filter = MetadataFilter::default();
+        let metadata = HashMap::new();
+
+        // Empty filter matches everything
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_single() {
+        let filter = MetadataFilter::default().must("key", "value");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("key".to_string(), "value".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_missing_key() {
+        let filter = MetadataFilter::default().must("key", "value");
+
+        let metadata = HashMap::new();
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_wrong_value() {
+        let filter = MetadataFilter::default().must("key", "expected");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("key".to_string(), "actual".to_string());
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_multiple_all_present() {
+        let filter = MetadataFilter::default()
+            .must("type", "article")
+            .must("language", "en");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "article".to_string());
+        metadata.insert("language".to_string(), "en".to_string());
+        metadata.insert("extra".to_string(), "ignored".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_multiple_one_missing() {
+        let filter = MetadataFilter::default()
+            .must("type", "article")
+            .must("language", "en");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "article".to_string());
+        // Missing "language"
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_match_multiple_one_wrong() {
+        let filter = MetadataFilter::default()
+            .must("type", "article")
+            .must("language", "en");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "article".to_string());
+        metadata.insert("language".to_string(), "de".to_string()); // Wrong value
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    // ============================================================================
+    // METADATA FILTER MATCHES TESTS - MUST_NOT_MATCH
+    // ============================================================================
+
+    #[test]
+    fn test_matches_must_not_match_key_absent() {
+        let filter = MetadataFilter::default().must_not("banned", "true");
+
+        let metadata = HashMap::new();
+
+        // Key not present, so doesn't match the banned value
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_not_match_different_value() {
+        let filter = MetadataFilter::default().must_not("status", "draft");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("status".to_string(), "published".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_not_match_same_value() {
+        let filter = MetadataFilter::default().must_not("status", "draft");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("status".to_string(), "draft".to_string());
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_not_match_multiple() {
+        let filter = MetadataFilter::default()
+            .must_not("deleted", "true")
+            .must_not("archived", "true");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("status".to_string(), "active".to_string());
+
+        // Neither banned key is present
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_must_not_match_one_matches() {
+        let filter = MetadataFilter::default()
+            .must_not("deleted", "true")
+            .must_not("archived", "true");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("archived".to_string(), "true".to_string());
+
+        // One banned condition matches
+        assert!(!filter.matches(&metadata));
+    }
+
+    // ============================================================================
+    // METADATA FILTER MATCHES TESTS - SHOULD_MATCH
+    // ============================================================================
+
+    #[test]
+    fn test_matches_should_match_empty() {
+        let filter = MetadataFilter::default();
+
+        let metadata = HashMap::new();
+
+        // No should_match conditions means automatic pass
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_should_match_one_group_matches() {
+        let mut filter = MetadataFilter::default();
+
+        let mut group1 = HashMap::new();
+        group1.insert("type".to_string(), "article".to_string());
+
+        let mut group2 = HashMap::new();
+        group2.insert("type".to_string(), "blog".to_string());
+
+        filter.should_match = vec![group1, group2];
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "article".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_should_match_second_group_matches() {
+        let mut filter = MetadataFilter::default();
+
+        let mut group1 = HashMap::new();
+        group1.insert("type".to_string(), "article".to_string());
+
+        let mut group2 = HashMap::new();
+        group2.insert("type".to_string(), "blog".to_string());
+
+        filter.should_match = vec![group1, group2];
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "blog".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_should_match_no_groups_match() {
+        let mut filter = MetadataFilter::default();
+
+        let mut group1 = HashMap::new();
+        group1.insert("type".to_string(), "article".to_string());
+
+        let mut group2 = HashMap::new();
+        group2.insert("type".to_string(), "blog".to_string());
+
+        filter.should_match = vec![group1, group2];
+
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "video".to_string());
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_should_match_group_with_multiple_keys() {
+        let mut filter = MetadataFilter::default();
+
+        let mut group = HashMap::new();
+        group.insert("type".to_string(), "article".to_string());
+        group.insert("language".to_string(), "en".to_string());
+
+        filter.should_match = vec![group];
+
+        // Both keys must match within the group
+        let mut metadata1 = HashMap::new();
+        metadata1.insert("type".to_string(), "article".to_string());
+        metadata1.insert("language".to_string(), "en".to_string());
+        assert!(filter.matches(&metadata1));
+
+        // Only one key matches - not enough
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("type".to_string(), "article".to_string());
+        metadata2.insert("language".to_string(), "de".to_string());
+        assert!(!filter.matches(&metadata2));
+    }
+
+    // ============================================================================
+    // METADATA FILTER MATCHES TESTS - SOURCE PATTERNS
+    // ============================================================================
+
+    #[test]
+    fn test_matches_source_pattern_no_patterns() {
+        let filter = MetadataFilter::default();
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "anything.txt".to_string());
+
+        // No patterns = no restriction
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_simple_glob() {
+        let filter = MetadataFilter::default().source("*.txt");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "document.txt".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_no_match() {
+        let filter = MetadataFilter::default().source("*.txt");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "document.md".to_string());
+
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_multiple_one_matches() {
+        let filter = MetadataFilter::default()
+            .source("*.txt")
+            .source("*.md");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "readme.md".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_with_path() {
+        let filter = MetadataFilter::default().source("docs/*.md");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "docs/readme.md".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_extracts_filename() {
+        // Pattern without path components matches against filename only
+        let filter = MetadataFilter::default().source("*.md");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "path/to/document.md".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_missing_source_key() {
+        let filter = MetadataFilter::default().source("*.txt");
+
+        let metadata = HashMap::new(); // No "source" key
+
+        // Can't match pattern if source is missing
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_source_pattern_exact_name() {
+        let filter = MetadataFilter::default().source("README.md");
+
+        let mut metadata1 = HashMap::new();
+        metadata1.insert("source".to_string(), "README.md".to_string());
+        assert!(filter.matches(&metadata1));
+
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("source".to_string(), "README.txt".to_string());
+        assert!(!filter.matches(&metadata2));
+    }
+
+    // ============================================================================
+    // COMBINED FILTER TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_matches_combined_must_and_must_not() {
+        let filter = MetadataFilter::default()
+            .must("category", "tech")
+            .must_not("archived", "true");
+
+        // Passes both conditions
+        let mut metadata1 = HashMap::new();
+        metadata1.insert("category".to_string(), "tech".to_string());
+        metadata1.insert("archived".to_string(), "false".to_string());
+        assert!(filter.matches(&metadata1));
+
+        // Fails must
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("category".to_string(), "sports".to_string());
+        assert!(!filter.matches(&metadata2));
+
+        // Fails must_not
+        let mut metadata3 = HashMap::new();
+        metadata3.insert("category".to_string(), "tech".to_string());
+        metadata3.insert("archived".to_string(), "true".to_string());
+        assert!(!filter.matches(&metadata3));
+    }
+
+    #[test]
+    fn test_matches_combined_all_conditions() {
+        let mut filter = MetadataFilter::default()
+            .must("type", "article")
+            .must_not("deleted", "true")
+            .source("*.md");
+
+        let mut should_group = HashMap::new();
+        should_group.insert("priority".to_string(), "high".to_string());
+        filter.should_match = vec![should_group];
+
+        // Passes all conditions
+        let mut metadata = HashMap::new();
+        metadata.insert("type".to_string(), "article".to_string());
+        metadata.insert("priority".to_string(), "high".to_string());
+        metadata.insert("source".to_string(), "docs/readme.md".to_string());
+
+        assert!(filter.matches(&metadata));
+
+        // Fails must_not
+        let mut metadata2 = metadata.clone();
+        metadata2.insert("deleted".to_string(), "true".to_string());
+        assert!(!filter.matches(&metadata2));
+
+        // Fails should_match
+        let mut metadata3 = HashMap::new();
+        metadata3.insert("type".to_string(), "article".to_string());
+        metadata3.insert("priority".to_string(), "low".to_string());
+        metadata3.insert("source".to_string(), "docs/readme.md".to_string());
+        assert!(!filter.matches(&metadata3));
+
+        // Fails source pattern
+        let mut metadata4 = HashMap::new();
+        metadata4.insert("type".to_string(), "article".to_string());
+        metadata4.insert("priority".to_string(), "high".to_string());
+        metadata4.insert("source".to_string(), "docs/readme.txt".to_string());
+        assert!(!filter.matches(&metadata4));
+    }
+
+    // ============================================================================
+    // EDGE CASES
+    // ============================================================================
+
+    #[test]
+    fn test_matches_empty_string_values() {
+        let filter = MetadataFilter::default().must("key", "");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("key".to_string(), "".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_whitespace_values() {
+        let filter = MetadataFilter::default().must("key", "  ");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("key".to_string(), "  ".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_case_sensitive() {
+        let filter = MetadataFilter::default().must("key", "Value");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("key".to_string(), "value".to_string());
+
+        // Case sensitive - should not match
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_unicode_values() {
+        let filter = MetadataFilter::default().must("greeting", "你好");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("greeting".to_string(), "你好".to_string());
+
+        assert!(filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_matches_special_characters_in_pattern() {
+        let filter = MetadataFilter::default().source("file[1].txt");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "file[1].txt".to_string());
+
+        // Glob pattern with special chars
+        // Note: behavior depends on glob_match implementation
+        assert!(filter.matches(&metadata));
+    }
+
+    // ============================================================================
+    // GLOB PATTERN TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_glob_asterisk() {
+        let filter = MetadataFilter::default().source("test_*");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "test_file.txt".to_string());
+        assert!(filter.matches(&metadata));
+
+        metadata.insert("source".to_string(), "other_file.txt".to_string());
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_glob_question_mark() {
+        let filter = MetadataFilter::default().source("file?.txt");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "file1.txt".to_string());
+        assert!(filter.matches(&metadata));
+
+        metadata.insert("source".to_string(), "file12.txt".to_string());
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_glob_double_asterisk() {
+        let filter = MetadataFilter::default().source("**/*.md");
+
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), "deep/nested/path/doc.md".to_string());
+        assert!(filter.matches(&metadata));
+    }
+
+    // ============================================================================
+    // LOCAL/GLOBAL ID CONVERSION TESTS
+    // ============================================================================
+
+    // Note: These would typically require creating an IndexReader with mock segments.
+    // Here we test the logic conceptually. In a real test, you'd create temporary
+    // index files or mock the Segment struct.
+
+    #[test]
+    fn test_local_to_global_concept() {
+        // Conceptual test for ID conversion logic
+        // Segment 0: 10 docs (IDs 0-9)
+        // Segment 1: 5 docs (IDs 10-14)
+        // Segment 2: 8 docs (IDs 15-22)
+
+        fn local_to_global(segment_sizes: &[usize], segment_idx: usize, local_id: usize) -> usize {
+            let offset: usize = segment_sizes[..segment_idx].iter().sum();
+            offset + local_id
+        }
+
+        let sizes = [10, 5, 8];
+
+        assert_eq!(local_to_global(&sizes, 0, 0), 0);
+        assert_eq!(local_to_global(&sizes, 0, 9), 9);
+        assert_eq!(local_to_global(&sizes, 1, 0), 10);
+        assert_eq!(local_to_global(&sizes, 1, 4), 14);
+        assert_eq!(local_to_global(&sizes, 2, 0), 15);
+        assert_eq!(local_to_global(&sizes, 2, 7), 22);
+    }
+
+    #[test]
+    fn test_global_to_local_concept() {
+        fn global_to_local(segment_sizes: &[usize], global_id: usize) -> Option<(usize, usize)> {
+            let mut offset = 0;
+            for (seg_idx, &size) in segment_sizes.iter().enumerate() {
+                if global_id < offset + size {
+                    return Some((seg_idx, global_id - offset));
+                }
+                offset += size;
+            }
+            None
+        }
+
+        let sizes = [10, 5, 8];
+
+        assert_eq!(global_to_local(&sizes, 0), Some((0, 0)));
+        assert_eq!(global_to_local(&sizes, 9), Some((0, 9)));
+        assert_eq!(global_to_local(&sizes, 10), Some((1, 0)));
+        assert_eq!(global_to_local(&sizes, 14), Some((1, 4)));
+        assert_eq!(global_to_local(&sizes, 15), Some((2, 0)));
+        assert_eq!(global_to_local(&sizes, 22), Some((2, 7)));
+        assert_eq!(global_to_local(&sizes, 23), None); // Out of range
+    }
+
+    #[test]
+    fn test_roundtrip_conversion() {
+        fn local_to_global(segment_sizes: &[usize], segment_idx: usize, local_id: usize) -> usize {
+            let offset: usize = segment_sizes[..segment_idx].iter().sum();
+            offset + local_id
+        }
+
+        fn global_to_local(segment_sizes: &[usize], global_id: usize) -> Option<(usize, usize)> {
+            let mut offset = 0;
+            for (seg_idx, &size) in segment_sizes.iter().enumerate() {
+                if global_id < offset + size {
+                    return Some((seg_idx, global_id - offset));
+                }
+                offset += size;
+            }
+            None
+        }
+
+        let sizes = [10, 5, 8];
+
+        // Test roundtrip for all valid IDs
+        for seg_idx in 0..sizes.len() {
+            for local_id in 0..sizes[seg_idx] {
+                let global = local_to_global(&sizes, seg_idx, local_id);
+                let (back_seg, back_local) = global_to_local(&sizes, global).unwrap();
+
+                assert_eq!(seg_idx, back_seg);
+                assert_eq!(local_id, back_local);
+            }
+        }
+    }
+
+    // ============================================================================
+    // SEARCH RESULT FILTERING TESTS
+    // ============================================================================
+
+    #[test]
+    fn test_filter_application_concept() {
+        // Conceptual test for apply_filter logic
+        use crate::SearchResult;
+
+        fn apply_filter(
+            results: Vec<SearchResult>,
+            filter: &MetadataFilter,
+            limit: usize,
+        ) -> Vec<SearchResult> {
+            results
+                .into_iter()
+                .filter(|r| filter.matches(&r.metadata))
+                .take(limit)
+                .collect()
+        }
+
+        let mut results = Vec::new();
+
+        // Result 1: matches filter
+        let mut meta1 = HashMap::new();
+        meta1.insert("category".to_string(), "tech".to_string());
+        results.push(SearchResult {
+            score: 0.9,
+            document_id: 0,
+            text: "Tech article".to_string(),
+            metadata: meta1,
+        });
+
+        // Result 2: doesn't match filter
+        let mut meta2 = HashMap::new();
+        meta2.insert("category".to_string(), "sports".to_string());
+        results.push(SearchResult {
+            score: 0.8,
+            document_id: 1,
+            text: "Sports article".to_string(),
+            metadata: meta2,
+        });
+
+        // Result 3: matches filter
+        let mut meta3 = HashMap::new();
+        meta3.insert("category".to_string(), "tech".to_string());
+        results.push(SearchResult {
+            score: 0.7,
+            document_id: 2,
+            text: "Another tech article".to_string(),
+            metadata: meta3,
+        });
+
+        let filter = MetadataFilter::default().must("category", "tech");
+        let filtered = apply_filter(results, &filter, 10);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].document_id, 0);
+        assert_eq!(filtered[1].document_id, 2);
+    }
+
+    #[test]
+    fn test_filter_application_respects_limit() {
+        use crate::SearchResult;
+
+        fn apply_filter(
+            results: Vec<SearchResult>,
+            filter: &MetadataFilter,
+            limit: usize,
+        ) -> Vec<SearchResult> {
+            results
+                .into_iter()
+                .filter(|r| filter.matches(&r.metadata))
+                .take(limit)
+                .collect()
+        }
+
+        let results: Vec<SearchResult> = (0..10)
+            .map(|i| {
+                let mut meta = HashMap::new();
+                meta.insert("type".to_string(), "doc".to_string());
+                SearchResult {
+                    score: 1.0 - (i as f32 * 0.1),
+                    document_id: i,
+                    text: format!("Document {}", i),
+                    metadata: meta,
+                }
+            })
+            .collect();
+
+        let filter = MetadataFilter::default().must("type", "doc");
+
+        // All 10 match, but limit to 5
+        let filtered = apply_filter(results, &filter, 5);
+        assert_eq!(filtered.len(), 5);
+
+        // Verify order preserved (highest scores first)
+        assert_eq!(filtered[0].document_id, 0);
+        assert_eq!(filtered[4].document_id, 4);
+    }
+}

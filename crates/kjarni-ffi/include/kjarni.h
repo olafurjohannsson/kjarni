@@ -15,81 +15,81 @@
  * Error codes returned by Kjarni FFI functions.
  */
 typedef enum KjarniKjarniErrorCode {
-    /**
-     * Operation completed successfully
-     */
-    KJARNI_KJARNI_ERROR_CODE_OK = 0,
-    /**
-     * Null pointer passed to function
-     */
-    KJARNI_KJARNI_ERROR_CODE_NULL_POINTER = 1,
-    /**
-     * Invalid UTF-8 string
-     */
-    KJARNI_KJARNI_ERROR_CODE_INVALID_UTF8 = 2,
-    /**
-     * Model not found in registry
-     */
-    KJARNI_KJARNI_ERROR_CODE_MODEL_NOT_FOUND = 3,
-    /**
-     * Failed to load model
-     */
-    KJARNI_KJARNI_ERROR_CODE_LOAD_FAILED = 4,
-    /**
-     * Inference operation failed
-     */
-    KJARNI_KJARNI_ERROR_CODE_INFERENCE_FAILED = 5,
-    /**
-     * GPU not available
-     */
-    KJARNI_KJARNI_ERROR_CODE_GPU_UNAVAILABLE = 6,
-    /**
-     * Invalid configuration
-     */
-    KJARNI_KJARNI_ERROR_CODE_INVALID_CONFIG = 7,
-    /**
-     * Operation was cancelled
-     */
-    KJARNI_KJARNI_ERROR_CODE_CANCELLED = 8,
-    /**
-     * Operation timed out
-     */
-    KJARNI_KJARNI_ERROR_CODE_TIMEOUT = 9,
-    /**
-     * Stream has ended
-     */
-    KJARNI_KJARNI_ERROR_CODE_STREAM_ENDED = 10,
-    /**
-     * Unknown error
-     */
-    KJARNI_KJARNI_ERROR_CODE_UNKNOWN = 255,
+  /**
+   * Operation completed successfully
+   */
+  KJARNI_KJARNI_ERROR_CODE_OK = 0,
+  /**
+   * Null pointer passed to function
+   */
+  KJARNI_KJARNI_ERROR_CODE_NULL_POINTER = 1,
+  /**
+   * Invalid UTF-8 string
+   */
+  KJARNI_KJARNI_ERROR_CODE_INVALID_UTF8 = 2,
+  /**
+   * Model not found in registry
+   */
+  KJARNI_KJARNI_ERROR_CODE_MODEL_NOT_FOUND = 3,
+  /**
+   * Failed to load model
+   */
+  KJARNI_KJARNI_ERROR_CODE_LOAD_FAILED = 4,
+  /**
+   * Inference operation failed
+   */
+  KJARNI_KJARNI_ERROR_CODE_INFERENCE_FAILED = 5,
+  /**
+   * GPU not available
+   */
+  KJARNI_KJARNI_ERROR_CODE_GPU_UNAVAILABLE = 6,
+  /**
+   * Invalid configuration
+   */
+  KJARNI_KJARNI_ERROR_CODE_INVALID_CONFIG = 7,
+  /**
+   * Operation was cancelled
+   */
+  KJARNI_KJARNI_ERROR_CODE_CANCELLED = 8,
+  /**
+   * Operation timed out
+   */
+  KJARNI_KJARNI_ERROR_CODE_TIMEOUT = 9,
+  /**
+   * Stream has ended
+   */
+  KJARNI_KJARNI_ERROR_CODE_STREAM_ENDED = 10,
+  /**
+   * Unknown error
+   */
+  KJARNI_KJARNI_ERROR_CODE_UNKNOWN = 255,
 } KjarniKjarniErrorCode;
 
 /**
  * Device selection for inference.
  */
 typedef enum KjarniKjarniDevice {
-    /**
-     * Use CPU for inference
-     */
-    KJARNI_KJARNI_DEVICE_CPU = 0,
-    /**
-     * Use GPU for inference
-     */
-    KJARNI_KJARNI_DEVICE_GPU = 1,
+  /**
+   * Use CPU for inference
+   */
+  KJARNI_KJARNI_DEVICE_CPU = 0,
+  /**
+   * Use GPU for inference
+   */
+  KJARNI_KJARNI_DEVICE_GPU = 1,
 } KjarniKjarniDevice;
 
 /**
  * Progress stage enum for FFI
  */
 typedef enum KjarniKjarniProgressStage {
-    KJARNI_KJARNI_PROGRESS_STAGE_SCANNING = 0,
-    KJARNI_KJARNI_PROGRESS_STAGE_LOADING = 1,
-    KJARNI_KJARNI_PROGRESS_STAGE_EMBEDDING = 2,
-    KJARNI_KJARNI_PROGRESS_STAGE_WRITING = 3,
-    KJARNI_KJARNI_PROGRESS_STAGE_COMMITTING = 4,
-    KJARNI_KJARNI_PROGRESS_STAGE_SEARCHING = 5,
-    KJARNI_KJARNI_PROGRESS_STAGE_RERANKING = 6,
+  KJARNI_KJARNI_PROGRESS_STAGE_SCANNING = 0,
+  KJARNI_KJARNI_PROGRESS_STAGE_LOADING = 1,
+  KJARNI_KJARNI_PROGRESS_STAGE_EMBEDDING = 2,
+  KJARNI_KJARNI_PROGRESS_STAGE_WRITING = 3,
+  KJARNI_KJARNI_PROGRESS_STAGE_COMMITTING = 4,
+  KJARNI_KJARNI_PROGRESS_STAGE_SEARCHING = 5,
+  KJARNI_KJARNI_PROGRESS_STAGE_RERANKING = 6,
 } KjarniKjarniProgressStage;
 
 /**
@@ -101,18 +101,18 @@ typedef enum KjarniKjarniProgressStage {
  * - Hybrid (2): Combined approach (recommended)
  */
 typedef enum KjarniKjarniSearchMode {
-    /**
-     * BM25 keyword search
-     */
-    KJARNI_KJARNI_SEARCH_MODE_KEYWORD = 0,
-    /**
-     * Embedding-based semantic search
-     */
-    KJARNI_KJARNI_SEARCH_MODE_SEMANTIC = 1,
-    /**
-     * Combined keyword + semantic (default, recommended)
-     */
-    KJARNI_KJARNI_SEARCH_MODE_HYBRID = 2,
+  /**
+   * BM25 keyword search
+   */
+  KJARNI_KJARNI_SEARCH_MODE_KEYWORD = 0,
+  /**
+   * Embedding-based semantic search
+   */
+  KJARNI_KJARNI_SEARCH_MODE_SEMANTIC = 1,
+  /**
+   * Combined keyword + semantic (default, recommended)
+   */
+  KJARNI_KJARNI_SEARCH_MODE_HYBRID = 2,
 } KjarniKjarniSearchMode;
 
 /**
@@ -153,148 +153,148 @@ typedef struct KjarniKjarniSearcher KjarniKjarniSearcher;
  * Float array returned by FFI functions. Caller must free with kjarni_float_array_free.
  */
 typedef struct KjarniKjarniFloatArray {
-    float *data;
-    uintptr_t len;
+  float *data;
+  uintptr_t len;
 } KjarniKjarniFloatArray;
 
 /**
  * 2D float array for batch results. Caller must free with kjarni_float_2d_array_free.
  */
 typedef struct KjarniKjarniFloat2DArray {
-    float *data;
-    uintptr_t rows;
-    uintptr_t cols;
+  float *data;
+  uintptr_t rows;
+  uintptr_t cols;
 } KjarniKjarniFloat2DArray;
 
 /**
  * String array. Caller must free with kjarni_string_array_free.
  */
 typedef struct KjarniKjarniStringArray {
-    char **strings;
-    uintptr_t len;
+  char **strings;
+  uintptr_t len;
 } KjarniKjarniStringArray;
 
 /**
  * Configuration for creating an Embedder.
  */
 typedef struct KjarniKjarniEmbedderConfig {
-    /**
-     * Device to use (CPU or GPU)
-     */
-    enum KjarniKjarniDevice device;
-    /**
-     * Cache directory for models (NULL = default)
-     */
-    const char *cache_dir;
-    /**
-     * Model name from registry (NULL = "minilm-l6-v2")
-     */
-    const char *model_name;
-    /**
-     * Path to local model (NULL = use registry)
-     */
-    const char *model_path;
-    /**
-     * Whether to L2-normalize embeddings (1 = yes, 0 = no)
-     */
-    int32_t normalize;
-    /**
-     * Suppress progress output (1 = quiet, 0 = verbose)
-     */
-    int32_t quiet;
+  /**
+   * Device to use (CPU or GPU)
+   */
+  enum KjarniKjarniDevice device;
+  /**
+   * Cache directory for models (NULL = default)
+   */
+  const char *cache_dir;
+  /**
+   * Model name from registry (NULL = "minilm-l6-v2")
+   */
+  const char *model_name;
+  /**
+   * Path to local model (NULL = use registry)
+   */
+  const char *model_path;
+  /**
+   * Whether to L2-normalize embeddings (1 = yes, 0 = no)
+   */
+  int32_t normalize;
+  /**
+   * Suppress progress output (1 = quiet, 0 = verbose)
+   */
+  int32_t quiet;
 } KjarniKjarniEmbedderConfig;
 
 /**
  * Single classification result (label + score).
  */
 typedef struct KjarniKjarniClassResult {
-    /**
-     * Label name (must be freed with kjarni_string_free)
-     */
-    char *label;
-    /**
-     * Confidence score
-     */
-    float score;
+  /**
+   * Label name (must be freed with kjarni_string_free)
+   */
+  char *label;
+  /**
+   * Confidence score
+   */
+  float score;
 } KjarniKjarniClassResult;
 
 /**
  * Array of classification results.
  */
 typedef struct KjarniKjarniClassResults {
-    /**
-     * Array of results
-     */
-    struct KjarniKjarniClassResult *results;
-    /**
-     * Number of results
-     */
-    uintptr_t len;
+  /**
+   * Array of results
+   */
+  struct KjarniKjarniClassResult *results;
+  /**
+   * Number of results
+   */
+  uintptr_t len;
 } KjarniKjarniClassResults;
 
 /**
  * Configuration for creating a Classifier.
  */
 typedef struct KjarniKjarniClassifierConfig {
-    /**
-     * Device to use
-     */
-    enum KjarniKjarniDevice device;
-    /**
-     * Cache directory (NULL = default)
-     */
-    const char *cache_dir;
-    /**
-     * Model name (NULL = default)
-     */
-    const char *model_name;
-    /**
-     * Model path (NULL = use registry)
-     */
-    const char *model_path;
-    /**
-     * Custom labels (NULL = use model labels)
-     */
-    const char *const *labels;
-    /**
-     * Number of custom labels
-     */
-    uintptr_t num_labels;
-    /**
-     * Multi-label mode (1 = multi-label, 0 = single-label)
-     */
-    int32_t multi_label;
-    /**
-     * Suppress output
-     */
-    int32_t quiet;
+  /**
+   * Device to use
+   */
+  enum KjarniKjarniDevice device;
+  /**
+   * Cache directory (NULL = default)
+   */
+  const char *cache_dir;
+  /**
+   * Model name (NULL = default)
+   */
+  const char *model_name;
+  /**
+   * Model path (NULL = use registry)
+   */
+  const char *model_path;
+  /**
+   * Custom labels (NULL = use model labels)
+   */
+  const char *const *labels;
+  /**
+   * Number of custom labels
+   */
+  uintptr_t num_labels;
+  /**
+   * Multi-label mode (1 = multi-label, 0 = single-label)
+   */
+  int32_t multi_label;
+  /**
+   * Suppress output
+   */
+  int32_t quiet;
 } KjarniKjarniClassifierConfig;
 
 /**
  * Single rerank result
  */
 typedef struct KjarniKjarniRerankResult {
-    uintptr_t index;
-    float score;
+  uintptr_t index;
+  float score;
 } KjarniKjarniRerankResult;
 
 /**
  * Array of rerank results
  */
 typedef struct KjarniKjarniRerankResults {
-    struct KjarniKjarniRerankResult *results;
-    uintptr_t len;
+  struct KjarniKjarniRerankResult *results;
+  uintptr_t len;
 } KjarniKjarniRerankResults;
 
 /**
  * Configuration for Reranker
  */
 typedef struct KjarniKjarniRerankerConfig {
-    enum KjarniKjarniDevice device;
-    const char *cache_dir;
-    const char *model_name;
-    const char *model_path;
-    int32_t quiet;
+  enum KjarniKjarniDevice device;
+  const char *cache_dir;
+  const char *model_name;
+  const char *model_path;
+  int32_t quiet;
 } KjarniKjarniRerankerConfig;
 
 /**
@@ -304,30 +304,30 @@ typedef struct KjarniKjarniRerankerConfig {
  * using `kjarni_index_info_free` to avoid memory leaks.
  */
 typedef struct KjarniKjarniIndexInfo {
-    /**
-     * Path to the index directory (must be freed)
-     */
-    char *path;
-    /**
-     * Total number of documents in the index
-     */
-    uintptr_t document_count;
-    /**
-     * Number of index segments
-     */
-    uintptr_t segment_count;
-    /**
-     * Embedding dimension
-     */
-    uintptr_t dimension;
-    /**
-     * Total size on disk in bytes
-     */
-    uint64_t size_bytes;
-    /**
-     * Embedding model name used to create the index (may be NULL, must be freed if not)
-     */
-    char *embedding_model;
+  /**
+   * Path to the index directory (must be freed)
+   */
+  char *path;
+  /**
+   * Total number of documents in the index
+   */
+  uintptr_t document_count;
+  /**
+   * Number of index segments
+   */
+  uintptr_t segment_count;
+  /**
+   * Embedding dimension
+   */
+  uintptr_t dimension;
+  /**
+   * Total size on disk in bytes
+   */
+  uint64_t size_bytes;
+  /**
+   * Embedding model name used to create the index (may be NULL, must be freed if not)
+   */
+  char *embedding_model;
 } KjarniKjarniIndexInfo;
 
 /**
@@ -337,54 +337,54 @@ typedef struct KjarniKjarniIndexInfo {
  * then modify fields as needed before passing to `kjarni_indexer_new()`.
  */
 typedef struct KjarniKjarniIndexerConfig {
-    /**
-     * Device to run embeddings on (CPU or GPU)
-     */
-    enum KjarniKjarniDevice device;
-    /**
-     * Directory to cache downloaded models (NULL = system default)
-     */
-    const char *cache_dir;
-    /**
-     * Embedding model name (NULL = "minilm-l6-v2")
-     */
-    const char *model_name;
-    /**
-     * Maximum chunk size in characters
-     */
-    uintptr_t chunk_size;
-    /**
-     * Overlap between adjacent chunks in characters
-     */
-    uintptr_t chunk_overlap;
-    /**
-     * Batch size for embedding operations
-     */
-    uintptr_t batch_size;
-    /**
-     * Comma-separated list of file extensions to include (NULL = use defaults)
-     */
-    const char *extensions;
-    /**
-     * Comma-separated list of glob patterns to exclude
-     */
-    const char *exclude_patterns;
-    /**
-     * Whether to recurse into subdirectories (1 = true, 0 = false)
-     */
-    int32_t recursive;
-    /**
-     * Whether to include hidden files (1 = true, 0 = false)
-     */
-    int32_t include_hidden;
-    /**
-     * Maximum file size in bytes (0 = no limit)
-     */
-    uintptr_t max_file_size;
-    /**
-     * Suppress progress output to stderr (1 = quiet, 0 = verbose)
-     */
-    int32_t quiet;
+  /**
+   * Device to run embeddings on (CPU or GPU)
+   */
+  enum KjarniKjarniDevice device;
+  /**
+   * Directory to cache downloaded models (NULL = system default)
+   */
+  const char *cache_dir;
+  /**
+   * Embedding model name (NULL = "minilm-l6-v2")
+   */
+  const char *model_name;
+  /**
+   * Maximum chunk size in characters
+   */
+  uintptr_t chunk_size;
+  /**
+   * Overlap between adjacent chunks in characters
+   */
+  uintptr_t chunk_overlap;
+  /**
+   * Batch size for embedding operations
+   */
+  uintptr_t batch_size;
+  /**
+   * Comma-separated list of file extensions to include (NULL = use defaults)
+   */
+  const char *extensions;
+  /**
+   * Comma-separated list of glob patterns to exclude
+   */
+  const char *exclude_patterns;
+  /**
+   * Whether to recurse into subdirectories (1 = true, 0 = false)
+   */
+  int32_t recursive;
+  /**
+   * Whether to include hidden files (1 = true, 0 = false)
+   */
+  int32_t include_hidden;
+  /**
+   * Maximum file size in bytes (0 = no limit)
+   */
+  uintptr_t max_file_size;
+  /**
+   * Suppress progress output to stderr (1 = quiet, 0 = verbose)
+   */
+  int32_t quiet;
 } KjarniKjarniIndexerConfig;
 
 /**
@@ -394,50 +394,50 @@ typedef struct KjarniKjarniIndexerConfig {
  * information about what was indexed and how long it took.
  */
 typedef struct KjarniKjarniIndexStats {
-    /**
-     * Number of document chunks indexed (after splitting)
-     */
-    uintptr_t documents_indexed;
-    /**
-     * Number of chunks created from source files
-     */
-    uintptr_t chunks_created;
-    /**
-     * Embedding dimension used
-     */
-    uintptr_t dimension;
-    /**
-     * Total index size on disk in bytes
-     */
-    uint64_t size_bytes;
-    /**
-     * Number of source files successfully processed
-     */
-    uintptr_t files_processed;
-    /**
-     * Number of source files skipped (errors, unsupported format, too large)
-     */
-    uintptr_t files_skipped;
-    /**
-     * Total time taken in milliseconds
-     */
-    uint64_t elapsed_ms;
+  /**
+   * Number of document chunks indexed (after splitting)
+   */
+  uintptr_t documents_indexed;
+  /**
+   * Number of chunks created from source files
+   */
+  uintptr_t chunks_created;
+  /**
+   * Embedding dimension used
+   */
+  uintptr_t dimension;
+  /**
+   * Total index size on disk in bytes
+   */
+  uint64_t size_bytes;
+  /**
+   * Number of source files successfully processed
+   */
+  uintptr_t files_processed;
+  /**
+   * Number of source files skipped (errors, unsupported format, too large)
+   */
+  uintptr_t files_skipped;
+  /**
+   * Total time taken in milliseconds
+   */
+  uint64_t elapsed_ms;
 } KjarniKjarniIndexStats;
 
 /**
  * Progress data passed to callbacks
  */
 typedef struct KjarniKjarniProgress {
-    enum KjarniKjarniProgressStage stage;
-    uintptr_t current;
-    uintptr_t total;
-    const char *message;
+  enum KjarniKjarniProgressStage stage;
+  uintptr_t current;
+  uintptr_t total;
+  const char *message;
 } KjarniKjarniProgress;
 
 /**
  * Generic callback function pointer type for progress
  */
-typedef void (*KjarniKjarniProgressCallbackFn)( struct KjarniKjarniProgress progress, void *user_data );
+typedef void (*KjarniKjarniProgressCallbackFn)(struct KjarniKjarniProgress progress, void *user_data);
 
 /**
  * Single search result returned from a query.
@@ -445,22 +445,22 @@ typedef void (*KjarniKjarniProgressCallbackFn)( struct KjarniKjarniProgress prog
  * Contains the matched text, relevance score, and associated metadata.
  */
 typedef struct KjarniKjarniSearchResult {
-    /**
-     * Relevance score (higher is better, scale depends on search mode)
-     */
-    float score;
-    /**
-     * Document ID within the index
-     */
-    uintptr_t document_id;
-    /**
-     * The matched text chunk (must be freed)
-     */
-    char *text;
-    /**
-     * JSON-encoded metadata (must be freed, may be NULL)
-     */
-    char *metadata_json;
+  /**
+   * Relevance score (higher is better, scale depends on search mode)
+   */
+  float score;
+  /**
+   * Document ID within the index
+   */
+  uintptr_t document_id;
+  /**
+   * The matched text chunk (must be freed)
+   */
+  char *text;
+  /**
+   * JSON-encoded metadata (must be freed, may be NULL)
+   */
+  char *metadata_json;
 } KjarniKjarniSearchResult;
 
 /**
@@ -469,14 +469,14 @@ typedef struct KjarniKjarniSearchResult {
  * Must be freed with `kjarni_search_results_free` after use.
  */
 typedef struct KjarniKjarniSearchResults {
-    /**
-     * Pointer to array of results
-     */
-    struct KjarniKjarniSearchResult *results;
-    /**
-     * Number of results
-     */
-    uintptr_t len;
+  /**
+   * Pointer to array of results
+   */
+  struct KjarniKjarniSearchResult *results;
+  /**
+   * Number of results
+   */
+  uintptr_t len;
 } KjarniKjarniSearchResults;
 
 /**
@@ -485,34 +485,34 @@ typedef struct KjarniKjarniSearchResults {
  * Use `kjarni_search_options_default()` to get defaults, then modify as needed.
  */
 typedef struct KjarniKjarniSearchOptions {
-    /**
-     * Search mode (-1 = use searcher default)
-     */
-    int32_t mode;
-    /**
-     * Number of results to return (0 = use searcher default)
-     */
-    uintptr_t top_k;
-    /**
-     * Use reranker: -1 = auto (use if available), 0 = no, 1 = yes
-     */
-    int32_t use_reranker;
-    /**
-     * Minimum score threshold (0.0 = no threshold)
-     */
-    float threshold;
-    /**
-     * Filter by source file pattern, glob syntax (NULL = no filter)
-     */
-    const char *source_pattern;
-    /**
-     * Metadata key to filter on (NULL = no filter)
-     */
-    const char *filter_key;
-    /**
-     * Required value for filter_key (NULL = no filter)
-     */
-    const char *filter_value;
+  /**
+   * Search mode (-1 = use searcher default)
+   */
+  int32_t mode;
+  /**
+   * Number of results to return (0 = use searcher default)
+   */
+  uintptr_t top_k;
+  /**
+   * Use reranker: -1 = auto (use if available), 0 = no, 1 = yes
+   */
+  int32_t use_reranker;
+  /**
+   * Minimum score threshold (0.0 = no threshold)
+   */
+  float threshold;
+  /**
+   * Filter by source file pattern, glob syntax (NULL = no filter)
+   */
+  const char *source_pattern;
+  /**
+   * Metadata key to filter on (NULL = no filter)
+   */
+  const char *filter_key;
+  /**
+   * Required value for filter_key (NULL = no filter)
+   */
+  const char *filter_value;
 } KjarniKjarniSearchOptions;
 
 /**
@@ -522,102 +522,102 @@ typedef struct KjarniKjarniSearchOptions {
  * then modify fields as needed before passing to `kjarni_searcher_new()`.
  */
 typedef struct KjarniKjarniSearcherConfig {
-    /**
-     * Device to run models on (CPU or GPU)
-     */
-    enum KjarniKjarniDevice device;
-    /**
-     * Directory to cache downloaded models (NULL = system default)
-     */
-    const char *cache_dir;
-    /**
-     * Embedding model name (NULL = "minilm-l6-v2")
-     */
-    const char *model_name;
-    /**
-     * Cross-encoder reranker model (NULL = no reranking)
-     */
-    const char *rerank_model;
-    /**
-     * Default search mode
-     */
-    enum KjarniKjarniSearchMode default_mode;
-    /**
-     * Default number of results
-     */
-    uintptr_t default_top_k;
-    /**
-     * Suppress progress output (1 = quiet, 0 = verbose)
-     */
-    int32_t quiet;
+  /**
+   * Device to run models on (CPU or GPU)
+   */
+  enum KjarniKjarniDevice device;
+  /**
+   * Directory to cache downloaded models (NULL = system default)
+   */
+  const char *cache_dir;
+  /**
+   * Embedding model name (NULL = "minilm-l6-v2")
+   */
+  const char *model_name;
+  /**
+   * Cross-encoder reranker model (NULL = no reranking)
+   */
+  const char *rerank_model;
+  /**
+   * Default search mode
+   */
+  enum KjarniKjarniSearchMode default_mode;
+  /**
+   * Default number of results
+   */
+  uintptr_t default_top_k;
+  /**
+   * Suppress progress output (1 = quiet, 0 = verbose)
+   */
+  int32_t quiet;
 } KjarniKjarniSearcherConfig;
 
 /**
  * Initialize the Kjarni runtime. Optional - auto-initialized on first use.
  */
-kjarni_ enum KjarniKjarniErrorCode kjarni_init( void );
+kjarni_ enum KjarniKjarniErrorCode kjarni_init(void);
 
 /**
  * Shutdown and cleanup. Call before process exit.
  */
-kjarni_ void kjarni_shutdown( void );
+kjarni_ void kjarni_shutdown(void);
 
 /**
  * Get the library version string.
  */
-kjarni_ const char *kjarni_version( void );
+kjarni_ const char *kjarni_version(void);
 
 /**
  * Free a float array allocated by Kjarni.
  */
-kjarni_ void kjarni_float_array_free( struct KjarniKjarniFloatArray arr );
+kjarni_ void kjarni_float_array_free(struct KjarniKjarniFloatArray arr);
 
 /**
  * Free a 2D float array allocated by Kjarni.
  */
-kjarni_ void kjarni_float_2d_array_free( struct KjarniKjarniFloat2DArray arr );
+kjarni_ void kjarni_float_2d_array_free(struct KjarniKjarniFloat2DArray arr);
 
 /**
  * Free a string allocated by Kjarni.
  */
-kjarni_ void kjarni_string_free( char *s );
+kjarni_ void kjarni_string_free(char *s);
 
 /**
  * Free a string array allocated by Kjarni.
  */
-kjarni_ void kjarni_string_array_free( struct KjarniKjarniStringArray arr );
+kjarni_ void kjarni_string_array_free(struct KjarniKjarniStringArray arr);
 
-kjarni_ struct KjarniKjarniCancelToken *kjarni_cancel_token_new( void );
+kjarni_ struct KjarniKjarniCancelToken *kjarni_cancel_token_new(void);
 
-kjarni_ void kjarni_cancel_token_cancel( struct KjarniKjarniCancelToken *token );
+kjarni_ void kjarni_cancel_token_cancel(struct KjarniKjarniCancelToken *token);
 
-kjarni_ bool kjarni_cancel_token_is_cancelled( const struct KjarniKjarniCancelToken *token );
+kjarni_ bool kjarni_cancel_token_is_cancelled(const struct KjarniKjarniCancelToken *token);
 
-kjarni_ void kjarni_cancel_token_reset( struct KjarniKjarniCancelToken *token );
+kjarni_ void kjarni_cancel_token_reset(struct KjarniKjarniCancelToken *token);
 
-kjarni_ void kjarni_cancel_token_free( struct KjarniKjarniCancelToken *token );
+kjarni_ void kjarni_cancel_token_free(struct KjarniKjarniCancelToken *token);
 
-kjarni_ const char *kjarni_error_code_to_string( enum KjarniKjarniErrorCode err );
+kjarni_ const char *kjarni_error_code_to_string(enum KjarniKjarniErrorCode err);
 
 /**
  * Get the name of an error code as a C string.
  */
-kjarni_ const char *kjarni_error_name( enum KjarniKjarniErrorCode err );
+kjarni_ const char *kjarni_error_name(enum KjarniKjarniErrorCode err);
 
 /**
  * Get the last error message. Returns NULL if no error.
  */
-kjarni_ const char *kjarni_last_error_message( void );
+kjarni_ const char *kjarni_last_error_message(void);
 
 /**
  * Clear the last error.
  */
-kjarni_ void kjarni_clear_error( void );
+kjarni_ void kjarni_clear_error(void);
 
 /**
  * Get default embedder configuration.
  */
-kjarni_ struct KjarniKjarniEmbedderConfig kjarni_embedder_config_default( void );
+kjarni_ struct KjarniKjarniEmbedderConfig kjarni_embedder_config_default(void);
 
 /**
  * Create a new Embedder.
@@ -628,8 +628,8 @@ kjarni_ struct KjarniKjarniEmbedderConfig kjarni_embedder_config_default( void )
  * - The returned handle must be freed with `kjarni_embedder_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_new( const struct KjarniKjarniEmbedderConfig *config,
-                                                struct KjarniKjarniEmbedder **out );
+enum KjarniKjarniErrorCode kjarni_embedder_new(const struct KjarniKjarniEmbedderConfig *config,
+                                               struct KjarniKjarniEmbedder **out);
 
 /**
  * Free an Embedder instance.
@@ -638,7 +638,7 @@ enum KjarniKjarniErrorCode kjarni_embedder_new( const struct KjarniKjarniEmbedde
  * - `embedder` must be a valid handle or NULL
  * - The handle must not be used after this call
  */
-kjarni_ void kjarni_embedder_free( struct KjarniKjarniEmbedder *embedder );
+kjarni_ void kjarni_embedder_free(struct KjarniKjarniEmbedder *embedder);
 
 /**
  * Encode a single text to an embedding vector.
@@ -650,9 +650,9 @@ kjarni_ void kjarni_embedder_free( struct KjarniKjarniEmbedder *embedder );
  * - The returned array must be freed with `kjarni_float_array_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_encode( struct KjarniKjarniEmbedder *embedder,
-                                                   const char *text,
-                                                   struct KjarniKjarniFloatArray *out );
+enum KjarniKjarniErrorCode kjarni_embedder_encode(struct KjarniKjarniEmbedder *embedder,
+                                                  const char *text,
+                                                  struct KjarniKjarniFloatArray *out);
 
 /**
  * Encode multiple texts to embedding vectors.
@@ -664,10 +664,10 @@ enum KjarniKjarniErrorCode kjarni_embedder_encode( struct KjarniKjarniEmbedder *
  * - The returned array must be freed with `kjarni_float_2d_array_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_encode_batch( struct KjarniKjarniEmbedder *embedder,
-                                                         const char *const *texts,
-                                                         uintptr_t num_texts,
-                                                         struct KjarniKjarniFloat2DArray *out );
+enum KjarniKjarniErrorCode kjarni_embedder_encode_batch(struct KjarniKjarniEmbedder *embedder,
+                                                        const char *const *texts,
+                                                        uintptr_t num_texts,
+                                                        struct KjarniKjarniFloat2DArray *out);
 
 /**
  * Compute cosine similarity between two texts.
@@ -678,10 +678,10 @@ enum KjarniKjarniErrorCode kjarni_embedder_encode_batch( struct KjarniKjarniEmbe
  * - `out` must be a valid pointer
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_similarity( struct KjarniKjarniEmbedder *embedder,
-                                                       const char *text1,
-                                                       const char *text2,
-                                                       float *out );
+enum KjarniKjarniErrorCode kjarni_embedder_similarity(struct KjarniKjarniEmbedder *embedder,
+                                                      const char *text1,
+                                                      const char *text2,
+                                                      float *out);
 
 /**
  * Get the embedding dimension.
@@ -689,17 +689,17 @@ enum KjarniKjarniErrorCode kjarni_embedder_similarity( struct KjarniKjarniEmbedd
  * # Safety
  * - `embedder` must be a valid handle
  */
-kjarni_ uintptr_t kjarni_embedder_dim( const struct KjarniKjarniEmbedder *embedder );
+kjarni_ uintptr_t kjarni_embedder_dim(const struct KjarniKjarniEmbedder *embedder);
 
 /**
  * Free classification results.
  */
-kjarni_ void kjarni_class_results_free( struct KjarniKjarniClassResults results );
+kjarni_ void kjarni_class_results_free(struct KjarniKjarniClassResults results);
 
 /**
  * Get default classifier configuration.
  */
-kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default( void );
+kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default(void);
 
 /**
  * Create a new Classifier.
@@ -710,13 +710,13 @@ kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default( vo
  * - The returned handle must be freed with `kjarni_classifier_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_new( const struct KjarniKjarniClassifierConfig *config,
-                                                  struct KjarniKjarniClassifier **out );
+enum KjarniKjarniErrorCode kjarni_classifier_new(const struct KjarniKjarniClassifierConfig *config,
+                                                 struct KjarniKjarniClassifier **out);
 
 /**
  * Free a Classifier.
  */
-kjarni_ void kjarni_classifier_free( struct KjarniKjarniClassifier *classifier );
+kjarni_ void kjarni_classifier_free(struct KjarniKjarniClassifier *classifier);
 
 /**
  * Classify a single text.
@@ -728,9 +728,9 @@ kjarni_ void kjarni_classifier_free( struct KjarniKjarniClassifier *classifier )
  * - Results must be freed with `kjarni_class_results_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_classify( struct KjarniKjarniClassifier *classifier,
-                                                       const char *text,
-                                                       struct KjarniKjarniClassResults *out );
+enum KjarniKjarniErrorCode kjarni_classifier_classify(struct KjarniKjarniClassifier *classifier,
+                                                      const char *text,
+                                                      struct KjarniKjarniClassResults *out);
 
 /**
  * Get the classifier's labels.
@@ -741,65 +741,65 @@ enum KjarniKjarniErrorCode kjarni_classifier_classify( struct KjarniKjarniClassi
  * - Results must be freed with `kjarni_string_array_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_labels( const struct KjarniKjarniClassifier *classifier,
-                                                     struct KjarniKjarniStringArray *out );
+enum KjarniKjarniErrorCode kjarni_classifier_labels(const struct KjarniKjarniClassifier *classifier,
+                                                    struct KjarniKjarniStringArray *out);
 
 /**
  * Get number of labels.
  */
-kjarni_ uintptr_t kjarni_classifier_num_labels( const struct KjarniKjarniClassifier *classifier );
+kjarni_ uintptr_t kjarni_classifier_num_labels(const struct KjarniKjarniClassifier *classifier);
 
 /**
  * Free rerank results
  */
-kjarni_ void kjarni_rerank_results_free( struct KjarniKjarniRerankResults results );
+kjarni_ void kjarni_rerank_results_free(struct KjarniKjarniRerankResults results);
 
 /**
  * Get default reranker configuration
  */
-kjarni_ struct KjarniKjarniRerankerConfig kjarni_reranker_config_default( void );
+kjarni_ struct KjarniKjarniRerankerConfig kjarni_reranker_config_default(void);
 
 /**
  * Create a new Reranker
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_new( const struct KjarniKjarniRerankerConfig *config,
-                                                struct KjarniKjarniReranker **out );
+enum KjarniKjarniErrorCode kjarni_reranker_new(const struct KjarniKjarniRerankerConfig *config,
+                                               struct KjarniKjarniReranker **out);
 
 /**
  * Free a Reranker
  */
-kjarni_ void kjarni_reranker_free( struct KjarniKjarniReranker *reranker );
+kjarni_ void kjarni_reranker_free(struct KjarniKjarniReranker *reranker);
 
 /**
  * Score a single query-document pair
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_score( struct KjarniKjarniReranker *reranker,
-                                                  const char *query,
-                                                  const char *document,
-                                                  float *out );
+enum KjarniKjarniErrorCode kjarni_reranker_score(struct KjarniKjarniReranker *reranker,
+                                                 const char *query,
+                                                 const char *document,
+                                                 float *out);
 
 /**
  * Rerank documents by relevance to query
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_rerank( struct KjarniKjarniReranker *reranker,
-                                                   const char *query,
-                                                   const char *const *documents,
-                                                   uintptr_t num_docs,
-                                                   struct KjarniKjarniRerankResults *out );
+enum KjarniKjarniErrorCode kjarni_reranker_rerank(struct KjarniKjarniReranker *reranker,
+                                                  const char *query,
+                                                  const char *const *documents,
+                                                  uintptr_t num_docs,
+                                                  struct KjarniKjarniRerankResults *out);
 
 /**
  * Rerank and return top-k results
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k( struct KjarniKjarniReranker *reranker,
-                                                         const char *query,
-                                                         const char *const *documents,
-                                                         uintptr_t num_docs,
-                                                         uintptr_t top_k,
-                                                         struct KjarniKjarniRerankResults *out );
+enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniKjarniReranker *reranker,
+                                                        const char *query,
+                                                        const char *const *documents,
+                                                        uintptr_t num_docs,
+                                                        uintptr_t top_k,
+                                                        struct KjarniKjarniRerankResults *out);
 
 /**
  * Free memory allocated for index info strings.
@@ -808,7 +808,7 @@ enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k( struct KjarniKjarniRera
  *
  * Must only be called once per `KjarniIndexInfo` returned from `kjarni_index_info`.
  */
-kjarni_ void kjarni_index_info_free( struct KjarniKjarniIndexInfo info );
+kjarni_ void kjarni_index_info_free(struct KjarniKjarniIndexInfo info);
 
 /**
  * Get default indexer configuration.
@@ -822,7 +822,7 @@ kjarni_ void kjarni_index_info_free( struct KjarniKjarniIndexInfo info );
  * - Recursive directory traversal
  * - Hidden files excluded
  */
-kjarni_ struct KjarniKjarniIndexerConfig kjarni_indexer_config_default( void );
+kjarni_ struct KjarniKjarniIndexerConfig kjarni_indexer_config_default(void);
 
 /**
  * Create a new Indexer.
@@ -843,8 +843,8 @@ kjarni_ struct KjarniKjarniIndexerConfig kjarni_indexer_config_default( void );
  * - The returned handle must be freed with `kjarni_indexer_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_new( const struct KjarniKjarniIndexerConfig *config,
-                                               struct KjarniKjarniIndexer **out );
+enum KjarniKjarniErrorCode kjarni_indexer_new(const struct KjarniKjarniIndexerConfig *config,
+                                              struct KjarniKjarniIndexer **out);
 
 /**
  * Free an Indexer handle.
@@ -855,7 +855,7 @@ enum KjarniKjarniErrorCode kjarni_indexer_new( const struct KjarniKjarniIndexerC
  * - Must not be called more than once per handle
  * - Handle must not be used after freeing
  */
-kjarni_ void kjarni_indexer_free( struct KjarniKjarniIndexer *indexer );
+kjarni_ void kjarni_indexer_free(struct KjarniKjarniIndexer *indexer);
 
 /**
  * Create a new index from files/directories (simple version).
@@ -882,12 +882,12 @@ kjarni_ void kjarni_indexer_free( struct KjarniKjarniIndexer *indexer );
  * - `inputs` must contain at least `num_inputs` valid C strings
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_create( struct KjarniKjarniIndexer *indexer,
-                                                  const char *index_path,
-                                                  const char *const *inputs,
-                                                  uintptr_t num_inputs,
-                                                  int32_t force,
-                                                  struct KjarniKjarniIndexStats *out );
+enum KjarniKjarniErrorCode kjarni_indexer_create(struct KjarniKjarniIndexer *indexer,
+                                                 const char *index_path,
+                                                 const char *const *inputs,
+                                                 uintptr_t num_inputs,
+                                                 int32_t force,
+                                                 struct KjarniKjarniIndexStats *out);
 
 /**
  * Create a new index with progress callback and cancellation support.
@@ -928,15 +928,15 @@ enum KjarniKjarniErrorCode kjarni_indexer_create( struct KjarniKjarniIndexer *in
  * - Callback must be thread-safe if indexer uses multiple threads
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback( struct KjarniKjarniIndexer *indexer,
-                                                                const char *index_path,
-                                                                const char *const *inputs,
-                                                                uintptr_t num_inputs,
-                                                                int32_t force,
-                                                                KjarniKjarniProgressCallbackFn progress_callback,
-                                                                void *user_data,
-                                                                const struct KjarniKjarniCancelToken *cancel_token,
-                                                                struct KjarniKjarniIndexStats *out );
+enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniKjarniIndexer *indexer,
+                                                               const char *index_path,
+                                                               const char *const *inputs,
+                                                               uintptr_t num_inputs,
+                                                               int32_t force,
+                                                               KjarniKjarniProgressCallbackFn progress_callback,
+                                                               void *user_data,
+                                                               const struct KjarniKjarniCancelToken *cancel_token,
+                                                               struct KjarniKjarniIndexStats *out);
 
 /**
  * Add documents to an existing index (simple version).
@@ -963,11 +963,11 @@ enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback( struct KjarniKja
  * - Index at `index_path` must exist and be compatible (same embedding dimension)
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_add( struct KjarniKjarniIndexer *indexer,
-                                               const char *index_path,
-                                               const char *const *inputs,
-                                               uintptr_t num_inputs,
-                                               uintptr_t *documents_added );
+enum KjarniKjarniErrorCode kjarni_indexer_add(struct KjarniKjarniIndexer *indexer,
+                                              const char *index_path,
+                                              const char *const *inputs,
+                                              uintptr_t num_inputs,
+                                              uintptr_t *documents_added);
 
 /**
  * Add documents to an existing index with progress callback and cancellation support.
@@ -999,14 +999,14 @@ enum KjarniKjarniErrorCode kjarni_indexer_add( struct KjarniKjarniIndexer *index
  * - Index at `index_path` must exist and be compatible
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback( struct KjarniKjarniIndexer *indexer,
-                                                             const char *index_path,
-                                                             const char *const *inputs,
-                                                             uintptr_t num_inputs,
-                                                             KjarniKjarniProgressCallbackFn progress_callback,
-                                                             void *user_data,
-                                                             const struct KjarniKjarniCancelToken *cancel_token,
-                                                             uintptr_t *documents_added );
+enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniKjarniIndexer *indexer,
+                                                            const char *index_path,
+                                                            const char *const *inputs,
+                                                            uintptr_t num_inputs,
+                                                            KjarniKjarniProgressCallbackFn progress_callback,
+                                                            void *user_data,
+                                                            const struct KjarniKjarniCancelToken *cancel_token,
+                                                            uintptr_t *documents_added);
 
 /**
  * Get information about an existing index.
@@ -1028,8 +1028,8 @@ enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback( struct KjarniKjarni
  * - Caller must free the returned `KjarniIndexInfo` with `kjarni_index_info_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_index_info( const char *index_path,
-                                              struct KjarniKjarniIndexInfo *out );
+enum KjarniKjarniErrorCode kjarni_index_info(const char *index_path,
+                                             struct KjarniKjarniIndexInfo *out);
 
 /**
  * Delete an index.
@@ -1049,7 +1049,7 @@ enum KjarniKjarniErrorCode kjarni_index_info( const char *index_path,
  *
  * - `index_path` must be a valid C string
  */
-kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete( const char *index_path );
+kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete(const char *index_path);
 
 /**
  * Get the embedding model name used by the indexer.
@@ -1068,7 +1068,7 @@ kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete( const char *index_path )
  * - `indexer` must be a valid handle or NULL
  * - Returned string must not be modified or freed
  */
-kjarni_ const char *kjarni_indexer_model_name( const struct KjarniKjarniIndexer *indexer );
+kjarni_ const char *kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer);
 
 /**
  * Get the embedding dimension used by the indexer.
@@ -1081,7 +1081,7 @@ kjarni_ const char *kjarni_indexer_model_name( const struct KjarniKjarniIndexer 
  *
  * Embedding dimension, or 0 if indexer is NULL.
  */
-kjarni_ uintptr_t kjarni_indexer_dimension( const struct KjarniKjarniIndexer *indexer );
+kjarni_ uintptr_t kjarni_indexer_dimension(const struct KjarniKjarniIndexer *indexer);
 
 /**
  * Get the chunk size configured for the indexer.
@@ -1094,7 +1094,7 @@ kjarni_ uintptr_t kjarni_indexer_dimension( const struct KjarniKjarniIndexer *in
  *
  * Chunk size in characters, or 0 if indexer is NULL.
  */
-kjarni_ uintptr_t kjarni_indexer_chunk_size( const struct KjarniKjarniIndexer *indexer );
+kjarni_ uintptr_t kjarni_indexer_chunk_size(const struct KjarniKjarniIndexer *indexer);
 
 /**
  * Free search results and all contained strings.
@@ -1103,7 +1103,7 @@ kjarni_ uintptr_t kjarni_indexer_chunk_size( const struct KjarniKjarniIndexer *i
  *
  * Must only be called once per `KjarniSearchResults` returned from search functions.
  */
-kjarni_ void kjarni_search_results_free( struct KjarniKjarniSearchResults results );
+kjarni_ void kjarni_search_results_free(struct KjarniKjarniSearchResults results);
 
 /**
  * Get default search options.
@@ -1115,7 +1115,7 @@ kjarni_ void kjarni_search_results_free( struct KjarniKjarniSearchResults result
  * - threshold: 0.0 (no minimum score)
  * - All filters: NULL (no filtering)
  */
-kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default( void );
+kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default(void);
 
 /**
  * Get default searcher configuration.
@@ -1127,7 +1127,7 @@ kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default( void );
  * - Hybrid search mode
  * - Top 10 results
  */
-kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default( void );
+kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default(void);
 
 /**
  * Create a new Searcher.
@@ -1148,8 +1148,8 @@ kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default( void )
  * - The returned handle must be freed with `kjarni_searcher_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_new( const struct KjarniKjarniSearcherConfig *config,
-                                                struct KjarniKjarniSearcher **out );
+enum KjarniKjarniErrorCode kjarni_searcher_new(const struct KjarniKjarniSearcherConfig *config,
+                                               struct KjarniKjarniSearcher **out);
 
 /**
  * Free a Searcher handle.
@@ -1160,7 +1160,7 @@ enum KjarniKjarniErrorCode kjarni_searcher_new( const struct KjarniKjarniSearche
  * - Must not be called more than once per handle
  * - Handle must not be used after freeing
  */
-kjarni_ void kjarni_searcher_free( struct KjarniKjarniSearcher *searcher );
+kjarni_ void kjarni_searcher_free(struct KjarniKjarniSearcher *searcher);
 
 /**
  * Search with default options.
@@ -1184,10 +1184,10 @@ kjarni_ void kjarni_searcher_free( struct KjarniKjarniSearcher *searcher );
  * - Results must be freed with `kjarni_search_results_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_search( struct KjarniKjarniSearcher *searcher,
-                                                   const char *index_path,
-                                                   const char *query,
-                                                   struct KjarniKjarniSearchResults *out );
+enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *searcher,
+                                                  const char *index_path,
+                                                  const char *query,
+                                                  struct KjarniKjarniSearchResults *out);
 
 /**
  * Search with custom options.
@@ -1213,11 +1213,11 @@ enum KjarniKjarniErrorCode kjarni_searcher_search( struct KjarniKjarniSearcher *
  * - Results must be freed with `kjarni_search_results_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_search_with_options( struct KjarniKjarniSearcher *searcher,
-                                                                const char *index_path,
-                                                                const char *query,
-                                                                const struct KjarniKjarniSearchOptions *options,
-                                                                struct KjarniKjarniSearchResults *out );
+enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjarniSearcher *searcher,
+                                                               const char *index_path,
+                                                               const char *query,
+                                                               const struct KjarniKjarniSearchOptions *options,
+                                                               struct KjarniKjarniSearchResults *out);
 
 /**
  * Static keyword search (BM25) - no embedder needed.
@@ -1242,10 +1242,10 @@ enum KjarniKjarniErrorCode kjarni_searcher_search_with_options( struct KjarniKja
  * - Results must be freed with `kjarni_search_results_free`
  */
 kjarni_
-enum KjarniKjarniErrorCode kjarni_search_keywords( const char *index_path,
-                                                   const char *query,
-                                                   uintptr_t top_k,
-                                                   struct KjarniKjarniSearchResults *out );
+enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
+                                                  const char *query,
+                                                  uintptr_t top_k,
+                                                  struct KjarniKjarniSearchResults *out);
 
 /**
  * Check if the searcher has a reranker configured.
@@ -1258,7 +1258,7 @@ enum KjarniKjarniErrorCode kjarni_search_keywords( const char *index_path,
  *
  * `true` if a reranker is configured, `false` otherwise.
  */
-kjarni_ bool kjarni_searcher_has_reranker( const struct KjarniKjarniSearcher *searcher );
+kjarni_ bool kjarni_searcher_has_reranker(const struct KjarniKjarniSearcher *searcher);
 
 /**
  * Get the default search mode.
@@ -1272,7 +1272,7 @@ kjarni_ bool kjarni_searcher_has_reranker( const struct KjarniKjarniSearcher *se
  * The default search mode, or Hybrid if searcher is NULL.
  */
 kjarni_
-enum KjarniKjarniSearchMode kjarni_searcher_default_mode( const struct KjarniKjarniSearcher *searcher );
+enum KjarniKjarniSearchMode kjarni_searcher_default_mode(const struct KjarniKjarniSearcher *searcher);
 
 /**
  * Get the default number of results.
@@ -1285,7 +1285,7 @@ enum KjarniKjarniSearchMode kjarni_searcher_default_mode( const struct KjarniKja
  *
  * The default top_k value, or 10 if searcher is NULL.
  */
-kjarni_ uintptr_t kjarni_searcher_default_top_k( const struct KjarniKjarniSearcher *searcher );
+kjarni_ uintptr_t kjarni_searcher_default_top_k(const struct KjarniKjarniSearcher *searcher);
 
 /**
  * Get the embedding model name.
@@ -1304,7 +1304,7 @@ kjarni_ uintptr_t kjarni_searcher_default_top_k( const struct KjarniKjarniSearch
  * - `searcher` must be a valid handle or NULL
  * - Returned string must not be modified or freed
  */
-kjarni_ const char *kjarni_searcher_model_name( const struct KjarniKjarniSearcher *searcher );
+kjarni_ const char *kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher);
 
 /**
  * Get the reranker model name, if configured.
@@ -1323,6 +1323,6 @@ kjarni_ const char *kjarni_searcher_model_name( const struct KjarniKjarniSearche
  * - `searcher` must be a valid handle or NULL
  * - Returned string must not be modified or freed
  */
-kjarni_ const char *kjarni_searcher_reranker_model( const struct KjarniKjarniSearcher *searcher );
+kjarni_ const char *kjarni_searcher_reranker_model(const struct KjarniKjarniSearcher *searcher);
 
 #endif  /* KJARNI_FFI_H */

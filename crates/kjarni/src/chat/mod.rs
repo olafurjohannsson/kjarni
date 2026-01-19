@@ -307,8 +307,6 @@ mod chat_integration_tests {
 
 }
 
-
-
 #[test]
 fn test_history_management() {
     let mut history = History::new();
@@ -325,25 +323,24 @@ fn test_history_management() {
     assert_eq!(msgs[1].role, Role::Assistant);
     assert_eq!(msgs[1].content, "Assistant 1");
 
-    // 2. Clear keeping system - but there's no system, so should be empty
+    // 2. Clear keeping system - but there's no system, so empty
     history.clear(true);
-    assert_eq!(history.len(), 0);  // No system message was added
+    assert_eq!(history.len(), 0);  // FIX: was expecting 1
 
-    // 3. Test with system message
-    let mut history_with_system = History::with_system("You are helpful.");
-    history_with_system.push_user("Hello");
-    history_with_system.push_assistant("Hi!");
-    assert_eq!(history_with_system.len(), 3);
-
-    history_with_system.clear(true);
-    assert_eq!(history_with_system.len(), 1);
-    assert_eq!(history_with_system.messages()[0].role, Role::System);
+    // 3. Test with system message  
+    let mut history_with_sys = History::with_system("System prompt");
+    history_with_sys.push_user("User 1");
+    history_with_sys.push_assistant("Assistant 1");
+    assert_eq!(history_with_sys.len(), 3);
+    
+    history_with_sys.clear(true);
+    assert_eq!(history_with_sys.len(), 1);
+    assert_eq!(history_with_sys.messages()[0].role, Role::System);
 
     // 4. Full clear
-    history_with_system.clear(false);
-    assert!(history_with_system.is_empty());
+    history_with_sys.clear(false);
+    assert!(history_with_sys.is_empty());
 }
-
 #[test]
 fn test_chat_mode_defaults() {
     let creative = ChatMode::Creative;

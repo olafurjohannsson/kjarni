@@ -63,11 +63,20 @@ impl<'a> ChatConversation<'a> {
     ///
     /// Both the user message and assistant response are added to history.
     pub async fn send(&mut self, message: &str) -> ChatResult<String> {
-        // Add user message first
+        // Add user message to history
         self.history.push_user(message);
 
-        // Generate response using history
-        let response = self.chat.send_with_history(&self.history_without_last_user(), message).await?;
+        // Convert full history to conversation and generate
+        let conversation = self.chat.history_to_conversation(&self.history);
+        let prompt = self.chat.format_prompt(&conversation);
+
+        // Debug: uncomment to see what's being sent
+        // eprintln!("DEBUG prompt:\n{}", prompt);
+
+        let response = self
+            .chat
+            .generate(&prompt, &GenerationOverrides::default())
+            .await?;
 
         // Add assistant response
         self.history.push_assistant(&response);
@@ -83,34 +92,13 @@ impl<'a> ChatConversation<'a> {
     ) -> ChatResult<String> {
         self.history.push_user(message);
 
-        let mut conversation = self.chat.history_to_conversation(&self.history_without_last_user());
-        conversation.push_user(message);
+        let conversation = self.chat.history_to_conversation(&self.history);
         let prompt = self.chat.format_prompt(&conversation);
-
         let response = self.chat.generate(&prompt, overrides).await?;
 
         self.history.push_assistant(&response);
 
         Ok(response)
-    }
-
-    // Helper: get history without the last user message (for send_with_history)
-    fn history_without_last_user(&self) -> History {
-        let mut h = History::new();
-        let messages = self.history.messages();
-        
-        // Copy all but potentially skip last if we just added it
-        for msg in messages.iter().take(messages.len().saturating_sub(1)) {
-            match msg.role {
-                Role::System => {
-                    // Reconstruct with system
-                    h = History::with_system(&msg.content);
-                }
-                Role::User => h.push_user(&msg.content),
-                Role::Assistant => h.push_assistant(&msg.content),
-            }
-        }
-        h
     }
 
     // =========================================================================

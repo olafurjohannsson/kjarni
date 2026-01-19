@@ -33,6 +33,7 @@ futures-util = "0.3.31"
 toml = "0.8.10"
 walkdir = "2.5.0"
 glob-match = "0.2"
+tempfile = "3.23.0"
 [features]
 default = []
 python = ["pyo3"]
