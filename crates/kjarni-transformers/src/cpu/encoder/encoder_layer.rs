@@ -341,18 +341,18 @@ impl EncoderLayer {
 
         let total = layer_start.elapsed();
 
-        if total.as_millis() > 5 {
-            println!(
-                "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-                b,
-                s,
-                d, // <--- PRINT SHAPE
-                total.as_millis(),
-                t_attn.as_millis(),
-                t_ffn.as_millis(),
-                (total - t_attn - t_ffn).as_millis()
-            );
-        }
+        // if total.as_millis() > 5 {
+        //     println!(
+        //         "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
+        //         b,
+        //         s,
+        //         d, // <--- PRINT SHAPE
+        //         total.as_millis(),
+        //         t_attn.as_millis(),
+        //         t_ffn.as_millis(),
+        //         (total - t_attn - t_ffn).as_millis()
+        //     );
+        // }
 
         Ok(hidden)
     }

@@ -262,65 +262,75 @@ impl<'a> LinearLayerBuilder<'a> {
         // Determine target dtype: use explicit override or keep original
         let target_dtype = self.target_dtype.unwrap_or_else(|| typed_tensor.dtype());
 
-        // Convert tensor to LinearData, applying dtype conversion if needed.
-        // The match arms are ordered: identity conversions first, then upcasts,
-        // downcasts, dequantization, and finally quantization.
-let data = match (typed_tensor, target_dtype) {
-        // === Identity conversions (no transformation needed) ===
-        (CpuTensor::F32(arr), DType::F32) => {
-            // Wrap in Arc!
-            LinearData::F32(Arc::new(arr.into_dimensionality::<Ix2>()?)) 
-        },
-        (CpuTensor::BF16(arr), DType::BF16) => {
-            LinearData::BF16(Arc::new(arr.into_dimensionality::<Ix2>()?))
-        },
-        // For Quantized types, wrap the matrix/vec in Arc
-        (CpuTensor::Q8_0(m), DType::Q8_0) => LinearData::Q8_0(Arc::new(m)),
-        (CpuTensor::Q4_K(m), DType::Q4_K) => LinearData::Q4_K(Arc::new(m)),
-        (CpuTensor::Q6_K(m), DType::Q6_K) => LinearData::Q6_K(Arc::new(m)),
+        let data = match (typed_tensor, target_dtype) {
+            // === Identity conversions (no transformation needed) ===
+            (CpuTensor::F32(arr), DType::F32) => {
+                // Wrap in Arc!
+                LinearData::F32(Arc::new(arr.into_dimensionality::<Ix2>()?))
+            }
+            (CpuTensor::BF16(arr), DType::BF16) => {
+                LinearData::BF16(Arc::new(arr.into_dimensionality::<Ix2>()?))
+            }
+            (CpuTensor::F16(arr), DType::F16) => {
+                // LinearData::F16(Arc::new(arr.into_dimensionality::<Ix2>()?))
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
+            (CpuTensor::F16(arr), DType::F32) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
+            (CpuTensor::F32(arr), DType::F16) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v);
+                LinearData::F32(Arc::new(converted))
+            }
+            // For Quantized types, wrap the matrix/vec in Arc
+            (CpuTensor::Q8_0(m), DType::Q8_0) => LinearData::Q8_0(Arc::new(m)),
+            (CpuTensor::Q4_K(m), DType::Q4_K) => LinearData::Q4_K(Arc::new(m)),
+            (CpuTensor::Q6_K(m), DType::Q6_K) => LinearData::Q6_K(Arc::new(m)),
 
-        // === Upcast: BF16 -> F32 ===
-        (CpuTensor::BF16(arr), DType::F32) => {
-            let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
-            LinearData::F32(Arc::new(converted))
-        }
+            // === Upcast: BF16 -> F32 ===
+            (CpuTensor::BF16(arr), DType::F32) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
 
-        // === Downcast: F32 -> BF16 ===
-        (CpuTensor::F32(arr), DType::BF16) => {
-            let converted = arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32);
-            LinearData::BF16(Arc::new(converted))
-        }
+            // === Downcast: F32 -> BF16 ===
+            (CpuTensor::F32(arr), DType::BF16) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32);
+                LinearData::BF16(Arc::new(converted))
+            }
 
-        // === Dequantization: Q* -> F32 ===
-        (tensor, DType::F32) if tensor.is_quantized() => {
-             // to_array2_f32 returns Array2, wrap it
-            LinearData::F32(Arc::new(tensor.to_array2_f32()?))
-        }
+            // === Dequantization: Q* -> F32 ===
+            (tensor, DType::F32) if tensor.is_quantized() => {
+                // to_array2_f32 returns Array2, wrap it
+                LinearData::F32(Arc::new(tensor.to_array2_f32()?))
+            }
 
-        // === Quantization: F32 -> Q8_0 ===
-        (CpuTensor::F32(arr), DType::Q8_0) => {
-            let w = arr.into_dimensionality::<Ix2>()?;
-            let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w)?;
-            LinearData::Q8_0(Arc::new(QuantizedMatrix {
-                blocks,
-                shape: array2_shape(&w),
-            }))
-        }
+            // === Quantization: F32 -> Q8_0 ===
+            (CpuTensor::F32(arr), DType::Q8_0) => {
+                let w = arr.into_dimensionality::<Ix2>()?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w)?;
+                LinearData::Q8_0(Arc::new(QuantizedMatrix {
+                    blocks,
+                    shape: array2_shape(&w),
+                }))
+            }
 
-        // === Quantization: BF16 -> Q8_0 ===
-        (CpuTensor::BF16(arr), DType::Q8_0) => {
-            let w = arr.into_dimensionality::<Ix2>()?;
-            let w_f32 = w.mapv(|v| v.to_f32());
-            let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
-            LinearData::Q8_0(Arc::new(QuantizedMatrix {
-                blocks,
-                shape: array2_shape(&w),
-            }))
-        }
-        
-        // ... Error handling ...
-        (t, d) => return Err(anyhow!("Unsupported... {:?} to {:?}", t.dtype(), d)),
-    };
+            // === Quantization: BF16 -> Q8_0 ===
+            (CpuTensor::BF16(arr), DType::Q8_0) => {
+                let w = arr.into_dimensionality::<Ix2>()?;
+                let w_f32 = w.mapv(|v| v.to_f32());
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
+                LinearData::Q8_0(Arc::new(QuantizedMatrix {
+                    blocks,
+                    shape: array2_shape(&w),
+                }))
+            }
+
+            // ... Error handling ...
+            (t, d) => return Err(anyhow!("Unsupported... {:?} to {:?}", t.dtype(), d)),
+        };
 
         // Load bias tensor based on the configured strategy
         let bias = match &self.bias_loading {

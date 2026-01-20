@@ -7,6 +7,8 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use kjarni_transformers::models::base::ModelInput;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -298,12 +300,41 @@ impl SequenceClassifier {
             }
         }
 
-        // Forward through encoder
-        let hidden_states = self.pipeline
-            .cpu_encoder()
-            .ok_or_else(|| anyhow!("No CPU encoder available"))?
-            .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
-            .last_hidden_state;
+        let hidden_states = if let Some(gpu_encoder) = self.pipeline.gpu_encoder() {
+            let context = self.pipeline.context()
+                .ok_or_else(|| anyhow!("GPU context required for GPU encoder"))?;
+            let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> = context.get_inference_pool();
+            let pool_guard = pool.lock().await;
+            let mut frame = GpuFrameContext::new(&context, pool_guard);
+            let (encoder_cmd, pool_ref) = frame.resources();
+            
+            // Create gpu tensors
+            let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids)?;
+            let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask)?;
+            let token_types_gpu = GpuTensor::from_ndarray(&context, &token_type_ids)?;
+
+            let gpu_output = gpu_encoder.forward(
+                encoder_cmd, 
+                pool_ref, 
+                ModelInput::TokensGpu(&input_ids_gpu), 
+                &attention_mask_gpu, 
+                Some(ModelInput::TokensGpu(&token_types_gpu)),)?;
+
+            frame.finish();
+
+            gpu_output.last_hidden_state.to_ndarray_3d().await?
+
+        } else {
+            // Forward through CPU encoder
+            self.pipeline
+                .cpu_encoder()
+                .ok_or_else(|| anyhow!("No CPU encoder available"))?
+                .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
+                .last_hidden_state
+        };
+
+
+
 
         // Forward through head
         let logits = self.pipeline

@@ -130,7 +130,7 @@ impl CpuSequenceClassificationHead {
             // BERT, RoBERTa, DistilBERT, etc., all default to using the CLS token.
             PoolingStrategy::Cls
         };
-        println!("Pooling {:?}", pooling_strategy);
+        // println!("Pooling {:?}", pooling_strategy);
 
         // Case 1: BART-style head (for Zero-Shot NLI)
         // Checks for "classification_head.dense.weight"
