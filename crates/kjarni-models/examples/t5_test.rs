@@ -1,10 +1,11 @@
 use anyhow::Result;
-use futures_util::StreamExt;
 use kjarni_models::models::t5::model::T5Model;
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 use kjarni_transformers::{Device, ModelType};
 use std::io;
 use std::io::Write;
+use futures::{TryStreamExt, pin_mut};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +18,7 @@ async fn main() -> Result<()> {
     // 2. Setup - Load the model from registry for CPU
     // We use Flan-T5-Base as in your Python example
     log::info!("Loading Flan-T5-Base on CPU...");
-    let model_type = ModelType::FlanT5Base;
+    let model_type = ModelType::FlanT5Large;
 
     let model = T5Model::from_registry(
         model_type,
@@ -27,6 +28,10 @@ async fn main() -> Result<()> {
         None, // Use default ModelLoadConfig
     )
         .await?;
+    let c = GenerationConfig {
+        strategy: DecodingStrategy::Greedy,
+        ..Default::default()
+    };
 
     // 3. Initialize the Generator
     // This orchestrates the Encoder-Decoder loop
@@ -34,14 +39,14 @@ async fn main() -> Result<()> {
 
     // 4. Get Default Generation Config
     // This pulls the beam search settings (num_beams: 4) defined in your T5Model trait
-    let config = generator.model.get_default_generation_config();
-
+    // let mut config = generator.model.get_default_generation_config();
+    // config.strategy = DecodingStrategy::Greedy;
     log::info!("Input: {}", input_text);
-    log::info!("Generating with config: {:?}", config);
+    // log::info!("Generating with config: {:?}", config);
 
     // 5. Run Complete Generation (Blocking)
     println!("\n--- Full Generation ---");
-    let output = generator.generate(input_text, Some(&config)).await?;
+    let output = generator.generate(input_text, None).await?;
     println!("Result: {}", output);
 
     // 6. Run Streaming Generation (Optional, for real-time output)
@@ -49,12 +54,11 @@ async fn main() -> Result<()> {
     print!("Result: ");
     io::stdout().flush()?;
 
-    let mut stream = generator.generate_stream(input_text, Some(&config));
+    let mut stream = generator.generate_stream(input_text, None);
 
-    futures_util::pin_mut!(stream);
-    println!("\nCPU STREAMING TEST: ");
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream).await? {
-        print!("{}", token.text);
+    pin_mut!(stream);
+    while let Some(token) = TryStreamExt::try_next(&mut stream).await? {
+        print!("{} ", token.text);
         std::io::stdout().flush().unwrap();
     }
 

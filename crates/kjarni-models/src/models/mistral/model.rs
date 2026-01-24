@@ -100,8 +100,6 @@ impl DecoderModelFactory for MistralModel {
     }
 }
 
-// ... Boilerplate accessors (Standard Pattern) ...
-
 impl MistralModel {
     pub async fn from_registry(
         model_type: ModelType,

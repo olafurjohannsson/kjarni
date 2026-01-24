@@ -5,7 +5,7 @@
 //! Interactive chat command using the high-level Chat API.
 
 use anyhow::{anyhow, Result};
-use futures_util::StreamExt;
+use futures::StreamExt;
 use std::io::{self, BufRead, Write};
 
 use kjarni::chat::Chat;

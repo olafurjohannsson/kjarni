@@ -4,7 +4,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use kjarni_models::models::gpt2::Gpt2Model;
-// The new, refactored struct
+use futures::{TryStreamExt, pin_mut};
 
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
@@ -45,8 +45,8 @@ async fn main() -> anyhow::Result<()> {
 
     let stream = generator_gpu.generate_stream(prompt, &config, None).await?;
 
-    futures_util::pin_mut!(stream);
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream).await? {
+    pin_mut!(stream);
+    while let Some(token) = TryStreamExt::try_next(&mut stream).await? {
         print!("{}", token.text);
         std::io::stdout().flush().unwrap();
     }
@@ -62,8 +62,8 @@ async fn main() -> anyhow::Result<()> {
     // let llama_generator = Generator::new(Box::new(llama_model));
     // println!("LLama gen: ");
     // let stream = llama_generator.generate_stream("Rust is a language that is", &config).await?;
-    // futures_util::pin_mut!(stream);
-    // while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream).await? {
+    // futures::Stream::pin_mut!(stream);
+    // while let Some(token) = futures::Stream::TryStreamExt::try_next(&mut stream).await? {
     //     print!("{}", token);
     //     std::io::stdout().flush().unwrap();
     // }

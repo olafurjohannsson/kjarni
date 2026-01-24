@@ -42,13 +42,15 @@ gguf = "0.1.2"
 byteorder = "1.5.0"
 num_cpus = "1.16"
 async-stream = "0.3.6"
-futures-core = "0.3.31"
-futures-util = "0.3.31"
+#futures-core = "0.3.31"
+#futures-util = "0.3.31"
 libc = "0.2.177"
 strum = "0.26"
 rand_chacha = "0.9.0"
 strum_macros = "0.26"
 tokio-stream = "0.1.18"
+hound = "3.5"           # WAV loading (simple, no dependencies)
+rubato = "0.14"         # High-quality resampling
 ndarray = { workspace = true }
 
 

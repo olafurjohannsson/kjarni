@@ -3,7 +3,7 @@ use crate::cpu::encoder_decoder::DecoderCrossAttention;
 use crate::encoder_decoder::DecoderSelfAttention;
 pub use crate::feedforward::FeedForward;
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, ArrayView3};
+use ndarray::{Array2, Array3, Array4, ArrayView3, s};
 
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,
@@ -160,6 +160,8 @@ impl CrossDecoderLayer {
                 .forward(&normed, self_mask, past_kv, position_bias)?;
         let hidden_states = hidden_states + &attn_out;
 
+        // println!("=== LAYER 0 AFTER SELF-ATTN ===");
+        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
         // 2. Cross-Attention: norm -> attn -> add
         let normed = self.cross_attn_layer_norm.forward(&hidden_states);
         let cross_out = self.compute_cross_attention(
@@ -170,10 +172,15 @@ impl CrossDecoderLayer {
         )?;
         let hidden_states = hidden_states + &cross_out;
 
+        // println!("=== LAYER 0 AFTER CROSS-ATTN ===");
+        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
         // 3. FFN: norm -> ffn -> add
         let normed = self.ffn_layer_norm.forward(&hidden_states);
         let ffn_out = self.feedforward.forward(&normed)?;
         let hidden_states = hidden_states + &ffn_out;
+
+        // println!("=== LAYER 0 AFTER FFN ===");
+        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
 
         Ok((hidden_states, (new_k, new_v)))
     }

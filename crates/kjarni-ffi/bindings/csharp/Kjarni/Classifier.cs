@@ -1,8 +1,47 @@
 using System;
+using System.Linq;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace Kjarni
 {
+    /// <summary>
+    /// Result of classifying a single text.
+    /// </summary>
+    public class ClassificationResult
+    {
+        /// <summary>The predicted label (highest score).</summary>
+        public string Label { get; }
+
+        /// <summary>Confidence score for the predicted label (0.0 - 1.0).</summary>
+        public float Score { get; }
+
+        /// <summary>All labels with their scores, sorted by score descending.</summary>
+        public IReadOnlyList<(string Label, float Score)> AllScores { get; }
+
+        internal ClassificationResult((string Label, float Score)[] scores)
+        {
+            AllScores = scores;
+            Label = scores[0].Label;
+            Score = scores[0].Score;
+        }
+
+        /// <summary>Get the top K predictions.</summary>
+        public IEnumerable<(string Label, float Score)> TopK(int k)
+            => AllScores.Take(k);
+
+        /// <summary>Check if the top prediction exceeds a confidence threshold.</summary>
+        public bool IsConfident(float threshold)
+            => Score >= threshold;
+
+        /// <summary>Get predictions above a threshold.</summary>
+        public IEnumerable<(string Label, float Score)> AboveThreshold(float threshold)
+            => AllScores.Where(x => x.Score >= threshold);
+
+        public override string ToString()
+            => $"{Label} ({Score * 100:F1}%)";
+    }
+
     /// <summary>
     /// Text classification model.
     /// </summary>
@@ -74,8 +113,7 @@ namespace Kjarni
         /// <summary>
         /// Classify a single text.
         /// </summary>
-        /// <returns>Array of (label, score) tuples sorted by score.</returns>
-        public (string Label, float Score)[] Classify(string text)
+        public ClassificationResult Classify(string text)
         {
             ThrowIfDisposed();
 
@@ -84,7 +122,7 @@ namespace Kjarni
 
             try
             {
-                return result.ToArray();
+                return new ClassificationResult(result.ToArray());
             }
             finally
             {

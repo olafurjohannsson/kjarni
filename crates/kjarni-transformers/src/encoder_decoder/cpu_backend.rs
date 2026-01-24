@@ -1,11 +1,13 @@
+use core::panic;
+
 use crate::cache::{Cache, CpuBeamKVCache};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 
 use crate::encoder_decoder::{
-    traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuEncoderDecoderOps}, EncoderDecoderGenerationBackend,
-    EncoderDecoderLanguageModel,
+    EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
+    traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuEncoderDecoderOps},
 };
 
 #[derive(Debug)]
@@ -20,7 +22,6 @@ pub enum CpuSeq2SeqState {
         encoder_padding_mask: Array2<f32>,
     },
 }
-
 
 #[derive(Debug)]
 pub struct CpuBackend;
@@ -47,23 +48,36 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         // Encoder padding mask
         let attention_mask = Array2::ones(input_ids.dim());
 
+        let hidden_states = encoder_ops
+            .embed_tokens(&input_ids, None, 0)?;
+
         let encoder_output = encoder_ops
             .encoder()
-            .forward(&input_ids, &attention_mask, None)?
+            .forward(&hidden_states, &attention_mask)?
             .last_hidden_state;
 
+        let normed = encoder_ops.encoder().final_norm(&encoder_output)?;
+        // println!("=== ENCODER DEBUG ===");
+        // println!("Encoder shape: {:?}", normed.dim());
+        // println!(
+        //     "Encoder [0,0,:10]: {:?}",
+        //     normed.slice(ndarray::s![0, 0, ..10])
+        // );
+        // println!("Encoder mean: {:?}", normed.mean());
         // let final_state = if num_beams > 1 {
         //     seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?
         // } else {
         //     encoder_output
         // };
         let (final_state, final_mask) = if num_beams > 1 {
-            let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
-            let m = attention_mask.broadcast((num_beams, tokens.len()))
-                .ok_or_else(|| anyhow!("Mask broadcast failed"))?.to_owned();
+            let s = seq2seq_ops.broadcast_encoder_states(&normed, num_beams)?;
+            let m = attention_mask
+                .broadcast((num_beams, tokens.len()))
+                .ok_or_else(|| anyhow!("Mask broadcast failed"))?
+                .to_owned();
             (s, m)
         } else {
-            (encoder_output, attention_mask)
+            (normed, attention_mask)
         };
 
         let cross_cache = seq2seq_ops
@@ -91,6 +105,8 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let CpuSeq2SeqState::U32(tokens) = decoder_tokens else {
             return Err(anyhow!("Invalid tensor type for decoder_tokens"));
         };
+        // println!("=== DECODE STEP ===");
+        // println!("Decoder input tokens: {:?}", tokens);
 
         let CpuSeq2SeqState::EncoderState {
             hidden_states: enc_state,
@@ -100,6 +116,9 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         else {
             return Err(anyhow!("Invalid tensor type for encoder_state"));
         };
+
+        // let position_offset = cache.get_seq_length();
+        // println!("Position offset (cache length): {}", position_offset);
 
         // create decoder padding mask, usually all 1s during auto regressive decode
         let attention_mask = Array2::ones(tokens.dim());
@@ -120,6 +139,18 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             Some(cross_kv),
         )?;
 
+        let hidden = &decoder_output.last_hidden_state;
+    
+        // println!("Decoder hidden state shape: {:?}", hidden.dim());
+        // println!("Decoder hidden state [0,0,:10]: {:?}", hidden.slice(ndarray::s![0, 0, ..10]));
+
+        // let dodo = decoder_output.last_hidden_state;
+
+        //         println!("=== decoder_output DEBUG ===");
+        // println!("decoder_output shape: {:?}", dodo.dim());
+        // println!("decoder_output [0,0,:10]: {:?}", dodo.slice(ndarray::s![0, 0, ..10]));
+        // println!("decoder_output mean: {:?}", dodo.mean());
+
         let cpu_cache = cache
             .as_any_mut()
             .downcast_mut::<CpuBeamKVCache>()
@@ -128,6 +159,17 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             cpu_cache.update(i, &k, &v)?;
         }
         let logits = ops.project_to_logits(&decoder_output.last_hidden_state)?;
+
+        // println!("Logits shape: {:?}", logits.dim());
+
+
+        let last_logits = logits.slice(ndarray::s![0, -1, ..]);
+        let mut indexed: Vec<(usize, f32)> = last_logits.iter().cloned().enumerate().collect();
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // println!("Top 5 token IDs: {:?}", indexed[..5].iter().map(|(i, _)| i).collect::<Vec<_>>());
+        // println!("Top 5 logits: {:?}", indexed[..5].iter().map(|(_, v)| v).collect::<Vec<_>>());
+
+
 
         Ok(logits)
     }

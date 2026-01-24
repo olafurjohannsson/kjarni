@@ -1,76 +1,24 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import os
+import numpy as np
+import librosa
 
-# Point to your local cache
-model_path = "/home/olafurj/.cache/kjarni/Qwen_Qwen2.5-0.5B-Instruct/"
+audio, sr = librosa.load("crates/kjarni-models/examples/hideyowife.wav", sr=16000, duration=30.0)
+audio = librosa.util.fix_length(audio, size=480000)
 
-print(f"Loading model from {model_path}...")
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(
-    model_path, 
-    torch_dtype=torch.float32, # Matching your likely Rust precision
-    device_map="cpu"
-)
+# Pad for center=True
+padded = np.pad(audio, 200, mode='reflect')
 
-# ---------------------------------------------------------
-# Test 1: Verify the Chat Template formatting
-# ---------------------------------------------------------
-print("\n=== TEST 1: CHAT TEMPLATE PARITY ===")
-messages = [
-    {"role": "user", "content": "Hello! Answer with exactly one word: 'Hi'."}
-]
-# We use the tokenizer to render the string. Compare this EXACTLY to what your Rust code produces.
-prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-print("RAW PROMPT STRING (Copy this to your Rust debug output to compare):")
-print(repr(prompt_str))
+# Frame 100
+start = 100 * 160  # hop_length=160
+frame = padded[start:start+400]
+window = librosa.filters.get_window('hann', 400, fftbins=True)
+windowed = frame * window
 
-# ---------------------------------------------------------
-# Test 2: Logits Parity (Gate 1)
-# ---------------------------------------------------------
-print("\n=== TEST 2: LOGITS PARITY ===")
-inputs = tokenizer(prompt_str, return_tensors="pt")
-with torch.no_grad():
-    outputs = model(inputs.input_ids)
-    next_token_logits = outputs.logits[0, -1, :]
-    
-    # Print top 5 tokens and their logits
-    probs = torch.softmax(next_token_logits, dim=-1)
-    top_k = torch.topk(next_token_logits, 5)
-    
-    print("Top 5 Predicted Tokens (Rust should match these logits ~1e-4):")
-    for i in range(5):
-        token_id = top_k.indices[i].item()
-        score = top_k.values[i].item()
-        token_str = tokenizer.decode([token_id])
-        print(f"ID: {token_id:<6} | Logit: {score:.4f} | Token: {repr(token_str)}")
+print("=== FFT Debug (frame 100) ===")
+print(f"Windowed[:5]: {windowed[:5]}")
 
-# ---------------------------------------------------------
-# Test 3: Conversation Flow (The Failing Test)
-# ---------------------------------------------------------
-print("\n=== TEST 3: CONVERSATION FLOW ===")
+fft_result = np.fft.rfft(windowed)
+magnitudes = np.abs(fft_result)
+powers = magnitudes ** 2
 
-# Turn 1
-print("User: Hello! Answer with exactly one word: 'Hi'.")
-output_ids = model.generate(
-    inputs.input_ids, 
-    max_new_tokens=50, 
-    do_sample=True, 
-    temperature=0.7, # Matching your Rust config
-    top_p=0.8,
-    top_k=40
-)
-response_1 = tokenizer.decode(output_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=False)
-print(f"Model: {repr(response_1)}")
-
-# Turn 2 (Manual Append to check context)
-messages.append({"role": "assistant", "content": response_1.replace("<|im_end|>", "")})
-messages.append({"role": "user", "content": "What word did you just say?"})
-
-prompt_str_2 = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-inputs_2 = tokenizer(prompt_str_2, return_tensors="pt")
-output_ids_2 = model.generate(inputs_2.input_ids, max_new_tokens=50, do_sample=True, temperature=0.7)
-response_2 = tokenizer.decode(output_ids_2[0][inputs_2.input_ids.shape[1]:], skip_special_tokens=False)
-
-print("User: What word did you just say?")
-print(f"Model: {repr(response_2)}")
+print(f"Magnitudes[:10]: {magnitudes[:10]}")
+print(f"Powers[:10]: {powers[:10]}")

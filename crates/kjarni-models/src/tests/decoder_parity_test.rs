@@ -644,10 +644,10 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
 
 // TODO HEAVY TESTS
 
-// #[tokio::test]
-// async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
-//     test_layer0_attention_vs_ffn_isolation(DType::BF16).await
-// }
+#[tokio::test]
+async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
+    test_layer0_attention_vs_ffn_isolation(DType::BF16).await
+}
 
 
 
@@ -656,10 +656,10 @@ async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
     test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
 }
 
-// #[tokio::test]
-// async fn test_llama_cpu_gpu_step_by_step_parity_f32() -> Result<()> {
-//     test_llama_cpu_gpu_step_by_step_parity(DType::F32).await
-// }
+#[tokio::test]
+async fn test_llama_cpu_gpu_step_by_step_parity_f32() -> Result<()> {
+    test_llama_cpu_gpu_step_by_step_parity(DType::F32).await
+}
 
 async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     let ctx = WgpuContext::new().await?;

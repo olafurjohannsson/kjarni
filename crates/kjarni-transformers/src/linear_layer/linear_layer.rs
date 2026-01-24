@@ -179,6 +179,12 @@ pub enum LinearData {
     /// savings with minimal quality loss for inference.
     BF16(Arc<Array2<bf16>>),
 
+    /// 16-bit IEEE half-precision floating point weights.
+    /// 
+    /// Provides 2x memory savings compared to F32, but with a smaller exponent range.
+    /// Suitable for scenarios where memory is constrained and some precision loss is acceptable.
+    F16(Arc<Array2<half::f16>>),
+
     /// 8-bit block-quantized weights (32 elements per block).
     ///
     /// Each block stores 32 int8 values with a shared F16 scale factor.
@@ -204,6 +210,7 @@ impl LinearData {
         match self {
             LinearData::F32(_) => DType::F32,
             LinearData::BF16(_) => DType::BF16,
+            LinearData::F16(_) => DType::F16,
             LinearData::Q8_0(_) => DType::Q8_0,
             LinearData::Q6_K(_) => DType::Q6_K,
             LinearData::Q4_K(_) => DType::Q4_K,
@@ -392,7 +399,7 @@ impl LinearLayer {
                     output.assign(&result);
                 }
             },
-            LinearData::BF16(_) | LinearData::Q8_0(_) | LinearData::Q6_K(_) | LinearData::Q4_K(_) => {
+            LinearData::BF16(_) | LinearData::F16(_) | LinearData::Q8_0(_) | LinearData::Q6_K(_) | LinearData::Q4_K(_) => {
                 // Quantized/BF16 paths don't have no-alloc versions yet
                 // Fall back to allocating and copy
                 let result = self.matmul(input);
@@ -477,6 +484,9 @@ impl LinearLayer {
                     }
                 }
                 result
+            }
+            LinearData::F16(w) => {
+                unimplemented!("F16 LinearLayer matmul not implemented yet");
             }
             LinearData::Q8_0(w) => {
                 let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
@@ -600,6 +610,7 @@ impl LinearLayer {
                 F32MatmulStrategy::FaerOutIn => w.shape()[0],
             },
             LinearData::BF16(w) => w.shape()[0],
+            LinearData::F16(w) => w.shape()[0],
             LinearData::Q8_0(w) => w.shape[0],
             LinearData::Q4_K(w) => w.shape[0],
             LinearData::Q6_K(w) => w.shape[0],
@@ -616,6 +627,7 @@ impl LinearLayer {
                 F32MatmulStrategy::FaerOutIn => w.shape()[1],
             },
             LinearData::BF16(w) => w.shape()[1],
+            LinearData::F16(w) => w.shape()[1],
             LinearData::Q8_0(w) => w.shape[1],
             LinearData::Q4_K(w) => w.shape[1],
             LinearData::Q6_K(w) => w.shape[1],
@@ -728,6 +740,21 @@ impl LinearLayer {
                     bytes: Cow::Borrowed(bytemuck::cast_slice(slice)),
                     shape: arr.shape().to_vec(),
                     dtype: DType::BF16,
+                };
+                GpuTensor::from_raw(ctx, &raw_tensor, label)
+            }
+            LinearData::F16(arr) => {
+                let layout = arr.as_standard_layout();
+
+                let slice = layout
+                    .as_slice()
+                    .ok_or_else(|| anyhow!("F16 tensor is not contiguous"))?;
+
+                let raw_tensor = TensorView {
+                    name: label.to_string(),
+                    bytes: Cow::Borrowed(bytemuck::cast_slice(slice)),
+                    shape: arr.shape().to_vec(),
+                    dtype: DType::F16,
                 };
                 GpuTensor::from_raw(ctx, &raw_tensor, label)
             }

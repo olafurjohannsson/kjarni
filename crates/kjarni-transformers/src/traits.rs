@@ -1,6 +1,8 @@
 //! Core model traits and data structures for the Kjarni Inference Engine.
 //! This is the unified interface for Encoders, Decoders, and Seq2Seq models.
 
+use ndarray::Array3;
+use anyhow::Result;
 use crate::activations::Activation;
 pub use crate::cache::Cache;
 use crate::models::base::RopeScalingConfig;
@@ -29,6 +31,7 @@ impl Device {
 
 /// A handle to a loaded model instance.
 /// Renamed from TransformerModel to better reflect its role as a runtime handle.
+/// todo: not sure about this trait, seems kind of useless right now
 pub trait InferenceModel: Send + Sync {
     /// The device this model instance is running on.
     fn device(&self) -> Device;
@@ -210,6 +213,47 @@ pub trait ModelConfig: Send + Sync {
     }
 }
 
+/// Shared functionality for CPU transformer blocks (encoder/decoder layers).
+/// 
+/// This trait captures the common structure:
+/// - Downcasting for concrete type access
+/// - Normalization hooks (embed_norm, final_norm)
+/// - Metadata accessors
+pub trait CpuTransformerCore: Send + Sync {
+    // =========================================================================
+    // Downcasting
+    // =========================================================================
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    // =========================================================================
+    // Normalization Hooks
+    // =========================================================================
+    
+    /// Post-embedding normalization (e.g., Gemma's RMSNorm after embed).
+    /// Default: no-op passthrough.
+    fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(hidden_states.clone())
+    }
+    
+    /// Final layer normalization (RMSNorm for Llama, LayerNorm for BERT).
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
+
+    // =========================================================================
+    // Metadata
+    // =========================================================================
+    fn num_layers(&self) -> usize;
+    fn hidden_size(&self) -> usize;
+    fn num_attention_heads(&self) -> usize;
+    
+    fn num_kv_heads(&self) -> usize { 
+        self.num_attention_heads() 
+    }
+    
+    fn head_dim(&self) -> usize { 
+        self.hidden_size() / self.num_attention_heads() 
+    }
+}
 
 #[cfg(test)]
 mod tests {

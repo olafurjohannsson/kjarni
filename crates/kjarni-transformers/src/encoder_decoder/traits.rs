@@ -278,6 +278,10 @@ pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
     fn decoder_start_token_id(&self) -> u32;
     /// Returns the default generation configuration for this model.
     fn get_default_generation_config(&self) -> GenerationConfig;
+    
+    fn get_generation_config_for_input(&self, _input: &str) -> GenerationConfig {
+        self.get_default_generation_config()
+    }
 }
 
 // ============================================================================

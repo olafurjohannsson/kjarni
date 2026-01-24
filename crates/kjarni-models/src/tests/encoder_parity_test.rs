@@ -272,6 +272,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
     let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
 
+    let cpu_ops = cpu_model.encoder_cpu_ops().expect("No CPU encoder ops");
+
     fn assert_close(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) {
         let max_diff = cpu
             .iter()
@@ -296,7 +298,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     }
 
     println!("\n=== STEP 1: EMBEDDINGS ===");
-    let cpu_embed = cpu_encoder.embed(&input_ids_cpu, None);
+    
+    let cpu_embed = cpu_ops.embed_tokens(&input_ids_cpu, None, 0)?;
 
     let pool = ctx.get_inference_pool();
     {

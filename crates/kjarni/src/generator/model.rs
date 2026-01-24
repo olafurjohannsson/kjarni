@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures_util::StreamExt;
+use futures::{StreamExt, Stream, pin_mut};
 use tokio::sync::mpsc;
 
 use kjarni_transformers::{
@@ -63,7 +63,7 @@ use super::validation::validate_for_generation;
 /// let text = generator.generate("Once upon a time").await?;
 ///
 /// // Streaming
-/// use futures_util::StreamExt;
+/// use futures::StreamExt;
 ///
 /// let mut stream = generator.stream("In a galaxy far away").await?;
 /// while let Some(token) = stream.next().await {
@@ -355,8 +355,8 @@ impl Generator {
             .decoder
             .generate_stream(prompt, config.as_ref(), None)
             .await?;
-
-        futures_util::pin_mut!(stream);
+        
+        pin_mut!(stream);
 
         let mut output = String::new();
         while let Some(token_result) = stream.next().await {
@@ -382,7 +382,7 @@ impl Generator {
     /// # Example
     ///
     /// ```ignore
-    /// use futures_util::StreamExt;
+    /// use futures::StreamExt;
     ///
     /// let mut stream = generator.stream("Once upon a time").await?;
     /// while let Some(result) = stream.next().await {
@@ -394,7 +394,7 @@ impl Generator {
     pub async fn stream(
         &self,
         prompt: &str,
-    ) -> GeneratorResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
+    ) -> GeneratorResult<std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
     {
         self.stream_with_config(prompt, GenerationOverrides::default())
             .await
@@ -405,7 +405,7 @@ impl Generator {
         &self,
         prompt: &str,
         runtime_overrides: GenerationOverrides,
-    ) -> GeneratorResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
+    ) -> GeneratorResult<std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<GeneratedToken>> + Send>>>
     {
         let config = resolve_generation_config(
             self.generation_config.inner.clone(),
@@ -431,7 +431,7 @@ impl Generator {
                 }
             };
 
-            futures_util::pin_mut!(stream);
+            pin_mut!(stream);
 
             while let Some(result) = stream.next().await {
                 let msg = match result {
@@ -465,7 +465,7 @@ impl Generator {
     pub async fn stream_text(
         &self,
         prompt: &str,
-    ) -> GeneratorResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = GeneratorResult<String>> + Send>>>
+    ) -> GeneratorResult<std::pin::Pin<Box<dyn Stream<Item = GeneratorResult<String>> + Send>>>
     {
         let inner_stream = self.stream(prompt).await?;
 

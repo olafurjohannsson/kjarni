@@ -422,10 +422,6 @@ impl ModelWeights {
     /// Eagerly loads the tensor into RAM and converts to f32.
     /// For a 4096x4096 weight matrix, this allocates ~64MB.
     /// Prefer `with_raw_tensor` for large matrices.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Eagerly loads tensor into RAM. Use `with_raw_tensor` for memory-efficient access."
-    )]
     pub fn get_array2(&self, name: &str) -> Result<Array2<f32>> {
         #[allow(deprecated)]
         self.get_typed_tensor(name)?
@@ -439,10 +435,6 @@ impl ModelWeights {
     ///
     /// Eagerly loads the tensor into RAM and converts to f32.
     /// Prefer `with_raw_tensor` for large tensors.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Eagerly loads tensor into RAM. Use `with_raw_tensor` for memory-efficient access."
-    )]
     pub fn get_array3(&self, name: &str) -> Result<Array3<f32>> {
         #[allow(deprecated)]
         self.get_typed_tensor(name)?

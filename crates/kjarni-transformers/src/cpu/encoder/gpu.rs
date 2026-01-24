@@ -265,11 +265,15 @@ impl GpuTransformerEncoder {
                 crate::gpu_ops::blocks::GpuFeedForwardWeights::SwiGLU(swiglu_weights)
             } else {
                 // Standard FeedForward (MiniLM/BERT)
-                let up_w = load_transposed(&up_name)?;
-                let down_w = load_transposed(&down_name)?;
+                // let up_w = load_transposed(&up_name)?;
+                let up_w = weights.get_array2(&up_name)?;
+                // let down_w = load_transposed(&down_name)?;
+                let down_w = weights.get_array2(&down_name)?;
+                
                 let up_b = resolve_bias(&encoder_layout.layer.ffn.up_bias)
                     .map(|s| weights.get_array1(&s))
                     .transpose()?;
+
                 let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
                     .map(|s| weights.get_array1(&s))
                     .transpose()?;

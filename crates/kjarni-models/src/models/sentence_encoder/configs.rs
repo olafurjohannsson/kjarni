@@ -75,8 +75,30 @@ fn default_true() -> bool {
 
 impl BertConfig {
     pub fn from_json(json: &str) -> Result<Self> {
-        Ok(serde_json::from_str(json)?)
+        let mut config: Self = serde_json::from_str(json)?;
+        
+        // Convert id2label HashMap to sorted Vec
+        if let Some(ref map) = config.id2label {
+            let mut labels: Vec<(usize, String)> = map
+                .iter()
+                .filter_map(|(k, v)| k.parse::<usize>().ok().map(|idx| (idx, v.clone())))
+                .collect();
+            labels.sort_by_key(|(idx, _)| *idx);
+            config.labels_vec = Some(labels.into_iter().map(|(_, v)| v).collect());
+
+            // Infer num_labels if not set
+            if config.num_labels.is_none() {
+                config.num_labels = Some(config.labels_vec.as_ref().unwrap().len());
+            }
+        }
+        
+        Ok(config)
     }
+    fn is_hf_classification(&self) -> bool {
+        // Classification models from HuggingFace transformers use bert. prefix
+        self.id2label.is_some() || self.num_labels.is_some()
+    }
+
 
     pub fn from_loader(loader: &dyn WeightLoader, config_json: Option<&str>) -> Result<Arc<Self>> {
         if loader.has_metadata() {
@@ -257,17 +279,42 @@ impl ModelConfig for BertConfig {
             }
         } else {
             // === STANDARD BERT LAYOUT (MiniLM) ===
-            let encoder_layer = EncoderLayerLayout {
-                self_attn: AttentionLayout {
-                    q_weight: "encoder.layer.{}.attention.self.query.weight".to_string(),
-                    q_bias: Some("encoder.layer.{}.attention.self.query.bias".to_string()),
-                    k_weight: "encoder.layer.{}.attention.self.key.weight".to_string(),
-                    k_bias: Some("encoder.layer.{}.attention.self.key.bias".to_string()),
-                    v_weight: "encoder.layer.{}.attention.self.value.weight".to_string(),
-                    v_bias: Some("encoder.layer.{}.attention.self.value.bias".to_string()),
-                    o_weight: "encoder.layer.{}.attention.output.dense.weight".to_string(),
-                    o_bias: Some("encoder.layer.{}.attention.output.dense.bias".to_string()),
-                    norm_weight: "encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+            let encoder_layer = if self.is_hf_classification() {
+                EncoderLayerLayout {
+                    self_attn: AttentionLayout {
+                        q_weight: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
+                        q_bias: Some("bert.encoder.layer.{}.attention.self.query.bias".to_string()),
+                        k_weight: "bert.encoder.layer.{}.attention.self.key.weight".to_string(),
+                        k_bias: Some("bert.encoder.layer.{}.attention.self.key.bias".to_string()),
+                        v_weight: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
+                        v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
+                        o_weight: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
+                        o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
+                        norm_weight: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
+                    norm_bias: Some("bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
+                },
+                ffn: FeedForwardLayout {
+                    up_weight: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
+                    up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
+                    down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
+                    down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
+                    gate_weight: None,
+                    gate_bias: None,
+                    norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                    norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
+                } }
+            } else {
+                EncoderLayerLayout {
+                    self_attn: AttentionLayout {
+                        q_weight: "encoder.layer.{}.attention.self.query.weight".to_string(),
+                        q_bias: Some("encoder.layer.{}.attention.self.query.bias".to_string()),
+                        k_weight: "encoder.layer.{}.attention.self.key.weight".to_string(),
+                        k_bias: Some("encoder.layer.{}.attention.self.key.bias".to_string()),
+                        v_weight: "encoder.layer.{}.attention.self.value.weight".to_string(),
+                        v_bias: Some("encoder.layer.{}.attention.self.value.bias".to_string()),
+                        o_weight: "encoder.layer.{}.attention.output.dense.weight".to_string(),
+                        o_bias: Some("encoder.layer.{}.attention.output.dense.bias".to_string()),
+                        norm_weight: "encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
                     norm_bias: Some("encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
                 },
                 ffn: FeedForwardLayout {
@@ -279,19 +326,37 @@ impl ModelConfig for BertConfig {
                     gate_bias: None,
                     norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
                     norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
-                },
+                } }
             };
 
             ModelLayout {
-                token_embedding: "embeddings.word_embeddings.weight".to_string(),
+                token_embedding: if self.is_hf_classification() {
+                    "bert.embeddings.word_embeddings.weight".to_string()
+                } else {
+                    "embeddings.word_embeddings.weight".to_string()
+                },
                 lm_head: "cls.predictions.decoder.weight".to_string(),
                 encoder: Some(EncoderLayout {
-                    position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
-                    token_type_embedding: Some(
-                        "embeddings.token_type_embeddings.weight".to_string(),
-                    ),
-                    embedding_norm_weight: Some("embeddings.LayerNorm.weight".to_string()),
-                    embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
+                    position_embedding: if self.is_hf_classification() {
+                        Some("bert.embeddings.position_embeddings.weight".to_string())
+                    } else {
+                        Some("embeddings.position_embeddings.weight".to_string())
+                    },
+                    token_type_embedding: if self.is_hf_classification() {
+                        Some("bert.embeddings.token_type_embeddings.weight".to_string())
+                    } else {
+                        Some("embeddings.token_type_embeddings.weight".to_string())
+                    },
+                    embedding_norm_weight: if self.is_hf_classification() {
+                        Some("bert.embeddings.LayerNorm.weight".to_string())
+                    } else {
+                        Some("embeddings.LayerNorm.weight".to_string())
+                    },
+                    embedding_norm_bias: if self.is_hf_classification() {
+                        Some("bert.embeddings.LayerNorm.bias".to_string())
+                    } else {
+                        Some("embeddings.LayerNorm.bias".to_string())
+                    },
                     final_norm_weight: None,
                     final_norm_bias: None,
                     layer: encoder_layer,

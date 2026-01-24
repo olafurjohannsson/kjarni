@@ -276,11 +276,11 @@ impl CpuCrossDecoder for BartCpuDecoder {
 // In cpu_decoder.rs, add tests module
 
 #[cfg(test)]
-mod tests {
+mod bart_cpu_cross_decoder_tests {
     use super::*;
     use crate::models::bart::cpu_encoder::BartCpuEncoder;
     use anyhow::Result;
-    use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
+    use kjarni_transformers::{cpu::encoder::traits::CpuEncoder, embeddings::EmbeddingData};
     use ndarray::{Array2, s};
     use std::path::Path;
 
@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    fn setup() -> Result<(BartCpuEncoder, BartCpuDecoder, Arc<BartConfig>)> {
+    fn setup() -> Result<(BartCpuEncoder, BartCpuDecoder, Arc<BartConfig>, Embeddings)> {
         let path = Path::new(DISTILBART_PATH);
         if !path.exists() {
             anyhow::bail!("Weights not found");
@@ -357,13 +357,19 @@ mod tests {
 
         let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
         let decoder = BartCpuDecoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
-
-        Ok((encoder, decoder, config))
+        let embeddings = Embeddings::new(
+            EmbeddingData::F32(Arc::new(
+                weights.get_array2(&config.layout().token_embedding)?,
+            )),
+            Some(weights.get_array2("model.encoder.embed_positions.weight")?),
+            None,
+        );
+        Ok((encoder, decoder, config, embeddings))
     }
 
     #[tokio::test]
     async fn test_decoder_step0_hidden() -> Result<()> {
-        let (encoder, decoder, _config) = setup()?;
+        let (encoder, decoder, _config, embeddings) = setup()?;
 
         // 1. Encode
         let input_ids = Array2::from_shape_vec(
@@ -371,7 +377,10 @@ mod tests {
             vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6],
         )?;
         let mask = Array2::<f32>::ones((1, 10));
-        let encoder_output = encoder.forward(&input_ids, &mask, None)?;
+        
+        let hidden_states = embeddings.forward(&input_ids, None, 2, false);
+
+        let encoder_output = encoder.forward(&hidden_states, &mask)?;
 
         // Verify encoder output
         let enc_actual: Vec<f32> = encoder_output
@@ -410,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn test_beam_search_step0() -> Result<()> {
         // Setup same as greedy test
-        let (encoder, decoder, _config) = setup()?;
+        let (encoder, decoder, _config, embeddings) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight").build()?;
@@ -422,7 +431,8 @@ mod tests {
             vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6],
         )?;
         let mask = Array2::<f32>::ones((1, 10));
-        let encoder_output = encoder.forward(&input_ids, &mask, None)?;
+        let hidden_states = embeddings.forward(&input_ids, None, 2, false);
+        let encoder_output = encoder.forward(&hidden_states, &mask)?;
 
         // Step 0: BOS token
         let dec_input = Array2::from_shape_vec((1, 1), vec![2u32])?;
@@ -463,7 +473,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_greedy_generation_step_by_step() -> Result<()> {
-        let (encoder, decoder, _config) = setup()?;
+        let (encoder, decoder, _config, embeddings) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
@@ -477,7 +487,8 @@ mod tests {
             vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6],
         )?;
         let mask = Array2::<f32>::ones((1, 10));
-        let encoder_output = encoder.forward(&input_ids, &mask, None)?;
+        let hidden_states = embeddings.forward(&input_ids, None, 2, false);
+        let encoder_output = encoder.forward(&hidden_states, &mask)?;
 
         // 2. Greedy decode (no beam search, no cache for simplicity)
         let mut decoder_ids = vec![2u32]; // BOS
@@ -530,7 +541,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_generation_step_by_step_vs_python() -> Result<()> {
-        let (encoder, decoder, _config) = setup()?;
+        let (encoder, decoder, _config, embeddings) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
@@ -564,9 +575,9 @@ mod tests {
 
         let input_ids = Array2::from_shape_vec((1, input_ids_vec.len()), input_ids_vec)?;
         let mask = Array2::<f32>::ones(input_ids.dim());
-
+        let hidden_states = embeddings.forward(&input_ids, None, 2, false);
         // Encode
-        let encoder_output = encoder.forward(&input_ids, &mask, None)?;
+        let encoder_output = encoder.forward(&hidden_states, &mask)?;
 
         // Golden tokens from Python step-by-step greedy generation (first 30 steps)
         let golden_tokens: Vec<u32> = vec![
@@ -643,7 +654,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_decoder_step0_logits() -> Result<()> {
-        let (encoder, decoder, _config) = setup()?;
+        let (encoder, decoder, _config, embeddings) = setup()?;
         let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
 
         // Load LM head
@@ -659,7 +670,8 @@ mod tests {
             vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6],
         )?;
         let mask = Array2::<f32>::ones((1, 10));
-        let encoder_output = encoder.forward(&input_ids, &mask, None)?;
+        let hidden_states = embeddings.forward(&input_ids, None, 2, false);
+        let encoder_output = encoder.forward(&hidden_states, &mask)?;
 
         // 2. Decode step 0
         let decoder_input_ids = Array2::from_shape_vec((1, 1), vec![2u32])?;

@@ -2,12 +2,22 @@ use crate::models::bart::config::BartConfig;
 use anyhow::Result;
 use async_trait::async_trait;
 use kjarni_transformers::{
-    Normalization, WgpuContext, activations::Activation, cpu::encoder::{buffers::EncoderBuffers, encoder_layer::EncoderLayer, prelude::*}, embeddings::Embeddings, encoder_decoder::traits::CpuCrossDecoder, feedforward::{FeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelLoadConfig, normalization::{LayerNorm, RMSNorm}, traits::{
-        Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
-    }, weights::ModelWeights
+    Normalization, WgpuContext,
+    activations::Activation,
+    cpu::encoder::{CpuEncoderOps, buffers::EncoderBuffers, encoder_layer::EncoderLayer, prelude::*},
+    embeddings::Embeddings,
+    encoder_decoder::traits::CpuCrossDecoder,
+    feedforward::{FeedForward, StdFeedForward},
+    linear_layer::LinearLayer,
+    models::base::ModelLoadConfig,
+    normalization::{LayerNorm, RMSNorm},
+    traits::{
+        CpuTransformerCore, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy
+    },
+    weights::ModelWeights,
 };
 use ndarray::{Array2, Array3};
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 pub struct BartCpuEncoder {
     embeddings: Embeddings,
@@ -151,17 +161,50 @@ impl InferenceModel for BartCpuEncoder {
     }
 }
 
+impl CpuTransformerCore for BartCpuEncoder {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn num_attention_heads(&self) -> usize {
+        self.meta.num_attention_heads
+    }
+    /// Compute embeddings only (word + position + token_type)
+    // fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
+    //     self.embeddings
+    //         .forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
+    // }
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(hidden_states.clone())
+    }
+
+    fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        if self.config.normalize_embedding {
+            Ok(self.embed_layer_norm.forward_3d(hidden_states))
+        } else {
+            Ok(hidden_states.clone())
+        }
+    }
+
+    /// Number of encoder layers
+    fn num_layers(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Hidden size (needed for projection heads)
+    fn hidden_size(&self) -> usize {
+        self.meta.hidden_size
+    }
+}
+
 #[async_trait]
 impl CpuEncoder for BartCpuEncoder {
     // type Input = Array2<u32>;
     // type Output = EncoderOutput;
-
-    /// Compute embeddings only (word + position + token_type)
-    fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
-        self.embeddings
-            .forward(input_ids, token_type_ids, 2, self.meta.scale_embeddings)
-    }
-
+   
+    
     fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
         EncoderBuffers::new_auto(
             max_batch,
@@ -173,18 +216,18 @@ impl CpuEncoder for BartCpuEncoder {
     }
 
     /// Compute embeddings + initial normalization
-    fn embed_and_normalize(
-        &self,
-        input_ids: &Array2<u32>,
-        token_type_ids: Option<&Array2<u32>>,
-    ) -> Array3<f32> {
-        let hidden = self.embed(input_ids, token_type_ids);
-        if self.config.normalize_embedding {
-            self.embed_layer_norm.forward_3d(&hidden)
-        } else {
-            hidden
-        }
-    }
+    // fn embed_and_normalize(
+    //     &self,
+    //     input_ids: &Array2<u32>,
+    //     token_type_ids: Option<&Array2<u32>>,
+    // ) -> Array3<f32> {
+    //     let hidden = self.embed(input_ids, token_type_ids);
+    //     if self.config.normalize_embedding {
+    //         self.embed_layer_norm.forward_3d(&hidden)
+    //     } else {
+    //         hidden
+    //     }
+    // }
 
     /// Run layers [start_layer, end_layer) on pre-computed hidden states
     fn forward_layers(
@@ -203,13 +246,4 @@ impl CpuEncoder for BartCpuEncoder {
         Ok(hidden)
     }
 
-    /// Number of encoder layers
-    fn num_layers(&self) -> usize {
-        self.layers.len()
-    }
-
-    /// Hidden size (needed for projection heads)
-    fn hidden_size(&self) -> usize {
-        self.meta.hidden_size
-    }
 }

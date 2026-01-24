@@ -609,9 +609,12 @@ impl GpuTensor {
         });
 
         // This is a critical step to ensure the submission is processed.
-        device.poll(wgpu::PollType::wait_indefinitely());
-        // device.poll(wgpu::PollType::wai);
-
+        
+        match device.poll(wgpu::PollType::wait_indefinitely()) {
+            Ok(status) => log::debug!("GPU Poll OK: {:?}", status),
+            Err(e) => panic!("GPU Poll Failed: {:?}", e), // todo return something else instead of panic?
+        }
+        
         // Wait for the map_async callback to complete
         rx.receive()
             .await

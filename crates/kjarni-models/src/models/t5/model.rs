@@ -1,21 +1,31 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::Array2;
+use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
+
+use crate::models::t5::T5Task;
 
 use super::config::T5Config;
 
-
 use kjarni_transformers::{
-    cache::{Cache, CpuBeamKVCache, GpuBeamKVCache}, common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults}, cpu::encoder::{prelude::*, traits::CpuEncoder, CpuEncoderOps, GpuEncoderOps},
-    cpu::encoder_decoder::{
-        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
-        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+    LanguageModel, ModelType, WgpuContext,
+    cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
+    common::{
+        BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
+        HFGenerationDefaults, ModelGenerationDefaults,
+    },
+    cpu::{
+        encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+        encoder_decoder::{
+            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+        },
     },
     encoder_decoder::{
+        config::TranslationParams,
         traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
             GpuEncoderDecoderOps,
@@ -25,16 +35,13 @@ use kjarni_transformers::{
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
     traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    LanguageModel,
-    ModelType,
-    WgpuContext,
 };
 
 pub struct T5Model {
     tokenizer: Tokenizer,
     config: Arc<T5Config>,
     pub pipeline: EncoderDecoderPipeline,
-    generation_defaults: Option<HFGenerationDefaults>,
+    generation_config: HFGenerationConfig,
 }
 
 impl T5Model {
@@ -107,13 +114,14 @@ impl EncoderDecoderModelFactory for T5Model {
         pipeline: EncoderDecoderPipeline,
         tokenizer: Tokenizer,
         config: Arc<T5Config>,
-        generation_defaults: Option<HFGenerationDefaults>,
+        _: Option<HFGenerationDefaults>,
+        generation_config: HFGenerationConfig,
     ) -> Self {
         Self {
             pipeline,
             tokenizer,
             config,
-            generation_defaults,
+            generation_config,
         }
     }
 }
@@ -133,7 +141,66 @@ impl T5Model {
             context,
             load_config,
         )
-            .await
+        .await
+    }
+
+    /// Get generation config for a specific task
+    pub fn get_generation_config_for_task(&self, task: &T5Task) -> GenerationConfig {
+        // Start with base config from generation_config.json
+        let mut config = self
+            .generation_config
+            .to_generation_config(&ModelGenerationDefaults::for_t5());
+
+        // Apply task-specific overrides
+        if let Some(params) = &self.config.task_specific_params {
+            match task {
+                T5Task::Summarization => {
+                    if let Some(task_cfg) = &params.summarization {
+                        config.max_length = task_cfg.max_length;
+                        config.min_length = task_cfg.min_length;
+                        config.no_repeat_ngram_size = task_cfg.no_repeat_ngram_size;
+                        config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
+                            num_beams: task_cfg.num_beams,
+                            length_penalty: task_cfg.length_penalty,
+                            early_stopping: task_cfg.early_stopping,
+                        });
+                    }
+                }
+                T5Task::TranslationEnToDe => {
+                    if let Some(task_cfg) = &params.translation_en_to_de {
+                        self.apply_translation_params(&mut config, task_cfg);
+                    }
+                }
+                T5Task::TranslationEnToFr => {
+                    if let Some(task_cfg) = &params.translation_en_to_fr {
+                        self.apply_translation_params(&mut config, task_cfg);
+                    }
+                }
+                T5Task::TranslationEnToRo => {
+                    if let Some(task_cfg) = &params.translation_en_to_ro {
+                        self.apply_translation_params(&mut config, task_cfg);
+                    }
+                }
+                T5Task::TranslationCustom { .. } | T5Task::Question | T5Task::Unknown => {
+                    // Use base config with translation-safe defaults
+                    config.min_length = 0;
+                    config.no_repeat_ngram_size = 0;
+                }
+            }
+        }
+
+        config
+    }
+
+    fn apply_translation_params(&self, config: &mut GenerationConfig, params: &TranslationParams) {
+        config.max_length = params.max_length;
+        config.min_length = 0; // Translation should not force min length
+        config.no_repeat_ngram_size = 0; // Translation may need repetition
+        config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
+            num_beams: params.num_beams,
+            length_penalty: 1.0,
+            early_stopping: params.early_stopping,
+        });
     }
 
     const SUPPORTED_MODELS: &'static [ModelType] = &[
@@ -165,6 +232,16 @@ impl InferenceModel for T5Model {
 impl CpuEncoderOps for T5Model {
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline.cpu_encoder().expect("CPU Encoder not active")
+    }
+    fn embed_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+        pos: usize,
+    ) -> Result<Array3<f32>> {
+        self.pipeline
+            .embeddings()
+            .embed_cpu(input_ids, token_type_ids, pos)
     }
 }
 
@@ -202,17 +279,20 @@ impl LanguageModel for T5Model {
         self.config.metadata().max_seq_len
     }
 
+    // fn forced_eos_token_id(&self) -> Option<u32> {
+    //     Some(self.config.eos_token_id)
+    // }
     fn forced_eos_token_id(&self) -> Option<u32> {
-        Some(self.config.eos_token_id)
-    }
-
-    fn forced_bos_token_id(&self) -> Option<u32> {
-        Some(self.config.decoder_start_token_id)
+        self.generation_config.forced_eos_token_id
     }
 
     fn pad_token_id(&self) -> Option<u32> {
-        Some(self.config.pad_token_id)
+        self.generation_config.pad_token_id.or(Some(0))
     }
+
+    // fn pad_token_id(&self) -> Option<u32> {
+    //     Some(self.config.pad_token_id)
+    // }
 
     fn vocab_size(&self) -> usize {
         self.config.vocab_size
@@ -230,8 +310,19 @@ impl LanguageModel for T5Model {
         self.config.num_layers
     }
 
+    // fn eos_token_id(&self) -> Option<u32> {
+    //     Some(self.config.eos_token_id)
+    // }
     fn eos_token_id(&self) -> Option<u32> {
-        Some(self.config.eos_token_id)
+        self.generation_config
+            .eos_token_id
+            .as_ref()
+            .map(|e| e.primary())
+            .or(Some(1)) // T5 default
+    }
+
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        self.generation_config.forced_bos_token_id
     }
 
     fn bos_token_id(&self) -> Option<u32> {
@@ -361,6 +452,11 @@ impl GpuEncoderDecoderOps for T5Model {
 
 #[async_trait]
 impl EncoderDecoderLanguageModel for T5Model {
+    /// Get generation config for a specific input (auto-detects task)
+    fn get_generation_config_for_input(&self, input: &str) -> GenerationConfig {
+        let task = T5Task::from_input(input);
+        self.get_generation_config_for_task(&task)
+    }
     fn encoder_decoder_cpu_ops(&self) -> Option<&dyn CpuEncoderDecoderOps> {
         if self.pipeline.cpu_decoder().is_some() {
             Some(self)
@@ -377,8 +473,11 @@ impl EncoderDecoderLanguageModel for T5Model {
         }
     }
 
+    // fn decoder_start_token_id(&self) -> u32 {
+    //     self.config.decoder_start_token_id
+    // }
     fn decoder_start_token_id(&self) -> u32 {
-        self.config.decoder_start_token_id
+        self.generation_config.decoder_start_token_id.unwrap_or(0)
     }
 
     fn get_default_generation_config(&self) -> GenerationConfig {

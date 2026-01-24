@@ -907,11 +907,6 @@ mod decoder_backend_tests {
             assert!((diff - 0.5).abs() < 0.001);
         }
 
-        // When a dual-execution model is available, add tests like:
-        // #[tokio::test]
-        // async fn test_cpu_gpu_prefill_parity() { ... }
-        // #[tokio::test]
-        // async fn test_cpu_gpu_decode_parity() { ... }
     }
 
     // =========================================================================

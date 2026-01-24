@@ -63,7 +63,7 @@ pub use loader::{DecoderModelFactory, GenericLoader};
 pub use decoder_builder::DecoderPipelineBuilder;
 pub use cpu_factory::CpuLayerFactory;
 pub use seq2seq_cpu_factory::Seq2SeqFactory;
-pub use audio::{AudioConvFrontend, AudioPipeline, MelConfig};
+
 pub use encoder::{
     EncoderLoader,
     EncoderModelFactory,

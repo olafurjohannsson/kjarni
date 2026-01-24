@@ -45,26 +45,24 @@
 //! - [`super::LlamaCpuDecoder`] — CPU fallback implementation
 //! - [`crate::models::mistral::MistralGpuDecoder`] — Mistral variant
 
-use crate::models::llama::config::LlamaConfig;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings},
+    embeddings::{EmbeddingConfig, LoadedEmbeddings},
     gpu_ops::{
-        GpuTensor, GpuTensorPool, Kernel,
+        GpuTensor, GpuTensorPool,
         blocks::{
-            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights, attention::{
-                GpuAttention, GpuAttentionWeights, GpuDecoderSelfAttention,
-            }, embeddings::{GpuEmbeddingWeights, GpuEmbeddings}, rms_norm::{GpuRMSNorm, GpuRMSNormWeights}, rope::GpuRoPE
+            GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFNWeights,
+            attention::GpuAttentionWeights,
+            rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
+            rope::GpuRoPE,
         },
-        primitives::add::GpuAdd,
     },
     models::base::{ModelInput, ModelLoadConfig},
     tensor::DType,
-    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    traits::{ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 use std::sync::Arc;
@@ -306,7 +304,6 @@ impl LlamaGpuDecoder {
     }
 }
 
-
 impl GpuDecoder for LlamaGpuDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -319,11 +316,11 @@ impl GpuDecoder for LlamaGpuDecoder {
         position_offset: usize,
     ) -> Result<GpuTensor> {
         self.embeddings.embed(
-            encoder, 
-            pool, 
-            input, 
+            encoder,
+            pool,
+            input,
             None, // Decoders usually don't use token_type_ids
-            position_offset
+            position_offset,
         )
     }
 
@@ -390,8 +387,7 @@ impl GpuDecoder for LlamaGpuDecoder {
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
         // 1. Embed
-        let hidden = self
-            .embed_and_normalize(encoder, pool, input, position_offset)?;
+        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
         // 2. Layers
         let mut hidden = self.forward_layers(

@@ -3,14 +3,17 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
+use crate::cpu::encoder_decoder::EncoderOutput;
 use crate::cpu::strategy::ComputeStrategy;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
+use crate::traits::CpuTransformerCore;
 use crate::{last_token_pool, max_pool};
 
 use anyhow::{Result, anyhow};
@@ -69,10 +72,17 @@ pub trait EncoderLanguageModel: LanguageModel {
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
             let encoder: &dyn CpuEncoder = ops.encoder();
 
+            let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
+            let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
+
             let hidden_states = if compute_strategy.use_scratch_buffers == false {
                 // Allocating was faster for medium batches (16-512 tokens)
+                // encoder
+                //     .forward(input_ids, &attention_mask_f32, None)?
+                //     .last_hidden_state
+
                 encoder
-                    .forward(input_ids, &attention_mask_f32, None)?
+                    .forward(&normalized_hidden, &attention_mask_f32)?
                     .last_hidden_state
             } else {
                 let mut buffers = encoder.create_buffers(batch_size, seq_len);
@@ -85,7 +95,7 @@ pub trait EncoderLanguageModel: LanguageModel {
                     );
                 }
                 encoder
-                    .forward_with_buffers(input_ids, &attention_mask_f32, None, &mut buffers)?
+                    .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
                     .last_hidden_state
             };
 
@@ -193,8 +203,6 @@ pub trait SentenceEncoderModel: EncoderLanguageModel {
     }
 }
 
-// Now, we provide a GENERIC implementation that works for ANY EncoderLanguageModel.
-// This is the key to reusability.
 #[async_trait]
 impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
     async fn encode_batch(&self, texts: &[&str], config: &EncodingConfig) -> Result<Vec<Vec<f32>>> {
@@ -242,50 +250,7 @@ pub struct CpuEncoderOutput {
 ///
 
 /// ```
-pub trait CpuEncoder: Send + Sync {
-    /// Compute embeddings only (word + position + token_type).
-    ///
-    /// Does NOT apply the initial layer normalization.
-    ///
-    /// # Arguments
-    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
-    /// * `token_type_ids` - Optional token type IDs for models like BERT
-    ///
-    /// # Returns
-    /// Hidden states `[batch_size, sequence_length, hidden_size]`
-    fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32>;
-
-    /// Compute embeddings + initial normalization.
-    ///
-    /// This produces hidden states ready to be processed by encoder layers.
-    ///
-    /// # Arguments
-    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
-    /// * `token_type_ids` - Optional token type IDs
-    ///
-    /// # Returns
-    /// Normalized hidden states `[batch_size, sequence_length, hidden_size]`
-    fn embed_and_normalize(
-        &self,
-        input_ids: &Array2<u32>,
-        token_type_ids: Option<&Array2<u32>>,
-    ) -> Array3<f32>;
-
-    /// Run layers `[start_layer, end_layer)` on pre-computed hidden states.
-    ///
-    /// Useful for:
-    /// - Hybrid CPU/GPU execution
-    /// - Layer-by-layer debugging
-    /// - Partial model execution
-    ///
-    /// # Arguments
-    /// * `hidden_states` - Input hidden states `[batch_size, seq_len, hidden_size]`
-    /// * `attention_mask` - Attention mask `[batch_size, seq_len]`
-    /// * `start_layer` - First layer to execute (inclusive)
-    /// * `end_layer` - Last layer to execute (exclusive)
-    ///
-    /// # Returns
-    /// Hidden states after processing through the specified layers
+pub trait CpuEncoder: CpuTransformerCore {
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
@@ -294,49 +259,97 @@ pub trait CpuEncoder: Send + Sync {
         end_layer: usize,
     ) -> Result<Array3<f32>>;
 
-    /// Number of encoder layers in this model.
-    fn num_layers(&self) -> usize;
-
-    /// Hidden dimension of the model.
-    fn hidden_size(&self) -> usize;
-
-    /// Creates buffers for noalloc forward passes.
     fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers;
 
-    /// Forward with pre-allocated buffers (optional, has default impl).
     fn forward_with_buffers(
         &self,
-        input_ids: &Array2<u32>,
+        hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
-        _: &mut EncoderBuffers,
+        buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
-        // Default: just use regular forward (for encoders that don't support noalloc)
-        self.forward(input_ids, attention_mask, token_type_ids)
+        // Default: ignore buffers, call regular forward
+        let hidden = self.forward_layers(hidden_states, attention_mask, 0, self.num_layers());
+        Ok(CpuEncoderOutput {
+            last_hidden_state: hidden?,
+        })
     }
 
-    /// Full forward pass through the encoder.
-    ///
-    /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
-    ///
-    /// # Arguments
-    /// * `input_ids` - Token IDs `[batch_size, sequence_length]`
-    /// * `attention_mask` - Attention mask `[batch_size, sequence_length]`
-    /// * `token_type_ids` - Optional token type IDs
-    ///
-    /// # Returns
-    /// Encoder output containing the final hidden states
+    /// Full forward: layers → final_norm
     fn forward(
         &self,
-        input_ids: &Array2<u32>,
+        hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
     ) -> Result<CpuEncoderOutput> {
-        let hidden = self.embed_and_normalize(input_ids, token_type_ids);
-        let output = self.forward_layers(&hidden, attention_mask, 0, self.num_layers())?;
+        let output = self.forward_layers(hidden_states, attention_mask, 0, self.num_layers())?;
         Ok(CpuEncoderOutput {
-            last_hidden_state: output,
+            last_hidden_state: self.final_norm(&output)?,
         })
+    }
+}
+
+pub trait CpuEncoderOps: Send + Sync {
+    /// Access the underlying encoder (transformer layers).
+    fn encoder(&self) -> &dyn CpuEncoder;
+
+    /// Embed tokens to hidden states (for text models like T5, BERT).
+    fn embed_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+        pos: usize,
+    ) -> Result<Array3<f32>>;
+
+    /// Embed audio to hidden states (for audio models like Whisper).
+    /// Default returns error for text-only models.
+    fn embed_audio(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
+        Err(anyhow!("Audio embedding not supported for this model"))
+    }
+
+    /// Get attention mask for encoder (model-specific).
+    fn get_encoder_mask(&self, seq_len: usize) -> Option<Array2<f32>> {
+        None // Most encoders use no mask or all-ones
+    }
+
+    // =========================================================================
+    // Default Implementations
+    // =========================================================================
+
+    /// Forward from tokens (T5, BERT, etc.)
+    fn forward_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: Option<&Array2<f32>>,
+        token_type_ids: Option<&Array2<u32>>,
+        pos: usize,
+    ) -> Result<Array3<f32>> {
+        let hidden = self.embed_tokens(input_ids, token_type_ids, pos)?;
+        let mask = attention_mask
+            .cloned()
+            .or_else(|| self.get_encoder_mask(hidden.shape()[1]))
+            .unwrap_or_else(|| Array2::ones((1, hidden.shape()[1])));
+
+        let output =
+            self.encoder()
+                .forward_layers(&hidden, &mask, 0, self.encoder().num_layers())?;
+        self.encoder().final_norm(&output)
+    }
+
+    /// Forward from mel spectrogram (Whisper)
+    fn forward_audio(
+        &self,
+        mel: &Array3<f32>, // [batch, n_mels, frames]
+        attention_mask: Option<&Array2<f32>>,
+    ) -> Result<Array3<f32>> {
+        let hidden = self.embed_audio(mel)?;
+        let mask = attention_mask
+            .cloned()
+            .or_else(|| self.get_encoder_mask(hidden.shape()[1]))
+            .unwrap_or_else(|| Array2::ones((1, hidden.shape()[1])));
+
+        let output =
+            self.encoder()
+                .forward_layers(&hidden, &mask, 0, self.encoder().num_layers())?;
+        self.encoder().final_norm(&output)
     }
 }
 
@@ -452,10 +465,6 @@ pub trait GpuEncoder: Send + Sync {
     }
 }
 
-pub trait CpuEncoderOps: Send + Sync {
-    fn encoder(&self) -> &dyn CpuEncoder;
-}
-
 pub trait GpuEncoderOps: Send + Sync {
     fn encoder(&self) -> &dyn GpuEncoder;
 }
@@ -494,28 +503,33 @@ mod tests_trait {
             }
         }
     }
-
+    impl CpuTransformerCore for MockCpuEncoder {
+        fn num_layers(&self) -> usize {
+            1
+        }
+        fn hidden_size(&self) -> usize {
+            self.hidden_size
+        }
+        fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+            unimplemented!()
+        }
+        fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+            Ok(hidden_states.clone())
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn num_attention_heads(&self) -> usize {
+            8
+        }
+    }
     impl CpuEncoder for MockCpuEncoder {
         fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
             unimplemented!()
         }
-        fn embed(
-            &self,
-            _input_ids: &Array2<u32>,
-            _token_type_ids: Option<&Array2<u32>>,
-        ) -> Array3<f32> {
-            unimplemented!()
-        }
-
-        fn embed_and_normalize(
-            &self,
-            input_ids: &Array2<u32>,
-            _token_type_ids: Option<&Array2<u32>>,
-        ) -> Array3<f32> {
-            let (batch, seq) = input_ids.dim();
-            Array3::zeros((batch, seq, self.hidden_size))
-        }
-
         fn forward_layers(
             &self,
             hidden_states: &Array3<f32>,
@@ -526,13 +540,6 @@ mod tests_trait {
             let mut lock = self.captured_mask_sum.lock().unwrap();
             *lock = attention_mask.sum();
             Ok(hidden_states.clone())
-        }
-
-        fn num_layers(&self) -> usize {
-            1
-        }
-        fn hidden_size(&self) -> usize {
-            self.hidden_size
         }
     }
 
@@ -595,6 +602,14 @@ mod tests_trait {
     impl CpuEncoderOps for MockModel {
         fn encoder(&self) -> &dyn CpuEncoder {
             &self.encoder
+        }
+        fn embed_tokens(
+            &self,
+            input_ids: &Array2<u32>,
+            token_type_ids: Option<&Array2<u32>>,
+            pos: usize,
+        ) -> Result<Array3<f32>> {
+            unimplemented!()
         }
     }
 

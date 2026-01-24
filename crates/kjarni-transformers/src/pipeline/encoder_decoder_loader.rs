@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use crate::Device;
+use crate::common::HFGenerationConfig;
 use crate::{
     common::HFGenerationDefaults,
     cpu::encoder::{CpuEncoder, GpuEncoder},
@@ -43,6 +44,7 @@ pub trait EncoderDecoderModelFactory: Sized {
         tokenizer: Tokenizer,
         config: Arc<Self::Config>,
         generation_defaults: Option<HFGenerationDefaults>,
+        generation_config: HFGenerationConfig,
     ) -> Self;
 }
 
@@ -64,6 +66,8 @@ impl Seq2SeqLoader {
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
+        let generation_config = HFGenerationConfig::load_or_default(&model_dir);
+
         download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors, true).await?;
 
         let context = if device.is_gpu() && context.is_none() {
@@ -72,7 +76,7 @@ impl Seq2SeqLoader {
             context
         };
 
-        Self::load_from_pretrained::<M>(&model_dir, device, context, load_config)
+        Self::load_from_pretrained::<M>(&model_dir, device, context, load_config, generation_config)
     }
 
     pub fn load_from_pretrained<M: EncoderDecoderModelFactory>(
@@ -80,17 +84,18 @@ impl Seq2SeqLoader {
         device: Device,
         context: Option<Arc<WgpuContext>>,
         load_config: Option<ModelLoadConfig>,
+        generation_config: HFGenerationConfig,
     ) -> Result<M> {
-        let weights = ModelWeights::new(model_path)?;
-        let load_config = load_config.unwrap_or_default();
+        let weights: ModelWeights = ModelWeights::new(model_path)?;
+        let load_config: ModelLoadConfig = load_config.unwrap_or_default();
 
         // 1. Config & Tokenizer
         let config = M::load_config(&weights)?;
-        let meta = config.metadata();
-        let layout = config.layout();
+        let meta: ModelMetadata = config.metadata();
+        let layout: ModelLayout = config.layout();
 
-        let tokenizer_path = model_path.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+        let tokenizer_path: PathBuf = model_path.join("tokenizer.json");
+        let tokenizer: Tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
 
         // 2. Build Backends (User implementation logic)
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = M::build_backends(
@@ -124,6 +129,7 @@ impl Seq2SeqLoader {
             tokenizer,
             config,
             gen_defaults,
+            generation_config,
         ))
     }
 }

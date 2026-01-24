@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -14,7 +15,7 @@ use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
 use crate::normalization::RMSNorm;
 use crate::rope::RoPE;
-use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
+use crate::traits::{CpuTransformerCore, Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
 use crate::{Embeddings, FeedForward, normalization::LayerNorm};
 
@@ -310,14 +311,16 @@ impl CpuTransformerEncoder {
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
         // Embeddings still allocate (could optimize later)
-        let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        unimplemented!()
+        // let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        
 
-        // Forward through layers (noalloc for layer computations)
-        self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
+        // // Forward through layers (noalloc for layer computations)
+        // self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
 
-        Ok(CpuEncoderOutput {
-            last_hidden_state: hidden,
-        })
+        // Ok(CpuEncoderOutput {
+        //     last_hidden_state: hidden,
+        // })
     }
 
     /// Creates appropriately sized buffers for this encoder.
@@ -338,8 +341,33 @@ impl InferenceModel for CpuTransformerEncoder {
     fn device(&self) -> Device {
         Device::Cpu
     }
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any { // TODO REMOVE
         self
+    }
+}
+
+impl CpuTransformerCore for CpuTransformerEncoder {
+    fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(hidden_states.clone()) // noop
+    }
+    fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        Ok(self.embeddings_layer_norm.forward_3d(hidden_states))
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn num_attention_heads(&self) -> usize {
+        self.metadata.num_attention_heads
+    }
+    fn num_layers(&self) -> usize {
+        self.layers.len()
+    }
+
+    fn hidden_size(&self) -> usize {
+        self.metadata.hidden_size
     }
 }
 
@@ -353,45 +381,22 @@ impl CpuEncoder for CpuTransformerEncoder {
             self.metadata.intermediate_size,
         )
     }
+
     fn forward_with_buffers(
         &self,
-        input_ids: &Array2<u32>,
+        input_ids: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
-        let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
-        
-        self.forward_layers_noalloc(
-            &mut hidden,
-            attention_mask,
-            0,
-            self.num_layers(),
-            buffers,
-        )?;
-        
-        Ok(CpuEncoderOutput {
-            last_hidden_state: hidden,
-        })
-    }
-    fn embed(&self, input_ids: &Array2<u32>, token_type_ids: Option<&Array2<u32>>) -> Array3<f32> {
-        self.embeddings.forward(
-            input_ids,
-            token_type_ids,
-            self.metadata.extra_pos_embeddings,
-            self.metadata.scale_embeddings,
-        )
-    }
+        unimplemented!()
+        // let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
 
-    fn embed_and_normalize(
-        &self,
-        input_ids: &Array2<u32>,
-        token_type_ids: Option<&Array2<u32>>,
-    ) -> Array3<f32> {
-        let hidden = self.embed(input_ids, token_type_ids);
-        self.embeddings_layer_norm.forward_3d(&hidden)
-    }
+        // self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
 
+        // Ok(CpuEncoderOutput {
+        //     last_hidden_state: hidden,
+        // })
+    }
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
@@ -413,11 +418,5 @@ impl CpuEncoder for CpuTransformerEncoder {
         Ok(hidden)
     }
 
-    fn num_layers(&self) -> usize {
-        self.layers.len()
-    }
-
-    fn hidden_size(&self) -> usize {
-        self.metadata.hidden_size
-    }
+    
 }

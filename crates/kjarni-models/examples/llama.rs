@@ -7,6 +7,7 @@ use kjarni_transformers::{Device, ModelType, WgpuContext};
 use std::io;
 use std::io::Write;
 use std::sync::Arc;
+use futures::{TryStreamExt, pin_mut};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -52,8 +53,8 @@ async fn main() -> anyhow::Result<()> {
     // io::stdout().flush().unwrap();
     //
     // let mut stream_gpu = generator_gpu.generate_stream(prompt, &config).await?;
-    // futures_util::pin_mut!(stream_gpu);
-    // while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
+    // futures::Stream::pin_mut!(stream_gpu);
+    // while let Some(token) = futures::Stream::TryStreamExt::try_next(&mut stream_gpu).await? {
     //     print!("{}", token.text);
     //     io::stdout().flush().unwrap();
     // }
@@ -93,16 +94,16 @@ async fn main() -> anyhow::Result<()> {
     // )?;
     let generator_cpu = DecoderGenerator::new(Arc::new(model_cpu))?;
     let mut stream_cpu = generator_cpu.generate_stream(prompt, &config, None).await?;
-    futures_util::pin_mut!(stream_cpu);
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_cpu).await? {
+    pin_mut!(stream_cpu);
+    while let Some(token) = TryStreamExt::try_next(&mut stream_cpu).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }
     println!();
     let generator_gpu = DecoderGenerator::new(Arc::new(model_gpu))?;
     let mut stream_gpu = generator_gpu.generate_stream(prompt, &config, None).await?;
-    futures_util::pin_mut!(stream_gpu);
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
+    pin_mut!(stream_gpu);
+    while let Some(token) = TryStreamExt::try_next(&mut stream_gpu).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }

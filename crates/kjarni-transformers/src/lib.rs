@@ -33,6 +33,13 @@ pub mod lm_head;
 pub mod execution;
 pub mod pipeline;
 pub mod stats;
+pub mod audio;
+
+pub use audio::{AudioConvFrontend, AudioPipeline, MelConfig,
+    AudioData, AudioLoaderConfig, 
+    load_audio, load_audio_bytes, load_audio_for_whisper,
+    create_silence, create_sine_wave,
+};
 
 // Re-export commonly used items
 pub use crate::{

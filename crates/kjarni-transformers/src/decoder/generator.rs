@@ -80,8 +80,10 @@ use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
 use crate::{Conversation, prelude::*};
 use anyhow::{Result, anyhow};
-use futures_core::stream::Stream;
-use futures_util::TryStreamExt;
+// use futures_core::stream::Stream;
+use futures::stream::{TryStreamExt, Stream};
+//use futures::stream::TryStreamExt
+//use futures::Stream::TryStreamExt;
 use log::{debug, info, trace};
 use ndarray::Array2;
 use std::sync::Arc;
@@ -293,13 +295,13 @@ impl DecoderGenerator {
     ///
     /// ```ignore
     /// # async fn example(generator: kjarni_transformers::decoder::prelude::DecoderGenerator) -> anyhow::Result<()> {
-    /// use futures_util::StreamExt;
+    /// use futures::StreamExt;
     /// use kjarni_transformers::common::GenerationConfig;
     /// use kjarni_transformers::common::CancellationToken;
     ///
     /// let (token, handle) = CancellationToken::new();
     /// let stream = generator.generate_stream("Once upon a time", &GenerationConfig::default(), Some(token)).await?;
-    /// futures_util::pin_mut!(stream);
+    /// futures::Stream::pin_mut!(stream);
     ///
     /// while let Some(token_result) = stream.next().await {
     ///     let token = token_result?;

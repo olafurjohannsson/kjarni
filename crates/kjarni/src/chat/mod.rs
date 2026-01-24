@@ -54,7 +54,7 @@
 //! # Streaming
 //!
 //! ```ignore
-//! use futures_util::StreamExt;
+//! use futures::StreamExt;
 //! use kjarni::chat::Chat;
 //!
 //! let chat = Chat::new("llama3.2-1b").await?;
@@ -187,7 +187,7 @@ mod chat_integration_tests {
     use crate::common::DownloadPolicy;
     use crate::chat::types::Role;
     use crate::generation::GenerationOverrides;
-    use futures_util::StreamExt;
+    use futures::StreamExt;
 
     async fn load_real_model() -> Chat {
         let model_name = ChatPreset::FAST.model; // "qwen2.5-0.5b-instruct"
@@ -380,7 +380,7 @@ fn test_tier_resolution() {
 mod integration {
     use super::*;
     use crate::common::DownloadPolicy;
-    use futures_util::StreamExt;
+    use futures::StreamExt;
 
     async fn load_test_model() -> Chat {
         // Use Qwen 0.5B for fast testing

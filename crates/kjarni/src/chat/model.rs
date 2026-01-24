@@ -4,22 +4,19 @@
 
 //! Core Chat implementation using Generator.
 
-use std::sync::Arc;
-
-use futures_util::StreamExt;
+use futures::{Stream, StreamExt};
 use tokio::sync::mpsc;
 
 use kjarni_transformers::{
-    ChatTemplate, Conversation, WgpuContext, models::ModelType, traits::Device,
+    ChatTemplate, Conversation, models::ModelType, traits::Device,
 };
 
-use crate::common::DownloadPolicy;
-use crate::generation::{GenerationOverrides, ResolvedGenerationConfig, resolve_generation_config};
+use crate::generation::{GenerationOverrides, ResolvedGenerationConfig};
 use crate::generator::{Generator, GeneratorBuilder};
 
 use super::builder::ChatBuilder;
 use super::conversation::ChatConversation;
-use super::types::{ChatError, ChatMode, ChatResult, History, Message, Role};
+use super::types::{ChatError, ChatMode, ChatResult, History, Role};
 use super::validation::validate_for_chat;
 
 /// High-level chat interface for conversational AI.
@@ -305,7 +302,7 @@ impl Chat {
     /// # Example
     ///
     /// ```ignore
-    /// use futures_util::StreamExt;
+    /// use futures::StreamExt;
     ///
     /// let mut stream = chat.stream("Tell me a story.").await?;
     /// while let Some(token) = stream.next().await {
@@ -315,7 +312,7 @@ impl Chat {
     pub async fn stream(
         &self,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
@@ -330,7 +327,7 @@ impl Chat {
         &self,
         history: &History,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         let mut conversation = self.history_to_conversation(history);
         conversation.push_user(message);
@@ -345,7 +342,7 @@ impl Chat {
         &self,
         message: &str,
         overrides: GenerationOverrides,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);
@@ -415,7 +412,7 @@ impl Chat {
         &self,
         prompt: String,
         runtime_overrides: GenerationOverrides,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         let inner_stream = self
             .generator
