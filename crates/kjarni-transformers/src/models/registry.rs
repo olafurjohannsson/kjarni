@@ -830,9 +830,9 @@ impl ModelType {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
                 paths: ModelPaths {
-                    weights_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/unitary/toxic-bert/resolve/main/config.json",
+                    weights_url: "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/olafuraron/toxic-bert-safetensors/resolve/main/config.json",
                     gguf_url: None,
                 },
                 description: "Toxic comment classifier. Detects: toxic, severe_toxic, obscene, threat, insult, identity_hate.",
