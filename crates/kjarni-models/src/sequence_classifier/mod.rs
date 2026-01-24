@@ -164,6 +164,11 @@ impl EncoderModelFactory for SequenceClassifier {
 // =============================================================================
 
 impl SequenceClassifier {
+
+    pub fn config(&self) -> &dyn ModelConfig {
+        self.config.as_ref()
+    }
+
     /// Create classifier from HuggingFace model registry.
     pub async fn from_registry(
         model_type: ModelType,
@@ -325,11 +330,13 @@ impl SequenceClassifier {
             gpu_output.last_hidden_state.to_ndarray_3d().await?
 
         } else {
+            let hidden_states = self.encoder_cpu_ops().ok_or_else(|| anyhow!("No CPU encoder available"))?
+                .embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
             // Forward through CPU encoder
             self.pipeline
                 .cpu_encoder()
                 .ok_or_else(|| anyhow!("No CPU encoder available"))?
-                .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
+                .forward(&hidden_states, &attention_mask)?
                 .last_hidden_state
         };
 
@@ -458,6 +465,16 @@ impl InferenceModel for SequenceClassifier {
 impl CpuEncoderOps for SequenceClassifier {
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline.cpu_encoder().expect("CPU encoder not available")
+    }
+    fn embed_tokens(
+            &self,
+            input_ids: &ndarray::Array2<u32>,
+            token_type_ids: Option<&ndarray::Array2<u32>>,
+            pos: usize,
+        ) -> Result<ndarray::Array3<f32>> {
+        self.pipeline
+            .embeddings()
+            .embed_cpu(input_ids, token_type_ids, pos)
     }
 }
 

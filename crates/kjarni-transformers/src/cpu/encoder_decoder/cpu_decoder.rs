@@ -275,23 +275,23 @@ impl Seq2SeqCPUDecoder {
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
         position_offset: usize,
     ) -> Result<DecoderOutput> {
-        println!("\n[DECODER DEBUG] Number of layers: {}", self.layers.len());
-        println!("[DECODER DEBUG] Input shape: {:?}", input_ids.dim());
-        println!(
-            "[DECODER DEBUG] Encoder hidden shape: {:?}",
-            encoder_hidden_states.dim()
-        );
-        
+        // println!("\n[DECODER DEBUG] Number of layers: {}", self.layers.len());
+        // println!("[DECODER DEBUG] Input shape: {:?}", input_ids.dim());
+        // println!(
+        //     "[DECODER DEBUG] Encoder hidden shape: {:?}",
+        //     encoder_hidden_states.dim()
+        // );
+
         // 1. Embeddings
         let mut hidden = self.embed(input_ids, position_offset);
-        if position_offset == 0 {
-            println!("\n--- RUST DECODER DEBUG ---");
-            // Slice the first 5 values of the embedding (before norm/pos)
-            println!(
-                "[2] Scaled Word Embedding (first 5): {:?}",
-                hidden.slice(s![0, 0, ..5])
-            );
-        }
+        // if position_offset == 0 {
+        //     println!("\n--- RUST DECODER DEBUG ---");
+        //     // Slice the first 5 values of the embedding (before norm/pos)
+        //     println!(
+        //         "[2] Scaled Word Embedding (first 5): {:?}",
+        //         hidden.slice(s![0, 0, ..5])
+        //     );
+        // }
         // 2. Apply position encoding (for sinusoidal - learned handled in embed)
         hidden = self.apply_position_encoding(hidden, position_offset)?;
 
@@ -328,10 +328,10 @@ impl Seq2SeqCPUDecoder {
             )?;
             let post_mean = hidden.mean().unwrap_or(0.0);
             hidden = new_hidden;
-            println!(
-                "[DECODER DEBUG] Layer {} | Pre-mean: {:.6} -> Post-mean: {:.6}",
-                i, pre_mean, post_mean
-            );
+            // println!(
+            //     "[DECODER DEBUG] Layer {} | Pre-mean: {:.6} -> Post-mean: {:.6}",
+            //     i, pre_mean, post_mean
+            // );
             new_self_attn_kvs.push(new_kv);
         }
 
@@ -339,12 +339,12 @@ impl Seq2SeqCPUDecoder {
         if let Some(norm) = &self.final_norm {
             hidden = norm.forward(&hidden);
         }
-        if position_offset == 0 {
-            println!(
-                "[4] Decoder Initial State (Pre-Layer 0) (first 10): {:?}",
-                hidden.slice(s![0, 0, ..10])
-            );
-        }
+        // if position_offset == 0 {
+        //     println!(
+        //         "[4] Decoder Initial State (Pre-Layer 0) (first 10): {:?}",
+        //         hidden.slice(s![0, 0, ..10])
+        //     );
+        // }
         Ok(DecoderOutput {
             last_hidden_state: hidden,
             new_self_attn_kv: new_self_attn_kvs,
@@ -522,6 +522,10 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
 
         // 2. Embed
         let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
+
+        // println!("=== DECODER EMBED ===");
+        // println!("Decoder input token: {:?}", decoder_input_ids);
+        // println!("Embed [0,0,:10]: {:?}", hidden.slice(s![0, 0, ..10]));
 
         // 3. Run all layers
         self.forward_layers2(

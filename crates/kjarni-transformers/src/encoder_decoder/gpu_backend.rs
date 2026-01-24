@@ -174,7 +174,10 @@ impl EncoderDecoderGenerationBackend for GpuBackend {
             .enumerate()
         {
             // The update command is recorded into the SAME command encoder
-            gpu_cache.update(encoder_cmd, i, &k, &v);
+            match gpu_cache.update(encoder_cmd, i, &k, &v) {
+                Ok(()) => {}
+                Err(e) => log::error!("Failed to update GPU cache: {:?}", e),
+            }
         }
         // gpu_cache.increment_len(1);
         // c) Project to logits

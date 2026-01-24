@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 kjarni = { path = "../kjarni" }
 anyhow = { workspace = true }
-futures-util = { workspace = true }
+futures = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }

@@ -31,8 +31,8 @@ rayon = { workspace = true }
 reqwest = { workspace = true }
 log = { workspace = true }
 ndarray-rand = { workspace = true }
-futures-util = { workspace = true }
-futures-core = { workspace = true }
+#futures-util = { workspace = true }
+#futures-core = { workspace = true }
 async-stream = { workspace = true }
 bytemuck = { workspace = true }
 wgpu = { workspace = true }

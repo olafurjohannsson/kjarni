@@ -5,6 +5,7 @@ use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::{Device, ModelType};
 use std::sync::Arc;
+use futures::{StreamExt, TryStreamExt, pin_mut};
 
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
@@ -65,25 +66,25 @@ like C++, Haskell, and Erlang.";
     // io::stdout().flush().unwrap();
     //
     // let mut stream_gpu = generator_gpu.generate_stream(formatted.as_str(), &config).await?;
-    // futures_util::pin_mut!(stream_gpu);
-    // while let Some(token) = futures_util::TryStreamExt::try_next(&mut stream_gpu).await? {
+    // futures::Stream::pin_mut!(stream_gpu);
+    // while let Some(token) = futures::Stream::TryStreamExt::try_next(&mut stream_gpu).await? {
     //     print!("{}", token.text);
     //     io::stdout().flush().unwrap();
     // }
     // let mut stream_gpu = generator_gpu.generate_stream(formatted.as_str(), &config).await?;
 
-    futures_util::pin_mut!(cpu_summary);
+    pin_mut!(cpu_summary);
     println!("\nCPU STREAMING TEST:");
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut cpu_summary).await? {
+    while let Some(token) = TryStreamExt::try_next(&mut cpu_summary).await? {
         print!("{}", token.text);
         io::stdout().flush().unwrap();
     }
 
     let gpu_generation_config = gpu_generator.model.get_default_generation_config();
     let gpu_summary = gpu_generator.generate_stream(article, Some(&gpu_generation_config));
-    futures_util::pin_mut!(gpu_summary);
+    pin_mut!(gpu_summary);
     println!("\nGPU STREAMING TEST: ");
-    while let Some(token) = futures_util::TryStreamExt::try_next(&mut gpu_summary).await? {
+    while let Some(token) = TryStreamExt::try_next(&mut gpu_summary).await? {
         print!("{}", token.text);
         std::io::stdout().flush().unwrap();
     }

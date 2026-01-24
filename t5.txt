@@ -1,0 +1,873 @@
+
+--- Full Generation ---
+
+=== STEP 0 ===
+Input tokens for this step: [Some(0)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=7.0401, text='Wie'
+  token_id=571, logit=5.7167, text='How'
+  token_id=3, logit=4.2341, text=''
+  token_id=2751, logit=4.1798, text='Was'
+  token_id=22984, logit=4.1631, text='Wann'
+Top candidates after beam search:
+  #0: token_id=2739, score=-0.6003, from_beam=0, text='Wie'
+  #1: token_id=571, score=-1.9237, from_beam=0, text='How'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+
+=== STEP 1 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=4.5847, text='old'
+  token_id=3, logit=4.1157, text=''
+  token_id=6575, logit=3.1643, text='lange'
+  token_id=28344, logit=3.0403, text='älter'
+  token_id=9223, logit=2.8832, text='groß'
+Top candidates after beam search:
+  #0: token_id=625, score=-1.9245, from_beam=0, text='old'
+  #1: token_id=3, score=-2.3934, from_beam=0, text=''
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+
+=== STEP 2 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=436, logit=2.7134, text='sind'
+  token_id=33, logit=1.1564, text='are'
+  token_id=3, logit=-1.4292, text=''
+  token_id=229, logit=-1.6140, text='ist'
+  token_id=49, logit=-1.6713, text='er'
+Top candidates after beam search:
+  #0: token_id=436, score=-2.1928, from_beam=0, text='sind'
+  #1: token_id=33, score=-3.7499, from_beam=0, text='are'
+Selected token for next step: [436]
+  Beam 0: token_id=436, text='sind'
+
+=== STEP 3 ===
+Input tokens for this step: [Some(436)]
+Top 5 RAW logits (before penalties):
+  token_id=292, logit=0.4785, text='Sie'
+  token_id=25, logit=-0.7443, text='you'
+  token_id=3, logit=-1.5235, text=''
+  token_id=680, logit=-3.5081, text='sie'
+  token_id=148, logit=-4.0551, text='You'
+Top candidates after beam search:
+  #0: token_id=292, score=-2.5974, from_beam=0, text='Sie'
+  #1: token_id=25, score=-3.8202, from_beam=0, text='you'
+Selected token for next step: [292]
+  Beam 0: token_id=292, text='Sie'
+
+=== STEP 4 ===
+Input tokens for this step: [Some(292)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=3.5848, text='?'
+  token_id=3, logit=-0.9959, text=''
+  token_id=6, logit=-2.4979, text=','
+  token_id=55, logit=-3.0848, text='!'
+  token_id=1, logit=-3.1450, text='</s>'
+Top candidates after beam search:
+  #0: token_id=58, score=-2.6212, from_beam=0, text='?'
+  #1: token_id=3, score=-7.2020, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+
+=== STEP 5 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=2.7400, text='</s>'
+  token_id=3, logit=-3.3271, text=''
+  token_id=2739, logit=-5.5836, text='Wie'
+  token_id=5, logit=-5.7804, text='.'
+  token_id=316, logit=-6.1298, text='Die'
+Top candidates after beam search:
+  #0: token_id=3, score=-3.7765, from_beam=0, text=''
+  #1: token_id=2739, score=-6.0330, from_beam=0, text='Wie'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 6 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=4.0555, text='-'
+  token_id=2, logit=2.5848, text='<unk>'
+  token_id=17499, logit=2.4998, text='Warum'
+  token_id=104, logit=2.1649, text='–'
+  token_id=30862, logit=1.4671, text='Können'
+Top candidates after beam search:
+  #0: token_id=18, score=-4.4486, from_beam=0, text='-'
+  #1: token_id=2, score=-5.9193, from_beam=0, text='<unk>'
+Selected token for next step: [18]
+  Beam 0: token_id=18, text='-'
+
+=== STEP 7 ===
+Input tokens for this step: [Some(18)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=3.0635, text='Wie'
+  token_id=3, logit=2.1229, text=''
+  token_id=571, logit=2.0547, text='How'
+  token_id=1, logit=1.6804, text='</s>'
+  token_id=22984, logit=1.5208, text='Wann'
+Top candidates after beam search:
+  #0: token_id=2739, score=-6.1986, from_beam=0, text='Wie'
+  #1: token_id=3, score=-7.1392, from_beam=0, text=''
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+
+=== STEP 8 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=5.0215, text='old'
+  token_id=3, logit=2.6915, text=''
+  token_id=6575, logit=1.6621, text='lange'
+  token_id=3525, logit=1.4353, text='Old'
+  token_id=28344, logit=1.0208, text='älter'
+Top candidates after beam search:
+  #0: token_id=625, score=-6.5777, from_beam=0, text='old'
+  #1: token_id=3, score=-8.9076, from_beam=0, text=''
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+
+=== STEP 9 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=436, logit=2.2550, text='sind'
+  token_id=58, logit=1.1686, text='?'
+  token_id=33, logit=1.0633, text='are'
+  token_id=229, logit=-0.9609, text='ist'
+  token_id=3, logit=-1.1732, text=''
+Top candidates after beam search:
+  #0: token_id=58, score=-7.5018, from_beam=0, text='?'
+  #1: token_id=33, score=-7.6070, from_beam=0, text='are'
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+
+=== STEP 10 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=2.2306, text='</s>'
+  token_id=3, logit=-0.5809, text=''
+  token_id=18, logit=-4.5858, text='-'
+  token_id=5, logit=-4.8611, text='.'
+  token_id=41, logit=-5.0539, text='('
+Top candidates after beam search:
+  #0: token_id=3, score=-7.6627, from_beam=0, text=''
+  #1: token_id=18, score=-11.6676, from_beam=0, text='-'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 11 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=1.6593, text='-'
+  token_id=104, logit=-4.5380, text='–'
+  token_id=2, logit=-5.2405, text='<unk>'
+  token_id=318, logit=-5.8899, text='—'
+  token_id=87, logit=-6.1621, text='/'
+Top candidates after beam search:
+  #0: token_id=104, score=-9.0310, from_beam=0, text='–'
+  #1: token_id=2, score=-9.7335, from_beam=0, text='<unk>'
+Selected token for next step: [104]
+  Beam 0: token_id=104, text='–'
+
+=== STEP 12 ===
+Input tokens for this step: [Some(104)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=4.7269, text='Wie'
+  token_id=587, logit=2.0874, text='wie'
+  token_id=571, logit=1.5676, text='How'
+  token_id=2751, logit=1.4827, text='Was'
+  token_id=1, logit=0.8275, text='</s>'
+Top candidates after beam search:
+  #0: token_id=2739, score=-9.2970, from_beam=0, text='Wie'
+  #1: token_id=587, score=-11.9365, from_beam=0, text='wie'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+
+=== STEP 13 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=5.1053, text='old'
+  token_id=1021, logit=-0.1394, text='young'
+  token_id=3, logit=-0.9310, text=''
+  token_id=307, logit=-1.4925, text='long'
+  token_id=2886, logit=-1.9009, text='fat'
+Top candidates after beam search:
+  #0: token_id=625, score=-9.3164, from_beam=0, text='old'
+  #1: token_id=1021, score=-14.5611, from_beam=0, text='young'
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+
+=== STEP 14 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.4626, text='?'
+  token_id=436, logit=-0.6147, text='sind'
+  token_id=33, logit=-0.6848, text='are'
+  token_id=55, logit=-2.7078, text='!'
+  token_id=19, logit=-2.8161, text='is'
+Top candidates after beam search:
+  #0: token_id=33, score=-9.9224, from_beam=0, text='are'
+  #1: token_id=55, score=-11.9454, from_beam=0, text='!'
+Selected token for next step: [33]
+  Beam 0: token_id=33, text='are'
+
+=== STEP 15 ===
+Input tokens for this step: [Some(33)]
+Top 5 RAW logits (before penalties):
+  token_id=25, logit=0.6204, text='you'
+  token_id=292, logit=-3.6232, text='Sie'
+  token_id=3, logit=-4.0887, text=''
+  token_id=148, logit=-5.1789, text='You'
+  token_id=58, logit=-6.0178, text='?'
+Top candidates after beam search:
+  #0: token_id=25, score=-9.9537, from_beam=0, text='you'
+  #1: token_id=292, score=-14.1974, from_beam=0, text='Sie'
+Selected token for next step: [25]
+  Beam 0: token_id=25, text='you'
+
+=== STEP 16 ===
+Input tokens for this step: [Some(25)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.4066, text='?'
+  token_id=3, logit=-2.2729, text=''
+  token_id=1, logit=-4.0572, text='</s>'
+  token_id=5, logit=-4.1115, text='.'
+  token_id=6, logit=-4.1722, text=','
+Top candidates after beam search:
+  #0: token_id=58, score=-9.9970, from_beam=0, text='?'
+  #1: token_id=3, score=-13.6764, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+
+=== STEP 17 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=1.2696, text='</s>'
+  token_id=3, logit=-0.2662, text=''
+  token_id=18, logit=-5.8077, text='-'
+  token_id=5, logit=-6.0702, text='.'
+  token_id=41, logit=-6.2680, text='('
+Top candidates after beam search:
+  #0: token_id=3, score=-10.0406, from_beam=0, text=''
+  #1: token_id=18, score=-15.5820, from_beam=0, text='-'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 18 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=1.0090, text='-'
+  token_id=104, logit=-2.1567, text='–'
+  token_id=318, logit=-5.1081, text='—'
+  token_id=2, logit=-6.1419, text='<unk>'
+  token_id=233, logit=-7.2598, text='...'
+Top candidates after beam search:
+  #0: token_id=318, score=-11.0374, from_beam=0, text='—'
+  #1: token_id=2, score=-12.0712, from_beam=0, text='<unk>'
+Selected token for next step: [318]
+  Beam 0: token_id=318, text='—'
+
+=== STEP 19 ===
+Input tokens for this step: [Some(318)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=4.2132, text='Wie'
+  token_id=587, logit=1.5201, text='wie'
+  token_id=571, logit=1.4644, text='How'
+  token_id=2751, logit=0.7584, text='Was'
+  token_id=1, logit=0.1552, text='</s>'
+Top candidates after beam search:
+  #0: token_id=2739, score=-11.3156, from_beam=0, text='Wie'
+  #1: token_id=587, score=-14.0087, from_beam=0, text='wie'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+
+=== STEP 20 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=4.8866, text='old'
+  token_id=1021, logit=-1.3676, text='young'
+  token_id=307, logit=-2.1759, text='long'
+  token_id=3, logit=-2.7395, text=''
+  token_id=5065, logit=-3.3504, text='tall'
+Top candidates after beam search:
+  #0: token_id=625, score=-11.3231, from_beam=0, text='old'
+  #1: token_id=1021, score=-17.5774, from_beam=0, text='young'
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+
+=== STEP 21 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=33, logit=1.2554, text='are'
+  token_id=58, logit=-0.4602, text='?'
+  token_id=436, logit=-2.1556, text='sind'
+  token_id=19, logit=-2.4180, text='is'
+  token_id=103, logit=-3.2144, text='do'
+Top candidates after beam search:
+  #0: token_id=19, score=-12.3673, from_beam=0, text='is'
+  #1: token_id=103, score=-13.1636, from_beam=0, text='do'
+Selected token for next step: [19]
+  Beam 0: token_id=19, text='is'
+
+=== STEP 22 ===
+Input tokens for this step: [Some(19)]
+Top 5 RAW logits (before penalties):
+  token_id=25, logit=-1.6019, text='you'
+  token_id=3, logit=-3.1883, text=''
+  token_id=39, logit=-3.9125, text='your'
+  token_id=34, logit=-4.3208, text='it'
+  token_id=58, logit=-4.6437, text='?'
+Top candidates after beam search:
+  #0: token_id=25, score=-12.9292, from_beam=0, text='you'
+  #1: token_id=3, score=-14.5156, from_beam=0, text=''
+Selected token for next step: [25]
+  Beam 0: token_id=25, text='you'
+
+=== STEP 23 ===
+Input tokens for this step: [Some(25)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.6248, text='?'
+  token_id=3, logit=-3.3682, text=''
+  token_id=55, logit=-4.4250, text='!'
+  token_id=6, logit=-4.6736, text=','
+  token_id=5, logit=-4.7022, text='.'
+Top candidates after beam search:
+  #0: token_id=58, score=-12.9477, from_beam=0, text='?'
+  #1: token_id=3, score=-17.9407, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+
+=== STEP 24 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=0.5143, text='</s>'
+  token_id=3, logit=0.3562, text=''
+  token_id=41, logit=-6.4351, text='('
+  token_id=5, logit=-6.4819, text='.'
+  token_id=6, logit=-6.6546, text=','
+Top candidates after beam search:
+  #0: token_id=41, score=-15.9418, from_beam=0, text='('
+  #1: token_id=5, score=-15.9886, from_beam=0, text='.'
+Selected token for next step: [41]
+  Beam 0: token_id=41, text='('
+
+=== STEP 25 ===
+Input tokens for this step: [Some(41)]
+Top 5 RAW logits (before penalties):
+  token_id=134, logit=3.6990, text='S'
+  token_id=518, logit=3.5224, text='W'
+  token_id=308, logit=3.3427, text='D'
+  token_id=517, logit=3.0782, text='G'
+  token_id=25241, logit=3.0659, text='siehe'
+Top candidates after beam search:
+  #0: token_id=134, score=-19.1199, from_beam=0, text='S'
+  #1: token_id=518, score=-19.2965, from_beam=0, text='W'
+Selected token for next step: [134]
+  Beam 0: token_id=134, text='S'
+
+=== STEP 26 ===
+Input tokens for this step: [Some(134)]
+Top 5 RAW logits (before penalties):
+  token_id=17, logit=4.0959, text='t'
+  token_id=127, logit=3.4580, text='or'
+  token_id=1123, logit=3.0721, text='we'
+  token_id=23, logit=2.9596, text='i'
+  token_id=15, logit=2.8329, text='e'
+Top candidates after beam search:
+  #0: token_id=17, score=-20.9914, from_beam=0, text='t'
+  #1: token_id=127, score=-21.6293, from_beam=0, text='or'
+Selected token for next step: [17]
+  Beam 0: token_id=17, text='t'
+
+=== STEP 27 ===
+Input tokens for this step: [Some(17)]
+Top 5 RAW logits (before penalties):
+  token_id=232, logit=3.0931, text='and'
+  token_id=9, logit=2.5893, text='a'
+  token_id=1092, logit=2.2469, text='ill'
+  token_id=3961, logit=2.1112, text='ock'
+  token_id=144, logit=1.7669, text='at'
+Top candidates after beam search:
+  #0: token_id=232, score=-22.4969, from_beam=0, text='and'
+  #1: token_id=9, score=-23.0007, from_beam=0, text='a'
+Selected token for next step: [232]
+  Beam 0: token_id=232, text='and'
+
+=== STEP 28 ===
+Input tokens for this step: [Some(232)]
+Top 5 RAW logits (before penalties):
+  token_id=986, logit=1.5703, text='ard'
+  token_id=53, logit=1.4573, text='ing'
+  token_id=61, logit=0.6449, text=')'
+  token_id=16, logit=0.2064, text='in'
+  token_id=1408, logit=0.0020, text='art'
+Top candidates after beam search:
+  #0: token_id=986, score=-24.1818, from_beam=0, text='ard'
+  #1: token_id=53, score=-24.2947, from_beam=0, text='ing'
+Selected token for next step: [986]
+  Beam 0: token_id=986, text='ard'
+
+=== STEP 29 ===
+Input tokens for this step: [Some(986)]
+Top 5 RAW logits (before penalties):
+  token_id=61, logit=4.0913, text=')'
+  token_id=10, logit=3.0051, text=':'
+  token_id=3, logit=2.9232, text=''
+  token_id=2968, logit=2.8917, text='German'
+  token_id=1566, logit=2.8603, text='English'
+Top candidates after beam search:
+  #0: token_id=61, score=-26.0330, from_beam=0, text=')'
+  #1: token_id=10, score=-27.1193, from_beam=0, text=':'
+Selected token for next step: [61]
+  Beam 0: token_id=61, text=')'
+
+=== STEP 30 ===
+Input tokens for this step: [Some(61)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=3.2938, text='</s>'
+  token_id=3, logit=0.2532, text=''
+  token_id=41, logit=-1.1350, text='('
+  token_id=10, logit=-2.0983, text=':'
+  token_id=784, logit=-3.2426, text='['
+Top candidates after beam search:
+  #0: token_id=1, score=-26.1344, from_beam=0, text='</s>'
+  #1: token_id=3, score=-29.1750, from_beam=0, text=''
+Result: Wie old sind Sie? - Wie old? – Wie old are you? — Wie old is you? (Standard)
+
+--- Streaming Generation ---
+Result: 
+CPU STREAMING TEST: 
+
+=== STEP 0 ===
+Input tokens for this step: [Some(0)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=7.0401, text='Wie'
+  token_id=571, logit=5.7167, text='How'
+  token_id=3, logit=4.2341, text=''
+  token_id=2751, logit=4.1798, text='Was'
+  token_id=22984, logit=4.1631, text='Wann'
+Top candidates after beam search:
+  #0: token_id=2739, score=-0.6003, from_beam=0, text='Wie'
+  #1: token_id=571, score=-1.9237, from_beam=0, text='How'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+Wie
+=== STEP 1 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=4.5847, text='old'
+  token_id=3, logit=4.1157, text=''
+  token_id=6575, logit=3.1643, text='lange'
+  token_id=28344, logit=3.0403, text='älter'
+  token_id=9223, logit=2.8832, text='groß'
+Top candidates after beam search:
+  #0: token_id=625, score=-1.9245, from_beam=0, text='old'
+  #1: token_id=3, score=-2.3934, from_beam=0, text=''
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+old
+=== STEP 2 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=436, logit=2.7134, text='sind'
+  token_id=33, logit=1.1564, text='are'
+  token_id=3, logit=-1.4292, text=''
+  token_id=229, logit=-1.6140, text='ist'
+  token_id=49, logit=-1.6713, text='er'
+Top candidates after beam search:
+  #0: token_id=436, score=-2.1928, from_beam=0, text='sind'
+  #1: token_id=33, score=-3.7499, from_beam=0, text='are'
+Selected token for next step: [436]
+  Beam 0: token_id=436, text='sind'
+sind
+=== STEP 3 ===
+Input tokens for this step: [Some(436)]
+Top 5 RAW logits (before penalties):
+  token_id=292, logit=0.4785, text='Sie'
+  token_id=25, logit=-0.7443, text='you'
+  token_id=3, logit=-1.5235, text=''
+  token_id=680, logit=-3.5081, text='sie'
+  token_id=148, logit=-4.0551, text='You'
+Top candidates after beam search:
+  #0: token_id=292, score=-2.5974, from_beam=0, text='Sie'
+  #1: token_id=25, score=-3.8202, from_beam=0, text='you'
+Selected token for next step: [292]
+  Beam 0: token_id=292, text='Sie'
+Sie
+=== STEP 4 ===
+Input tokens for this step: [Some(292)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=3.5848, text='?'
+  token_id=3, logit=-0.9959, text=''
+  token_id=6, logit=-2.4979, text=','
+  token_id=55, logit=-3.0848, text='!'
+  token_id=1, logit=-3.1450, text='</s>'
+Top candidates after beam search:
+  #0: token_id=58, score=-2.6212, from_beam=0, text='?'
+  #1: token_id=3, score=-7.2020, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+?
+=== STEP 5 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=2.7400, text='</s>'
+  token_id=3, logit=-3.3271, text=''
+  token_id=2739, logit=-5.5836, text='Wie'
+  token_id=5, logit=-5.7804, text='.'
+  token_id=316, logit=-6.1298, text='Die'
+Top candidates after beam search:
+  #0: token_id=3, score=-3.7765, from_beam=0, text=''
+  #1: token_id=2739, score=-6.0330, from_beam=0, text='Wie'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 6 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=4.0555, text='-'
+  token_id=2, logit=2.5848, text='<unk>'
+  token_id=17499, logit=2.4998, text='Warum'
+  token_id=104, logit=2.1649, text='–'
+  token_id=30862, logit=1.4671, text='Können'
+Top candidates after beam search:
+  #0: token_id=18, score=-4.4486, from_beam=0, text='-'
+  #1: token_id=2, score=-5.9193, from_beam=0, text='<unk>'
+Selected token for next step: [18]
+  Beam 0: token_id=18, text='-'
+-
+=== STEP 7 ===
+Input tokens for this step: [Some(18)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=3.0635, text='Wie'
+  token_id=3, logit=2.1229, text=''
+  token_id=571, logit=2.0547, text='How'
+  token_id=1, logit=1.6804, text='</s>'
+  token_id=22984, logit=1.5208, text='Wann'
+Top candidates after beam search:
+  #0: token_id=2739, score=-6.1986, from_beam=0, text='Wie'
+  #1: token_id=3, score=-7.1392, from_beam=0, text=''
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+Wie
+=== STEP 8 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=5.0215, text='old'
+  token_id=3, logit=2.6915, text=''
+  token_id=6575, logit=1.6621, text='lange'
+  token_id=3525, logit=1.4353, text='Old'
+  token_id=28344, logit=1.0208, text='älter'
+Top candidates after beam search:
+  #0: token_id=625, score=-6.5777, from_beam=0, text='old'
+  #1: token_id=3, score=-8.9076, from_beam=0, text=''
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+old
+=== STEP 9 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=436, logit=2.2550, text='sind'
+  token_id=58, logit=1.1686, text='?'
+  token_id=33, logit=1.0633, text='are'
+  token_id=229, logit=-0.9609, text='ist'
+  token_id=3, logit=-1.1732, text=''
+Top candidates after beam search:
+  #0: token_id=58, score=-7.5018, from_beam=0, text='?'
+  #1: token_id=33, score=-7.6070, from_beam=0, text='are'
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+?
+=== STEP 10 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=2.2306, text='</s>'
+  token_id=3, logit=-0.5809, text=''
+  token_id=18, logit=-4.5858, text='-'
+  token_id=5, logit=-4.8611, text='.'
+  token_id=41, logit=-5.0539, text='('
+Top candidates after beam search:
+  #0: token_id=3, score=-7.6627, from_beam=0, text=''
+  #1: token_id=18, score=-11.6676, from_beam=0, text='-'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 11 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=1.6593, text='-'
+  token_id=104, logit=-4.5380, text='–'
+  token_id=2, logit=-5.2405, text='<unk>'
+  token_id=318, logit=-5.8899, text='—'
+  token_id=87, logit=-6.1621, text='/'
+Top candidates after beam search:
+  #0: token_id=104, score=-9.0310, from_beam=0, text='–'
+  #1: token_id=2, score=-9.7335, from_beam=0, text='<unk>'
+Selected token for next step: [104]
+  Beam 0: token_id=104, text='–'
+–
+=== STEP 12 ===
+Input tokens for this step: [Some(104)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=4.7269, text='Wie'
+  token_id=587, logit=2.0874, text='wie'
+  token_id=571, logit=1.5676, text='How'
+  token_id=2751, logit=1.4827, text='Was'
+  token_id=1, logit=0.8275, text='</s>'
+Top candidates after beam search:
+  #0: token_id=2739, score=-9.2970, from_beam=0, text='Wie'
+  #1: token_id=587, score=-11.9365, from_beam=0, text='wie'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+Wie
+=== STEP 13 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=5.1053, text='old'
+  token_id=1021, logit=-0.1394, text='young'
+  token_id=3, logit=-0.9310, text=''
+  token_id=307, logit=-1.4925, text='long'
+  token_id=2886, logit=-1.9009, text='fat'
+Top candidates after beam search:
+  #0: token_id=625, score=-9.3164, from_beam=0, text='old'
+  #1: token_id=1021, score=-14.5611, from_beam=0, text='young'
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+old
+=== STEP 14 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.4626, text='?'
+  token_id=436, logit=-0.6147, text='sind'
+  token_id=33, logit=-0.6848, text='are'
+  token_id=55, logit=-2.7078, text='!'
+  token_id=19, logit=-2.8161, text='is'
+Top candidates after beam search:
+  #0: token_id=33, score=-9.9224, from_beam=0, text='are'
+  #1: token_id=55, score=-11.9454, from_beam=0, text='!'
+Selected token for next step: [33]
+  Beam 0: token_id=33, text='are'
+are
+=== STEP 15 ===
+Input tokens for this step: [Some(33)]
+Top 5 RAW logits (before penalties):
+  token_id=25, logit=0.6204, text='you'
+  token_id=292, logit=-3.6232, text='Sie'
+  token_id=3, logit=-4.0887, text=''
+  token_id=148, logit=-5.1789, text='You'
+  token_id=58, logit=-6.0178, text='?'
+Top candidates after beam search:
+  #0: token_id=25, score=-9.9537, from_beam=0, text='you'
+  #1: token_id=292, score=-14.1974, from_beam=0, text='Sie'
+Selected token for next step: [25]
+  Beam 0: token_id=25, text='you'
+you
+=== STEP 16 ===
+Input tokens for this step: [Some(25)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.4066, text='?'
+  token_id=3, logit=-2.2729, text=''
+  token_id=1, logit=-4.0572, text='</s>'
+  token_id=5, logit=-4.1115, text='.'
+  token_id=6, logit=-4.1722, text=','
+Top candidates after beam search:
+  #0: token_id=58, score=-9.9970, from_beam=0, text='?'
+  #1: token_id=3, score=-13.6764, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+?
+=== STEP 17 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=1.2696, text='</s>'
+  token_id=3, logit=-0.2662, text=''
+  token_id=18, logit=-5.8077, text='-'
+  token_id=5, logit=-6.0702, text='.'
+  token_id=41, logit=-6.2680, text='('
+Top candidates after beam search:
+  #0: token_id=3, score=-10.0406, from_beam=0, text=''
+  #1: token_id=18, score=-15.5820, from_beam=0, text='-'
+Selected token for next step: [3]
+  Beam 0: token_id=3, text=''
+
+=== STEP 18 ===
+Input tokens for this step: [Some(3)]
+Top 5 RAW logits (before penalties):
+  token_id=18, logit=1.0090, text='-'
+  token_id=104, logit=-2.1567, text='–'
+  token_id=318, logit=-5.1081, text='—'
+  token_id=2, logit=-6.1419, text='<unk>'
+  token_id=233, logit=-7.2598, text='...'
+Top candidates after beam search:
+  #0: token_id=318, score=-11.0374, from_beam=0, text='—'
+  #1: token_id=2, score=-12.0712, from_beam=0, text='<unk>'
+Selected token for next step: [318]
+  Beam 0: token_id=318, text='—'
+—
+=== STEP 19 ===
+Input tokens for this step: [Some(318)]
+Top 5 RAW logits (before penalties):
+  token_id=2739, logit=4.2132, text='Wie'
+  token_id=587, logit=1.5201, text='wie'
+  token_id=571, logit=1.4644, text='How'
+  token_id=2751, logit=0.7584, text='Was'
+  token_id=1, logit=0.1552, text='</s>'
+Top candidates after beam search:
+  #0: token_id=2739, score=-11.3156, from_beam=0, text='Wie'
+  #1: token_id=587, score=-14.0087, from_beam=0, text='wie'
+Selected token for next step: [2739]
+  Beam 0: token_id=2739, text='Wie'
+Wie
+=== STEP 20 ===
+Input tokens for this step: [Some(2739)]
+Top 5 RAW logits (before penalties):
+  token_id=625, logit=4.8866, text='old'
+  token_id=1021, logit=-1.3676, text='young'
+  token_id=307, logit=-2.1759, text='long'
+  token_id=3, logit=-2.7395, text=''
+  token_id=5065, logit=-3.3504, text='tall'
+Top candidates after beam search:
+  #0: token_id=625, score=-11.3231, from_beam=0, text='old'
+  #1: token_id=1021, score=-17.5774, from_beam=0, text='young'
+Selected token for next step: [625]
+  Beam 0: token_id=625, text='old'
+old
+=== STEP 21 ===
+Input tokens for this step: [Some(625)]
+Top 5 RAW logits (before penalties):
+  token_id=33, logit=1.2554, text='are'
+  token_id=58, logit=-0.4602, text='?'
+  token_id=436, logit=-2.1556, text='sind'
+  token_id=19, logit=-2.4180, text='is'
+  token_id=103, logit=-3.2144, text='do'
+Top candidates after beam search:
+  #0: token_id=19, score=-12.3673, from_beam=0, text='is'
+  #1: token_id=103, score=-13.1636, from_beam=0, text='do'
+Selected token for next step: [19]
+  Beam 0: token_id=19, text='is'
+is
+=== STEP 22 ===
+Input tokens for this step: [Some(19)]
+Top 5 RAW logits (before penalties):
+  token_id=25, logit=-1.6019, text='you'
+  token_id=3, logit=-3.1883, text=''
+  token_id=39, logit=-3.9125, text='your'
+  token_id=34, logit=-4.3208, text='it'
+  token_id=58, logit=-4.6437, text='?'
+Top candidates after beam search:
+  #0: token_id=25, score=-12.9292, from_beam=0, text='you'
+  #1: token_id=3, score=-14.5156, from_beam=0, text=''
+Selected token for next step: [25]
+  Beam 0: token_id=25, text='you'
+you
+=== STEP 23 ===
+Input tokens for this step: [Some(25)]
+Top 5 RAW logits (before penalties):
+  token_id=58, logit=1.6248, text='?'
+  token_id=3, logit=-3.3682, text=''
+  token_id=55, logit=-4.4250, text='!'
+  token_id=6, logit=-4.6736, text=','
+  token_id=5, logit=-4.7022, text='.'
+Top candidates after beam search:
+  #0: token_id=58, score=-12.9477, from_beam=0, text='?'
+  #1: token_id=3, score=-17.9407, from_beam=0, text=''
+Selected token for next step: [58]
+  Beam 0: token_id=58, text='?'
+?
+=== STEP 24 ===
+Input tokens for this step: [Some(58)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=0.5143, text='</s>'
+  token_id=3, logit=0.3562, text=''
+  token_id=41, logit=-6.4351, text='('
+  token_id=5, logit=-6.4819, text='.'
+  token_id=6, logit=-6.6546, text=','
+Top candidates after beam search:
+  #0: token_id=41, score=-15.9418, from_beam=0, text='('
+  #1: token_id=5, score=-15.9886, from_beam=0, text='.'
+Selected token for next step: [41]
+  Beam 0: token_id=41, text='('
+(
+=== STEP 25 ===
+Input tokens for this step: [Some(41)]
+Top 5 RAW logits (before penalties):
+  token_id=134, logit=3.6990, text='S'
+  token_id=518, logit=3.5224, text='W'
+  token_id=308, logit=3.3427, text='D'
+  token_id=517, logit=3.0782, text='G'
+  token_id=25241, logit=3.0659, text='siehe'
+Top candidates after beam search:
+  #0: token_id=134, score=-19.1199, from_beam=0, text='S'
+  #1: token_id=518, score=-19.2965, from_beam=0, text='W'
+Selected token for next step: [134]
+  Beam 0: token_id=134, text='S'
+S
+=== STEP 26 ===
+Input tokens for this step: [Some(134)]
+Top 5 RAW logits (before penalties):
+  token_id=17, logit=4.0959, text='t'
+  token_id=127, logit=3.4580, text='or'
+  token_id=1123, logit=3.0721, text='we'
+  token_id=23, logit=2.9596, text='i'
+  token_id=15, logit=2.8329, text='e'
+Top candidates after beam search:
+  #0: token_id=17, score=-20.9914, from_beam=0, text='t'
+  #1: token_id=127, score=-21.6293, from_beam=0, text='or'
+Selected token for next step: [17]
+  Beam 0: token_id=17, text='t'
+t
+=== STEP 27 ===
+Input tokens for this step: [Some(17)]
+Top 5 RAW logits (before penalties):
+  token_id=232, logit=3.0931, text='and'
+  token_id=9, logit=2.5893, text='a'
+  token_id=1092, logit=2.2469, text='ill'
+  token_id=3961, logit=2.1112, text='ock'
+  token_id=144, logit=1.7669, text='at'
+Top candidates after beam search:
+  #0: token_id=232, score=-22.4969, from_beam=0, text='and'
+  #1: token_id=9, score=-23.0007, from_beam=0, text='a'
+Selected token for next step: [232]
+  Beam 0: token_id=232, text='and'
+and
+=== STEP 28 ===
+Input tokens for this step: [Some(232)]
+Top 5 RAW logits (before penalties):
+  token_id=986, logit=1.5703, text='ard'
+  token_id=53, logit=1.4573, text='ing'
+  token_id=61, logit=0.6449, text=')'
+  token_id=16, logit=0.2064, text='in'
+  token_id=1408, logit=0.0020, text='art'
+Top candidates after beam search:
+  #0: token_id=986, score=-24.1818, from_beam=0, text='ard'
+  #1: token_id=53, score=-24.2947, from_beam=0, text='ing'
+Selected token for next step: [986]
+  Beam 0: token_id=986, text='ard'
+ard
+=== STEP 29 ===
+Input tokens for this step: [Some(986)]
+Top 5 RAW logits (before penalties):
+  token_id=61, logit=4.0913, text=')'
+  token_id=10, logit=3.0051, text=':'
+  token_id=3, logit=2.9232, text=''
+  token_id=2968, logit=2.8917, text='German'
+  token_id=1566, logit=2.8603, text='English'
+Top candidates after beam search:
+  #0: token_id=61, score=-26.0330, from_beam=0, text=')'
+  #1: token_id=10, score=-27.1193, from_beam=0, text=':'
+Selected token for next step: [61]
+  Beam 0: token_id=61, text=')'
+)
+=== STEP 30 ===
+Input tokens for this step: [Some(61)]
+Top 5 RAW logits (before penalties):
+  token_id=1, logit=3.2938, text='</s>'
+  token_id=3, logit=0.2532, text=''
+  token_id=41, logit=-1.1350, text='('
+  token_id=10, logit=-2.0983, text=':'
+  token_id=784, logit=-3.2426, text='['
+Top candidates after beam search:
+  #0: token_id=1, score=-26.1344, from_beam=0, text='</s>'
+  #1: token_id=3, score=-29.1750, from_beam=0, text=''
+)
+

@@ -9,7 +9,7 @@ use crate::encoder_decoder::traits::{
 };
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
-use futures_core::Stream;
+use futures::stream::Stream;
 use ndarray::{Array2, s};
 
 #[derive(Clone, Debug)]
@@ -144,7 +144,7 @@ impl<'a, B: EncoderDecoderGenerationBackend> BeamContext<'a, B> {
                 params.length_penalty,
                 params.early_stopping,
             ),
-            DecodingStrategy::Greedy | DecodingStrategy::Sample(_) => (1, 1.0, false),
+            DecodingStrategy::Greedy | DecodingStrategy::Sample(_) => (1, 1.0, true), // greedy has early stopping
         };
 
         let encoding = model
@@ -250,33 +250,7 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
     ctx: &mut BeamContext<'_, B>,
     step: usize,
 ) -> Result<bool> {
-    // --- DEBUG PRINT START ---
-    // log::info!("\n--- Step {} ---", step);
-    // for (i, beam) in ctx.beams.iter().enumerate() {
-    //     // Just like Python, skip decoding everything if it gets too slow,
-    //     // but for debugging this single sentence it's fine.
-    //     let text = ctx
-    //         .model
-    //         .tokenizer()
-    //         .decode(&beam.tokens, false)
-    //         .unwrap_or_default();
-    //     let safe_text = text.replace('\n', " ");
-
-    //     // Show last 5 tokens for ID comparison
-    //     let len = beam.tokens.len();
-    //     let start = if len > 5 { len - 5 } else { 0 };
-    //     let last_ids = &beam.tokens[start..];
-
-    //     log::info!(
-    //         "Beam {}: {:?} | Score: {:.4} | \"{}\"",
-    //         i,
-    //         last_ids,
-    //         beam.score,
-    //         safe_text
-    //     );
-    // }
-    // --- DEBUG PRINT END ---
-    // 1. Model Forward
+    // forward
     let logits_3d = ctx
         .backend
         .decode_step(
@@ -289,13 +263,13 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
 
     let mut logits_2d = logits_3d.slice(s![.., -1, ..]).to_owned();
 
+
     // In Rust, step starts at 0. Initial tokens len is 1 (Start Token).
     // So if step is 0, we are generating the 2nd token. Current len will be 2.
     // HF `cur_len` (Line 166) = input_ids.shape[-1] + 1.
     // This matches: step(0) + 2 = 2.
     let current_len = step + 2;
 
-    // 2. Logits Processing (Penalties)
     // Corresponds to HF `LogitsProcessor` call in `_beam_search` (Line 1581)
     logits_2d
         .outer_iter_mut()
@@ -341,14 +315,15 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
             }
         });
 
-    // 3. Candidate Generation
+    // candidates
     let all_candidates = find_best_beams_and_get_candidates(logits_2d, &ctx.beams, ctx.num_beams);
+
 
     let mut active_beams = Vec::with_capacity(ctx.num_beams);
     let mut active_tokens = Vec::with_capacity(ctx.num_beams);
     let mut active_reorder = Vec::with_capacity(ctx.num_beams);
 
-    // 4. Process Candidates (Matches HF `BeamSearchScorer.process`, Line 185 loop)
+    // Process Candidates (Matches HF `BeamSearchScorer.process`, Line 185 loop)
     for (global_rank, (beam, next_token, source_idx, _beam_token_rank)) in
         all_candidates.into_iter().enumerate()
     {
@@ -378,7 +353,7 @@ async fn beam_step<B: EncoderDecoderGenerationBackend>(
         }
     }
 
-    // 5. Check Completion (Matches HF `BeamSearchScorer.process`, Line 224)
+    // Check Completion (Matches HF `BeamSearchScorer.process`, Line 224)
     // We take the best score of the beams that are CONTINUING.
     let best_unfinished_score = active_beams
         .first()
@@ -480,6 +455,9 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     }
     log::info!("=================================\n");
     // --- DEBUG DUMP END ---
+
+    
+
     // Select the best hypothesis
     let best_beam = ctx
         .finished
@@ -511,6 +489,7 @@ pub async fn run_beam_search<B: EncoderDecoderGenerationBackend>(
     } else {
         &[]
     };
+    
 
     let text = model
         .tokenizer()
@@ -868,9 +847,12 @@ mod beam_tests {
 
     // Minimal mock implementation
     use crate::{
-        Device, LanguageModel, WgpuContext, cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel}, encoder_decoder::traits::{
+        Device, LanguageModel, WgpuContext,
+        cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel},
+        encoder_decoder::traits::{
             CpuEncoderDecoderOps, EncoderDecoderGenerationBackend, GpuEncoderDecoderOps,
-        }, traits::InferenceModel
+        },
+        traits::InferenceModel,
     };
     use async_trait::async_trait;
     // Mock Model
@@ -934,7 +916,7 @@ mod beam_tests {
         }
 
         fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn crate::cache::Cache>> {
-            Ok(Box::new(MockCache{ len: 0})) // Use MockCache from previous snippet or define here
+            Ok(Box::new(MockCache { len: 0 })) // Use MockCache from previous snippet or define here
         }
     }
 
@@ -1090,7 +1072,7 @@ mod beam_tests {
         let model = MockModel {
             vocab: 10,
             eos: eos_id,
-            decoder_start: 0
+            decoder_start: 0,
         };
         let backend = MockStepBackend;
         let config = GenerationConfig::default(); // default length penalty 1.0

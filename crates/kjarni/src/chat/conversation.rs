@@ -5,8 +5,9 @@
 //! Stateful conversation management.
 
 use super::model::Chat;
-use super::types::{ChatResult, History, Role};
+use super::types::{ChatResult, History};
 use crate::generation::GenerationOverrides;
+use futures::Stream;
 
 /// A stateful conversation that maintains history automatically.
 ///
@@ -133,7 +134,7 @@ impl<'a> ChatConversation<'a> {
     /// ```
     pub async fn stream_next(
         &self,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         // Format prompt from current history
         let conversation = self.chat.history_to_conversation(&self.history);
@@ -151,7 +152,7 @@ impl<'a> ChatConversation<'a> {
     pub async fn stream(
         &mut self,
         message: &str,
-    ) -> ChatResult<std::pin::Pin<Box<dyn futures_util::Stream<Item = ChatResult<String>> + Send>>>
+    ) -> ChatResult<std::pin::Pin<Box<dyn Stream<Item = ChatResult<String>> + Send>>>
     {
         self.push_user(message);
         self.stream_next().await

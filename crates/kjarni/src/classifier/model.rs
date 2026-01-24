@@ -467,9 +467,14 @@ impl Classifier {
 
     /// Get the model's CLI name (if from registry).
     pub fn model_name(&self) -> &str {
-        self.model_type
-            .map(|t| t.cli_name())
-            .unwrap_or(&self.model_id)
+        println!("model_type: {:?}", self.inner.config().model_type());
+        println!("model_id: {}", self.model_id);
+        println!("model_type cli_name: {}", self.model_type().map(|t| t.cli_name()).unwrap_or("custom"));
+        self.inner.config().model_type()
+                
+        // self.model_type
+        //     .map(|t| t.cli_name())
+        //     .unwrap_or(&self.model_id)
     }
 
     /// Get the device.

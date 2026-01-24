@@ -9,12 +9,11 @@ use async_trait::async_trait;
 
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
-    common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationDefaults},
-    cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
-    cpu::encoder_decoder::{
+    common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults},
+    cpu::{encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder}, encoder_decoder::{
         cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
         cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
-    },
+    }},
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
@@ -134,6 +133,7 @@ impl EncoderDecoderModelFactory for BartModel {
         tokenizer: Tokenizer,
         config: Arc<BartConfig>,
         generation_defaults: Option<HFGenerationDefaults>,
+        generation_config: HFGenerationConfig,
     ) -> Self {
         Self {
             pipeline,
@@ -192,6 +192,16 @@ impl InferenceModel for BartModel {
 impl CpuEncoderOps for BartModel {
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline.cpu_encoder().expect("CPU Encoder not active")
+    }
+    fn embed_tokens(
+            &self,
+            input_ids: &Array2<u32>,
+            token_type_ids: Option<&Array2<u32>>,
+            pos: usize,
+        ) -> Result<Array3<f32>> {
+        self.pipeline
+            .embeddings()
+            .embed_cpu(input_ids, token_type_ids, pos)
     }
 }
 

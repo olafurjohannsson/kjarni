@@ -169,6 +169,12 @@ pub enum ModelArchitecture {
     /// Original GPT-2 architecture. Included for compatibility but largely
     /// superseded by Llama-based models.
     GPT,
+
+    /// Whisper family for speech-to-text.
+    /// 
+    /// OpenAI's encoder-decoder model for automatic speech recognition (ASR).
+    /// Uses convolutional front-end and mel spectrogram inputs.
+    Whisper,
 }
 
 impl ModelArchitecture {
@@ -195,6 +201,7 @@ impl ModelArchitecture {
             Self::T5 => "T5",
             Self::Bart => "BART",
             Self::GPT => "GPT",
+            Self::Whisper => "Whisper (ASR)",
         }
     }
 
@@ -223,7 +230,7 @@ impl ModelArchitecture {
             Self::Bert | Self::NomicBert => "encoder",
 
             // Seq2Seq
-            Self::T5 | Self::Bart => "encoder-decoder",
+            Self::T5 | Self::Bart | Self::Whisper => "encoder-decoder",
         }
     }
 }
@@ -318,6 +325,11 @@ pub enum ModelTask {
     ///
     /// Models: NLLB, mBART, MarianMT, FLAN-T5
     Translation,
+
+    /// Speech-to-text transcription.
+    ///
+    /// Models: Whisper
+    SpeechToText,
 
     /// General text-to-text transformation.
     ///
@@ -416,6 +428,8 @@ pub enum ModelType {
     FlanT5Large,
     DistilBartCnn,
     BartLargeCnn,
+    WhisperSmall,
+    WhisperLargeV3,
 
     // Legacy
     DistilGpt2,
@@ -513,6 +527,12 @@ pub struct ModelInfo {
     pub params_millions: usize,
 }
 
+impl std::fmt::Display for ModelArchitecture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
 impl ModelType {
     pub fn architecture(&self) -> ModelArchitecture {
         self.info().architecture
@@ -573,6 +593,8 @@ impl ModelType {
             Self::FlanT5Large => "flan-t5-large",
             Self::DistilBartCnn => "distilbart-cnn", // Changed for consistency
             Self::BartLargeCnn => "bart-large-cnn",
+            Self::WhisperSmall => "whisper-small",
+            Self::WhisperLargeV3 => "whisper-large-v3",
 
             // Legacy
             Self::DistilGpt2 => "distilgpt2",
@@ -589,7 +611,9 @@ impl ModelType {
             ModelTask::Seq2Seq
             | ModelTask::Summarization
             | ModelTask::Translation
-            | ModelTask::TextToText => "Seq2Seq",
+            | ModelTask::TextToText
+            | ModelTask::SpeechToText
+            => "Seq2Seq",
 
             // Group 3: Vector Search
             ModelTask::Embedding => "Embedding",
@@ -1041,6 +1065,34 @@ impl ModelType {
                 description: "Distilled BART for fast summarization.",
                 size_mb: 1000,
                 params_millions: 306,
+            },
+
+            Self::WhisperSmall => ModelInfo {
+                architecture: ModelArchitecture::Whisper,
+                task: ModelTask::SpeechToText,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/openai/whisper-small/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/openai/whisper-small/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/openai/whisper-small/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "OpenAI Whisper small for speech-to-text transcription.",
+                size_mb: 1500,
+                params_millions: 244,
+            },
+
+            Self::WhisperLargeV3 => ModelInfo {
+                architecture: ModelArchitecture::Whisper,
+                task: ModelTask::SpeechToText,
+                paths: ModelPaths {
+                    weights_url: "https://huggingface.co/openai/whisper-large-v3/resolve/main/model.safetensors",
+                    tokenizer_url: "https://huggingface.co/openai/whisper-large-v3/resolve/main/tokenizer.json",
+                    config_url: "https://huggingface.co/openai/whisper-large-v3/resolve/main/config.json",
+                    gguf_url: None,
+                },
+                description: "OpenAI Whisper large v3 for high-accuracy speech-to-text transcription.",
+                size_mb: 7700,
+                params_millions: 1550,
             },
 
             Self::DistilGpt2 => ModelInfo {

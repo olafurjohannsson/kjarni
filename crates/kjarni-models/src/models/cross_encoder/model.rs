@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::ModelInput;
+use kjarni_transformers::traits::CpuTransformerCore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -216,9 +217,11 @@ impl CrossEncoder {
         }
 
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
-            ops.encoder()
-                .forward(&input_ids, &attention_mask, Some(&token_type_ids))?
-                .last_hidden_state
+            
+            let hidden_states = ops.embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
+
+            let encoder: &dyn CpuEncoder = ops.encoder();
+            encoder.forward(&hidden_states, &attention_mask)?.last_hidden_state
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
                 .context()
@@ -375,11 +378,22 @@ impl InferenceModel for CrossEncoder {
     }
 }
 
+
 impl CpuEncoderOps for CrossEncoder {
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline
             .cpu_encoder()
             .expect("CPU encoder not available")
+    }
+    fn embed_tokens(
+        &self,
+        input_ids: &ndarray::Array2<u32>,
+        token_type_ids: Option<&ndarray::Array2<u32>>,
+        pos: usize,
+    ) -> Result<ndarray::Array3<f32>> {
+        self.pipeline
+            .embeddings()
+            .embed_cpu(input_ids, token_type_ids, pos)
     }
 }
 

@@ -158,7 +158,8 @@ impl GgufLoader {
 
         // 3. Parse GGUF header using gguf-rs
         // Note: File pointer is at position 4, which is where version starts
-        let mut container = GGUFContainer::new(byte_order, Box::new(header_file));
+        let max_array_size = usize::MAX as u64; // No limit
+        let mut container = GGUFContainer::new(byte_order, Box::new(header_file), max_array_size);
         let model = container
             .decode()
             .map_err(|e| anyhow!("Failed to decode GGUF header: {}", e))?;

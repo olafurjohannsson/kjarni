@@ -1,14 +1,13 @@
 // Import Zip
-use crate::linear_layer::LinearLayer;
-use crate::utils::linear_algebra::{apply_attention_mask};
 use crate::activations::softmax_4d_inplace;
+use crate::linear_layer::LinearLayer;
+use crate::utils::linear_algebra::apply_attention_mask;
 use crate::utils::linear_algebra::{matmul_4d, matmul_4d_context, matmul_4d_decode};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4};
 
 // Standard large negative value for masking (avoids NaN in softmax)
 const MASK_VALUE: f32 = -1e9;
-
 
 // ============================================================================
 //  2. Decoder Cross-Attention
@@ -56,12 +55,25 @@ impl DecoderCrossAttention {
         &self,
         encoder_hidden_states: &Array3<f32>,
     ) -> Result<(Array4<f32>, Array4<f32>)> {
+        use ndarray::s;
+        // println!("=== PRECOMPUTE K/V DEBUG ===");
+        // println!(
+        //     "encoder_hidden_states [0,0,:5]: {:?}",
+        //     encoder_hidden_states.slice(s![0, 0, ..5])
+        // );
+
         let (batch, seq_len, _) = encoder_hidden_states.dim();
         let enc_2d = encoder_hidden_states
             .view()
             .into_shape_with_order((batch * seq_len, self.num_heads * self.head_dim))?;
 
         let k = self.k_proj.matmul(&enc_2d);
+        // println!("K after projection [0,:5]: {:?}", k.slice(s![0, ..5]));
+        // println!(
+        //     "K min/max: {:?} / {:?}",
+        //     k.iter().cloned().fold(f32::INFINITY, f32::min),
+        //     k.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+        // );
         let v = self.v_proj.matmul(&enc_2d);
 
         // K: Transpose to [B, H, D, S] for efficient MatMul with Q
@@ -88,7 +100,20 @@ impl DecoderCrossAttention {
         encoder_v: &Array4<f32>,
         attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
+        use ndarray::s;
         let (batch, seq_len, _) = hidden_states.dim();
+
+        // println!("=== CROSS-ATTN DEBUG ===");
+        // println!("hidden_states shape: {:?}", hidden_states.dim());
+        // println!("encoder_k_t shape: {:?}", encoder_k_t.dim());
+        // println!("encoder_v shape: {:?}", encoder_v.dim());
+        // if let Some(m) = attention_mask {
+        //     println!("attention_mask shape: {:?}", m.dim());
+        //     println!(
+        //         "attention_mask [0,:5]: {:?}",
+        //         m.slice(s![0, ..5.min(m.dim().1)])
+        //     );
+        // }
 
         // Project Q from Decoder Hidden States
         let hidden_2d = hidden_states
@@ -100,6 +125,8 @@ impl DecoderCrossAttention {
             .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3])
             .to_owned();
+        // println!("q_heads shape: {:?}", q_heads.dim());
+        // println!("q_heads [0,0,0,:5]: {:?}", q_heads.slice(s![0, 0, 0, ..5]));
 
         // Scores
         let mut scores = if seq_len == 1 {
@@ -108,14 +135,40 @@ impl DecoderCrossAttention {
             matmul_4d(&q_heads, encoder_k_t)
         };
         if self.scale_qk {
+            // println!("scores BEFORE scaling: {:?}", scores);
             scores.mapv_inplace(|x| x * self.scale_factor);
+            // println!("scores AFTER scaling: {:?}", scores);
         }
+
+        // println!("scores shape: {:?}", scores.dim());
+        // println!(
+        //     "scores BEFORE mask [0,0,0,:5]: {:?}",
+        //     scores.slice(s![0, 0, 0, ..5.min(scores.dim().3)])
+        // );
+        // println!(
+        //     "scores min/max: {:?} / {:?}",
+        //     scores.iter().cloned().fold(f32::INFINITY, f32::min),
+        //     scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+        // );
+
         // Apply Padding Mask (Using safe Zip broadcasting)
         if let Some(mask) = attention_mask {
             scores = apply_attention_mask(scores, mask);
+            // println!(
+            //     "scores AFTER mask [0,0,0,:5]: {:?}",
+            //     scores.slice(s![0, 0, 0, ..5.min(scores.dim().3)])
+            // );
         }
 
         softmax_4d_inplace(&mut scores);
+        // println!(
+        //     "attn_weights [0,0,0,:5]: {:?}",
+        //     scores.slice(s![0, 0, 0, ..5.min(scores.dim().3)])
+        // );
+        // println!(
+        //     "attn_weights sum (should be ~1): {:?}",
+        //     scores.slice(s![0, 0, 0, ..]).sum()
+        // );
 
         // Context
         let context = if seq_len == 1 {
@@ -132,7 +185,8 @@ impl DecoderCrossAttention {
             .to_owned();
 
         let output = self.o_proj.matmul(&context_flat.view());
-        let output_3d = output.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?;
+        let output_3d =
+            output.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?;
 
         Ok(output_3d)
     }
@@ -142,11 +196,16 @@ impl DecoderCrossAttention {
 mod cross_attention_tests {
     use super::*;
     use crate::linear_layer::LinearLayer;
-    use ndarray::{Array1, Array2, Array3, Array4, s};
     use anyhow::Result;
+    use ndarray::{Array1, Array2, Array3, Array4, s};
 
     /// Helper to create LinearLayer from weight and bias vecs
-    fn load_linear(out_features: usize, in_features: usize, weight_data: Vec<f32>, bias_data: Vec<f32>) -> LinearLayer {
+    fn load_linear(
+        out_features: usize,
+        in_features: usize,
+        weight_data: Vec<f32>,
+        bias_data: Vec<f32>,
+    ) -> LinearLayer {
         let weight = Array2::from_shape_vec((out_features, in_features), weight_data).unwrap();
         let bias = Array1::from_vec(bias_data);
         LinearLayer::new_f32(weight, Some(bias))
@@ -182,10 +241,30 @@ mod cross_attention_tests {
         ];
         let cross_attn_o_bias: Vec<f32> = vec![0.010000, 0.010000, 0.010000, 0.010000];
 
-        let q = load_linear(hidden_size, hidden_size, cross_attn_q_weight, cross_attn_q_bias);
-        let k = load_linear(hidden_size, hidden_size, cross_attn_k_weight, cross_attn_k_bias);
-        let v = load_linear(hidden_size, hidden_size, cross_attn_v_weight, cross_attn_v_bias);
-        let o = load_linear(hidden_size, hidden_size, cross_attn_o_weight, cross_attn_o_bias);
+        let q = load_linear(
+            hidden_size,
+            hidden_size,
+            cross_attn_q_weight,
+            cross_attn_q_bias,
+        );
+        let k = load_linear(
+            hidden_size,
+            hidden_size,
+            cross_attn_k_weight,
+            cross_attn_k_bias,
+        );
+        let v = load_linear(
+            hidden_size,
+            hidden_size,
+            cross_attn_v_weight,
+            cross_attn_v_bias,
+        );
+        let o = load_linear(
+            hidden_size,
+            hidden_size,
+            cross_attn_o_weight,
+            cross_attn_o_bias,
+        );
 
         DecoderCrossAttention::new(hidden_size, num_heads, q, k, v, o)
     }
@@ -222,7 +301,11 @@ mod cross_attention_tests {
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
         println!("Test 1 (Basic, no mask) Max Diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Basic cross-attention mismatch. Max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "Basic cross-attention mismatch. Max diff: {}",
+            max_diff
+        );
 
         Ok(())
     }
@@ -261,7 +344,11 @@ mod cross_attention_tests {
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
         println!("Test 2 (With mask) Max Diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Cross-attention with mask mismatch. Max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "Cross-attention with mask mismatch. Max diff: {}",
+            max_diff
+        );
 
         Ok(())
     }
@@ -293,7 +380,7 @@ mod cross_attention_tests {
             0.866000, 1.050000, 1.162000, 1.410000, 1.458000, 1.770000, 1.234000, 1.418000,
             1.658000, 1.906000, 2.082000, 2.394000,
         ];
-        
+
         // test3_v_cache - Shape: [1, 2, 3, 2]
         let test3_v_cache: Vec<f32> = vec![
             1.602000, 1.786000, 2.154000, 2.402000, 2.706000, 3.018000, 1.970000, 2.154000,
@@ -305,7 +392,11 @@ mod cross_attention_tests {
         let v_diff = (&v_cache - &golden_v).mapv(|x| x.abs());
         let max_v_diff = v_diff.fold(0.0f32, |a, &b| a.max(b));
         println!("Test 3 V cache Max Diff: {:.6}", max_v_diff);
-        assert!(max_v_diff < 1e-4, "V cache mismatch. Max diff: {}", max_v_diff);
+        assert!(
+            max_v_diff < 1e-4,
+            "V cache mismatch. Max diff: {}",
+            max_v_diff
+        );
 
         // K cache is transposed [B, H, D, S] in Rust vs [B, H, S, D] in Python
         // Need to transpose for comparison or compare element-wise
@@ -314,7 +405,11 @@ mod cross_attention_tests {
         let k_diff = (&k_cache - &golden_k_bhds).mapv(|x| x.abs());
         let max_k_diff = k_diff.fold(0.0f32, |a, &b| a.max(b));
         println!("Test 3 K cache Max Diff: {:.6}", max_k_diff);
-        assert!(max_k_diff < 1e-4, "K cache mismatch. Max diff: {}", max_k_diff);
+        assert!(
+            max_k_diff < 1e-4,
+            "K cache mismatch. Max diff: {}",
+            max_k_diff
+        );
 
         // Verify output matches non-cached path
         let output_cached = attn.forward(&decoder_hidden, &k_cache, &v_cache, None)?;
@@ -327,7 +422,11 @@ mod cross_attention_tests {
         let diff = (&output_cached - &golden_output).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
         println!("Test 3 (Precomputed K/V) Output Max Diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Precomputed K/V output mismatch. Max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "Precomputed K/V output mismatch. Max diff: {}",
+            max_diff
+        );
 
         Ok(())
     }
@@ -346,9 +445,8 @@ mod cross_attention_tests {
             1.800000, 1.900000, 2.000000, 2.100000, 2.200000, 2.300000, 2.400000, 2.500000,
             2.600000, 2.700000, 2.800000, 2.900000, 3.000000, 3.100000, 3.200000, 3.300000,
         ];
-        let test4_cross_mask: Vec<f32> = vec![
-            1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000,
-        ];
+        let test4_cross_mask: Vec<f32> =
+            vec![1.000000, 1.000000, 1.000000, 1.000000, 1.000000, 0.000000];
 
         let decoder_hidden = Array3::from_shape_vec((2, 2, 4), test4_decoder_hidden)?;
         let encoder_hidden = Array3::from_shape_vec((2, 3, 4), test4_encoder_hidden)?;
@@ -367,7 +465,11 @@ mod cross_attention_tests {
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
         println!("Test 4 (Batched with masks) Max Diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Batched cross-attention mismatch. Max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "Batched cross-attention mismatch. Max diff: {}",
+            max_diff
+        );
 
         Ok(())
     }
@@ -396,7 +498,11 @@ mod cross_attention_tests {
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
         println!("Test 5 (Single token decode) Max Diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Single token decode mismatch. Max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "Single token decode mismatch. Max diff: {}",
+            max_diff
+        );
 
         Ok(())
     }
@@ -431,7 +537,11 @@ mod cross_attention_tests {
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
         println!("Mask effect - Output diff: {:.6}", max_diff);
-        assert!(max_diff > 0.1, "Mask should change output! Diff was only {}", max_diff);
+        assert!(
+            max_diff > 0.1,
+            "Mask should change output! Diff was only {}",
+            max_diff
+        );
 
         Ok(())
     }

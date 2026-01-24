@@ -267,24 +267,6 @@ pub trait CpuDecoder: Send + Sync {
         )?;
         self.final_norm(&output)
     }
-
-    // fn forward(
-    //     &self,
-    //     input: ModelInput<'_>,
-    //     attention_mask: &Array2<f32>,
-    //     position_offset: usize,
-    //     cache: Option<&mut dyn Cache>,
-    // ) -> Result<Array3<f32>> {
-    //     let hidden = self.embed_and_normalize(input, position_offset)?;
-    //     self.forward_layers(
-    //         &hidden,
-    //         attention_mask,
-    //         position_offset,
-    //         cache,
-    //         0,
-    //         self.num_layers(),
-    //     )
-    // }
 }
 
 // ============================================================================

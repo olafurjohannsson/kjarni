@@ -12,6 +12,16 @@ namespace Kjarni.Tests
     {
         static void Main(string[] args)
         {
+            using var classifier = new Classifier("distilbert-sentiment");
+            var result = classifier.Classify("I love kjarni");
+
+            foreach (var (label, score) in result.AllScores)
+            {
+                Console.WriteLine($"{label}: {score:F8}");
+            }
+
+            return;
+
             if (args.Length > 0 && args[0] == "benchmark")
             {
                 EmbedderBenchmark.Run();
@@ -44,7 +54,7 @@ namespace Kjarni.Tests
                 TestIndexerCreation();
                 TestCancelToken();
                 TestIndexInfo(indexPath);
-                
+
                 var indexPath2 = TestIndexCreate(tempDir);
                 TestIndexAdd(indexPath2, tempDir);
                 TestIndexDelete(indexPath2);
@@ -246,7 +256,7 @@ This is document number {i} in the test corpus.";
 
             var version = Kjarni.GetVersion();
             Console.WriteLine($"Kjarni version: {version}");
-            
+
             if (string.IsNullOrEmpty(version))
                 throw new Exception("Version should not be empty");
 

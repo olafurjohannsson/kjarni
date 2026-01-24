@@ -165,6 +165,7 @@ mod bart_golden_test_encoder {
         let input_ids_vec = vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
         let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
         let hidden = encoder.embed_and_normalize(&input_ids, None);
+        
 
         Ok((encoder, hidden))
     }

@@ -181,7 +181,7 @@ pub enum Commands {
         input: Vec<String>,
 
         /// Model name from registry
-        #[arg(short, long, default_value = "minilm-l6-v2-cross-encoder")]
+        #[arg(short, long, default_value = "distilbert-sentiment")]
         model: String,
 
         /// Load model from local path instead of registry

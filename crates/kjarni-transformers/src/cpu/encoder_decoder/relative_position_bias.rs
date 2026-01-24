@@ -100,7 +100,7 @@ impl T5RelativePositionBias {
         let mut num_buckets = self.num_buckets as i32; // Local mutable copy
         let max_distance = self.max_distance as i32;
 
-        let mut n = -relative_position; 
+        let mut n = -relative_position;
         let mut ret = 0;
 
         if self.is_bidirectional {
@@ -110,7 +110,8 @@ impl T5RelativePositionBias {
             }
             n = n.abs();
         } else {
-            n = (-n).max(0);
+            // n = (-n).max(0);
+            n = n.max(0);
         }
 
         let max_exact = num_buckets / 2;
@@ -123,7 +124,8 @@ impl T5RelativePositionBias {
             let max_exact_float = max_exact as f32;
             let max_dist_float = max_distance as f32;
 
-            let log_ratio = (n_float / max_exact_float).ln() / (max_dist_float / max_exact_float).ln();
+            let log_ratio =
+                (n_float / max_exact_float).ln() / (max_dist_float / max_exact_float).ln();
             let bucket = max_exact_float + (log_ratio * (num_buckets - max_exact) as f32);
 
             bucket.min((num_buckets - 1) as f32) as i32
@@ -358,6 +360,45 @@ mod t5_bias_tests {
                 k
             );
         }
+
+        Ok(())
+    }
+    #[test]
+    fn test_decoder_unidirectional() -> Result<()> {
+        let buckets = 32;
+        let max_dist = 128;
+
+        let mut weights_map = HashMap::new();
+        let mut shapes = HashMap::new();
+        let debug_table: Vec<f32> = (0..32 * 2).map(|i| (i / 2) as f32).collect();
+
+        weights_map.insert(
+            "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight".into(),
+            debug_table,
+        );
+        shapes.insert(
+            "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight".into(),
+            vec![32, 2],
+        );
+        let (mw, _tmp) = create_model_weights(weights_map, shapes)?;
+
+        // UNIDIRECTIONAL (decoder)
+        let bias_model = T5RelativePositionBias::new(&mw, "decoder", false, buckets, max_dist)?;
+
+        // For decoder: query at position 5, keys at positions 0-5
+        // rel_pos = k - q, so for k=0, q=5: rel_pos = -5
+        // Expected bucket for distance 5 should be 5 (not 0)
+        let result = bias_model.compute(6, 6)?;
+
+        // Check position [q=5, k=0] - this is 5 positions back
+        let bucket_val = result[[0, 0, 5, 0]] as usize;
+        println!("Bucket for k=0, q=5: {}", bucket_val);
+
+        // Should be 5 (or some non-zero bucket), not 0
+        assert!(
+            bucket_val > 0,
+            "Decoder bucket should not be 0 for past positions"
+        );
 
         Ok(())
     }

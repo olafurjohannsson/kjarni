@@ -383,6 +383,16 @@ impl CpuEncoderOps for SentenceEncoder {
             .cpu_encoder()
             .expect("CPU encoder not available")
     }
+    fn embed_tokens(
+            &self,
+            input_ids: &ndarray::Array2<u32>,
+            token_type_ids: Option<&ndarray::Array2<u32>>,
+            pos: usize,
+        ) -> Result<ndarray::Array3<f32>> {
+        self.pipeline
+            .embeddings()
+            .embed_cpu(input_ids, token_type_ids, pos)
+    }
 }
 
 impl GpuEncoderOps for SentenceEncoder {

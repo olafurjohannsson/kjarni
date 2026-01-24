@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use futures_util::StreamExt;
+use futures::{StreamExt, pin_mut};
 
 use kjarni::{
     models::{Gpt2Model, LlamaModel}, registry, DecoderGenerator, DecoderLanguageModel, DecodingStrategy,
@@ -41,13 +41,13 @@ pub async fn run(
         .ok_or_else(|| anyhow!(model_not_found_error(model, Some("decoder"))))?;
 
     if model_type.architecture() != ModelArchitecture::GPT
-        || model_type.architecture() != ModelArchitecture::Llama
-        || model_type.architecture() != ModelArchitecture::Mistral
-        || model_type.architecture() != ModelArchitecture::Qwen2
+        && model_type.architecture() != ModelArchitecture::Llama
+        && model_type.architecture() != ModelArchitecture::Mistral
+        && model_type.architecture() != ModelArchitecture::Qwen2
     {
         return Err(anyhow!(
-            "Model '{}' is not a decoder. Use a decoder model for generation.",
-            model
+            "Model '{}' is not a decoder. Use a decoder model for generation. Detected architecture: {:?}",
+            model, model_type.architecture()
         ));
     }
 
@@ -111,7 +111,7 @@ pub async fn run(
         let stream = generator
             .generate_stream(&prompt_text, &config, None)
             .await?;
-        futures_util::pin_mut!(stream);
+        pin_mut!(stream);
 
         let mut stdout = io::stdout();
         let mut generated_any = false;

@@ -76,6 +76,17 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
             });
         }
 
+        ModelArchitecture::Whisper => {
+            return Err(ChatError::IncompatibleModel {
+                model: cli_name.to_string(),
+                reason: format!(
+                    "Model architecture '{}' is designed for speech-to-text transcription. \
+                     Use a SpeechToText model instead.",
+                    info.architecture.display_name()
+                ),
+            });
+        }
+
         // Encoder-decoders could theoretically work but are designed for different tasks
         ModelArchitecture::T5 | ModelArchitecture::Bart => {
             return Err(ChatError::IncompatibleModel {
@@ -123,6 +134,7 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
         ModelTask::Seq2Seq
         | ModelTask::Summarization
         | ModelTask::Translation
+        | ModelTask::SpeechToText
         | ModelTask::TextToText => Err(ChatError::IncompatibleModel {
             model: cli_name.to_string(),
             reason: "Model is designed for seq2seq tasks like translation or summarization."
