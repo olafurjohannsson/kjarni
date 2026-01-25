@@ -1,6 +1,10 @@
 use core::panic;
 
-use crate::cache::{Cache, CpuBeamKVCache};
+use crate::{
+    cache::{Cache, CpuBeamKVCache},
+    cpu::encoder_decoder::Seq2SeqCPUEncoder,
+    models::base::ModelInput,
+};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
@@ -48,47 +52,50 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         // Encoder padding mask
         let attention_mask = Array2::ones(input_ids.dim());
 
-        let hidden_states = encoder_ops
-            .embed_tokens(&input_ids, None, 0)?;
+        let encoder = encoder_ops.encoder();
+        let seq2seq_encoder = encoder
+            .as_any()
+            .downcast_ref::<Seq2SeqCPUEncoder>()
+            .unwrap();
+    // Step 1: embed_tokens
+    let step1 = encoder_ops.embed_tokens(&input_ids, None, 0)?;
+    println!("NEW step1 embed_tokens [0,0,:5]: {:?}", step1.slice(ndarray::s![0, 0, ..5]));
 
-        let encoder_output = encoder_ops
-            .encoder()
-            .forward(&hidden_states, &attention_mask)?
-            .last_hidden_state;
+    // Step 2: embed_norm
+    let step2 = encoder_ops.encoder().embed_norm(&step1)?;
+    println!("NEW step2 embed_norm [0,0,:5]: {:?}", step2.slice(ndarray::s![0, 0, ..5]));
 
-        let normed = encoder_ops.encoder().final_norm(&encoder_output)?;
-        // println!("=== ENCODER DEBUG ===");
-        // println!("Encoder shape: {:?}", normed.dim());
-        // println!(
-        //     "Encoder [0,0,:10]: {:?}",
-        //     normed.slice(ndarray::s![0, 0, ..10])
-        // );
-        // println!("Encoder mean: {:?}", normed.mean());
-        // let final_state = if num_beams > 1 {
-        //     seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?
+    // Step 3: forward_layers
+    let step3 = encoder_ops.encoder().forward_layers(&step2, &attention_mask, 0, encoder_ops.encoder().num_layers())?;
+    println!("NEW step3 forward_layers [0,0,:5]: {:?}", step3.slice(ndarray::s![0, 0, ..5]));
+
+    // Step 4: final_norm
+    let step4 = encoder_ops.encoder().final_norm(&step3)?;
+    println!("NEW step4 final_norm [0,0,:5]: {:?}", step4.slice(ndarray::s![0, 0, ..5]));
+
+    panic!("NEW FOLDER DEBUG STOP");
+
+        unimplemented!()
+        // let (final_state, final_mask) = if num_beams > 1 {
+        //     let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
+        //     let m = attention_mask
+        //         .broadcast((num_beams, tokens.len()))
+        //         .ok_or_else(|| anyhow!("Mask broadcast failed"))?
+        //         .to_owned();
+        //     (s, m)
         // } else {
-        //     encoder_output
+        //     (encoder_output, attention_mask)
         // };
-        let (final_state, final_mask) = if num_beams > 1 {
-            let s = seq2seq_ops.broadcast_encoder_states(&normed, num_beams)?;
-            let m = attention_mask
-                .broadcast((num_beams, tokens.len()))
-                .ok_or_else(|| anyhow!("Mask broadcast failed"))?
-                .to_owned();
-            (s, m)
-        } else {
-            (normed, attention_mask)
-        };
 
-        let cross_cache = seq2seq_ops
-            .decoder()
-            .precompute_cross_attention_kv(&final_state)?;
+        // let cross_cache = seq2seq_ops
+        //     .decoder()
+        //     .precompute_cross_attention_kv(&final_state)?;
 
-        Ok(CpuSeq2SeqState::EncoderState {
-            hidden_states: final_state,
-            cross_attention_kv_cache: cross_cache,
-            encoder_padding_mask: final_mask,
-        })
+        // Ok(CpuSeq2SeqState::EncoderState {
+        //     hidden_states: final_state,
+        //     cross_attention_kv_cache: cross_cache,
+        //     encoder_padding_mask: final_mask,
+        // })
     }
 
     async fn decode_step(
@@ -140,7 +147,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         )?;
 
         let hidden = &decoder_output.last_hidden_state;
-    
+
         // println!("Decoder hidden state shape: {:?}", hidden.dim());
         // println!("Decoder hidden state [0,0,:10]: {:?}", hidden.slice(ndarray::s![0, 0, ..10]));
 
@@ -162,14 +169,11 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
 
         // println!("Logits shape: {:?}", logits.dim());
 
-
         let last_logits = logits.slice(ndarray::s![0, -1, ..]);
         let mut indexed: Vec<(usize, f32)> = last_logits.iter().cloned().enumerate().collect();
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         // println!("Top 5 token IDs: {:?}", indexed[..5].iter().map(|(i, _)| i).collect::<Vec<_>>());
         // println!("Top 5 logits: {:?}", indexed[..5].iter().map(|(_, v)| v).collect::<Vec<_>>());
-
-
 
         Ok(logits)
     }

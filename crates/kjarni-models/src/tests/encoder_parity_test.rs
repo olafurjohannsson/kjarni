@@ -297,12 +297,13 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         println!("[PASS] {}\n", name);
     }
 
+    let pool = ctx.get_inference_pool();
     println!("\n=== STEP 1: EMBEDDINGS ===");
-    
     let cpu_embed = cpu_ops.embed_tokens(&input_ids_cpu, None, 0)?;
 
-    let pool = ctx.get_inference_pool();
     {
+        
+        
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
@@ -316,7 +317,9 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     }
 
     println!("=== STEP 2: EMBED + LAYERNORM ===");
-    let cpu_embed_ln = cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
+    
+    
+    let cpu_embed_ln = cpu_encoder.embed_norm(&cpu_embed)?; //cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
 
     {
         let pool_guard = pool.lock().await;
@@ -336,7 +339,9 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     }
 
     println!("=== STEP 3: AFTER LAYER 0 ===");
-    let h = cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
+    let h = cpu_ops.embed_tokens(&input_ids_cpu, None, 0)?;
+    let h = cpu_encoder.embed_norm(&h)?;
+    // let h = cpu_encoder.embed_and_normalize(&input_ids_cpu, None);
 
     let cpu_layer0 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 1)?;
 
@@ -401,7 +406,10 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     println!("=== SANITY CHECK: debug_n_layers(12) vs forward() ===");
 
     let cpu_debug_12 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 12)?;
-    let cpu_forward = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
+    
+    // let cpu_forward = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
+    let cpu_forward = cpu_ops.forward_tokens(&input_ids_cpu, Some(&mask_cpu), None, 0)?;
+
     let cpu_internal_diff = cpu_debug_12
         .iter()
         .zip(cpu_forward.last_hidden_state.iter())
@@ -446,8 +454,8 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         );
     }
     println!("=== STEP 4: FULL ENCODER ===");
-    let cpu_full = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
-
+    // let cpu_full = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
+    let cpu_full = cpu_ops.forward_tokens(&input_ids_cpu, Some(&mask_cpu), None, 0)?;
     {
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
@@ -728,7 +736,11 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         let encoder_mask = Array2::<f32>::ones((1, encoder_tokens.len()));
 
         // CPU encoder forward
-        let cpu_encoder_output = cpu_encoder.forward(&encoder_input_ids, &encoder_mask, None)?;
+        let cpu_ops = cpu_model.encoder_cpu_ops().expect("Ops invalid");
+
+        // let cpu_encoder_output = cpu_encoder.forward(&encoder_input_ids, &encoder_mask, None)?;
+        let cpu_encoder_output = cpu_ops.forward_tokens(&encoder_input_ids, Some(&encoder_mask), None, 0)?;
+        
         let cpu_encoder_hidden = cpu_encoder_output.last_hidden_state;
 
         // GPU encoder forward

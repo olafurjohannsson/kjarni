@@ -9,11 +9,17 @@ use async_trait::async_trait;
 
 use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
-    common::{BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults},
-    cpu::{encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder}, encoder_decoder::{
-        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
-        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
-    }},
+    common::{
+        BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
+        HFGenerationDefaults,
+    },
+    cpu::{
+        encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+        encoder_decoder::{
+            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+        },
+    },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
@@ -84,7 +90,7 @@ impl EncoderDecoderModelFactory for BartModel {
         let mut cpu_dec = None;
         let mut gpu_enc = None;
         let mut gpu_dec = None;
-        
+
         // CPU Backends
         if device.is_cpu() || load_config.offload_embeddings {
             // Unified Encoder
@@ -104,9 +110,10 @@ impl EncoderDecoderModelFactory for BartModel {
                 *load_config,
             )?) as Box<dyn CpuCrossDecoder>);
         }
-
         // GPU Backends
-        else if let Some(ctx) = context && device.is_gpu() {
+        else if let Some(ctx) = context
+            && device.is_gpu()
+        {
             gpu_enc = Some(Box::new(BartGpuEncoder::new(
                 ctx,
                 weights,
@@ -120,8 +127,7 @@ impl EncoderDecoderModelFactory for BartModel {
                 config.clone(),
                 *load_config,
             )?) as Box<dyn GpuCrossDecoder>);
-        }
-        else {
+        } else {
             log::error!("Invalid device");
         }
 
@@ -194,11 +200,11 @@ impl CpuEncoderOps for BartModel {
         self.pipeline.cpu_encoder().expect("CPU Encoder not active")
     }
     fn embed_tokens(
-            &self,
-            input_ids: &Array2<u32>,
-            token_type_ids: Option<&Array2<u32>>,
-            pos: usize,
-        ) -> Result<Array3<f32>> {
+        &self,
+        input_ids: &Array2<u32>,
+        token_type_ids: Option<&Array2<u32>>,
+        pos: usize,
+    ) -> Result<Array3<f32>> {
         self.pipeline
             .embeddings()
             .embed_cpu(input_ids, token_type_ids, pos)

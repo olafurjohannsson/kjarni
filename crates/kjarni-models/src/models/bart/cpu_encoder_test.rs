@@ -19,6 +19,8 @@ const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart
 
 #[cfg(test)]
 mod bart_golden_test_encoder {
+    use kjarni_transformers::{Embeddings, traits::{CpuTransformerCore, ModelConfig}};
+
     use super::*;
 
     // Golden values from Python (HuggingFace transformers)
@@ -159,12 +161,24 @@ mod bart_golden_test_encoder {
         let weights = ModelWeights::new(path)?;
         let config_json = std::fs::read_to_string(path.join("config.json"))?;
         let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
-        let encoder = BartCpuEncoder::new(&weights, config, ModelLoadConfig::default())?;
-
+        let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
+        let meta = config.metadata();
+        let layout = config.layout();
         // First 10 tokens of the test input
         let input_ids_vec = vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
         let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
-        let hidden = encoder.embed_and_normalize(&input_ids, None);
+        
+        let word_embeddings = weights.get_array2(&layout.token_embedding)?;
+        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+        let embeddings = Embeddings::new(
+            embed,
+            Some(weights.get_array2("model.encoder.embed_positions.weight")?),
+            None, // No token_type_embeddings in BART
+        );
+
+        // let hidden = encoder.embed_and_normalize(&input_ids, None);
+        let hidden = embeddings.forward(&input_ids, None, 2, meta.scale_embeddings);
+        let hidden = encoder.embed_norm(&hidden)?;
         
 
         Ok((encoder, hidden))

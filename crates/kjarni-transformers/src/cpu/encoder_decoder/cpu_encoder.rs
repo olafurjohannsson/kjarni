@@ -11,7 +11,7 @@ use std::{any::Any, sync::Arc};
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
     Normalization, WgpuContext,
-    cpu::encoder::{encoder_layer::EncoderLayer, prelude::*},
+    cpu::encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
     embeddings::Embeddings,
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::Seq2SeqFactory,
@@ -452,6 +452,7 @@ impl InferenceModel for Seq2SeqCPUEncoder {
     }
 }
 
+
 #[async_trait]
 impl CpuTransformerCore for Seq2SeqCPUEncoder {
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
@@ -461,11 +462,12 @@ impl CpuTransformerCore for Seq2SeqCPUEncoder {
             Ok(hidden_states.clone())
         }
     }
-    fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+    fn embed_norm(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
+        // DON'T apply position encoding here - already done in embed_tokens!
         if let Some(norm) = &self.embed_norm {
-            Ok(norm.forward(hidden_states))
+            Ok(norm.forward(hidden))
         } else {
-            Ok(hidden_states.clone())
+            Ok(hidden.clone())
         }
     }
     fn as_any(&self) -> &dyn Any {
@@ -516,6 +518,12 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
             )?;
         }
         Ok(hidden)
+    }
+    fn forward(&self, hidden_states: &Array3<f32>, mask: &Array2<f32>) -> Result<CpuEncoderOutput> {
+        // DON'T do embedding here - it's already done!
+        let output = self.forward_layers(hidden_states, mask, 0, self.num_layers())?;
+        let normed = self.final_norm(&output)?;
+        Ok(CpuEncoderOutput { last_hidden_state: normed })
     }
 }
 

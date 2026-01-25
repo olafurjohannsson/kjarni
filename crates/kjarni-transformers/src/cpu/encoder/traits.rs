@@ -281,8 +281,9 @@ pub trait CpuEncoder: CpuTransformerCore {
         attention_mask: &Array2<f32>,
     ) -> Result<CpuEncoderOutput> {
         let output = self.forward_layers(hidden_states, attention_mask, 0, self.num_layers())?;
+        // let normalized = self.final_norm(&output)?;
         Ok(CpuEncoderOutput {
-            last_hidden_state: self.final_norm(&output)?,
+            last_hidden_state: output,
         })
     }
 }
@@ -291,7 +292,7 @@ pub trait CpuEncoderOps: Send + Sync {
     /// Access the underlying encoder (transformer layers).
     fn encoder(&self) -> &dyn CpuEncoder;
 
-    /// Embed tokens to hidden states (for text models like T5, BERT).
+    /// Embed tokens to hidden states, no normalization happens
     fn embed_tokens(
         &self,
         input_ids: &Array2<u32>,
@@ -299,39 +300,38 @@ pub trait CpuEncoderOps: Send + Sync {
         pos: usize,
     ) -> Result<Array3<f32>>;
 
-    /// Embed audio to hidden states (for audio models like Whisper).
-    /// Default returns error for text-only models.
+    /// Embed audio -> hidden states, no normalization happens
     fn embed_audio(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
         Err(anyhow!("Audio embedding not supported for this model"))
     }
 
-    /// Get attention mask for encoder (model-specific).
-    fn get_encoder_mask(&self, seq_len: usize) -> Option<Array2<f32>> {
-        None // Most encoders use no mask or all-ones
+    fn get_attention_mask(&self, seq_len: usize) -> Result<Array2<f32>> {
+        Ok(Array2::ones((1, seq_len)))
     }
 
     // =========================================================================
     // Default Implementations
     // =========================================================================
 
-    /// Forward from tokens (T5, BERT, etc.)
+    /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
     fn forward_tokens(
         &self,
         input_ids: &Array2<u32>,
         attention_mask: Option<&Array2<f32>>,
         token_type_ids: Option<&Array2<u32>>,
         pos: usize,
-    ) -> Result<Array3<f32>> {
-        let hidden = self.embed_tokens(input_ids, token_type_ids, pos)?;
-        let mask = attention_mask
-            .cloned()
-            .or_else(|| self.get_encoder_mask(hidden.shape()[1]))
-            .unwrap_or_else(|| Array2::ones((1, hidden.shape()[1])));
+    ) -> Result<CpuEncoderOutput> {
+        let hidden: Array3<f32> = self.embed_tokens(input_ids, token_type_ids, pos)?;
 
-        let output =
-            self.encoder()
-                .forward_layers(&hidden, &mask, 0, self.encoder().num_layers())?;
-        self.encoder().final_norm(&output)
+        // normalize 
+        let normalized = self.encoder().embed_norm(&hidden)?;
+
+        let mask = match attention_mask {
+            Some(m) => m.clone(),
+            None => self.get_attention_mask(normalized.shape()[1])?,
+        };
+
+        self.encoder().forward(&normalized, &mask)
     }
 
     /// Forward from mel spectrogram (Whisper)
@@ -341,10 +341,11 @@ pub trait CpuEncoderOps: Send + Sync {
         attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
         let hidden = self.embed_audio(mel)?;
-        let mask = attention_mask
-            .cloned()
-            .or_else(|| self.get_encoder_mask(hidden.shape()[1]))
-            .unwrap_or_else(|| Array2::ones((1, hidden.shape()[1])));
+
+        let mask = match attention_mask {
+            Some(m) => m.clone(),
+            None => self.get_attention_mask(hidden.shape()[1])?,
+        };
 
         let output =
             self.encoder()

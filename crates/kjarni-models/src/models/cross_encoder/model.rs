@@ -217,11 +217,12 @@ impl CrossEncoder {
         }
 
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
-            
-            let hidden_states = ops.embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
-
-            let encoder: &dyn CpuEncoder = ops.encoder();
-            encoder.forward(&hidden_states, &attention_mask)?.last_hidden_state
+            ops.forward_tokens(
+                &input_ids,
+                Some(&attention_mask),
+                Some(&token_type_ids),
+                0
+            )?.last_hidden_state
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
                 .context()
