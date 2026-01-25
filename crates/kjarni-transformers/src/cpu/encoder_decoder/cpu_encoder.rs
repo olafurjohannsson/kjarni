@@ -73,7 +73,7 @@ pub struct EncoderOutput {
 /// ```
 pub struct Seq2SeqCPUEncoder {
     /// Token embeddings (None for audio-only models like Whisper encoder)
-    embeddings: Option<Embeddings>,
+    pub embeddings: Option<Embeddings>,
 
     /// Embedding layer normalization
     embed_norm: Option<Normalization>,
@@ -325,7 +325,7 @@ impl Seq2SeqCPUEncoder {
     }
 
     /// Get position offset for learned embeddings.
-    fn position_offset(&self) -> usize {
+    pub fn position_offset(&self) -> usize {
         match &self.position_encoding {
             PositionEncoding::Learned { offset, .. } => *offset,
             _ => 0,

@@ -57,6 +57,26 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             .as_any()
             .downcast_ref::<Seq2SeqCPUEncoder>()
             .unwrap();
+
+            // In NEW folder encode(), before step1:
+println!("=== EMBEDDING CONFIG DEBUG ===");
+
+// Check if Seq2SeqCPUEncoder's internal embeddings exist and what config it uses
+let encoder = encoder_ops.encoder();
+let seq2seq_encoder = encoder.as_any().downcast_ref::<Seq2SeqCPUEncoder>().unwrap();
+println!("Seq2SeqCPUEncoder.position_offset(): {}", seq2seq_encoder.position_offset());
+println!("Seq2SeqCPUEncoder.meta.scale_embeddings: {}", seq2seq_encoder.meta.scale_embeddings);
+
+// Check LoadedEmbeddings config
+let pipeline = model.get_pipeline();
+let loaded_emb = pipeline.embeddings();
+println!("LoadedEmbeddings.config.position_offset: {}", loaded_emb.config().position_offset);
+println!("LoadedEmbeddings.config.scale_embeddings: {}", loaded_emb.config().scale_embeddings);
+
+// Also check if position embeddings exist in both
+println!("Seq2SeqCPUEncoder has embeddings: {}", seq2seq_encoder.embeddings.is_some());
+println!("LoadedEmbeddings has position_embedding: {}", loaded_emb.config().position_embedding.is_some());
+
     // Step 1: embed_tokens
     let step1 = encoder_ops.embed_tokens(&input_ids, None, 0)?;
     println!("NEW step1 embed_tokens [0,0,:5]: {:?}", step1.slice(ndarray::s![0, 0, ..5]));

@@ -10,6 +10,7 @@ use crate::cpu::encoder_decoder::CrossDecoderLayer;
 use crate::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
+use crate::pipeline::EncoderDecoderPipeline;
 use anyhow::Result;
 use async_trait::async_trait;
 use ndarray::{Array2, Array3, Array4};
@@ -269,6 +270,9 @@ pub trait GpuEncoderDecoderOps: Send + Sync {
 /// on its own.
 #[async_trait]
 pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
+    fn get_pipeline(&self) -> EncoderDecoderPipeline {
+        unimplemented!()
+    }
     /// Provides access to the CPU-specific operations for the combined model.
     fn encoder_decoder_cpu_ops(&self) -> Option<&dyn CpuEncoderDecoderOps>;
     /// Provides access to the GPU-specific operations for the combined model.
