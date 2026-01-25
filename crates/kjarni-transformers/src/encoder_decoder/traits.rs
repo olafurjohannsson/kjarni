@@ -270,7 +270,7 @@ pub trait GpuEncoderDecoderOps: Send + Sync {
 /// on its own.
 #[async_trait]
 pub trait EncoderDecoderLanguageModel: EncoderLanguageModel {
-    fn get_pipeline(&self) -> EncoderDecoderPipeline {
+    fn get_pipeline(&self) -> &EncoderDecoderPipeline {
         unimplemented!()
     }
     /// Provides access to the CPU-specific operations for the combined model.

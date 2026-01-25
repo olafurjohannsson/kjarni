@@ -77,6 +77,31 @@ println!("LoadedEmbeddings.config.scale_embeddings: {}", loaded_emb.config().sca
 println!("Seq2SeqCPUEncoder has embeddings: {}", seq2seq_encoder.embeddings.is_some());
 println!("LoadedEmbeddings has position_embedding: {}", loaded_emb.config().position_embedding.is_some());
 
+// Add this right after the config debug:
+println!("=== DIRECT EMBEDDING COMPARISON ===");
+
+// Call Seq2SeqCPUEncoder's internal embeddings directly
+let old_emb = seq2seq_encoder.embeddings.as_ref().unwrap()
+    .forward(&input_ids, None, seq2seq_encoder.position_offset(), false);
+println!("OLD internal embeddings.forward [0,0,:5]: {:?}", old_emb.slice(ndarray::s![0, 0, ..5]));
+
+// Call LoadedEmbeddings
+let new_emb = pipeline.embeddings().embed_cpu(&input_ids, None, 0)?;
+println!("NEW LoadedEmbeddings.embed_cpu [0,0,:5]: {:?}", new_emb.slice(ndarray::s![0, 0, ..5]));
+
+println!("=== WEIGHT KEY DEBUG ===");
+
+// Check what keys LoadedEmbeddings was built with
+let loaded_emb = pipeline.embeddings();
+println!("LoadedEmbeddings.config.word_embedding: {}", loaded_emb.config().word_embedding);
+println!("LoadedEmbeddings.config.position_embedding: {:?}", loaded_emb.config().position_embedding);
+
+// Check what keys Seq2SeqCPUEncoder used (from layout)
+println!("layout.token_embedding: {}", seq2seq_encoder.layout.token_embedding);
+if let Some(enc_layout) = &seq2seq_encoder.layout.encoder {
+    println!("layout.encoder.position_embedding: {:?}", enc_layout.position_embedding);
+}
+
     // Step 1: embed_tokens
     let step1 = encoder_ops.embed_tokens(&input_ids, None, 0)?;
     println!("NEW step1 embed_tokens [0,0,:5]: {:?}", step1.slice(ndarray::s![0, 0, ..5]));

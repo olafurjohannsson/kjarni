@@ -445,8 +445,8 @@ impl EncoderDecoderLanguageModel for BartModel {
             None
         }
     }
-    fn get_pipeline(&self) -> EncoderDecoderPipeline {
-        self.pipeline
+    fn get_pipeline(&self) -> &EncoderDecoderPipeline {
+        &self.pipeline
     }
     fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> {
         if self.pipeline.gpu_decoder().is_some() {
