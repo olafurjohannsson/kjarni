@@ -4,9 +4,8 @@ use async_trait::async_trait;
 use kjarni_transformers::{
     Normalization, WgpuContext,
     activations::Activation,
-    cpu::encoder::{CpuEncoderOps, buffers::EncoderBuffers, encoder_layer::EncoderLayer, prelude::*},
-    embeddings::Embeddings,
-    encoder_decoder::traits::CpuCrossDecoder,
+    cpu::encoder::{buffers::EncoderBuffers, encoder_layer::EncoderLayer, prelude::*},
+    Embeddings,
     feedforward::{FeedForward, StdFeedForward},
     linear_layer::LinearLayer,
     models::base::ModelLoadConfig,
@@ -40,7 +39,7 @@ impl BartCpuEncoder {
         // 1. Embeddings
 
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+        let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
         let embeddings = Embeddings::new(
             embed,
             Some(weights.get_array2("model.encoder.embed_positions.weight")?),

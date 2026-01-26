@@ -2,9 +2,7 @@ use crate::models::bart::config::BartConfig;
 use crate::models::bart::cpu_encoder::BartCpuEncoder;
 use anyhow::Result;
 use kjarni_transformers::{
-    activations::{softmax_1d_inplace, softmax_4d_inplace, softmax_inplace},
-    cpu::encoder::prelude::*,
-    encoder_decoder::traits::CpuCrossDecoder,
+    activations::{softmax_4d_inplace},
     feedforward::FeedForward,
     models::base::ModelLoadConfig,
     utils::linear_algebra::{apply_attention_mask, matmul_4d},
@@ -13,7 +11,6 @@ use kjarni_transformers::{
 use ndarray::{Array2, Array3, s};
 use std::path::Path;
 use std::sync::Arc;
-use tokenizers::Model;
 
 const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
@@ -169,7 +166,7 @@ mod bart_golden_test_encoder {
         let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
         
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+        let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
         let embeddings = Embeddings::new(
             embed,
             Some(weights.get_array2("model.encoder.embed_positions.weight")?),

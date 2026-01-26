@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result};
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
@@ -11,21 +11,16 @@ use tokenizers::Tokenizer;
 use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder};
 use crate::models::mistral::config::MistralConfig;
 
-use kjarni_transformers::chat::mistral::MistralChatTemplate; // todo mode tom models?
-
 use kjarni_transformers::{
     ChatTemplate, WgpuContext,
     cache::{Cache, CpuKVCache, GpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, LoadedEmbeddings},
-    execution::ExecutionPlan,
     gpu_ops::{GpuFrameContext, GpuTensor},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
-    models::{LanguageModel, ModelArchitecture, ModelType},
+    models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
     rope::loader::LoadedRoPE,
-    tensor::DType,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };

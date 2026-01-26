@@ -14,7 +14,7 @@ use crate::{
     Normalization,
     activations::Activation,
     cpu::encoder::{encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention},
-    embeddings::{EmbeddingData, Embeddings},
+    {EmbeddingData, Embeddings},
     feedforward::{FeedForward, StdFeedForward, SwiGluFeedForward},
     linear_layer::{F32MatmulStrategy, LinearLayer},
     models::base::ModelLoadConfig,

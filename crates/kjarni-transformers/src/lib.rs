@@ -9,10 +9,9 @@ pub mod activations;
 pub mod attention;
 pub mod cache;
 pub mod chat;
-pub mod cpu;
 pub mod common;
+pub mod cpu;
 pub mod decoder;
-pub mod embeddings;
 
 pub mod encoder_decoder;
 pub mod feedforward;
@@ -22,36 +21,38 @@ pub mod linear_layer;
 pub mod models;
 pub mod normalization;
 
+pub mod audio;
+pub mod execution;
+pub mod lm_head;
+pub mod pipeline;
 pub mod pooling;
 pub mod rope;
+pub mod stats;
 pub mod tensor;
+pub mod tokenizer;
 pub mod traits;
 pub mod utils;
 pub mod weights;
-pub mod tokenizer;
-pub mod lm_head;
-pub mod execution;
-pub mod pipeline;
-pub mod stats;
-pub mod audio;
 
-pub use audio::{AudioConvFrontend, AudioPipeline, MelConfig,
-    AudioData, AudioLoaderConfig, 
-    load_audio, load_audio_bytes, load_audio_for_whisper,
-    create_silence, create_sine_wave,
+pub use audio::{
+    AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig, create_silence,
+    create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 
 // Re-export commonly used items
 pub use crate::{
     attention::MultiHeadAttention,
     chat::templates::{ChatTemplate, Conversation, Message, Role},
-    embeddings::Embeddings,
+    cpu::embeddings::{
+        EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingData, EmbeddingInput, Embeddings,
+        LoadedEmbeddings,
+    },
     execution::ExecutionPlan,
     feedforward::FeedForward,
     lm_head::{LMHeadConfig, LoadedLMHead},
     normalization::Normalization,
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
-    pooling::{cls_pool, last_token_pool, max_pool, mean_pool, PoolingStrategy},
+    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_ops::context::WgpuContext;
@@ -71,6 +72,6 @@ pub mod prelude {
 #[cfg(test)]
 pub mod tests;
 
-
 #[global_allocator]
-static GLOBAL: crate::utils::alloc_stats::TracingAllocator = crate::utils::alloc_stats::TracingAllocator;
+static GLOBAL: crate::utils::alloc_stats::TracingAllocator =
+    crate::utils::alloc_stats::TracingAllocator;

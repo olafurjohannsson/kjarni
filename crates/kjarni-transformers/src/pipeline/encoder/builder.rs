@@ -8,7 +8,7 @@ use crate::{cpu::encoder::{
     config::PoolingStrategy,
     traits::{CpuEncoder, GpuEncoder},
 }, pipeline::encoder::pipeline::{EncoderPipeline, EncoderPipelineConfig}};
-use crate::embeddings::{EmbeddingConfig, LoadedEmbeddings};
+use crate::{EmbeddingConfig, LoadedEmbeddings};
 use crate::execution::ExecutionPlan;
 use crate::models::base::ModelLoadConfig;
 use crate::traits::{Device, ModelConfig};

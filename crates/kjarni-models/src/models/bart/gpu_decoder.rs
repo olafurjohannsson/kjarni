@@ -2,15 +2,14 @@ use crate::models::bart::config::BartConfig;
 use anyhow::Result;
 use kjarni_transformers::cache::Cache;
 use kjarni_transformers::cache::GpuBeamKVCache;
-use kjarni_transformers::embeddings::EmbeddingConfig;
-use kjarni_transformers::embeddings::LoadedEmbeddings;
+use kjarni_transformers::EmbeddingConfig;
+use kjarni_transformers::LoadedEmbeddings;
 use kjarni_transformers::encoder_decoder::traits::{
     GpuCrossAttentionKVCache, GpuCrossDecoder, GpuCrossDecoderOutput,
 };
 
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
-use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
@@ -23,7 +22,6 @@ use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::ModelConfig;
 use kjarni_transformers::traits::ModelMetadata;
 use kjarni_transformers::weights::ModelWeights;
-use ndarray::Array2;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 

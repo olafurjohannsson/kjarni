@@ -40,17 +40,12 @@
 //! - [`super::LlamaModel`] — High-level model wrapper
 //! - [`crate::models::mistral`] — Mistral variant with sliding window attention
 
-// --- Standard Library ---
 use std::sync::Arc;
-
-// --- External Crates ---
-use crate::models::llama::config::LlamaConfig;
-use anyhow::{Result, anyhow};
-use ndarray::{Array2, Array3, Axis, s};
-use std::time::Instant;
+use anyhow::{Result};
+use ndarray::{Array2, Array3};
 
 use kjarni_transformers::{
-    Normalization, WgpuContext, activations::Activation, cache::CpuKVCache, decoder::prelude::*, embeddings::Embeddings, feedforward::SwiGluFeedForward, linear_layer::LinearLayer, models::base::ModelInput, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, stats::GenerationStats, tensor::DType, traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
+    WgpuContext, activations::Activation, cache::CpuKVCache, decoder::prelude::*, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 /// CPU-based Llama decoder implementation with RoPE and SwiGLU.

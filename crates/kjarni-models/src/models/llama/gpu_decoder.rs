@@ -50,7 +50,7 @@ use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, LoadedEmbeddings},
+    {EmbeddingConfig, LoadedEmbeddings},
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::{

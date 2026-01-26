@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/06_generation.dir/link.d CMakeFiles/06_generation.dir/06_generation.cpp.o -o 06_generation   -L/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release  -Wl,-rpath,/home/olafurj/dev/edgebert/crates/edgegpt/examples/cpp/../../../../target/release -ledgegpt -lpthread -ldl -lm

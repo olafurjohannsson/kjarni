@@ -14,7 +14,7 @@ use crate::cpu::encoder_decoder::{
 use crate::{
     Normalization, WgpuContext,
     cache::{Cache, CpuBeamKVCache},
-    embeddings::Embeddings,
+    Embeddings,
     encoder_decoder::traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
     models::base::ModelLoadConfig,
     pipeline::Seq2SeqFactory,

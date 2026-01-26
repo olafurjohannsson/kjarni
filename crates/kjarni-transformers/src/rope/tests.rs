@@ -692,7 +692,7 @@ fn test_rope_pytorch_parity_2() {
     let q = Array4::from_shape_vec((1, 1, 1, 4), vec![1.0, 0.0, 1.0, 0.0]).unwrap();
     let k = Array4::from_shape_vec((1, 1, 1, 4), vec![0.0, 1.0, 0.0, 1.0]).unwrap();
 
-    let (rotated_q, rotated_k) = rope.apply_4d(&q, &k, 0);
+    let (rotated_q, _) = rope.apply_4d(&q, &k, 0);
 
     // At position 0:
     // freq[0] = 1.0 / (10000^(0/4)) = 1.0, angle = 0 * 1.0 = 0
@@ -753,7 +753,7 @@ fn test_rope_is_working() {
     println!("Input Q: {:?}", q.slice(s![0, 0, 0, ..]));
 
     // Apply RoPE at position 1 (not 0, which is identity)
-    let (q_rot, k_rot) = rope.apply_4d(&q, &k, 1);
+    let (q_rot, _) = rope.apply_4d(&q, &k, 1);
 
     println!("Rotated Q: {:?}", q_rot.slice(s![0, 0, 0, ..]));
 

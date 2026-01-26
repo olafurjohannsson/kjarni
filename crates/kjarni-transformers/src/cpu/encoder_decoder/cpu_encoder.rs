@@ -12,7 +12,7 @@ pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderCon
 use crate::{
     Normalization, WgpuContext,
     cpu::encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
-    embeddings::Embeddings,
+    Embeddings,
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::Seq2SeqFactory,
     traits::{

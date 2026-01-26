@@ -2,7 +2,7 @@
 
 use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
-use crate::embeddings::LoadedEmbeddings;
+use crate::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
 use crate::lm_head::LoadedLMHead;
 use crate::prelude::Device;

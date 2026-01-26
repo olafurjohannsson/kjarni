@@ -3,8 +3,8 @@ use ndarray::s;
 use std::sync::Arc;
 
 use crate::cpu::encoder::traits::GpuEncoder;
-use crate::embeddings::EmbeddingConfig;
-use crate::embeddings::LoadedEmbeddings;
+use crate::EmbeddingConfig;
+use crate::LoadedEmbeddings;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};

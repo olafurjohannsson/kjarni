@@ -7,7 +7,7 @@ use kjarni_transformers::{
     activations::Activation,
     cache::{Cache, CpuBeamKVCache},
     cpu::encoder_decoder::{CrossDecoderLayer, DecoderCrossAttention},
-    embeddings::Embeddings,
+    Embeddings,
     encoder_decoder::{
         DecoderSelfAttention,
         traits::{CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput},
@@ -42,7 +42,7 @@ impl BartCpuDecoder {
 
         // 1. Word Embeddings (Logic preserved: Force dequantize to F32)
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+        let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
 
         // 2. Decoder-Specific Embeddings (Preserving BART-specific naming logic)
         let embeddings = Embeddings::new(
@@ -281,7 +281,7 @@ mod bart_cpu_cross_decoder_tests {
     use crate::models::bart::cpu_encoder::BartCpuEncoder;
     use anyhow::Result;
     use kjarni_transformers::{
-        cpu::encoder::traits::CpuEncoder, embeddings::EmbeddingData, traits::CpuTransformerCore,
+        cpu::encoder::traits::CpuEncoder, traits::CpuTransformerCore,
     };
     use ndarray::{Array2, s};
     use std::path::Path;
@@ -367,7 +367,7 @@ mod bart_cpu_cross_decoder_tests {
 
         // 1. Word Embeddings (Logic preserved: Force dequantize to F32)
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+        let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
 
         let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
         let decoder = BartCpuDecoder::new(&weights, config.clone(), ModelLoadConfig::default())?;

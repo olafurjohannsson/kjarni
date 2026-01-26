@@ -1,7 +1,7 @@
 use crate::models::bart::config::BartConfig;
 use anyhow::{anyhow, Result};
 use kjarni_transformers::cpu::encoder::prelude::*;
-use kjarni_transformers::embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
+use kjarni_transformers::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
@@ -98,7 +98,7 @@ impl BartGpuEncoder {
             let pos_emb =
                 weights.get_array2(encoder_layout.position_embedding.as_ref().unwrap())?;
 
-            let embed = kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings));
+            let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
             let cpu_emb = Embeddings::new(embed, Some(pos_emb), None);
             (Some(cpu_emb), None)
         } else {

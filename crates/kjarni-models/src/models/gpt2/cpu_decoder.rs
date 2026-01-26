@@ -1,12 +1,9 @@
-// --- Standard Library ---
-use std::sync::Arc;
 
-// --- External Crates ---
+use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use log::debug;
 use ndarray::{Array1, Array2, Array3, s};
 
-// --- Workspace Crates ---
 use kjarni_transformers::{
     Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::{LegacyFeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelInput, normalization::LayerNorm, tensor::DType, traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
@@ -46,7 +43,7 @@ impl Gpt2CpuDecoder {
         };
 
         let embeddings = Embeddings::new(
-            kjarni_transformers::embeddings::EmbeddingData::F32(Arc::new(word_embeddings)),
+            kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings)),
             position_embeddings,
             None,
         );

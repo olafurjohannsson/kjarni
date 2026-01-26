@@ -2,7 +2,7 @@ use crate::{
     WgpuContext,
     cpu::encoder::{CpuEncoder, GpuEncoder},
     decoder::prelude::{CpuDecoder, GpuDecoder},
-    embeddings::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
+    {EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
     gpu_ops::GpuTensor,
@@ -14,8 +14,8 @@ use crate::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use serde_json::de;
 use std::sync::Arc;
+
 pub struct EncoderDecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
     config: Arc<dyn ModelConfig>,

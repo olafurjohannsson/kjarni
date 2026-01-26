@@ -1,5 +1,5 @@
 use super::*;
-use crate::embeddings::Embeddings;
+use crate::Embeddings;
 use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
@@ -150,7 +150,7 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
     // CPU
 
     let cpu_embed = Embeddings::new(
-        crate::embeddings::EmbeddingData::F32(Arc::new(word_emb.clone())),
+        crate::EmbeddingData::F32(Arc::new(word_emb.clone())),
         None,
         None,
     );
@@ -213,7 +213,7 @@ async fn test_word_plus_position_embeddings() -> Result<()> {
     let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
     let cpu_embed = Embeddings::new(
-        crate::embeddings::EmbeddingData::F32(Arc::new(word_emb.clone())),
+        crate::EmbeddingData::F32(Arc::new(word_emb.clone())),
         Some(pos_emb.clone()),
         None,
     );
@@ -281,7 +281,7 @@ async fn test_embeddings_with_position_offset() -> Result<()> {
     let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
     let cpu_embed = Embeddings::new(
-        crate::embeddings::EmbeddingData::F32(Arc::new(word_emb.clone())),
+        crate::EmbeddingData::F32(Arc::new(word_emb.clone())),
         Some(pos_emb.clone()),
         None,
     );
@@ -350,7 +350,7 @@ async fn test_embeddings_with_scaling() -> Result<()> {
     let (word_emb, pos_emb) = make_embeddings(vocab_size, max_pos, hidden_size);
 
     let cpu_embed = Embeddings::new(
-        crate::embeddings::EmbeddingData::F32(Arc::new(word_emb.clone())),
+        crate::EmbeddingData::F32(Arc::new(word_emb.clone())),
         Some(pos_emb.clone()),
         None,
     );

@@ -1124,22 +1124,23 @@ mod classifier_tests {
         #[tokio::test]
         #[ignore = "Requires model download"]
         async fn test_batch_multilingual() {
+            println!("classifier::new");
             let classifier = Classifier::new("bert-sentiment-multilingual")
                 .await
                 .expect("Failed to load model");
-
+            println!("classifier::new loaded");
             let texts = &[
                 TEST_TEXT_POSITIVE,         // English
                 TEST_TEXT_GERMAN_POSITIVE,  // German
                 TEST_TEXT_FRENCH_NEGATIVE,  // French
                 TEST_TEXT_SPANISH_POSITIVE, // Spanish
             ];
-
+            println!("classifier::new before results");
             let results = classifier
                 .classify_batch(texts)
                 .await
                 .expect("Batch classification failed");
-
+            println!("classifier::new after results");
             assert_eq!(results.len(), 4);
 
             // All positive texts should be 4-5 stars

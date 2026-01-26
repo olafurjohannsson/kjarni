@@ -1,17 +1,13 @@
-// --- Standard Library ---
 use std::sync::Arc;
 
-// --- External Crates ---
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
-use ndarray::{Array2, s};
+use anyhow::{Result};
+use ndarray::{s};
 
-// --- Workspace Crates ---
 use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, Embeddings, LoadedEmbeddings},
+    {EmbeddingConfig, Embeddings, LoadedEmbeddings},
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::{
@@ -19,7 +15,6 @@ use kjarni_transformers::{
             GpuFeedForwardWeightsStd as GpuStandardFFNWeights, GpuNormalization,
             GpuNormalizationWeights,
             attention::GpuAttentionWeights,
-            embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
             layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
         },
     },
@@ -31,21 +26,13 @@ use kjarni_transformers::{
 // --- Crate-Specific ---
 use crate::models::gpt2::config::Gpt2Config;
 
-/// The GPU-native implementation of the GPT-2 decoder architecture.
 pub struct Gpt2GpuDecoder {
-    // Option: If using CPU embeddings, these are None to save VRAM
-    // embedding_weights: Option<GpuEmbeddingWeights>,
-    // embeddings: Option<GpuEmbeddings>,
-
     layers: Vec<GpuPreNormDecoderLayer>,
     final_layer_norm: GpuNormalization,
     final_ln_weights: GpuNormalizationWeights,
 
     context: Arc<WgpuContext>,
     config: Arc<Gpt2Config>,
-
-    // Option: If using GPU embeddings, this is None
-    // cpu_embeddings: Option<Embeddings>,
 
     load_config: ModelLoadConfig,
 

@@ -10,9 +10,8 @@ use crate::cpu::encoder::{
     classifier::CpuSequenceClassificationHead,
     config::PoolingStrategy,
     traits::{CpuEncoder, GpuEncoder},
-    CpuTransformerEncoder, GpuTransformerEncoder,
 };
-use crate::embeddings::LoadedEmbeddings;
+use crate::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
 use crate::traits::Device;
 use crate::WgpuContext;

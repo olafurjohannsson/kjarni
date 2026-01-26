@@ -63,23 +63,16 @@ use kjarni_transformers::{
     WgpuContext,
     cache::{Cache, CpuKVCache, GpuKVCache},
     decoder::prelude::*,
-    embeddings::{EmbeddingConfig, LoadedEmbeddings},
     execution::ExecutionPlan,
-    gpu_ops::{GpuFrameContext, GpuTensor, blocks::rope::GpuRoPE},
-    // Cache
-    lm_head::{LMHeadConfig, LoadedLMHead},
+    gpu_ops::{GpuFrameContext, GpuTensor},
     // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     // Embeddings
-    models::{LanguageModel, ModelArchitecture, ModelType, download_model_files},
+    models::{LanguageModel, ModelType},
     // Execution planning
-    pipeline::{DecoderPipeline, DecoderPipelineConfig},
+    pipeline::{DecoderPipeline},
     // GPU operations
     prelude::*,
-    // LM Head
-    rope::RoPE,
-    // Model infrastructure
-    tensor::DType,
     traits::{InferenceModel, ModelConfig},
     // Pipeline
     weights::ModelWeights,

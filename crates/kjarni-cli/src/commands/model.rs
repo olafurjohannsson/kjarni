@@ -485,9 +485,9 @@ mod tests {
     #[test]
     fn test_pad_center_single_char() {
         assert_eq!(pad_center("x", 5), "  x  ");
-        assert_eq!(pad_center("x", 4), " x  ");
+        assert_eq!(pad_center("x", 4), " x  ");  // odd padding: extra on right
         assert_eq!(pad_center("x", 3), " x ");
-        assert_eq!(pad_center("x", 2), " x");
+        assert_eq!(pad_center("x", 2), "x ");    // odd padding: extra on right
         assert_eq!(pad_center("x", 1), "x");
     }
 

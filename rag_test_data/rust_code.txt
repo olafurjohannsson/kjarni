@@ -1,1 +1,0 @@
-In Rust programming, the Result<T, E> type is used for recoverable errors. Use match or ? operator.

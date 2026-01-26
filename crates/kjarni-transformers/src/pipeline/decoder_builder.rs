@@ -1,5 +1,5 @@
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
-use crate::embeddings::{EmbeddingConfig, LoadedEmbeddings};
+use crate::{EmbeddingConfig, LoadedEmbeddings};
 use crate::execution::ExecutionPlan;
 use crate::lm_head::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;

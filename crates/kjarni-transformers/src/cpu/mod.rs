@@ -4,3 +4,4 @@ pub mod kernels;
 pub mod ops;
 pub mod decoder;
 pub mod strategy;
+pub mod embeddings;
