@@ -1,6 +1,5 @@
 pub mod attention;
 pub mod cache;
-pub mod embeddings;
 pub mod encoder;
 pub mod ffn;
 pub mod ffn_swiglu;

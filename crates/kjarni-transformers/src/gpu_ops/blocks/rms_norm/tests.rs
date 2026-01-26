@@ -1,7 +1,7 @@
 use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
 use crate::gpu_ops::blocks::rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
-use crate::normalization::rms_norm::RMSNorm;
+use crate::cpu::normalization::rms_norm::RMSNorm;
 use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
 use ndarray::{Array, Array1, Array3, Axis};

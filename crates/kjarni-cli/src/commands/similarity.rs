@@ -1,32 +1,20 @@
 //! Compute semantic similarity between two texts
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::Path;
 
-use kjarni::{
-    registry,
-    SentenceEncoder,
-    ModelArchitecture,
-    ModelType,
-    Device,
-};
+use kjarni::{Device, ModelArchitecture, ModelType, SentenceEncoder, registry};
 
-pub async fn run(
-    text1: &str,
-    text2: &str,
-    model: &str,
-    gpu: bool,
-    quiet: bool,
-) -> Result<()> {
+pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) -> Result<()> {
     // 1. Resolve texts (could be file paths)
     let content1 = resolve_text(text1)?;
     let content2 = resolve_text(text2)?;
 
     // 2. Load encoder
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
-    let model_type = ModelType::from_cli_name(model)
-        .ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
+    let model_type =
+        ModelType::from_cli_name(model).ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
 
     if model_type.architecture() != ModelArchitecture::Bert {
         return Err(anyhow!("Model '{}' is not an encoder.", model));
@@ -52,7 +40,7 @@ pub async fn run(
     }
 
     let embeddings = encoder.encode_batch(&[&content1, &content2]).await?;
-    
+
     // 4. Compute cosine similarity
     let similarity = cosine_similarity(&embeddings[0], &embeddings[1]);
 
@@ -70,7 +58,10 @@ fn format_output(similarity: f32, text1: &str, text2: &str, quiet: bool) -> Stri
         let mut output = String::new();
         output.push_str(&format!("Similarity: {:.4}\n", similarity));
         output.push('\n');
-        output.push_str(&format!("Interpretation: {}\n", interpret_similarity(similarity)));
+        output.push_str(&format!(
+            "Interpretation: {}\n",
+            interpret_similarity(similarity)
+        ));
         output.push('\n');
         output.push_str(&format!("Text 1: {}\n", truncate(text1, 50)));
         output.push_str(&format!("Text 2: {}\n", truncate(text2, 50)));
@@ -81,8 +72,7 @@ fn format_output(similarity: f32, text1: &str, text2: &str, quiet: bool) -> Stri
 fn resolve_text(input: &str) -> Result<String> {
     let path = Path::new(input);
     if path.exists() && path.is_file() {
-        fs::read_to_string(path)
-            .map_err(|e| anyhow!("Failed to read '{}': {}", input, e))
+        fs::read_to_string(path).map_err(|e| anyhow!("Failed to read '{}': {}", input, e))
     } else {
         Ok(input.to_string())
     }
@@ -133,8 +123,8 @@ fn truncate(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     // =========================================================================
     // cosine_similarity tests
@@ -145,7 +135,10 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![1.0, 2.0, 3.0];
         let sim = cosine_similarity(&a, &b);
-        assert!((sim - 1.0).abs() < 1e-6, "Identical vectors should have similarity 1.0");
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "Identical vectors should have similarity 1.0"
+        );
     }
 
     #[test]
@@ -153,7 +146,10 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![-1.0, 0.0, 0.0];
         let sim = cosine_similarity(&a, &b);
-        assert!((sim - (-1.0)).abs() < 1e-6, "Opposite vectors should have similarity -1.0");
+        assert!(
+            (sim - (-1.0)).abs() < 1e-6,
+            "Opposite vectors should have similarity -1.0"
+        );
     }
 
     #[test]
@@ -161,7 +157,10 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![0.0, 1.0, 0.0];
         let sim = cosine_similarity(&a, &b);
-        assert!(sim.abs() < 1e-6, "Orthogonal vectors should have similarity 0.0");
+        assert!(
+            sim.abs() < 1e-6,
+            "Orthogonal vectors should have similarity 0.0"
+        );
     }
 
     #[test]
@@ -170,7 +169,10 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![2.0, 4.0, 6.0]; // 2x scaled
         let sim = cosine_similarity(&a, &b);
-        assert!((sim - 1.0).abs() < 1e-6, "Scaled vectors should have similarity 1.0");
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "Scaled vectors should have similarity 1.0"
+        );
     }
 
     #[test]
@@ -214,7 +216,7 @@ mod tests {
         let a: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).sin()).collect();
         let b: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).cos()).collect();
         let sim = cosine_similarity(&a, &b);
-        
+
         assert!(sim >= -1.0 && sim <= 1.0, "Similarity should be in [-1, 1]");
     }
 
@@ -277,13 +279,16 @@ mod tests {
     #[test]
     fn test_interpret_similarity_boundary_values() {
         // Test exact boundary values
-        assert_eq!(interpret_similarity(0.9), "Highly similar");      // <= 0.9
-        assert_eq!(interpret_similarity(0.90001), "Very similar / near duplicate"); // > 0.9
-        assert_eq!(interpret_similarity(0.7), "Moderately similar");  // <= 0.7
-        assert_eq!(interpret_similarity(0.70001), "Highly similar");  // > 0.7
-        assert_eq!(interpret_similarity(0.5), "Somewhat related");    // <= 0.5
+        assert_eq!(interpret_similarity(0.9), "Highly similar"); // <= 0.9
+        assert_eq!(
+            interpret_similarity(0.90001),
+            "Very similar / near duplicate"
+        ); // > 0.9
+        assert_eq!(interpret_similarity(0.7), "Moderately similar"); // <= 0.7
+        assert_eq!(interpret_similarity(0.70001), "Highly similar"); // > 0.7
+        assert_eq!(interpret_similarity(0.5), "Somewhat related"); // <= 0.5
         assert_eq!(interpret_similarity(0.50001), "Moderately similar"); // > 0.5
-        assert_eq!(interpret_similarity(0.3), "Not similar");         // <= 0.3
+        assert_eq!(interpret_similarity(0.3), "Not similar"); // <= 0.3
         assert_eq!(interpret_similarity(0.30001), "Somewhat related"); // > 0.3
     }
 
@@ -362,7 +367,7 @@ mod tests {
     fn test_resolve_text_from_file() {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "content from file").unwrap();
-        
+
         let result = resolve_text(temp_file.path().to_str().unwrap()).unwrap();
         assert_eq!(result.trim(), "content from file");
     }
@@ -373,7 +378,7 @@ mod tests {
         writeln!(temp_file, "line one").unwrap();
         writeln!(temp_file, "line two").unwrap();
         writeln!(temp_file, "line three").unwrap();
-        
+
         let result = resolve_text(temp_file.path().to_str().unwrap()).unwrap();
         assert!(result.contains("line one"));
         assert!(result.contains("line two"));
@@ -384,7 +389,7 @@ mod tests {
     fn test_resolve_text_from_file_unicode() {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "日本語テキスト").unwrap();
-        
+
         let result = resolve_text(temp_file.path().to_str().unwrap()).unwrap();
         assert!(result.contains("日本語テキスト"));
     }
@@ -414,7 +419,7 @@ mod tests {
     #[test]
     fn test_format_output_verbose() {
         let output = format_output(0.85, "text one", "text two", false);
-        
+
         assert!(output.contains("Similarity: 0.8500"));
         assert!(output.contains("Interpretation: Highly similar"));
         assert!(output.contains("Text 1: text one"));
@@ -425,7 +430,7 @@ mod tests {
     fn test_format_output_verbose_truncates_long_text() {
         let long_text = "a".repeat(100);
         let output = format_output(0.5, &long_text, "short", false);
-        
+
         assert!(output.contains("..."));
         assert!(!output.contains(&long_text));
     }
@@ -465,16 +470,16 @@ mod tests {
         // Simulate the non-encoder parts of the workflow
         let text1 = "The quick brown fox jumps over the lazy dog";
         let text2 = "A fast auburn fox leaps above a sleepy canine";
-        
+
         let content1 = resolve_text(text1).unwrap();
         let content2 = resolve_text(text2).unwrap();
-        
+
         assert_eq!(content1, text1);
         assert_eq!(content2, text2);
-        
+
         // Simulate similarity (would come from encoder)
         let similarity = 0.75;
-        
+
         let output = format_output(similarity, &content1, &content2, false);
         assert!(output.contains("Highly similar"));
     }
@@ -483,13 +488,13 @@ mod tests {
     fn test_full_workflow_file_and_literal() {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "content from a file").unwrap();
-        
+
         let text1 = temp_file.path().to_str().unwrap();
         let text2 = "literal text input";
-        
+
         let content1 = resolve_text(text1).unwrap();
         let content2 = resolve_text(text2).unwrap();
-        
+
         assert!(content1.contains("content from a file"));
         assert_eq!(content2, "literal text input");
     }
@@ -499,12 +504,27 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_cosine_similarity_very_small_values() {
+    fn test_cosine_similarity_small_values() {
+        // Use values small enough to test precision but large enough to avoid epsilon floor (1e-9)
+        let a = vec![1e-4, 1e-4, 1e-4];
+        let b = vec![1e-4, 1e-4, 1e-4];
+        let sim = cosine_similarity(&a, &b);
+        assert!(sim.is_finite());
+        assert!(
+            (sim - 1.0).abs() < 1e-3,
+            "Identical small vectors should have similarity ~1.0, got {}",
+            sim
+        );
+    }
+
+    #[test]
+    fn test_cosine_similarity_very_small_values_graceful() {
         let a = vec![1e-10, 1e-10, 1e-10];
         let b = vec![1e-10, 1e-10, 1e-10];
         let sim = cosine_similarity(&a, &b);
+
         assert!(sim.is_finite());
-        assert!((sim - 1.0).abs() < 1e-3); // Should be close to 1.0
+        assert!(!sim.is_nan());
     }
 
     #[test]

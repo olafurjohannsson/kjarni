@@ -187,7 +187,7 @@ impl LlamaModel {
         context: Option<Arc<WgpuContext>>,
         load_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
-        kjarni_transformers::pipeline::GenericLoader::load_from_registry::<Self>(
+        kjarni_transformers::pipeline::DecoderLoader::load_from_registry::<Self>(
             model_type,
             cache_dir,
             device,
@@ -203,7 +203,7 @@ impl LlamaModel {
         decoder_config: Option<ModelLoadConfig>,
         model_type: Option<ModelType>,
     ) -> Result<Self> {
-        kjarni_transformers::pipeline::GenericLoader::load_from_pretrained::<Self>(
+        kjarni_transformers::pipeline::DecoderLoader::load_from_pretrained::<Self>(
             model_path,
             device,
             context,

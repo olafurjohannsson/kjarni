@@ -1,5 +1,3 @@
-mod loader;
-
 use std::ops::AddAssign;
 use std::sync::Arc;
 
@@ -14,7 +12,7 @@ use half::bf16;
 use ndarray::{Array2, Array3, Axis, s};
 use rayon::prelude::*;
 
-pub use loader::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LoadedEmbeddings};
+
 
 #[cfg(test)]
 mod tests;

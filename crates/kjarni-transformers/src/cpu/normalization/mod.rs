@@ -1,7 +1,7 @@
 pub mod layer_norm;
 pub mod rms_norm;
 
-pub use crate::normalization::{layer_norm::LayerNorm, rms_norm::RMSNorm};
+pub use crate::cpu::normalization::{layer_norm::LayerNorm, rms_norm::RMSNorm};
 
 use ndarray::{Array1, Array3, ArrayView2, ArrayViewMut2};
 

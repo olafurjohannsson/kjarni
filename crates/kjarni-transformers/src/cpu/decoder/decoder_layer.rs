@@ -1,6 +1,6 @@
 use crate::cpu::decoder::DecoderAttention;
 use crate::feedforward::FeedForward;
-use crate::normalization::Normalization;
+use crate::cpu::normalization::Normalization;
 use crate::rope::RoPE;
 use anyhow::Result;
 use ndarray::{Array2, Array3, s};
@@ -142,7 +142,7 @@ mod decoder_layer_tests {
         activations::Activation,
         feedforward::{FeedForward, LegacyFeedForward, StdFeedForward, SwiGluFeedForward},
         linear_layer::LinearLayer,
-        normalization::{LayerNorm, RMSNorm},
+        cpu::normalization::{LayerNorm, RMSNorm},
     };
     use ndarray::{Array1, Array4};
 

@@ -6,7 +6,7 @@ use crate::{
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
     gpu_ops::GpuTensor,
-    lm_head::{LMHeadConfig, LoadedLMHead},
+    loaders::{LMHeadConfig, LoadedLMHead},
     models::base::ModelLoadConfig,
     pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig},
     traits::{Device, ModelConfig},
@@ -223,9 +223,9 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
 
         // 6. Build Model Backends (Handover RoPE and DType)
         // We resolve backends here using the specific model's factory logic
-        // This is where you call build_backends from the GenericLoader
+        // This is where you call build_backends from the DecoderLoader
 
-        // Return dummy/empty backends for now; the GenericLoader will populate these
+        // Return dummy/empty backends for now; the DecoderLoader will populate these
         EncoderDecoderPipeline::new(
             encoder_embeddings,
             decoder_embeddings,

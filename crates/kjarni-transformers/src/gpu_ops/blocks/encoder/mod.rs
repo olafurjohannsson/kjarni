@@ -281,7 +281,7 @@ mod tests {
     use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
-    use crate::normalization::LayerNorm;
+    use crate::cpu::normalization::LayerNorm;
     use crate::traits::{
         AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout,
     };

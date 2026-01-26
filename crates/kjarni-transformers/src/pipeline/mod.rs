@@ -44,32 +44,28 @@
 //! - [`crate::generation`] — Generation strategies
 
 // kjarni-transformers/src/pipeline/mod.rs
-mod encoder;
+mod audio;
+mod cpu_factory;
 mod decoder;
-mod decoder_builder;
+mod encoder;
 mod encoder_decoder;
 mod encoder_decoder_builder;
 mod encoder_decoder_loader;
-mod loader;
-mod cpu_factory;
 mod seq2seq_cpu_factory;
-mod audio;
 
-pub use decoder::{DecoderPipeline, DecoderPipelineConfig};
-pub use encoder_decoder::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig};
-pub use encoder_decoder_builder::{EncoderDecoderPipelineBuilder};
-pub use encoder_decoder_loader::{Seq2SeqLoader, EncoderDecoderModelFactory};
-pub use loader::{DecoderModelFactory, GenericLoader};
-pub use decoder_builder::DecoderPipelineBuilder;
 pub use cpu_factory::CpuLayerFactory;
+pub use decoder::{
+    DecoderModelFactory, DecoderPipeline, DecoderPipelineBuilder, DecoderPipelineConfig,
+    DecoderLoader,
+};
+pub use encoder_decoder::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig};
+pub use encoder_decoder_builder::EncoderDecoderPipelineBuilder;
+pub use encoder_decoder_loader::{EncoderDecoderModelFactory, Seq2SeqLoader};
 pub use seq2seq_cpu_factory::Seq2SeqFactory;
 
 pub use encoder::{
-    EncoderLoader,
-    EncoderModelFactory,
-    EncoderPipeline,
-    EncoderPipelineBuilder,
-    EncoderPipelineConfig
+    EncoderLoader, EncoderModelFactory, EncoderPipeline, EncoderPipelineBuilder,
+    EncoderPipelineConfig,
 };
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use super::*;
 use crate::Embeddings;
-use crate::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+use crate::gpu::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
 use crate::gpu_ops::{GpuFrameContext, GpuTensor};
 use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelLayout};
 use crate::WgpuContext;

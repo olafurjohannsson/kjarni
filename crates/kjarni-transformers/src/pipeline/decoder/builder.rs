@@ -1,7 +1,7 @@
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::{EmbeddingConfig, LoadedEmbeddings};
 use crate::execution::ExecutionPlan;
-use crate::lm_head::{LMHeadConfig, LoadedLMHead};
+use crate::loaders::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;
 use crate::pipeline::{DecoderPipeline, DecoderPipelineConfig};
 use crate::traits::{Device, ModelConfig};
@@ -130,9 +130,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
         println!("  [Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
         // 6. Build Model Backends (Handover RoPE and DType)
         // We resolve backends here using the specific model's factory logic
-        // This is where you call build_backends from the GenericLoader
+        // This is where you call build_backends from the DecoderLoader
 
-        // Return dummy/empty backends for now; the GenericLoader will populate these
+        // Return dummy/empty backends for now; the DecoderLoader will populate these
         DecoderPipeline::new(
             embeddings,
             self.cpu_backend,

@@ -13,11 +13,11 @@ use crate::cpu::encoder::{
 };
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
-use crate::normalization::RMSNorm;
+use crate::cpu::normalization::RMSNorm;
 use crate::rope::RoPE;
 use crate::traits::{CpuTransformerCore, Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
-use crate::{Embeddings, FeedForward, normalization::LayerNorm};
+use crate::{Embeddings, FeedForward, cpu::normalization::LayerNorm};
 
 pub struct CpuTransformerEncoder {
     embeddings: Embeddings,

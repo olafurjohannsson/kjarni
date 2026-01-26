@@ -19,9 +19,9 @@
 use crate::{
     WgpuContext,
     {EmbeddingData, Embeddings},
+    gpu::{GpuEmbeddingWeights, GpuEmbeddings},
     gpu_ops::{
         GpuTensor, GpuTensorPool,
-        blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings},
     },
     linear_layer::LinearLayer,
     models::base::ModelInput,

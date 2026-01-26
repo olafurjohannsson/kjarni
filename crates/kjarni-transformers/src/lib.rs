@@ -19,11 +19,11 @@ pub mod gpu_ops;
 
 pub mod linear_layer;
 pub mod models;
-pub mod normalization;
+
 
 pub mod audio;
 pub mod execution;
-pub mod lm_head;
+pub mod loaders;
 pub mod pipeline;
 pub mod pooling;
 pub mod rope;
@@ -33,6 +33,10 @@ pub mod tokenizer;
 pub mod traits;
 pub mod utils;
 pub mod weights;
+pub mod gpu;
+pub mod normalization {
+    pub use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
+}
 
 pub use audio::{
     AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig, create_silence,
@@ -43,14 +47,17 @@ pub use audio::{
 pub use crate::{
     attention::MultiHeadAttention,
     chat::templates::{ChatTemplate, Conversation, Message, Role},
-    cpu::embeddings::{
-        EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingData, EmbeddingInput, Embeddings,
-        LoadedEmbeddings,
-    },
+    cpu::embeddings::{EmbeddingData, Embeddings},
     execution::ExecutionPlan,
     feedforward::FeedForward,
-    lm_head::{LMHeadConfig, LoadedLMHead},
-    normalization::Normalization,
+    loaders::{
+        EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
+        LoadedLMHead,
+    },
+    cpu::normalization::{
+        Normalization,
+
+    },
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };

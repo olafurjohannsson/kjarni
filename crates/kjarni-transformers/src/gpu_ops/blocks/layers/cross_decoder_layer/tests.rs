@@ -10,7 +10,7 @@ use crate::gpu_ops::blocks::{
     GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
-use crate::normalization::LayerNorm as CpuLayerNorm;
+use crate::cpu::normalization::LayerNorm as CpuLayerNorm;
 use crate::{Normalization, WgpuContext};
 use anyhow::Result;
 use ndarray::{Array, Array1, Array2, Array3};

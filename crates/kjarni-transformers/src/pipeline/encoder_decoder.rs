@@ -4,7 +4,7 @@ use crate::LoadedEmbeddings;
 use crate::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use crate::execution::ExecutionPlan;
 use crate::gpu_ops::primitives::broadcast::GpuBroadcast;
-use crate::lm_head::LoadedLMHead;
+use crate::loaders::LoadedLMHead;
 use crate::prelude::Device;
 use anyhow::{Result, anyhow};
 use ndarray::Array2;

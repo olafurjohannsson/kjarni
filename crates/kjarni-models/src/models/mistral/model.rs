@@ -103,7 +103,7 @@ impl MistralModel {
         context: Option<Arc<WgpuContext>>,
         load_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
-        kjarni_transformers::pipeline::GenericLoader::load_from_registry::<Self>(
+        kjarni_transformers::pipeline::DecoderLoader::load_from_registry::<Self>(
             model_type,
             cache_dir,
             device,
@@ -118,7 +118,7 @@ impl MistralModel {
         context: Option<Arc<WgpuContext>>,
         decoder_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
-        kjarni_transformers::pipeline::GenericLoader::load_from_pretrained::<Self>(
+        kjarni_transformers::pipeline::DecoderLoader::load_from_pretrained::<Self>(
             model_path,
             device,
             context,

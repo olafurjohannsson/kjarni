@@ -18,7 +18,7 @@ use crate::{
     feedforward::{FeedForward, StdFeedForward, SwiGluFeedForward},
     linear_layer::{F32MatmulStrategy, LinearLayer},
     models::base::ModelLoadConfig,
-    normalization::{LayerNorm, RMSNorm},
+    cpu::normalization::{LayerNorm, RMSNorm},
     tensor::DType,
     traits::{
         AttentionLayout, EncoderLayout, FeedForwardLayout, ModelMetadata, NormalizationStrategy,

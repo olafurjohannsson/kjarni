@@ -4,7 +4,7 @@ use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::LoadedEmbeddings;
 use crate::execution::ExecutionPlan;
-use crate::lm_head::LoadedLMHead;
+use crate::loaders::LoadedLMHead;
 use crate::prelude::Device;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;

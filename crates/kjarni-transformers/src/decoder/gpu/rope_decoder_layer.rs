@@ -153,7 +153,7 @@ mod rope_decoder_gpu_test {
     use crate::gpu_ops::blocks::{GpuFeedForwardWeights, GpuRMSNormWeights, GpuSwiGLUFFNWeights};
     use crate::gpu_ops::{GpuTensor, GpuTensorPool};
     use crate::linear_layer::LinearLayer;
-    use crate::normalization::RMSNorm as CpuRMSNorm;
+    use crate::cpu::normalization::RMSNorm as CpuRMSNorm;
     use crate::rope::RoPE;
     use crate::{Normalization, WgpuContext};
     use anyhow::Result;

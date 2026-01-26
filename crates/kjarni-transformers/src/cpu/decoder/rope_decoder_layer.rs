@@ -195,7 +195,7 @@ impl CpuRoPEDecoderLayer {
 mod tests {
     use super::*;
     use crate::activations::Activation;
-    use crate::{linear_layer::LinearLayer, normalization::RMSNorm};
+    use crate::{linear_layer::LinearLayer, cpu::normalization::RMSNorm};
     use ndarray::{Array1, Array2};
 
     fn create_test_layer() -> CpuRoPEDecoderLayer {

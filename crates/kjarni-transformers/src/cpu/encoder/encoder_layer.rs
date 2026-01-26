@@ -3,7 +3,7 @@ use std::time::Instant;
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
-use crate::{Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
+use crate::{cpu::normalization::Normalization, cpu::encoder::encoder_self_attention::EncoderSelfAttention};
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3, s};
 use rayon::iter::{
@@ -363,7 +363,7 @@ mod encoder_layer_tests {
     use super::*;
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
-    use crate::normalization::LayerNorm;
+    use crate::cpu::normalization::LayerNorm;
     use crate::pipeline::CpuLayerFactory;
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};

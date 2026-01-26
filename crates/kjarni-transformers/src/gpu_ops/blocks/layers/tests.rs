@@ -9,7 +9,7 @@ use crate::gpu_ops::blocks::{
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
-use crate::normalization::{Normalization, RMSNorm};
+use crate::cpu::normalization::{Normalization, RMSNorm};
 use crate::WgpuContext;
 
 use crate::activations::Activation;

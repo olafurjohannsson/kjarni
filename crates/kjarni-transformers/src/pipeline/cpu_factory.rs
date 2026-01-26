@@ -3,7 +3,7 @@ use crate::decoder::prelude::DecoderAttention;
 use crate::feedforward::SwiGluFeedForward;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
-use crate::normalization::{LayerNorm, Normalization, RMSNorm};
+use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::tensor::DType;
 use crate::traits::{AttentionLayout, FeedForwardLayout, ModelMetadata};
 use crate::weights::ModelWeights;

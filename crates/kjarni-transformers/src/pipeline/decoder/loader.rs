@@ -11,7 +11,8 @@ use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::models::base::ModelLoadConfig;
 use crate::models::registry::WeightsFormat;
 use crate::models::{download_model_files, ModelArchitecture, ModelType};
-use crate::pipeline::{DecoderPipeline, DecoderPipelineBuilder};
+use crate::pipeline::decoder::DecoderPipelineBuilder;
+use crate::pipeline::{DecoderPipeline};
 use crate::rope::loader::LoadedRoPE;
 use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
@@ -44,9 +45,9 @@ pub trait DecoderModelFactory: Sized {
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>>;
 }
 
-pub struct GenericLoader;
+pub struct DecoderLoader;
 
-impl GenericLoader {
+impl DecoderLoader {
     pub async fn load_from_registry<M: DecoderModelFactory>(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,

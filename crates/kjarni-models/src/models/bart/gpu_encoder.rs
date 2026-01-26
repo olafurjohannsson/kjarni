@@ -1,9 +1,11 @@
 use crate::models::bart::config::BartConfig;
 use anyhow::{anyhow, Result};
+use kjarni_transformers::gpu::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+
 use kjarni_transformers::cpu::encoder::prelude::*;
 use kjarni_transformers::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
-use kjarni_transformers::gpu_ops::blocks::embeddings::{GpuEmbeddingWeights, GpuEmbeddings};
+
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
 use kjarni_transformers::gpu_ops::blocks::GpuFeedForwardWeights;
 use kjarni_transformers::gpu_ops::blocks::{
