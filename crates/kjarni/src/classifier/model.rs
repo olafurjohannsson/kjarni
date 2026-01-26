@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use kjarni_transformers::{models::ModelType, traits::Device, WgpuContext};
+use kjarni_transformers::{WgpuContext, models::ModelType, traits::Device};
 
-use crate::common::{default_cache_dir, ensure_model_downloaded};
 use crate::SequenceClassifier;
+use crate::common::{default_cache_dir, ensure_model_downloaded};
 
 use super::builder::ClassifierBuilder;
 use super::types::{
@@ -96,8 +96,14 @@ impl Classifier {
         // Determine loading strategy
         let (inner, model_type, model_id) = if let Some(model_path) = &builder.model_path {
             // Load from local path
-            Self::load_from_path(model_path, device, context.clone(), load_config, builder.quiet)
-                .await?
+            Self::load_from_path(
+                model_path,
+                device,
+                context.clone(),
+                load_config,
+                builder.quiet,
+            )
+            .await?
         } else {
             // Load from registry
             Self::load_from_registry(
@@ -257,9 +263,8 @@ impl Classifier {
             ClassifierError::InvalidConfig(format!("Failed to read config.json: {}", e))
         })?;
 
-        let config: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| {
-            ClassifierError::InvalidConfig(format!("Invalid config.json: {}", e))
-        })?;
+        let config: serde_json::Value = serde_json::from_str(&config_str)
+            .map_err(|e| ClassifierError::InvalidConfig(format!("Invalid config.json: {}", e)))?;
 
         // Check model_type or architectures field
         let model_type_str = config
@@ -281,10 +286,7 @@ impl Classifier {
             }
             Some(s) => Err(ClassifierError::IncompatibleModel {
                 model: path.display().to_string(),
-                reason: format!(
-                    "Unknown model type '{}'. Expected BERT-based model.",
-                    s
-                ),
+                reason: format!("Unknown model type '{}'. Expected BERT-based model.", s),
             }),
             None => Err(ClassifierError::InvalidConfig(
                 "config.json missing 'model_type' or 'architectures' field".to_string(),
@@ -332,23 +334,20 @@ impl Classifier {
 
         // Build result with labels
         let result = ClassificationResult::from_scores_with_labels(&scores, &labels)
-            .ok_or_else(|| {
-                ClassifierError::ClassificationFailed(anyhow::anyhow!("No results"))
-            })?;
+            .ok_or_else(|| ClassifierError::ClassificationFailed(anyhow::anyhow!("No results")))?;
 
         // Apply threshold filter and top_k
         let filtered_scores: Vec<(String, f32)> = result
             .all_scores
             .iter()
-            .filter(|(_, score)| {
-                merged.threshold.map(|t| *score >= t).unwrap_or(true)
-            })
+            .filter(|(_, score)| merged.threshold.map(|t| *score >= t).unwrap_or(true))
             .take(top_k)
             .cloned()
             .collect();
 
-        ClassificationResult::from_scores(filtered_scores)
-            .ok_or_else(|| ClassifierError::ClassificationFailed(anyhow::anyhow!("No results after filtering")))
+        ClassificationResult::from_scores(filtered_scores).ok_or_else(|| {
+            ClassifierError::ClassificationFailed(anyhow::anyhow!("No results after filtering"))
+        })
     }
 
     /// Classify multiple texts.
@@ -394,9 +393,7 @@ impl Classifier {
                 // Apply mode
                 let final_scores = match self.mode {
                     ClassificationMode::SingleLabel => scores,
-                    ClassificationMode::MultiLabel => {
-                        scores.iter().map(|&x| sigmoid(x)).collect()
-                    }
+                    ClassificationMode::MultiLabel => scores.iter().map(|&x| sigmoid(x)).collect(),
                 };
 
                 let result = ClassificationResult::from_scores_with_labels(&final_scores, &labels)?;
@@ -405,9 +402,7 @@ impl Classifier {
                 let filtered: Vec<(String, f32)> = result
                     .all_scores
                     .iter()
-                    .filter(|(_, score)| {
-                        merged.threshold.map(|t| *score >= t).unwrap_or(true)
-                    })
+                    .filter(|(_, score)| merged.threshold.map(|t| *score >= t).unwrap_or(true))
                     .take(top_k)
                     .cloned()
                     .collect();
@@ -467,14 +462,13 @@ impl Classifier {
 
     /// Get the model's CLI name (if from registry).
     pub fn model_name(&self) -> &str {
-        println!("model_type: {:?}", self.inner.config().model_type());
-        println!("model_id: {}", self.model_id);
-        println!("model_type cli_name: {}", self.model_type().map(|t| t.cli_name()).unwrap_or("custom"));
+        self.model_type
+            .map(|t| t.cli_name())
+            .unwrap_or(&self.model_id)
+    }
+
+    pub fn architecture(&self) -> &str {
         self.inner.config().model_type()
-                
-        // self.model_type
-        //     .map(|t| t.cli_name())
-        //     .unwrap_or(&self.model_id)
     }
 
     /// Get the device.

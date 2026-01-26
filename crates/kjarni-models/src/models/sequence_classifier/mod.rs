@@ -30,10 +30,11 @@ use kjarni_transformers::{
 };
 
 pub mod configs;
+
 #[cfg(test)]
 mod tests;
 
-use crate::sequence_classifier::configs::RobertaConfig;
+use crate::models::sequence_classifier::configs::RobertaConfig;
 use crate::{BertConfig, DistilBertConfig};
 
 // =============================================================================

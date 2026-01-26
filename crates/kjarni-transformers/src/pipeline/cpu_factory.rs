@@ -1,6 +1,6 @@
 use crate::activations::Activation;
 use crate::decoder::prelude::DecoderAttention;
-use crate::feedforward::SwiGluFeedForward;
+use crate::cpu::feedforward::SwiGluFeedForward;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
 use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};

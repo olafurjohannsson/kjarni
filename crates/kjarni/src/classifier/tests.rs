@@ -224,15 +224,6 @@ mod classifier_tests {
         }
 
         #[test]
-        fn test_builder_from_zeroshot_preset() {
-            let builder = ClassifierBuilder::from_preset(&presets::ZEROSHOT_LARGE_V1);
-
-            assert_eq!(builder.model, "bart-zeroshot");
-            // Zero-shot presets don't have labels - user provides them
-            assert!(builder.label_config.is_none());
-        }
-
-        #[test]
         fn test_builder_with_load_config() {
             let builder = ClassifierBuilder::new("test-model")
                 .with_load_config(|b| b.offload_embeddings(true).max_batch_size(32));
@@ -249,7 +240,7 @@ mod classifier_tests {
     // =============================================================================
 
     mod preset_tests {
-        use crate::classifier::presets::{EmotionTier, SentimentTier, ZeroShotTier, find_preset};
+        use crate::classifier::presets::{EmotionTier, SentimentTier, find_preset};
 
         use super::*;
 
@@ -271,15 +262,6 @@ mod classifier_tests {
             assert_eq!(preset.name, "SENTIMENT_3CLASS_V1");
             assert_eq!(preset.model, "roberta-sentiment");
             assert_eq!(preset.labels.unwrap().len(), 3); // negative, neutral, positive
-        }
-
-        #[test]
-        fn test_zeroshot_preset() {
-            let preset = &presets::ZEROSHOT_LARGE_V1;
-
-            assert_eq!(preset.name, "ZEROSHOT_LARGE_V1");
-            assert_eq!(preset.task, presets::ClassificationTask::ZeroShot);
-            assert!(preset.labels.is_none()); // User provides at runtime
         }
 
         #[test]
@@ -337,14 +319,11 @@ mod classifier_tests {
         fn test_classifier_tier_resolve() {
             let fast = presets::ClassifierTier::Fast.resolve();
             let balanced = presets::ClassifierTier::Balanced.resolve();
-            let accurate = presets::ClassifierTier::Accurate.resolve();
 
             // Fast defaults to binary sentiment
             assert_eq!(fast.name, "SENTIMENT_BINARY_V1");
             // Balanced defaults to 3-class sentiment
             assert_eq!(balanced.name, "SENTIMENT_3CLASS_V1");
-            // Accurate defaults to zero-shot (most flexible)
-            assert_eq!(accurate.name, "ZEROSHOT_LARGE_V1");
         }
 
         #[test]
@@ -354,15 +333,6 @@ mod classifier_tests {
                 assert!(!preset.model.is_empty());
                 assert!(preset.memory_mb > 0);
                 assert!(!preset.description.is_empty());
-
-                // Zero-shot presets don't have labels
-                if preset.task != presets::ClassificationTask::ZeroShot {
-                    assert!(
-                        preset.labels.is_some(),
-                        "Non-zeroshot preset {} should have labels",
-                        preset.name
-                    );
-                }
             }
         }
 
@@ -389,12 +359,6 @@ mod classifier_tests {
                 SentimentTier::Detailed.resolve().model,
                 "bert-sentiment-multilingual"
             );
-        }
-
-        #[test]
-        fn test_zeroshot_tier_resolution() {
-            assert_eq!(ZeroShotTier::Fast.resolve().model, "deberta-zeroshot");
-            assert_eq!(ZeroShotTier::Accurate.resolve().model, "bart-zeroshot");
         }
 
         #[test]
@@ -1229,48 +1193,6 @@ mod classifier_tests {
     // Preset Contract Tests
     // =============================================================================
 
-    mod preset_tests_2 {
-        use super::*;
-        use crate::classifier::presets::{ALL_V1_PRESETS, ClassificationTask};
-
-        #[tokio::test]
-        #[ignore = "Requires model downloads"]
-        async fn test_all_non_zeroshot_presets_load() {
-            for preset in ALL_V1_PRESETS.iter() {
-                // Skip zero-shot for now
-                if preset.task == ClassificationTask::ZeroShot {
-                    println!("Skipping zero-shot preset: {}", preset.name);
-                    continue;
-                }
-
-                println!("Testing preset: {}", preset.name);
-
-                let classifier = Classifier::new(preset.model)
-                    .await
-                    .unwrap_or_else(|e| panic!("Failed to load preset {}: {}", preset.name, e));
-
-                // Verify label count matches
-                if let Some(expected_labels) = preset.labels {
-                    assert_eq!(
-                        classifier.num_labels(),
-                        expected_labels.len(),
-                        "Label count mismatch for {}",
-                        preset.name
-                    );
-                }
-
-                // Verify can classify
-                let result = classifier
-                    .classify("This is a test.")
-                    .await
-                    .unwrap_or_else(|e| panic!("Classification failed for {}: {}", preset.name, e));
-
-                assert_valid_probability(result.score, &format!("{} classification", preset.name));
-
-                println!("  ✓ {} loaded and classified successfully", preset.name);
-            }
-        }
-    }
 
     mod integration_tests {
         use kjarni_transformers::Device;
@@ -1392,13 +1314,15 @@ mod classifier_tests {
             assert_eq!(PRESET.model, MODEL_NAME);
             let model_name = PRESET.model;
 
+
             println!("--- Verifying Preset Contract for '{}' ---", PRESET.name);
 
             let classifier = Classifier::new(model_name)
                 .await
                 .expect("Failed to load model defined in preset");
-
+            
             assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
+            assert_eq!(classifier.architecture(), "roberta", "Model name mismatch");
 
             let expected_labels: Vec<String> = PRESET
                 .labels

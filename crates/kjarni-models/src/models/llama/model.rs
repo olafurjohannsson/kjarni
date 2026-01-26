@@ -47,7 +47,7 @@ use kjarni_transformers::common::{
     DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
 };
 use kjarni_transformers::pipeline::DecoderModelFactory;
-use kjarni_transformers::rope::loader::LoadedRoPE;
+use kjarni_transformers::loaders::LoadedRoPE;
 use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;

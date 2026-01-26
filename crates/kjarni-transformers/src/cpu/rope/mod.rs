@@ -8,7 +8,6 @@
 //! - No learned parameters (purely geometric)
 //! - Applied to Q and K, not V
 //! - Different rotation frequencies for different dimensions
-pub mod loader;
 use crate::cpu::kernels::x86::rope_avx2;
 use crate::models::base::RopeScalingConfig;
 use ndarray::{Array1, Array2, Array3, Array4};

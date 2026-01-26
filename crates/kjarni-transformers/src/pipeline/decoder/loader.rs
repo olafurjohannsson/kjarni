@@ -13,7 +13,7 @@ use crate::models::registry::WeightsFormat;
 use crate::models::{download_model_files, ModelArchitecture, ModelType};
 use crate::pipeline::decoder::DecoderPipelineBuilder;
 use crate::pipeline::{DecoderPipeline};
-use crate::rope::loader::LoadedRoPE;
+use crate::loaders::LoadedRoPE;
 use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;

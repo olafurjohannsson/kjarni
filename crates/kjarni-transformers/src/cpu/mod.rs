@@ -6,5 +6,5 @@ pub mod decoder;
 pub mod strategy;
 pub mod embeddings;
 pub mod normalization;
-
-
+pub mod feedforward;
+pub mod rope;

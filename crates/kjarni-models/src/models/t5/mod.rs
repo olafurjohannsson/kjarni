@@ -4,6 +4,7 @@ pub mod config;
 pub mod model;
 
 pub use config::T5Config;
+pub use model::T5Model;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum T5Task {
@@ -20,7 +21,7 @@ impl T5Task {
     /// Detect task from input text prefix
     pub fn from_input(input: &str) -> Self {
         let input_lower = input.to_lowercase();
-        
+
         if input_lower.starts_with("summarize:") || input_lower.starts_with("summarize :") {
             T5Task::Summarization
         } else if input_lower.starts_with("translate english to german:") {
@@ -38,7 +39,7 @@ impl T5Task {
             T5Task::Unknown
         }
     }
-    
+
     fn parse_translation(input: &str) -> Self {
         // Parse "translate {from} to {to}:"
         let input = input.strip_prefix("translate ").unwrap_or(input);
@@ -51,5 +52,25 @@ impl T5Task {
             }
         }
         T5Task::Unknown
+    }
+}
+
+#[cfg(test)]
+mod t5_generation_test {
+    use crate::models::t5::model::T5Model;
+
+    use super::*;
+    use anyhow::Result;
+    use kjarni_transformers::{Device, ModelType, encoder_decoder::EncoderDecoderGenerator};
+
+    #[tokio::test]
+    async fn test_t5_full_generation() -> Result<()> {
+        let input_text = "translate English to German: How old are you?";
+        let model_type = ModelType::FlanT5Large;
+        let model = T5Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
+        let generator = EncoderDecoderGenerator::new(Box::new(model))?;
+        let output = generator.generate(input_text, None).await?;
+        assert_eq!(output, "Sie sind wie?");
+        Ok(())
     }
 }

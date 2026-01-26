@@ -20,7 +20,7 @@ use kjarni_transformers::{
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
-    rope::loader::LoadedRoPE,
+    loaders::LoadedRoPE,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };

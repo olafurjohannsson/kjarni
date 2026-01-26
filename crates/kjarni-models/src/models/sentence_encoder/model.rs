@@ -24,8 +24,7 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
-use crate::sequence_classifier::configs::RobertaConfig;
-
+use crate::models::sequence_classifier::configs::RobertaConfig;
 use super::configs::{BertConfig, DistilBertConfig};
 
 

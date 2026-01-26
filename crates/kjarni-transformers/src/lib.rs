@@ -14,28 +14,36 @@ pub mod cpu;
 pub mod decoder;
 
 pub mod encoder_decoder;
-pub mod feedforward;
 pub mod gpu_ops;
 
 pub mod linear_layer;
 pub mod models;
 
-
 pub mod audio;
 pub mod execution;
+pub mod gpu;
 pub mod loaders;
 pub mod pipeline;
 pub mod pooling;
-pub mod rope;
 pub mod stats;
 pub mod tensor;
 pub mod tokenizer;
 pub mod traits;
 pub mod utils;
 pub mod weights;
-pub mod gpu;
+
+pub mod rope {
+    pub use crate::cpu::rope::RoPE;
+}
+
 pub mod normalization {
     pub use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
+}
+
+pub mod feedforward {
+    pub use crate::cpu::feedforward::{
+        FeedForward, LegacyFeedForward, StdFeedForward, StdFeedForwardNew, SwiGluFeedForward,
+    };
 }
 
 pub use audio::{
@@ -48,15 +56,12 @@ pub use crate::{
     attention::MultiHeadAttention,
     chat::templates::{ChatTemplate, Conversation, Message, Role},
     cpu::embeddings::{EmbeddingData, Embeddings},
+    cpu::normalization::Normalization,
     execution::ExecutionPlan,
     feedforward::FeedForward,
     loaders::{
         EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
         LoadedLMHead,
-    },
-    cpu::normalization::{
-        Normalization,
-
     },
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},

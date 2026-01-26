@@ -3,11 +3,14 @@ use ndarray::{Array3, ArrayView2};
 
 pub mod legacy;
 pub mod standard;
-pub mod swiglu;
 pub mod standard_new;
+pub mod swiglu;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
-pub use crate::feedforward::{legacy::LegacyFeedForward, swiglu::SwiGluFeedForward, standard::StdFeedForward, standard_new::StdFeedForwardNew};
+pub use crate::cpu::feedforward::{
+    legacy::LegacyFeedForward, standard::StdFeedForward, standard_new::StdFeedForwardNew,
+    swiglu::SwiGluFeedForward,
+};
 
 pub enum FeedForward {
     Standard(StdFeedForward),
@@ -41,7 +44,6 @@ impl FeedForward {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

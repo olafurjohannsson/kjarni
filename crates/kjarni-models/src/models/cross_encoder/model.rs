@@ -8,7 +8,6 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::ModelInput;
-use kjarni_transformers::traits::CpuTransformerCore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -29,7 +28,7 @@ use kjarni_transformers::{
 };
 
 use crate::BertConfig;
-use crate::sequence_classifier::configs::MiniLMCrossEncoderConfig;
+use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
 
 // =============================================================================
 // Cross Encoder

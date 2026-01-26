@@ -11,6 +11,9 @@ pub struct ClassifierPreset {
     /// CLI model name.
     pub model: &'static str,
 
+    /// Architecture type (roberta)
+    pub architecture: &'static str,
+
     /// Classification task type.
     pub task: ClassificationTask,
 
@@ -30,13 +33,9 @@ pub struct ClassifierPreset {
 /// Type of classification task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassificationTask {
-   Sentiment,
+    Sentiment,
     Emotion,
-    ZeroShot,
     Toxicity,
-    Topic,
-    Intent,
-    Custom,
 }
 
 
@@ -48,6 +47,7 @@ pub enum ClassificationTask {
 pub const SENTIMENT_BINARY_V1: ClassifierPreset = ClassifierPreset {
     name: "SENTIMENT_BINARY_V1",
     model: "distilbert-sentiment",
+    architecture: "bert",
     task: ClassificationTask::Sentiment,
     labels: Some(&["NEGATIVE", "POSITIVE"]),
     recommended_device: KjarniDevice::Cpu,
@@ -59,6 +59,7 @@ pub const SENTIMENT_BINARY_V1: ClassifierPreset = ClassifierPreset {
 pub const SENTIMENT_3CLASS_V1: ClassifierPreset = ClassifierPreset {
     name: "SENTIMENT_3CLASS_V1",
     model: "roberta-sentiment",
+    architecture: "roberta",
     task: ClassificationTask::Sentiment,
     labels: Some(&["negative", "neutral", "positive"]),
     recommended_device: KjarniDevice::Cpu,
@@ -70,37 +71,12 @@ pub const SENTIMENT_3CLASS_V1: ClassifierPreset = ClassifierPreset {
 pub const SENTIMENT_5STAR_V1: ClassifierPreset = ClassifierPreset {
     name: "SENTIMENT_5STAR_V1",
     model: "bert-sentiment-multilingual",
+    architecture: "bert",
     task: ClassificationTask::Sentiment,
     labels: Some(&["1 star", "2 stars", "3 stars", "4 stars", "5 stars"]),
     recommended_device: KjarniDevice::Cpu,
     memory_mb: 681,
     description: "5-star ratings, multilingual (EN/DE/FR/ES/IT/NL)",
-};
-
-// =============================================================================
-// V1 Presets - Zero-Shot
-// =============================================================================
-
-/// Zero-shot classification (large, most capable)
-pub const ZEROSHOT_LARGE_V1: ClassifierPreset = ClassifierPreset {
-    name: "ZEROSHOT_LARGE_V1",
-    model: "bart-zeroshot",
-    task: ClassificationTask::ZeroShot,
-    labels: None, // User provides at runtime
-    recommended_device: KjarniDevice::Cpu,
-    memory_mb: 1630,
-    description: "Zero-shot classifier, classify into any labels",
-};
-
-/// Zero-shot classification (smaller, faster)
-pub const ZEROSHOT_BASE_V1: ClassifierPreset = ClassifierPreset {
-    name: "ZEROSHOT_BASE_V1",
-    model: "deberta-zeroshot",
-    task: ClassificationTask::ZeroShot,
-    labels: None,
-    recommended_device: KjarniDevice::Cpu,
-    memory_mb: 738,
-    description: "Zero-shot classifier, smaller and faster than BART",
 };
 
 // =============================================================================
@@ -111,6 +87,7 @@ pub const ZEROSHOT_BASE_V1: ClassifierPreset = ClassifierPreset {
 pub const EMOTION_V1: ClassifierPreset = ClassifierPreset {
     name: "EMOTION_V1",
     model: "distilroberta-emotion",
+    architecture: "roberta",
     task: ClassificationTask::Emotion,
     labels: Some(&["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]),
     recommended_device: KjarniDevice::Cpu,
@@ -122,6 +99,7 @@ pub const EMOTION_V1: ClassifierPreset = ClassifierPreset {
 pub const EMOTION_DETAILED_V1: ClassifierPreset = ClassifierPreset {
     name: "EMOTION_DETAILED_V1",
     model: "roberta-emotions",
+    architecture: "roberta",
     task: ClassificationTask::Emotion,
     labels: Some(&[
         "admiration", "amusement", "anger", "annoyance", "approval", "caring",
@@ -143,6 +121,7 @@ pub const EMOTION_DETAILED_V1: ClassifierPreset = ClassifierPreset {
 pub const TOXICITY_V1: ClassifierPreset = ClassifierPreset {
     name: "TOXICITY_V1",
     model: "toxic-bert",
+    architecture: "bert",
     task: ClassificationTask::Toxicity,
     labels: Some(&["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]),
     recommended_device: KjarniDevice::Cpu,
@@ -160,9 +139,6 @@ pub const ALL_V1_PRESETS: &[&ClassifierPreset] = &[
     &SENTIMENT_BINARY_V1,
     &SENTIMENT_3CLASS_V1,
     &SENTIMENT_5STAR_V1,
-    // Zero-Shot
-    &ZEROSHOT_LARGE_V1,
-    &ZEROSHOT_BASE_V1,
     // Emotion
     &EMOTION_V1,
     &EMOTION_DETAILED_V1,
@@ -205,25 +181,6 @@ impl SentimentTier {
     }
 }
 
-/// Tier-based preset selection for zero-shot classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ZeroShotTier {
-    /// Faster, smaller model
-    Fast,
-    /// More accurate, larger model
-    Accurate,
-}
-
-impl ZeroShotTier {
-    /// Resolve tier to default preset.
-    pub fn resolve(&self) -> &'static ClassifierPreset {
-        match self {
-            Self::Fast => &ZEROSHOT_BASE_V1,
-            Self::Accurate => &ZEROSHOT_LARGE_V1,
-        }
-    }
-}
-
 /// Tier-based preset selection for emotion detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmotionTier {
@@ -251,8 +208,6 @@ pub enum ClassifierTier {
     Fast,
     /// Balanced speed/accuracy
     Balanced,
-    /// Most accurate
-    Accurate,
 }
 
 impl ClassifierTier {
@@ -261,7 +216,6 @@ impl ClassifierTier {
         match self {
             Self::Fast => &SENTIMENT_BINARY_V1,
             Self::Balanced => &SENTIMENT_3CLASS_V1,
-            Self::Accurate => &ZEROSHOT_LARGE_V1,
         }
     }
 }

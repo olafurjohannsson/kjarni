@@ -7,3 +7,4 @@ pub mod t5;
 pub mod whisper;
 pub mod cross_encoder;
 pub mod sentence_encoder;
+pub mod sequence_classifier;

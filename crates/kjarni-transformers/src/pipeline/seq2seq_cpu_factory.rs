@@ -9,13 +9,13 @@ use crate::cpu::encoder_decoder::{
     decoder_cross_attn::DecoderCrossAttention, decoder_cross_attn_layer::CrossDecoderLayer,
 };
 use crate::encoder_decoder::DecoderSelfAttention;
-use crate::feedforward::LegacyFeedForward;
+
+use crate::feedforward::{FeedForward, LegacyFeedForward, StdFeedForward, SwiGluFeedForward};
 use crate::{
     Normalization,
     activations::Activation,
     cpu::encoder::{encoder_layer::EncoderLayer, encoder_self_attention::EncoderSelfAttention},
     {EmbeddingData, Embeddings},
-    feedforward::{FeedForward, StdFeedForward, SwiGluFeedForward},
     linear_layer::{F32MatmulStrategy, LinearLayer},
     models::base::ModelLoadConfig,
     cpu::normalization::{LayerNorm, RMSNorm},
