@@ -66,7 +66,7 @@
 //! ```
 
 mod builder;
-mod conversation;
+pub mod conversation;
 mod model;
 pub mod presets;
 mod types;

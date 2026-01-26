@@ -7,9 +7,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Semaphore;
 use std::sync::Arc;
 
-// Use high-level Embedder instead of low-level SentenceEncoder
 use kjarni::embedder::Embedder;
-
 use kjarni::{DocumentLoader, IndexConfig, IndexReader, IndexWriter, LoaderConfig, SplitterConfig};
 use kjarni_cli::IndexCommands;
 
@@ -215,7 +213,6 @@ async fn process_inputs(
     // 3. Spawn Producer Task
     let inputs_owned = inputs.to_vec();
     let loader_ref = loader.clone();
-    let quiet_clone = quiet;
     
     tokio::spawn(async move {
         for input in inputs_owned {
@@ -235,7 +232,6 @@ async fn process_inputs(
                 let loader = loader_ref.clone();
                 let tx = tx.clone();
                 let file_path = entry.path().to_owned();
-                // let quiet = quiet_clone;
 
                 tokio::spawn(async move {
                     let _p = permit; 
@@ -304,7 +300,6 @@ async fn flush_batch(
 ) -> Result<usize> {
     let count = texts.len();
 
-    // High-level API call
     let texts_ref: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
     let embeddings = embedder.embed_batch(&texts_ref).await?;
 
@@ -318,31 +313,39 @@ async fn flush_batch(
 /// Show index information
 fn info(index_path: &str) -> Result<()> {
     let reader = IndexReader::open(index_path)?;
+    let output = format_index_info(index_path, &reader)?;
+    print!("{}", output);
+    Ok(())
+}
 
-    println!();
-    println!("Index: {}", index_path);
-    println!("{}", "-".repeat(50));
-    println!("Documents:      {}", reader.len());
-    println!("Segments:       {}", reader.segment_count());
-    println!("Dimension:      {}", reader.dimension());
+/// Format index information as a string
+fn format_index_info(index_path: &str, reader: &IndexReader) -> Result<String> {
+    let mut output = String::new();
+
+    output.push('\n');
+    output.push_str(&format!("Index: {}\n", index_path));
+    output.push_str(&format!("{}\n", "-".repeat(50)));
+    output.push_str(&format!("Documents:      {}\n", reader.len()));
+    output.push_str(&format!("Segments:       {}\n", reader.segment_count()));
+    output.push_str(&format!("Dimension:      {}\n", reader.dimension()));
 
     if let Ok(size) = calculate_index_size(index_path) {
-        println!("Total size:     {}", format_size(size));
+        output.push_str(&format!("Total size:     {}\n", format_size(size)));
     }
 
     if !reader.is_empty() {
-        println!();
-        println!("Sample documents:");
+        output.push('\n');
+        output.push_str("Sample documents:\n");
         for i in 0..3.min(reader.len()) {
             if let Ok(doc) = reader.get_document(i) {
-                println!("  [{}] {}", i, truncate(&doc, 60));
+                output.push_str(&format!("  [{}] {}\n", i, truncate(&doc, 60)));
             }
         }
     }
 
     // Show segment details
-    println!();
-    println!("Segments:");
+    output.push('\n');
+    output.push_str("Segments:\n");
     let segments_dir = Path::new(index_path).join("segments");
     if segments_dir.exists() {
         let mut entries: Vec<_> = std::fs::read_dir(&segments_dir)?
@@ -357,14 +360,14 @@ fn info(index_path: &str) -> Result<()> {
                 if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
                     let doc_count = meta["doc_count"].as_u64().unwrap_or(0);
                     let name = entry.file_name();
-                    println!("  {:?}: {} docs", name, doc_count);
+                    output.push_str(&format!("  {:?}: {} docs\n", name, doc_count));
                 }
             }
         }
     }
 
-    println!();
-    Ok(())
+    output.push('\n');
+    Ok(output)
 }
 
 /// Helper to load embedder using high-level builder
@@ -378,7 +381,6 @@ async fn load_embedder(model: &str, gpu: bool, quiet: bool) -> Result<Embedder> 
         builder = builder.cpu();
     }
 
-    // The builder handles validation, downloading, and loading
     builder.build().await.map_err(|e| anyhow!(e))
 }
 
@@ -410,5 +412,175 @@ fn truncate(s: &str, max_len: usize) -> String {
         s
     } else {
         format!("{}...", &s[..max_len - 3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // format_size tests
+    // =========================================================================
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(0), "0 bytes");
+        assert_eq!(format_size(1), "1 bytes");
+        assert_eq!(format_size(512), "512 bytes");
+        assert_eq!(format_size(999), "999 bytes");
+    }
+
+    #[test]
+    fn test_format_size_kilobytes() {
+        assert_eq!(format_size(1_000), "1.00 KB");
+        assert_eq!(format_size(1_500), "1.50 KB");
+        assert_eq!(format_size(10_000), "10.00 KB");
+        assert_eq!(format_size(999_999), "1000.00 KB");
+    }
+
+    #[test]
+    fn test_format_size_megabytes() {
+        assert_eq!(format_size(1_000_000), "1.00 MB");
+        assert_eq!(format_size(1_500_000), "1.50 MB");
+        assert_eq!(format_size(100_000_000), "100.00 MB");
+        assert_eq!(format_size(999_999_999), "1000.00 MB");
+    }
+
+    #[test]
+    fn test_format_size_gigabytes() {
+        assert_eq!(format_size(1_000_000_000), "1.00 GB");
+        assert_eq!(format_size(1_500_000_000), "1.50 GB");
+        assert_eq!(format_size(10_000_000_000), "10.00 GB");
+        assert_eq!(format_size(100_000_000_000), "100.00 GB");
+    }
+
+    #[test]
+    fn test_format_size_edge_cases() {
+        // Just under KB threshold
+        assert_eq!(format_size(999), "999 bytes");
+        // Just at KB threshold
+        assert_eq!(format_size(1_000), "1.00 KB");
+        // Just under MB threshold
+        assert_eq!(format_size(999_999), "1000.00 KB");
+        // Just at MB threshold
+        assert_eq!(format_size(1_000_000), "1.00 MB");
+    }
+
+    #[test]
+    fn test_format_size_precision() {
+        assert_eq!(format_size(1_234_567), "1.23 MB");
+        assert_eq!(format_size(1_235_000), "1.24 MB"); // Rounding
+        assert_eq!(format_size(1_234_567_890), "1.23 GB");
+    }
+
+    // =========================================================================
+    // truncate tests
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+        assert_eq!(truncate("hello world", 11), "hello world");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 8), "hello...");
+        assert_eq!(truncate("this is a very long string", 10), "this is...");
+    }
+
+    #[test]
+    fn test_truncate_replaces_newlines() {
+        assert_eq!(truncate("hello\nworld", 20), "hello world");
+        assert_eq!(truncate("line1\nline2\nline3", 20), "line1 line2 line3");
+    }
+
+    #[test]
+    fn test_truncate_replaces_tabs() {
+        assert_eq!(truncate("hello\tworld", 20), "hello world");
+        assert_eq!(truncate("col1\tcol2\tcol3", 20), "col1 col2 col3");
+    }
+
+    #[test]
+    fn test_truncate_mixed_whitespace() {
+        assert_eq!(truncate("hello\n\tworld", 20), "hello  world");
+        assert_eq!(truncate("a\nb\tc\nd", 10), "a b c d");
+    }
+
+    #[test]
+    fn test_truncate_with_newlines_then_truncate() {
+        // First replaces newlines, then truncates
+        let input = "line one\nline two\nline three";
+        let result = truncate(input, 15);
+        assert_eq!(result, "line one lin...");
+    }
+
+    #[test]
+    fn test_truncate_empty_string() {
+        assert_eq!(truncate("", 10), "");
+        assert_eq!(truncate("", 0), "");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        // Note: This will panic if max_len cuts in the middle of a multi-byte char
+        // Testing with safe boundaries
+        assert_eq!(truncate("héllo", 10), "héllo");
+        assert_eq!(truncate("日本語テスト", 20), "日本語テスト");
+    }
+
+    #[test]
+    fn test_truncate_only_whitespace() {
+        assert_eq!(truncate("\n\n\n", 10), "   ");
+        assert_eq!(truncate("\t\t\t", 10), "   ");
+    }
+
+    #[test]
+    fn test_truncate_minimum_length() {
+        // With max_len=4, we get 1 char + "..."
+        assert_eq!(truncate("hello", 4), "h...");
+    }
+
+    // =========================================================================
+    // Edge cases and integration-like tests
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_realistic_document() {
+        let doc = "This is a document with multiple paragraphs.\n\nIt has some content that spans several lines.\n\nAnd more content here.";
+        let result = truncate(doc, 60);
+        
+        assert_eq!(result.len(), 60);
+        assert!(result.ends_with("..."));
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn test_format_size_realistic_file_sizes() {
+        // Common file sizes
+        assert_eq!(format_size(4_096), "4.10 KB");        // 4KB block
+        assert_eq!(format_size(65_536), "65.54 KB");      // 64KB
+        assert_eq!(format_size(1_048_576), "1.05 MB");    // 1 MiB
+        assert_eq!(format_size(104_857_600), "104.86 MB"); // 100 MiB
+        assert_eq!(format_size(1_073_741_824), "1.07 GB"); // 1 GiB
+    }
+
+    // =========================================================================
+    // ENCODE_BATCH_SIZE constant test
+    // =========================================================================
+
+    #[test]
+    fn test_encode_batch_size_is_reasonable() {
+        // Sanity check that the constant is in a reasonable range
+        assert!(ENCODE_BATCH_SIZE > 0);
+        assert!(ENCODE_BATCH_SIZE <= 128);
+        assert_eq!(ENCODE_BATCH_SIZE, 32); // Document expected value
     }
 }

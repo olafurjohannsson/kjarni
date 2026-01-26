@@ -1,20 +1,15 @@
 mod commands;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
-use kjarni_cli::{Cli, Commands};
+use kjarni_cli::{Cli, Commands, verbosity_to_log_level};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let log_level = match cli.verbose {
-        0 => "warn",
-        1 => "info",
-        2 => "debug",
-        _ => "trace",
-    };
+    let log_level = verbosity_to_log_level(cli.verbose);
     unsafe {
         std::env::set_var("RUST_LOG", log_level);
     }
@@ -109,28 +104,7 @@ async fn main() -> Result<()> {
             commands::transcribe::run(&file, &model, model_path.as_deref(), language.as_deref())
                 .await
         }
-
-        Commands::Encode {
-            input,
-            model,
-            model_path,
-            format,
-            normalize,
-            pooling,
-            gpu,
-        } => {
-            commands::encode::run(
-                input.as_deref(),
-                &model,
-                model_path.as_deref(),
-                &format,
-                normalize,
-                &pooling,
-                gpu,
-            )
-            .await
-        }
-
+        
         Commands::Classify {
             input,
             model,
@@ -173,18 +147,17 @@ async fn main() -> Result<()> {
             gpu,
             quiet,
         } => {
-            unimplemented!()
-            // commands::rerank::run(
-            //     &query,
-            //     &documents,
-            //     &model,
-            //     model_path.as_deref(),
-            //     top_k,
-            //     &format,
-            //     gpu,
-            //     quiet,
-            // )
-            // .await
+            commands::rerank::run(
+                &query,
+                &documents,
+                &model,
+                model_path.as_deref(),
+                top_k,
+                &format,
+                gpu,
+                quiet,
+            )
+            .await
         }
 
         Commands::Chat {
@@ -208,12 +181,6 @@ async fn main() -> Result<()> {
             .await
         }
 
-        Commands::Repl {
-            model,
-            model_path,
-            mode,
-            gpu,
-        } => commands::repl::run(&model, model_path.as_deref(), &mode, gpu).await,
 
         Commands::Index { action } => commands::index::run(action).await,
 
@@ -249,8 +216,5 @@ async fn main() -> Result<()> {
             gpu,
             quiet,
         } => commands::similarity::run(&text1, &text2, &model, gpu, quiet).await,
-
-
-        
     }
 }

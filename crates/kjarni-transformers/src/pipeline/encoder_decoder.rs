@@ -21,7 +21,8 @@ use std::sync::Arc;
 /// through the `*Ops` traits that the model implements.
 pub struct EncoderDecoderPipeline {
     // Core components
-    embeddings: LoadedEmbeddings,
+    encoder_embeddings: Option<LoadedEmbeddings>,
+    decoder_embeddings: LoadedEmbeddings,
 
     // Encoders
     cpu_encoder: Option<Box<dyn CpuEncoder>>,
@@ -57,7 +58,8 @@ pub struct EncoderDecoderPipelineConfig {
 impl EncoderDecoderPipeline {
     /// Creates a new decoder pipeline.
     pub fn new(
-        embeddings: LoadedEmbeddings,
+        encoder_embeddings: Option<LoadedEmbeddings>,
+        decoder_embeddings: LoadedEmbeddings,
         cpu_decoder: Option<Box<dyn CpuCrossDecoder>>,
         gpu_decoder: Option<Box<dyn GpuCrossDecoder>>,
         cpu_encoder: Option<Box<dyn CpuEncoder>>,
@@ -74,7 +76,8 @@ impl EncoderDecoderPipeline {
             None
         };
         let pipeline = Self {
-            embeddings,
+            encoder_embeddings,
+            decoder_embeddings,
             cpu_decoder,
             gpu_decoder,
             cpu_encoder,
@@ -113,15 +116,35 @@ impl EncoderDecoderPipeline {
     }
 
     fn validate_plan(&self, plan: &ExecutionPlan) -> Result<()> {
-        // Validate embeddings
         match plan.embeddings {
-            Device::Cpu if !self.embeddings.is_cpu() => {
-                return Err(anyhow!("Plan requires CPU embeddings but not loaded"));
+            Device::Cpu if !self.decoder_embeddings.is_cpu() => {
+                return Err(anyhow!(
+                    "Plan requires CPU embeddings but decoder embeddings not loaded on CPU"
+                ));
             }
-            Device::Wgpu if !self.embeddings.is_gpu() => {
-                return Err(anyhow!("Plan requires GPU embeddings but not loaded"));
+            Device::Wgpu if !self.decoder_embeddings.is_gpu() => {
+                return Err(anyhow!(
+                    "Plan requires GPU embeddings but decoder embeddings not loaded on GPU"
+                ));
             }
             _ => {}
+        }
+
+        // Validate encoder embeddings (if present)
+        if let Some(ref enc_emb) = self.encoder_embeddings {
+            match plan.embeddings {
+                Device::Cpu if !enc_emb.is_cpu() => {
+                    return Err(anyhow!(
+                        "Plan requires CPU embeddings but encoder embeddings not loaded on CPU"
+                    ));
+                }
+                Device::Wgpu if !enc_emb.is_gpu() => {
+                    return Err(anyhow!(
+                        "Plan requires GPU embeddings but encoder embeddings not loaded on GPU"
+                    ));
+                }
+                _ => {}
+            }
         }
 
         // Validate layers
@@ -158,8 +181,12 @@ impl EncoderDecoderPipeline {
     // Component Accessors
     // ========================================================================
 
-    pub fn embeddings(&self) -> &LoadedEmbeddings {
-        &self.embeddings
+    pub fn encoder_embeddings(&self) -> Option<&LoadedEmbeddings> {
+        self.encoder_embeddings.as_ref()
+    }
+
+    pub fn decoder_embeddings(&self) -> &LoadedEmbeddings {
+        &self.decoder_embeddings
     }
 
     pub fn cpu_decoder(&self) -> Option<&dyn CpuCrossDecoder> {

@@ -610,7 +610,7 @@ mod tests_trait {
             token_type_ids: Option<&Array2<u32>>,
             pos: usize,
         ) -> Result<Array3<f32>> {
-            unimplemented!()
+            Ok(Array3::zeros((input_ids.dim().0, input_ids.dim().1, self.hidden_size())))
         }
     }
 

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
 use crate::cpu::kernels::q_common::BlockQ8_0;
 use crate::cpu::kernels::quantize::quantize_matrix_q8_0;
+use crate::linear_layer::LinearLayer;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::ModelWeights;
 use anyhow::Result;
@@ -24,6 +25,26 @@ pub enum EmbeddingData {
     F32(Arc<Array2<f32>>),
     BF16(Arc<Array2<bf16>>),
     Q8_0(Arc<QuantizedMatrix<BlockQ8_0>>),
+}
+
+impl EmbeddingData {
+    
+    pub fn to_linear_layer(&self) -> LinearLayer {
+        match self {
+            EmbeddingData::F32(arc) => LinearLayer::from_arc_f32(arc.clone(), None),
+            EmbeddingData::BF16(arc) => LinearLayer::from_arc_bf16(arc.clone(), None),
+            EmbeddingData::Q8_0(arc) => LinearLayer::from_arc_q8_0(arc.clone(), None),
+        }
+    }
+
+    pub fn dtype(&self) -> DType {
+        match self {
+            EmbeddingData::F32(_) => DType::F32,
+            EmbeddingData::BF16(_) => DType::BF16,
+            EmbeddingData::Q8_0(_) => DType::Q8_0,
+        }
+    }
+    
 }
 
 /// A CPU-based embedding layer that handles word, position, and token type embeddings.
@@ -48,8 +69,26 @@ impl Embeddings {
         }
     }
 
-    /// Loads the embedding layer from model weights, preserving the native dtype
-    /// of the word embedding table to save memory.
+    pub fn with_shared_words(
+        shared_words: EmbeddingData,
+        weights: &ModelWeights,
+        position_embedding_key: Option<&str>,
+        token_type_embedding_key: Option<&str>,
+    ) -> Result<Self> {
+        let pos_emb = position_embedding_key
+            .map(|k| weights.get_array2(k))
+            .transpose()?;
+        let type_emb = token_type_embedding_key
+            .map(|k| weights.get_array2(k))
+            .transpose()?;
+
+        Ok(Self {
+            word_embeddings: shared_words,
+            position_embeddings: pos_emb,
+            token_type_embeddings: type_emb,
+        })
+    }
+
     pub fn from_weights(
         weights: &ModelWeights,
         word_embedding_name: &str,
@@ -61,7 +100,6 @@ impl Embeddings {
         let effective_dtype = target_dtype.unwrap_or(word_tensor.dtype());
 
         let word_embeddings = match (word_tensor, effective_dtype) {
-            // === CASE 1: Native Q8_0 (Best for GGUF) ===
             (CpuTensor::Q8_0(m), DType::Q8_0) => {
                 log::info!("Loading embeddings as Native Q8_0 (Zero Copy)");
                 EmbeddingData::Q8_0(Arc::new(m))
@@ -194,7 +232,9 @@ impl Embeddings {
                 let pos_broadcast = pos_slice.insert_axis(Axis(0)); // shape [1, len, hidden_size]
 
                 // Slice hidden and broadcast addition
-                hidden.slice_mut(s![.., 0..len, ..]).add_assign(&pos_broadcast);
+                hidden
+                    .slice_mut(s![.., 0..len, ..])
+                    .add_assign(&pos_broadcast);
             }
             // if len > 0 {
             //     let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);

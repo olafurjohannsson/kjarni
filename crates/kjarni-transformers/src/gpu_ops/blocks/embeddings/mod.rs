@@ -29,7 +29,7 @@ use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::lookup2::GpuLookup2;
 use crate::gpu_ops::primitives::scale::GpuScale;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use crate::tensor::{DType};
+use crate::tensor::DType;
 use crate::weights::ModelWeights;
 use anyhow::Result;
 use std::sync::Arc;
@@ -42,7 +42,6 @@ pub struct GpuEmbeddingWeights {
 }
 
 impl GpuEmbeddingWeights {
-
     /// Creates and uploads embedding weights to the GPU from CPU-side ndarrays.
     pub fn new(
         context: &Arc<WgpuContext>,
@@ -54,11 +53,11 @@ impl GpuEmbeddingWeights {
     ) -> Result<Self> {
         // Use from_model_weights - it handles quantized dequantization automatically
         let word_embeddings = GpuTensor::from_model_weights(
-            context, 
-            weights, 
-            word_name, 
-            target_dtype, 
-            "word_embeddings"
+            context,
+            weights,
+            word_name,
+            target_dtype,
+            "word_embeddings",
         )?;
 
         let position_embeddings = if let Some(name) = pos_name {
@@ -99,7 +98,54 @@ impl GpuEmbeddingWeights {
             token_type_embeddings,
         })
     }
+    /// Creates embedding weights using pre-loaded shared word embeddings.
+    /// Only loads position and token type embeddings from weights.
+    pub fn with_shared_words(
+        context: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        shared_word_embeddings: GpuTensor,
+        pos_name: Option<&str>,
+        type_name: Option<&str>,
+        target_dtype: Option<DType>,
+    ) -> Result<Self> {
+        let position_embeddings = if let Some(name) = pos_name {
+            if weights.contains(name) {
+                Some(GpuTensor::from_model_weights(
+                    context,
+                    weights,
+                    name,
+                    Some(DType::F32),
+                    "pos_embeddings",
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
+        let token_type_embeddings = if let Some(name) = type_name {
+            if weights.contains(name) {
+                Some(GpuTensor::from_model_weights(
+                    context,
+                    weights,
+                    name,
+                    Some(DType::F32),
+                    "type_embeddings",
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            word_embeddings: shared_word_embeddings,
+            position_embeddings,
+            token_type_embeddings,
+        })
+    }
 }
 
 /// A GPU-accelerated Embeddings block.
@@ -148,7 +194,7 @@ impl GpuEmbeddings {
         self.lookup
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
 
-            // 4. Apply Scaling (BART/T5 style)
+        // 4. Apply Scaling (BART/T5 style)
         if scale_embeddings {
             let scale_factor = (hidden_size as f32).sqrt();
             let scale_out = pool.get(hidden_states.shape().to_vec());

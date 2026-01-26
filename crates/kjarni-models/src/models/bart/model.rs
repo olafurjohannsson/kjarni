@@ -206,7 +206,8 @@ impl CpuEncoderOps for BartModel {
         pos: usize,
     ) -> Result<Array3<f32>> {
         self.pipeline
-            .embeddings()
+            .encoder_embeddings()
+            .expect("CPU Encoder not active")
             .embed_cpu(input_ids, token_type_ids, pos)
     }
 }

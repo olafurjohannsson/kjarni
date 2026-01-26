@@ -1,18 +1,20 @@
 use crate::{
+    WgpuContext,
     cpu::encoder::{CpuEncoder, GpuEncoder},
     decoder::prelude::{CpuDecoder, GpuDecoder},
-    embeddings::{EmbeddingConfig, LoadedEmbeddings},
+    embeddings::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
+    gpu_ops::GpuTensor,
     lm_head::{LMHeadConfig, LoadedLMHead},
     models::base::ModelLoadConfig,
     pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig},
     traits::{Device, ModelConfig},
     weights::ModelWeights,
-    WgpuContext,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
+use serde_json::de;
 use std::sync::Arc;
 pub struct EncoderDecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
@@ -23,6 +25,7 @@ pub struct EncoderDecoderPipelineBuilder<'a> {
     gpu_encoder_backend: Option<Box<dyn GpuEncoder>>,
     cpu_decoder_backend: Option<Box<dyn CpuCrossDecoder>>,
     gpu_decoder_backend: Option<Box<dyn GpuCrossDecoder>>,
+    pub is_audio_encoder: bool,
 }
 
 impl<'a> EncoderDecoderPipelineBuilder<'a> {
@@ -36,6 +39,7 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             gpu_encoder_backend: None,
             cpu_decoder_backend: None,
             gpu_decoder_backend: None,
+            is_audio_encoder: false,
         }
     }
     pub fn with_context(mut self, context: Option<Arc<WgpuContext>>) -> Self {
@@ -72,9 +76,47 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         self
     }
 
+    fn load_shared_word_embeddings(
+        &self,
+        key: &str,
+        load_cpu: bool,
+        load_gpu: bool,
+    ) -> Result<(Option<EmbeddingData>, Option<GpuTensor>)> {
+        let cpu = if load_cpu {
+            let arr = self.weights.get_array2(key)?;
+            Some(EmbeddingData::F32(Arc::new(arr)))
+        } else {
+            None
+        };
+
+        let gpu = if load_gpu {
+            let ctx = self
+                .context
+                .as_ref()
+                .ok_or_else(|| anyhow!("GPU loading requires context"))?;
+            Some(GpuTensor::from_model_weights(
+                ctx,
+                self.weights,
+                key,
+                self.load_config.target_dtype,
+                "shared_word_embeddings",
+            )?)
+        } else {
+            None
+        };
+
+        Ok((cpu, gpu))
+    }
+
     pub fn build(self) -> Result<EncoderDecoderPipeline> {
         let meta = self.config.metadata();
         let layout = self.config.layout();
+        let enc_layout = layout.encoder.as_ref();
+        let dec_layout = layout
+            .decoder
+            .as_ref()
+            .ok_or_else(|| anyhow!("Decoder layout required"))?;
+
         let ctx = self.context.as_ref();
         let target_dt = self.load_config.target_dtype;
 
@@ -85,12 +127,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             Device::Cpu
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
-
-        // 3. Extract Decoder Layout
-        let dec_layout = layout
-            .decoder
-            .as_ref()
-            .ok_or_else(|| anyhow!("Pipeline requires a DecoderLayout in ModelLayout"))?;
 
         // 4. Load Embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
@@ -105,16 +141,63 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             plan.embeddings == Device::Cpu || (tied_weights && plan.lm_head == Device::Cpu);
         let emb_load_gpu =
             plan.embeddings == Device::Wgpu || (tied_weights && plan.lm_head == Device::Wgpu);
-        let embeddings = LoadedEmbeddings::new(
-            ctx,
+
+        // =========================================================
+        // Step 1: Load word embeddings ONCE
+        // =========================================================
+        let (shared_word_cpu, shared_word_gpu) =
+            self.load_shared_word_embeddings(&layout.token_embedding, emb_load_cpu, emb_load_gpu)?;
+
+        // =========================================================
+        // Step 2: Build encoder embeddings (if text encoder)
+        // =========================================================
+        let encoder_embeddings = if let Some(enc) = enc_layout {
+            if !self.is_audio_encoder {
+                let mut enc_emb_builder =
+                    EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
+                        .position_offset(meta.extra_pos_embeddings)
+                        .scale_embeddings(meta.scale_embeddings);
+
+                // Only add position embedding if it exists
+                if let Some(pos) = &enc.position_embedding {
+                    enc_emb_builder = enc_emb_builder.position_embedding(pos);
+                }
+
+                Some(LoadedEmbeddings::with_shared_words(
+                    self.context.as_ref(),
+                    self.weights,
+                    enc_emb_builder.build(),
+                    shared_word_cpu.clone(),
+                    shared_word_gpu.clone(),
+                    emb_load_cpu,
+                    emb_load_gpu,
+                    self.load_config.target_dtype,
+                )?)
+            } else {
+                None // Whisper encoder - no token embeddings
+            }
+        } else {
+            None
+        };
+
+        // =========================================================
+        // Step 3: Build decoder embeddings
+        // =========================================================
+        let dec_config = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
+            .position_embedding(dec_layout.position_embedding.as_deref().unwrap_or_default())
+            .position_offset(meta.extra_pos_embeddings)
+            .scale_embeddings(meta.scale_embeddings)
+            .build();
+
+        let decoder_embeddings = LoadedEmbeddings::with_shared_words(
+            self.context.as_ref(),
             self.weights,
-            emb_builder
-                .position_offset(meta.extra_pos_embeddings)
-                .scale_embeddings(meta.scale_embeddings)
-                .build(),
+            dec_config,
+            shared_word_cpu.clone(),
+            shared_word_gpu.clone(),
             emb_load_cpu,
             emb_load_gpu,
-            target_dt,
+            self.load_config.target_dtype,
         )?;
 
         // 5. Load LM Head (The "Tied" Check)
@@ -122,8 +205,8 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             log::info!("Using tied weights between embeddings and LM head");
             LoadedLMHead::from_shared_weights(
                 ctx,
-                embeddings.word_embeddings_cpu(),
-                embeddings.word_embeddings_gpu(),
+                shared_word_cpu.map(|e| e.to_linear_layer()),
+                shared_word_gpu,
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
                 None,
             )?
@@ -144,7 +227,8 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
 
         // Return dummy/empty backends for now; the GenericLoader will populate these
         EncoderDecoderPipeline::new(
-            embeddings,
+            encoder_embeddings,
+            decoder_embeddings,
             self.cpu_decoder_backend,
             self.gpu_decoder_backend,
             self.cpu_encoder_backend,

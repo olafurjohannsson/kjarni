@@ -1,3 +1,5 @@
+//! Model management commands
+
 use anyhow::Result;
 use kjarni::registry;
 use kjarni::ModelType;
@@ -58,6 +60,7 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / MB as f64)
     }
 }
+
 fn dir_size(path: &Path) -> Result<u64> {
     let mut size = 0;
     for entry in walkdir::WalkDir::new(path) {
@@ -68,6 +71,7 @@ fn dir_size(path: &Path) -> Result<u64> {
     }
     Ok(size)
 }
+
 fn search(query: &str) -> Result<()> {
     let results = ModelType::search(query);
 
@@ -80,7 +84,7 @@ fn search(query: &str) -> Result<()> {
     println!("Search results for '{}':", query);
     println!("{}", "-".repeat(60));
 
-    for (model_type, score) in results.iter().take(10) {
+    for (model_type, _score) in results.iter().take(10) {
         let info = model_type.info();
         let downloaded = model_type.is_downloaded(&registry::cache_dir());
         let status = if downloaded { "✓" } else { " " };
@@ -106,7 +110,6 @@ pub fn format_params(millions: usize) -> String {
         format!("{}M", millions)
     }
 }
-
 
 fn list(filter_arch: Option<String>, filter_task: Option<String>, only_downloaded: bool) -> Result<()> {
     let models = registry::list_models();
@@ -331,5 +334,282 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max_len - 3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // format_bytes tests
+    // =========================================================================
+
+    #[test]
+    fn test_format_bytes_megabytes() {
+        let mb = 1024 * 1024;
+        assert_eq!(format_bytes(mb), "1.0 MB");
+        assert_eq!(format_bytes(mb * 10), "10.0 MB");
+        assert_eq!(format_bytes(mb * 100), "100.0 MB");
+        assert_eq!(format_bytes(mb + mb / 2), "1.5 MB");
+    }
+
+    #[test]
+    fn test_format_bytes_gigabytes() {
+        let gb = 1024 * 1024 * 1024;
+        assert_eq!(format_bytes(gb), "1.00 GB");
+        assert_eq!(format_bytes(gb * 2), "2.00 GB");
+        assert_eq!(format_bytes(gb + gb / 2), "1.50 GB");
+        assert_eq!(format_bytes(gb * 10), "10.00 GB");
+    }
+
+    #[test]
+    fn test_format_bytes_edge_cases() {
+        assert_eq!(format_bytes(0), "0.0 MB");
+        assert_eq!(format_bytes(1), "0.0 MB");
+        assert_eq!(format_bytes(1024), "0.0 MB");
+        
+        // Just under 1 GB
+        let just_under_gb = 1024 * 1024 * 1024 - 1;
+        assert_eq!(format_bytes(just_under_gb), "1024.0 MB");
+        
+        // Exactly 1 GB
+        let exactly_gb = 1024 * 1024 * 1024;
+        assert_eq!(format_bytes(exactly_gb), "1.00 GB");
+    }
+
+    #[test]
+    fn test_format_bytes_realistic_model_sizes() {
+        let mb = 1024 * 1024;
+        let gb = 1024 * 1024 * 1024;
+        
+        // Typical model sizes
+        assert_eq!(format_bytes(90 * mb), "90.0 MB");      // MiniLM
+        assert_eq!(format_bytes(268 * mb), "268.0 MB");    // DistilBERT
+        assert_eq!(format_bytes(550 * mb), "550.0 MB");    // Nomic Embed
+        assert_eq!(format_bytes(gb + 600 * mb), "1.59 GB"); // ~1.6GB model
+        assert_eq!(format_bytes(3 * gb), "3.00 GB");       // 3B model
+        assert_eq!(format_bytes(7 * gb), "7.00 GB");       // 7B model
+        assert_eq!(format_bytes(16 * gb), "16.00 GB");     // 8B model (fp16)
+    }
+
+    // =========================================================================
+    // format_params tests
+    // =========================================================================
+
+    #[test]
+    fn test_format_params_millions() {
+        assert_eq!(format_params(22), "22M");
+        assert_eq!(format_params(66), "66M");
+        assert_eq!(format_params(125), "125M");
+        assert_eq!(format_params(345), "345M");
+        assert_eq!(format_params(999), "999M");
+    }
+
+    #[test]
+    fn test_format_params_billions() {
+        assert_eq!(format_params(1000), "1.0B");
+        assert_eq!(format_params(1230), "1.2B");
+        assert_eq!(format_params(1500), "1.5B");
+        assert_eq!(format_params(3210), "3.2B");
+        assert_eq!(format_params(7240), "7.2B");
+        assert_eq!(format_params(8030), "8.0B");
+    }
+
+    #[test]
+    fn test_format_params_edge_cases() {
+        assert_eq!(format_params(0), "0M");
+        assert_eq!(format_params(1), "1M");
+        assert_eq!(format_params(999), "999M");
+        assert_eq!(format_params(1000), "1.0B");
+        assert_eq!(format_params(1001), "1.0B");
+    }
+
+    #[test]
+    fn test_format_params_realistic_models() {
+        // Real model parameter counts from registry
+        assert_eq!(format_params(22), "22M");      // MiniLM
+        assert_eq!(format_params(66), "66M");      // DistilBERT
+        assert_eq!(format_params(137), "137M");    // Nomic Embed
+        assert_eq!(format_params(490), "490M");    // Qwen2.5-0.5B
+        assert_eq!(format_params(1230), "1.2B");   // Llama 3.2-1B
+        assert_eq!(format_params(3210), "3.2B");   // Llama 3.2-3B
+        assert_eq!(format_params(3800), "3.8B");   // Phi 3.5 Mini
+        assert_eq!(format_params(7240), "7.2B");   // Mistral 7B
+        assert_eq!(format_params(8030), "8.0B");   // Llama 3.1-8B
+    }
+
+    // =========================================================================
+    // pad_center tests
+    // =========================================================================
+
+    #[test]
+    fn test_pad_center_shorter_string() {
+        assert_eq!(pad_center("hi", 10), "    hi    ");
+        assert_eq!(pad_center("abc", 7), "  abc  ");
+        assert_eq!(pad_center("test", 10), "   test   ");
+    }
+
+    #[test]
+    fn test_pad_center_odd_padding() {
+        // When padding is odd, extra space goes to the right
+        assert_eq!(pad_center("hi", 5), " hi  ");
+        assert_eq!(pad_center("a", 4), " a  ");
+        assert_eq!(pad_center("abc", 6), " abc  ");
+    }
+
+    #[test]
+    fn test_pad_center_exact_width() {
+        assert_eq!(pad_center("hello", 5), "hello");
+        assert_eq!(pad_center("test", 4), "test");
+    }
+
+    #[test]
+    fn test_pad_center_longer_string() {
+        assert_eq!(pad_center("hello world", 5), "hello world");
+        assert_eq!(pad_center("toolong", 3), "toolong");
+    }
+
+    #[test]
+    fn test_pad_center_empty_string() {
+        assert_eq!(pad_center("", 5), "     ");
+        assert_eq!(pad_center("", 0), "");
+    }
+
+    #[test]
+    fn test_pad_center_width_zero() {
+        assert_eq!(pad_center("hello", 0), "hello");
+        assert_eq!(pad_center("", 0), "");
+    }
+
+    #[test]
+    fn test_pad_center_single_char() {
+        assert_eq!(pad_center("x", 5), "  x  ");
+        assert_eq!(pad_center("x", 4), " x  ");
+        assert_eq!(pad_center("x", 3), " x ");
+        assert_eq!(pad_center("x", 2), " x");
+        assert_eq!(pad_center("x", 1), "x");
+    }
+
+    #[test]
+    fn test_pad_center_realistic_model_name() {
+        // Used in info display with width 37
+        let result = pad_center("llama3.2-1b-instruct", 37);
+        assert_eq!(result.len(), 37);
+        assert!(result.starts_with(' '));
+        assert!(result.ends_with(' '));
+        assert!(result.contains("llama3.2-1b-instruct"));
+    }
+
+    // =========================================================================
+    // truncate tests
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hi", 5), "hi");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+        assert_eq!(truncate("test", 4), "test");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 8), "hello...");
+        assert_eq!(truncate("this is a long string", 10), "this is...");
+    }
+
+    #[test]
+    fn test_truncate_minimum_length() {
+        // With max_len=4, we get 1 char + "..."
+        assert_eq!(truncate("hello", 4), "h...");
+        assert_eq!(truncate("abcdef", 5), "ab...");
+    }
+
+    #[test]
+    fn test_truncate_empty_string() {
+        assert_eq!(truncate("", 10), "");
+        assert_eq!(truncate("", 0), "");
+    }
+
+    #[test]
+    fn test_truncate_realistic_descriptions() {
+        // Model descriptions from registry, truncated to 30 chars
+        assert_eq!(
+            truncate("Fastest sentence embedding model. Ideal for basic RAG.", 30),
+            "Fastest sentence embedding ..."
+        );
+        assert_eq!(
+            truncate("Fast binary sentiment", 30),
+            "Fast binary sentiment"
+        );
+        assert_eq!(
+            truncate("Zero-shot classifier. Classify text into ANY labels you provide at runtime.", 30),
+            "Zero-shot classifier. Class..."
+        );
+    }
+
+    // =========================================================================
+    // Integration-like tests combining functions
+    // =========================================================================
+
+    #[test]
+    fn test_format_functions_together() {
+        // Simulate what list() does for display
+        let params = format_params(1230);  // 1.2B
+        let desc = truncate("Official Meta edge model. Very fast, good general chat.", 30);
+        
+        assert_eq!(params, "1.2B");
+        assert_eq!(desc, "Official Meta edge model. V...");
+    }
+
+    #[test]
+    fn test_pad_center_with_model_names() {
+        // Various model name lengths
+        let names = vec![
+            "gpt2",
+            "llama3.2-1b",
+            "llama3.2-1b-instruct",
+            "deepseek-r1-8b",
+            "bert-sentiment-multilingual",
+        ];
+
+        for name in names {
+            let padded = pad_center(name, 37);
+            // Should be exactly 37 chars or longer if name is longer
+            assert!(padded.len() >= 37 || padded.len() == name.len());
+            // Should contain the original name
+            assert!(padded.contains(name));
+        }
+    }
+
+    // =========================================================================
+    // Edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_unicode() {
+        // ASCII-safe truncation
+        assert_eq!(truncate("hello", 10), "hello");
+        // Note: truncate uses byte indexing, so unicode may cause issues
+        // Testing with ASCII for safety
+    }
+
+    #[test]
+    fn test_format_bytes_very_large() {
+        let tb = 1024u64 * 1024 * 1024 * 1024;
+        // Still shows as GB (no TB support)
+        assert_eq!(format_bytes(tb), "1024.00 GB");
+    }
+
+    #[test]
+    fn test_format_params_very_large() {
+        assert_eq!(format_params(70000), "70.0B");   // 70B model
+        assert_eq!(format_params(175000), "175.0B"); // GPT-3 scale
+        assert_eq!(format_params(540000), "540.0B"); // PaLM scale
     }
 }

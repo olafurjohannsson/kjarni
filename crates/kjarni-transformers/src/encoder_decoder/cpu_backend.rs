@@ -48,100 +48,143 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
             .ok_or_else(|| anyhow!("Model does not support CPU execution"))?;
 
         let input_ids = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
-
-        // Encoder padding mask
         let attention_mask = Array2::ones(input_ids.dim());
 
-        let encoder = encoder_ops.encoder();
-        let seq2seq_encoder = encoder
-            .as_any()
-            .downcast_ref::<Seq2SeqCPUEncoder>()
-            .unwrap();
+        // Use the new trait path: embed_tokens → embed_norm → forward (layers + final_norm)
+        let encoder_output = encoder_ops
+            .forward_tokens(&input_ids, Some(&attention_mask), None, 0)?
+            .last_hidden_state;
 
-            // In NEW folder encode(), before step1:
-println!("=== EMBEDDING CONFIG DEBUG ===");
+        let (final_state, final_mask) = if num_beams > 1 {
+            let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
+            let m = attention_mask
+                .broadcast((num_beams, tokens.len()))
+                .ok_or_else(|| anyhow!("Mask broadcast failed"))?
+                .to_owned();
+            (s, m)
+        } else {
+            (encoder_output, attention_mask)
+        };
 
-// Check if Seq2SeqCPUEncoder's internal embeddings exist and what config it uses
-let encoder = encoder_ops.encoder();
-let seq2seq_encoder = encoder.as_any().downcast_ref::<Seq2SeqCPUEncoder>().unwrap();
-println!("Seq2SeqCPUEncoder.position_offset(): {}", seq2seq_encoder.position_offset());
-println!("Seq2SeqCPUEncoder.meta.scale_embeddings: {}", seq2seq_encoder.meta.scale_embeddings);
+        let cross_cache = seq2seq_ops
+            .decoder()
+            .precompute_cross_attention_kv(&final_state)?;
 
-// Check LoadedEmbeddings config
-let pipeline = model.get_pipeline();
-let loaded_emb = pipeline.embeddings();
-println!("LoadedEmbeddings.config.position_offset: {}", loaded_emb.config().position_offset);
-println!("LoadedEmbeddings.config.scale_embeddings: {}", loaded_emb.config().scale_embeddings);
-
-// Also check if position embeddings exist in both
-println!("Seq2SeqCPUEncoder has embeddings: {}", seq2seq_encoder.embeddings.is_some());
-println!("LoadedEmbeddings has position_embedding: {}", loaded_emb.config().position_embedding.is_some());
-
-// Add this right after the config debug:
-println!("=== DIRECT EMBEDDING COMPARISON ===");
-
-// Call Seq2SeqCPUEncoder's internal embeddings directly
-let old_emb = seq2seq_encoder.embeddings.as_ref().unwrap()
-    .forward(&input_ids, None, seq2seq_encoder.position_offset(), false);
-println!("OLD internal embeddings.forward [0,0,:5]: {:?}", old_emb.slice(ndarray::s![0, 0, ..5]));
-
-// Call LoadedEmbeddings
-let new_emb = pipeline.embeddings().embed_cpu(&input_ids, None, 0)?;
-println!("NEW LoadedEmbeddings.embed_cpu [0,0,:5]: {:?}", new_emb.slice(ndarray::s![0, 0, ..5]));
-
-println!("=== WEIGHT KEY DEBUG ===");
-
-// Check what keys LoadedEmbeddings was built with
-let loaded_emb = pipeline.embeddings();
-println!("LoadedEmbeddings.config.word_embedding: {}", loaded_emb.config().word_embedding);
-println!("LoadedEmbeddings.config.position_embedding: {:?}", loaded_emb.config().position_embedding);
-
-// Check what keys Seq2SeqCPUEncoder used (from layout)
-println!("layout.token_embedding: {}", seq2seq_encoder.layout.token_embedding);
-if let Some(enc_layout) = &seq2seq_encoder.layout.encoder {
-    println!("layout.encoder.position_embedding: {:?}", enc_layout.position_embedding);
-}
-
-    // Step 1: embed_tokens
-    let step1 = encoder_ops.embed_tokens(&input_ids, None, 0)?;
-    println!("NEW step1 embed_tokens [0,0,:5]: {:?}", step1.slice(ndarray::s![0, 0, ..5]));
-
-    // Step 2: embed_norm
-    let step2 = encoder_ops.encoder().embed_norm(&step1)?;
-    println!("NEW step2 embed_norm [0,0,:5]: {:?}", step2.slice(ndarray::s![0, 0, ..5]));
-
-    // Step 3: forward_layers
-    let step3 = encoder_ops.encoder().forward_layers(&step2, &attention_mask, 0, encoder_ops.encoder().num_layers())?;
-    println!("NEW step3 forward_layers [0,0,:5]: {:?}", step3.slice(ndarray::s![0, 0, ..5]));
-
-    // Step 4: final_norm
-    let step4 = encoder_ops.encoder().final_norm(&step3)?;
-    println!("NEW step4 final_norm [0,0,:5]: {:?}", step4.slice(ndarray::s![0, 0, ..5]));
-
-    panic!("NEW FOLDER DEBUG STOP");
-
-        unimplemented!()
-        // let (final_state, final_mask) = if num_beams > 1 {
-        //     let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
-        //     let m = attention_mask
-        //         .broadcast((num_beams, tokens.len()))
-        //         .ok_or_else(|| anyhow!("Mask broadcast failed"))?
-        //         .to_owned();
-        //     (s, m)
-        // } else {
-        //     (encoder_output, attention_mask)
-        // };
-
-        // let cross_cache = seq2seq_ops
-        //     .decoder()
-        //     .precompute_cross_attention_kv(&final_state)?;
-
-        // Ok(CpuSeq2SeqState::EncoderState {
-        //     hidden_states: final_state,
-        //     cross_attention_kv_cache: cross_cache,
-        //     encoder_padding_mask: final_mask,
-        // })
+        Ok(CpuSeq2SeqState::EncoderState {
+            hidden_states: final_state,
+            cross_attention_kv_cache: cross_cache,
+            encoder_padding_mask: final_mask,
+        })
     }
+
+    //     async fn encode(
+    //         &self,
+    //         model: &dyn EncoderDecoderLanguageModel,
+    //         tokens: &[u32],
+    //         num_beams: usize,
+    //     ) -> Result<Self::Tensor> {
+    //         let seq2seq_ops = model
+    //             .encoder_decoder_cpu_ops()
+    //             .ok_or_else(|| anyhow!("Model does not support CPU execution"))?;
+    //         let encoder_ops = model
+    //             .encoder_cpu_ops()
+    //             .ok_or_else(|| anyhow!("Model does not support CPU execution"))?;
+
+    //         let input_ids = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
+
+    //         // Encoder padding mask
+    //         let attention_mask = Array2::ones(input_ids.dim());
+
+    //         let encoder = encoder_ops.encoder();
+    //         let seq2seq_encoder = encoder
+    //             .as_any()
+    //             .downcast_ref::<Seq2SeqCPUEncoder>()
+    //             .unwrap();
+
+    //             // In NEW folder encode(), before step1:
+    // println!("=== EMBEDDING CONFIG DEBUG ===");
+
+    // // Check if Seq2SeqCPUEncoder's internal embeddings exist and what config it uses
+    // let encoder = encoder_ops.encoder();
+    // let seq2seq_encoder = encoder.as_any().downcast_ref::<Seq2SeqCPUEncoder>().unwrap();
+    // println!("Seq2SeqCPUEncoder.position_offset(): {}", seq2seq_encoder.position_offset());
+    // println!("Seq2SeqCPUEncoder.meta.scale_embeddings: {}", seq2seq_encoder.meta.scale_embeddings);
+
+    // // Check LoadedEmbeddings config
+    // let pipeline = model.get_pipeline();
+    // let loaded_emb = pipeline.embeddings();
+    // println!("LoadedEmbeddings.config.position_offset: {}", loaded_emb.config().position_offset);
+    // println!("LoadedEmbeddings.config.scale_embeddings: {}", loaded_emb.config().scale_embeddings);
+
+    // // Also check if position embeddings exist in both
+    // println!("Seq2SeqCPUEncoder has embeddings: {}", seq2seq_encoder.embeddings.is_some());
+    // println!("LoadedEmbeddings has position_embedding: {}", loaded_emb.config().position_embedding.is_some());
+
+    // // Add this right after the config debug:
+    // println!("=== DIRECT EMBEDDING COMPARISON ===");
+
+    // // Call Seq2SeqCPUEncoder's internal embeddings directly
+    // let old_emb = seq2seq_encoder.embeddings.as_ref().unwrap()
+    //     .forward(&input_ids, None, seq2seq_encoder.position_offset(), false);
+    // println!("OLD internal embeddings.forward [0,0,:5]: {:?}", old_emb.slice(ndarray::s![0, 0, ..5]));
+
+    // // Call LoadedEmbeddings
+    // let new_emb = pipeline.embeddings().embed_cpu(&input_ids, None, 0)?;
+    // println!("NEW LoadedEmbeddings.embed_cpu [0,0,:5]: {:?}", new_emb.slice(ndarray::s![0, 0, ..5]));
+
+    // println!("=== WEIGHT KEY DEBUG ===");
+
+    // // Check what keys LoadedEmbeddings was built with
+    // let loaded_emb = pipeline.decoder_embeddings();
+    // println!("LoadedEmbeddings.config.word_embedding: {}", loaded_emb.config().word_embedding);
+    // println!("LoadedEmbeddings.config.position_embedding: {:?}", loaded_emb.config().position_embedding);
+
+    // // Check what keys Seq2SeqCPUEncoder used (from layout)
+    // println!("layout.token_embedding: {}", seq2seq_encoder.layout.token_embedding);
+    // if let Some(enc_layout) = &seq2seq_encoder.layout.encoder {
+    //     println!("layout.encoder.position_embedding: {:?}", enc_layout.position_embedding);
+    // }
+
+    //     // Step 1: embed_tokens
+    //     let step1 = encoder_ops.embed_tokens(&input_ids, None, 0)?;
+    //     println!("NEW step1 embed_tokens [0,0,:5]: {:?}", step1.slice(ndarray::s![0, 0, ..5]));
+
+    //     // Step 2: embed_norm
+    //     let step2 = encoder_ops.encoder().embed_norm(&step1)?;
+    //     println!("NEW step2 embed_norm [0,0,:5]: {:?}", step2.slice(ndarray::s![0, 0, ..5]));
+
+    //     // Step 3: forward_layers
+    //     let step3 = encoder_ops.encoder().forward_layers(&step2, &attention_mask, 0, encoder_ops.encoder().num_layers())?;
+    //     println!("NEW step3 forward_layers [0,0,:5]: {:?}", step3.slice(ndarray::s![0, 0, ..5]));
+
+    //     // Step 4: final_norm
+    //     let step4 = encoder_ops.encoder().final_norm(&step3)?;
+    //     println!("NEW step4 final_norm [0,0,:5]: {:?}", step4.slice(ndarray::s![0, 0, ..5]));
+
+    //     panic!("NEW FOLDER DEBUG STOP");
+
+    //         unimplemented!()
+    //         // let (final_state, final_mask) = if num_beams > 1 {
+    //         //     let s = seq2seq_ops.broadcast_encoder_states(&encoder_output, num_beams)?;
+    //         //     let m = attention_mask
+    //         //         .broadcast((num_beams, tokens.len()))
+    //         //         .ok_or_else(|| anyhow!("Mask broadcast failed"))?
+    //         //         .to_owned();
+    //         //     (s, m)
+    //         // } else {
+    //         //     (encoder_output, attention_mask)
+    //         // };
+
+    //         // let cross_cache = seq2seq_ops
+    //         //     .decoder()
+    //         //     .precompute_cross_attention_kv(&final_state)?;
+
+    //         // Ok(CpuSeq2SeqState::EncoderState {
+    //         //     hidden_states: final_state,
+    //         //     cross_attention_kv_cache: cross_cache,
+    //         //     encoder_padding_mask: final_mask,
+    //         // })
+    //     }
 
     async fn decode_step(
         &self,

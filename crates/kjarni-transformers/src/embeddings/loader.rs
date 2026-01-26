@@ -273,20 +273,89 @@ impl LoadedEmbeddings {
         self.gpu_weights.as_ref().map(|w| w.word_embeddings.clone())
     }
 
+    pub fn with_shared_words(
+        ctx: Option<&Arc<WgpuContext>>,
+        weights: &ModelWeights,
+        config: EmbeddingConfig,
+        shared_word_cpu: Option<EmbeddingData>,
+        shared_word_gpu: Option<GpuTensor>,
+        load_cpu: bool,
+        load_gpu: bool,
+        target_dtype: Option<DType>,
+    ) -> Result<Self> {
+        // CPU embeddings
+        let cpu = if load_cpu {
+            let shared = shared_word_cpu
+                .ok_or_else(|| anyhow!("CPU word embeddings required but not provided"))?;
+
+            // Load only position embeddings from weights (filter empty strings)
+            let pos_emb = config
+                .position_embedding
+                .as_ref()
+                .filter(|k| !k.is_empty()) // <-- ADD THIS
+                .map(|k| weights.get_array2(k))
+                .transpose()?;
+
+            let type_emb = config
+                .type_embedding
+                .as_ref()
+                .filter(|k| !k.is_empty()) // <-- ADD THIS
+                .map(|k| weights.get_array2(k))
+                .transpose()?;
+
+            Some(Embeddings::new(shared, pos_emb, type_emb))
+        } else {
+            None
+        };
+
+        // GPU embeddings
+        let (gpu_weights, gpu_layer) = if load_gpu {
+            let ctx = ctx.ok_or_else(|| anyhow!("GPU embeddings require WgpuContext"))?;
+            let shared = shared_word_gpu
+                .ok_or_else(|| anyhow!("GPU word embeddings required but not provided"))?;
+
+            let gpu_weights = GpuEmbeddingWeights::with_shared_words(
+                ctx,
+                weights,
+                shared,
+                config
+                    .position_embedding
+                    .as_deref()
+                    .filter(|k| !k.is_empty()), // <-- ADD THIS
+                config.type_embedding.as_deref().filter(|k| !k.is_empty()), // <-- ADD THIS
+                target_dtype,
+            )?;
+            let gpu_layer = GpuEmbeddings::new(ctx)?;
+            (Some(gpu_weights), Some(gpu_layer))
+        } else {
+            (None, None)
+        };
+
+        if cpu.is_none() && gpu_weights.is_none() {
+            return Err(anyhow!("Must load embeddings to at least one device"));
+        }
+
+        Ok(Self {
+            cpu,
+            gpu_weights,
+            gpu_layer,
+            config,
+            context: ctx.cloned(),
+        })
+    }
+
     /// Returns the raw word embedding weights for CPU weight sharing.
     pub fn word_embeddings_cpu(&self) -> Option<LinearLayer> {
         self.cpu.as_ref().and_then(|e| match &e.word_embeddings {
             EmbeddingData::F32(arc_w) => {
                 // Use the new LinearLayer::from_arc_f32
                 Some(LinearLayer::from_arc_f32(arc_w.clone(), None))
-            },
+            }
             EmbeddingData::BF16(arc_w) => {
                 // You need to add LinearLayer::from_arc_bf16 too!
                 Some(LinearLayer::from_arc_bf16(arc_w.clone(), None))
-            },
-            EmbeddingData::Q8_0(arc_q) => {
-                Some(LinearLayer::from_arc_q8_0(arc_q.clone(), None))
             }
+            EmbeddingData::Q8_0(arc_q) => Some(LinearLayer::from_arc_q8_0(arc_q.clone(), None)),
         })
     }
 
@@ -320,7 +389,6 @@ impl LoadedEmbeddings {
         self.gpu_weights.is_some()
     }
 
-
     /// CPU-Native embedding lookup.
     /// Returns Array3<f32> (Hidden States) for pure CPU execution.
     ///
@@ -331,14 +399,14 @@ impl LoadedEmbeddings {
     /// * `position_offset` - The starting position for positional embeddings
     ///
     pub fn embed_cpu(
-        &self, 
+        &self,
         token_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<u32>>,
-        position_offset: usize
+        position_offset: usize,
     ) -> Result<ndarray::Array3<f32>> {
-        let cpu_layer = self.cpu.as_ref().ok_or_else(|| 
+        let cpu_layer = self.cpu.as_ref().ok_or_else(|| {
             anyhow::anyhow!("Cannot run embed_cpu: Embeddings are not loaded on CPU")
-        )?;
+        })?;
 
         // Forward pass on CPU
         // This delegates directly to the underlying Embeddings logic
