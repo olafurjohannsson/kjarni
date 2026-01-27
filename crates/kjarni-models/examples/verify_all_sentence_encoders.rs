@@ -1,17 +1,16 @@
+use std::sync::Arc;
+
 use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 use kjarni_transformers::WgpuContext;
-use std::sync::Arc;
-
-// ============================================================================
 
 struct TestCase {
     model_type: ModelType,
     name: &'static str,
     golden_mean: &'static [f32],
-    prefix: &'static str, // Nomic needs "search_document: "
-    threshold: f32,       // FP16 vs FP32 tolerance
+    prefix: &'static str,
+    threshold: f32,
 }
 
 #[tokio::main]
@@ -24,14 +23,14 @@ async fn main() -> anyhow::Result<()> {
             name: "MiniLM (BERT)",
             golden_mean: GOLDEN_MINILM_MEAN,
             prefix: "",
-            threshold: 1e-4, 
+            threshold: 1e-4,
         },
         TestCase {
             model_type: ModelType::NomicEmbedText,
             name: "Nomic (RoPE BERT)",
             golden_mean: GOLDEN_NOMIC_MEAN,
-            prefix: "search_document: ", 
-            threshold: 1e-3, // Slightly looser for complex RoPE math
+            prefix: "search_document: ",
+            threshold: 1e-3,
         },
     ];
 
@@ -42,74 +41,68 @@ async fn main() -> anyhow::Result<()> {
     ];
 
     for test in test_cases {
-        println!("\n========================================================");
-        println!("Testing Model: {}", test.name);
-        println!("========================================================");
+        println!("\ntesting model: {}", test.name);
+        println!("--------------------------------------------------------");
 
-        // 1. Prepare Inputs (Handle prefixes like Nomic)
-        let inputs: Vec<String> = raw_sentences.iter()
+        let inputs: Vec<String> = raw_sentences
+            .iter()
             .map(|s| format!("{}{}", test.prefix, s))
             .collect();
         let inputs_ref: Vec<&str> = inputs.iter().map(|s| s.as_str()).collect();
 
-        // 2. Load Models
-        println!("  Loading CPU...");
-        let cpu_enc = SentenceEncoder::from_registry(
-            test.model_type, None, Device::Cpu, None, None
-        ).await?;
+        println!("  loading CPU...");
+        let cpu_enc =
+            SentenceEncoder::from_registry(test.model_type, None, Device::Cpu, None, None).await?;
 
-        println!("  Loading GPU...");
+        println!("  loading GPU...");
         let gpu_enc = SentenceEncoder::from_registry(
-            test.model_type, None, Device::Wgpu, Some(ctx.clone()), None
-        ).await?;
+            test.model_type,
+            None,
+            Device::Wgpu,
+            Some(ctx.clone()),
+            None,
+        )
+        .await?;
 
-        // 3. Run Inference
         let cpu_out = cpu_enc.encode_batch(&inputs_ref).await?;
         let gpu_out = gpu_enc.encode_batch(&inputs_ref).await?;
 
-        // 4. Verify Consistency (CPU vs GPU)
         let consistency = cosine_similarity(&cpu_out[0], &gpu_out[0]);
-        println!("  CPU <-> GPU Consistency: {:.6}", consistency);
+        println!("  CPU <-> GPU consistency: {:.6}", consistency);
         if consistency < 0.999 {
-            eprintln!("  ❌ CRITICAL: CPU and GPU outputs diverge!");
+            eprintln!("  FAIL: CPU and GPU outputs diverge");
         } else {
-            println!("  ✅ Backends match.");
+            println!("  PASS: backends match");
         }
 
-        // 5. Verify Accuracy (vs Python Golden)
-        // If your placeholders are 0.0, skip this check to avoid noise
         if test.golden_mean[0] != 0.0 {
             let accuracy = cosine_similarity(&cpu_out[0], test.golden_mean);
-            println!("  Rust <-> Python Accuracy: {:.6}", accuracy);
-            
+            println!("  Rust <-> Python accuracy: {:.6}", accuracy);
+
             if accuracy < 0.99 {
-                eprintln!("  ❌ CRITICAL: Math incorrect! (RoPE or LayerNorm issue?)");
+                eprintln!("  FAIL: math incorrect");
             } else {
-                println!("  ✅ Math verified.");
+                println!("  PASS: math verified");
             }
         } else {
-            println!("  ⚠️ Skipping Golden check (Placeholders used)");
+            println!("  skipping golden check (placeholders used)");
         }
 
-        // 6. Matryoshka Check (Nomic Specific)
-        // Nomic vectors can be truncated. If the first 64 dims form a valid vector,
-        // it proves the model learned the matryoshka objective.
         if test.model_type == ModelType::NomicEmbedText {
-            println!("\n  [Feature Check] Matryoshka Slicing");
+            println!("\n  matryoshka slicing check:");
             let full_sim = cosine_similarity(&cpu_out[0], &cpu_out[1]);
-            
-            // Slice to 64 dims and normalize manually
+
             let slice_a = &cpu_out[0][..64];
             let slice_b = &cpu_out[1][..64];
             let short_sim = cosine_similarity(slice_a, slice_b);
-            
-            println!("    Full Dim Sim (768): {:.4}", full_sim);
-            println!("    Short Dim Sim (64): {:.4}", short_sim);
-            
+
+            println!("    full dim sim (768): {:.4}", full_sim);
+            println!("    short dim sim (64): {:.4}", short_sim);
+
             if (full_sim - short_sim).abs() < 0.2 {
-                println!("    ✅ Matryoshka property holds (Sim preserved in low dim)");
+                println!("    PASS: matryoshka property holds");
             } else {
-                println!("    ⚠️ Matryoshka property questionable");
+                println!("    WARN: matryoshka property questionable");
             }
         }
     }
@@ -121,9 +114,12 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot / (norm_a * norm_b) }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        0.0
+    } else {
+        dot / (norm_a * norm_b)
+    }
 }
-
 
 const GOLDEN_MINILM_MEAN: &[f32] = &[
     0.13489075,

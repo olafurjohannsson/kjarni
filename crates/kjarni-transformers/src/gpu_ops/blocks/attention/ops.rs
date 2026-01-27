@@ -18,33 +18,6 @@ use crate::WgpuContext;
 use std::sync::Arc;
 
 /// Shared attention operations used by all attention variants.
-///
-/// This struct holds the GPU kernels and configuration needed for attention
-/// computation. It provides the primitive operations that are combined
-/// differently by each attention type.
-///
-/// # Design
-///
-/// Rather than having each attention type create its own kernels, they share
-/// this struct to reduce GPU resource usage and ensure consistent behavior.
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni_transformers::gpu_ops::blocks::attention::AttentionOps;
-/// use kjarni_transformers::WgpuContext;
-/// use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
-/// let ops = AttentionOps::new(&context, 1024, 16, 16);
-///
-/// // Use primitives directly
-/// let mut encoder = context.create_command_encoder("attention_example");
-/// let mut pool = GpuTensorPool::new();
-/// let input = pool.get(vec![batch_size, seq_len, hidden_size]);
-/// let q_weight = pool.get(vec![hidden_size, hidden_size]);
-/// let q_bias = pool.get(vec![hidden_size]);
-/// let q_proj = ops.project(&mut encoder, &input, &q_weight, &q_bias, &mut pool);
-/// let q_heads = ops.split_heads(&mut encoder, &q_proj, &mut pool);
-/// ```
 pub struct AttentionOps {
     // Compute kernels
     linear: GpuLinearLayer,
@@ -74,22 +47,6 @@ impl AttentionOps {
     /// * `hidden_size` - The model's hidden dimension (e.g., 1024 for BART-large).
     /// * `num_heads` - Number of attention heads for queries.
     /// * `num_kv_heads` - Number of attention heads for keys/values (same as num_heads for MHA).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Multi-head attention (BART, BERT)
-    /// use kjarni_transformers::gpu_ops::blocks::attention::AttentionOps;
-    /// use kjarni_transformers::WgpuContext;
-    /// # use pollster::block_on;
-    /// # block_on(async {
-    /// let ctx = WgpuContext::new().await?;
-    /// let ops = AttentionOps::new(&ctx, 1024, 16, 16);
-    ///
-    /// // Grouped-query attention (LLaMA)
-    /// let ops = AttentionOps::new(&ctx, 4096, 32, 8);
-    /// # });
-    /// ```
     pub fn new(
         context: &Arc<WgpuContext>,
         hidden_size: u32,

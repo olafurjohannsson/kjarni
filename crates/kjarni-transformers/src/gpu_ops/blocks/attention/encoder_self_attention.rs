@@ -9,27 +9,6 @@
 //! - **No KV Cache**: Processes the full sequence at once (no autoregressive decoding).
 //! - **Padding Mask**: Supports masking out padding tokens.
 //!
-//! # Used By
-//!
-//! - BERT, RoBERTa, DistilBERT (encoder-only)
-//! - BART encoder, T5 encoder (encoder-decoder)
-//! - Sentence transformers
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni_transformers::gpu_ops::attention::GpuEncoderSelfAttention;
-//!
-//! let attn = GpuEncoderSelfAttention::new(&context, 768, 12);
-//!
-//! let output = attn.forward(
-//!     &mut encoder,
-//!     &hidden_states,
-//!     &weights,
-//!     Some(&padding_mask),
-//!     &mut pool,
-//! );
-//! ```
 
 use super::ops::AttentionOps;
 use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
@@ -41,24 +20,6 @@ use std::sync::Arc;
 /// This attention module is designed for encoders where every token can attend
 /// to every other token. It does not use a KV cache since encoders process
 /// the full sequence in a single forward pass.
-///
-/// # Architecture
-///
-/// ```text
-/// Input [B, S, H]
-///     │
-///     ├──► Q Projection ──► Split Heads ──┐
-///     │                                    │
-///     ├──► K Projection ──► Split Heads ──┼──► Attention ──► Merge Heads ──► O Projection
-///     │                                    │
-///     └──► V Projection ──► Split Heads ──┘
-///                                          │
-/// Output [B, S, H] ◄───────────────────────┘
-/// ```
-///
-/// # Thread Safety
-///
-/// `GpuEncoderSelfAttention` is `Send + Sync` and can be safely shared across threads.
 pub struct GpuEncoderSelfAttention {
     ops: AttentionOps,
 }
@@ -72,15 +33,6 @@ impl GpuEncoderSelfAttention {
     /// * `hidden_size` - The model's hidden dimension.
     /// * `num_heads` - Number of attention heads.
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // BERT-base: 768 hidden, 12 heads
-    /// let attn = GpuEncoderSelfAttention::new(&ctx, 768, 12);
-    ///
-    /// // BERT-large: 1024 hidden, 16 heads
-    /// let attn = GpuEncoderSelfAttention::new(&ctx, 1024, 16);
-    /// ```
     pub fn new(context: &Arc<WgpuContext>, hidden_size: u32, num_heads: u32) -> Self {
         Self {
             // Encoder self-attention has equal Q and KV heads (no GQA)
@@ -110,25 +62,6 @@ impl GpuEncoderSelfAttention {
     ///
     /// Output tensor of shape `[B, S, H]`.
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Without padding mask (all tokens valid)
-    /// use kjarni_transformers::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
-    /// use kjarni_transformers::gpu_ops::{GpuTensor, GpuAttentionWeights, GpuTensorPool};
-    /// use kjarni_transformers::WgpuContext;
-    /// let context = WgpuContext::new();
-    /// let attn = GpuEncoderSelfAttention::new(&context, 768, 12);
-    /// let mut enc = context.create_command_encoder("encoder_self_attention");
-    /// let hidden = GpuTensor::from_ndarray(&ctx, &hidden_states)?;
-    /// let weights = GpuAttentionWeights::new(&ctx, 768, 12);
-    /// let mut pool = GpuTensorPool::new();
-    /// let output = attn.forward(&mut enc, &hidden, &weights, None, &mut pool);
-    ///
-    /// // With padding mask
-    /// let mask = GpuTensor::from_ndarray(&ctx, &padding_mask)?;
-    /// let output = attn.forward(&mut enc, &hidden, &weights, Some(&mask), &mut pool);
-    /// ```
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -188,23 +121,5 @@ impl GpuEncoderSelfAttention {
             &weights.output_bias,
             pool,
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_encoder_attention_dimensions() {
-        // This is a compile-time test to ensure the API is correct
-        // Actual GPU tests would require a WgpuContext
-        
-        // BERT-base dimensions
-        let hidden_size = 768u32;
-        let num_heads = 12u32;
-        let head_dim = hidden_size / num_heads;
-        
-        assert_eq!(head_dim, 64);
     }
 }

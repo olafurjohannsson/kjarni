@@ -9,40 +9,6 @@
 //! - **KV Cache**: Caches key/value states for efficient token-by-token generation.
 //! - **No RoPE**: For models using learned or absolute positions (BART, GPT-2).
 //!
-//! # Used By
-//!
-//! - GPT-2 (decoder-only)
-//! - BART decoder, T5 decoder (self-attention part)
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::{GpuDecoderSelfAttention, GpuAttentionWeights}};
-//! use kjarni_transformers::WgpuContext;
-//! let attn = GpuDecoderSelfAttention::new(&context, 1024, 16);
-//!
-//! // Prefill (process prompt)
-//! let (output, new_k, new_v) = attn.forward(
-//!     &mut encoder,
-//!     &hidden_states,
-//!     &weights,
-//!     &mask,
-//!     None,  // No cache yet
-//!     0,     // cache_len = 0
-//!     &mut pool,
-//! )?;
-//!
-//! // Decode (generate tokens one by one)
-//! let (output, new_k, new_v) = attn.forward(
-//!     &mut encoder,
-//!     &new_token_hidden,
-//!     &weights,
-//!     &mask,
-//!     Some((&cached_k, &cached_v)),  // Use cache
-//!     cache_len,
-//!     &mut pool,
-//! )?;
-//! ```
 
 use super::ops::AttentionOps;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
@@ -56,39 +22,7 @@ use std::sync::Arc;
 ///
 /// This attention module is designed for autoregressive decoding where each
 /// token can only attend to itself and previous tokens. It supports KV caching
-/// for efficient generation.
 ///
-/// # Architecture
-///
-/// ```text
-/// Input [B, S_new, H]
-///     │
-///     ├──► Q Projection ──► Split Heads ──────────────────┐
-///     │                                                    │
-///     ├──► K Projection ──► Concat w/ Cache ──► Split ────┼──► Causal Attention
-///     │                                                    │
-///     └──► V Projection ──► Concat w/ Cache ──► Split ────┘
-///                                                          │
-///                                                          ▼
-///                                            Merge Heads ──► O Projection
-///                                                          │
-/// Output [B, S_new, H] ◄───────────────────────────────────┘
-///
-/// Also returns: (new_K [B, S_new, H], new_V [B, S_new, H]) for cache update
-/// ```
-///
-/// # KV Cache Strategy
-///
-/// The cache stores K and V in 3D format `[B, S_cached, H*D]` for efficient
-/// concatenation. The attention module:
-/// 1. Projects new K, V from input
-/// 2. Concatenates with cached K, V (if provided)
-/// 3. Splits heads for attention computation
-/// 4. Returns new K, V projections for cache update
-///
-/// # Thread Safety
-///
-/// `GpuDecoderSelfAttention` is `Send + Sync` and can be safely shared across threads.
 pub struct GpuDecoderSelfAttention {
     pub ops: AttentionOps,
     concatenate: GpuConcatenate,
@@ -113,22 +47,7 @@ impl GpuDecoderSelfAttention {
     /// * `context` - The WGPU context for creating GPU resources.
     /// * `hidden_size` - The model's hidden dimension.
     /// * `num_heads` - Number of attention heads.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // BART decoder: 1024 hidden, 16 heads
-    /// # use pollster;
-    /// # pollster::block_on(async {
-    /// use kjarni_transformers::gpu_ops::{blocks::attention::GpuDecoderSelfAttention};
-    /// use kjarni_transformers::WgpuContext;
-    /// let ctx = WgpuContext::new().await?;
-    /// let attn = GpuDecoderSelfAttention::new(&ctx, 1024, 16);
-    ///
-    /// // GPT-2 small: 768 hidden, 12 heads
-    /// let attn = GpuDecoderSelfAttention::new(&ctx, 768, 12);
-    /// # });
-    /// ```
+    ///s
     pub fn new(context: &Arc<WgpuContext>, hidden_size: u32, num_heads: u32) -> Self {
         Self {
             // Decoder self-attention has equal Q and KV heads (no GQA for BART/GPT-2)
@@ -165,21 +84,6 @@ impl GpuDecoderSelfAttention {
     /// - `new_k`: New K projection `[B, S_new, H*D]` for cache update
     /// - `new_v`: New V projection `[B, S_new, H*D]` for cache update
     ///
-    /// # Cache Usage
-    ///
-    /// ```ignore
-    /// // Step 1: Prefill (no cache)
-    /// let out = attn.forward(&mut enc, &prompt_hidden, &w, &mask, None, 0, &mut pool)?;
-    /// cache.update(0, &out.new_k, &out.new_v);
-    ///
-    /// // Step 2+: Decode with cache
-    /// let (cached_k, cached_v) = cache.get(0);
-    /// let out = attn.forward(
-    ///     &mut enc, &token_hidden, &w, &mask,
-    ///     Some((&cached_k, &cached_v)), cache_len, &mut pool
-    /// )?;
-    /// cache.append(0, &out.new_k, &out.new_v);
-    /// ```
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -190,7 +94,7 @@ impl GpuDecoderSelfAttention {
         cache_len: usize,
         pool: &mut GpuTensorPool,
     ) -> Result<DecoderSelfAttentionOutput> {
-        let (batch_size, query_len, _hidden_size) = hidden_states.dims3();
+        let (_, _, _hidden_size) = hidden_states.dims3();
 
         // 1. Project Q, K, V from input
         let q_proj = self.ops.project(
@@ -349,29 +253,5 @@ impl GpuDecoderSelfAttention {
             pool,
         );
         (k_proj, v_proj)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decoder_attention_dimensions() {
-        // Compile-time API test
-        
-        // BART decoder dimensions
-        let hidden_size = 1024u32;
-        let num_heads = 16u32;
-        let head_dim = hidden_size / num_heads;
-        
-        assert_eq!(head_dim, 64);
-        
-        // GPT-2 small dimensions  
-        let hidden_size = 768u32;
-        let num_heads = 12u32;
-        let head_dim = hidden_size / num_heads;
-        
-        assert_eq!(head_dim, 64);
     }
 }
