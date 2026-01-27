@@ -9,7 +9,7 @@
 //! - down_proj: [intermediate_size, hidden_size]
 
 use crate::activations::Activation;
-use crate::feedforward::swiglu::SwiGluFeedForward;
+use crate::feedforward::SwiGluFeedForward;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 

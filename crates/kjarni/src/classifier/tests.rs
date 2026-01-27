@@ -1088,45 +1088,80 @@ mod classifier_tests {
         #[tokio::test]
         #[ignore = "Requires model download"]
         async fn test_batch_multilingual() {
-            println!("classifier::new");
             let classifier = Classifier::new("bert-sentiment-multilingual")
                 .await
                 .expect("Failed to load model");
-            println!("classifier::new loaded");
+
             let texts = &[
                 TEST_TEXT_POSITIVE,         // English
                 TEST_TEXT_GERMAN_POSITIVE,  // German
                 TEST_TEXT_FRENCH_NEGATIVE,  // French
                 TEST_TEXT_SPANISH_POSITIVE, // Spanish
             ];
-            println!("classifier::new before results");
+
             let results = classifier
                 .classify_batch(texts)
                 .await
                 .expect("Batch classification failed");
-            println!("classifier::new after results");
+
             assert_eq!(results.len(), 4);
 
-            // All positive texts should be 4-5 stars
-            for (i, result) in results.iter().enumerate() {
-                if i != 2 {
-                    // Skip French negative
-                    assert!(
-                        result.label.contains("4") || result.label.contains("5"),
-                        "Text {} should be positive, got {}",
-                        i,
-                        result.label
-                    );
-                }
+            for result in &results {
+                println!("Batch result: {} (score: {})", result.label, result.score);
             }
 
-            // French negative should be 1-3 stars
+            // Expected results from Python reference implementation:
+            // Index 0 (English positive): 5 stars (0.9689)
+            // Index 1 (German positive): 5 stars (0.8865)
+            // Index 2 (French negative): 1 star (0.7609)
+            // Index 3 (Spanish positive): 5 stars (0.9312)
+
+            // Test English positive
+            assert_eq!(
+                results[0].label, "5 stars",
+                "English positive should be 5 stars, got {}",
+                results[0].label
+            );
             assert!(
-                results[2].label.contains("1")
-                    || results[2].label.contains("2")
-                    || results[2].label.contains("3"),
-                "French negative should be 1-3 stars, got {}",
+                results[0].score > 0.95,
+                "English positive score should be > 0.95, got {}",
+                results[0].score
+            );
+
+            // Test German positive
+            assert_eq!(
+                results[1].label, "5 stars",
+                "German positive should be 5 stars, got {}",
+                results[1].label
+            );
+            assert!(
+                results[1].score > 0.85,
+                "German positive score should be > 0.85, got {}",
+                results[1].score
+            );
+
+            // Test French negative
+            assert_eq!(
+                results[2].label, "1 star",
+                "French negative should be 1 star, got {}",
                 results[2].label
+            );
+            assert!(
+                results[2].score > 0.75,
+                "French negative score should be > 0.75, got {}",
+                results[2].score
+            );
+
+            // Test Spanish positive
+            assert_eq!(
+                results[3].label, "5 stars",
+                "Spanish positive should be 5 stars, got {}",
+                results[3].label
+            );
+            assert!(
+                results[3].score > 0.90,
+                "Spanish positive score should be > 0.90, got {}",
+                results[3].score
             );
         }
     }
@@ -1192,7 +1227,6 @@ mod classifier_tests {
     // =============================================================================
     // Preset Contract Tests
     // =============================================================================
-
 
     mod integration_tests {
         use kjarni_transformers::Device;
@@ -1314,13 +1348,12 @@ mod classifier_tests {
             assert_eq!(PRESET.model, MODEL_NAME);
             let model_name = PRESET.model;
 
-
             println!("--- Verifying Preset Contract for '{}' ---", PRESET.name);
 
             let classifier = Classifier::new(model_name)
                 .await
                 .expect("Failed to load model defined in preset");
-            
+
             assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
             assert_eq!(classifier.architecture(), "roberta", "Model name mismatch");
 
@@ -1770,7 +1803,7 @@ mod classifier_tests {
                 .classify("Test GPU classification")
                 .await
                 .expect("GPU classification failed");
-            
+
             assert!(!result.label.is_empty());
         }
 
