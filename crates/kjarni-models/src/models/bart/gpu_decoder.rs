@@ -1,20 +1,21 @@
 use crate::models::bart::config::BartConfig;
 use anyhow::Result;
-use kjarni_transformers::cache::Cache;
-use kjarni_transformers::cache::GpuBeamKVCache;
 use kjarni_transformers::EmbeddingConfig;
 use kjarni_transformers::LoadedEmbeddings;
+use kjarni_transformers::cache::Cache;
+use kjarni_transformers::cache::GpuBeamKVCache;
 use kjarni_transformers::encoder_decoder::traits::{
     GpuCrossAttentionKVCache, GpuCrossDecoder, GpuCrossDecoderOutput,
 };
 
 use kjarni_transformers::WgpuContext;
+use kjarni_transformers::gpu::{
+    normalization::{GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights},
+};
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
-    GpuNormalization, GpuNormalizationWeights,
-    layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
 };
 use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;

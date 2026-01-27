@@ -11,7 +11,7 @@ use std::borrow::Cow;
 /// mmap pages are alive and loader is alive
 /// IMPORTANT: The view must be fully consumed synchronously
 #[derive(Debug)] 
-pub(crate) struct TensorView<'a> { // (crate)
+pub(crate) struct TensorView<'a> {
     pub name: String,
     pub bytes: Cow<'a, [u8]>,
     pub shape: Vec<usize>,
@@ -19,10 +19,6 @@ pub(crate) struct TensorView<'a> { // (crate)
 }
 
 impl<'a> TensorView<'a> {
-    /// **CPU Compatibility Layer**
-    /// Converts raw bytes into a standard `ndarray::ArrayD<f32>`.
-    /// This is a slow, memory-intensive operation and should only be used for debugging
-    /// or for components that have not yet been updated to handle multiple dtypes.
     #[deprecated(
         since = "0.1.0",
         note = "This is a slow compatibility layer. Use ModelWeights::get_typed_tensor and handle specific dtypes instead."
@@ -30,13 +26,10 @@ impl<'a> TensorView<'a> {
     pub fn to_ndarray_f32(&self) -> Result<ArrayD<f32>> {
         let data: Vec<f32> = match self.dtype {
             DType::F32 => {
-                // --- THIS IS THE FIX ---
-                // Fast Path: Try a zero-copy cast if the memory is aligned.
                 if let Ok(slice) = bytemuck::try_cast_slice::<u8, f32>(&self.bytes) {
                     slice.to_vec()
                 }
-                // Safe Path: If not aligned, copy the bytes element by element.
-                // This is slower but guaranteed to be safe.
+                // if not aligned, copy the bytes element by element.
                 else {
                     self.bytes
                         .chunks_exact(4)
@@ -143,10 +136,7 @@ mod tests {
 
     #[test]
     fn test_tensorview_f32_safe_path_unaligned() {
-        // Values: 1.0, 2.0, 3.0, 4.0
         let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-
-        // Convert to bytes
         let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
 
         // Prepend 1 byte to misalign start
@@ -156,7 +146,7 @@ mod tests {
         // Slice to remove the first byte (misaligned but still divisible by 4)
         let tensor = TensorView {
             name: "unaligned_f32".to_string(),
-            bytes: Cow::Owned(unaligned[1..].to_vec()), // Now properly divisible by 4
+            bytes: Cow::Owned(unaligned[1..].to_vec()),
             shape: vec![2, 2],
             dtype: DType::F32,
         };
@@ -195,7 +185,7 @@ mod tests {
             name: "invalid".to_string(),
             bytes: Cow::Owned(vec![0u8; 4]),
             shape: vec![1],
-            dtype: DType::Q8_0, // unsupported for f32 conversion
+            dtype: DType::Q8_0,
         };
 
         let result = tensor.to_ndarray_f32();

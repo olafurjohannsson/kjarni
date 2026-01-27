@@ -1,11 +1,16 @@
 use crate::attention::MultiHeadAttention;
 use crate::decoder::prelude::*;
 use crate::feedforward::{FeedForward, SwiGluFeedForward};
+
+use crate::gpu::normalization::{
+    GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+    GpuRMSNormWeights
+};
+
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
-    GpuRMSNormWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
+    GpuFeedForward, GpuFeedForwardWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;

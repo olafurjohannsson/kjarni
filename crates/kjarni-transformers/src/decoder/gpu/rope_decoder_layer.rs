@@ -2,11 +2,15 @@ use crate::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::{gpu::GpuRoPEAttention, prelude::*},
+    gpu::normalization::{
+        GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+        GpuRMSNormWeights,
+    },
     gpu_ops::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
-            GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights,
-            GpuSwiGLUFFN, attention::GpuAttentionWeights, rms_norm::GpuRMSNorm, rope::GpuRoPE,
+            GpuFeedForward, GpuFeedForwardWeights, GpuSwiGLUFFN, attention::GpuAttentionWeights,
+            rope::GpuRoPE,
         },
         primitives::add::GpuAdd,
     },
@@ -149,11 +153,11 @@ mod rope_decoder_gpu_test {
 
     use super::*;
     use crate::cpu::decoder::{CpuRoPEDecoderLayer, DecoderAttention};
+    use crate::cpu::normalization::RMSNorm as CpuRMSNorm;
     use crate::feedforward::SwiGluFeedForward;
-    use crate::gpu_ops::blocks::{GpuFeedForwardWeights, GpuRMSNormWeights, GpuSwiGLUFFNWeights};
+    use crate::gpu_ops::blocks::{GpuFeedForwardWeights, GpuSwiGLUFFNWeights};
     use crate::gpu_ops::{GpuTensor, GpuTensorPool};
     use crate::linear_layer::LinearLayer;
-    use crate::cpu::normalization::RMSNorm as CpuRMSNorm;
     use crate::rope::RoPE;
     use crate::{Normalization, WgpuContext};
     use anyhow::Result;
@@ -270,7 +274,7 @@ mod rope_decoder_gpu_test {
             let gate = load(&cpu.feed_forward.gate)?;
             let up = load(&cpu.feed_forward.up)?;
             let down = load(&cpu.feed_forward.down)?;
-            
+
             let w = GpuSwiGLUFFNWeights::new(gate, up, down)?;
             GpuFeedForwardWeights::SwiGLU(w)
         };
@@ -353,11 +357,17 @@ mod rope_decoder_gpu_test {
         let p = k_gpu_raw.permuted_axes([0, 2, 1, 3]);
 
         // Reshape GPU [b, h, s, d] -> [b, s, h, d] -> [b, s, h*d]
-        let k_gpu_reshaped = p
-            .as_standard_layout()
-            .into_shape_with_order((batch, seq_len, kv_heads * head_dim))?;
+        let k_gpu_reshaped =
+            p.as_standard_layout()
+                .into_shape_with_order((batch, seq_len, kv_heads * head_dim))?;
 
-        assert_all_close(&k_cache_cpu, &k_gpu_reshaped.to_owned(), 1e-3, 1e-4, "K Cache");
+        assert_all_close(
+            &k_cache_cpu,
+            &k_gpu_reshaped.to_owned(),
+            1e-3,
+            1e-4,
+            "K Cache",
+        );
 
         Ok(())
     }

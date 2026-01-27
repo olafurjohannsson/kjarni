@@ -7,7 +7,10 @@ use crate::feedforward::{FeedForward as CpuFf, LegacyFeedForward as CpuStdFf};
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
-    GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
+};
+use crate::gpu::normalization::{
+    GpuNormalization, GpuNormalizationWeights,
+    GpuLayerNormWeights, GpuLayerNorm
 };
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
 use crate::cpu::normalization::LayerNorm as CpuLayerNorm;

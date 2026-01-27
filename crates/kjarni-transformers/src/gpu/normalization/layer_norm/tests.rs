@@ -1,6 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
+use crate::gpu::normalization::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;
 use ndarray::{Array1, Array3, Axis};

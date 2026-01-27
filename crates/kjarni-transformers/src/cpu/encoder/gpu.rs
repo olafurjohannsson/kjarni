@@ -7,11 +7,12 @@ use crate::EmbeddingConfig;
 use crate::LoadedEmbeddings;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-use crate::gpu_ops::blocks::layer_norm::{GpuLayerNorm, GpuLayerNormWeights};
-use crate::gpu_ops::blocks::GpuNormalization;
-use crate::gpu_ops::blocks::GpuNormalizationWeights;
-use crate::gpu_ops::blocks::GpuRMSNorm;
-use crate::gpu_ops::blocks::GpuRMSNormWeights;
+
+use crate::gpu::normalization::{
+    GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+    GpuRMSNormWeights, GpuLayerNorm, GpuLayerNormWeights
+};
+
 use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;

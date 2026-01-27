@@ -1,91 +1,30 @@
-// kjarni-transformers/src/stats.rs
-
 //! Generation statistics tracking for performance monitoring.
 //!
-//! Provides low-overhead metrics collection for text generation, including:
-//! - Prefill throughput (tokens/second)
-//! - Decode throughput (tokens/second)
-//! - Per-phase timing breakdowns
-//!
-//! # Usage
-//!
-//! Statistics collection is disabled by default. Enable it globally:
-//!
-//! ```ignore
-//! GenerationStats::enable();
-//! ```
-//!
-//! Or via CLI flag:
-//!
-//! ```bash
-//! kjarni chat --stats "Hello, world"
-//! ```
-//!
-//! # Output Example
-//!
-//! ```text
-//! ┌─────────────────────────────────────┐
-//! │       Generation Statistics         │
-//! ├─────────────────────────────────────┤
-//! │ Prefill:     42 tokens @   850.3 t/s│
-//! │ Decode:      58 tokens @    23.4 t/s│
-//! │ Total:      100 tokens              │
-//! └─────────────────────────────────────┘
-//! ```
+//! Provides low-overhead metrics collection for prefill and decode throughput.
+//! Disabled by default; enable with `GenerationStats::enable()`.
 
 use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-/// Global flag to enable/disable statistics collection.
-///
-/// When disabled (default), all stats methods are no-ops with minimal overhead.
 static STATS_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Tracks generation performance metrics.
 ///
-/// This struct is designed for low overhead in the hot path:
-/// - No allocations after construction
-/// - Atomic operations only for the global enable flag
-/// - All timing uses `Instant` (monotonic, fast)
-///
-/// # Example
-///
-/// ```ignore
-/// let mut stats = GenerationStats::new();
-///
-/// stats.start_prefill(prompt_tokens.len());
-/// // ... run prefill ...
-/// stats.end_prefill();
-///
-/// for token in generated_tokens {
-///     // ... generate token ...
-///     stats.record_token();
-/// }
-///
-/// stats.print_summary();
-/// ```
+/// Designed for minimal overhead: no allocations after construction,
+/// atomic check for the global enable flag, monotonic timing.
 #[derive(Debug)]
 pub struct GenerationStats {
-    /// When prefill started
     prefill_start: Option<Instant>,
-    /// Number of tokens in the prompt
     prefill_tokens: usize,
-    /// Total prefill duration
     prefill_duration: Duration,
-
-    /// When decode phase started (first token)
     decode_start: Option<Instant>,
-    /// Number of tokens generated
     decode_tokens: usize,
-    /// Time of the most recent token
     last_token_time: Option<Instant>,
 }
 
 impl GenerationStats {
     /// Creates a new stats tracker.
-    ///
-    /// Collection is only active if `GenerationStats::is_enabled()` returns true.
     pub fn new() -> Self {
         Self {
             prefill_start: None,
@@ -97,13 +36,7 @@ impl GenerationStats {
         }
     }
 
-    // =========================================================================
-    // Global Enable/Disable
-    // =========================================================================
-
     /// Enables statistics collection globally.
-    ///
-    /// Call this once at startup (e.g., based on CLI flags).
     pub fn enable() {
         STATS_ENABLED.store(true, Ordering::Relaxed);
     }
@@ -119,15 +52,7 @@ impl GenerationStats {
         STATS_ENABLED.load(Ordering::Relaxed)
     }
 
-    // =========================================================================
-    // Prefill Phase
-    // =========================================================================
-
     /// Marks the start of the prefill phase.
-    ///
-    /// # Arguments
-    ///
-    /// * `num_tokens` - Number of prompt tokens being processed
     #[inline]
     pub fn start_prefill(&mut self, num_tokens: usize) {
         if !Self::is_enabled() {
@@ -155,13 +80,7 @@ impl GenerationStats {
         }
     }
 
-    // =========================================================================
-    // Decode Phase
-    // =========================================================================
-
-    /// Records a generated token.
-    ///
-    /// Call this after each token is sampled and yielded.
+    /// Records a generated token. Call after each token is sampled.
     #[inline]
     pub fn record_token(&mut self) {
         if !Self::is_enabled() {
@@ -177,13 +96,10 @@ impl GenerationStats {
     }
 
     /// Returns decode throughput in tokens per second.
-    ///
-    /// This is the "generation speed" users typically care about.
     pub fn decode_tps(&self) -> f64 {
         if let (Some(start), Some(last)) = (self.decode_start, self.last_token_time) {
             let secs = last.duration_since(start).as_secs_f64();
             if secs > 0.0 && self.decode_tokens > 1 {
-                // Exclude first token (it's part of prefill latency)
                 return (self.decode_tokens - 1) as f64 / secs;
             }
         }
@@ -195,13 +111,7 @@ impl GenerationStats {
         self.decode_tokens
     }
 
-    // =========================================================================
-    // Reporting
-    // =========================================================================
-
     /// Prints a summary of generation statistics.
-    ///
-    /// Only prints if statistics collection is enabled and tokens were generated.
     pub fn print_summary(&self) {
         if !Self::is_enabled() {
             return;
@@ -254,13 +164,8 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    // #[test]
-    // fn test_stats_disabled_by_default() {
-    //     assert!(!GenerationStats::is_enabled());
-    // }
-
     #[test]
-    fn test_prefill_tps_calculation() {
+    fn test_prefill_tps() {
         GenerationStats::enable();
         let mut stats = GenerationStats::new();
 
@@ -269,36 +174,8 @@ mod tests {
         stats.end_prefill();
 
         let tps = stats.prefill_tps();
-        // Should be roughly 1000 t/s (100 tokens / 0.1s)
-        assert!(tps > 500.0 && tps < 2000.0, "TPS was {}", tps);
+        assert!(tps > 500.0 && tps < 2000.0, "tps was {}", tps);
 
         GenerationStats::disable();
     }
-    // #[test]
-    // fn test_generation_stats_lifecycle() {
-    //     let mut stats = GenerationStats::new();
-
-    //     // Initial state
-    //     assert_eq!(stats.prefill_tps(), 0.0);
-    //     assert_eq!(stats.decode_tps(), 0.0);
-
-    //     // Prefill
-    //     stats.start_prefill(100);
-    //     std::thread::sleep(Duration::from_millis(10));
-    //     stats.end_prefill();
-
-    //     assert!(stats.prefill_tps() > 0.0);
-
-    //     // Decode
-    //     stats.record_token();
-    //     std::thread::sleep(Duration::from_millis(10));
-    //     stats.record_token();
-
-    //     assert!(stats.decode_tps() > 0.0);
-
-    //     // Verify counts
-    //     // (Access fields or print summary to ensure no panic)
-    //     stats.print_summary();
-    // }
-
 }

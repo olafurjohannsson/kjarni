@@ -5,13 +5,6 @@
 /// Returns the minimum number of single-character edits (insertions,
 /// deletions, or substitutions) required to change one string into another.
 ///
-/// # Example
-/// ```
-/// use kjarni_transformers::utils::levenshtein::distance;
-///
-/// assert_eq!(distance("kitten", "sitting"), 3);
-/// assert_eq!(distance("llama", "llma"), 1);
-/// ```
 pub fn distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();

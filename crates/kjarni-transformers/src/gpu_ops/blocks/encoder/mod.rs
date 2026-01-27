@@ -3,8 +3,7 @@ use crate::activations;
 use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
-use crate::gpu_ops::blocks::layer_norm::GpuLayerNorm;
-use crate::gpu_ops::blocks::{GpuNormalization, GpuNormalizationWeights};
+use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights, GpuLayerNorm, GpuRMSNorm};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::GpuAttentionWeights};
 use crate::traits::ModelMetadata;
@@ -103,7 +102,7 @@ impl GpuEncoderLayer {
                     GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps))
                 }
                 GpuNormalizationWeights::RMSNorm(_) => GpuNormalization::RMSNorm(
-                    crate::gpu_ops::blocks::rms_norm::GpuRMSNorm::new(context, meta.norm_eps),
+                    GpuRMSNorm::new(context, meta.norm_eps),
                 ),
             }
         };
@@ -278,7 +277,6 @@ mod tests {
     use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-    use crate::gpu_ops::blocks::layer_norm::GpuLayerNormWeights;
     use crate::gpu_ops::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::cpu::normalization::LayerNorm;
@@ -288,6 +286,8 @@ mod tests {
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
     use std::sync::Arc;
+
+    use crate::gpu::normalization::{GpuLayerNormWeights};
 
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()

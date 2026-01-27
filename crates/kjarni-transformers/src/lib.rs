@@ -1,28 +1,24 @@
-//! Core transformer components for building transformer-based models
+//! # Kjarni Transformers
 //!
-//! This crate provides the fundamental building blocks for transformer architectures
-//! without model-specific implementations.
-
-//! Kjarni Transformers: Fast transformer models for Rust
+//! Transformer inference for Rust.
+//!
+//! **Author:** Ólafur Aron <olafurjohannss@gmail.com>  
+//! **License:** MIT OR Apache-2.0
 
 pub mod activations;
-pub mod attention;
+pub mod audio;
 pub mod cache;
 pub mod chat;
 pub mod common;
 pub mod cpu;
 pub mod decoder;
-
 pub mod encoder_decoder;
-pub mod gpu_ops;
-
-pub mod linear_layer;
-pub mod models;
-
-pub mod audio;
 pub mod execution;
 pub mod gpu;
+pub mod gpu_ops;
+pub mod linear_layer;
 pub mod loaders;
+pub mod models;
 pub mod pipeline;
 pub mod pooling;
 pub mod stats;
@@ -46,17 +42,22 @@ pub mod feedforward {
     };
 }
 
+pub mod attention {
+    pub use crate::cpu::attention::multi_head_attention::MultiHeadAttention;
+}
+
 pub use audio::{
     AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig, create_silence,
     create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 
-// Re-export commonly used items
 pub use crate::{
-    attention::MultiHeadAttention,
     chat::templates::{ChatTemplate, Conversation, Message, Role},
-    cpu::embeddings::{EmbeddingData, Embeddings},
-    cpu::normalization::Normalization,
+    cpu::{
+        attention::multi_head_attention::MultiHeadAttention,
+        embeddings::{EmbeddingData, Embeddings},
+        normalization::Normalization,
+    },
     execution::ExecutionPlan,
     feedforward::FeedForward,
     loaders::{
@@ -66,14 +67,13 @@ pub use crate::{
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
+
 pub use cache::{Cache, CpuKVCache, GpuKVCache};
 pub use gpu_ops::context::WgpuContext;
 pub use traits::Device;
-
-// Re-export model traits and registry
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
 
-// Prelude for easy imports
+/// Commonly used types for convenience imports.
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache, GpuKVCache};
     pub use crate::gpu_ops::context::WgpuContext;

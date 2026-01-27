@@ -1,5 +1,6 @@
-//! Core model traits and data structures for the Kjarni Inference Engine.
-//! This is the unified interface for Encoders, Decoders, and Seq2Seq models.
+//! Core model traits and data structures for Kjarni.
+//!
+//! Defines the unified interface for Encoders, Decoders, and Seq2Seq models.
 
 use ndarray::Array3;
 use anyhow::Result;
@@ -10,10 +11,7 @@ use crate::WgpuContext;
 use std::any::Any;
 use std::sync::Arc;
 
-// ============================================================================
-//  1. Backend & Runtime
-// ============================================================================
-
+/// Compute backend for model inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Device {
     Cpu,
@@ -21,40 +19,39 @@ pub enum Device {
 }
 
 impl Device {
+    /// Returns `true` if this is the CPU backend.
     pub fn is_cpu(&self) -> bool {
         matches!(self, Device::Cpu)
     }
+
+    /// Returns `true` if this is the WebGPU backend.
     pub fn is_gpu(&self) -> bool {
         matches!(self, Device::Wgpu)
     }
 }
 
 /// A handle to a loaded model instance.
-/// Renamed from TransformerModel to better reflect its role as a runtime handle.
-/// todo: not sure about this trait, seems kind of useless right now
 pub trait InferenceModel: Send + Sync {
-    /// The device this model instance is running on.
+    /// Returns the device this model is running on.
     fn device(&self) -> Device;
 
-    /// The GPU context (if applicable).
+    /// Returns the GPU context, if running on WebGPU.
     fn context(&self) -> Option<Arc<WgpuContext>> {
         None
     }
 
-    /// Downcasting support for custom model logic.
+    /// Downcasts to a concrete type.
     fn as_any(&self) -> &dyn Any;
 }
 
-// ============================================================================
-//  2. The Unified Blueprint
-// ============================================================================
-
+/// Layer normalization strategy.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NormalizationStrategy {
     LayerNorm,
     RMSNorm,
 }
 
+/// Core hyperparameters and configuration for a transformer model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelMetadata {
     pub hidden_size: usize,
@@ -68,15 +65,13 @@ pub struct ModelMetadata {
     pub activation: Activation,
     pub rope_theta: Option<f32>,
     pub rope_scaling: Option<RopeScalingConfig>,
+    /// Whether to multiply embeddings by `sqrt(hidden_size)`.
     pub scale_embeddings: bool,
     pub extra_pos_embeddings: usize,
     pub transpose_ffn_weights: bool,
     pub transpose_attention_weights: bool,
     pub is_prenorm: bool,
-    /// Whether to scale embeddings by sqrt(d_model)
-    /// Note: This is DIFFERENT from scale_embeddings!
-    /// - scale_embeddings: embeddings *= sqrt(d_model) (scaling up)
-    /// - normalize_embedding: layer norm after embedding lookup
+    /// Whether to apply layer norm after embedding lookup.
     pub normalize_embedding: bool,
     pub normalization_strategy: NormalizationStrategy,
     pub no_scale_qk: bool,
@@ -84,7 +79,7 @@ pub struct ModelMetadata {
     pub intermediate_size: usize,
 }
 
-/// Naming templates for a standard attention block (self- or cross-attention).
+/// Weight tensor names for an attention block.
 #[derive(Debug, Clone)]
 pub struct AttentionLayout {
     pub q_weight: String,
@@ -99,35 +94,37 @@ pub struct AttentionLayout {
     pub norm_bias: Option<String>,
 }
 
-/// Naming templates for a standard feed-forward network block.
+/// Weight tensor names for a feed-forward block.
 #[derive(Debug, Clone)]
 pub struct FeedForwardLayout {
     pub up_weight: String,
     pub up_bias: Option<String>,
     pub down_weight: String,
     pub down_bias: Option<String>,
-    pub gate_weight: Option<String>, // For SwiGLU/GEGLU variants
+    /// For gated variants (SwiGLU, GEGLU).
+    pub gate_weight: Option<String>,
     pub gate_bias: Option<String>,
     pub norm_weight: String,
     pub norm_bias: Option<String>,
 }
 
-/// Naming templates for a complete encoder transformer layer.
+/// Weight tensor names for an encoder layer.
 #[derive(Debug, Clone)]
 pub struct EncoderLayerLayout {
     pub self_attn: AttentionLayout,
     pub ffn: FeedForwardLayout,
 }
 
-/// Naming templates for a complete decoder transformer layer.
+/// Weight tensor names for a decoder layer.
 #[derive(Debug, Clone)]
 pub struct DecoderLayerLayout {
     pub self_attn: AttentionLayout,
-    pub cross_attn: Option<AttentionLayout>, // Only present in encoder-decoder models
+    /// Only present in encoder-decoder models.
+    pub cross_attn: Option<AttentionLayout>,
     pub ffn: FeedForwardLayout,
 }
 
-/// Naming templates for all components of an encoder block.
+/// Weight tensor names for an encoder block.
 #[derive(Debug, Clone)]
 pub struct EncoderLayout {
     pub position_embedding: Option<String>,
@@ -139,7 +136,7 @@ pub struct EncoderLayout {
     pub layer: EncoderLayerLayout,
 }
 
-/// Naming templates for all components of a decoder block.
+/// Weight tensor names for a decoder block.
 #[derive(Debug, Clone)]
 pub struct DecoderLayout {
     pub position_embedding: Option<String>,
@@ -151,12 +148,11 @@ pub struct DecoderLayout {
     pub layer: DecoderLayerLayout,
 }
 
-/// The top-level, comprehensive layout for any transformer model.
+/// Complete weight tensor layout for any transformer architecture.
 ///
-/// This struct acts as the single source of truth for all tensor names.
-/// - For a **decoder-only** model (Llama), `encoder` will be `None`.
-/// - For an **encoder-only** model (BERT), `decoder` and `lm_head` will be `None`.
-/// - For an **encoder-decoder** model (BART), both `encoder` and `decoder` will be `Some`.
+/// - Decoder-only (Llama): `encoder` is `None`
+/// - Encoder-only (BERT): `decoder` is `None`
+/// - Encoder-decoder (BART): both are `Some`
 #[derive(Debug, Clone)]
 pub struct ModelLayout {
     pub token_embedding: String,
@@ -164,32 +160,42 @@ pub struct ModelLayout {
     pub encoder: Option<EncoderLayout>,
     pub decoder: Option<DecoderLayout>,
 }
+
+/// Configuration trait implemented by all model configs.
 pub trait ModelConfig: Send + Sync {
     fn metadata(&self) -> ModelMetadata;
     fn layout(&self) -> ModelLayout;
     fn model_type(&self) -> &str;
+    fn as_any(&self) -> &dyn std::any::Any;
+
     fn vocab_size(&self) -> usize {
         self.metadata().vocab_size
     }
-    fn as_any(&self) -> &dyn std::any::Any;
+
     fn num_heads(&self) -> usize {
         self.metadata().num_attention_heads
     }
+
     fn context_size(&self) -> usize {
         self.metadata().max_seq_len
     }
+
     fn hidden_size(&self) -> usize {
         self.metadata().hidden_size
     }
+
     fn num_attention_heads(&self) -> usize {
         self.metadata().num_attention_heads
     }
+
     fn num_layers(&self) -> usize {
         self.metadata().num_layers
     }
+
     fn layer_norm_eps(&self) -> f32 {
         self.metadata().norm_eps
     }
+
     fn activation(&self) -> Activation {
         self.metadata().activation
     }
@@ -201,57 +207,41 @@ pub trait ModelConfig: Send + Sync {
     fn eos_token_id(&self) -> Option<u32> {
         None
     }
-     /// Get ordered label names for classification models.
-    /// Labels are sorted by their index (0, 1, 2, ...).
+
+    /// Returns ordered label names for classification models.
     fn id2label(&self) -> Option<&[String]> {
-        None  // Default: no labels
+        None
     }
 
-    /// Get number of labels for classification models.
+    /// Returns the number of classification labels.
     fn num_labels(&self) -> Option<usize> {
         self.id2label().map(|l| l.len())
     }
 }
 
-/// Shared functionality for CPU transformer blocks (encoder/decoder layers).
-/// 
-/// This trait captures the common structure:
-/// - Downcasting for concrete type access
-/// - Normalization hooks (embed_norm, final_norm)
-/// - Metadata accessors
+/// Shared functionality for CPU transformer blocks.
 pub trait CpuTransformerCore: Send + Sync {
-    // =========================================================================
-    // Downcasting
-    // =========================================================================
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    // =========================================================================
-    // Normalization Hooks
-    // =========================================================================
-    
-    /// Post-embedding normalization (e.g., Gemma's RMSNorm after embed).
-    /// Default: no-op passthrough.
+    /// Applies post-embedding normalization. Default is passthrough.
     fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         Ok(hidden_states.clone())
     }
-    
-    /// Final layer normalization (RMSNorm for Llama, LayerNorm for BERT).
+
+    /// Applies final layer normalization.
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
 
-    // =========================================================================
-    // Metadata
-    // =========================================================================
     fn num_layers(&self) -> usize;
     fn hidden_size(&self) -> usize;
     fn num_attention_heads(&self) -> usize;
-    
-    fn num_kv_heads(&self) -> usize { 
-        self.num_attention_heads() 
+
+    fn num_kv_heads(&self) -> usize {
+        self.num_attention_heads()
     }
-    
-    fn head_dim(&self) -> usize { 
-        self.hidden_size() / self.num_attention_heads() 
+
+    fn head_dim(&self) -> usize {
+        self.hidden_size() / self.num_attention_heads()
     }
 }
 
@@ -266,7 +256,6 @@ mod tests {
 
         assert!(cpu.is_cpu());
         assert!(!cpu.is_gpu());
-
         assert!(gpu.is_gpu());
         assert!(!gpu.is_cpu());
     }
@@ -292,8 +281,7 @@ mod tests {
 
         assert_eq!(model_ref.device(), Device::Cpu);
 
-        let any_ref = model_ref.as_any();
-        let downcasted = any_ref.downcast_ref::<DummyModel>().unwrap();
+        let downcasted = model_ref.as_any().downcast_ref::<DummyModel>().unwrap();
         assert_eq!(downcasted.device, Device::Cpu);
     }
 
@@ -329,8 +317,36 @@ mod tests {
         assert!(meta.rope_theta.is_some());
     }
 
+    fn make_attention_layout() -> AttentionLayout {
+        AttentionLayout {
+            q_weight: "q".to_string(),
+            q_bias: None,
+            k_weight: "k".to_string(),
+            k_bias: None,
+            v_weight: "v".to_string(),
+            v_bias: None,
+            o_weight: "o".to_string(),
+            o_bias: None,
+            norm_weight: "n".to_string(),
+            norm_bias: None,
+        }
+    }
+
+    fn make_ffn_layout() -> FeedForwardLayout {
+        FeedForwardLayout {
+            up_weight: "up".to_string(),
+            up_bias: None,
+            down_weight: "down".to_string(),
+            down_bias: None,
+            gate_weight: None,
+            gate_bias: None,
+            norm_weight: "norm".to_string(),
+            norm_bias: None,
+        }
+    }
+
     #[test]
-    fn test_attention_layout_creation() {
+    fn test_attention_layout() {
         let attn = AttentionLayout {
             q_weight: "q_w".to_string(),
             q_bias: Some("q_b".to_string()),
@@ -349,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_feedforward_layout_creation() {
+    fn test_feedforward_layout() {
         let ffn = FeedForwardLayout {
             up_weight: "up_w".to_string(),
             up_bias: None,
@@ -366,32 +382,14 @@ mod tests {
     }
 
     #[test]
-    fn test_encoder_layer_and_decoder_layer_layouts() {
-        let attn = AttentionLayout {
-            q_weight: "q".to_string(),
-            q_bias: None,
-            k_weight: "k".to_string(),
-            k_bias: None,
-            v_weight: "v".to_string(),
-            v_bias: None,
-            o_weight: "o".to_string(),
-            o_bias: None,
-            norm_weight: "n".to_string(),
-            norm_bias: None,
-        };
+    fn test_encoder_and_decoder_layer_layouts() {
+        let attn = make_attention_layout();
+        let ffn = make_ffn_layout();
 
-        let ffn = FeedForwardLayout {
-            up_weight: "up".to_string(),
-            up_bias: None,
-            down_weight: "down".to_string(),
-            down_bias: None,
-            gate_weight: None,
-            gate_bias: None,
-            norm_weight: "norm".to_string(),
-            norm_bias: None,
+        let encoder_layer = EncoderLayerLayout {
+            self_attn: attn.clone(),
+            ffn: ffn.clone(),
         };
-
-        let encoder_layer = EncoderLayerLayout { self_attn: attn.clone(), ffn: ffn.clone() };
         let decoder_layer = DecoderLayerLayout {
             self_attn: attn.clone(),
             cross_attn: Some(attn.clone()),
@@ -404,28 +402,9 @@ mod tests {
 
     #[test]
     fn test_encoder_and_decoder_layouts() {
-        let attn = AttentionLayout {
-            q_weight: "q".to_string(),
-            q_bias: None,
-            k_weight: "k".to_string(),
-            k_bias: None,
-            v_weight: "v".to_string(),
-            v_bias: None,
-            o_weight: "o".to_string(),
-            o_bias: None,
-            norm_weight: "n".to_string(),
-            norm_bias: None,
-        };
-        let ffn = FeedForwardLayout {
-            up_weight: "up".to_string(),
-            up_bias: None,
-            down_weight: "down".to_string(),
-            down_bias: None,
-            gate_weight: None,
-            gate_bias: None,
-            norm_weight: "norm".to_string(),
-            norm_bias: None,
-        };
+        let attn = make_attention_layout();
+        let ffn = make_ffn_layout();
+
         let encoder_layout = EncoderLayout {
             position_embedding: Some("pos".to_string()),
             token_type_embedding: None,
@@ -433,7 +412,10 @@ mod tests {
             embedding_norm_bias: None,
             final_norm_weight: None,
             final_norm_bias: None,
-            layer: EncoderLayerLayout { self_attn: attn.clone(), ffn: ffn.clone() },
+            layer: EncoderLayerLayout {
+                self_attn: attn.clone(),
+                ffn: ffn.clone(),
+            },
         };
 
         let decoder_layout = DecoderLayout {
@@ -455,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_layout_creation() {
+    fn test_model_layout() {
         let layout = ModelLayout {
             token_embedding: "tok_emb".to_string(),
             lm_head: "lm_head".to_string(),

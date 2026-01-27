@@ -331,13 +331,17 @@ impl SequenceClassifier {
             gpu_output.last_hidden_state.to_ndarray_3d().await?
 
         } else {
-            let hidden_states = self.encoder_cpu_ops().ok_or_else(|| anyhow!("No CPU encoder available"))?
+            let cpu_ops = self.encoder_cpu_ops().ok_or_else(|| anyhow!("No CPU encoder available"))?;
+            let cpu_encoder = self.pipeline.cpu_encoder().ok_or_else(|| anyhow!("No CPU encoder available"))?;
+
+            let hidden_states = cpu_ops
                 .embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
+
+            let normalized = cpu_encoder.embed_norm(&hidden_states)?;
+
             // Forward through CPU encoder
-            self.pipeline
-                .cpu_encoder()
-                .ok_or_else(|| anyhow!("No CPU encoder available"))?
-                .forward(&hidden_states, &attention_mask)?
+            cpu_encoder
+                .forward(&normalized, &attention_mask)?
                 .last_hidden_state
         };
 

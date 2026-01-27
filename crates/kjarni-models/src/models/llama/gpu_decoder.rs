@@ -50,13 +50,15 @@ use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    {EmbeddingConfig, LoadedEmbeddings},
+    gpu::{
+        normalization::{
+            GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights
+        },
+    },
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::{
-            GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights, GpuSwiGLUFFNWeights,
-            attention::GpuAttentionWeights,
-            rms_norm::{GpuRMSNorm, GpuRMSNormWeights},
+            GpuFeedForwardWeights, GpuSwiGLUFFNWeights, attention::GpuAttentionWeights,
             rope::GpuRoPE,
         },
     },
@@ -64,6 +66,7 @@ use kjarni_transformers::{
     tensor::DType,
     traits::{ModelLayout, ModelMetadata},
     weights::ModelWeights,
+    {EmbeddingConfig, LoadedEmbeddings},
 };
 use std::sync::Arc;
 

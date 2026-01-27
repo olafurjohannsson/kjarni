@@ -5,7 +5,7 @@ use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
 use anyhow::Result;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
-use kjarni_transformers::gpu_ops::blocks::{GpuRMSNorm, GpuRMSNormWeights};
+use kjarni_transformers::gpu::normalization::{GpuRMSNorm, GpuRMSNormWeights};
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
@@ -392,10 +392,11 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
         println!("=== STEP 1: EMBEDDINGS ===\n");
 
         // CPU: Use the new ModelInput with ArrayView2
-        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+        let ops = cpu_model
+            .decoder_cpu_ops()
+            .ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
 
-        let cpu_embeddings =
-            ops.embed(&input_ids, position_offset)?;
+        let cpu_embeddings = ops.embed(&input_ids, position_offset)?;
         println!("CPU embeddings shape: {:?}", cpu_embeddings.shape());
         println!(
             "CPU embeddings first 5: {:?}",
@@ -649,8 +650,6 @@ async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
     test_layer0_attention_vs_ffn_isolation(DType::BF16).await
 }
 
-
-
 #[tokio::test]
 async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
     test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
@@ -737,10 +736,11 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         // ========================================================================
         println!("=== STEP 1: EMBEDDINGS ===\n");
 
-        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+        let ops = cpu_model
+            .decoder_cpu_ops()
+            .ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
 
-        let cpu_embeddings =
-            ops.embed(&input_ids, position_offset)?;
+        let cpu_embeddings = ops.embed(&input_ids, position_offset)?;
 
         // CPU: Use the new ModelInput with ArrayView2
         // let cpu_embeddings =
@@ -1138,17 +1138,14 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
         // ========================================================================
         println!("=== STEP 4: FULL FORWARD ===\n");
 
-        let ops = cpu_model.decoder_cpu_ops().ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
+        let ops = cpu_model
+            .decoder_cpu_ops()
+            .ok_or_else(|| anyhow::anyhow!("Model does not support CPU execution"))?;
 
-        let cpu_embeddings =
-            ops.embed(&input_ids, position_offset)?;
+        let cpu_embeddings = ops.embed(&input_ids, position_offset)?;
 
-        let cpu_full = cpu_decoder.forward(
-            &cpu_embeddings,
-            &attention_mask,
-            position_offset,
-            None,
-        )?;
+        let cpu_full =
+            cpu_decoder.forward(&cpu_embeddings, &attention_mask, position_offset, None)?;
 
         let gpu_full = {
             let pool_guard = pool.lock().await;

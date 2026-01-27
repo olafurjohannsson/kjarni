@@ -2,7 +2,6 @@ pub mod blocks;
 pub mod context;
 mod frame_context;
 pub mod kernel;
-pub mod layers;
 pub mod primitives;
 pub mod profiler;
 pub mod tensor;

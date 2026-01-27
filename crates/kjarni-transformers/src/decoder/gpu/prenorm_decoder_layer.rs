@@ -1,16 +1,15 @@
-use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::Kernel;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::GpuKVCache;
 use crate::WgpuContext;
+use crate::gpu_ops::Kernel;
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
-use crate::gpu_ops::blocks::{
-    GpuFeedForward, GpuFeedForwardWeights, GpuNormalization, GpuNormalizationWeights
-};
+use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
 
 pub struct GpuPreNormDecoderLayer {
     pub self_attn: GpuAttention,

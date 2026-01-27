@@ -1,3 +1,4 @@
+pub mod attention;
 pub mod encoder;
 pub mod encoder_decoder;
 pub mod kernels;

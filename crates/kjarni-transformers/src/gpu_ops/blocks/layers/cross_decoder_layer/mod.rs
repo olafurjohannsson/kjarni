@@ -1,7 +1,9 @@
 use crate::gpu_ops::blocks::attention::{GpuAttentionWeights, GpuCrossAttention, GpuDecoderSelfAttention};
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights,
-    GpuNormalization, GpuNormalizationWeights,
+};
+use crate::gpu::normalization::{
+    GpuNormalization, GpuNormalizationWeights, 
 };
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};

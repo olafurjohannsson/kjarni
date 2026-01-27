@@ -1,13 +1,13 @@
-use crate::models::sentence_encoder::SentenceEncoder;
-use anyhow::Result;
-use kjarni_transformers::WgpuContext;
-use kjarni_transformers::models::ModelType;
-use kjarni_transformers::prelude::Device;
 use std::path::Path;
-use tokio;
+
+use anyhow::Result;
 use tokio::fs;
 
-/// Helper to ensure model files exist
+use kjarni_transformers::models::ModelType;
+use kjarni_transformers::prelude::Device;
+use kjarni_transformers::WgpuContext;
+
+use crate::models::sentence_encoder::SentenceEncoder;
 
 async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
     if !local_dir.exists() {
@@ -18,7 +18,7 @@ async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
     for filename in files_to_check {
         let local_path = local_dir.join(filename);
         if !local_path.exists() {
-            println!("-> Downloading {}...", filename);
+            println!("downloading {}...", filename);
             let download_url = format!(
                 "https://huggingface.co/{}/resolve/main/{}",
                 repo_id, filename
@@ -27,20 +27,20 @@ async fn ensure_model_files(repo_id: &str, local_dir: &Path) -> Result<()> {
             let response = reqwest::get(&download_url).await?.error_for_status()?;
             let content = response.bytes().await?;
             fs::write(&local_path, &content).await?;
-            println!("   ... downloaded to {:?}", local_path);
+            println!("downloaded to {:?}", local_path);
         }
     }
     Ok(())
 }
 
 fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, name: &str) {
-    assert_eq!(cpu.len(), gpu.len(), "{}: Batch size mismatch", name);
+    assert_eq!(cpu.len(), gpu.len(), "{}: batch size mismatch", name);
 
     for (batch_idx, (cpu_emb, gpu_emb)) in cpu.iter().zip(gpu.iter()).enumerate() {
         assert_eq!(
             cpu_emb.len(),
             gpu_emb.len(),
-            "{}: Embedding dimension mismatch at batch {}",
+            "{}: embedding dimension mismatch at batch {}",
             name,
             batch_idx
         );
@@ -52,7 +52,7 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
         for (i, (&cpu_val, &gpu_val)) in cpu_emb.iter().zip(gpu_emb.iter()).enumerate() {
             if cpu_val.is_nan() || gpu_val.is_nan() {
                 panic!(
-                    "{}: NaN at batch {} index {}: CPU={}, GPU={}",
+                    "{}: nan at batch {} index {}: cpu={}, gpu={}",
                     name, batch_idx, i, cpu_val, gpu_val
                 );
             }
@@ -71,7 +71,7 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
                 num_large_diffs += 1;
                 if num_large_diffs <= 5 {
                     println!(
-                        "{}: Large diff at batch {} index {}: CPU={:.6}, GPU={:.6}, diff={:.6}",
+                        "{}: large diff at batch {} index {}: cpu={:.6}, gpu={:.6}, diff={:.6}",
                         name, batch_idx, i, cpu_val, gpu_val, diff
                     );
                 }
@@ -79,18 +79,13 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
         }
 
         println!(
-            "{}: Batch {} - Max abs diff: {:.6}, Max rel diff: {:.6}, Large diffs: {}/{}",
-            name,
-            batch_idx,
-            max_diff,
-            max_rel_diff,
-            num_large_diffs,
-            cpu_emb.len()
+            "{}: batch {} - max abs diff: {:.6}, max rel diff: {:.6}, large diffs: {}/{}",
+            name, batch_idx, max_diff, max_rel_diff, num_large_diffs, cpu_emb.len()
         );
 
         assert!(
             max_diff < tolerance * 10.0,
-            "{}: Batch {} max difference {:.6} exceeds 10x tolerance {:.6}",
+            "{}: batch {} max difference {:.6} exceeds 10x tolerance {:.6}",
             name,
             batch_idx,
             max_diff,
@@ -99,20 +94,19 @@ fn assert_embeddings_close(cpu: &[Vec<f32>], gpu: &[Vec<f32>], tolerance: f32, n
     }
 }
 
-#[tokio::test]
-async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
-    println!("\n=== CPU vs GPU Parity Test: Single Sentence ===\n");
-
-    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-    let cache_dir = dirs::cache_dir()
+fn get_model_cache_dir(repo_id: &str) -> std::path::PathBuf {
+    dirs::cache_dir()
         .unwrap()
         .join("edgegpt")
-        .join(model_repo.replace('/', "_"));
+        .join(repo_id.replace('/', "_"))
+}
 
+#[tokio::test]
+async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
+    let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
+    let cache_dir = get_model_cache_dir(model_repo);
     ensure_model_files(model_repo, &cache_dir).await?;
 
-    // Initialize both encoders
-    println!("Initializing CPU encoder...");
     let cpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
         Device::Cpu,
@@ -121,7 +115,6 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    println!("Initializing GPU encoder...");
     let gpu_context = WgpuContext::new().await?;
     let gpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
@@ -131,39 +124,26 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    // Test with single sentence
     let sentence = "The quick brown fox jumps over the lazy dog.";
 
-    println!("\n--- Encoding on CPU ---");
     let cpu_embedding = cpu_encoder.encode(sentence).await?;
-    println!("CPU output stats:");
     let cpu_norm: f32 = cpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    println!("  Norm: {:.6}", cpu_norm);
-    println!("  First 10: {:?}", &cpu_embedding[..10]);
+    println!("cpu norm: {:.6}, first 10: {:?}", cpu_norm, &cpu_embedding[..10]);
 
-    println!("\n--- Encoding on GPU ---");
     let gpu_embedding = gpu_encoder.encode(sentence).await?;
-    println!("GPU output stats:");
     let gpu_norm: f32 = gpu_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    println!("  Norm: {:.6}", gpu_norm);
-    println!("  First 10: {:?}", &gpu_embedding[..10]);
+    println!("gpu norm: {:.6}, first 10: {:?}", gpu_norm, &gpu_embedding[..10]);
 
-    assert_embeddings_close(&[cpu_embedding], &[gpu_embedding], 1e-3, "Single sentence");
+    assert_embeddings_close(&[cpu_embedding], &[gpu_embedding], 1e-3, "single sentence");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_cpu_gpu_parity_batch() -> Result<()> {
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-    let cache_dir = dirs::cache_dir()
-        .unwrap()
-        .join("edgegpt")
-        .join(model_repo.replace('/', "_"));
-
+    let cache_dir = get_model_cache_dir(model_repo);
     ensure_model_files(model_repo, &cache_dir).await?;
 
-    // Initialize both encoders
-    println!("Initializing CPU encoder...");
     let cpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
         Device::Cpu,
@@ -172,7 +152,6 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    println!("Initializing GPU encoder...");
     let gpu_context = WgpuContext::new().await?;
     let gpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
@@ -182,7 +161,6 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    // Test with batch of sentences
     let sentences = &[
         "The quick brown fox jumps over the lazy dog.",
         "Rust is a systems programming language.",
@@ -190,31 +168,22 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
         "This library aims for maximum performance.",
     ];
 
-    println!("\n--- Encoding batch on CPU ---");
     let cpu_embeddings = cpu_encoder.encode_batch(sentences).await?;
-    println!("CPU batch encoded: {} sentences", cpu_embeddings.len());
+    println!("cpu batch encoded: {} sentences", cpu_embeddings.len());
 
-    println!("\n--- Encoding batch on GPU ---");
     let gpu_embeddings = gpu_encoder.encode_batch(sentences).await?;
-    println!("GPU batch encoded: {} sentences", gpu_embeddings.len());
+    println!("gpu batch encoded: {} sentences", gpu_embeddings.len());
 
-    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Batch");
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "batch");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
-    println!("\n=== CPU vs GPU Parity Test: Varied Lengths ===\n");
-
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-    let cache_dir = dirs::cache_dir()
-        .unwrap()
-        .join("edgegpt")
-        .join(model_repo.replace('/', "_"));
-
+    let cache_dir = get_model_cache_dir(model_repo);
     ensure_model_files(model_repo, &cache_dir).await?;
 
-    // Initialize both encoders
     let cpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
         Device::Cpu,
@@ -222,6 +191,7 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
         None,
         Some(ModelType::MiniLML6V2),
     )?;
+
     let gpu_context = WgpuContext::new().await?;
     let gpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
@@ -231,7 +201,6 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    // Test with varied length sentences
     let sentences = &[
         "Hi",
         "Hello world!",
@@ -239,30 +208,19 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
         "This is a much longer sentence that should test the model's ability to handle various input lengths and still produce consistent embeddings between CPU and GPU implementations.",
     ];
 
-    println!("\n--- Encoding varied lengths on CPU ---");
     let cpu_embeddings = cpu_encoder.encode_batch(sentences).await?;
-
-    println!("\n--- Encoding varied lengths on GPU ---");
     let gpu_embeddings = gpu_encoder.encode_batch(sentences).await?;
 
-    // Compare
-    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Varied lengths");
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "varied lengths");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
-    println!("\n=== CPU vs GPU Parity Test: Large Batch ===\n");
-
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
-    let cache_dir = dirs::cache_dir()
-        .unwrap()
-        .join("edgegpt")
-        .join(model_repo.replace('/', "_"));
-
+    let cache_dir = get_model_cache_dir(model_repo);
     ensure_model_files(model_repo, &cache_dir).await?;
 
-    // Initialize both encoders
     let cpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
         Device::Cpu,
@@ -270,6 +228,7 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
         None,
         Some(ModelType::MiniLML6V2),
     )?;
+
     let gpu_context = WgpuContext::new().await?;
     let gpu_encoder = SentenceEncoder::from_pretrained(
         &cache_dir,
@@ -279,7 +238,6 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
         Some(ModelType::MiniLML6V2),
     )?;
 
-    // Create large batch (32 sentences)
     let base_sentences = vec![
         "The quick brown fox jumps over the lazy dog.",
         "Rust is a systems programming language.",
@@ -298,6 +256,6 @@ async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
     let cpu_embeddings = cpu_encoder.encode_batch(&sentence_refs).await?;
     let gpu_embeddings = gpu_encoder.encode_batch(&sentence_refs).await?;
 
-    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "Large batch");
+    assert_embeddings_close(&cpu_embeddings, &gpu_embeddings, 1e-3, "large batch");
     Ok(())
 }

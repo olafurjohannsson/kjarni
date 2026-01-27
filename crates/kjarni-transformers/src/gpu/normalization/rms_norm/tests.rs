@@ -1,6 +1,6 @@
 use crate::WgpuContext;
 use crate::gpu_ops::GpuTensor;
-use crate::gpu_ops::blocks::rms_norm::{GpuRMSNorm, GpuRMSNormWeights};
+use crate::gpu::normalization::{GpuRMSNorm, GpuRMSNormWeights};
 use crate::cpu::normalization::rms_norm::RMSNorm;
 use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;

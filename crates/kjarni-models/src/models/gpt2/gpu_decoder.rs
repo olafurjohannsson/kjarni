@@ -1,26 +1,26 @@
 use std::sync::Arc;
 
-use anyhow::{Result};
-use ndarray::{s};
+use anyhow::Result;
+use ndarray::s;
 
 use kjarni_transformers::{
     WgpuContext,
     cache::GpuKVCache,
     decoder::prelude::*,
-    {EmbeddingConfig, Embeddings, LoadedEmbeddings},
+    gpu::normalization::{
+        GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
+    },
     gpu_ops::{
         GpuTensor, GpuTensorPool,
         blocks::{
             GpuFeedForward, GpuFeedForwardStd as GpuStandardFFN, GpuFeedForwardWeights,
-            GpuFeedForwardWeightsStd as GpuStandardFFNWeights, GpuNormalization,
-            GpuNormalizationWeights,
-            attention::GpuAttentionWeights,
-            layer_norm::{GpuLayerNorm, GpuLayerNormWeights},
+            GpuFeedForwardWeightsStd as GpuStandardFFNWeights, attention::GpuAttentionWeights,
         },
     },
     models::base::{ModelInput, ModelLoadConfig},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
+    {EmbeddingConfig, Embeddings, LoadedEmbeddings},
 };
 
 // --- Crate-Specific ---
@@ -63,18 +63,18 @@ impl Gpt2GpuDecoder {
             .expect("GPT-2 layout must have a decoder section");
         let target_dtype = load_config.target_dtype;
         let embeddings = LoadedEmbeddings::new(
-            Some(context),  // Option<&Arc<WgpuContext>>
+            Some(context), // Option<&Arc<WgpuContext>>
             weights,
             EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
                 .position_embedding(
                     decoder_layout
                         .position_embedding
                         .as_ref()
-                        .expect("GPT-2 requires position embeddings")
+                        .expect("GPT-2 requires position embeddings"),
                 )
                 .build(),
-            false,  // load_cpu
-            true,   // load_gpu
+            false, // load_cpu
+            true,  // load_gpu
             target_dtype,
         )?;
 
@@ -115,7 +115,7 @@ impl Gpt2GpuDecoder {
             load_config,
             meta,
             layout,
-            embeddings
+            embeddings,
         })
     }
 
@@ -262,11 +262,11 @@ impl GpuDecoder for Gpt2GpuDecoder {
         position_offset: usize,
     ) -> Result<GpuTensor> {
         self.embeddings.embed(
-            encoder, 
-            pool, 
-            input, 
+            encoder,
+            pool,
+            input,
             None, // Decoders usually don't use token_type_ids
-            position_offset
+            position_offset,
         )
     }
 
@@ -341,8 +341,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
         // 1. Embed
-        let hidden = self
-            .embed_and_normalize(encoder, pool, input, position_offset)?;
+        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
         // 2. Layers
         let mut hidden = self.forward_layers(
