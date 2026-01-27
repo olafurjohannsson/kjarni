@@ -5,7 +5,7 @@
 //!
 //! For BART-based zero-shot classification, use `BartZeroShotClassifier` instead.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
@@ -22,8 +22,8 @@ use kjarni_transformers::{
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},
     },
-    models::{LanguageModel, ModelType},
     models::base::ModelLoadConfig,
+    models::{LanguageModel, ModelType},
     pipeline::{EncoderLoader, EncoderModelFactory, EncoderPipeline},
     traits::{Cache, Device, InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
@@ -64,7 +64,9 @@ impl EncoderModelFactory for SequenceClassifier {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
         // Auto-detect config type
         if weights.is_distilbert() {
-            Ok(Arc::new(DistilBertConfig::from_json(weights.config_json())?))
+            Ok(Arc::new(DistilBertConfig::from_json(
+                weights.config_json(),
+            )?))
         } else if weights.is_roberta() || weights.is_distilroberta() {
             Ok(Arc::new(RobertaConfig::from_json(weights.config_json())?))
         } else {
@@ -113,10 +115,11 @@ impl EncoderModelFactory for SequenceClassifier {
         load_config: &ModelLoadConfig,
     ) -> Result<Option<CpuSequenceClassificationHead>> {
         // Get labels from config if available
-        let config: serde_json::Value = serde_json::from_str(weights.config_json())
-            .unwrap_or(serde_json::Value::Null);
-        
-        let labels = config.get("id2label")
+        let config: serde_json::Value =
+            serde_json::from_str(weights.config_json()).unwrap_or(serde_json::Value::Null);
+
+        let labels = config
+            .get("id2label")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 let mut labels: Vec<(usize, String)> = obj
@@ -149,7 +152,7 @@ impl EncoderModelFactory for SequenceClassifier {
         model_type: Option<ModelType>,
     ) -> Self {
         let labels = pipeline.labels().map(|l| l.to_vec());
-        
+
         Self {
             pipeline,
             tokenizer,
@@ -165,7 +168,6 @@ impl EncoderModelFactory for SequenceClassifier {
 // =============================================================================
 
 impl SequenceClassifier {
-
     pub fn config(&self) -> &dyn ModelConfig {
         self.config.as_ref()
     }
@@ -212,15 +214,21 @@ impl SequenceClassifier {
     /// Classify text, returning the top prediction.
     pub async fn classify(&self, text: &str) -> Result<ClassificationResult> {
         let results = self.classify_top_k(text, 1).await?;
-        results.into_iter().next().ok_or_else(|| anyhow!("No results"))
+        results
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No results"))
     }
 
     /// Classify text, returning all scores (after softmax).
-    /// 
+    ///
     /// This is the method the higher-level API depends on.
     pub async fn classify_scores(&self, text: &str) -> Result<Vec<f32>> {
         let batch_scores = self.classify_scores_batch(&[text]).await?;
-        batch_scores.into_iter().next().ok_or_else(|| anyhow!("No results"))
+        batch_scores
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No results"))
     }
 
     /// Classify text, returning top-k predictions.
@@ -230,7 +238,7 @@ impl SequenceClassifier {
     }
 
     /// Batch classify multiple texts, returning top-k per text.
-    /// 
+    ///
     /// Returns Vec<Vec<(String, f32)>> to match original API.
     pub async fn classify_batch(
         &self,
@@ -238,7 +246,7 @@ impl SequenceClassifier {
         top_k: usize,
     ) -> Result<Vec<Vec<(String, f32)>>> {
         let batch_scores = self.classify_scores_batch(texts).await?;
-        
+
         let labels = self.labels.as_ref().ok_or_else(|| {
             anyhow!("Model has no label mapping. Use classify_scores_batch() instead.")
         })?;
@@ -268,8 +276,12 @@ impl SequenceClassifier {
             return Ok(vec![]);
         }
 
+        let t = texts[0];
+
         let logits = self.predict_logits(texts).await?;
-        
+
+        println!("\n=== RUST TEXT LOGITS ===");
+            println!("Logits: {:?}", logits); // Print the raw logits before softmax
         // Apply softmax to each row
         Ok(logits
             .into_iter()
@@ -287,7 +299,8 @@ impl SequenceClassifier {
         }
 
         // Tokenize
-        let encodings = self.tokenizer
+        let encodings = self
+            .tokenizer
             .encode_batch(texts.to_vec(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
@@ -307,35 +320,42 @@ impl SequenceClassifier {
         }
 
         let hidden_states = if let Some(gpu_encoder) = self.pipeline.gpu_encoder() {
-            let context = self.pipeline.context()
+            let context = self
+                .pipeline
+                .context()
                 .ok_or_else(|| anyhow!("GPU context required for GPU encoder"))?;
-            let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> = context.get_inference_pool();
+            let pool: std::sync::Arc<tokio::sync::Mutex<GpuTensorPool>> =
+                context.get_inference_pool();
             let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&context, pool_guard);
             let (encoder_cmd, pool_ref) = frame.resources();
-            
+
             // Create gpu tensors
             let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids)?;
             let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask)?;
             let token_types_gpu = GpuTensor::from_ndarray(&context, &token_type_ids)?;
 
             let gpu_output = gpu_encoder.forward(
-                encoder_cmd, 
-                pool_ref, 
-                ModelInput::TokensGpu(&input_ids_gpu), 
-                &attention_mask_gpu, 
-                Some(ModelInput::TokensGpu(&token_types_gpu)),)?;
+                encoder_cmd,
+                pool_ref,
+                ModelInput::TokensGpu(&input_ids_gpu),
+                &attention_mask_gpu,
+                Some(ModelInput::TokensGpu(&token_types_gpu)),
+            )?;
 
             frame.finish();
 
             gpu_output.last_hidden_state.to_ndarray_3d().await?
-
         } else {
-            let cpu_ops = self.encoder_cpu_ops().ok_or_else(|| anyhow!("No CPU encoder available"))?;
-            let cpu_encoder = self.pipeline.cpu_encoder().ok_or_else(|| anyhow!("No CPU encoder available"))?;
+            let cpu_ops = self
+                .encoder_cpu_ops()
+                .ok_or_else(|| anyhow!("No CPU encoder available"))?;
+            let cpu_encoder = self
+                .pipeline
+                .cpu_encoder()
+                .ok_or_else(|| anyhow!("No CPU encoder available"))?;
 
-            let hidden_states = cpu_ops
-                .embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
+            let hidden_states = cpu_ops.embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
 
             let normalized = cpu_encoder.embed_norm(&hidden_states)?;
 
@@ -345,11 +365,9 @@ impl SequenceClassifier {
                 .last_hidden_state
         };
 
-
-
-
         // Forward through head
-        let logits = self.pipeline
+        let logits = self
+            .pipeline
             .cpu_head()
             .ok_or_else(|| anyhow!("No classification head available"))?
             .forward(&hidden_states, Some(&attention_mask))?;
@@ -368,13 +386,18 @@ impl SequenceClassifier {
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .ok_or_else(|| anyhow!("Empty scores"))?;
 
-        let label = self.labels
+        let label = self
+            .labels
             .as_ref()
             .and_then(|l| l.get(idx))
             .cloned()
             .unwrap_or_else(|| format!("LABEL_{}", idx));
 
-        Ok(ClassificationResult { label, score, index: idx })
+        Ok(ClassificationResult {
+            label,
+            score,
+            index: idx,
+        })
     }
 
     fn scores_to_top_k(&self, scores: &[f32], k: usize) -> Result<Vec<ClassificationResult>> {
@@ -385,12 +408,17 @@ impl SequenceClassifier {
         Ok(indexed
             .into_iter()
             .map(|(idx, score)| {
-                let label = self.labels
+                let label = self
+                    .labels
                     .as_ref()
                     .and_then(|l| l.get(idx))
                     .cloned()
                     .unwrap_or_else(|| format!("LABEL_{}", idx));
-                ClassificationResult { label, score, index: idx }
+                ClassificationResult {
+                    label,
+                    score,
+                    index: idx,
+                }
             })
             .collect())
     }
@@ -445,38 +473,69 @@ pub struct ClassificationResult {
 // =============================================================================
 
 impl LanguageModel for SequenceClassifier {
-    fn vocab_size(&self) -> usize { self.pipeline.vocab_size() }
-    fn hidden_size(&self) -> usize { self.pipeline.hidden_size() }
-    fn num_layers(&self) -> usize { self.pipeline.num_layers() }
-    fn num_heads(&self) -> usize { self.config.metadata().num_attention_heads }
-    fn context_size(&self) -> usize { self.pipeline.max_seq_length() }
-    fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
-    fn bos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[CLS]") }
-    fn eos_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[SEP]") }
-    fn pad_token_id(&self) -> Option<u32> { self.tokenizer.token_to_id("[PAD]") }
-    fn forced_bos_token_id(&self) -> Option<u32> { None }
-    fn forced_eos_token_id(&self) -> Option<u32> { None }
+    fn vocab_size(&self) -> usize {
+        self.pipeline.vocab_size()
+    }
+    fn hidden_size(&self) -> usize {
+        self.pipeline.hidden_size()
+    }
+    fn num_layers(&self) -> usize {
+        self.pipeline.num_layers()
+    }
+    fn num_heads(&self) -> usize {
+        self.config.metadata().num_attention_heads
+    }
+    fn context_size(&self) -> usize {
+        self.pipeline.max_seq_length()
+    }
+    fn tokenizer(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+    fn bos_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[CLS]")
+    }
+    fn eos_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[SEP]")
+    }
+    fn pad_token_id(&self) -> Option<u32> {
+        self.tokenizer.token_to_id("[PAD]")
+    }
+    fn forced_bos_token_id(&self) -> Option<u32> {
+        None
+    }
+    fn forced_eos_token_id(&self) -> Option<u32> {
+        None
+    }
     fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
         Err(anyhow!("Classifiers do not use KV cache"))
     }
 }
 
 impl InferenceModel for SequenceClassifier {
-    fn device(&self) -> Device { self.pipeline.plan().layers }
-    fn context(&self) -> Option<Arc<WgpuContext>> { self.pipeline.context().cloned() }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn device(&self) -> Device {
+        self.pipeline.plan().layers
+    }
+    fn context(&self) -> Option<Arc<WgpuContext>> {
+        self.pipeline.context().cloned()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl CpuEncoderOps for SequenceClassifier {
     fn encoder(&self) -> &dyn CpuEncoder {
-        self.pipeline.cpu_encoder().expect("CPU encoder not available")
+        self.pipeline
+            .cpu_encoder()
+            .expect("CPU encoder not available")
     }
     fn embed_tokens(
-            &self,
-            input_ids: &ndarray::Array2<u32>,
-            token_type_ids: Option<&ndarray::Array2<u32>>,
-            pos: usize,
-        ) -> Result<ndarray::Array3<f32>> {
+        &self,
+        input_ids: &ndarray::Array2<u32>,
+        token_type_ids: Option<&ndarray::Array2<u32>>,
+        pos: usize,
+    ) -> Result<ndarray::Array3<f32>> {
+        
         self.pipeline
             .embeddings()
             .embed_cpu(input_ids, token_type_ids, pos)
@@ -485,16 +544,26 @@ impl CpuEncoderOps for SequenceClassifier {
 
 impl GpuEncoderOps for SequenceClassifier {
     fn encoder(&self) -> &dyn GpuEncoder {
-        self.pipeline.gpu_encoder().expect("GPU encoder not available")
+        self.pipeline
+            .gpu_encoder()
+            .expect("GPU encoder not available")
     }
 }
 
 #[async_trait]
 impl EncoderLanguageModel for SequenceClassifier {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
-        if self.pipeline.cpu_encoder().is_some() { Some(self) } else { None }
+        if self.pipeline.cpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
     fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
-        if self.pipeline.gpu_encoder().is_some() { Some(self) } else { None }
+        if self.pipeline.gpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
 }

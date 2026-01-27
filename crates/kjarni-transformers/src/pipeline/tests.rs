@@ -1,13 +1,8 @@
-// kjarni-transformers/src/pipeline/tests.rs
-
 use super::*;
 use crate::execution::ExecutionPlan;
 
 #[test]
 fn test_execution_plan_validation() {
-    // We'd need mock components to fully test this
-    // For now, just test the plan logic
-
     let plan = ExecutionPlan::full_gpu();
     assert!(plan.needs_gpu());
     assert!(!plan.needs_cpu());

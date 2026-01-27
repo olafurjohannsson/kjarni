@@ -20,7 +20,6 @@ use crate::weights::ModelWeights;
 use crate::{Embeddings, FeedForward, cpu::normalization::LayerNorm};
 
 pub struct CpuTransformerEncoder {
-    embeddings: Embeddings,
     embeddings_layer_norm: LayerNorm,
     layers: Vec<EncoderLayer>,
     pub metadata: ModelMetadata,
@@ -254,7 +253,6 @@ impl CpuTransformerEncoder {
         };
 
         Ok(Self {
-            embeddings,
             embeddings_layer_norm,
             layers,
             metadata: meta,

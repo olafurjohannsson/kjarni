@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use kjarni_transformers::cpu::encoder::CpuEncoderOps;
 use kjarni_transformers::{WgpuContext, models::ModelType, traits::Device};
 
 use crate::SequenceClassifier;

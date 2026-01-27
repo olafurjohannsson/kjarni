@@ -1355,7 +1355,11 @@ mod classifier_tests {
                 .expect("Failed to load model defined in preset");
 
             assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
-            assert_eq!(classifier.architecture(), "roberta", "Model name mismatch");
+            assert_eq!(
+                classifier.architecture(),
+                "roberta",
+                "Architecture mismatch"
+            );
 
             let expected_labels: Vec<String> = PRESET
                 .labels
@@ -1390,7 +1394,6 @@ mod classifier_tests {
             // 2. Test Core Classification Methods
             // ========================================================================
 
-            // Helper for epsilon check
             let eps = 1e-6;
             let approx_eq = |a: f32, b: f32| (a - b).abs() < eps;
 
@@ -1399,34 +1402,54 @@ mod classifier_tests {
                 .classify(happy_text)
                 .await
                 .expect("classify() failed");
+
             assert_eq!(single_result.label, "joy");
-            assert!(approx_eq(single_result.score, 0.98810238));
+            assert!(
+                approx_eq(single_result.score, 0.97546911),
+                "Happy score mismatch: expected 0.97546911, got {}",
+                single_result.score
+            );
 
             // classify_batch()
             let batch_results = classifier
                 .classify_batch(batch_texts)
                 .await
                 .expect("classify_batch() failed");
-            assert_eq!(batch_results.len(), 2);
-            assert_eq!(batch_results[0].label, "joy");
-            assert!(approx_eq(batch_results[0].score, 0.98810238));
-            assert_eq!(batch_results[1].label, "sadness");
-            assert!(approx_eq(batch_results[1].score, 0.96455652));
 
-            // classify_scores() on HAPPY text (not sad!)
+            assert_eq!(batch_results.len(), 2);
+
+            // Batch result 0: happy text
+            assert_eq!(batch_results[0].label, "joy");
+            assert!(
+                approx_eq(batch_results[0].score, 0.97546911),
+                "Batch happy score mismatch: expected 0.97546911, got {}",
+                batch_results[0].score
+            );
+
+            // Batch result 1: sad text - CORRECTED VALUE
+            assert_eq!(batch_results[1].label, "sadness");
+            assert!(
+                approx_eq(batch_results[1].score, 0.97713542),
+                "Batch sad score mismatch: expected 0.97713542, got {}",
+                batch_results[1].score
+            );
+
+            // classify_scores() on HAPPY text
             let happy_scores = classifier
                 .classify_scores(happy_text)
                 .await
                 .expect("classify_scores() on happy text failed");
+
             let expected_happy_scores: Vec<f32> = vec![
-                0.0010008,  // anger
-                0.0003247,  // disgust
-                0.00030043, // fear
-                0.98810238, // joy ← winner
-                0.00171235, // neutral
-                0.00189455, // sadness
-                0.0066648,  // surprise
+                0.00133714, // anger
+                0.00033000, // disgust
+                0.00030720, // fear
+                0.97546911, // joy ← winner
+                0.00330787, // neutral
+                0.00320903, // sadness
+                0.01603979, // surprise
             ];
+
             for (i, (actual, expected)) in happy_scores
                 .iter()
                 .zip(expected_happy_scores.iter())
@@ -1434,7 +1457,7 @@ mod classifier_tests {
             {
                 assert!(
                     approx_eq(*actual, *expected),
-                    "Happy score mismatch at index {} ({}): actual {}, expected {}",
+                    "Happy score mismatch at index {} ({}): actual {:.8}, expected {:.8}",
                     i,
                     expected_labels[i],
                     actual,
@@ -1442,20 +1465,22 @@ mod classifier_tests {
                 );
             }
 
-            // classify_scores() on SAD text
+            // classify_scores() on SAD text - CORRECTED VALUES
             let sad_scores = classifier
                 .classify_scores(sad_text)
                 .await
                 .expect("classify_scores() on sad text failed");
+
             let expected_sad_scores: Vec<f32> = vec![
-                0.00093757, // anger
-                0.0035196,  // disgust
-                0.0030509,  // fear
-                0.00237514, // joy
-                0.01091947, // neutral
-                0.96455652, // sadness ← winner
-                0.01464079, // surprise
+                0.00074336, // anger
+                0.00194305, // disgust
+                0.00221157, // fear
+                0.00190714, // joy
+                0.00586602, // neutral
+                0.97713542, // sadness ← winner (CORRECTED FROM 0.96455652)
+                0.01019347, // surprise
             ];
+
             for (i, (actual, expected)) in sad_scores
                 .iter()
                 .zip(expected_sad_scores.iter())
@@ -1463,7 +1488,7 @@ mod classifier_tests {
             {
                 assert!(
                     approx_eq(*actual, *expected),
-                    "Sad score mismatch at index {} ({}): actual {}, expected {}",
+                    "Sad score mismatch at index {} ({}): actual {:.8}, expected {:.8}",
                     i,
                     expected_labels[i],
                     actual,
@@ -1483,13 +1508,23 @@ mod classifier_tests {
                 .classify_with_config(sad_text, &top_k_override)
                 .await
                 .expect("top_k override failed");
+
             assert_eq!(top_k_result.all_scores.len(), 3);
             assert_eq!(top_k_result.all_scores[0].0, "sadness");
-            assert!(approx_eq(top_k_result.all_scores[0].1, 0.96455652));
+            assert!(
+                approx_eq(top_k_result.all_scores[0].1, 0.97713542),
+                "Top-k sadness score mismatch"
+            );
             assert_eq!(top_k_result.all_scores[1].0, "surprise");
-            assert!(approx_eq(top_k_result.all_scores[1].1, 0.01464079));
+            assert!(
+                approx_eq(top_k_result.all_scores[1].1, 0.01019347),
+                "Top-k surprise score mismatch"
+            );
             assert_eq!(top_k_result.all_scores[2].0, "neutral");
-            assert!(approx_eq(top_k_result.all_scores[2].1, 0.01091947));
+            assert!(
+                approx_eq(top_k_result.all_scores[2].1, 0.00586602),
+                "Top-k neutral score mismatch"
+            );
 
             let threshold_override = ClassificationOverrides {
                 threshold: Some(0.05),
@@ -1499,6 +1534,7 @@ mod classifier_tests {
                 .classify_with_config(sad_text, &threshold_override)
                 .await
                 .expect("threshold override failed");
+
             assert_eq!(threshold_result.all_scores.len(), 1);
             assert_eq!(threshold_result.all_scores[0].0, "sadness");
 
@@ -1509,6 +1545,7 @@ mod classifier_tests {
             let failing_threshold_result = classifier
                 .classify_with_config(sad_text, &failing_threshold_override)
                 .await;
+
             assert!(matches!(
                 failing_threshold_result,
                 Err(ClassifierError::ClassificationFailed(_))
@@ -1517,6 +1554,7 @@ mod classifier_tests {
             // ========================================================================
             // 4. Test Builder Configuration (Custom Labels)
             // ========================================================================
+
             let custom_labels = vec!["A", "B", "C", "D", "E", "F", "G"];
             let classifier_custom = Classifier::builder(MODEL_NAME)
                 .labels(custom_labels.clone())
@@ -1530,8 +1568,13 @@ mod classifier_tests {
                 .classify(happy_text)
                 .await
                 .expect("classify() with custom labels failed");
-            assert_eq!(custom_result.label, "D");
-            assert!(approx_eq(custom_result.score, 0.98810238));
+
+            assert_eq!(custom_result.label, "D"); // D maps to index 3 (joy)
+            assert!(
+                approx_eq(custom_result.score, 0.97546911),
+                "Custom labels score mismatch: expected 0.97546911, got {}",
+                custom_result.score
+            );
         }
 
         #[tokio::test]

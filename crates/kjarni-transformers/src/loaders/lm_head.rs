@@ -1,15 +1,17 @@
-// kjarni-transformers/src/lm_head/loader.rs
+//! Unified LM head supporting both CPU and GPU execution.
 
-use crate::WgpuContext;
+use std::sync::Arc;
+use std::time::Instant;
+
+use anyhow::{Result, anyhow};
+use ndarray::{Array1, Array3, s};
+
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
-use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array3, s};
-use std::sync::Arc;
-use std::time::Instant;
+use crate::WgpuContext;
 
 /// Configuration for the LM head.
 pub struct LMHeadConfig {
@@ -30,31 +32,16 @@ impl LMHeadConfig {
 
 /// Unified LM head supporting both CPU and GPU execution.
 pub struct LoadedLMHead {
-    // CPU components
     pub cpu_weights: Option<LinearLayer>,
-
-    // GPU components
     pub gpu_weights: Option<GpuTensor>,
     pub gpu_kernel: Option<GpuLinearLayer>,
-
-    // Metadata
     pub vocab_size: usize,
     pub hidden_size: usize,
-
-    // Context for transfers
     pub context: Option<Arc<WgpuContext>>,
 }
 
 impl LoadedLMHead {
-    /// Load LM head from model weights.
-    ///
-    /// # Arguments
-    /// * `ctx` - GPU context (can be None for CPU-only)
-    /// * `weights` - Model weights
-    /// * `config` - LM head configuration
-    /// * `load_cpu` - Whether to load CPU weights
-    /// * `load_gpu` - Whether to load GPU weights
-    /// * `target_dtype` - Optional dtype override
+    /// Loads LM head from model weights.
     pub fn new(
         ctx: Option<&Arc<WgpuContext>>,
         weights: &ModelWeights,
@@ -64,7 +51,7 @@ impl LoadedLMHead {
         target_dtype: Option<DType>,
     ) -> Result<Self> {
         let cpu_weights = if load_cpu {
-            log::info!("Loading LM head to CPU");
+            log::info!("loading LM head to CPU");
             Some(
                 LinearLayer::builder(weights, &config.weight_name)
                     .with_target_dtype(target_dtype)
@@ -76,7 +63,7 @@ impl LoadedLMHead {
 
         let (gpu_weights, gpu_kernel) = if load_gpu {
             let ctx = ctx.ok_or_else(|| anyhow!("GPU context required for GPU LM head"))?;
-            log::info!("Loading LM head to GPU");
+            log::info!("loading LM head to GPU");
 
             let tensor = GpuTensor::from_model_weights(
                 ctx,
@@ -102,7 +89,7 @@ impl LoadedLMHead {
         })
     }
 
-    /// Creates an LM Head by aliasing existing weights (used for tied embedding models).
+    /// Creates an LM head by aliasing existing weights (for tied embedding models).
     pub fn from_shared_weights(
         ctx: Option<&Arc<WgpuContext>>,
         cpu_weights: Option<LinearLayer>,
@@ -116,22 +103,17 @@ impl LoadedLMHead {
             None
         };
 
-        // --- NEW LOGIC FOR CPU WEIGHTS ---
-        // Handle the "quantize on demand" for the tied CPU weights.
         let final_cpu_weights = if let Some(cpu_emb) = cpu_weights {
             if let Some(dtype) = quantize_dtype {
-                log::info!(
-                    "Creating quantized ({:?}) copy of tied LM head weights.",
-                    dtype
-                );
+                log::info!("creating quantized ({:?}) copy of tied LM head weights", dtype);
                 Some(cpu_emb.to_quantized(dtype)?)
             } else {
-                // Original behavior: just clone the layer.
-                Some(cpu_emb.clone()) // this is an Arc, so we just increment the reference count
+                Some(cpu_emb.clone())
             }
         } else {
             None
         };
+
         Ok(Self {
             cpu_weights: final_cpu_weights,
             gpu_weights,
@@ -158,7 +140,7 @@ impl LoadedLMHead {
         self.gpu_weights.is_some()
     }
 
-    /// Project hidden states to logits on CPU.
+    /// Projects hidden states to logits on CPU.
     pub fn forward_cpu(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let t_total = Instant::now();
 
@@ -173,21 +155,19 @@ impl LoadedLMHead {
             .view()
             .into_shape_with_order((batch * seq, hidden))?;
 
-        // Time the heavy matmul specifically
         let t_matmul = Instant::now();
         let logits_2d = cpu_weights.matmul(&hidden_2d);
         let d_matmul = t_matmul.elapsed();
 
         let result = logits_2d
             .into_shape_with_order((batch, seq, self.vocab_size))
-            .map_err(|e| anyhow!("Shape error: {}", e));
+            .map_err(|e| anyhow!("shape error: {}", e));
 
         let d_total = t_total.elapsed();
 
-        // Log if it takes more than 1ms (to avoid spamming on tiny inputs)
         if d_total.as_millis() > 1 {
             log::info!(
-                "[LM Head Perf] Total: {:?}, Matmul: {:?}, Overhead: {:?}",
+                "[LM head] total: {:?}, matmul: {:?}, overhead: {:?}",
                 d_total,
                 d_matmul,
                 d_total.saturating_sub(d_matmul)
@@ -197,7 +177,7 @@ impl LoadedLMHead {
         result
     }
 
-    /// Project hidden states to logits on GPU.
+    /// Projects hidden states to logits on GPU.
     pub fn forward_gpu(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -219,7 +199,7 @@ impl LoadedLMHead {
         Ok(logits)
     }
 
-    /// Get last-token logits on CPU.
+    /// Returns last-token logits on CPU.
     pub fn forward_cpu_last_token(&self, hidden_states: &Array3<f32>) -> Result<Array1<f32>> {
         let logits = self.forward_cpu(hidden_states)?;
         Ok(logits.slice(s![0, -1, ..]).to_owned())

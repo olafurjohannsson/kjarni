@@ -265,8 +265,6 @@ impl<'a> Seq2SeqFactory<'a> {
         meta: &ModelMetadata,
         layer_idx: usize,
     ) -> Result<FeedForward> {
-        // --- Case 1: Explicit Gated FFN (Llama, Qwen, Updated T5 Config) ---
-        // If the layout explicitly defines a gate, we trust it 100%.
         if let Some(gate_template) = &layout.gate_weight {
             let gate = self.build_linear(gate_template, layout.gate_bias.as_deref(), layer_idx)?;
             let up = self.build_linear(&layout.up_weight, layout.up_bias.as_deref(), layer_idx)?;
@@ -281,13 +279,9 @@ impl<'a> Seq2SeqFactory<'a> {
             )));
         }
 
-        // --- Case 2: Implicit T5 Gated FFN Safety Net ---
-        // If layout has no gate, but the weights file has T5-style "_0" and "_1" naming.
-        // This makes the engine work even if the T5Config layout was "lazy".
         let up_template = &layout.up_weight;
         let up_name = Self::resolve(up_template, layer_idx);
 
-        // T5 v1.1 naming convention: wi -> (wi_0, wi_1)
         let t5_gate_name = format!("{}_0", up_name);
         let t5_up_name = format!("{}_1", up_name);
 
@@ -305,25 +299,9 @@ impl<'a> Seq2SeqFactory<'a> {
                 meta.activation,
             )));
         }
-
-        // --- Case 3: Standard FFN (BART, Original T5, BERT) ---
-        // No gate in layout, no gated weights in file.
         self.build_standard_ffn(layout, meta.activation, layer_idx)
     }
-    // pub fn build_ffn(
-    //     &self,
-    //     layout: &FeedForwardLayout,
-    //     activation: Activation,
-    //     layer_idx: usize,
-    // ) -> Result<FeedForward> {
-    //     if layout.gate_weight.is_some() {
-    //         Ok(FeedForward::SwiGLU(
-    //             self.build_swiglu_ffn(layout, layer_idx)?,
-    //         ))
-    //     } else {
-    //         self.build_standard_ffn(layout, activation, layer_idx)
-    //     }
-    // }
+
     pub fn build_legacy_ffn(
         &self,
         layout: &FeedForwardLayout,
@@ -332,8 +310,6 @@ impl<'a> Seq2SeqFactory<'a> {
     ) -> Result<FeedForward> {
         let up_name = Self::resolve(&layout.up_weight, layer_idx);
         let down_name = Self::resolve(&layout.down_weight, layer_idx);
-
-        // Load and transpose (BART-style expects transposed weights)
         let fc1 = self.weights.get_array2(&up_name)?;
         let fc2 = self.weights.get_array2(&down_name)?;
 
@@ -362,6 +338,7 @@ impl<'a> Seq2SeqFactory<'a> {
             activation,
         )))
     }
+
     /// Build a complete encoder layer from EncoderLayerLayout.
     pub fn build_encoder_layer(
         &self,
@@ -416,10 +393,6 @@ impl<'a> Seq2SeqFactory<'a> {
     ///
     /// Currently returns `CrossDecoderLayer` which uses LayerNorm
     /// and post-norm ordering. Works for BART.
-    ///
-    /// TODO: For T5/Whisper support, either:
-    /// - Add pre_norm flag to CrossDecoderLayer
-    /// - Create Seq2SeqDecoderLayer with Normalization enum
     pub fn build_decoder_layer(
         &self,
         decoder_layout: &crate::traits::DecoderLayout,
