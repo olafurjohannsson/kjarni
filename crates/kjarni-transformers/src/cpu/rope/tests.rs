@@ -1,38 +1,33 @@
 use super::*;
 
 #[cfg(test)]
-mod rope_tests {
+mod tests {
     use super::*;
-    use ndarray::s;
-    use ndarray::{Array3, Array4};
-    /// Helper function to compare two 4D tensors for approximate equality.
+
+    use ndarray::{s, Array3, Array4};
+
     fn assert_tensors_approx_equal(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
-        assert_eq!(a.shape(), b.shape(), "Tensor shapes do not match");
+        assert_eq!(a.shape(), b.shape(), "tensor shapes do not match");
         for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
             assert!(
                 (val_a - val_b).abs() < tolerance,
-                "Tensor values differ at index {}: a={}, b={}. Difference: {}",
+                "tensor values differ at index {}: a={}, b={}, diff={}",
                 i,
                 val_a,
                 val_b,
                 (val_a - val_b).abs()
             );
         }
-        println!("✓ Tensors are approximately equal.");
     }
 
     #[test]
     fn test_rope_pytorch_parity() {
-        // --- 1. Arrange: Use the golden values from the Python script ---
-        // Config matches the python script: batch=1, heads=2, seq_len=4, head_dim=8
         let head_dim = 8;
         let seq_len = 4;
         let position_offset = 10;
         let max_seq_len = position_offset + seq_len;
         let theta = 10000.0;
 
-        // --- RoPE Input Q ---
-        // Shape: [1, 2, 4, 8]
         let q_input_vec = vec![
             1.9269152879714966,
             1.4872840642929077,
@@ -169,7 +164,6 @@ mod rope_tests {
         let q_cpu = Array4::from_shape_vec((1, 2, 4, 8), q_input_vec).unwrap();
         let k_cpu = Array4::from_shape_vec((1, 2, 4, 8), k_input_vec).unwrap();
 
-        // --- RoPE Golden Output Q ---
         let expected_q_vec = vec![
             -1.2477457523345947,
             1.8424166440963745,
@@ -306,46 +300,30 @@ mod rope_tests {
         let expected_q_cpu = Array4::from_shape_vec((1, 2, 4, 8), expected_q_vec).unwrap();
         let expected_k_cpu = Array4::from_shape_vec((1, 2, 4, 8), expected_k_vec).unwrap();
 
-        // --- 2. Act ---
         let rope = RoPE::new(head_dim, max_seq_len, theta);
         let (actual_q_cpu, actual_k_cpu) = rope.apply_4d(&q_cpu, &k_cpu, position_offset);
 
-        // --- 3. Assert ---
-        let tolerance = 1e-5; // Slightly looser for RoPE due to sin/cos
+        let tolerance = 1e-5;
         assert_tensors_approx_equal(&expected_q_cpu, &actual_q_cpu, tolerance);
         assert_tensors_approx_equal(&expected_k_cpu, &actual_k_cpu, tolerance);
-
-        println!("✓ CPU RoPE implementation passed PyTorch parity test.");
     }
+
     #[test]
     fn test_rope_actually_rotates() {
         let head_dim = 64;
         let max_seq_len = 128;
         let rope = RoPE::new(head_dim, max_seq_len, 10000.0);
 
-        // Create simple input
-        let q = Array4::ones((1, 4, 8, head_dim)); // [batch, heads, seq, dim]
+        let q = Array4::ones((1, 4, 8, head_dim));
         let k = Array4::ones((1, 4, 8, head_dim));
 
         let (q_rotated, k_rotated) = rope.apply_4d(&q, &k, 0);
 
-        // Check that rotation actually changed values
         let q_diff = (&q - &q_rotated).mapv(|x| x.abs()).sum();
         let k_diff = (&k - &k_rotated).mapv(|x| x.abs()).sum();
 
-        assert!(
-            q_diff > 1e-3,
-            "Q should be modified by RoPE, diff={}",
-            q_diff
-        );
-        assert!(
-            k_diff > 1e-3,
-            "K should be modified by RoPE, diff={}",
-            k_diff
-        );
-
-        println!("Q diff: {}", q_diff);
-        println!("K diff: {}", k_diff);
+        assert!(q_diff > 1e-3, "Q should be modified by RoPE, diff={}", q_diff);
+        assert!(k_diff > 1e-3, "K should be modified by RoPE, diff={}", k_diff);
     }
 
     #[test]
@@ -379,16 +357,15 @@ mod rope_tests {
     fn test_rope_frequencies() {
         let head_dim = 64;
         let rope = RoPE::new(head_dim, 128, 10000.0);
+
         assert_eq!(rope.cos_cache.shape(), &[128, head_dim]);
         assert_eq!(rope.sin_cache.shape(), &[128, head_dim]);
 
-        // First cos value should be close to cos(0) = 1.0
         let first_cos = rope.cos_cache[[0, 0]];
-        assert!((first_cos - 1.0).abs() < 1e-6, "First cos should be 1.0");
+        assert!((first_cos - 1.0).abs() < 1e-6, "first cos should be 1.0");
 
-        // First sin value should be close to sin(0) = 0.0
         let first_sin = rope.sin_cache[[0, 0]];
-        assert!((first_sin - 0.0).abs() < 1e-6, "First sin should be 0.0");
+        assert!((first_sin - 0.0).abs() < 1e-6, "first sin should be 0.0");
     }
 
     #[test]
@@ -399,11 +376,9 @@ mod rope_tests {
 
         let rope = RoPE::new(head_dim, max_seq_len, theta);
 
-        // ✅ Cache shape now correctly matches full head_dim
         assert_eq!(rope.cos_cache.shape(), &[max_seq_len, head_dim]);
         assert_eq!(rope.sin_cache.shape(), &[max_seq_len, head_dim]);
 
-        // Check that values are finite
         for i in 0..max_seq_len {
             for j in 0..head_dim {
                 assert!(rope.cos_cache[[i, j]].is_finite());
@@ -411,27 +386,18 @@ mod rope_tests {
             }
         }
     }
+
     #[test]
     fn test_rope_simple_debug() {
         let head_dim = 4;
         let rope = RoPE::new(head_dim, 10, 10000.0);
 
-        println!("\n=== RoPE Debug Info ===");
-        println!("head_dim: {}", rope.head_dim());
-
-        // ✅ Use position 1, not 0
         let q = Array4::ones((1, 1, 1, head_dim));
         let k = Array4::ones((1, 1, 1, head_dim));
 
-        println!("Input Q: {:?}", q.slice(s![0, 0, 0, ..]));
-
-        // Test at position 1 (not 0, which is identity)
         let (q_rot, _) = rope.apply_4d(&q, &k, 1);
 
-        println!("Rotated Q at pos=1: {:?}", q_rot.slice(s![0, 0, 0, ..]));
-
         let sum_diff = (&q - &q_rot).mapv(|x| x.abs()).sum();
-        println!("Total difference: {}", sum_diff);
 
         assert!(
             sum_diff > 1e-3,
@@ -439,6 +405,7 @@ mod rope_tests {
             sum_diff
         );
     }
+
     #[test]
     fn test_rope_rotation_formula() {
         let head_dim = 4;
@@ -456,81 +423,48 @@ mod rope_tests {
         let changed = (q[[0, 0, 0, 0]] - q_rot[[0, 0, 0, 0]]).abs() > 1e-6;
         assert!(changed, "RoPE should modify values at position 1");
     }
+
     #[test]
     fn test_rope_basic_rotation() {
-        use ndarray::Array4;
-
         let head_dim = 64;
         let rope = RoPE::new(head_dim, 128, 10000.0);
         let half_dim = head_dim / 2;
 
-        // Simple test vector:
-        // q[0] = 1.0
-        // q[32] (its pair in the other half) = 2.0
-        // All other elements are 0.0
         let mut q = Array4::zeros((1, 1, 1, head_dim));
         q[[0, 0, 0, 0]] = 1.0;
         q[[0, 0, 0, half_dim]] = 2.0;
 
         let k = q.clone();
 
-        println!("\n=== Testing RoPE Rotation (Corrected) ===");
-        println!(
-            "Input Q[0]: {}, Q[{}]: {}",
-            q[[0, 0, 0, 0]],
-            half_dim,
-            q[[0, 0, 0, half_dim]]
-        );
-
-        // Rotate at position 5
         let (q_rot, _) = rope.apply_4d(&q, &k, 5);
 
-        println!(
-            "Rotated Q[0]: {}, Rotated Q[{}]: {}",
-            q_rot[[0, 0, 0, 0]],
-            half_dim,
-            q_rot[[0, 0, 0, half_dim]]
-        );
-
-        // Get expected values from the cache for the first dimension pair (i=0)
         let cos_5_0 = rope.cos_cache[[5, 0]];
         let sin_5_0 = rope.sin_cache[[5, 0]];
 
-        println!("cos[5,0]: {}, sin[5,0]: {}", cos_5_0, sin_5_0);
-        // Formula for q_rot[i] = q[i] * cos[i] + (-q[i + half_dim]) * sin[i]
-        // Formula for q_rot[i + half_dim] = q[i + half_dim] * cos[i] + q[i] * sin[i]
+        let q0 = q[[0, 0, 0, 0]];
+        let q32 = q[[0, 0, 0, half_dim]];
 
-        let q0 = q[[0, 0, 0, 0]]; // is 1.0
-        let q32 = q[[0, 0, 0, half_dim]]; // is 2.0
-
-        let expected_0 = q0 * cos_5_0 - q32 * sin_5_0; // 1.0 * cos - 2.0 * sin
-        let expected_32 = q32 * cos_5_0 + q0 * sin_5_0; // 2.0 * cos + 1.0 * sin
-
-        println!(
-            "Expected Q[0]: {}, Expected Q[{}]: {}",
-            expected_0, half_dim, expected_32
-        );
+        let expected_0 = q0 * cos_5_0 - q32 * sin_5_0;
+        let expected_32 = q32 * cos_5_0 + q0 * sin_5_0;
 
         let diff_0 = (q_rot[[0, 0, 0, 0]] - expected_0).abs();
         let diff_32 = (q_rot[[0, 0, 0, half_dim]] - expected_32).abs();
 
         assert!(
             diff_0 < 1e-5,
-            "Q[0] should match expected: {} vs {}. Diff: {}",
+            "Q[0] should match expected: {} vs {}, diff: {}",
             q_rot[[0, 0, 0, 0]],
             expected_0,
             diff_0
         );
         assert!(
             diff_32 < 1e-5,
-            "Q[{}] should match expected: {} vs {}. Diff: {}",
+            "Q[{}] should match expected: {} vs {}, diff: {}",
             half_dim,
             q_rot[[0, 0, 0, half_dim]],
             expected_32,
             diff_32
         );
-
-        println!("✓ RoPE rotation correct!");
     }
 
     #[test]
@@ -541,24 +475,20 @@ mod rope_tests {
 
         let rope = RoPE::new(head_dim, max_seq_len, theta);
 
-        // Simple query and key: [1, 1, 1, 4]
         let q = Array4::from_shape_vec((1, 1, 1, 4), vec![1.0, 0.0, 1.0, 0.0]).unwrap();
         let k = Array4::from_shape_vec((1, 1, 1, 4), vec![0.0, 1.0, 0.0, 1.0]).unwrap();
 
         let (rotated_q, rotated_k) = rope.apply_4d(&q, &k, 0);
 
-        // Check output shapes
         assert_eq!(rotated_q.shape(), &[1, 1, 1, 4]);
         assert_eq!(rotated_k.shape(), &[1, 1, 1, 4]);
 
-        // Check values are finite
         assert!(rotated_q[[0, 0, 0, 0]].is_finite());
         assert!(rotated_k[[0, 0, 0, 0]].is_finite());
     }
 
     #[test]
     fn test_rope_rotation_identity() {
-        // At position 0, rotation should be minimal (close to identity)
         let head_dim = 4;
         let max_seq_len = 8;
         let theta = 10000.0;
@@ -570,8 +500,6 @@ mod rope_tests {
 
         let (rotated_q, _) = rope.apply_4d(&q, &k, 0);
 
-        // At position 0, first dimension pair should be very close to original
-        // cos(0) = 1, sin(0) = 0, so rotation is identity
         assert!((rotated_q[[0, 0, 0, 0]] - 1.0).abs() < 1e-5);
         assert!((rotated_q[[0, 0, 0, 1]] - 2.0).abs() < 1e-5);
     }
@@ -587,20 +515,16 @@ mod rope_tests {
         let q = Array4::from_shape_vec(
             (1, 1, 2, 4),
             vec![
-                1.0, 0.0, 1.0, 0.0, // position 0 (or offset)
-                1.0, 0.0, 1.0, 0.0, // position 1 (or offset+1)
+                1.0, 0.0, 1.0, 0.0,
+                1.0, 0.0, 1.0, 0.0,
             ],
         )
         .unwrap();
         let k = q.clone();
 
-        // Apply with offset 0
         let (rotated_q_0, _) = rope.apply_4d(&q, &k, 0);
-
-        // Apply with offset 5
         let (rotated_q_5, _) = rope.apply_4d(&q, &k, 5);
 
-        // Values should be different because positions are different
         assert!((rotated_q_0[[0, 0, 0, 0]] - rotated_q_5[[0, 0, 0, 0]]).abs() > 1e-3);
     }
 
@@ -614,31 +538,28 @@ mod rope_tests {
 
         let rope = RoPE::new(head_dim, max_seq_len, theta);
 
-        // [batch=1, seq_len=2, hidden_size=8]
         let q = Array3::from_shape_vec(
             (1, 2, hidden_size),
             vec![
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, // pos 0
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, // pos 1
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
             ],
         )
         .unwrap();
         let k = q.clone();
 
-        // FIX: num_kv_heads must be > 0. For non-GQA, it's equal to num_q_heads.
         let num_kv_heads = num_heads;
         let result = rope.apply_3d(&q, &k, num_heads, num_kv_heads, 0);
 
         assert!(result.is_ok(), "RoPE apply_3d should succeed");
         let (rotated_q, rotated_k) = result.unwrap();
 
-        // Check output shape preserved
         assert_eq!(rotated_q.shape(), &[1, 2, hidden_size]);
         assert_eq!(rotated_k.shape(), &[1, 2, hidden_size]);
     }
+
     #[test]
     fn test_rope_preserves_norm() {
-        // RoPE is a rotation, so it should preserve L2 norm
         let head_dim = 4;
         let max_seq_len = 8;
         let theta = 10000.0;
@@ -648,45 +569,17 @@ mod rope_tests {
         let q = Array4::from_shape_vec((1, 1, 1, 4), vec![3.0, 4.0, 0.0, 0.0]).unwrap();
         let k = q.clone();
 
-        // Original norm: sqrt(9 + 16) = 5.0
         let original_norm: f32 = q.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         let (rotated_q, _) = rope.apply_4d(&q, &k, 0);
 
         let rotated_norm: f32 = rotated_q.iter().map(|x| x * x).sum::<f32>().sqrt();
 
-        // Norm should be preserved (within floating point tolerance)
         assert!((original_norm - rotated_norm).abs() < 1e-4);
     }
 
     #[test]
     fn test_rope_pytorch_parity_2() {
-        // Test against known PyTorch output
-        // PyTorch code:
-        // ```python
-        // import torch
-        // def precompute_freqs_cis(dim, end, theta=10000.0):
-        //     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-        //     t = torch.arange(end)
-        //     freqs = torch.outer(t, freqs).float()
-        //     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-        //     return freqs_cis
-        //
-        // def apply_rotary_emb(xq, xk, freqs_cis):
-        //     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-        //     xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-        //     freqs_cis = freqs_cis[:xq_.shape[1]]
-        //     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(2)
-        //     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(2)
-        //     return xq_out, xk_out
-        //
-        // freqs = precompute_freqs_cis(4, 8)
-        // q = torch.tensor([[[[1.0, 0.0, 1.0, 0.0]]]])
-        // k = torch.tensor([[[[0.0, 1.0, 0.0, 1.0]]]])
-        // rq, rk = apply_rotary_emb(q, k, freqs)
-        // print(rq, rk)
-        // ```
-
         let head_dim = 4;
         let max_seq_len = 8;
         let theta = 10000.0;
@@ -698,14 +591,6 @@ mod rope_tests {
 
         let (rotated_q, _) = rope.apply_4d(&q, &k, 0);
 
-        // At position 0:
-        // freq[0] = 1.0 / (10000^(0/4)) = 1.0, angle = 0 * 1.0 = 0
-        // freq[1] = 1.0 / (10000^(2/4)) = 0.01, angle = 0 * 0.01 = 0
-        // So cos ≈ [1.0, 1.0, 1.0, 1.0], sin ≈ [0.0, 0.0, 0.0, 0.0]
-
-        // For q = [1, 0, 1, 0]:
-        // Pair 0: [1*1 - 0*0, 1*0 + 0*1] = [1, 0]
-        // Pair 1: [1*1 - 0*0, 1*0 + 0*1] = [1, 0]
         assert!((rotated_q[[0, 0, 0, 0]] - 1.0).abs() < 1e-3);
         assert!((rotated_q[[0, 0, 0, 1]] - 0.0).abs() < 1e-3);
         assert!((rotated_q[[0, 0, 0, 2]] - 1.0).abs() < 1e-3);
@@ -720,13 +605,12 @@ mod rope_tests {
 
         let rope = RoPE::new(head_dim, max_seq_len, theta);
 
-        // Test with a sequence of length 3
         let q = Array4::from_shape_vec(
             (1, 1, 3, 8),
             vec![
-                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, // pos 0
-                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, // pos 1
-                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, // pos 2
+                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+                1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
             ],
         )
         .unwrap();
@@ -734,7 +618,6 @@ mod rope_tests {
 
         let (rotated_q, _) = rope.apply_4d(&q, &k, 0);
 
-        // Each position should have different rotations
         let pos0_val = rotated_q[[0, 0, 0, 0]];
         let pos1_val = rotated_q[[0, 0, 1, 0]];
         let pos2_val = rotated_q[[0, 0, 2, 0]];
@@ -742,27 +625,18 @@ mod rope_tests {
         assert!((pos0_val - pos1_val).abs() > 1e-5);
         assert!((pos1_val - pos2_val).abs() > 1e-5);
     }
+
     #[test]
     fn test_rope_is_working() {
-        use ndarray::{Array4, s};
-
         let head_dim = 16;
         let rope = RoPE::new(head_dim, 128, 10000.0);
 
-        // Simple input
         let q = Array4::ones((1, 1, 1, head_dim));
         let k = Array4::ones((1, 1, 1, head_dim));
 
-        println!("\n=== Testing RoPE ===");
-        println!("Input Q: {:?}", q.slice(s![0, 0, 0, ..]));
-
-        // Apply RoPE at position 1 (not 0, which is identity)
         let (q_rot, _) = rope.apply_4d(&q, &k, 1);
 
-        println!("Rotated Q: {:?}", q_rot.slice(s![0, 0, 0, ..]));
-
         let diff = (&q - &q_rot).mapv(|x| x.abs()).sum();
-        println!("Difference: {}", diff);
 
         assert!(
             diff > 0.01,

@@ -56,3 +56,6 @@ pub trait WeightLoader: Send + Sync {
     /// Downcasts to a concrete type.
     fn as_any(&self) -> &dyn Any;
 }
+
+#[cfg(test)]
+mod tests;

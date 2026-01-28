@@ -1,28 +1,27 @@
-use crate::models::bart::config::BartConfig;
-use crate::models::bart::cpu_encoder::BartCpuEncoder;
-use anyhow::Result;
-use kjarni_transformers::{
-    activations::{softmax_4d_inplace},
-    feedforward::FeedForward,
-    models::base::ModelLoadConfig,
-    utils::linear_algebra::{apply_attention_mask, matmul_4d},
-    weights::ModelWeights,
-};
-use ndarray::{Array2, Array3, s};
 use std::path::Path;
 use std::sync::Arc;
+
+use anyhow::Result;
+use ndarray::{s, Array2, Array3};
+
+use kjarni_transformers::activations::softmax_4d_inplace;
+use kjarni_transformers::feedforward::FeedForward;
+use kjarni_transformers::models::base::ModelLoadConfig;
+use kjarni_transformers::utils::linear_algebra::{apply_attention_mask, matmul_4d};
+use kjarni_transformers::weights::ModelWeights;
+
+use crate::models::bart::config::BartConfig;
+use crate::models::bart::cpu_encoder::BartCpuEncoder;
 
 const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
 #[cfg(test)]
-mod bart_golden_test_encoder {
-    use kjarni_transformers::{Embeddings, traits::{CpuTransformerCore, ModelConfig}};
-
+mod tests {
     use super::*;
 
-    // Golden values from Python (HuggingFace transformers)
-    // Input: "Rust is a multi-paradigm, general-purpose programming language..."
-    // input_ids: [0, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6] (10 tokens)
+    use kjarni_transformers::traits::{CpuTransformerCore, ModelConfig};
+    use kjarni_transformers::Embeddings;
+
     mod golden {
         pub const LAYER0_INPUT: [f32; 10] = [
             -0.012427182,
@@ -152,7 +151,7 @@ mod bart_golden_test_encoder {
     fn setup_encoder() -> Result<(BartCpuEncoder, Array3<f32>)> {
         let path = Path::new(DISTILBART_PATH);
         if !path.exists() {
-            anyhow::bail!("Weights not found at {}", DISTILBART_PATH);
+            anyhow::bail!("weights not found at {}", DISTILBART_PATH);
         }
 
         let weights = ModelWeights::new(path)?;
@@ -161,22 +160,20 @@ mod bart_golden_test_encoder {
         let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
         let meta = config.metadata();
         let layout = config.layout();
-        // First 10 tokens of the test input
+
         let input_ids_vec = vec![0u32, 46541, 16, 10, 3228, 12, 5489, 625, 35045, 6];
         let input_ids = Array2::from_shape_vec((1, 10), input_ids_vec)?;
-        
+
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
         let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
         let embeddings = Embeddings::new(
             embed,
             Some(weights.get_array2("model.encoder.embed_positions.weight")?),
-            None, // No token_type_embeddings in BART
+            None,
         );
 
-        // let hidden = encoder.embed_and_normalize(&input_ids, None);
         let hidden = embeddings.forward(&input_ids, None, 2, meta.scale_embeddings);
         let hidden = encoder.embed_norm(&hidden)?;
-        
 
         Ok((encoder, hidden))
     }
@@ -185,8 +182,7 @@ mod bart_golden_test_encoder {
     async fn test_layer0_input_embeddings() -> Result<()> {
         let (_, hidden) = setup_encoder()?;
         let actual: Vec<f32> = hidden.slice(s![0, 0, 0..10]).to_vec();
-        assert_close(&actual, &golden::LAYER0_INPUT, 1e-5, "Layer0 Input");
-        println!("✅ Layer 0 Input (embeddings + layernorm) matches");
+        assert_close(&actual, &golden::LAYER0_INPUT, 1e-5, "layer0 input");
         Ok(())
     }
 
@@ -200,8 +196,7 @@ mod bart_golden_test_encoder {
             .forward(&hidden, &mask, None, None)?;
         let actual: Vec<f32> = attn_out.slice(s![0, 0, 0..10]).to_vec();
 
-        assert_close(&actual, &golden::ATTN_OUT, 1e-4, "Self-Attention Output");
-        println!("✅ Self-Attention output matches");
+        assert_close(&actual, &golden::ATTN_OUT, 1e-4, "self-attention output");
         Ok(())
     }
 
@@ -218,13 +213,7 @@ mod bart_golden_test_encoder {
             .forward(&(&hidden + &attn_out));
         let actual: Vec<f32> = post_attn.slice(s![0, 0, 0..10]).to_vec();
 
-        assert_close(
-            &actual,
-            &golden::POST_ATTN_LN,
-            1e-4,
-            "Post-Attention LayerNorm",
-        );
-        println!("✅ Post-Attention LayerNorm matches");
+        assert_close(&actual, &golden::POST_ATTN_LN, 1e-4, "post-attention layernorm");
         Ok(())
     }
 
@@ -243,12 +232,11 @@ mod bart_golden_test_encoder {
         let fc1_out = match &encoder.layers[0].feedforward {
             FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
             FeedForward::Legacy(ff) => ff.fc1(&post_attn)?,
-            _ => anyhow::bail!("Unexpected feedforward type"),
+            _ => anyhow::bail!("unexpected feedforward type"),
         };
 
         let actual: Vec<f32> = fc1_out.slice(s![0, 0, 0..10]).to_vec();
-        assert_close(&actual, &golden::FC1_OUT, 1e-3, "FC1 Output");
-        println!("✅ FC1 output matches");
+        assert_close(&actual, &golden::FC1_OUT, 1e-3, "fc1 output");
         Ok(())
     }
 
@@ -267,18 +255,17 @@ mod bart_golden_test_encoder {
         let mut fc1_out = match &encoder.layers[0].feedforward {
             FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
             FeedForward::Legacy(ff) => ff.fc1(&post_attn)?,
-            _ => anyhow::bail!("Unexpected feedforward type"),
+            _ => anyhow::bail!("unexpected feedforward type"),
         };
 
         match &encoder.layers[0].feedforward {
             FeedForward::Standard(ff) => ff.apply_activation(&mut fc1_out),
             FeedForward::Legacy(ff) => ff.apply_activation(&mut fc1_out),
-            _ => anyhow::bail!("Unexpected feedforward type"),
+            _ => anyhow::bail!("unexpected feedforward type"),
         };
 
         let actual: Vec<f32> = fc1_out.slice(s![0, 0, 0..10]).to_vec();
-        assert_close(&actual, &golden::FC1_GELU, 1e-3, "FC1+GELU Output");
-        println!("✅ FC1+GELU output matches");
+        assert_close(&actual, &golden::FC1_GELU, 1e-3, "fc1+gelu output");
         Ok(())
     }
 
@@ -297,8 +284,7 @@ mod bart_golden_test_encoder {
         let ffn_out = encoder.layers[0].feedforward.forward(&post_attn)?;
         let actual: Vec<f32> = ffn_out.slice(s![0, 0, 0..10]).to_vec();
 
-        assert_close(&actual, &golden::FFN_OUT, 1e-3, "FFN Output");
-        println!("✅ FFN output matches");
+        assert_close(&actual, &golden::FFN_OUT, 1e-3, "ffn output");
         Ok(())
     }
 
@@ -310,8 +296,7 @@ mod bart_golden_test_encoder {
         let layer0_out = encoder.layers[0].forward(hidden, &mask, None, false, None)?;
         let actual: Vec<f32> = layer0_out.slice(s![0, 0, 0..10]).to_vec();
 
-        assert_close(&actual, &golden::LAYER0_OUTPUT, 1e-4, "Layer 0 Output");
-        println!("✅ Layer 0 full output matches");
+        assert_close(&actual, &golden::LAYER0_OUTPUT, 1e-4, "layer 0 output");
         Ok(())
     }
 
@@ -328,7 +313,6 @@ mod bart_golden_test_encoder {
             .view()
             .into_shape_with_order((batch * seq_len, hidden_dim))?;
 
-        // Use QKVProjection's forward method
         let (q, k, v) = self_attn.qkv_proj.forward_qkv(&hidden_2d.view());
 
         let q_heads = q
@@ -344,33 +328,21 @@ mod bart_golden_test_encoder {
             .permuted_axes([0, 2, 1, 3])
             .to_owned();
 
-        // Scores
         let mut scores = matmul_4d(&q_heads, &k_heads_t);
         scores.mapv_inplace(|x| x * self_attn.scale_factor);
 
-        // Check scaled scores
         let scaled_actual: Vec<f32> = scores.slice(s![0, 0, 0, 0..5]).to_vec();
-        assert_close(
-            &scaled_actual,
-            &golden::SCALED_SCORES,
-            1e-4,
-            "Scaled Scores",
-        );
-        println!("✅ Scaled scores match");
+        assert_close(&scaled_actual, &golden::SCALED_SCORES, 1e-4, "scaled scores");
 
-        // Apply mask & softmax
         scores = apply_attention_mask(scores, &mask);
         softmax_4d_inplace(&mut scores);
 
         let softmax_actual: Vec<f32> = scores.slice(s![0, 0, 0, 0..5]).to_vec();
-        assert_close(&softmax_actual, &golden::SOFTMAX, 1e-4, "Softmax");
-        println!("✅ Softmax matches");
+        assert_close(&softmax_actual, &golden::SOFTMAX, 1e-4, "softmax");
 
-        // Context
         let context = matmul_4d(&scores, &v_heads);
         let context_actual: Vec<f32> = context.slice(s![0, 0, 0, 0..5]).to_vec();
-        assert_close(&context_actual, &golden::CONTEXT, 1e-4, "Context");
-        println!("✅ Context matches");
+        assert_close(&context_actual, &golden::CONTEXT, 1e-4, "context");
 
         Ok(())
     }

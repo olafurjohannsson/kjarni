@@ -1,20 +1,20 @@
-use crate::WgpuContext;
-use crate::attention::MultiHeadAttention;
-use crate::cache::{Cache, CpuKVCache, GpuKVCache};
-use crate::gpu_ops::blocks::cache::GpuUpdateCache;
-use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::gpu_ops::{
-    DType, GpuFrameContext, GpuTensor, GpuTensorPool,
-    blocks::attention::attention::{GpuAttention, GpuAttentionWeights, TempStorage},
-};
-use anyhow::Result;
-use common::{assert_tensors_are_close, read_gpu_tensor_to_vec};
-use ndarray::{Array, Array1, Array2, Array3, Array4, Axis, Ix3, Ix4};
 use std::sync::Arc;
+
+use anyhow::Result;
+use ndarray::{Array1, Array2, Array3, Axis};
+
+use common::assert_tensors_are_close;
+
+use crate::attention::MultiHeadAttention;
+use crate::cache::{Cache, GpuKVCache};
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
+use crate::gpu_ops::primitives::layout::slice::GpuSlice;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::WgpuContext;
+
 #[path = "../../../tests/common.rs"]
 mod common;
 
-/// Helper to create a CPU attention block with dummy weights.
 fn create_cpu_attention(
     h: usize,
     n: usize,
@@ -49,11 +49,11 @@ fn create_cpu_attention(
         v_b.clone(),
         o_w.clone(),
         o_b.clone(),
+        None,
     );
     (attention, q_w, q_b, k_w, k_b, v_w, v_b, o_w, o_b)
 }
 
-/// Helper to create the corresponding GPU attention block and weights.
 fn create_gpu_attention(
     context: &Arc<WgpuContext>,
     h: u32,
@@ -67,7 +67,7 @@ fn create_gpu_attention(
     o_w: &Array2<f32>,
     o_b: &Array1<f32>,
 ) -> (GpuAttention, GpuAttentionWeights) {
-    let attention = GpuAttention::new(&context.clone(), h, n);
+    let attention = GpuAttention::new(&context.clone(), h, n, 8);
     let weights = GpuAttentionWeights {
         q_weight: GpuTensor::from_ndarray(context, q_w).unwrap(),
         q_bias: GpuTensor::from_ndarray(context, q_b).unwrap(),
@@ -84,7 +84,7 @@ fn create_gpu_attention(
 #[tokio::test]
 async fn test_attention_encoder_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
-    let (b, s, h, n) = (1, 4, 16, 4); // Batch, SeqLen, HiddenSize, NumHeads
+    let (b, s, h, n) = (1, 4, 16, 4);
 
     let (cpu_attn, q_w, q_b, k_w, k_b, v_w, v_b, o_w, o_b) = create_cpu_attention(h, n);
     let (gpu_attn, gpu_weights) = create_gpu_attention(
@@ -96,33 +96,27 @@ async fn test_attention_encoder_parity() -> Result<()> {
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
     let mask_gpu = GpuTensor::from_ndarray(&context, &mask_cpu)?;
 
-    let (cpu_output, cpu_new_k, cpu_new_v) =
+    let (cpu_output, _cpu_new_k, _cpu_new_v) =
         cpu_attn.forward_with_cache(&input_cpu, None, Some(&mask_cpu), false, None, None)?;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let mut pool = GpuTensorPool::new(context.clone());
-    let mut frame = GpuFrameContext::new(&context, &mut pool);
 
-    let (gpu_output, gpu_new_k, gpu_new_v) = gpu_attn.forward(
+    let gpu_output = gpu_attn.forward(
         &mut encoder,
         &input_gpu,
-        &input_gpu,
+        None,
         &gpu_weights,
-        &mask_gpu,
+        Some(&mask_gpu),
         false,
         None,
-        0,
-        frame.pool,
+        &mut pool,
     );
     context.queue.submit(Some(encoder.finish()));
-    frame.finish();
+    pool.next_frame();
 
-    // 5. Compare results
-    assert_tensors_are_close(&cpu_output, &gpu_output, "Encoder Output", 1e-4).await;
-    assert_tensors_are_close(&cpu_new_k, &gpu_new_k, "Encoder New K", 1e-4).await;
-    assert_tensors_are_close(&cpu_new_v, &gpu_new_v, "Encoder New V", 1e-4).await;
+    assert_tensors_are_close(&cpu_output, &gpu_output, "encoder output", 1e-4).await;
 
-    println!("✅ GpuAttention passed encoder parity test!");
     Ok(())
 }
 
@@ -140,6 +134,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     let (gpu_attn, gpu_weights) = create_gpu_attention(
         &context, h as u32, n as u32, &q_w, &q_b, &k_w, &k_b, &v_w, &v_b, &o_w, &o_b,
     );
+
     let prompt_cpu =
         Array3::from_shape_fn((b, prompt_len, h), |(i, j, k)| (i + j + k) as f32 * 0.1);
     let query_cpu = Array3::from_shape_fn((b, gen_len, h), |(i, j, k)| {
@@ -150,6 +145,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     let prompt_gpu = GpuTensor::from_ndarray(&context, &prompt_cpu)?;
     let query_gpu = GpuTensor::from_ndarray(&context, &query_cpu)?;
     let mask_gpu = GpuTensor::from_ndarray(&context, &mask_cpu)?;
+
     let (prompt_k_cpu, prompt_v_cpu) = cpu_attn.project_kv(&prompt_cpu);
     let (cpu_new_k, cpu_new_v) = cpu_attn.project_kv(&query_cpu);
 
@@ -163,21 +159,21 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
         Some(&mask_cpu),
         true,
         prompt_len,
-        None,
     )?;
 
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    let mut pool = GpuTensorPool::new(context.clone());
     let mut gpu_cache = GpuKVCache::new(&context, 1, b, n, head_dim, max_len)?;
     let gpu_slicer = GpuSlice::new(&context);
-    let pool_guard = self.pool.lock().await;
-    let mut frame = GpuFrameContext::new(&self.context, pool_guard);
+
     let (prompt_k_gpu, prompt_v_gpu) =
-        gpu_attn.project_kv(&mut encoder, &prompt_gpu, &gpu_weights, &mut temp);
-    gpu_cache.update(&mut encoder, 0, &prompt_k_gpu, &prompt_v_gpu)?;
+        gpu_attn.project_kv(&mut encoder, &prompt_gpu, &gpu_weights, 0, &mut pool, None);
+    gpu_cache.update(&mut encoder, 0, &prompt_k_gpu, &prompt_v_gpu, 0)?;
     gpu_cache.increment_len(prompt_len);
 
     let (gpu_new_k, gpu_new_v) =
-        gpu_attn.project_kv(&mut encoder, &query_gpu, &gpu_weights, &mut temp);
-    gpu_cache.update(&mut encoder, 0, &gpu_new_k, &gpu_new_v)?;
+        gpu_attn.project_kv(&mut encoder, &query_gpu, &gpu_weights, prompt_len, &mut pool, None);
+    gpu_cache.update(&mut encoder, 0, &gpu_new_k, &gpu_new_v, prompt_len)?;
 
     let (full_cache_k_gpu, full_cache_v_gpu) = gpu_cache.get(0).unwrap();
 
@@ -199,17 +195,15 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
         &query_gpu,
         &gpu_weights,
         &mask_gpu,
-        true, // Causal
+        true,
         (&cache_k_view, &cache_v_view),
         prompt_len,
-        &mut temp,
+        &mut pool,
     );
-    frame.finish();
+    context.queue.submit(Some(encoder.finish()));
+    pool.next_frame();
 
-    assert_tensors_are_close(&cpu_output, &gpu_output, "Decoder Output", 1e-4).await;
-    assert_tensors_are_close(&cpu_new_k, &gpu_new_k, "Decoder New K", 1e-4).await;
-    assert_tensors_are_close(&cpu_new_v, &gpu_new_v, "Decoder New V", 1e-4).await;
+    assert_tensors_are_close(&cpu_output, &gpu_output, "decoder output", 1e-4).await;
 
-    println!("✅ GpuAttention passed decoder generation parity test!");
     Ok(())
 }

@@ -2,113 +2,92 @@ use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 use kjarni_transformers::WgpuContext;
-use std::sync::Arc;
-
 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. Setup
     let ctx = WgpuContext::new().await?;
-    
-    println!("Loading CPU Model...");
+
     let cpu_encoder = SentenceEncoder::from_registry(
         ModelType::MiniLML6V2,
         None,
         Device::Cpu,
         None,
         None,
-    ).await?;
+    )
+    .await?;
 
-    println!("Loading GPU Model...");
     let gpu_encoder = SentenceEncoder::from_registry(
         ModelType::MiniLML6V2,
         None,
         Device::Wgpu,
         Some(ctx),
         None,
-    ).await?;
+    )
+    .await?;
 
     let sentences = [
-        "The cat sits on the mat", // Index 0 (Checked against Golden)
+        "The cat sits on the mat",
         "A feline rests on a rug",
         "Dogs are playing in the park",
     ];
 
-    println!("\n=== TEST 1: Default Encode (Mean + Norm) ===");
     let cpu_res = cpu_encoder.encode_batch(&sentences).await?;
     let gpu_res = gpu_encoder.encode_batch(&sentences).await?;
-    
-    verify("CPU Mean+Norm", &cpu_res[0], GOLDEN_MEAN_NORM);
-    verify("GPU Mean+Norm", &gpu_res[0], GOLDEN_MEAN_NORM);
-    compare_cpu_gpu("Mean+Norm", &cpu_res[0], &gpu_res[0]);
+    verify("cpu mean+norm", &cpu_res[0], GOLDEN_MEAN_NORM);
+    verify("gpu mean+norm", &gpu_res[0], GOLDEN_MEAN_NORM);
+    compare_cpu_gpu("mean+norm", &cpu_res[0], &gpu_res[0]);
 
-    println!("\n=== TEST 2: Encode Raw (Mean + No Norm) ===");
     let cpu_res = cpu_encoder.encode_batch_raw(&sentences).await?;
-    // Note: encode_batch_raw uses internal encode with normalize=false
     let gpu_res = gpu_encoder.encode_batch_raw(&sentences).await?;
+    verify("cpu mean raw", &cpu_res[0], GOLDEN_MEAN_RAW);
+    verify("gpu mean raw", &gpu_res[0], GOLDEN_MEAN_RAW);
+    compare_cpu_gpu("mean raw", &cpu_res[0], &gpu_res[0]);
 
-    verify("CPU Mean Raw", &cpu_res[0], GOLDEN_MEAN_RAW);
-    verify("GPU Mean Raw", &gpu_res[0], GOLDEN_MEAN_RAW);
-    compare_cpu_gpu("Mean Raw", &cpu_res[0], &gpu_res[0]);
-
-    println!("\n=== TEST 3: Pooling Strategy: CLS ===");
     let cpu_res = cpu_encoder.encode_with(sentences[0], Some("cls"), true).await?;
     let gpu_res = gpu_encoder.encode_with(sentences[0], Some("cls"), true).await?;
+    verify("cpu cls", &cpu_res, GOLDEN_CLS_NORM);
+    verify("gpu cls", &gpu_res, GOLDEN_CLS_NORM);
+    compare_cpu_gpu("cls", &cpu_res, &gpu_res);
 
-    verify("CPU CLS", &cpu_res, GOLDEN_CLS_NORM);
-    verify("GPU CLS", &gpu_res, GOLDEN_CLS_NORM);
-    compare_cpu_gpu("CLS", &cpu_res, &gpu_res);
-
-    println!("\n=== TEST 4: Pooling Strategy: MAX ===");
     let cpu_res = cpu_encoder.encode_with(sentences[0], Some("max"), true).await?;
     let gpu_res = gpu_encoder.encode_with(sentences[0], Some("max"), true).await?;
+    verify("cpu max", &cpu_res, GOLDEN_MAX_NORM);
+    verify("gpu max", &gpu_res, GOLDEN_MAX_NORM);
+    compare_cpu_gpu("max", &cpu_res, &gpu_res);
 
-    verify("CPU Max", &cpu_res, GOLDEN_MAX_NORM);
-    verify("GPU Max", &gpu_res, GOLDEN_MAX_NORM);
-    compare_cpu_gpu("Max", &cpu_res, &gpu_res);
-
-    println!("\n=== TEST 5: Pooling Strategy: LastToken ===");
     let cpu_res = cpu_encoder.encode_with(sentences[0], Some("lastToken"), true).await?;
     let gpu_res = gpu_encoder.encode_with(sentences[0], Some("lastToken"), true).await?;
+    verify("cpu last_token", &cpu_res, GOLDEN_LAST_NORM);
+    verify("gpu last_token", &gpu_res, GOLDEN_LAST_NORM);
+    compare_cpu_gpu("last_token", &cpu_res, &gpu_res);
 
-    verify("CPU LastToken", &cpu_res, GOLDEN_LAST_NORM);
-    verify("GPU LastToken", &gpu_res, GOLDEN_LAST_NORM);
-    compare_cpu_gpu("LastToken", &cpu_res, &gpu_res);
-
-    println!("\n✅ All verifications passed successfully!");
     Ok(())
 }
 
 fn verify(label: &str, actual: &[f32], expected: &[f32]) {
-    // 1. Cosine Similarity (Should be ~1.0)
     let sim = cosine_similarity(actual, expected);
-    
-    // 2. Max Absolute Difference (Strict numerical check)
-    // F32 precision usually allows error around 1e-5 to 1e-6
-    let max_diff = actual.iter().zip(expected.iter())
+    let max_diff = actual
+        .iter()
+        .zip(expected.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
 
-    println!("{:<15} | Cosine: {:.6} | Max Diff: {:.6}", label, sim, max_diff);
-
-    if sim < 0.999 {
-        eprintln!("⚠️ WARNING: {} similarity is low!", label);
-    }
-    if max_diff > 1e-4 {
-        eprintln!("⚠️ WARNING: {} numerical drift detected!", label);
-    }
+    assert!(sim >= 0.999, "{} similarity too low: {}", label, sim);
+    assert!(max_diff <= 1e-4, "{} numerical drift: {}", label, max_diff);
 }
 
 fn compare_cpu_gpu(label: &str, cpu: &[f32], gpu: &[f32]) {
     let sim = cosine_similarity(cpu, gpu);
-    let max_diff = cpu.iter().zip(gpu.iter())
+    let max_diff = cpu
+        .iter()
+        .zip(gpu.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
-    
-    println!("{:<15} | CPU vs GPU Sim: {:.6} | Max Diff: {:.6}", label, sim, max_diff);
-}
 
+    assert!(sim >= 0.999, "{} cpu/gpu similarity too low: {}", label, sim);
+    assert!(max_diff <= 1e-4, "{} cpu/gpu drift: {}", label, max_diff);
+}
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -121,11 +100,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-// ============================================================================
-//  PASTE PYTHON OUTPUT HERE
-// ============================================================================
-// Placeholder values - REPLACE THESE with the output from python script!
-// MEAN_NORM (First sentence)
 const GOLDEN_MEAN_NORM: &[f32] = &[
     0.13489075,
     -0.03206336,
