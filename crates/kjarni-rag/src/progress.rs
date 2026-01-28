@@ -1,7 +1,7 @@
 //! Progress reporting for indexing operations
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Progress stage during indexing
 #[repr(C)]
@@ -46,23 +46,23 @@ impl Progress {
             message_len: 0,
         }
     }
-    
+
     pub fn scanning(current: usize) -> Self {
         Self::new(ProgressStage::Scanning, current, None)
     }
-    
+
     pub fn loading(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Loading, current, total)
     }
-    
+
     pub fn embedding(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Embedding, current, total)
     }
-    
+
     pub fn writing(current: usize, total: Option<usize>) -> Self {
         Self::new(ProgressStage::Writing, current, total)
     }
-    
+
     pub fn committing() -> Self {
         Self::new(ProgressStage::Committing, 0, None)
     }
@@ -80,25 +80,24 @@ impl CancelToken {
             cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
-    
+
     /// Cancel the operation
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
     }
-    
+
     /// Check if cancelled
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
-    
+
     /// Reset the token
     pub fn reset(&self) {
         self.cancelled.store(false, Ordering::SeqCst);
     }
 }
 
-/// Progress callback type (for Rust usage)
-pub type ProgressCallback = Box<dyn FnMut(&Progress, Option<&str>) + Send + Sync>;
+pub type ProgressCallback = Box<dyn Fn(&Progress, Option<&str>) + Send + Sync>;
 
 /// Progress reporter that can output to stderr or callback
 pub struct ProgressReporter {
@@ -115,9 +114,10 @@ impl ProgressReporter {
             last_stage: None,
         }
     }
-    
-    pub fn with_callback<F>(callback: F) -> Self 
-    where F: FnMut(&Progress, Option<&str>) + Send + Sync + 'static 
+
+    pub fn with_callback<F>(callback: F) -> Self
+    where
+        F: Fn(&Progress, Option<&str>) + Send + Sync + 'static,
     {
         Self {
             callback: Some(Box::new(callback)),
@@ -125,19 +125,19 @@ impl ProgressReporter {
             last_stage: None,
         }
     }
-    
+
     pub fn report(&mut self, progress: &Progress, message: Option<&str>) {
         // Call callback if provided
         if let Some(ref mut cb) = self.callback {
             cb(progress, message);
         }
-        
+
         // Output to stderr if not quiet
         if !self.quiet {
             self.report_stderr(progress, message);
         }
     }
-    
+
     fn report_stderr(&mut self, progress: &Progress, message: Option<&str>) {
         // Print stage header if changed
         if self.last_stage != Some(progress.stage) {
@@ -153,7 +153,7 @@ impl ProgressReporter {
             };
             eprintln!("{}", stage_name);
         }
-        
+
         // Print progress
         if progress.total.unwrap_or(0) > 0 {
             eprint!("\r  [{}/{}]", progress.current, progress.total.unwrap_or(0));
@@ -164,7 +164,7 @@ impl ProgressReporter {
         } else if progress.current > 0 {
             eprint!("\r  {} items processed", progress.current);
         }
-        
+
         // Newline on completion
         if progress.stage == ProgressStage::Committing {
             eprintln!();
@@ -176,7 +176,7 @@ fn truncate_path(path: &str, max_len: usize) -> String {
     if path.len() <= max_len {
         return path.to_string();
     }
-    
+
     // Try to show filename
     if let Some(pos) = path.rfind('/').or_else(|| path.rfind('\\')) {
         let filename = &path[pos + 1..];
@@ -184,15 +184,14 @@ fn truncate_path(path: &str, max_len: usize) -> String {
             return format!("...{}", &path[path.len() - max_len + 3..]);
         }
     }
-    
+
     format!("{}...", &path[..max_len - 3])
 }
 
-
 #[cfg(test)]
 mod progress_tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 
@@ -560,16 +559,20 @@ mod progress_tests {
 
     #[test]
     fn test_progress_reporter_stage_change_detection() {
-        // Test that stage changes are tracked
+        use std::sync::Mutex;
+
         let stage_changes = Arc::new(AtomicUsize::new(0));
         let changes_clone = stage_changes.clone();
 
-        let mut last_stage: Option<ProgressStage> = None;
+        // Wrap mutable state in Mutex
+        let last_stage = Arc::new(Mutex::new(None::<ProgressStage>));
+        let last_stage_clone = last_stage.clone();
 
         let mut reporter = ProgressReporter::with_callback(move |progress, _| {
-            if last_stage != Some(progress.stage) {
+            let mut guard = last_stage_clone.lock().unwrap();
+            if *guard != Some(progress.stage) {
                 changes_clone.fetch_add(1, Ordering::Relaxed);
-                last_stage = Some(progress.stage);
+                *guard = Some(progress.stage);
             }
         });
 
@@ -581,7 +584,7 @@ mod progress_tests {
         // Different stage
         reporter.report(&Progress::embedding(1, None), None);
 
-        assert_eq!(stage_changes.load(Ordering::Relaxed), 2); // Loading once, Embedding once
+        assert_eq!(stage_changes.load(Ordering::Relaxed), 2);
     }
 
     // ============================================================================
@@ -640,7 +643,10 @@ mod progress_tests {
         reporter.report(&Progress::loading(10, Some(25)), None);
         reporter.report(&Progress::loading(25, Some(25)), None);
 
-        reporter.report(&Progress::embedding(0, Some(100)), Some("Generating embeddings"));
+        reporter.report(
+            &Progress::embedding(0, Some(100)),
+            Some("Generating embeddings"),
+        );
         reporter.report(&Progress::embedding(50, Some(100)), None);
         reporter.report(&Progress::embedding(100, Some(100)), None);
 

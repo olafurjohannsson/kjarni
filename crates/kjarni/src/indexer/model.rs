@@ -1,5 +1,3 @@
-// kjarni/src/indexer/model.rs
-
 use crate::embedder::Embedder;
 use crate::indexer::{IndexInfo, IndexStats, IndexerBuilder, IndexerError, IndexerResult};
 use anyhow::Result;
@@ -10,7 +8,7 @@ use kjarni_rag::{
 use kjarni_transformers::Device;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::watch;
 
 pub struct Indexer {
@@ -137,15 +135,35 @@ impl Indexer {
     }
 
     // =========================================================================
+    // PROGRESS HELPER
+    // =========================================================================
+
+    /// Report progress using the stored callback (if any)
+    fn report_stored_progress(
+        &self,
+        stage: ProgressStage,
+        current: usize,
+        total: usize,
+        msg: Option<&str>,
+    ) {
+        if let Some(ref callback) = self.progress_callback {
+            let progress = Progress {
+                stage,
+                current,
+                total: if total > 0 { Some(total) } else { None },
+                message_len: msg.map(|s| s.len()).unwrap_or(0),
+            };
+            callback(&progress, msg); // Just call it - Fn doesn't need &mut
+        }
+    }
+
+    // =========================================================================
     // CREATE METHODS
     // =========================================================================
 
     /// Create a new index from files/directories
     pub async fn create(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<IndexStats> {
-        self.create_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
-            index_path, inputs, false, None, None,
-        )
-        .await
+        self.create_internal(index_path, inputs, false).await
     }
 
     /// Create with force overwrite option
@@ -155,10 +173,141 @@ impl Indexer {
         inputs: &[&str],
         force: bool,
     ) -> IndexerResult<IndexStats> {
-        self.create_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
-            index_path, inputs, force, None, None,
-        )
-        .await
+        self.create_internal(index_path, inputs, force).await
+    }
+
+    /// Internal create that uses the stored progress callback
+    async fn create_internal(
+        &self,
+        index_path: &str,
+        inputs: &[&str],
+        force: bool,
+    ) -> IndexerResult<IndexStats> {
+        if inputs.is_empty() {
+            return Err(IndexerError::NoInputs);
+        }
+
+        // Check if exists
+        if Path::new(index_path).exists() {
+            if force {
+                std::fs::remove_dir_all(index_path)
+                    .map_err(|e| IndexerError::IndexingFailed(e.into()))?;
+            } else {
+                return Err(IndexerError::IndexExists(index_path.to_string()));
+            }
+        }
+
+        let start = std::time::Instant::now();
+        let dimension = self.embedder.dimension();
+
+        // Create index writer
+        let config = IndexConfig {
+            dimension,
+            max_docs_per_segment: self.max_docs_per_segment,
+            embedding_model: Some(self.embedder.model_name().to_string()),
+            ..Default::default()
+        };
+
+        let mut writer =
+            IndexWriter::open(index_path, config).map_err(IndexerError::IndexingFailed)?;
+
+        // Collect files
+        self.report_stored_progress(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
+        let files = self.collect_files(inputs)?;
+        let total_files = files.len();
+
+        if self.is_cancelled() {
+            return Err(IndexerError::Cancelled);
+        }
+
+        let loader = DocumentLoader::new(self.loader_config.clone());
+
+        let mut total_docs = 0usize;
+        let mut total_chunks = 0usize;
+        let mut files_processed = 0usize;
+        let mut files_skipped = 0usize;
+
+        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
+        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
+
+        for (file_idx, file_path) in files.iter().enumerate() {
+            if self.is_cancelled() {
+                return Err(IndexerError::Cancelled);
+            }
+
+            self.report_stored_progress(
+                ProgressStage::Loading,
+                file_idx,
+                total_files,
+                Some(&file_path.to_string_lossy()),
+            );
+
+            match loader.load_file(file_path) {
+                Ok(chunks) => {
+                    total_chunks += chunks.len();
+                    files_processed += 1;
+
+                    for chunk in chunks {
+                        batch_texts.push(chunk.text);
+                        batch_metadata.push(chunk.metadata.to_hashmap());
+
+                        if batch_texts.len() >= self.batch_size {
+                            if self.is_cancelled() {
+                                return Err(IndexerError::Cancelled);
+                            }
+
+                            self.report_stored_progress(
+                                ProgressStage::Embedding,
+                                total_docs,
+                                0,
+                                None,
+                            );
+
+                            let added = self
+                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                                .await?;
+                            total_docs += added;
+                        }
+                    }
+                }
+                Err(e) => {
+                    files_skipped += 1;
+                    if !self.quiet {
+                        eprintln!("Warning: Failed to load {}: {}", file_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // Flush remaining
+        if !batch_texts.is_empty() {
+            self.report_stored_progress(ProgressStage::Embedding, total_docs, 0, None);
+            let added = self
+                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                .await?;
+            total_docs += added;
+        }
+
+        self.report_stored_progress(
+            ProgressStage::Committing,
+            total_docs,
+            total_docs,
+            Some("Finalizing index..."),
+        );
+
+        writer.commit().map_err(IndexerError::IndexingFailed)?;
+
+        let size_bytes = calculate_index_size(index_path).unwrap_or(0);
+
+        Ok(IndexStats {
+            documents_indexed: total_docs,
+            chunks_created: total_chunks,
+            dimension,
+            size_bytes,
+            files_processed,
+            files_skipped,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+        })
     }
 
     /// Create with callback and cancellation support (for FFI)
@@ -328,10 +477,110 @@ impl Indexer {
 
     /// Add documents to existing index
     pub async fn add(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
-        self.add_impl::<fn(ProgressStage, usize, usize, Option<&str>), fn() -> bool>(
-            index_path, inputs, None, None,
-        )
-        .await
+        self.add_internal(index_path, inputs).await
+    }
+
+    /// Internal add that uses the stored progress callback
+    async fn add_internal(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
+        if inputs.is_empty() {
+            return Ok(0);
+        }
+
+        if !Path::new(index_path).exists() {
+            return Err(IndexerError::IndexNotFound(index_path.to_string()));
+        }
+
+        // Open existing index for appending
+        let mut writer =
+            IndexWriter::open_existing(index_path).map_err(IndexerError::IndexingFailed)?;
+
+        // Validate dimension matches
+        if writer.dimension() != self.embedder.dimension() {
+            return Err(IndexerError::DimensionMismatch {
+                index_dim: writer.dimension(),
+                model_dim: self.embedder.dimension(),
+            });
+        }
+
+        // Collect files
+        self.report_stored_progress(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
+        let files = self.collect_files(inputs)?;
+        let total_files = files.len();
+
+        if self.is_cancelled() {
+            return Err(IndexerError::Cancelled);
+        }
+
+        let loader = DocumentLoader::new(self.loader_config.clone());
+
+        let mut total_docs = 0usize;
+        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
+        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
+
+        for (file_idx, file_path) in files.iter().enumerate() {
+            if self.is_cancelled() {
+                return Err(IndexerError::Cancelled);
+            }
+
+            self.report_stored_progress(
+                ProgressStage::Loading,
+                file_idx,
+                total_files,
+                Some(&file_path.to_string_lossy()),
+            );
+
+            match loader.load_file(file_path) {
+                Ok(chunks) => {
+                    for chunk in chunks {
+                        batch_texts.push(chunk.text);
+                        batch_metadata.push(chunk.metadata.to_hashmap());
+
+                        if batch_texts.len() >= self.batch_size {
+                            if self.is_cancelled() {
+                                return Err(IndexerError::Cancelled);
+                            }
+
+                            self.report_stored_progress(
+                                ProgressStage::Embedding,
+                                total_docs,
+                                0,
+                                None,
+                            );
+
+                            let added = self
+                                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                                .await?;
+                            total_docs += added;
+                        }
+                    }
+                }
+                Err(e) => {
+                    if !self.quiet {
+                        eprintln!("Warning: Failed to load {}: {}", file_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // Flush remaining
+        if !batch_texts.is_empty() {
+            self.report_stored_progress(ProgressStage::Embedding, total_docs, 0, None);
+            let added = self
+                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
+                .await?;
+            total_docs += added;
+        }
+
+        self.report_stored_progress(
+            ProgressStage::Committing,
+            total_docs,
+            total_docs,
+            Some("Finalizing..."),
+        );
+
+        writer.commit().map_err(IndexerError::IndexingFailed)?;
+
+        Ok(total_docs)
     }
 
     /// Add with callback support (for FFI)
@@ -589,12 +838,6 @@ impl Indexer {
             .unwrap_or(false)
     }
 
-    fn report_progress(&mut self, progress: Progress) {
-        if let Some(ref mut callback) = self.progress_callback {
-            callback(&progress, None);
-        }
-    }
-
     // =========================================================================
     // ACCESSORS
     // =========================================================================
@@ -617,6 +860,11 @@ impl Indexer {
 
     pub fn is_quiet(&self) -> bool {
         self.quiet
+    }
+
+    /// Check if a progress callback is configured
+    pub fn has_progress_callback(&self) -> bool {
+        self.progress_callback.is_some()
     }
 }
 
@@ -894,14 +1142,23 @@ mod indexer_tests {
     #[test]
     fn test_builder_device_string() {
         let builder_gpu = IndexerBuilder::new("model").device("gpu");
-        assert!(matches!(builder_gpu.device, kjarni_transformers::Device::Wgpu));
+        assert!(matches!(
+            builder_gpu.device,
+            kjarni_transformers::Device::Wgpu
+        ));
 
         let builder_cpu = IndexerBuilder::new("model").device("cpu");
-        assert!(matches!(builder_cpu.device, kjarni_transformers::Device::Cpu));
+        assert!(matches!(
+            builder_cpu.device,
+            kjarni_transformers::Device::Cpu
+        ));
 
         // Unknown defaults to CPU
         let builder_unknown = IndexerBuilder::new("model").device("unknown");
-        assert!(matches!(builder_unknown.device, kjarni_transformers::Device::Cpu));
+        assert!(matches!(
+            builder_unknown.device,
+            kjarni_transformers::Device::Cpu
+        ));
     }
 
     #[test]
@@ -1034,8 +1291,8 @@ mod indexer_tests {
 
     #[test]
     fn test_builder_on_progress() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
@@ -1347,10 +1604,7 @@ mod indexer_tests {
             .expect("Failed to build indexer");
 
         let stats = indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .expect("Failed to create index");
 
@@ -1383,10 +1637,7 @@ mod indexer_tests {
             .unwrap();
 
         indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
@@ -1469,10 +1720,7 @@ mod indexer_tests {
             .unwrap();
 
         indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
@@ -1485,10 +1733,7 @@ mod indexer_tests {
             .unwrap();
 
         let added = indexer
-            .add(
-                index_path.to_str().unwrap(),
-                &[more_docs.to_str().unwrap()],
-            )
+            .add(index_path.to_str().unwrap(), &[more_docs.to_str().unwrap()])
             .await
             .expect("Failed to add documents");
 
@@ -1519,19 +1764,13 @@ mod indexer_tests {
 
         // Create initial index
         indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
         // Try to create again without force - should fail
         let result = indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await;
 
         assert!(matches!(result, Err(IndexerError::IndexExists(_))));
@@ -1572,10 +1811,7 @@ mod indexer_tests {
             .unwrap();
 
         indexer1
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
@@ -1603,9 +1839,8 @@ mod indexer_tests {
     #[ignore = "Requires model files - run with --ignored"]
     async fn test_indexer_with_progress_callback() {
         use crate::Indexer;
-        use kjarni_rag::ProgressStage;
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let dir = TempDir::new().unwrap();
         let index_path = dir.path().join("test_index");
@@ -1632,15 +1867,53 @@ mod indexer_tests {
             .await
             .unwrap();
 
+        // Verify the callback was configured
+        assert!(indexer.has_progress_callback());
+
         indexer
-            .create(
-                index_path.to_str().unwrap(),
-                &[docs_dir.to_str().unwrap()],
-            )
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
         // Should have received multiple progress callbacks
-        assert!(progress_count.load(Ordering::SeqCst) > 0);
+        let count = progress_count.load(Ordering::SeqCst);
+        println!("Progress callback invoked {} times", count);
+        assert!(
+            count > 0,
+            "Progress callback should have been invoked at least once"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires model files - run with --ignored"]
+    async fn test_indexer_without_progress_callback() {
+        use crate::Indexer;
+
+        let dir = TempDir::new().unwrap();
+        let index_path = dir.path().join("test_index");
+        let docs_dir = dir.path().join("docs");
+
+        fs::create_dir(&docs_dir).unwrap();
+        File::create(docs_dir.join("doc.txt"))
+            .unwrap()
+            .write_all(b"Content")
+            .unwrap();
+
+        let indexer = Indexer::builder("minilm-l6-v2")
+            .cpu()
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+
+        // Verify no callback configured
+        assert!(!indexer.has_progress_callback());
+
+        // Should still work without callback
+        let result = indexer
+            .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
+            .await;
+
+        assert!(result.is_ok());
     }
 }
