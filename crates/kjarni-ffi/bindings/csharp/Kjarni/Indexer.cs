@@ -415,8 +415,21 @@ namespace Kjarni
         {
             get
             {
-                var ptr = Native.kjarni_indexer_model_name(_handle);
-                return ptr != IntPtr.Zero ? Marshal.PtrToStringUTF8(ptr) ?? "" : "";
+                // First call to get required size
+                var required = (int)Native.kjarni_indexer_model_name(_handle, IntPtr.Zero, UIntPtr.Zero);
+                if (required == 0) return "";
+
+                // Allocate buffer and get the string
+                var buf = Marshal.AllocHGlobal(required);
+                try
+                {
+                    Native.kjarni_indexer_model_name(_handle, buf, (UIntPtr)required);
+                    return Marshal.PtrToStringUTF8(buf) ?? "";
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buf);
+                }
             }
         }
 

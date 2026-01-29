@@ -253,7 +253,6 @@ impl ModelWeights {
     }
 
     /// Returns a 1D f32 array. Only use for small tensors like biases.
-    #[deprecated(note = "use with_raw_tensor for memory-efficient access")]
     pub fn get_array1(&self, name: &str) -> Result<Array1<f32>> {
         #[allow(deprecated)]
         self.get_typed_tensor(name)?

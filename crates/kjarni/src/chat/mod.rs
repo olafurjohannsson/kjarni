@@ -305,17 +305,12 @@ mod chat_integration_tests {
         );
     }
     #[tokio::test]
-    #[ignore]
     async fn test_real_blocking_conversation_flow() {
         let chat = load_real_model().await;
         let mut convo = chat.conversation();
 
-        // 1. Simpler Prompt for 0.5B model
-        // Qwen 0.5B is often chatty. Let's give it a distinctive fact.
         let response1 = convo.send("My name is Olafur.").await.unwrap();
         println!("Response 1: {}", response1);
-
-        // 2. Ask for recall
         let response2 = convo.send("What is my name?").await.unwrap();
         println!("Response 2: {}", response2);
 

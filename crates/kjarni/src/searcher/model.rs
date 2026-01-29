@@ -72,7 +72,9 @@ impl Searcher {
     pub async fn new(model: &str) -> SearcherResult<Self> {
         Self::builder(model).build().await
     }
-
+    pub fn is_quiet(&self) -> bool {
+        self.quiet
+    }
     /// Static keyword search (no embedder needed)
     pub fn search_keywords(
         index_path: &str,

@@ -382,18 +382,18 @@ impl CpuEncoder for CpuTransformerEncoder {
 
     fn forward_with_buffers(
         &self,
-        input_ids: &Array3<f32>,
+        hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
-        unimplemented!()
         // let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
+        let mut hidden = hidden_states.clone();
+        
+        self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
 
-        // self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
-
-        // Ok(CpuEncoderOutput {
-        //     last_hidden_state: hidden,
-        // })
+        Ok(CpuEncoderOutput {
+            last_hidden_state: hidden,
+        })
     }
     fn forward_layers(
         &self,

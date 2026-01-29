@@ -24,7 +24,7 @@ Example:
 """
 
 from typing import Optional, List, Dict, Any
-from ctypes import c_void_p, c_char_p, c_size_t, c_int32, c_float, c_bool, byref
+from ctypes import c_void_p, c_char_p, c_size_t, c_int32, c_float, c_bool, byref, create_string_buffer
 from dataclasses import dataclass
 from enum import Enum
 
@@ -286,14 +286,22 @@ class Searcher:
 
     @property
     def model_name(self) -> str:
-        """Get the embedding model name."""
-        name = _lib.kjarni_searcher_model_name(self._handle)
-        return name.decode("utf-8") if name else ""
+        """Get the embedding model name used by this searcher."""
+        required = _lib.kjarni_searcher_model_name(self._handle, None, 0)
+        if required == 0:
+            return ""
+        
+        buf = create_string_buffer(required)
+        _lib.kjarni_searcher_model_name(self._handle, buf, required)
+        return buf.value.decode("utf-8")
 
     @property
     def reranker_model(self) -> Optional[str]:
-        """Get the reranker model name, or None if not configured."""
-        name = _lib.kjarni_searcher_reranker_model(self._handle)
-        if name:
-            return name.decode("utf-8")
-        return None
+        """Get the reranker model name, or None if no reranker is configured."""
+        required = _lib.kjarni_searcher_reranker_model(self._handle, None, 0)
+        if required == 0:
+            return None
+        
+        buf = create_string_buffer(required)
+        _lib.kjarni_searcher_reranker_model(self._handle, buf, required)
+        return buf.value.decode("utf-8")

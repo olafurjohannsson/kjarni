@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::io::{self, BufRead, Read};
+use std::io::{self, Read};
 use std::path::Path;
 
 use kjarni::ModelType;
@@ -36,22 +36,6 @@ pub fn resolve_input(input: Option<&str>) -> Result<String> {
         }
     }
 }
-
-/// Resolve input as lines (for batch processing)
-/// 
-/// Useful for: rerank documents, batch encode, etc.
-pub fn resolve_input_lines(input: Option<&str>) -> Result<Vec<String>> {
-    let text = resolve_input(input)?;
-    Ok(text.lines().map(|s| s.to_string()).filter(|s| !s.is_empty()).collect())
-}
-
-/// Check if stdin has data (non-blocking check)
-pub fn stdin_has_data() -> bool {
-    use std::io::IsTerminal;
-    !io::stdin().is_terminal()
-}
-
-
 
 /// Create a helpful error message with "did you mean?" suggestions
 pub fn model_not_found_error(name: &str, arch_hint: Option<&str>) -> String {

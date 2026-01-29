@@ -51,6 +51,29 @@ async fn main() -> Result<()> {
             .await
         }
 
+        Commands::Embed {
+            input,
+            model,
+            model_path,
+            format,
+            normalize,
+            pooling,
+            gpu,
+            quiet,
+        } => {
+            commands::embed::run(
+                input.as_deref(),
+                &model,
+                model_path.as_deref(),
+                &format,
+                normalize,
+                &pooling,
+                gpu,
+                quiet,
+            )
+            .await
+        }
+
         Commands::Summarize {
             input,
             model,
@@ -104,7 +127,7 @@ async fn main() -> Result<()> {
             commands::transcribe::run(&file, &model, model_path.as_deref(), language.as_deref())
                 .await
         }
-        
+
         Commands::Classify {
             input,
             model,
@@ -134,7 +157,8 @@ async fn main() -> Result<()> {
                 gpu,
                 dtype.as_deref(),
                 quiet,
-            ).await
+            )
+            .await
         }
 
         Commands::Rerank {
@@ -180,7 +204,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-
 
         Commands::Index { action } => commands::index::run(action).await,
 

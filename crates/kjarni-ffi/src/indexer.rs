@@ -16,14 +16,13 @@
 //! which are executed on a shared Tokio runtime.
 
 use crate::callback::{
-    is_cancelled, KjarniCancelToken, KjarniProgress, KjarniProgressCallbackFn,
-    KjarniProgressStage,
+    KjarniCancelToken, KjarniProgress, KjarniProgressCallbackFn, KjarniProgressStage, is_cancelled,
 };
 use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use kjarni::ProgressStage;
-use kjarni::indexer::{Indexer, IndexerError, IndexInfo, IndexStats};
-use std::ffi::{c_char, c_void, CStr, CString};
+use kjarni::indexer::{IndexInfo, IndexStats, Indexer, IndexerError};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
 // =============================================================================
@@ -509,27 +508,28 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     // Create progress callback closure
     // We always create a closure to avoid generic type inference issues
     // The closure checks internally if the FFI callback is present
-    let on_progress = move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
-        if let Some(callback) = progress_callback {
-            let ffi_stage = convert_stage(stage);
-            
-            // Convert message to C string (temporary, valid for callback duration)
-            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
-            let msg_ptr = msg_cstring
-                .as_ref()
-                .map(|c| c.as_ptr())
-                .unwrap_or(ptr::null());
+    let on_progress =
+        move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+            if let Some(callback) = progress_callback {
+                let ffi_stage = convert_stage(stage);
 
-            let progress = KjarniProgress {
-                stage: ffi_stage,
-                current,
-                total,
-                message: msg_ptr,
-            };
+                // Convert message to C string (temporary, valid for callback duration)
+                let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+                let msg_ptr = msg_cstring
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or(ptr::null());
 
-            callback(progress, user_data);
-        }
-    };
+                let progress = KjarniProgress {
+                    stage: ffi_stage,
+                    current,
+                    total,
+                    message: msg_ptr,
+                };
+
+                callback(progress, user_data);
+            }
+        };
 
     // Create cancellation check closure
     let is_cancelled_fn = move || -> bool {
@@ -625,9 +625,7 @@ pub unsafe extern "C" fn kjarni_indexer_add(
     };
 
     // Call the simple Rust API directly (no callbacks)
-    let result = get_runtime().block_on(async {
-        indexer_ref.add(index_path, &input_vec).await
-    });
+    let result = get_runtime().block_on(async { indexer_ref.add(index_path, &input_vec).await });
 
     match result {
         Ok(count) => {
@@ -706,26 +704,27 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     };
 
     // Create progress callback closure
-    let on_progress = move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
-        if let Some(callback) = progress_callback {
-            let ffi_stage = convert_stage(stage);
-            
-            let msg_cstring = msg.and_then(|s| CString::new(s).ok());
-            let msg_ptr = msg_cstring
-                .as_ref()
-                .map(|c| c.as_ptr())
-                .unwrap_or(ptr::null());
+    let on_progress =
+        move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
+            if let Some(callback) = progress_callback {
+                let ffi_stage = convert_stage(stage);
 
-            let progress = KjarniProgress {
-                stage: ffi_stage,
-                current,
-                total,
-                message: msg_ptr,
-            };
+                let msg_cstring = msg.and_then(|s| CString::new(s).ok());
+                let msg_ptr = msg_cstring
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or(ptr::null());
 
-            callback(progress, user_data);
-        }
-    };
+                let progress = KjarniProgress {
+                    stage: ffi_stage,
+                    current,
+                    total,
+                    message: msg_ptr,
+                };
+
+                callback(progress, user_data);
+            }
+        };
 
     // Create cancellation check closure
     let is_cancelled_fn = move || -> bool {
@@ -739,7 +738,12 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     // Call the Rust API with callbacks
     let result = get_runtime().block_on(async {
         indexer_ref
-            .add_with_callback(index_path, &input_vec, Some(on_progress), Some(is_cancelled_fn))
+            .add_with_callback(
+                index_path,
+                &input_vec,
+                Some(on_progress),
+                Some(is_cancelled_fn),
+            )
             .await
     });
 
@@ -859,28 +863,33 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
 /// - `indexer` must be a valid handle or NULL
 /// - Returned string must not be modified or freed
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_model_name(indexer: *const KjarniIndexer) -> *const c_char {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-
-    // Static buffer to hold the model name between calls
-    // This is a simple approach that works for single-threaded access patterns
-    static MODEL_NAME_BUF: OnceLock<Mutex<CString>> = OnceLock::new();
-
+pub unsafe extern "C" fn kjarni_indexer_model_name(
+    indexer: *const KjarniIndexer,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> usize {
     if indexer.is_null() {
-        return ptr::null();
+        return 0;
     }
 
-    let name = (*indexer).inner.model_name();
-    let mutex = MODEL_NAME_BUF.get_or_init(|| Mutex::new(CString::default()));
+    let name: &str = unsafe { (*indexer).inner.model_name() };
+    let name_bytes = name.as_bytes();
+    let required = name_bytes.len() + 1; // +1 for null terminator
 
-    if let Ok(mut guard) = mutex.lock() {
-        if let Ok(cstr) = CString::new(name) {
-            *guard = cstr;
-            return guard.as_ptr();
-        }
+    // If no buffer provided, just return required size
+    if buf.is_null() || buf_len == 0 {
+        return required;
     }
-    ptr::null()
+
+    // Copy as much as fits
+    let copy_len = name_bytes.len().min(buf_len.saturating_sub(1));
+    unsafe {
+        std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), buf as *mut u8, copy_len);
+
+        // Null terminate
+        *buf.add(copy_len) = 0;
+    }
+    required
 }
 
 /// Get the embedding dimension used by the indexer.

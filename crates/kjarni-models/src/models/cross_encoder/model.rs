@@ -41,7 +41,7 @@ use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
 pub struct CrossEncoder {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
-    config: Arc<dyn ModelConfig>,
+    config: Arc<dyn ModelConfig + Send + Sync>,
     model_type: Option<ModelType>,
 }
 

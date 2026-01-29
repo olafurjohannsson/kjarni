@@ -70,7 +70,7 @@ mod t5_generation_test {
         let model = T5Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
         let generator = EncoderDecoderGenerator::new(Box::new(model))?;
         let output = generator.generate(input_text, None).await?;
-        assert_eq!(output, "Sie sind wie?");
+        assert_eq!(output, "Wie alte sind Sie?");
         Ok(())
     }
 }

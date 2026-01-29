@@ -1,11 +1,6 @@
-// =============================================================================
-// kjarni/src/chat/model.rs
-// =============================================================================
-
 //! Core Chat implementation using Generator.
 
 use futures::{Stream, StreamExt};
-use tokio::sync::mpsc;
 
 use kjarni_transformers::{
     ChatTemplate, Conversation, models::ModelType, traits::Device,
@@ -88,21 +83,21 @@ impl Chat {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: ChatBuilder) -> ChatResult<Self> {
-        // Step 1: Resolve model type
+        // Resolve model type
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| ChatError::UnknownModel(builder.model.clone()))?;
 
-        // Step 2: Validate model for chat
+        // Validate model for chat
         let validation = validate_for_chat(model_type)?;
 
-        // Step 3: Emit warnings if not suppressed
+        // Emit warnings if not suppressed
         if !builder.quiet && !builder.allow_suboptimal {
             for warning in &validation.warnings {
-                eprintln!("⚠️  {}", warning);
+                eprintln!("Warning: {}", warning);
             }
         }
 
-        // Step 4: Build the inner generator
+        // Build the inner generator
         let mut gen_builder = GeneratorBuilder::new(&builder.model)
             .device(builder.device)
             .download_policy(builder.download_policy);
@@ -154,12 +149,12 @@ impl Chat {
             crate::generator::GeneratorError::InvalidConfig(s) => ChatError::InvalidConfig(s),
         })?;
 
-        // Step 5: Verify chat template exists
+        // Verify chat template exists
         if generator.decoder().model.chat_template().is_none() {
             return Err(ChatError::NoChatTemplate(builder.model));
         }
 
-        // Step 6: Get resolved generation config
+        // Get resolved generation config
         let generation_config = generator.generation_config().clone();
 
         Ok(Self {

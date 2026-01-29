@@ -92,26 +92,9 @@ typedef enum KjarniKjarniProgressStage {
   KJARNI_KJARNI_PROGRESS_STAGE_RERANKING = 6,
 } KjarniKjarniProgressStage;
 
-/**
- * Search mode enum for FFI.
- *
- * Determines how the search query is processed:
- * - Keyword (0): BM25 text matching only
- * - Semantic (1): Vector similarity only
- * - Hybrid (2): Combined approach (recommended)
- */
 typedef enum KjarniKjarniSearchMode {
-  /**
-   * BM25 keyword search
-   */
   KJARNI_KJARNI_SEARCH_MODE_KEYWORD = 0,
-  /**
-   * Embedding-based semantic search
-   */
   KJARNI_KJARNI_SEARCH_MODE_SEMANTIC = 1,
-  /**
-   * Combined keyword + semantic (default, recommended)
-   */
   KJARNI_KJARNI_SEARCH_MODE_HYBRID = 2,
 } KjarniKjarniSearchMode;
 
@@ -142,11 +125,6 @@ typedef struct KjarniKjarniIndexer KjarniKjarniIndexer;
  */
 typedef struct KjarniKjarniReranker KjarniKjarniReranker;
 
-/**
- * Opaque handle to a Searcher instance.
- *
- * Created via `kjarni_searcher_new`, must be freed via `kjarni_searcher_free`.
- */
 typedef struct KjarniKjarniSearcher KjarniKjarniSearcher;
 
 /**
@@ -439,116 +417,35 @@ typedef struct KjarniKjarniProgress {
  */
 typedef void (*KjarniKjarniProgressCallbackFn)(struct KjarniKjarniProgress progress, void *user_data);
 
-/**
- * Single search result returned from a query.
- *
- * Contains the matched text, relevance score, and associated metadata.
- */
 typedef struct KjarniKjarniSearchResult {
-  /**
-   * Relevance score (higher is better, scale depends on search mode)
-   */
   float score;
-  /**
-   * Document ID within the index
-   */
   uintptr_t document_id;
-  /**
-   * The matched text chunk (must be freed)
-   */
   char *text;
-  /**
-   * JSON-encoded metadata (must be freed, may be NULL)
-   */
   char *metadata_json;
 } KjarniKjarniSearchResult;
 
-/**
- * Array of search results.
- *
- * Must be freed with `kjarni_search_results_free` after use.
- */
 typedef struct KjarniKjarniSearchResults {
-  /**
-   * Pointer to array of results
-   */
   struct KjarniKjarniSearchResult *results;
-  /**
-   * Number of results
-   */
   uintptr_t len;
 } KjarniKjarniSearchResults;
 
-/**
- * Search options for customizing query behavior.
- *
- * Use `kjarni_search_options_default()` to get defaults, then modify as needed.
- */
 typedef struct KjarniKjarniSearchOptions {
-  /**
-   * Search mode (-1 = use searcher default)
-   */
   int32_t mode;
-  /**
-   * Number of results to return (0 = use searcher default)
-   */
   uintptr_t top_k;
-  /**
-   * Use reranker: -1 = auto (use if available), 0 = no, 1 = yes
-   */
   int32_t use_reranker;
-  /**
-   * Minimum score threshold (0.0 = no threshold)
-   */
   float threshold;
-  /**
-   * Filter by source file pattern, glob syntax (NULL = no filter)
-   */
   const char *source_pattern;
-  /**
-   * Metadata key to filter on (NULL = no filter)
-   */
   const char *filter_key;
-  /**
-   * Required value for filter_key (NULL = no filter)
-   */
   const char *filter_value;
 } KjarniKjarniSearchOptions;
 
-/**
- * Configuration for creating a Searcher.
- *
- * Use `kjarni_searcher_config_default()` to get sensible defaults,
- * then modify fields as needed before passing to `kjarni_searcher_new()`.
- */
 typedef struct KjarniKjarniSearcherConfig {
-  /**
-   * Device to run models on (CPU or GPU)
-   */
   enum KjarniKjarniDevice device;
-  /**
-   * Directory to cache downloaded models (NULL = system default)
-   */
   const char *cache_dir;
-  /**
-   * Embedding model name (NULL = "minilm-l6-v2")
-   */
   const char *model_name;
-  /**
-   * Cross-encoder reranker model (NULL = no reranking)
-   */
   const char *rerank_model;
-  /**
-   * Default search mode
-   */
   enum KjarniKjarniSearchMode default_mode;
-  /**
-   * Default number of results
-   */
   uintptr_t default_top_k;
-  /**
-   * Suppress progress output (1 = quiet, 0 = verbose)
-   */
   int32_t quiet;
 } KjarniKjarniSearcherConfig;
 
@@ -1068,7 +965,10 @@ kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete(const char *index_path);
  * - `indexer` must be a valid handle or NULL
  * - Returned string must not be modified or freed
  */
-kjarni_ const char *kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer);
+kjarni_
+uintptr_t kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer,
+                                    char *buf,
+                                    uintptr_t buf_len);
 
 /**
  * Get the embedding dimension used by the indexer.
@@ -1097,53 +997,17 @@ kjarni_ uintptr_t kjarni_indexer_dimension(const struct KjarniKjarniIndexer *ind
 kjarni_ uintptr_t kjarni_indexer_chunk_size(const struct KjarniKjarniIndexer *indexer);
 
 /**
- * Free search results and all contained strings.
- *
  * # Safety
- *
  * Must only be called once per `KjarniSearchResults` returned from search functions.
  */
 kjarni_ void kjarni_search_results_free(struct KjarniKjarniSearchResults results);
 
-/**
- * Get default search options.
- *
- * Default values:
- * - mode: -1 (use searcher default, typically Hybrid)
- * - top_k: 0 (use searcher default, typically 10)
- * - use_reranker: -1 (auto - use if configured)
- * - threshold: 0.0 (no minimum score)
- * - All filters: NULL (no filtering)
- */
 kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default(void);
 
-/**
- * Get default searcher configuration.
- *
- * Returns a configuration with sensible defaults:
- * - CPU device
- * - minilm-l6-v2 embedding model
- * - No reranker
- * - Hybrid search mode
- * - Top 10 results
- */
 kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default(void);
 
 /**
- * Create a new Searcher.
- *
- * # Arguments
- *
- * * `config` - Configuration options (NULL for defaults)
- * * `out` - Pointer to receive the created searcher handle
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- * On error, call `kjarni_last_error_message()` for details.
- *
  * # Safety
- *
  * - `out` must be a valid pointer
  * - The returned handle must be freed with `kjarni_searcher_free`
  */
@@ -1152,36 +1016,15 @@ enum KjarniKjarniErrorCode kjarni_searcher_new(const struct KjarniKjarniSearcher
                                                struct KjarniKjarniSearcher **out);
 
 /**
- * Free a Searcher handle.
- *
  * # Safety
- *
  * - `searcher` must be a handle returned by `kjarni_searcher_new`
  * - Must not be called more than once per handle
- * - Handle must not be used after freeing
  */
 kjarni_ void kjarni_searcher_free(struct KjarniKjarniSearcher *searcher);
 
 /**
- * Search with default options.
- *
- * Equivalent to calling `kjarni_searcher_search_with_options` with default options.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- * * `index_path` - Path to the index directory
- * * `query` - Search query string
- * * `out` - Pointer to receive search results
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
  * # Safety
- *
- * - All pointers must be valid
- * - Results must be freed with `kjarni_search_results_free`
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *searcher,
@@ -1190,27 +1033,8 @@ enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *s
                                                   struct KjarniKjarniSearchResults *out);
 
 /**
- * Search with custom options.
- *
- * Performs a search query against the specified index with custom options
- * for search mode, result count, reranking, filtering, etc.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- * * `index_path` - Path to the index directory
- * * `query` - Search query string
- * * `options` - Search options (use `kjarni_search_options_default()` as base)
- * * `out` - Pointer to receive search results
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
  * # Safety
- *
- * - All pointers must be valid
- * - Results must be freed with `kjarni_search_results_free`
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjarniSearcher *searcher,
@@ -1220,26 +1044,8 @@ enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjar
                                                                struct KjarniKjarniSearchResults *out);
 
 /**
- * Static keyword search (BM25) - no embedder needed.
- *
- * This is a convenience function for pure keyword search that doesn't
- * require loading an embedding model. Useful for quick text matching.
- *
- * # Arguments
- *
- * * `index_path` - Path to the index directory
- * * `query` - Search query string
- * * `top_k` - Maximum number of results to return
- * * `out` - Pointer to receive search results
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
  * # Safety
- *
- * - All pointers must be valid
- * - Results must be freed with `kjarni_search_results_free`
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
@@ -1248,81 +1054,51 @@ enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
                                                   struct KjarniKjarniSearchResults *out);
 
 /**
- * Check if the searcher has a reranker configured.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- *
- * # Returns
- *
- * `true` if a reranker is configured, `false` otherwise.
+ * # Safety
+ * `searcher` must be a valid handle or null.
  */
 kjarni_ bool kjarni_searcher_has_reranker(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * Get the default search mode.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- *
- * # Returns
- *
- * The default search mode, or Hybrid if searcher is NULL.
+ * # Safety
+ * `searcher` must be a valid handle or null.
  */
 kjarni_
 enum KjarniKjarniSearchMode kjarni_searcher_default_mode(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * Get the default number of results.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- *
- * # Returns
- *
- * The default top_k value, or 10 if searcher is NULL.
+ * # Safety
+ * `searcher` must be a valid handle or null.
  */
 kjarni_ uintptr_t kjarni_searcher_default_top_k(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * Get the embedding model name.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- *
- * # Returns
- *
- * Pointer to model name string, or NULL if searcher is NULL.
- * The returned pointer is valid until the next call to this function.
+ * Get searcher model name into caller-provided buffer.
+ * Returns the required buffer size (including null terminator).
+ * If buf is NULL or buf_len is 0, just returns required size.
  *
  * # Safety
- *
- * - `searcher` must be a valid handle or NULL
- * - Returned string must not be modified or freed
+ * - `searcher` must be a valid handle or null
+ * - `buf` must be valid for writes of `buf_len` bytes if non-null
  */
-kjarni_ const char *kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher);
+kjarni_
+uintptr_t kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher,
+                                     char *buf,
+                                     uintptr_t buf_len);
 
 /**
- * Get the reranker model name, if configured.
- *
- * # Arguments
- *
- * * `searcher` - Searcher handle
- *
- * # Returns
- *
- * Pointer to reranker model name string, or NULL if no reranker is configured.
- * The returned pointer is valid until the next call to this function.
+ * Get reranker model name into caller-provided buffer.
+ * Returns the required buffer size (including null terminator).
+ * Returns 0 if no reranker is configured or searcher is null.
+ * If buf is NULL or buf_len is 0, just returns required size.
  *
  * # Safety
- *
- * - `searcher` must be a valid handle or NULL
- * - Returned string must not be modified or freed
+ * - `searcher` must be a valid handle or null
+ * - `buf` must be valid for writes of `buf_len` bytes if non-null
  */
-kjarni_ const char *kjarni_searcher_reranker_model(const struct KjarniKjarniSearcher *searcher);
+kjarni_
+uintptr_t kjarni_searcher_reranker_model(const struct KjarniKjarniSearcher *searcher,
+                                         char *buf,
+                                         uintptr_t buf_len);
 
 #endif  /* KJARNI_FFI_H */

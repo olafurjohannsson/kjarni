@@ -222,20 +222,6 @@ impl ClassifierBuilder {
     /// Set custom labels for the model.
     ///
     /// Labels must be in the same order as the model's output indices.
-    /// Index 0 in output corresponds to `labels[0]`, etc.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Binary sentiment
-    /// .labels(vec!["negative", "positive"])
-    ///
-    /// // Icelandic sentiment
-    /// .labels(vec!["neikvætt", "jákvætt"])
-    ///
-    /// // Multi-class
-    /// .labels(vec!["anger", "fear", "joy", "sadness", "surprise"])
-    /// ```
     pub fn labels<S: Into<String>>(mut self, labels: Vec<S>) -> Self {
         self.label_config = Some(LabelConfig::new(
             labels.into_iter().map(|s| s.into()).collect(),
@@ -244,12 +230,6 @@ impl ClassifierBuilder {
     }
 
     /// Set labels from a comma-separated string.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// .labels_str("negative,neutral,positive")
-    /// ```
     pub fn labels_str(mut self, labels: &str) -> Self {
         self.label_config = Some(LabelConfig::from_str(labels));
         self

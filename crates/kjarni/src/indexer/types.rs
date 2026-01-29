@@ -1,6 +1,3 @@
-// kjarni/src/indexer/types.rs
-
-use std::collections::HashMap;
 
 /// Statistics returned after indexing
 #[derive(Debug, Clone)]

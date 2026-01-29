@@ -626,7 +626,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string indexPath);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr kjarni_indexer_model_name(IntPtr handle);
+        public static extern UIntPtr kjarni_indexer_model_name(IntPtr handle, IntPtr buf, UIntPtr buf_len);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_indexer_dimension(IntPtr handle);
@@ -685,10 +685,10 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         public static extern UIntPtr kjarni_searcher_default_top_k(IntPtr handle);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr kjarni_searcher_model_name(IntPtr handle);
+        public static extern UIntPtr kjarni_searcher_model_name(IntPtr handle, IntPtr buf, UIntPtr buf_len);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr kjarni_searcher_reranker_model(IntPtr handle);
+        public static extern UIntPtr kjarni_searcher_reranker_model(IntPtr handle, IntPtr buf, UIntPtr buf_len);
 
         // =================================================================
         // Helpers

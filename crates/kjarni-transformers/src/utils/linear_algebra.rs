@@ -871,6 +871,49 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     output
 }
 
+/// Batched matrix multiply: A @ B -> Out (no allocation)
+/// 
+/// Shapes:
+/// - a: [batch, heads, seq1, dim]
+/// - b: [batch, heads, dim, seq2]
+/// - out: [batch, heads, seq1, seq2] (pre-allocated)
+#[inline]
+pub fn matmul_4d_noalloc(
+    a: &Array4<f32>,
+    b: &Array4<f32>,
+    out: &mut Array4<f32>,
+) {
+    let (batch, heads, seq1, dim) = a.dim();
+    let seq2 = b.shape()[3];
+
+    debug_assert_eq!(out.dim(), (batch, heads, seq1, seq2), "Output shape mismatch");
+
+    // Parallelize over BATCH only
+    Zip::from(out.outer_iter_mut())
+        .and(a.outer_iter())
+        .and(b.outer_iter())
+        .par_for_each(|mut out_b, a_b, b_b| {
+            // Iterate over HEADS (sequential per thread)
+            Zip::from(out_b.outer_iter_mut())
+                .and(a_b.outer_iter())
+                .and(b_b.outer_iter())
+                .for_each(|mut out_h, a_h, b_h| {
+                    let a_s = a_h.as_standard_layout();
+                    let b_s = b_h.as_standard_layout();
+                    let o_s = out_h.as_slice_mut().expect("Output buffer must be contiguous");
+
+                    faer::linalg::matmul::matmul(
+                        faer::mat::from_row_major_slice_mut(o_s, seq1, seq2),
+                        faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
+                        faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
+                        None,
+                        1.0,
+                        Parallelism::None,
+                    );
+                });
+        });
+}
+
 #[inline]
 pub fn matmul_4d_old(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     let (batch, heads, seq1, dim) = a.dim();

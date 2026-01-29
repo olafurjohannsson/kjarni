@@ -113,12 +113,39 @@ pub enum Commands {
         quiet: bool,
     },
 
+    Embed {
+        /// Input text, file path, or stdin if not provided
+        input: Option<String>,
+
+        #[arg(short, long, default_value = "minilm-l6v2")]
+        model: String,
+
+        #[arg(long)]
+        model_path: Option<String>,
+
+        #[arg(long, default_value = "raw")]
+        format: String,
+
+        #[arg(long)]
+        normalize: bool,
+
+        #[arg(long, default_value = "cls")]
+        pooling: String,
+
+        #[arg(long)]
+        gpu: bool,
+
+        /// Suppress status messages
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
     /// Translate text between languages
     Translate {
         /// Input text, file path, or stdin if not provided
         input: Option<String>,
 
-        #[arg(short, long, default_value = "marian-en-is")]
+        #[arg(short, long, default_value = "t5-flan")]
         model: String,
 
         #[arg(long)]
@@ -351,19 +378,13 @@ pub enum ModelCommands {
     },
 
     /// Remove a downloaded model
-    Remove {
-        name: String,
-    },
+    Remove { name: String },
 
     /// Show detailed info about a model
-    Info {
-        name: String,
-    },
+    Info { name: String },
 
     /// Search for models by name or description
-    Search {
-        query: String,
-    },
+    Search { query: String },
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -568,14 +589,17 @@ mod tests {
     #[test]
     fn test_generate_with_sampling_params() {
         let cli = parse_args(&[
-            "generate",
-            "--top-k", "50",
-            "--top-p", "0.9",
-            "--min-p", "0.05",
-        ]).unwrap();
+            "generate", "--top-k", "50", "--top-p", "0.9", "--min-p", "0.05",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Generate { top_k, top_p, min_p, .. } => {
+            Commands::Generate {
+                top_k,
+                top_p,
+                min_p,
+                ..
+            } => {
                 assert_eq!(top_k, Some(50));
                 assert_eq!(top_p, Some(0.9));
                 assert_eq!(min_p, Some(0.05));
@@ -637,17 +661,24 @@ mod tests {
         let cli = parse_args(&[
             "generate",
             "test prompt",
-            "-m", "llama3.2-3b-instruct",
-            "-n", "256",
-            "-t", "0.8",
-            "--top-k", "40",
-            "--top-p", "0.95",
-            "--repetition-penalty", "1.2",
+            "-m",
+            "llama3.2-3b-instruct",
+            "-n",
+            "256",
+            "-t",
+            "0.8",
+            "--top-k",
+            "40",
+            "--top-p",
+            "0.95",
+            "--repetition-penalty",
+            "1.2",
             "--greedy",
             "--gpu",
             "--no-stream",
             "-q",
-        ]).unwrap();
+        ])
+        .unwrap();
 
         match cli.command {
             Commands::Generate {
@@ -871,9 +902,13 @@ mod tests {
     #[test]
     fn test_search_with_rerank_model() {
         let cli = parse_args(&[
-            "search", "./index", "query",
-            "--rerank-model", "ms-marco-minilm"
-        ]).unwrap();
+            "search",
+            "./index",
+            "query",
+            "--rerank-model",
+            "ms-marco-minilm",
+        ])
+        .unwrap();
 
         match cli.command {
             Commands::Search { rerank_model, .. } => {
@@ -918,7 +953,14 @@ mod tests {
         let cli = parse_args(&["model", "list"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::List { arch, task, downloaded } } => {
+            Commands::Model {
+                action:
+                    ModelCommands::List {
+                        arch,
+                        task,
+                        downloaded,
+                    },
+            } => {
                 assert!(arch.is_none());
                 assert!(task.is_none());
                 assert!(!downloaded);
@@ -930,14 +972,25 @@ mod tests {
     #[test]
     fn test_model_list_with_filters() {
         let cli = parse_args(&[
-            "model", "list",
-            "--arch", "bert",
-            "--task", "embedding",
-            "--downloaded"
-        ]).unwrap();
+            "model",
+            "list",
+            "--arch",
+            "bert",
+            "--task",
+            "embedding",
+            "--downloaded",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::List { arch, task, downloaded } } => {
+            Commands::Model {
+                action:
+                    ModelCommands::List {
+                        arch,
+                        task,
+                        downloaded,
+                    },
+            } => {
                 assert_eq!(arch, Some("bert".to_string()));
                 assert_eq!(task, Some("embedding".to_string()));
                 assert!(downloaded);
@@ -951,7 +1004,9 @@ mod tests {
         let cli = parse_args(&["model", "download", "minilm-l6-v2"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::Download { name, gguf, quiet } } => {
+            Commands::Model {
+                action: ModelCommands::Download { name, gguf, quiet },
+            } => {
                 assert_eq!(name, "minilm-l6-v2");
                 assert!(!gguf);
                 assert!(!quiet);
@@ -965,7 +1020,9 @@ mod tests {
         let cli = parse_args(&["model", "download", "llama3.2-1b", "--gguf"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::Download { name, gguf, .. } } => {
+            Commands::Model {
+                action: ModelCommands::Download { name, gguf, .. },
+            } => {
                 assert_eq!(name, "llama3.2-1b");
                 assert!(gguf);
             }
@@ -978,7 +1035,9 @@ mod tests {
         let cli = parse_args(&["model", "info", "phi3.5-mini"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::Info { name } } => {
+            Commands::Model {
+                action: ModelCommands::Info { name },
+            } => {
                 assert_eq!(name, "phi3.5-mini");
             }
             _ => panic!("Expected Model Info command"),
@@ -990,7 +1049,9 @@ mod tests {
         let cli = parse_args(&["model", "remove", "old-model"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::Remove { name } } => {
+            Commands::Model {
+                action: ModelCommands::Remove { name },
+            } => {
                 assert_eq!(name, "old-model");
             }
             _ => panic!("Expected Model Remove command"),
@@ -1002,7 +1063,9 @@ mod tests {
         let cli = parse_args(&["model", "search", "llama"]).unwrap();
 
         match cli.command {
-            Commands::Model { action: ModelCommands::Search { query } } => {
+            Commands::Model {
+                action: ModelCommands::Search { query },
+            } => {
                 assert_eq!(query, "llama");
             }
             _ => panic!("Expected Model Search command"),
@@ -1018,14 +1081,17 @@ mod tests {
         let cli = parse_args(&["index", "create", "output.idx"]).unwrap();
 
         match cli.command {
-            Commands::Index { action: IndexCommands::Create {
-                output,
-                inputs,
-                chunk_size,
-                chunk_overlap,
-                model,
-                ..
-            }} => {
+            Commands::Index {
+                action:
+                    IndexCommands::Create {
+                        output,
+                        inputs,
+                        chunk_size,
+                        chunk_overlap,
+                        model,
+                        ..
+                    },
+            } => {
                 assert_eq!(output, "output.idx");
                 assert!(inputs.is_empty());
                 assert_eq!(chunk_size, 1000);
@@ -1039,12 +1105,19 @@ mod tests {
     #[test]
     fn test_index_create_with_inputs() {
         let cli = parse_args(&[
-            "index", "create", "out.idx",
-            "file1.txt", "file2.txt", "dir/"
-        ]).unwrap();
+            "index",
+            "create",
+            "out.idx",
+            "file1.txt",
+            "file2.txt",
+            "dir/",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Index { action: IndexCommands::Create { inputs, .. }} => {
+            Commands::Index {
+                action: IndexCommands::Create { inputs, .. },
+            } => {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(inputs[0], "file1.txt");
                 assert_eq!(inputs[1], "file2.txt");
@@ -1057,23 +1130,32 @@ mod tests {
     #[test]
     fn test_index_create_with_options() {
         let cli = parse_args(&[
-            "index", "create", "out.idx",
-            "--chunk-size", "500",
-            "--chunk-overlap", "100",
-            "-m", "nomic-embed-text",
+            "index",
+            "create",
+            "out.idx",
+            "--chunk-size",
+            "500",
+            "--chunk-overlap",
+            "100",
+            "-m",
+            "nomic-embed-text",
             "--gpu",
-            "-q"
-        ]).unwrap();
+            "-q",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Index { action: IndexCommands::Create {
-                chunk_size,
-                chunk_overlap,
-                model,
-                gpu,
-                quiet,
-                ..
-            }} => {
+            Commands::Index {
+                action:
+                    IndexCommands::Create {
+                        chunk_size,
+                        chunk_overlap,
+                        model,
+                        gpu,
+                        quiet,
+                        ..
+                    },
+            } => {
                 assert_eq!(chunk_size, 500);
                 assert_eq!(chunk_overlap, 100);
                 assert_eq!(model, "nomic-embed-text");
@@ -1089,7 +1171,12 @@ mod tests {
         let cli = parse_args(&["index", "add", "existing.idx", "newfile.txt"]).unwrap();
 
         match cli.command {
-            Commands::Index { action: IndexCommands::Add { index_path, inputs, .. }} => {
+            Commands::Index {
+                action:
+                    IndexCommands::Add {
+                        index_path, inputs, ..
+                    },
+            } => {
                 assert_eq!(index_path, "existing.idx");
                 assert_eq!(inputs, vec!["newfile.txt".to_string()]);
             }
@@ -1102,7 +1189,9 @@ mod tests {
         let cli = parse_args(&["index", "info", "my.idx"]).unwrap();
 
         match cli.command {
-            Commands::Index { action: IndexCommands::Info { index_path }} => {
+            Commands::Index {
+                action: IndexCommands::Info { index_path },
+            } => {
                 assert_eq!(index_path, "my.idx");
             }
             _ => panic!("Expected Index Info command"),
@@ -1217,7 +1306,9 @@ mod tests {
         let cli = parse_args(&["rerank", "query", "doc1", "doc2", "doc3"]).unwrap();
 
         match cli.command {
-            Commands::Rerank { query, documents, .. } => {
+            Commands::Rerank {
+                query, documents, ..
+            } => {
                 assert_eq!(query, "query");
                 assert_eq!(documents.len(), 3);
             }
@@ -1269,11 +1360,16 @@ mod tests {
         let cli = parse_args(&[
             "summarize",
             "input.txt",
-            "--min-length", "50",
-            "--max-length", "200",
-            "--num-beams", "4",
-            "--length-penalty", "1.5",
-        ]).unwrap();
+            "--min-length",
+            "50",
+            "--max-length",
+            "200",
+            "--num-beams",
+            "4",
+            "--length-penalty",
+            "1.5",
+        ])
+        .unwrap();
 
         match cli.command {
             Commands::Summarize {
@@ -1303,9 +1399,15 @@ mod tests {
         let cli = parse_args(&["translate"]).unwrap();
 
         match cli.command {
-            Commands::Translate { input, model, src, dst, .. } => {
+            Commands::Translate {
+                input,
+                model,
+                src,
+                dst,
+                ..
+            } => {
                 assert!(input.is_none());
-                assert_eq!(model, "marian-en-is");
+                assert_eq!(model, "t5-flan");
                 assert!(src.is_none());
                 assert!(dst.is_none());
             }
@@ -1315,11 +1417,7 @@ mod tests {
 
     #[test]
     fn test_translate_with_languages() {
-        let cli = parse_args(&[
-            "translate",
-            "--src", "en",
-            "--dst", "is",
-        ]).unwrap();
+        let cli = parse_args(&["translate", "--src", "en", "--dst", "is"]).unwrap();
 
         match cli.command {
             Commands::Translate { src, dst, .. } => {
@@ -1339,7 +1437,12 @@ mod tests {
         let cli = parse_args(&["transcribe", "audio.wav"]).unwrap();
 
         match cli.command {
-            Commands::Transcribe { file, model, language, .. } => {
+            Commands::Transcribe {
+                file,
+                model,
+                language,
+                ..
+            } => {
                 assert_eq!(file, "audio.wav");
                 assert_eq!(model, "whisper-tiny");
                 assert!(language.is_none());
@@ -1351,13 +1454,22 @@ mod tests {
     #[test]
     fn test_transcribe_with_options() {
         let cli = parse_args(&[
-            "transcribe", "audio.mp3",
-            "-m", "whisper-large-v3",
-            "--language", "is",
-        ]).unwrap();
+            "transcribe",
+            "audio.mp3",
+            "-m",
+            "whisper-large-v3",
+            "--language",
+            "is",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Transcribe { file, model, language, .. } => {
+            Commands::Transcribe {
+                file,
+                model,
+                language,
+                ..
+            } => {
                 assert_eq!(file, "audio.mp3");
                 assert_eq!(model, "whisper-large-v3");
                 assert_eq!(language, Some("is".to_string()));
@@ -1365,5 +1477,35 @@ mod tests {
             _ => panic!("Expected Transcribe command"),
         }
     }
+}
 
+mod send_sync_tests {
+    use kjarni::{
+        Classifier, Embedder, Indexer, Reranker, Searcher, chat::Chat, generator::Generator,
+    };
+    // Compile time verification
+    const _: () = {
+        const fn assert_send<T: Send>() {}
+        const fn assert_sync<T: Sync>() {}
+        assert_send::<Embedder>();
+        assert_sync::<Embedder>();
+
+        assert_send::<Indexer>();
+        assert_sync::<Indexer>();
+
+        assert_send::<Searcher>();
+        assert_sync::<Searcher>();
+
+        assert_send::<Reranker>();
+        assert_sync::<Reranker>();
+
+        assert_send::<Generator>();
+        assert_sync::<Generator>();
+
+        assert_send::<Chat>();
+        assert_sync::<Chat>();
+
+        assert_send::<Classifier>();
+        assert_sync::<Classifier>();
+    };
 }

@@ -349,29 +349,5 @@ impl EncoderSelfAttention {
             }
         }
     }
-    /// Q @ K^T matmul for attention scores.
-    ///
-    /// NOTE: This is a placeholder - true noalloc would need custom implementation.
-    #[inline]
-    fn matmul_qk_noalloc(
-        q: &ndarray::Array4<f32>,       // [batch, heads, seq, head_dim]
-        k_t: &ndarray::Array4<f32>,     // [batch, heads, head_dim, seq]
-        out: &mut ndarray::Array4<f32>, // [batch, heads, seq, seq]
-    ) {
-        let result = matmul_4d(q, k_t);
-        out.assign(&result);
-    }
-
-    /// Scores @ V matmul for context.
-    ///
-    /// NOTE: This is a placeholder - true noalloc would need custom implementation.
-    #[inline]
-    fn matmul_sv_noalloc(
-        scores: &ndarray::Array4<f32>,  // [batch, heads, seq, seq]
-        v: &ndarray::Array4<f32>,       // [batch, heads, seq, head_dim]
-        out: &mut ndarray::Array4<f32>, // [batch, heads, seq, head_dim]
-    ) {
-        let result = matmul_4d(scores, v);
-        out.assign(&result);
-    }
+    
 }

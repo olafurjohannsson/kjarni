@@ -26,7 +26,7 @@ Example:
 """
 
 from typing import Optional, List, Sequence, Callable, NamedTuple
-from ctypes import c_void_p, c_char_p, c_size_t, c_int32, byref, POINTER
+from ctypes import c_void_p, c_char_p, c_size_t, c_int32, byref, POINTER, create_string_buffer
 from dataclasses import dataclass
 
 from ._ffi import (
@@ -452,8 +452,15 @@ class Indexer:
     @property
     def model_name(self) -> str:
         """Get the embedding model name used by this indexer."""
-        name = _lib.kjarni_indexer_model_name(self._handle)
-        return name.decode("utf-8") if name else ""
+        # First call to get required size
+        required = _lib.kjarni_indexer_model_name(self._handle, None, 0)
+        if required == 0:
+            return ""
+        
+        # Allocate buffer and get the string
+        buf = create_string_buffer(required)
+        _lib.kjarni_indexer_model_name(self._handle, buf, required)
+        return buf.value.decode("utf-8")
 
     @property
     def dimension(self) -> int:

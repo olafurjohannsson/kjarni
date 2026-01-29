@@ -453,8 +453,8 @@ _lib.kjarni_index_info_free.restype = None
 _lib.kjarni_index_info_free.argtypes = [KjarniIndexInfo]
 _lib.kjarni_index_delete.restype = c_int
 _lib.kjarni_index_delete.argtypes = [c_char_p]
-_lib.kjarni_indexer_model_name.restype = c_char_p
-_lib.kjarni_indexer_model_name.argtypes = [c_void_p]
+_lib.kjarni_indexer_model_name.restype = c_size_t
+_lib.kjarni_indexer_model_name.argtypes = [c_void_p, c_char_p, c_size_t]
 _lib.kjarni_indexer_dimension.restype = c_size_t
 _lib.kjarni_indexer_dimension.argtypes = [c_void_p]
 _lib.kjarni_indexer_chunk_size.restype = c_size_t
@@ -483,10 +483,10 @@ _lib.kjarni_searcher_default_mode.restype = c_int
 _lib.kjarni_searcher_default_mode.argtypes = [c_void_p]
 _lib.kjarni_searcher_default_top_k.restype = c_size_t
 _lib.kjarni_searcher_default_top_k.argtypes = [c_void_p]
-_lib.kjarni_searcher_model_name.restype = c_char_p
-_lib.kjarni_searcher_model_name.argtypes = [c_void_p]
-_lib.kjarni_searcher_reranker_model.restype = c_char_p
-_lib.kjarni_searcher_reranker_model.argtypes = [c_void_p]
+_lib.kjarni_searcher_model_name.restype = c_size_t
+_lib.kjarni_searcher_model_name.argtypes = [c_void_p, c_char_p, c_size_t]
+_lib.kjarni_searcher_reranker_model.restype = c_size_t
+_lib.kjarni_searcher_reranker_model.argtypes = [c_void_p, c_char_p, c_size_t]
 
 # =============================================================================
 # Error Handling

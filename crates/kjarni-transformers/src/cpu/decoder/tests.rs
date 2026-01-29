@@ -19,6 +19,7 @@
 
 use crate::cache::{Cache, GpuKVCache};
 use crate::cpu::decoder::CpuDecoderBackend;
+use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::backend::AnyDecoderBackend;
 use crate::decoder::prelude::GpuDecoderBackend;
 use crate::decoder::traits::{
@@ -881,9 +882,6 @@ mod decoder_backend_tests {
                 .fold(0.0f32, f32::max)
         }
 
-        // Note: Full parity tests require a model that supports both CPU and GPU.
-        // These are structural tests that verify the test framework works.
-
         #[test]
         fn test_logits_close_same() {
             let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);
@@ -929,10 +927,21 @@ mod decoder_backend_tests {
         }
 
         #[test]
+        fn test_gpu_backend_is_send_sync() {
+            fn assert_send_sync<T: Send + Sync>() {}
+            assert_send_sync::<GpuDecoderBackend>();
+        }
+
+        #[test]
         fn test_any_backend_is_send_sync() {
             fn assert_send_sync<T: Send + Sync>() {}
-            // Note: AnyDecoderBackend might not be Send due to GPU internals
-            // This test documents the actual behavior
+            assert_send_sync::<AnyDecoderBackend>();
+        }
+
+        #[test]
+        fn test_generator_is_send_sync() {
+            fn assert_send_sync<T: Send + Sync>() {}
+            assert_send_sync::<DecoderGenerator>();
         }
 
         #[test]
@@ -950,7 +959,7 @@ mod decoder_backend_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore] // Run with --ignored
+        #[ignore]
         async fn test_many_decode_iterations_cpu() {
             let model = MockCpuDecoderModel::pipelined();
             let backend = CpuDecoderBackend::new();

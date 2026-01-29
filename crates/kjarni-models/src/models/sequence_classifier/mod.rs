@@ -51,7 +51,7 @@ use crate::{BertConfig, DistilBertConfig};
 pub struct SequenceClassifier {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
-    config: Arc<dyn ModelConfig>,
+    config: Arc<dyn ModelConfig + Send + Sync>,
     model_type: Option<ModelType>,
     labels: Option<Vec<String>>,
 }

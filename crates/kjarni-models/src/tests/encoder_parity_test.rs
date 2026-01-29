@@ -6,9 +6,7 @@ use crate::models::bart::model::BartModel;
 use crate::models::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
 use kjarni_transformers::cpu::encoder::prelude::*;
-use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
 use kjarni_transformers::encoder_decoder::EncoderDecoderLanguageModel;
-use kjarni_transformers::encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder};
 use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::ModelInput;
@@ -677,7 +675,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None)
                 .await?;
 
-        let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
         let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
         let cpu_decoder = cpu_model.pipeline.cpu_decoder().expect("No CPU decoder");
         let gpu_decoder = gpu_model.pipeline.gpu_decoder().expect("No GPU decoder");
@@ -907,8 +904,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
         println!("=== DECODER STEP 4: LAYER 0 DETAILED BREAKDOWN ===");
 
-        let decoder_hidden_cpu =
-            cpu_decoder.embed_and_normalize(&decoder_input_ids, position_offset)?;
 
         // Get layer 0 references
         let cpu_layer0 = &cpu_decoder.layers()[0];
@@ -1088,11 +1083,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         // ============================================================
         println!("--- 4a: Self-Attention Block ---");
 
-        // let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = cpu_layer0.self_attention(
-        //     &decoder_hidden_cpu,
-        //     Some(&decoder_mask),
-        //     None, // No past KV
-        // )?;
         let (attn_out, new_k, new_v) =
             cpu_layer0
                 .self_attn
@@ -1102,7 +1092,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             .self_attn_layer_norm
             .forward(&hidden_states_after_add);
 
-        let (cpu_after_self_attn, (cpu_new_k, cpu_new_v)) = (final_output, (new_k, new_v));
+        let (cpu_after_self_attn, (_, _)) = (final_output, (new_k, new_v));
 
         println!(
             "CPU after self-attn+norm shape: {:?}",
@@ -1124,19 +1114,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 ModelInput::TokensGpu(&decoder_input_ids_gpu),
                 position_offset,
             )?;
-
-            // GPU self-attention: residual + attn + norm
             let residual = &gpu_decoder_hidden;
-
-            // let (self_attn_output, _new_k, _new_v) = gpu_layer0.self_attn.forward_seq2seq(
-            //     enc,
-            //     residual,
-            //     &gpu_layer0.self_attn_weights,
-            //     &decoder_mask_gpu,
-            //     None, // No past KV
-            //     0,    // cache_len
-            //     pool_ref,
-            // )?;
             let output = gpu_layer0.self_attn.forward(
                 enc,
                 residual,
@@ -1261,19 +1239,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 &after_self_attn_norm,
             );
 
-            // NOW: Cross-attention
-            let residual = &after_self_attn_norm;
-            let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
-
-            // let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
-            //     enc,
-            //     residual,
-            //     gpu_cross_k,
-            //     gpu_cross_v,
-            //     &gpu_layer0.cross_attn_weights,
-            //     None, // encoder_attn_mask
-            //     pool_ref,
-            // );
+            let residual = &after_self_attn_norm;    
             let cross_attn_output = gpu_layer0.cross_attn.forward(
                 enc,
                 residual,
@@ -1388,18 +1354,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
 
             // Cross-attention
             let residual = &after_self_attn_norm;
-
-            let (gpu_cross_k, gpu_cross_v) = &gpu_cross_kv.0[0];
-
-            // let cross_attn_output = gpu_layer0.cross_attn.forward_cross_precomputed(
-            //     enc,
-            //     residual,
-            //     gpu_cross_k,
-            //     gpu_cross_v,
-            //     &gpu_layer0.cross_attn_weights,
-            //     None,
-            //     pool_ref,
-            // );
             let cross_attn_output = gpu_layer0.cross_attn.forward(
                 enc,
                 residual,

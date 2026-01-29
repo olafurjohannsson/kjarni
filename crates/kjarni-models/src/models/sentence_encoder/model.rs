@@ -2,7 +2,6 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use kjarni_transformers::utils::configure_threading;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -41,7 +40,7 @@ use super::configs::{BertConfig, DistilBertConfig};
 pub struct SentenceEncoder {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
-    config: Arc<dyn ModelConfig>, // Dynamic, not concrete type
+    config: Arc<dyn ModelConfig + Send + Sync>,
     model_type: Option<ModelType>,
 }
 
@@ -221,28 +220,20 @@ impl SentenceEncoder {
     }
 
     pub async fn encode_batch_flat(&self, texts: &[&str]) -> Result<(Vec<f32>, usize, usize)> {
-        println!("Calling encode_batch_flat");
-        // 1. Get raw hidden states (Array3<f32>)
-        // Use your existing logic here
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
+        
+        let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?;
 
-        // 2. Perform Pooling (e.g. Mean Pooling)
-        // This usually returns Array2<f32> (batch_size, hidden_dim)
-        let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?; // Adjust based on your pooling fn
+        // let config = EncodingConfig {
+        //     normalize: false,
+        //     pooling_strategy: self.pipeline.pooling_strategy(),
+        // };
+        
 
-        // 3. Normalize (in place)
-        // Adjust based on config, but assuming normalize=true for this example
         kjarni_transformers::cpu::encoder::traits::l2_normalize_inplace(&mut pooled);
 
-        // 4. THE OPTIMIZATION: Zero-copy conversion from Array2 to Vec
         let (rows, cols) = pooled.dim();
-
-        // Ensure memory is contiguous (C-order). 
-        // If it's already contiguous (which it usually is after pooling), this is free.
-        // If not, it performs one efficient copy.
         let standard_layout = pooled.as_standard_layout();
-        
-        // Convert to Vec<f32> without re-allocating if possible
         let (flat_vec, _) = standard_layout.into_owned().into_raw_vec_and_offset();
 
         Ok((flat_vec, rows, cols))

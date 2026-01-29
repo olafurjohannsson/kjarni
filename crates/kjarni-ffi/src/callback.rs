@@ -5,9 +5,9 @@
 //! - Token streaming during decoding (future)
 //! - Any other streaming/progress use case
 
-use std::ffi::{c_char, c_void, CString};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::{CString, c_char, c_void};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Progress stage enum for FFI
 #[repr(C)]
@@ -33,7 +33,8 @@ pub struct KjarniProgress {
 }
 
 /// Generic callback function pointer type for progress
-pub type KjarniProgressCallbackFn = Option<extern "C" fn(progress: KjarniProgress, user_data: *mut c_void)>;
+pub type KjarniProgressCallbackFn =
+    Option<extern "C" fn(progress: KjarniProgress, user_data: *mut c_void)>;
 
 /// Token callback for streaming (future use)
 #[repr(C)]
@@ -44,7 +45,8 @@ pub struct KjarniToken {
 }
 
 /// Generic callback for token streaming
-pub type KjarniTokenCallbackFn = Option<extern "C" fn(token: KjarniToken, user_data: *mut c_void) -> bool>;
+pub type KjarniTokenCallbackFn =
+    Option<extern "C" fn(token: KjarniToken, user_data: *mut c_void) -> bool>;
 
 /// Cancellation token
 pub struct KjarniCancelToken {
@@ -61,32 +63,46 @@ pub extern "C" fn kjarni_cancel_token_new() -> *mut KjarniCancelToken {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_cancel(token: *mut KjarniCancelToken) {
     if !token.is_null() {
-        (*token).inner.store(true, Ordering::SeqCst);
+        unsafe {
+            (*token).inner.store(true, Ordering::SeqCst);
+        }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_is_cancelled(token: *const KjarniCancelToken) -> bool {
-    if token.is_null() { false } else { (*token).inner.load(Ordering::SeqCst) }
+    if token.is_null() {
+        false
+    } else {
+        unsafe { (*token).inner.load(Ordering::SeqCst) }
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_reset(token: *mut KjarniCancelToken) {
     if !token.is_null() {
-        (*token).inner.store(false, Ordering::SeqCst);
+        unsafe {
+            (*token).inner.store(false, Ordering::SeqCst);
+        }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cancel_token_free(token: *mut KjarniCancelToken) {
     if !token.is_null() {
-        let _ = Box::from_raw(token);
+        unsafe {
+            let _ = Box::from_raw(token);
+        }
     }
 }
 
 /// Check if cancelled (internal helper)
 pub fn is_cancelled(token: *const KjarniCancelToken) -> bool {
-    if token.is_null() { false } else { unsafe { (*token).inner.load(Ordering::SeqCst) } }
+    if token.is_null() {
+        false
+    } else {
+        unsafe { (*token).inner.load(Ordering::SeqCst) }
+    }
 }
 
 /// Wrapper that adapts FFI callback to Rust closure
@@ -101,13 +117,16 @@ unsafe impl<T> Sync for FfiCallback<T> {}
 
 impl<T> FfiCallback<T> {
     pub fn new(callback: Option<extern "C" fn(T, *mut c_void)>, user_data: *mut c_void) -> Self {
-        Self { callback, user_data }
+        Self {
+            callback,
+            user_data,
+        }
     }
-    
+
     pub fn is_some(&self) -> bool {
         self.callback.is_some()
     }
-    
+
     pub fn call(&self, value: T) {
         if let Some(cb) = self.callback {
             cb(value, self.user_data);
@@ -135,13 +154,22 @@ impl ProgressCallbackWrapper {
             None
         }
     }
-    
-    pub fn report(&self, stage: KjarniProgressStage, current: usize, total: usize, message: Option<&str>) {
+
+    pub fn report(
+        &self,
+        stage: KjarniProgressStage,
+        current: usize,
+        total: usize,
+        message: Option<&str>,
+    ) {
         let message_ptr = if let Some(msg) = message {
             if let Ok(cstr) = CString::new(msg) {
                 unsafe {
                     *self.message_buf.get() = Some(cstr);
-                    (*self.message_buf.get()).as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null())
+                    (*self.message_buf.get())
+                        .as_ref()
+                        .map(|c| c.as_ptr())
+                        .unwrap_or(std::ptr::null())
                 }
             } else {
                 std::ptr::null()
@@ -149,7 +177,7 @@ impl ProgressCallbackWrapper {
         } else {
             std::ptr::null()
         };
-        
+
         self.inner.call(KjarniProgress {
             stage,
             current,
@@ -158,6 +186,3 @@ impl ProgressCallbackWrapper {
         });
     }
 }
-
-
-

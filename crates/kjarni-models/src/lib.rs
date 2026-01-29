@@ -79,94 +79,39 @@ pub use tokenizers::Tokenizer;
 #[cfg(target_arch = "wasm32")]
 pub use tokenizer::wasm::BPETokenizer;
 
-// User-facing unified API
-// pub enum Model {
-//     Decoder(DecoderModel),
-//     Encoder(EncoderModel),
-//     Seq2Seq(Seq2SeqModel),
-//     CrossEncoder(CrossEncoderModel),
-// }
+#[cfg(test)]
+mod send_sync_tests {
+    use crate::{CrossEncoder, SentenceEncoder, SequenceClassifier, models::{bart::model::BartModel, gpt2::Gpt2Model, llama::LlamaModel, mistral::MistralModel, qwen::QwenModel, t5::T5Model}};
+    // Compile time validation of send and sync
+     const _: () = {
+        const fn assert_send<T: Send>() {}
+        const fn assert_sync<T: Sync>() {}
+        assert_send::<CrossEncoder>();
+        assert_sync::<CrossEncoder>();
 
-// pub enum DecoderModel {
-//     Llama(LlamaModel),
-//     Phi(PhiModel),
-//     Gpt2(Gpt2Model),
-// }
+        assert_send::<SentenceEncoder>();
+        assert_sync::<SentenceEncoder>();
 
-// pub enum Seq2SeqModel {
-//     Bart(BartModel),
-//     T5(T5Model),
-// }
+        assert_send::<SequenceClassifier>();
+        assert_sync::<SequenceClassifier>();
 
-// pub enum EncoderModel {
-//     MiniLM(SentenceEncoder),
-//     // All encoders already share SentenceEncoder struct
-// }
-// impl Model {
-//     pub async fn load(model_type: ModelType, device: Device) -> Result<Self> {
-//         match model_type.info().architecture {
-//             ModelArchitecture::Decoder => {
-//                 let model = match model_type {
-//                     ModelType::Llama3_2_1B | ModelType::Llama3_2_1B_Instruct | ... => {
-//                         DecoderModel::Llama(LlamaModel::from_registry(model_type, device).await?)
-//                     }
-//                     ModelType::Phi3Mini => {
-//                         DecoderModel::Phi(PhiModel::from_registry(model_type, device).await?)
-//                     }
-//                     _ => return Err(anyhow!("Unknown decoder"))
-//                 };
-//                 Ok(Model::Decoder(model))
-//             }
-//             ModelArchitecture::Seq2Seq => {
-//                 let model = match model_type {
-//                     ModelType::BartLargeCnn | ModelType::DistilBartCnn => {
-//                         Seq2SeqModel::Bart(BartModel::from_registry(model_type, device).await?)
-//                     }
-//                     ModelType::T5Small | ModelType::T5Base => {
-//                         Seq2SeqModel::T5(T5Model::from_registry(model_type, device).await?)
-//                     }
-//                     _ => return Err(anyhow!("Unknown seq2seq"))
-//                 };
-//                 Ok(Model::Seq2Seq(model))
-//             }
-//             // ...
-//         }
-//     }
-// }
-// impl DecoderModel {
-//     pub async fn generate(&self, prompt: &str, config: &GenerationConfig) -> Result<String> {
-//         match self {
-//             DecoderModel::Llama(m) => {
-//                 let gen = DecoderGenerator::new(Box::new(m.clone()))?;
-//                 gen.generate(prompt, config).await
-//             }
-//             DecoderModel::Phi(m) => {
-//                 let gen = DecoderGenerator::new(Box::new(m.clone()))?;
-//                 gen.generate(prompt, config).await
-//             }
-//             DecoderModel::Gpt2(m) => {
-//                 let gen = DecoderGenerator::new(Box::new(m.clone()))?;
-//                 gen.generate(prompt, config).await
-//             }
-//         }
-//     }
-// }
-// ro_rules! dispatch_decoder {
-//     ($self:expr, $method:ident $(, $arg:expr)*) => {
-//         match $self {
-//             DecoderModel::Llama(m) => m.$method($($arg),*),
-//             DecoderModel::Phi(m) => m.$method($($arg),*),
-//             DecoderModel::Gpt2(m) => m.$method($($arg),*),
-//         }
-//     };
-// }
+        assert_send::<LlamaModel>();
+        assert_sync::<LlamaModel>();
 
-// impl DecoderModel {
-//     pub fn vocab_size(&self) -> usize {
-//         dispatch_decoder!(self, vocab_size)
-//     }
+        assert_send::<QwenModel>();
+        assert_sync::<QwenModel>();
 
-//     pub fn tokenizer(&self) -> &Tokenizer {
-//         dispatch_decoder!(self, tokenizer)
-//     }
-// }
+        assert_send::<MistralModel>();
+        assert_sync::<MistralModel>();
+
+        assert_send::<T5Model>();
+        assert_sync::<T5Model>();
+
+        assert_send::<Gpt2Model>();
+        assert_sync::<Gpt2Model>();
+
+        assert_send::<BartModel>();
+        assert_sync::<BartModel>();
+    };
+
+}

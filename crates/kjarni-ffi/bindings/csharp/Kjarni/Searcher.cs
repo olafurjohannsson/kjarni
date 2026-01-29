@@ -298,26 +298,48 @@ namespace Kjarni
         public int DefaultTopK => (int)Native.kjarni_searcher_default_top_k(_handle);
 
         /// <summary>
-        /// Get the embedding model name.
+        /// Get the embedding model name used by this searcher.
         /// </summary>
         public string ModelName
         {
             get
             {
-                var ptr = Native.kjarni_searcher_model_name(_handle);
-                return ptr != IntPtr.Zero ? Marshal.PtrToStringUTF8(ptr) ?? "" : "";
+                var required = (int)Native.kjarni_searcher_model_name(_handle, IntPtr.Zero, UIntPtr.Zero);
+                if (required == 0) return "";
+
+                var buf = Marshal.AllocHGlobal(required);
+                try
+                {
+                    Native.kjarni_searcher_model_name(_handle, buf, (UIntPtr)required);
+                    return Marshal.PtrToStringUTF8(buf) ?? "";
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buf);
+                }
             }
         }
 
         /// <summary>
-        /// Get the reranker model name, or null if not configured.
+        /// Get the reranker model name, or null if no reranker is configured.
         /// </summary>
         public string? RerankerModel
         {
             get
             {
-                var ptr = Native.kjarni_searcher_reranker_model(_handle);
-                return ptr != IntPtr.Zero ? Marshal.PtrToStringUTF8(ptr) : null;
+                var required = (int)Native.kjarni_searcher_reranker_model(_handle, IntPtr.Zero, UIntPtr.Zero);
+                if (required == 0) return null;
+
+                var buf = Marshal.AllocHGlobal(required);
+                try
+                {
+                    Native.kjarni_searcher_reranker_model(_handle, buf, (UIntPtr)required);
+                    return Marshal.PtrToStringUTF8(buf);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buf);
+                }
             }
         }
 

@@ -11,6 +11,7 @@ pub async fn run(
     normalize: bool,
     pooling: &str,
     gpu: bool,
+    quiet: bool,
 ) -> Result<()> {
     // 1. Resolve input
     let text = crate::commands::util::resolve_input(input)?;
@@ -48,6 +49,7 @@ pub async fn run(
         let embeddings = embedder.embed_batch(&lines).await
             .map_err(|e| anyhow!("Embedding failed: {}", e))?;
         let output = format_batch(&lines, &embeddings, format)?;
+        
         print!("{}", output);
     } else {
         let text_str = lines.first().copied().unwrap_or(&text);
