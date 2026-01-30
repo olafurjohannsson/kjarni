@@ -18,8 +18,8 @@ struct AddBroadcastOffsetUniforms {
     b_row_offset: u32,
     seq_len: u32,
     hidden_size: u32,
-    b_stride_0: u32,    // <-- ADD THIS: Stride for the first dimension of b (rows)
-    _padding: [u32; 3], // <-- ADD THIS: Ensure alignment
+    b_stride_0: u32,    
+    _padding: [u32; 3], 
 }
 
 #[repr(C)]

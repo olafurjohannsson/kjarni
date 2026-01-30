@@ -79,6 +79,9 @@ pub struct EncoderBuffers {
     /// Layer norm scratch buffer [max_tokens, hidden]
     pub norm_scratch: Array2<f32>,
 
+    /// Scratch buffer for merged heads [max_tokens, hidden]
+    pub merge_scratch: Array2<f32>,
+
     // =========================================================================
     // Configuration (stored for validation and resizing)
     // =========================================================================
@@ -148,7 +151,8 @@ impl EncoderBuffers {
             ffn_intermediate: Array2::zeros((max_tokens, intermediate_dim)),
             ffn_output: Array2::zeros((max_tokens, hidden)),
             norm_scratch: Array2::zeros((max_tokens, hidden)),
-            
+            merge_scratch: Array2::zeros((max_tokens, hidden)),
+
             // Config
             max_batch,
             max_seq,

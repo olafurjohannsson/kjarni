@@ -3,7 +3,7 @@ use crate::cpu::encoder_decoder::DecoderCrossAttention;
 use crate::encoder_decoder::DecoderSelfAttention;
 pub use crate::feedforward::FeedForward;
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, ArrayView3, s};
+use ndarray::{Array2, Array3, Array4, ArrayView3};
 
 /// A generic transformer layer combining attention and feedforward.
 /// This universal struct can represent an encoder layer, a decoder layer,

@@ -180,7 +180,7 @@ pub enum LinearData {
     BF16(Arc<Array2<bf16>>),
 
     /// 16-bit IEEE half-precision floating point weights.
-    /// 
+    ///
     /// Provides 2x memory savings compared to F32, but with a smaller exponent range.
     /// Suitable for scenarios where memory is constrained and some precision loss is acceptable.
     F16(Arc<Array2<half::f16>>),
@@ -244,16 +244,16 @@ impl LinearLayer {
         }
     }
 
-        /// Single-row matmul: [hidden] @ [hidden, out] -> [out]
+    /// Single-row matmul: [hidden] @ [hidden, out] -> [out]
     /// Writes directly to output slice
     pub fn matmul_row_into(&self, input: &[f32], output: &mut [f32]) {
         let out_dim = output.len();
         let in_dim = input.len();
-        
+
         // Assuming weights are [out_dim, in_dim] (row-major)
         let w = self.weights_view();
         let weights = w.as_slice().unwrap();
-        
+
         for o in 0..out_dim {
             let mut acc = 0.0f32;
             let row_offset = o * in_dim;
@@ -262,7 +262,7 @@ impl LinearLayer {
             }
             output[o] = acc;
         }
-        
+
         // Add bias if present
         if let Some(ref bias) = self.bias {
             let bias_slice = bias.as_slice().unwrap();
@@ -271,7 +271,6 @@ impl LinearLayer {
             }
         }
     }
-
 
     /// Returns a builder for constructing a `LinearLayer` from model weights.
     ///
@@ -428,7 +427,11 @@ impl LinearLayer {
                     output.assign(&result);
                 }
             },
-            LinearData::BF16(_) | LinearData::F16(_) | LinearData::Q8_0(_) | LinearData::Q6_K(_) | LinearData::Q4_K(_) => {
+            LinearData::BF16(_)
+            | LinearData::F16(_)
+            | LinearData::Q8_0(_)
+            | LinearData::Q6_K(_)
+            | LinearData::Q4_K(_) => {
                 // Quantized/BF16 paths don't have no-alloc versions yet
                 // Fall back to allocating and copy
                 let result = self.matmul(input);
@@ -557,6 +560,24 @@ impl LinearLayer {
         match self.data {
             crate::linear_layer::LinearData::F32(ref w) => w.view(),
             _ => panic!("Only f32 LinearLayer supported in optimized path"),
+        }
+    }
+
+    /// Get weights as contiguous slice [out_features * in_features]
+    pub fn weights_slice(&self) -> &[f32] {
+        match self.data {
+            crate::linear_layer::LinearData::F32(ref w) => w
+                .as_slice()
+                .expect("LinearLayer weights must be contiguous for fused ops"),
+            _ => panic!("Only f32 LinearLayer supported in optimized path"),
+
+        }
+    }
+
+    pub fn weights_slice_bf16(&self) -> Option<&[bf16]> {
+        match &self.data {
+            LinearData::BF16(w) => w.as_slice(),
+            _ => None,
         }
     }
 
@@ -853,85 +874,3 @@ impl From<(Array2<bf16>, Array1<f32>)> for LinearLayer {
     }
 }
 
-// #[cfg(test)]
-// mod matmul_speed_test {
-//     use super::*;
-//     use ndarray::{Array1, Array2};
-//     use std::time::{Duration, Instant};
-
-//     // ------------------------------------------------------------------
-//     // BENCHMARK SETTINGS (MiniLM Batch=120)
-//     // ------------------------------------------------------------------
-//     const BATCH: usize = 120;
-//     const SEQ_LEN: usize = 32;
-//     const M: usize = BATCH * SEQ_LEN; // 3840 rows (Tokens)
-//     const K: usize = 384; // In Features (Hidden Dim)
-//     const N: usize = 1536; // Out Features (Intermediate Dim)
-//     const ITERATIONS: u32 = 100;
-
-//     fn get_input() -> Array2<f32> {
-//         Array2::from_shape_fn((M, K), |(i, j)| ((i + j) % 100) as f32 / 100.0)
-//     }
-
-//     fn get_weights_standard() -> Array2<f32> {
-//         // [Out, In] -> This is how Safetensors/PyTorch saves them
-//         Array2::from_shape_fn((N, K), |(i, j)| ((i * j) % 100) as f32 / 100.0)
-//     }
-
-//     fn get_weights_transposed() -> Array2<f32> {
-//         // [In, Out] -> Simulating a load-time transpose
-//         Array2::from_shape_fn((K, N), |(i, j)| ((i * j) % 100) as f32 / 100.0)
-//     }
-
-//     fn run_benchmark(strategy: F32MatmulStrategy, weights: Array2<f32>, name: &str) {
-//         let input = get_input();
-//         let layer = LinearLayer::new_f32_with_strategy(weights, None, strategy);
-
-//         // Warmup
-//         let _ = layer.matmul(&input.view());
-
-//         let start = Instant::now();
-//         for _ in 0..ITERATIONS {
-//             let output = layer.matmul(&input.view());
-//             std::hint::black_box(output);
-//         }
-//         let duration = start.elapsed();
-
-//         // GFLOPS Calculation: 2 * M * N * K
-//         let total_ops = 2.0 * M as f64 * N as f64 * K as f64 * ITERATIONS as f64;
-//         let gflops = total_ops / (duration.as_secs_f64() * 1e9);
-
-//         println!(
-//             "Strategy: {:<20} | Latency: {:>8.2?} | Speed: {:>6.2} GFLOPS",
-//             name,
-//             duration / ITERATIONS,
-//             gflops
-//         );
-//     }
-
-//     // 1. Current Implementation (Standard Weights, Manual SIMD)
-//     #[test]
-//     fn bench_1_custom_simd() {
-//         let weights = get_weights_standard(); // [N, K]
-//         run_benchmark(F32MatmulStrategy::CustomSimd, weights, "Custom Simd");
-//     }
-
-//     // 2. Proposed Fix (Standard Weights, Faer with .transpose())
-//     #[test]
-//     fn bench_2_faer_out_in() {
-//         let weights = get_weights_standard(); // [N, K]
-//         run_benchmark(
-//             F32MatmulStrategy::FaerOutIn,
-//             weights,
-//             "Faer (Virtual Transpose)",
-//         );
-//     }
-
-//     // 3. Alternative Fix (Pre-Transposed Weights, Normal Faer)
-//     #[test]
-//     fn bench_3_faer_normal() {
-//         let weights = get_weights_transposed(); // [K, N]
-//         // This simulates doing the transpose ONCE during model loading
-//         run_benchmark(F32MatmulStrategy::Faer, weights, "Faer (Load Transpose)");
-//     }
-// }

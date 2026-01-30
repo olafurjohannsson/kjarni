@@ -67,7 +67,7 @@ fn create_gpu_attention(
     o_w: &Array2<f32>,
     o_b: &Array1<f32>,
 ) -> (GpuAttention, GpuAttentionWeights) {
-    let attention = GpuAttention::new(&context.clone(), h, n, 8);
+    let attention = GpuAttention::new(&context.clone(), h, n, n);
     let weights = GpuAttentionWeights {
         q_weight: GpuTensor::from_ndarray(context, q_w).unwrap(),
         q_bias: GpuTensor::from_ndarray(context, q_b).unwrap(),
@@ -146,20 +146,24 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     let query_gpu = GpuTensor::from_ndarray(&context, &query_cpu)?;
     let mask_gpu = GpuTensor::from_ndarray(&context, &mask_cpu)?;
 
+    // Project K and V
     let (prompt_k_cpu, prompt_v_cpu) = cpu_attn.project_kv(&prompt_cpu);
     let (cpu_new_k, cpu_new_v) = cpu_attn.project_kv(&query_cpu);
 
     let full_k_cpu = ndarray::concatenate(Axis(1), &[prompt_k_cpu.view(), cpu_new_k.view()])?;
     let full_v_cpu = ndarray::concatenate(Axis(1), &[prompt_v_cpu.view(), cpu_new_v.view()])?;
 
+    let q_proj_cpu = crate::utils::linear_algebra::matmul_3d_2d(&query_cpu, &q_w) + &q_b;
+
     let cpu_output = cpu_attn.attend(
-        &query_cpu,
+        &q_proj_cpu, 
         &full_k_cpu,
         &full_v_cpu,
         Some(&mask_cpu),
         true,
         prompt_len,
     )?;
+    let cpu_output_projected = crate::utils::linear_algebra::matmul_3d_2d(&cpu_output, &o_w) + &o_b;
 
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let mut pool = GpuTensorPool::new(context.clone());
@@ -174,6 +178,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     let (gpu_new_k, gpu_new_v) =
         gpu_attn.project_kv(&mut encoder, &query_gpu, &gpu_weights, prompt_len, &mut pool, None);
     gpu_cache.update(&mut encoder, 0, &gpu_new_k, &gpu_new_v, prompt_len)?;
+    gpu_cache.increment_len(gen_len);
 
     let (full_cache_k_gpu, full_cache_v_gpu) = gpu_cache.get(0).unwrap();
 
@@ -203,7 +208,7 @@ async fn test_attention_decoder_generation_parity() -> Result<()> {
     context.queue.submit(Some(encoder.finish()));
     pool.next_frame();
 
-    assert_tensors_are_close(&cpu_output, &gpu_output, "decoder output", 1e-4).await;
+    assert_tensors_are_close(&cpu_output_projected, &gpu_output, "decoder output", 1e-4).await;
 
     Ok(())
 }

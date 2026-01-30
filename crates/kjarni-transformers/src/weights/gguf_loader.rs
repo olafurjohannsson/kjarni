@@ -18,9 +18,9 @@ use serde_json::Value;
 
 use crate::tensor::DType;
 use crate::tensor::raw_tensor::TensorView;
+use crate::weights::WeightLoader;
 use crate::weights::mmap_cache::get_or_create_mmap;
 use crate::weights::model_weights::AttentionLayout;
-use crate::weights::WeightLoader;
 
 /// A loader for `.gguf` files with mmap caching.
 ///
@@ -63,10 +63,7 @@ impl GgufLoader {
                 FILE_MAGIC_GGUF_LE => ByteOrder::LE,
                 FILE_MAGIC_GGUF_BE => ByteOrder::BE,
                 _ => {
-                    return Err(anyhow!(
-                        "invalid GGUF magic number: {:#010x}",
-                        magic_val
-                    ));
+                    return Err(anyhow!("invalid GGUF magic number: {:#010x}", magic_val));
                 }
             }
         };
@@ -134,10 +131,7 @@ impl GgufLoader {
         let end = start + info.size as usize;
 
         if end > self.mmap.len() {
-            return Err(anyhow!(
-                "tensor '{}' points outside file bounds",
-                gguf_name
-            ));
+            return Err(anyhow!("tensor '{}' points outside file bounds", gguf_name));
         }
 
         Ok(TensorView {
@@ -318,7 +312,8 @@ impl WeightLoader for GgufLoader {
         let info = self.tensor_map.get(&gguf_name).ok_or_else(|| {
             anyhow!(
                 "tensor '{}' (translated to '{}') not found",
-                name, gguf_name
+                name,
+                gguf_name
             )
         })?;
 
@@ -387,32 +382,14 @@ mod tests {
     }
 
     #[test]
-    fn test_name_translation() {
-        let loader = GgufLoader {
-            mmap: Arc::new(unsafe { Mmap::map(&File::open("/dev/null").unwrap()).unwrap() }),
-            tensor_map: HashMap::new(),
-            metadata: BTreeMap::new(),
-            architecture: "llama".to_string(),
-            data_start_offset: 0,
-        };
-
-        assert_eq!(loader.translate_name("model.embed_tokens.weight"), "token_embd.weight");
-        assert_eq!(loader.translate_name("model.norm.weight"), "output_norm.weight");
-        assert_eq!(loader.translate_name("lm_head.weight"), "output.weight");
-        assert_eq!(
-            loader.translate_name("model.layers.0.self_attn.q_proj.weight"),
-            "blk.0.attn_q.weight"
-        );
-        assert_eq!(
-            loader.translate_name("model.layers.15.mlp.down_proj.weight"),
-            "blk.15.ffn_down.weight"
-        );
-    }
-
-    #[test]
     fn test_gguf_to_hf_reverse_mapping() {
+        // Create a minimal valid mmap from temp file
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), &[0u8; 64]).unwrap();
+        let file = File::open(temp_file.path()).unwrap();
+
         let loader = GgufLoader {
-            mmap: Arc::new(unsafe { Mmap::map(&File::open("/dev/null").unwrap()).unwrap() }),
+            mmap: Arc::new(unsafe { Mmap::map(&file).unwrap() }),
             tensor_map: HashMap::new(),
             metadata: BTreeMap::new(),
             architecture: "llama".to_string(),
@@ -428,5 +405,38 @@ mod tests {
             Some("model.layers.0.self_attn.q_proj.weight".to_string())
         );
         assert_eq!(loader.gguf_to_hf_name("unknown.tensor"), None);
+    }
+
+    #[test]
+    fn test_name_translation() {
+        let temp_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), &[0u8; 64]).unwrap();
+        let file = File::open(temp_file.path()).unwrap();
+
+        let loader = GgufLoader {
+            mmap: Arc::new(unsafe { Mmap::map(&file).unwrap() }),
+            tensor_map: HashMap::new(),
+            metadata: BTreeMap::new(),
+            architecture: "llama".to_string(),
+            data_start_offset: 0,
+        };
+
+        assert_eq!(
+            loader.translate_name("model.embed_tokens.weight"),
+            "token_embd.weight"
+        );
+        assert_eq!(
+            loader.translate_name("model.norm.weight"),
+            "output_norm.weight"
+        );
+        assert_eq!(loader.translate_name("lm_head.weight"), "output.weight");
+        assert_eq!(
+            loader.translate_name("model.layers.0.self_attn.q_proj.weight"),
+            "blk.0.attn_q.weight"
+        );
+        assert_eq!(
+            loader.translate_name("model.layers.15.mlp.down_proj.weight"),
+            "blk.15.ffn_down.weight"
+        );
     }
 }

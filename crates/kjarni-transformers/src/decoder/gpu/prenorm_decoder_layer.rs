@@ -1,15 +1,15 @@
-use crate::GpuKVCache;
-use crate::WgpuContext;
-use crate::gpu_ops::Kernel;
-use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
-use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
-use anyhow::Result;
 use std::sync::Arc;
 
+use anyhow::Result;
+
 use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights};
+use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
+use crate::gpu_ops::primitives::add::GpuAdd;
+use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::GpuKVCache;
+use crate::WgpuContext;
 
 pub struct GpuPreNormDecoderLayer {
     pub self_attn: GpuAttention,
@@ -37,17 +37,13 @@ impl GpuPreNormDecoderLayer {
         num_heads: usize,
         num_kv_heads: usize,
     ) -> Result<Self> {
-        // let hidden_size = config.hidden_size() as u32;
-        // let num_heads = config.num_attention_heads() as u32;
-        // let num_kv_heads = config.num_key_value_heads() as u32;
-
         let self_attn = GpuAttention::new(
             context,
             hidden_size as u32,
             num_heads as u32,
             num_kv_heads as u32,
         );
-        let add = GpuAdd::new(&context);
+        let add = GpuAdd::new(context);
 
         Ok(Self {
             self_attn,
@@ -61,6 +57,7 @@ impl GpuPreNormDecoderLayer {
             add,
         })
     }
+
     pub fn forward_llama(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -72,7 +69,6 @@ impl GpuPreNormDecoderLayer {
         temp: &mut GpuTensorPool,
         rope: Option<&GpuRoPE>,
     ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
-        // --- 1. Pre-Norm ---
         let residual = hidden_states;
         let ln1_out = temp.get(hidden_states.shape().to_vec());
         self.self_attn_norm.encode(
@@ -82,7 +78,6 @@ impl GpuPreNormDecoderLayer {
             &ln1_out,
         );
 
-        // --- 2. Project Q, K, V ---
         let q_proj = self.self_attn.project(
             encoder,
             &ln1_out,
@@ -105,7 +100,6 @@ impl GpuPreNormDecoderLayer {
             temp,
         );
 
-        // --- 3. Split heads and apply RoPE to Q and K ---
         let q_split = self.self_attn.split_heads(encoder, &q_proj, temp);
         let k_split = self.self_attn.split_heads(encoder, &k_proj, temp);
         let v_split = self.self_attn.split_heads(encoder, &v_proj, temp);
@@ -116,54 +110,31 @@ impl GpuPreNormDecoderLayer {
         if let Some(rope_encoder) = rope {
             rope_encoder.encode(encoder, &q_split, &q_rotated, position_offset);
             rope_encoder.encode(encoder, &k_split, &k_rotated, position_offset);
-        } else {
-            // If there's no RoPE, we should probably copy the original tensors
-            // This case might not happen for Llama, but it's good practice.
-            // A copy kernel would be ideal, but for now, this logic is inside an if-let.
-            // If rope is None, q_rotated and k_rotated will contain uninitialized data,
-            // which is a bug. Let's handle it.
-            // NOTE: This part of the logic needs review. If RoPE is optional,
-            // we need a clean way to handle the non-RoPE case.
-            // For now, we assume `rope` is always `Some` for Llama.
         }
 
-        // --- 4. Cache handling ---
         let attn_out = if let Some(cache) = gpu_cache {
             let k_rotated_3d = self.self_attn.merge_heads(encoder, &k_rotated, temp);
 
-            // 2. v_proj is already the correct 3D shape [B, S, H*D].
-
-            // --- Update the Cache ---
-            // Pass the 3D tensors to the cache. The kernel will split heads and store them in 4D.
             cache.update(encoder, layer_idx, &k_rotated_3d, &v_proj, position_offset)?;
 
-            // --- Prepare Tensors for Attention ---
-            // The attention function expects 4D tensors: [B, H, S, D].
-
-            // 1. Get the full K/V history from the cache. The cache correctly stores and returns them as 4D tensors.
             let (cached_k, cached_v) = cache.get(layer_idx).unwrap();
 
-            // 2. q_rotated is already the correct 4D shape.
-
-            // --- Perform Attention ---
-            // All inputs to llama_attention are now correctly shaped 4D tensors.
             self.self_attn.llama_attention(
                 encoder,
-                &q_rotated, // [B, H_q, 1, D]
-                &cached_k,  // [B, H_kv, S_full, D]
-                &cached_v,  // [B, H_kv, S_full, D]
+                &q_rotated,
+                &cached_k,
+                &cached_v,
                 attention_mask,
                 position_offset,
                 temp,
                 &self.self_attn_weights,
             )
         } else {
-            // No cache - use new K/V directly
             self.self_attn.llama_attention(
                 encoder,
-                &q_rotated, // 4D, rotated
-                &k_rotated, // 4D, rotated
-                &v_split,   // 4D, not rotated
+                &q_rotated,
+                &k_rotated,
+                &v_split,
                 attention_mask,
                 position_offset,
                 temp,
@@ -171,30 +142,24 @@ impl GpuPreNormDecoderLayer {
             )
         };
 
-        // --- 5. Residual connection ---
         let attn_block_output = temp.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);
 
-        // --- 6. FFN (unchanged) ---
         let residual_2 = &attn_block_output;
         let ln2_out = temp.get(residual_2.shape().to_vec());
         self.ffn_norm
             .encode(encoder, &self.ffn_norm_weights, residual_2, &ln2_out);
 
-        // [FIX] START: Reshape 3D tensor to 2D for FFN
         let (b, s, h) = ln2_out.dims3();
         let ln2_out_2d = ln2_out.view(vec![b * s, h]);
 
-        // The output of the FFN will also be 2D initially
         let ffn_out_2d = temp.get(vec![b * s, h]);
 
         self.feedforward
             .encode(encoder, &self.ff_weights, &ln2_out_2d, &ffn_out_2d, temp);
 
-        // Reshape the 2D FFN output back to 3D for the residual connection
         let ffn_out = ffn_out_2d.view(vec![b, s, h]);
-        // [FIX] END
 
         let final_output = temp.get(residual_2.shape().to_vec());
         self.add
@@ -215,7 +180,6 @@ impl GpuPreNormDecoderLayer {
         pool: &mut GpuTensorPool,
         rope: Option<&GpuRoPE>,
     ) -> Result<(GpuTensor, (GpuTensor, GpuTensor))> {
-        // Self-Attention (Pre-Norm)
         let residual = hidden_states;
 
         let ln1_out = pool.get(hidden_states.shape().to_vec());
@@ -226,7 +190,6 @@ impl GpuPreNormDecoderLayer {
             &ln1_out,
         );
 
-        // Project the K/V for this step. These are the raw 3D tensors.
         let (new_k, new_v) = self.self_attn.project_kv(
             encoder,
             &ln1_out,
@@ -256,8 +219,6 @@ impl GpuPreNormDecoderLayer {
                 rope,
             )
         } else {
-            // Priming pass: no cache, use standard attend
-            // Split heads for new K/V
             let new_k_split = self.self_attn.split_heads(encoder, &new_k, pool);
             let new_v_split = self.self_attn.split_heads(encoder, &new_v, pool);
 
@@ -266,17 +227,17 @@ impl GpuPreNormDecoderLayer {
                 &ln1_out,
                 &self.self_attn_weights,
                 attention_mask,
-                true, // is_causal
+                true,
                 (&new_k_split, &new_v_split),
                 position_offset,
                 pool,
             )
         };
+
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);
 
-        // Second Sub-layer: Feed-Forward Network (Pre-Norm)
         let residual_2 = &attn_block_output;
 
         let ln2_out = pool.get(residual_2.shape().to_vec());
@@ -285,12 +246,11 @@ impl GpuPreNormDecoderLayer {
 
         let ffn_out = pool.get(ln2_out.shape().to_vec());
 
-        // 2. Call encode with the correct 5 arguments in the correct order.
         self.feedforward.encode(
             encoder,
-            &self.ff_weights, // weights
-            &ln2_out,         // input
-            &ffn_out,         // output
+            &self.ff_weights,
+            &ln2_out,
+            &ffn_out,
             pool,
         );
 
@@ -298,7 +258,6 @@ impl GpuPreNormDecoderLayer {
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &final_output);
 
-        // Return the raw 3D K/V tensors for the cache manager.
         Ok((final_output, (new_k, new_v)))
     }
 }

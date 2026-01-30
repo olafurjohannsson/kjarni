@@ -111,6 +111,7 @@ impl GenerationStats {
         self.decode_tokens
     }
 
+    
     /// Prints a summary of generation statistics.
     pub fn print_summary(&self) {
         if !Self::is_enabled() {

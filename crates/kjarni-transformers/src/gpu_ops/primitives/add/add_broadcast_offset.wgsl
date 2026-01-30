@@ -3,7 +3,7 @@ struct AddBroadcastOffsetUniforms {
     b_row_offset: u32,
     seq_len: u32,
     hidden_size: u32,
-    b_stride_0: u32, // <-- ADD THIS
+    b_stride_0: u32,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: AddBroadcastOffsetUniforms;

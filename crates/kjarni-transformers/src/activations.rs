@@ -258,6 +258,29 @@ pub fn softmax_1d_inplace(logits: &mut Array1<f32>) {
     }
 }
 
+/// Applies softmax along the last axis of a 4D array view.
+pub fn softmax_4d_view_inplace(scores: &mut ndarray::ArrayViewMut4<f32>) {
+    let (batch_size, num_heads, q_len, _) = scores.dim();
+
+    for b in 0..batch_size {
+        for h in 0..num_heads {
+            for q in 0..q_len {
+                let mut row_view = scores.slice_mut(s![b, h, q, ..]);
+                if let Some(slice) = row_view.as_slice_mut() {
+                    softmax_inplace(slice);
+                } else {
+                    let max = row_view.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                    row_view.mapv_inplace(|x| (x - max).exp());
+                    let sum = row_view.sum();
+                    if sum > 0.0 {
+                        row_view /= sum;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Applies softmax along the last axis of a 4D array.
 pub fn softmax_4d_inplace(scores: &mut Array4<f32>) {
     let (batch_size, num_heads, q_len, _) = scores.dim();

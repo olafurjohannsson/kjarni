@@ -707,9 +707,7 @@ mod index_reader_tests {
 
     #[test]
     fn test_matches_source_pattern_multiple_one_matches() {
-        let filter = MetadataFilter::default()
-            .source("*.txt")
-            .source("*.md");
+        let filter = MetadataFilter::default().source("*.txt").source("*.md");
 
         let mut metadata = HashMap::new();
         metadata.insert("source".to_string(), "readme.md".to_string());
@@ -875,14 +873,18 @@ mod index_reader_tests {
 
     #[test]
     fn test_matches_special_characters_in_pattern() {
+        // [1] is a character class matching '1', so pattern matches "file1.txt"
         let filter = MetadataFilter::default().source("file[1].txt");
 
         let mut metadata = HashMap::new();
-        metadata.insert("source".to_string(), "file[1].txt".to_string());
-
-        // Glob pattern with special chars
-        // Note: behavior depends on glob_match implementation
+        metadata.insert("source".to_string(), "file1.txt".to_string());
         assert!(filter.matches(&metadata));
+
+        // To match literal brackets, user must escape them
+        let filter2 = MetadataFilter::default().source("file\\[1\\].txt");
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("source".to_string(), "file[1].txt".to_string());
+        assert!(filter2.matches(&metadata2));
     }
 
     // ============================================================================
