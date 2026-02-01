@@ -1,0 +1,12 @@
+
+--- Running Llama 3 on GPU ---
+  [Builder] Pre-Embeddings RAM: 5532.96 MB
+  [Builder] Post-Embeddings RAM: 6284.46 MB (Delta: 751.50 MB)
+  [Builder] Post-LMHead RAM: 6284.46 MB (Delta: 0.00 MB)
+  [Builder] Pre-Embeddings RAM: 6460.49 MB
+  [Builder] Post-Embeddings RAM: 6460.57 MB (Delta: 0.08 MB)
+  [Builder] Post-LMHead RAM: 6460.68 MB (Delta: 0.10 MB)
+Describe the theory of relativity in simple terms(max 50 words):
+The theory of relativity, developed by Albert Einstein, explains how time and space are connected. It states that time and space are not fixed, but depend on the observer's frame of reference. Time can appear to slow down or speed up depending on how fast you're moving.<|eot_id|>
+Describe the theory of relativity in simple terms(max 50 words):
+The theory of relativity, developed by Albert Einstein, explains how time and space are connected. It states that time and space are not fixed, but depend on the observer's frame of reference. Time can appear to slow down or speed up depending on how fast you're moving.<|eot_id|>

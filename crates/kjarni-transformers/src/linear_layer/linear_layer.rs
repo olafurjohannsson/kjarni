@@ -244,34 +244,6 @@ impl LinearLayer {
         }
     }
 
-    /// Single-row matmul: [hidden] @ [hidden, out] -> [out]
-    /// Writes directly to output slice
-    pub fn matmul_row_into(&self, input: &[f32], output: &mut [f32]) {
-        let out_dim = output.len();
-        let in_dim = input.len();
-
-        // Assuming weights are [out_dim, in_dim] (row-major)
-        let w = self.weights_view();
-        let weights = w.as_slice().unwrap();
-
-        for o in 0..out_dim {
-            let mut acc = 0.0f32;
-            let row_offset = o * in_dim;
-            for i in 0..in_dim {
-                acc += input[i] * weights[row_offset + i];
-            }
-            output[o] = acc;
-        }
-
-        // Add bias if present
-        if let Some(ref bias) = self.bias {
-            let bias_slice = bias.as_slice().unwrap();
-            for o in 0..out_dim {
-                output[o] += bias_slice[o];
-            }
-        }
-    }
-
     /// Returns a builder for constructing a `LinearLayer` from model weights.
     ///
     /// # Arguments
@@ -570,7 +542,6 @@ impl LinearLayer {
                 .as_slice()
                 .expect("LinearLayer weights must be contiguous for fused ops"),
             _ => panic!("Only f32 LinearLayer supported in optimized path"),
-
         }
     }
 
@@ -873,4 +844,3 @@ impl From<(Array2<bf16>, Array1<f32>)> for LinearLayer {
         LinearLayer::new_bf16(weights, Some(bias))
     }
 }
-

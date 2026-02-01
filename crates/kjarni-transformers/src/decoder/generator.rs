@@ -75,13 +75,14 @@ use crate::common::{
     CancellationToken, GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram,
     apply_repetition_penalty_mut, sample_token,
 };
+use crate::cpu::decoder::DraftModelContext;
 use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
 use crate::{Conversation, prelude::*};
 use anyhow::{Result, anyhow};
 // use futures_core::stream::Stream;
-use futures::stream::{TryStreamExt, Stream};
+use futures::stream::{Stream, TryStreamExt};
 //use futures::stream::TryStreamExt
 //use futures::Stream::TryStreamExt;
 use log::{debug, info, trace};
@@ -130,6 +131,10 @@ pub struct DecoderGenerator {
 
     /// Device-specific execution backend
     backend: AnyDecoderBackend,
+
+    /// Optional draft model for speculative decoding.
+    /// Loaded via `load_draft_model()`, used when `config.speculation` is Some.
+    draft: Option<DraftModelContext>,
 }
 
 impl DecoderGenerator {
@@ -180,7 +185,65 @@ impl DecoderGenerator {
             model.context_size()
         );
 
-        Ok(Self { model, backend })
+        Ok(Self {
+            model,
+            backend,
+            draft: None,
+        })
+    }
+
+    // =========================================================================
+    // Speculative Decoding Setup
+    // =========================================================================
+
+    /// Loads a draft model for speculative decoding.
+    ///
+    /// Call this once before using `speculation: Some(...)` in GenerationConfig.
+    /// The draft model should be smaller and faster than the target (e.g., 1B for 8B target).
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the draft model
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// generator.load_draft_model(Path::new("/models/llama-3.2-1b"))?;
+    ///
+    /// let config = GenerationConfig {
+    ///     speculation: Some(SpeculationParams::default()),
+    ///     ..Default::default()
+    /// };
+    /// let output = generator.generate("Hello", &config, None).await?;
+    /// ```
+    pub fn load_draft_model(&mut self, model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<()> {
+        let draft_ctx = DraftModelContext::load(model)?;
+
+        // Validate compatibility
+        if draft_ctx.model.vocab_size() != self.model.vocab_size() {
+            log::warn!(
+                "Vocab size mismatch: target={}, draft={}. Generation may fail.",
+                self.model.vocab_size(),
+                draft_ctx.model.vocab_size()
+            );
+        }
+
+        self.draft = Some(draft_ctx);
+        log::info!("Draft model ready for speculative decoding");
+        Ok(())
+    }
+
+    /// Unloads the draft model, freeing memory.
+    pub fn unload_draft_model(&mut self) {
+        if self.draft.is_some() {
+            self.draft = None;
+            log::info!("Draft model unloaded");
+        }
+    }
+
+    /// Returns true if a draft model is loaded.
+    pub fn has_draft_model(&self) -> bool {
+        self.draft.is_some()
     }
 
     // =========================================================================

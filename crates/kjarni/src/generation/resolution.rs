@@ -153,6 +153,7 @@ mod tests {
                 top_p: Some(0.9),
                 min_p: None,
             }),
+            speculation: None,
         }
     }
 

@@ -73,6 +73,10 @@ pub struct GenerationConfig {
     pub no_repeat_ngram_size: usize,
     pub add_bos_token: bool,
     pub strategy: DecodingStrategy,
+    /// Enable speculative decoding for this generation.
+    /// Requires draft model to be loaded via `generator.load_draft_model()`.
+    /// Set to None to use normal autoregressive decoding.
+    pub speculation: Option<SpeculationParams>,
 }
 /// A sensible default for decoder-only models (like GPT-2 or Llama).
 impl Default for GenerationConfig {
@@ -90,12 +94,31 @@ impl Default for GenerationConfig {
                 top_p: Some(0.9),
                 min_p: Some(0.1),
             }),
+            speculation: None,
         }
     }
 }
 
-/// HuggingFace generation_config.json format
-/// This is the standard format used across all HF models
+/// Parameters for speculative decoding (per-call settings).
+#[derive(Clone, Debug)]
+pub struct SpeculationParams {
+    /// Number of tokens to speculate per iteration (default: 4).
+    pub num_tokens: usize,
+    
+    /// Use probability-based acceptance to preserve exact target distribution.
+    /// If false, uses greedy acceptance (faster but slightly different distribution).
+    pub probabilistic: bool,
+}
+
+impl Default for SpeculationParams {
+    fn default() -> Self {
+        Self {
+            num_tokens: 4,
+            probabilistic: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct HFGenerationConfig {
     // Token IDs
@@ -213,6 +236,7 @@ impl HFGenerationConfig {
             repetition_penalty: self.repetition_penalty.unwrap_or(1.0),
             add_bos_token: model_defaults.add_bos_token,
             strategy,
+            speculation: None,
         }
     }
     
@@ -323,6 +347,7 @@ impl HFGenerationDefaults {
             no_repeat_ngram_size: 0,
             add_bos_token: true,
             strategy,
+            speculation: None,
         }
     }
 }

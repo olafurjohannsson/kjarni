@@ -497,6 +497,7 @@ impl EncoderDecoderLanguageModel for T5Model {
                         length_penalty: summary.length_penalty,
                         early_stopping: summary.early_stopping,
                     }),
+                    speculation: None,
                 };
             }
         }
@@ -514,6 +515,7 @@ impl EncoderDecoderLanguageModel for T5Model {
                 length_penalty: 1.0, // T5 typically uses 1.0
                 early_stopping: true,
             }),
+            speculation: None,
         }
     }
 }

@@ -30,6 +30,7 @@ async fn test_beam_search_4_beams() -> Result<()> {
             length_penalty: 2.0,
             early_stopping: true,
         }),
+        ..Default::default()
     };
 
     let result = run_beam_search(&model, &backend, text, &config).await?;
@@ -117,6 +118,7 @@ async fn test_beam_search_debug_trace() -> Result<()> {
             length_penalty: 2.0,
             early_stopping: true,
         }),
+        ..Default::default()
     };
 
     let result = run_beam_search(&model, &backend, text, &config).await?;

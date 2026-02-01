@@ -477,6 +477,7 @@ impl EncoderDecoderLanguageModel for BartModel {
                     length_penalty: summary_params.length_penalty,
                     early_stopping: summary_params.early_stopping,
                 }),
+                speculation: None,
             };
         }
 
@@ -493,6 +494,7 @@ impl EncoderDecoderLanguageModel for BartModel {
                 length_penalty: 2.0,
                 early_stopping: true,
             }),
+            speculation: None,
         }
     }
 }

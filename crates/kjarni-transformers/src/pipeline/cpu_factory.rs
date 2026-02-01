@@ -1,13 +1,14 @@
 use crate::activations::Activation;
-use crate::decoder::prelude::DecoderAttention;
+use crate::cpu::decoder::DecoderAttentionNew;
 use crate::cpu::feedforward::SwiGluFeedForward;
+use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
+use crate::decoder::prelude::DecoderAttention;
 use crate::linear_layer::{F32MatmulStrategy, LinearLayer};
 use crate::models::base::ModelLoadConfig;
-use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::tensor::DType;
 use crate::traits::{AttentionLayout, FeedForwardLayout, ModelMetadata};
 use crate::weights::ModelWeights;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub struct CpuLayerFactory<'a> {
     weights: &'a ModelWeights,
@@ -16,7 +17,7 @@ pub struct CpuLayerFactory<'a> {
 }
 
 impl<'a> CpuLayerFactory<'a> {
-        pub fn new(weights: &'a ModelWeights) -> Self {
+    pub fn new(weights: &'a ModelWeights) -> Self {
         Self {
             weights,
             target_dtype: None,
@@ -34,7 +35,7 @@ impl<'a> CpuLayerFactory<'a> {
         self
     }
 
-        /// Replace `{}` with layer index.
+    /// Replace `{}` with layer index.
     fn resolve(template: &str, layer_idx: usize) -> String {
         template.replace("{}", &layer_idx.to_string())
     }
@@ -55,8 +56,6 @@ impl<'a> CpuLayerFactory<'a> {
             .with_f32_strategy(self.f32_strategy)
             .build()
     }
-
-    
 
     /// Builds a Normalization brick.
     /// Logic: If bias template exists -> LayerNorm, else -> RMSNorm.
@@ -103,7 +102,8 @@ impl<'a> CpuLayerFactory<'a> {
         // SwiGLU variants typically do not use biases, so we pass None
         let gate = Self::build_linear(&self, gate_template, layout.gate_bias.as_deref(), idx)?;
         let up = Self::build_linear(&self, &layout.up_weight, layout.up_bias.as_deref(), idx)?;
-        let down = Self::build_linear(&self, &layout.down_weight, layout.down_bias.as_deref(), idx)?;
+        let down =
+            Self::build_linear(&self, &layout.down_weight, layout.down_bias.as_deref(), idx)?;
 
         Ok(SwiGluFeedForward::new(gate, up, down, activation))
     }
@@ -152,6 +152,61 @@ impl<'a> CpuLayerFactory<'a> {
 
         // 2. Construct the DecoderAttention brick
         Ok(DecoderAttention::new(
+            meta.hidden_size,
+            meta.num_attention_heads,
+            q,
+            k,
+            v,
+            o,
+            Some(meta.num_kv_heads),
+        ))
+    }
+
+    pub fn build_decoder_attention_new(
+        &self,
+        meta: &ModelMetadata,
+        layout: &AttentionLayout,
+        idx: usize,
+    ) -> Result<DecoderAttentionNew> {
+        let i_str = idx.to_string();
+        let strategy = Some(F32MatmulStrategy::CustomSimd);
+
+        // Helper to resolve template strings
+        let name = |t: &String| t.replace("{}", &i_str);
+        let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &i_str));
+
+        // 1. Load the 4 Linear Layers
+        // LinearLayer::from_weights handles the bias automatically if opt_name returns Some
+        let q = Self::build_linear(
+            &self,
+            &layout.q_weight,
+            opt_name(&layout.q_bias).as_deref(),
+            idx,
+        )?;
+
+        let k = Self::build_linear(
+            &self,
+            &layout.k_weight,
+            opt_name(&layout.k_bias).as_deref(),
+            idx,
+        )?;
+
+        let v = Self::build_linear(
+            &self,
+            &layout.v_weight,
+            opt_name(&layout.v_bias).as_deref(),
+            idx,
+        )?;
+
+        let o = Self::build_linear(
+            &self,
+            &layout.o_weight,
+            opt_name(&layout.o_bias).as_deref(),
+            idx,
+        )?;
+
+        // 2. Construct the DecoderAttention brick
+        Ok(DecoderAttentionNew::new(
             meta.hidden_size,
             meta.num_attention_heads,
             q,
@@ -250,12 +305,13 @@ mod tests {
 
         let factory = CpuLayerFactory::new(&weights);
 
-        let norm = factory.build_norm(
-            &"layer.{}.norm.weight".to_string(),
-            &None, // No bias -> RMSNorm
-            1e-5,
-            0,
-        )
+        let norm = factory
+            .build_norm(
+                &"layer.{}.norm.weight".to_string(),
+                &None, // No bias -> RMSNorm
+                1e-5,
+                0,
+            )
             .unwrap();
 
         match norm {
@@ -276,12 +332,13 @@ mod tests {
 
         let factory = CpuLayerFactory::new(&weights);
 
-        let norm = factory.build_norm(
-            &"layer.{}.ln.weight".to_string(),
-            &Some("layer.{}.ln.bias".to_string()), // Bias -> LayerNorm
-            1e-5,
-            0,
-        )
+        let norm = factory
+            .build_norm(
+                &"layer.{}.ln.weight".to_string(),
+                &Some("layer.{}.ln.bias".to_string()), // Bias -> LayerNorm
+                1e-5,
+                0,
+            )
             .unwrap();
 
         match norm {
@@ -321,7 +378,9 @@ mod tests {
 
         let factory = CpuLayerFactory::new(&weights);
 
-        let ffn = factory.build_swiglu_ffn(&layout, crate::activations::Activation::SilU, 0).unwrap();
+        let ffn = factory
+            .build_swiglu_ffn(&layout, crate::activations::Activation::SilU, 0)
+            .unwrap();
 
         assert_eq!(ffn.gate.shape(), [8, 4]);
         assert_eq!(ffn.up.shape(), [8, 4]);
@@ -382,8 +441,7 @@ mod tests {
 
         let meta = dummy_metadata();
         let factory = CpuLayerFactory::new(&weights);
-        let attn =
-            factory.build_decoder_attention(&meta, &layout, 0).unwrap();
+        let attn = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
 
         assert!(attn.q_proj.has_bias());
         assert!(!attn.k_proj.has_bias());

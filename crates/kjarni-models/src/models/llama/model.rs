@@ -503,6 +503,7 @@ impl DecoderLanguageModel for LlamaModel {
                 top_p: Some(0.9),
                 min_p: Some(0.05),
             }),
+            speculation: None,
         }
     }
 }

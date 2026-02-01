@@ -43,6 +43,7 @@ like C++, Haskell, and Erlang.";
             length_penalty: 2.0,
             early_stopping: true,
         }),
+        speculation: None,
     };
     let mut cpu_generation_config = cpu_generator.model.get_default_generation_config();
     // cpu_generation_config.max_new_tokens = Some(100);

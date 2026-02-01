@@ -117,6 +117,15 @@ pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Res
     }
 }
 
+/// Get probability of a specific token after softmax.
+#[inline]
+pub fn softmax_prob(logits: &Array1<f32>, token: u32) -> f32 {
+    let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f32 = logits.iter().map(|&x| (x - max_logit).exp()).sum();
+    let token_exp = (logits[token as usize] - max_logit).exp();
+    token_exp / exp_sum
+}
+
 fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
     let mut probs = logits.clone();
     softmax_1d_inplace(&mut probs);

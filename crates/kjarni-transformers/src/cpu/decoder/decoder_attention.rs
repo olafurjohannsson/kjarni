@@ -1579,7 +1579,6 @@ mod decoder_attention_test {
         assert_eq!(attn.num_heads, 8);
         assert_eq!(attn.num_kv_heads, 2);
         assert_eq!(attn.head_dim, 32);
-        assert_eq!(attn.kv_dim(), 64);
     }
 
     #[test]
@@ -1621,5 +1620,787 @@ mod decoder_attention_test {
             .expect("forward should succeed");
 
         assert_eq!(output.shape(), &[batch, seq_len, hidden_size]);
+    }
+}
+
+
+// =============================================================================
+// Test Utilities
+// =============================================================================
+
+#[cfg(test)]
+mod test_utils {
+    use super::*;
+
+    /// Model configurations: (hidden_size, num_heads, num_kv_heads, head_dim)
+    pub struct AttentionConfig {
+        pub name: &'static str,
+        pub hidden_size: usize,
+        pub num_heads: usize,
+        pub num_kv_heads: usize,
+        pub head_dim: usize,
+    }
+
+    impl AttentionConfig {
+        pub fn new(name: &'static str, hidden_size: usize, num_heads: usize, num_kv_heads: usize) -> Self {
+            Self {
+                name,
+                hidden_size,
+                num_heads,
+                num_kv_heads,
+                head_dim: hidden_size / num_heads,
+            }
+        }
+
+        pub fn kv_dim(&self) -> usize {
+            self.num_kv_heads * self.head_dim
+        }
+
+        pub fn q_dim(&self) -> usize {
+            self.num_heads * self.head_dim
+        }
+    }
+
+    // Llama 3.2 1B: hidden=2048, heads=32, kv_heads=8
+    pub const LLAMA_1B: AttentionConfig = AttentionConfig {
+        name: "Llama-3.2-1B",
+        hidden_size: 2048,
+        num_heads: 32,
+        num_kv_heads: 8,
+        head_dim: 64, // 2048 / 32
+    };
+
+    // Llama 3.2 3B: hidden=3072, heads=24, kv_heads=8
+    pub const LLAMA_3B: AttentionConfig = AttentionConfig {
+        name: "Llama-3.2-3B",
+        hidden_size: 3072,
+        num_heads: 24,
+        num_kv_heads: 8,
+        head_dim: 128, // 3072 / 24
+    };
+
+    // Llama 3.1 8B: hidden=4096, heads=32, kv_heads=8
+    pub const LLAMA_8B: AttentionConfig = AttentionConfig {
+        name: "Llama-3.1-8B",
+        hidden_size: 4096,
+        num_heads: 32,
+        num_kv_heads: 8,
+        head_dim: 128, // 4096 / 32
+    };
+
+    // Small test config for fast unit tests
+    pub const SMALL_TEST: AttentionConfig = AttentionConfig {
+        name: "SmallTest",
+        hidden_size: 256,
+        num_heads: 8,
+        num_kv_heads: 4,
+        head_dim: 32, // 256 / 8
+    };
+
+    // MHA config (num_heads == num_kv_heads)
+    pub const MHA_TEST: AttentionConfig = AttentionConfig {
+        name: "MHA-Test",
+        hidden_size: 256,
+        num_heads: 8,
+        num_kv_heads: 8,
+        head_dim: 32,
+    };
+
+    /// Creates deterministic test weights for attention projections.
+    pub fn create_attention_weights(
+        config: &AttentionConfig,
+    ) -> (Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>) {
+        let hidden = config.hidden_size;
+        let q_dim = config.q_dim();
+        let kv_dim = config.kv_dim();
+
+        // Q: [q_dim, hidden_size] (transposed for matmul)
+        let q = Array2::from_shape_fn((q_dim, hidden), |(i, j)| {
+            let idx = (i * 17 + j * 13) % 1000;
+            (idx as f32 * 0.001 - 0.5) * 0.02
+        });
+
+        // K: [kv_dim, hidden_size]
+        let k = Array2::from_shape_fn((kv_dim, hidden), |(i, j)| {
+            let idx = (i * 19 + j * 11) % 1000;
+            (idx as f32 * 0.001 - 0.5) * 0.02
+        });
+
+        // V: [kv_dim, hidden_size]
+        let v = Array2::from_shape_fn((kv_dim, hidden), |(i, j)| {
+            let idx = (i * 23 + j * 7) % 1000;
+            (idx as f32 * 0.001 - 0.5) * 0.02
+        });
+
+        // O: [hidden_size, q_dim]
+        let o = Array2::from_shape_fn((hidden, q_dim), |(i, j)| {
+            let idx = (i * 29 + j * 3) % 1000;
+            (idx as f32 * 0.001 - 0.5) * 0.02
+        });
+
+        (q, k, v, o)
+    }
+
+    /// Creates both attention implementations with identical weights.
+    pub fn create_attention_pair(
+        config: &AttentionConfig,
+    ) -> (DecoderAttention, DecoderAttentionNew) {
+        let (q, k, v, o) = create_attention_weights(config);
+
+        let baseline = DecoderAttention::new(
+            config.hidden_size,
+            config.num_heads,
+            LinearLayer::new_f32(q.clone(), None),
+            LinearLayer::new_f32(k.clone(), None),
+            LinearLayer::new_f32(v.clone(), None),
+            LinearLayer::new_f32(o.clone(), None),
+            Some(config.num_kv_heads),
+        );
+
+        let fused = DecoderAttentionNew::new(
+            config.hidden_size,
+            config.num_heads,
+            LinearLayer::new_f32(q, None),
+            LinearLayer::new_f32(k, None),
+            LinearLayer::new_f32(v, None),
+            LinearLayer::new_f32(o, None),
+            Some(config.num_kv_heads),
+        );
+
+        (baseline, fused)
+    }
+
+    /// Creates deterministic test input.
+    pub fn create_test_input(batch: usize, seq: usize, hidden: usize) -> Array3<f32> {
+        Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
+            let idx = (b * 1000 + s * 100 + h) % 1000;
+            (idx as f32 * 0.001 - 0.5) * 0.1
+        })
+    }
+
+    /// Creates zeroed KV cache.
+    pub fn create_kv_cache(
+        batch: usize,
+        total_len: usize,
+        kv_dim: usize,
+    ) -> (Array3<f32>, Array3<f32>) {
+        let k_cache = Array3::zeros((batch, total_len, kv_dim));
+        let v_cache = Array3::zeros((batch, total_len, kv_dim));
+        (k_cache, v_cache)
+    }
+
+    /// Creates attention mask (all ones = no masking).
+    pub fn create_attention_mask(batch: usize, total_len: usize) -> Array2<f32> {
+        Array2::ones((batch, total_len))
+    }
+
+    /// Computes max absolute difference between two arrays.
+    pub fn max_abs_diff(a: &Array3<f32>, b: &Array3<f32>) -> f32 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, |acc, x| acc.max(x))
+    }
+
+    /// Computes mean absolute difference.
+    pub fn mean_abs_diff(a: &Array3<f32>, b: &Array3<f32>) -> f32 {
+        let sum: f32 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum();
+        sum / a.len() as f32
+    }
+}
+
+// =============================================================================
+// Parity Tests
+// =============================================================================
+
+#[cfg(test)]
+mod attention_parity_test {
+    use super::test_utils::*;
+    use super::*;
+
+    /// Helper to run parity test for a given config and sequence length.
+    fn run_parity_test(config: &AttentionConfig, batch: usize, seq_len: usize) -> Result<f32> {
+        let (baseline, fused) = create_attention_pair(config);
+
+        let input = create_test_input(batch, seq_len, config.hidden_size);
+        let total_len = seq_len; // No history for this test
+        let position_offset = 0;
+
+        // Create separate caches for each implementation
+        let (mut k_cache_baseline, mut v_cache_baseline) =
+            create_kv_cache(batch, total_len, config.kv_dim());
+        let (mut k_cache_fused, mut v_cache_fused) =
+            create_kv_cache(batch, total_len, config.kv_dim());
+
+        let mask = create_attention_mask(batch, total_len);
+
+        // Run baseline
+        let baseline_out = baseline.forward(
+            &input,
+            Some(&mask),
+            k_cache_baseline.view_mut(),
+            v_cache_baseline.view_mut(),
+            position_offset,
+            None, // No RoPE for parity test
+        )?;
+
+        // Run fused
+        let fused_out = fused.forward(
+            &input,
+            Some(&mask),
+            k_cache_fused.view_mut(),
+            v_cache_fused.view_mut(),
+            position_offset,
+            None,
+        )?;
+
+        let max_diff = max_abs_diff(&baseline_out, &fused_out);
+        Ok(max_diff)
+    }
+
+    // -------------------------------------------------------------------------
+    // Decode (seq=1) Parity Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_decode_parity_small() {
+        let max_diff = run_parity_test(&SMALL_TEST, 1, 1).unwrap();
+        assert!(
+            max_diff < 1e-5,
+            "Decode parity failed for {}: max_diff={}",
+            SMALL_TEST.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_decode_parity_mha() {
+        let max_diff = run_parity_test(&MHA_TEST, 1, 1).unwrap();
+        assert!(
+            max_diff < 1e-5,
+            "Decode parity failed for {}: max_diff={}",
+            MHA_TEST.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_decode_parity_llama_1b() {
+        let max_diff = run_parity_test(&LLAMA_1B, 1, 1).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Decode parity failed for {}: max_diff={}",
+            LLAMA_1B.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_decode_parity_llama_3b() {
+        let max_diff = run_parity_test(&LLAMA_3B, 1, 1).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Decode parity failed for {}: max_diff={}",
+            LLAMA_3B.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_decode_parity_llama_8b() {
+        let max_diff = run_parity_test(&LLAMA_8B, 1, 1).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Decode parity failed for {}: max_diff={}",
+            LLAMA_8B.name,
+            max_diff
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Prefill (seq>1) Parity Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_prefill_parity_small_seq8() {
+        let max_diff = run_parity_test(&SMALL_TEST, 1, 8).unwrap();
+        assert!(
+            max_diff < 1e-5,
+            "Prefill parity failed for {} seq=8: max_diff={}",
+            SMALL_TEST.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_prefill_parity_small_seq32() {
+        let max_diff = run_parity_test(&SMALL_TEST, 1, 32).unwrap();
+        assert!(
+            max_diff < 1e-5,
+            "Prefill parity failed for {} seq=32: max_diff={}",
+            SMALL_TEST.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_prefill_parity_llama_1b_seq16() {
+        let max_diff = run_parity_test(&LLAMA_1B, 1, 16).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Prefill parity failed for {} seq=16: max_diff={}",
+            LLAMA_1B.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_prefill_parity_llama_3b_seq16() {
+        let max_diff = run_parity_test(&LLAMA_3B, 1, 16).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Prefill parity failed for {} seq=16: max_diff={}",
+            LLAMA_3B.name,
+            max_diff
+        );
+    }
+
+    #[test]
+    fn test_prefill_parity_llama_8b_seq16() {
+        let max_diff = run_parity_test(&LLAMA_8B, 1, 16).unwrap();
+        assert!(
+            max_diff < 1e-4,
+            "Prefill parity failed for {} seq=16: max_diff={}",
+            LLAMA_8B.name,
+            max_diff
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // With Cache History Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_decode_with_history_parity() {
+        let config = &SMALL_TEST;
+        let (baseline, fused) = create_attention_pair(config);
+
+        let batch = 1;
+        let history_len = 32;
+        let seq_len = 1; // Decode
+        let total_len = history_len + seq_len;
+
+        let input = create_test_input(batch, seq_len, config.hidden_size);
+
+        // Pre-fill cache with "history"
+        let (mut k_cache_baseline, mut v_cache_baseline) =
+            create_kv_cache(batch, total_len, config.kv_dim());
+        let (mut k_cache_fused, mut v_cache_fused) =
+            create_kv_cache(batch, total_len, config.kv_dim());
+
+        // Fill history portion with deterministic values
+        for i in 0..history_len {
+            for j in 0..config.kv_dim() {
+                let val = ((i * 17 + j * 13) % 100) as f32 * 0.01 - 0.5;
+                k_cache_baseline[[0, i, j]] = val;
+                v_cache_baseline[[0, i, j]] = val * 0.5;
+                k_cache_fused[[0, i, j]] = val;
+                v_cache_fused[[0, i, j]] = val * 0.5;
+            }
+        }
+
+        let mask = create_attention_mask(batch, total_len);
+
+        let baseline_out = baseline
+            .forward(
+                &input,
+                Some(&mask),
+                k_cache_baseline.view_mut(),
+                v_cache_baseline.view_mut(),
+                history_len, // position_offset = history length
+                None,
+            )
+            .unwrap();
+
+        let fused_out = fused
+            .forward(
+                &input,
+                Some(&mask),
+                k_cache_fused.view_mut(),
+                v_cache_fused.view_mut(),
+                history_len,
+                None,
+            )
+            .unwrap();
+
+        let max_diff = max_abs_diff(&baseline_out, &fused_out);
+        assert!(
+            max_diff < 1e-5,
+            "Decode with history parity failed: max_diff={}",
+            max_diff
+        );
+
+        // Also verify cache contents match
+        let k_cache_diff = k_cache_baseline
+            .iter()
+            .zip(k_cache_fused.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+
+        let v_cache_diff = v_cache_baseline
+            .iter()
+            .zip(v_cache_fused.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+
+        assert!(
+            k_cache_diff < 1e-5,
+            "K cache mismatch: max_diff={}",
+            k_cache_diff
+        );
+        assert!(
+            v_cache_diff < 1e-5,
+            "V cache mismatch: max_diff={}",
+            v_cache_diff
+        );
+    }
+}
+
+// =============================================================================
+// Performance Tests
+// =============================================================================
+
+#[cfg(test)]
+mod attention_performance_test {
+    use super::test_utils::*;
+    use super::*;
+
+    const WARMUP_ITERATIONS: usize = 3;
+    const BENCHMARK_ITERATIONS: usize = 10;
+
+    /// Benchmarks both implementations and prints results.
+    fn benchmark_config(config: &AttentionConfig, batch: usize, seq_len: usize, history_len: usize) {
+        let (baseline, fused) = create_attention_pair(config);
+
+        let total_len = history_len + seq_len;
+        let input = create_test_input(batch, seq_len, config.hidden_size);
+        let mask = create_attention_mask(batch, total_len);
+
+        // --- Benchmark baseline ---
+        for _ in 0..WARMUP_ITERATIONS {
+            let (mut k_cache, mut v_cache) = create_kv_cache(batch, total_len, config.kv_dim());
+            let _ = baseline.forward(
+                &input,
+                Some(&mask),
+                k_cache.view_mut(),
+                v_cache.view_mut(),
+                history_len,
+                None,
+            );
+        }
+
+        let baseline_start = std::time::Instant::now();
+        for _ in 0..BENCHMARK_ITERATIONS {
+            let (mut k_cache, mut v_cache) = create_kv_cache(batch, total_len, config.kv_dim());
+            let _ = baseline.forward(
+                &input,
+                Some(&mask),
+                k_cache.view_mut(),
+                v_cache.view_mut(),
+                history_len,
+                None,
+            );
+        }
+        let baseline_avg_us =
+            baseline_start.elapsed().as_micros() as f64 / BENCHMARK_ITERATIONS as f64;
+
+        // --- Benchmark fused ---
+        for _ in 0..WARMUP_ITERATIONS {
+            let (mut k_cache, mut v_cache) = create_kv_cache(batch, total_len, config.kv_dim());
+            let _ = fused.forward(
+                &input,
+                Some(&mask),
+                k_cache.view_mut(),
+                v_cache.view_mut(),
+                history_len,
+                None,
+            );
+        }
+
+        let fused_start = std::time::Instant::now();
+        for _ in 0..BENCHMARK_ITERATIONS {
+            let (mut k_cache, mut v_cache) = create_kv_cache(batch, total_len, config.kv_dim());
+            let _ = fused.forward(
+                &input,
+                Some(&mask),
+                k_cache.view_mut(),
+                v_cache.view_mut(),
+                history_len,
+                None,
+            );
+        }
+        let fused_avg_us = fused_start.elapsed().as_micros() as f64 / BENCHMARK_ITERATIONS as f64;
+
+        let speedup = baseline_avg_us / fused_avg_us;
+        let diff_pct = (1.0 - fused_avg_us / baseline_avg_us) * 100.0;
+
+        println!(
+            "| {:15} | batch={:<2} seq={:<4} hist={:<4} | Baseline: {:>10.1}µs | Fused: {:>10.1}µs | Speedup: {:>5.2}x | Diff: {:>+6.1}% |",
+            config.name, batch, seq_len, history_len, baseline_avg_us, fused_avg_us, speedup, diff_pct
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Decode Performance (seq=1)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn perf_decode_no_history() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              DECODE PERFORMANCE (seq=1, history=0)                                                        ║");
+        println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣");
+
+        benchmark_config(&SMALL_TEST, 1, 1, 0);
+        benchmark_config(&MHA_TEST, 1, 1, 0);
+        benchmark_config(&LLAMA_1B, 1, 1, 0);
+        benchmark_config(&LLAMA_3B, 1, 1, 0);
+        benchmark_config(&LLAMA_8B, 1, 1, 0);
+
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+    }
+
+    #[test]
+    fn perf_decode_with_history() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              DECODE PERFORMANCE (seq=1, with history)                                                     ║");
+        println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣");
+
+        // Short history
+        benchmark_config(&LLAMA_1B, 1, 1, 32);
+        benchmark_config(&LLAMA_3B, 1, 1, 32);
+        benchmark_config(&LLAMA_8B, 1, 1, 32);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        // Medium history
+        benchmark_config(&LLAMA_1B, 1, 1, 128);
+        benchmark_config(&LLAMA_3B, 1, 1, 128);
+        benchmark_config(&LLAMA_8B, 1, 1, 128);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        // Long history
+        benchmark_config(&LLAMA_1B, 1, 1, 512);
+        benchmark_config(&LLAMA_3B, 1, 1, 512);
+
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Prefill Performance (seq>1)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn perf_prefill() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              PREFILL PERFORMANCE (seq>1, history=0)                                                       ║");
+        println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣");
+
+        benchmark_config(&LLAMA_1B, 1, 8, 0);
+        benchmark_config(&LLAMA_1B, 1, 16, 0);
+        benchmark_config(&LLAMA_1B, 1, 32, 0);
+        benchmark_config(&LLAMA_1B, 1, 64, 0);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        benchmark_config(&LLAMA_3B, 1, 8, 0);
+        benchmark_config(&LLAMA_3B, 1, 16, 0);
+        benchmark_config(&LLAMA_3B, 1, 32, 0);
+        benchmark_config(&LLAMA_3B, 1, 64, 0);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        benchmark_config(&LLAMA_8B, 1, 8, 0);
+        benchmark_config(&LLAMA_8B, 1, 16, 0);
+        benchmark_config(&LLAMA_8B, 1, 32, 0);
+
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Summary
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn perf_summary() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              ATTENTION PERFORMANCE SUMMARY                                                                ║");
+        println!("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣");
+        println!("║ Baseline = DecoderAttention (separate Q, K, V matmuls)                                                                    ║");
+        println!("║ Fused    = DecoderAttentionNew (Q separate, KV fused via GQAProjection)                                                   ║");
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        // Key decode scenarios
+        benchmark_config(&LLAMA_1B, 1, 1, 0);
+        benchmark_config(&LLAMA_3B, 1, 1, 0);
+        benchmark_config(&LLAMA_8B, 1, 1, 0);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        // Decode with realistic history
+        benchmark_config(&LLAMA_1B, 1, 1, 128);
+        benchmark_config(&LLAMA_3B, 1, 1, 128);
+        benchmark_config(&LLAMA_8B, 1, 1, 128);
+
+        println!("╟────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╢");
+
+        // Key prefill scenarios
+        benchmark_config(&LLAMA_1B, 1, 16, 0);
+        benchmark_config(&LLAMA_3B, 1, 16, 0);
+        benchmark_config(&LLAMA_8B, 1, 16, 0);
+
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+    }
+
+    // -------------------------------------------------------------------------
+    // Detailed Timing Breakdown
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn perf_detailed_breakdown() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              DETAILED TIMING BREAKDOWN (LLAMA 3B)                                                         ║");
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+
+        let config = &LLAMA_3B;
+        let batch = 1;
+        let seq_len = 1;
+        let history_len = 128;
+        let total_len = history_len + seq_len;
+
+        let (q_w, k_w, v_w, o_w) = create_attention_weights(config);
+        let q = LinearLayer::new_f32(q_w.clone(), None);
+        let k = LinearLayer::new_f32(k_w.clone(), None);
+        let v = LinearLayer::new_f32(v_w.clone(), None);
+        let o = LinearLayer::new_f32(o_w.clone(), None);
+
+        let input = create_test_input(batch, seq_len, config.hidden_size);
+        let hidden_2d = input
+            .view()
+            .into_shape_with_order((batch * seq_len, config.hidden_size))
+            .unwrap();
+
+        // BASELINE BREAKDOWN
+        println!("BASELINE (separate Q, K, V):");
+
+        let t1 = std::time::Instant::now();
+        let _q_out = q.matmul(&hidden_2d);
+        let q_time = t1.elapsed();
+
+        let t2 = std::time::Instant::now();
+        let _k_out = k.matmul(&hidden_2d);
+        let k_time = t2.elapsed();
+
+        let t3 = std::time::Instant::now();
+        let _v_out = v.matmul(&hidden_2d);
+        let v_time = t3.elapsed();
+
+        println!("  Q projection:     {:>10}µs", q_time.as_micros());
+        println!("  K projection:     {:>10}µs", k_time.as_micros());
+        println!("  V projection:     {:>10}µs", v_time.as_micros());
+        println!(
+            "  Total Q+K+V:      {:>10}µs",
+            q_time.as_micros() + k_time.as_micros() + v_time.as_micros()
+        );
+        println!();
+
+        // FUSED BREAKDOWN
+        println!("FUSED (Q separate, KV fused):");
+
+        let gqa = GQAProjection::new(
+            LinearLayer::new_f32(q_w, None),
+            LinearLayer::new_f32(k_w, None),
+            LinearLayer::new_f32(v_w, None),
+        );
+
+        let t4 = std::time::Instant::now();
+        let _q_out2 = gqa.q_proj().matmul(&hidden_2d);
+        let q_time2 = t4.elapsed();
+
+        let kv_dim = config.kv_dim();
+        let mut kv_scratch = Array2::<f32>::zeros((batch * seq_len, 2 * kv_dim));
+
+        let t5 = std::time::Instant::now();
+        gqa.kv_proj().matmul_noalloc(&hidden_2d, &mut kv_scratch);
+        let kv_time = t5.elapsed();
+
+        let t6 = std::time::Instant::now();
+        let _k_split = kv_scratch.slice(s![.., ..kv_dim]).to_owned();
+        let _v_split = kv_scratch.slice(s![.., kv_dim..]).to_owned();
+        let split_time = t6.elapsed();
+
+        println!("  Q projection:     {:>10}µs", q_time2.as_micros());
+        println!("  KV projection:    {:>10}µs", kv_time.as_micros());
+        println!("  Split KV:         {:>10}µs", split_time.as_micros());
+        println!(
+            "  Total Q+KV+Split: {:>10}µs",
+            q_time2.as_micros() + kv_time.as_micros() + split_time.as_micros()
+        );
+        println!();
+
+        // COMPARISON
+        let baseline_total = q_time.as_micros() + k_time.as_micros() + v_time.as_micros();
+        let fused_total = q_time2.as_micros() + kv_time.as_micros() + split_time.as_micros();
+        let diff_pct = (1.0 - fused_total as f64 / baseline_total as f64) * 100.0;
+
+        println!("COMPARISON:");
+        println!("  Baseline total:   {:>10}µs", baseline_total);
+        println!("  Fused total:      {:>10}µs", fused_total);
+        println!("  Difference:       {:>+10.1}%", diff_pct);
+    }
+
+    // -------------------------------------------------------------------------
+    // Memory Analysis
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn perf_memory_analysis() {
+        println!("\n╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                              WEIGHT MEMORY ANALYSIS                                                                       ║");
+        println!("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+
+        for config in &[LLAMA_1B, LLAMA_3B, LLAMA_8B] {
+            let hidden = config.hidden_size;
+            let q_dim = config.q_dim();
+            let kv_dim = config.kv_dim();
+
+            // Baseline: Q, K, V separate
+            let q_size = q_dim * hidden * 4; // f32
+            let k_size = kv_dim * hidden * 4;
+            let v_size = kv_dim * hidden * 4;
+            let baseline_total = q_size + k_size + v_size;
+
+            // Fused: Q separate, KV fused (same total memory)
+            let fused_kv_size = 2 * kv_dim * hidden * 4;
+            let fused_total = q_size + fused_kv_size;
+
+            println!("{}:", config.name);
+            println!("  hidden={}, num_heads={}, num_kv_heads={}", hidden, config.num_heads, config.num_kv_heads);
+            println!("  Q dim: {}, KV dim: {}", q_dim, kv_dim);
+            println!();
+            println!("  BASELINE (separate Q, K, V):");
+            println!("    Q:  {:>8.2} MB", q_size as f64 / 1024.0 / 1024.0);
+            println!("    K:  {:>8.2} MB", k_size as f64 / 1024.0 / 1024.0);
+            println!("    V:  {:>8.2} MB", v_size as f64 / 1024.0 / 1024.0);
+            println!("    Total: {:>6.2} MB", baseline_total as f64 / 1024.0 / 1024.0);
+            println!();
+            println!("  FUSED (Q + KV):");
+            println!("    Q:  {:>8.2} MB", q_size as f64 / 1024.0 / 1024.0);
+            println!("    KV: {:>8.2} MB", fused_kv_size as f64 / 1024.0 / 1024.0);
+            println!("    Total: {:>6.2} MB", fused_total as f64 / 1024.0 / 1024.0);
+            println!();
+            println!("  (Same memory - fusion doesn't reduce weight size)");
+            println!();
+        }
     }
 }

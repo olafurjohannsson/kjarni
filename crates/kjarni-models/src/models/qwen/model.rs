@@ -291,6 +291,7 @@ impl DecoderLanguageModel for QwenModel {
                 top_p: Some(0.8),
                 min_p: Some(0.05),
             }),
+            speculation: None,
         }
     }
 }
