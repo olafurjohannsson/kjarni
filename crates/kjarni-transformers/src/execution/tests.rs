@@ -130,7 +130,7 @@ use crate::WgpuContext;
 async fn test_hidden_state_from_gpu() {
     let ctx = WgpuContext::new().await.unwrap();
     let arr = Array3::<f32>::zeros((1, 10, 512));
-    let gpu_tensor = crate::gpu_ops::GpuTensor::from_ndarray(&ctx, &arr).unwrap();
+    let gpu_tensor = crate::gpu::GpuTensor::from_ndarray(&ctx, &arr).unwrap();
 
     let hidden = HiddenState::from(gpu_tensor);
 
@@ -155,7 +155,7 @@ async fn test_hidden_state_cpu_to_gpu() {
 async fn test_hidden_state_gpu_to_cpu() {
     let ctx = std::sync::Arc::new(WgpuContext::new().await.unwrap());
     let arr = Array3::<f32>::ones((1, 4, 128));
-    let gpu_tensor = crate::gpu_ops::GpuTensor::from_ndarray(&ctx, &arr).unwrap();
+    let gpu_tensor = crate::gpu::GpuTensor::from_ndarray(&ctx, &arr).unwrap();
     let hidden = HiddenState::Gpu(gpu_tensor);
 
     let cpu_arr = hidden.into_cpu().await.unwrap();

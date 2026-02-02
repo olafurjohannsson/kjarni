@@ -3,8 +3,7 @@ use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
 use crate::encoder_decoder::traits::{GpuCrossAttentionKVCache, GpuCrossDecoderOutput};
-use crate::gpu_ops::GpuFrameContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::models::base::ModelInput;
 use crate::WgpuContext;
 use anyhow::anyhow;

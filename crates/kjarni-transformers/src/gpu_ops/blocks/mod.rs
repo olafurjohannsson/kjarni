@@ -5,7 +5,7 @@ pub mod ffn;
 pub mod ffn_swiglu;
 pub mod rope;
 pub mod layers;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 
 
 

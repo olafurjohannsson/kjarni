@@ -2,7 +2,7 @@ use super::*;
 use crate::activations::Activation;
 // Imports GpuSwiGLUFFN, GpuSwiGLUFFNWeights
 use crate::feedforward::SwiGluFeedForward as CpuSwiGLUFFN;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tests::common::assert_tensors_are_close_2d as assert_tensors_are_close;
 // Import your CPU implementation

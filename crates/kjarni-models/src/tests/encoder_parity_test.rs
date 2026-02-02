@@ -7,7 +7,7 @@ use crate::models::sentence_encoder::SentenceEncoder;
 use anyhow::Result;
 use kjarni_transformers::cpu::encoder::prelude::*;
 use kjarni_transformers::encoder_decoder::EncoderDecoderLanguageModel;
-use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::models::base::ModelInput;
 use kjarni_transformers::traits::Device;

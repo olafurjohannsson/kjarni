@@ -6,7 +6,7 @@ use ndarray_rand::RandomExt;
 use rand_distr::Uniform;
 
 use super::*;
-use crate::gpu_ops::DType;
+use crate::gpu::DType;
 use crate::WgpuContext;
 
 #[path = "../../../tests/common.rs"]

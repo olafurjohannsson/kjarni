@@ -14,7 +14,7 @@ use crate::gpu::normalization::{
 };
 
 use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
 use crate::models::base::ModelLoadConfig;
 use crate::traits::NormalizationStrategy;

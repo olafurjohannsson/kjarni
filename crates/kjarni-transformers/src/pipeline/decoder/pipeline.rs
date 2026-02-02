@@ -209,7 +209,7 @@ mod decoder_pipeline_test {
     use ndarray::{Array2, Array3};
 
     use super::*;
-    use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+    use crate::gpu::{GpuTensor, GpuTensorPool};
     use crate::models::base::{ModelInput, ModelLoadConfig};
     use crate::pipeline::DecoderPipelineBuilder;
     use crate::tensor::DType;

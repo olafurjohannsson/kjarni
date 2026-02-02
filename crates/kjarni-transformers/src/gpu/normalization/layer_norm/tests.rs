@@ -1,5 +1,5 @@
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::gpu::normalization::{GpuLayerNorm, GpuLayerNormWeights};
 use crate::tests::common::assert_tensors_are_close;
 use anyhow::Result;

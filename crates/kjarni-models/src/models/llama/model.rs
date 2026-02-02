@@ -64,7 +64,7 @@ use kjarni_transformers::{
     cache::{Cache, CpuKVCache, GpuKVCache},
     decoder::prelude::*,
     execution::ExecutionPlan,
-    gpu_ops::{GpuFrameContext, GpuTensor},
+    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
     // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     // Embeddings

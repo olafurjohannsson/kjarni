@@ -7,7 +7,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 
 /// Uniforms to pass shape and size metadata to the lookup shader.
 #[repr(C)]

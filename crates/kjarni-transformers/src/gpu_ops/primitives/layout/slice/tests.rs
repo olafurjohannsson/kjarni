@@ -1,5 +1,5 @@
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::Result;
 use common::read_gpu_tensor;

@@ -11,7 +11,8 @@
 //!
 
 use super::ops::AttentionOps;
-use crate::gpu_ops::{blocks::attention::GpuAttentionWeights, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::WgpuContext;
 use std::sync::Arc;
 

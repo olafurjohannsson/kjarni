@@ -1,6 +1,6 @@
 use super::*;
 use crate::WgpuContext;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu::{DType, GpuTensor};
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use anyhow::Result;
 use ndarray::{Array, Array2, Array3, Array4};

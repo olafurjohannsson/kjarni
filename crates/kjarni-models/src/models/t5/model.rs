@@ -410,10 +410,10 @@ impl GpuEncoderDecoderOps for T5Model {
 
     fn broadcast_encoder_states(
         &self,
-        frame: &mut kjarni_transformers::gpu_ops::GpuFrameContext,
-        encoder_hidden_states: &kjarni_transformers::gpu_ops::GpuTensor,
+        frame: &mut kjarni_transformers::gpu::GpuFrameContext,
+        encoder_hidden_states: &kjarni_transformers::gpu::GpuTensor,
         num_beams: usize,
-    ) -> Result<kjarni_transformers::gpu_ops::GpuTensor> {
+    ) -> Result<kjarni_transformers::gpu::GpuTensor> {
         let broadcast = self
             .pipeline
             .gpu_broadcast()
@@ -428,7 +428,7 @@ impl GpuEncoderDecoderOps for T5Model {
         }
         expanded_shape[0] = num_beams;
 
-        let expanded_states = kjarni_transformers::gpu_ops::GpuTensor::uninitialized(
+        let expanded_states = kjarni_transformers::gpu::GpuTensor::uninitialized(
             self.context().as_ref().unwrap(),
             expanded_shape,
             encoder_hidden_states.dtype(),
@@ -441,9 +441,9 @@ impl GpuEncoderDecoderOps for T5Model {
 
     fn project_to_logits(
         &self,
-        frame: &mut kjarni_transformers::gpu_ops::GpuFrameContext,
-        hidden_states: &kjarni_transformers::gpu_ops::GpuTensor,
-    ) -> Result<kjarni_transformers::gpu_ops::GpuTensor> {
+        frame: &mut kjarni_transformers::gpu::GpuFrameContext,
+        hidden_states: &kjarni_transformers::gpu::GpuTensor,
+    ) -> Result<kjarni_transformers::gpu::GpuTensor> {
         let (encoder_cmd, pool) = frame.resources();
         self.pipeline
             .lm_head()

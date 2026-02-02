@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 
 use crate::gpu_ops::blocks::rope::GpuRoPE;
-use crate::gpu_ops::kernel::Kernel;
+use crate::gpu::kernel::Kernel;
 use crate::gpu_ops::primitives::add_bias::GpuAddBias;
 use crate::gpu_ops::primitives::apply_mask::GpuApplyMask;
 use crate::gpu_ops::primitives::bmm::GpuBatchedMatMul;
@@ -18,7 +18,7 @@ use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
 use crate::gpu_ops::primitives::softmax::GpuSoftmax;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::traits::{AttentionLayout, ModelLayout};
 use crate::weights::ModelWeights;

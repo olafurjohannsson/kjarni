@@ -22,7 +22,8 @@ use tokenizers::Tokenizer;
 use kjarni_transformers::{
     WgpuContext,
     decoder::prelude::*,
-    gpu_ops::{GpuFrameContext, GpuTensor, primitives::linear::GpuLinearLayer},
+    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
+    gpu_ops::{primitives::linear::GpuLinearLayer},
     linear_layer::LinearLayer,
     models::{
         LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,

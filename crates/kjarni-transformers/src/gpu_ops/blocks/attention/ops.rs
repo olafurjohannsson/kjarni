@@ -13,7 +13,7 @@ use crate::gpu_ops::primitives::{
     apply_mask::GpuApplyMask,
     softmax::GpuSoftmax,
 };
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::WgpuContext;
 use std::sync::Arc;
 

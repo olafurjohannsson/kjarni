@@ -7,7 +7,7 @@
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::{linear::GpuLinearLayer, tanh::GpuTanh};
-use crate::gpu_ops::{GpuFrameContext, GpuTensor};
+use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
 use crate::weights::ModelWeights;

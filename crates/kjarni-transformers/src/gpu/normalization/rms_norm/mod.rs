@@ -1,5 +1,5 @@
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::tensor::DType;
 use anyhow::Result;
 use std::sync::Arc;

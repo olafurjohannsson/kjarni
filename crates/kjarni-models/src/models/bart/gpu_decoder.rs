@@ -17,7 +17,7 @@ use kjarni_transformers::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
 use kjarni_transformers::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
 };
-use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
+use kjarni_transformers::gpu::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::ModelConfig;

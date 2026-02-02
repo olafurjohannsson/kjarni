@@ -6,7 +6,7 @@ use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 
 use super::*;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu::{DType, GpuTensor};
 
 #[path = "../../../tests/common.rs"]
 mod common;

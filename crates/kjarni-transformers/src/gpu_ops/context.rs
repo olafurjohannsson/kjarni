@@ -11,7 +11,7 @@ use wgpu::{
 
 use crate::gpu_ops::profiler::GpuProfiler;
 use crate::gpu_ops::uniforms::GpuUniformBuffer;
-use crate::gpu_ops::GpuTensorPool;
+use crate::gpu::GpuTensorPool;
 
 #[derive(Debug, Clone)]
 pub struct GpuMemoryInfo {

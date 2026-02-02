@@ -26,7 +26,7 @@ use crate::decoder::traits::{
     CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel, GpuDecoder,
     GpuDecoderOps,
 };
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::AutoregressiveLoop;
 use crate::traits::InferenceModel;
 use crate::{Device, LanguageModel, WgpuContext};

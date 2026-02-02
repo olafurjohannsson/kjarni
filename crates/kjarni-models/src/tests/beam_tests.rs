@@ -1,6 +1,7 @@
 use anyhow::Result;
 use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
-use kjarni_transformers::encoder_decoder::{CpuBackend, GpuBackend, run_beam_search};
+use kjarni_transformers::encoder_decoder::{CpuBackend, run_beam_search};
+use kjarni_transformers::gpu::encoder_decoder::backend::GpuEncoderDecoderBackend;
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 use kjarni_transformers::{LanguageModel, WgpuContext};
@@ -14,7 +15,7 @@ async fn test_beam_search_4_beams() -> Result<()> {
 
     let context = WgpuContext::new().await?;
     let gpu_model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Wgpu, Some(context.clone()), None).await?;
-    let gpu_backend = GpuBackend::new(context)?;
+    let gpu_backend = GpuEncoderDecoderBackend::new(context)?;
 
     let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
 

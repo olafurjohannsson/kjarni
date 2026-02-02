@@ -11,7 +11,7 @@ use crate::cache::{Cache, GpuKVCache};
 use crate::decoder::prelude::*;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
 use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};
-use crate::gpu_ops::{GpuFrameContext, GpuTensor};
+use crate::gpu::{GpuFrameContext, GpuTensor};
 pub use crate::models::base::AutoregressiveLoop;
 use crate::models::base::ModelInput;
 use crate::WgpuContext;

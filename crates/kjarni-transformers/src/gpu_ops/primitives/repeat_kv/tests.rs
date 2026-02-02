@@ -25,7 +25,7 @@ async fn test_repeat_kv() -> Result<()> {
     let output_gpu = GpuTensor::zeros(
         &context,
         vec![1, 4, 2, 2],
-        crate::gpu_ops::DType::F32,
+        crate::gpu::DType::F32,
         "output",
     )?;
 

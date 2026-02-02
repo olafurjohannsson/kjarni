@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use ndarray::Array2;
 
 use crate::gpu::{GpuEmbeddingWeights, GpuEmbeddings};
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelInput;
 use crate::tensor::DType;

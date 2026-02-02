@@ -6,7 +6,7 @@ use crate::activations::softmax_4d_inplace;
 mod common;
 
 use super::*;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use anyhow::Result;
 use common::{read_gpu_tensor_to_vec, get_test_context, assert_all_close_4d};
 use ndarray::{Array, Array2, Array4, Axis, s};

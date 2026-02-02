@@ -1,5 +1,5 @@
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::rope::RoPE;
 use anyhow::Result;
 use ndarray::Array2;

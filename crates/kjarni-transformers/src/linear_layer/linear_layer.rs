@@ -48,7 +48,7 @@ use crate::{
 };
 
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::linear_layer::LinearLayerBuilder;
 use crate::tensor::{DType, QuantizedMatrix};
 use crate::utils::tensor_ops;
@@ -682,9 +682,9 @@ impl LinearLayer {
     pub fn bias_to_gpu(
         &self,
         ctx: &Arc<crate::WgpuContext>,
-    ) -> Result<Option<crate::gpu_ops::GpuTensor>> {
+    ) -> Result<Option<crate::gpu::GpuTensor>> {
         if let Some(bias) = &self.bias {
-            let gpu_bias = crate::gpu_ops::GpuTensor::from_ndarray(ctx, bias)?;
+            let gpu_bias = crate::gpu::GpuTensor::from_ndarray(ctx, bias)?;
             Ok(Some(gpu_bias))
         } else {
             Ok(None)

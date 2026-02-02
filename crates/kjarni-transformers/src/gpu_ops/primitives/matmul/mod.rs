@@ -45,7 +45,7 @@
 //! - [`super::bmm`] — Batched matrix multiplication
 //! - [`super::linear`] — Fused linear layer (matmul + bias)
 
-use crate::gpu_ops::{GpuTensor, Kernel};
+use crate::gpu::{GpuTensor, Kernel};
 use crate::tensor::DType;
 use crate::WgpuContext;
 use std::sync::Arc;

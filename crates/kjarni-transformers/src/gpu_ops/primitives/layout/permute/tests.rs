@@ -4,7 +4,7 @@ mod common;
 
 
 use super::GpuPermute; // Assuming GpuPermute is in the parent `mod.rs`
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu::{DType, GpuTensor};
 use anyhow::Result;
 use common::{read_gpu_tensor_to_vec};
 use ndarray::{Array, Array2, Array4, Axis};

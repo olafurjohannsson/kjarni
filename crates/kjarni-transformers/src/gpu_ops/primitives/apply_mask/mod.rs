@@ -2,7 +2,7 @@ use crate::WgpuContext;
 use wgpu::util::DeviceExt;
 use wgpu::{include_wgsl, BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use std::sync::Arc;
 
 

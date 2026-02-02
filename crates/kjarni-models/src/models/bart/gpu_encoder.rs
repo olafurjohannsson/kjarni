@@ -14,7 +14,7 @@ use kjarni_transformers::gpu::{
 };
 
 use kjarni_transformers::WgpuContext;
-use kjarni_transformers::gpu_ops::{GpuTensor, GpuTensorPool};
+use kjarni_transformers::gpu::{GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::traits::{ModelConfig, ModelLayout, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;

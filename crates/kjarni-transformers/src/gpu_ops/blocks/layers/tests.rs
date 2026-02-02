@@ -17,7 +17,7 @@ use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardWeights, GpuSwiGLUFFN, GpuSwiGLUFFNWeights,
 };
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::rope::RoPE as CpuRoPE;
 use crate::traits::{
@@ -735,7 +735,7 @@ mod tests {
         let expanded_gpu_out = GpuTensor::uninitialized(
             &context,
             vec![batch_size, num_heads, seq_len, head_dim],
-            crate::gpu_ops::DType::F32,
+            crate::gpu::DType::F32,
             "expanded kv output",
         );
 
@@ -894,7 +894,7 @@ mod tests {
         let output_gpu = GpuTensor::uninitialized(
             &context,
             input_gpu.shape().to_vec(),
-            crate::gpu_ops::DType::F32,
+            crate::gpu::DType::F32,
             "rope output",
         );
 
@@ -947,13 +947,13 @@ mod tests {
         let q_rot_gpu = GpuTensor::uninitialized(
             &context,
             q_gpu.shape().to_vec(),
-            crate::gpu_ops::DType::F32,
+            crate::gpu::DType::F32,
             "q rot",
         );
         let k_rot_gpu = GpuTensor::uninitialized(
             &context,
             k_gpu.shape().to_vec(),
-            crate::gpu_ops::DType::F32,
+            crate::gpu::DType::F32,
             "k rot",
         );
 

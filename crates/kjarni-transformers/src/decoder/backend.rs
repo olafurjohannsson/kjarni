@@ -9,7 +9,7 @@ use ndarray::{Array1, Array2};
 
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 
 #[derive(Clone)]
 pub enum AnyDecoderBackend {

@@ -28,7 +28,7 @@ use std::any::Any;
 use crate::ChatTemplate;
 use crate::cache::{Cache, GpuKVCache};
 use crate::common::GenerationConfig;
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{AutoregressiveLoop, LanguageModel, ModelInput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;

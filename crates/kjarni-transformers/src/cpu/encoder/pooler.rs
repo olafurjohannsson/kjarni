@@ -1,7 +1,7 @@
 //! Pooling traits and implementations for encoder outputs
 
 use super::config::PoolingStrategy;
-use crate::{cls_pool, gpu_ops::{GpuTensor, GpuTensorPool}, last_token_pool, max_pool, mean_pool};
+use crate::{cls_pool, gpu::{GpuTensor, GpuTensorPool}, last_token_pool, max_pool, mean_pool};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 

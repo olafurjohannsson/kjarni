@@ -1,5 +1,6 @@
 use crate::WgpuContext;
-use crate::gpu_ops::{GpuTensor, primitives::layout::unreshape::GpuUnreshape};
+use crate::gpu::{GpuTensor};
+use crate::gpu_ops::primitives::layout::unreshape::GpuUnreshape;
 use anyhow::Result;
 use ndarray::{Array, Array3, Array4};
 use std::sync::Arc;
@@ -41,7 +42,7 @@ async fn test_unreshape() -> Result<()> {
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![b, s, hidden_size],
-        crate::gpu_ops::DType::F32,
+        crate::gpu::DType::F32,
         "Unreshape Output",
     );
     let mut encoder = context.device.create_command_encoder(&Default::default());

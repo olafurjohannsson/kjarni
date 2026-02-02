@@ -2,7 +2,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

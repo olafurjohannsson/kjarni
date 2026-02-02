@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::tensor::DType;
 use crate::{WgpuContext, gpu_profile};
 

@@ -1,6 +1,7 @@
 use crate::cache::Cache;
-use crate::gpu_ops::{blocks::cache::GpuUpdateCache, GpuTensor};
+use crate::gpu_ops::{blocks::cache::GpuUpdateCache};
 use crate::WgpuContext;
+use crate::gpu::GpuTensor;
 use anyhow::{anyhow, Result};
 use std::any::Any;
 use std::sync::Arc;
@@ -53,13 +54,13 @@ impl GpuKVCache {
             k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Layer {} K-Cache", i),
             ));
             v_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Layer {} V-Cache", i),
             ));
         }

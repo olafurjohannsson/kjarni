@@ -67,7 +67,7 @@
 //! # See Also
 //!
 //! - [`crate::gpu_ops::Kernel`] — Base trait for GPU operations
-//! - [`crate::gpu_ops::GpuTensor`] — GPU tensor storage
+//! - [`crate::gpu::GpuTensor`] — GPU tensor storage
 //! - [`crate::WgpuContext`] — WebGPU device context
 
 pub mod add;

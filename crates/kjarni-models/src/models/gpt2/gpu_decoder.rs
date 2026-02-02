@@ -10,8 +10,9 @@ use kjarni_transformers::{
     gpu::normalization::{
         GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
     },
+    gpu::{GpuTensor, GpuTensorPool},
     gpu_ops::{
-        GpuTensor, GpuTensorPool,
+        
         blocks::{
             GpuFeedForward, GpuFeedForwardStd as GpuStandardFFN, GpuFeedForwardWeights,
             GpuFeedForwardWeightsStd as GpuStandardFFNWeights, attention::GpuAttentionWeights,
@@ -20,10 +21,9 @@ use kjarni_transformers::{
     models::base::{ModelInput, ModelLoadConfig},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
-    {EmbeddingConfig, Embeddings, LoadedEmbeddings},
+    {EmbeddingConfig, LoadedEmbeddings},
 };
 
-// --- Crate-Specific ---
 use crate::models::gpt2::config::Gpt2Config;
 
 pub struct Gpt2GpuDecoder {

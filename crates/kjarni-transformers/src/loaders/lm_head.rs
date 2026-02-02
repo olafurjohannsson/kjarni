@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array3, s};
 
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;

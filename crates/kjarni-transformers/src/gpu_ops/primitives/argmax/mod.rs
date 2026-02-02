@@ -1,4 +1,4 @@
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::WgpuContext;
 use std::borrow::Cow;
 

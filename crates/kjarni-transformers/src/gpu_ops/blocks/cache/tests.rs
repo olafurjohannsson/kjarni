@@ -4,7 +4,7 @@ use anyhow::Result;
 use ndarray::{Array, Array3, Array4};
 
 use super::GpuUpdateCache;
-use crate::gpu_ops::{DType, GpuTensor};
+use crate::gpu::{DType, GpuTensor};
 use crate::WgpuContext;
 
 async fn get_test_context() -> Arc<WgpuContext> {

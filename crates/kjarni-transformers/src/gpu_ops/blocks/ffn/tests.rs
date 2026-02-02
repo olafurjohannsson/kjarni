@@ -3,7 +3,7 @@ mod common;
 
 use super::*;
 use crate::feedforward::LegacyFeedForward as CpuFeedForward;
-use crate::gpu_ops::{DType, GpuTensor, GpuTensorPool};
+use crate::gpu::{DType, GpuTensor, GpuTensorPool};
 use anyhow::Result;
 use common::read_gpu_tensor_to_vec;
 use ndarray::{Array, Array1, Array2, Array3};

@@ -6,7 +6,7 @@ use crate::gpu::normalization::{
     GpuNormalization, GpuNormalizationWeights, 
 };
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::traits::ModelMetadata;
 use crate::WgpuContext;
 use anyhow::Result;

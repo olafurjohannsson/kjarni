@@ -10,7 +10,7 @@ use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::WgpuContext;
 
 pub struct GpuRoPEAttention {
@@ -270,7 +270,7 @@ mod tests {
     use super::*;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::rope::GpuRoPE;
-    use crate::gpu_ops::GpuTensorPool;
+    use crate::gpu::GpuTensorPool;
     use crate::rope::RoPE;
     use crate::WgpuContext;
 

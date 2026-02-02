@@ -1,21 +1,8 @@
 use anyhow::{Result, anyhow};
-use kjarni_transformers::cpu::encoder::prelude::{
-    CpuSequenceClassificationHead, GpuSequenceClassificationHead,
-};
-use kjarni_transformers::cpu::encoder::{
-    CpuEncoder, CpuEncoderOps, GpuEncoder, GpuEncoderOps, GpuTransformerEncoder,
-};
-use kjarni_transformers::gpu_ops::primitives::layout::clsslice::GpuClsSlice;
-use kjarni_transformers::gpu_ops::primitives::linear::GpuLinearLayer;
-use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor};
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
-use kjarni_transformers::models::download_model_files;
-use kjarni_transformers::models::registry::WeightsFormat;
-use kjarni_transformers::traits::InferenceModel;
+
 use kjarni_transformers::{
-    cpu::encoder::CpuTransformerEncoder,
-    cpu::encoder::traits::EncoderLanguageModel,
-    linear_layer::LinearLayer,
     models::{ModelArchitecture, ModelTask, ModelType},
     traits::{Device, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,

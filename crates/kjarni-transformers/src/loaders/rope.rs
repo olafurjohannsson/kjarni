@@ -40,7 +40,7 @@ mod loaded_rope {
 
     use super::*;
     use crate::WgpuContext;
-    use crate::gpu_ops::GpuTensor;
+    use crate::gpu::GpuTensor;
     use crate::traits::ModelMetadata;
     use anyhow::Result;
     use ndarray::{Array3, Array4};

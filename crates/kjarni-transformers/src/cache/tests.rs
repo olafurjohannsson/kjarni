@@ -10,7 +10,7 @@ mod cache_tests {
     use ndarray_rand::RandomExt;
 
     use crate::cache::{CpuBeamKVCache, GpuBeamKVCache};
-    use crate::gpu_ops::GpuTensor;
+    use crate::gpu::GpuTensor;
     use crate::WgpuContext;
 
     async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {

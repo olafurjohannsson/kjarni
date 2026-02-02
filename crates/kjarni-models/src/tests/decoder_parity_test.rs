@@ -7,7 +7,7 @@ use ndarray::{s, Array1, Array2, Array3, Array4};
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::gpu::normalization::{GpuRMSNorm, GpuRMSNormWeights};
-use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, Kernel};
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, Kernel};
 use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::normalization::RMSNorm;

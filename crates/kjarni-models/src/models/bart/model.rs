@@ -24,7 +24,7 @@ use kjarni_transformers::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu_ops::{GpuFrameContext, GpuTensor},
+    gpu::{GpuFrameContext, GpuTensor},
     models::{ModelType, base::ModelLoadConfig},
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
     prelude::*,

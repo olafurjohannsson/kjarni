@@ -18,7 +18,7 @@ use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::{
     GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
 };
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::linear_layer::LinearLayer;
 use crate::{Normalization, WgpuContext};
 

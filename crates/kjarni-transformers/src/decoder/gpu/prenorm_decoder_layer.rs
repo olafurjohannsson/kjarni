@@ -7,7 +7,7 @@ use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::GpuKVCache;
 use crate::WgpuContext;
 

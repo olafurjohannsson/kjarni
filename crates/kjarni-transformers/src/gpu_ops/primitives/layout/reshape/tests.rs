@@ -1,4 +1,5 @@
-use crate::gpu_ops::{GpuTensor, primitives::layout::reshape::GpuReshape};
+use crate::gpu::{GpuTensor, DType};
+use crate::gpu_ops::primitives::layout::reshape::GpuReshape;
 use anyhow::Result;
 use ndarray::{ Array3};
 use common::{read_gpu_tensor_4d, get_test_context};
@@ -27,7 +28,7 @@ async fn test_reshape_q_v_path() -> Result<()> {
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![b, h, s, d],
-        crate::gpu_ops::DType::F32,
+        DType::F32,
         "Reshape Output Q/V",
     );
     let mut encoder = context.device.create_command_encoder(&Default::default());
@@ -58,7 +59,7 @@ async fn test_reshape_k_transpose_path() -> Result<()> {
     let gpu_output = GpuTensor::uninitialized(
         &context,
         vec![b, h, d, s], 
-        crate::gpu_ops::DType::F32,
+        DType::F32,
         "Reshape Output K^T",
     );
     let mut encoder = context.device.create_command_encoder(&Default::default());

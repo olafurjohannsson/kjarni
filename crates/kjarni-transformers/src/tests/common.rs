@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use crate::WgpuContext;
-use crate::gpu_ops::GpuTensor; // Adjust path as needed
+use crate::gpu::GpuTensor; // Adjust path as needed
 use anyhow::Result;
 use ndarray::{Array, Array2, Array3, Array4, Dimension, Ix2, Ix3, Ix4};
 use std::sync::Arc;

@@ -9,7 +9,7 @@ use crate::attention::MultiHeadAttention;
 use crate::cache::{Cache, GpuKVCache};
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::WgpuContext;
 
 #[path = "../../../tests/common.rs"]

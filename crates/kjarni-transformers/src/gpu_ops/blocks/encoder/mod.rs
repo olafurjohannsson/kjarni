@@ -1,11 +1,11 @@
 use crate::WgpuContext;
 use crate::activations;
-use crate::gpu_ops::Kernel;
 use crate::gpu_ops::blocks::attention::GpuEncoderSelfAttention;
 use crate::gpu_ops::blocks::ffn::GpuFeedForwardStd;
 use crate::gpu::normalization::{GpuNormalization, GpuNormalizationWeights, GpuLayerNorm, GpuRMSNorm};
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::GpuAttentionWeights};
+use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::traits::ModelMetadata;
 use anyhow::Result;
 use std::sync::Arc;
@@ -277,7 +277,7 @@ mod tests {
     use crate::gpu_ops::blocks::GpuFeedForwardWeightsStd;
     use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
     use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
-    use crate::gpu_ops::{GpuFrameContext, GpuTensor};
+    use crate::gpu::{GpuFrameContext, GpuTensor};
     use crate::linear_layer::LinearLayer;
     use crate::cpu::normalization::LayerNorm;
     use crate::traits::{

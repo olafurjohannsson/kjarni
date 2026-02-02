@@ -1,7 +1,8 @@
 use crate::cache::Cache;
 use crate::gpu_ops::{
-    blocks::cache::reorder::GpuReorderCache, blocks::cache::GpuUpdateCache, GpuTensor,
+    blocks::cache::reorder::GpuReorderCache, blocks::cache::GpuUpdateCache,
 };
+use crate::gpu::GpuTensor;
 use crate::WgpuContext;
 use anyhow::{anyhow, Result};
 use std::any::Any;
@@ -53,26 +54,26 @@ impl GpuBeamKVCache {
             k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Layer {} K-Cache", i),
             ));
             v_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Layer {} V-Cache", i),
             ));
             // Allocate the temporary buffers for reordering
             temp_k_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Temp Layer {} K-Cache", i),
             ));
             temp_v_tensors.push(GpuTensor::uninitialized(
                 context,
                 cache_shape.clone(),
-                crate::gpu_ops::DType::F32,
+                crate::gpu::DType::F32,
                 &format!("Temp Layer {} V-Cache", i),
             ));
         }

@@ -27,7 +27,7 @@ async fn test_gpu_lookup() -> Result<()> {
     // 2. Setup GPU tensors
     let table_gpu = GpuTensor::from_ndarray(&context, &embedding_table_cpu)?;
     let ids_gpu = GpuTensor::from_ndarray(&context, &input_ids_cpu)?;
-    let output_gpu = GpuTensor::zeros(&context, vec![2, 2, 3], crate::gpu_ops::DType::F32, "f32")?; // [batch, seq, hidden]
+    let output_gpu = GpuTensor::zeros(&context, vec![2, 2, 3], crate::gpu::DType::F32, "f32")?; // [batch, seq, hidden]
 
     // 3. Execute kernel
     let lookup_kernel = GpuLookup::new(&context);

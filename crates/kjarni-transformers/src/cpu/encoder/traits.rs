@@ -10,7 +10,7 @@ use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::cpu::encoder_decoder::EncoderOutput;
 use crate::cpu::strategy::ComputeStrategy;
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;

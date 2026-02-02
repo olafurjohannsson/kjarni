@@ -1,5 +1,5 @@
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::{gpu_profile, WgpuContext};
 use anyhow::Result;

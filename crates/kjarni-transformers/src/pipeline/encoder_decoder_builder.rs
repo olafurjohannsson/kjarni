@@ -5,7 +5,7 @@ use crate::{
     {EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
-    gpu_ops::GpuTensor,
+    gpu::GpuTensor,
     loaders::{LMHeadConfig, LoadedLMHead},
     models::base::ModelLoadConfig,
     pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig},

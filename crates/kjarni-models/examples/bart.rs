@@ -4,16 +4,16 @@ use kjarni_transformers::{
     WgpuContext,
     common::DecodingStrategy,
     encoder_decoder::{
-        CpuBackend, CpuSeq2SeqState, EncoderDecoderGenerator, GpuBackend, GpuSeq2SeqState,
+        CpuBackend, CpuSeq2SeqState, EncoderDecoderGenerator,
         traits::{CpuCrossDecoder, EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel},
     },
+    gpu::encoder_decoder::backend::{GpuEncoderDecoderBackend, GpuSeq2SeqState},
     models::{ModelType, base::ModelInput},
 };
 
 use kjarni_models::models::bart::model::BartModel;
 use kjarni_transformers::Device;
-use kjarni_transformers::gpu_ops::GpuFrameContext;
-use kjarni_transformers::gpu_ops::tensor::GpuTensor;
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::LanguageModel;
 use ndarray::{ArrayViewD, IxDyn};
 use std::sync::Arc;
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
         BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
 
     let cpu_backend = CpuBackend;
-    let gpu_backend = GpuBackend::new(ctx.clone())?;
+    let gpu_backend = GpuEncoderDecoderBackend::new(ctx.clone())?;
 
     let article = "Rust is a multi-paradigm, general-purpose programming language.";
     let num_beams = 4; // Use the same number of beams for both
@@ -170,8 +170,12 @@ async fn main() -> Result<()> {
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
-        let gpu_dec_ln =
-            gpu_decoder.embed_and_normalize(enc, pool_ref, ModelInput::TokensGpu(&decoder_input_gpu), position_offset)?;
+        let gpu_dec_ln = gpu_decoder.embed_and_normalize(
+            enc,
+            pool_ref,
+            ModelInput::TokensGpu(&decoder_input_gpu),
+            position_offset,
+        )?;
         frame.finish();
 
         let gpu_dec_ln_cpu = gpu_dec_ln.to_ndarray_3d::<f32>().await?;

@@ -16,7 +16,7 @@ use kjarni_transformers::{
     cache::{Cache, CpuKVCache, GpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    gpu_ops::{GpuFrameContext, GpuTensor},
+    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},

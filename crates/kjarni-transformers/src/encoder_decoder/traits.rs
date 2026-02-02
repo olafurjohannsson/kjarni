@@ -8,7 +8,7 @@ use crate::common::GenerationConfig;
 use crate::cpu::encoder::prelude::EncoderLanguageModel;
 use crate::cpu::encoder_decoder::CrossDecoderLayer;
 use crate::gpu_ops::blocks::layers::GpuCrossDecoderLayer;
-use crate::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::ModelInput;
 use crate::pipeline::EncoderDecoderPipeline;
 use anyhow::Result;

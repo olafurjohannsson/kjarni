@@ -5,7 +5,8 @@
 
 use super::ops::AttentionOps;
 use crate::WgpuContext;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool, blocks::attention::GpuAttentionWeights};
+use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use std::sync::Arc;
 
 /// Cross-attention for encoder-decoder models.

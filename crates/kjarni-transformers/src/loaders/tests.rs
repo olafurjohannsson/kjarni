@@ -197,7 +197,7 @@ mod cpu_tests {
 
 use super::*;
 use crate::WgpuContext;
-use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
 use std::sync::Arc;

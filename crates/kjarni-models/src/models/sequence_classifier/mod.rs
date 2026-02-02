@@ -7,7 +7,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use kjarni_transformers::gpu_ops::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

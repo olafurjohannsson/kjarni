@@ -37,7 +37,7 @@
 
 pub use crate::tensor::DType;
 use crate::Cache;
-use crate::{gpu_ops::GpuTensor, traits::InferenceModel};
+use crate::{gpu::GpuTensor, traits::InferenceModel};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::{Array2, ArrayView2, ArrayView3};

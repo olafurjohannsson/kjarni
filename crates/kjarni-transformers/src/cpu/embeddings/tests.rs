@@ -2,7 +2,7 @@
 mod embeddings_tests {
     use super::*;
     use crate::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
-    use crate::gpu_ops::{GpuTensor, GpuTensorPool};
+    use crate::gpu::{GpuTensor, GpuTensorPool};
     use crate::models::base::ModelInput; // <--- Using your actual input enum
     use crate::tensor::{CpuTensor, DType};
     use crate::weights::ModelWeights;

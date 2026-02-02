@@ -2,7 +2,7 @@ use anyhow::Result;
 use ndarray::{arr3, Array, Array3, Ix3};
 
 use crate::gpu_ops::primitives::add::GpuAdd;
-use crate::gpu_ops::{DType, GpuTensor, Kernel};
+use crate::gpu::{DType, GpuTensor, Kernel};
 use crate::WgpuContext;
 
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {

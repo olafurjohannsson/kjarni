@@ -2,7 +2,7 @@
 mod common;
 
 use super::*;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::utils::masks::{apply_causal_mask, apply_padding_mask};
 use crate::utils::masks::{create_full_attention_mask, create_padding_mask_from_tokens};
 use crate::WgpuContext;

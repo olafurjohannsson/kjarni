@@ -55,8 +55,8 @@ use kjarni_transformers::{
             GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights
         },
     },
+    gpu::{GpuTensor, GpuTensorPool},
     gpu_ops::{
-        GpuTensor, GpuTensorPool,
         blocks::{
             GpuFeedForwardWeights, GpuSwiGLUFFNWeights, attention::GpuAttentionWeights,
             rope::GpuRoPE,

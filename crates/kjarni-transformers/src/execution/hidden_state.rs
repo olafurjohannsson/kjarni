@@ -1,6 +1,6 @@
 // kjarni-transformers/src/execution/hidden_state.rs
 
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::Array3;

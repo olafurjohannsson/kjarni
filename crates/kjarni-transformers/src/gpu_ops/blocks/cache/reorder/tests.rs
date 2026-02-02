@@ -2,7 +2,7 @@ use anyhow::Result;
 use ndarray::{s, Array1, Array4};
 
 use crate::gpu_ops::blocks::cache::reorder::GpuReorderCache;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::WgpuContext;
 
 async fn read_gpu_tensor(tensor: &GpuTensor) -> Result<Array4<f32>> {

@@ -1,5 +1,5 @@
 use crate::gpu_ops::blocks::rope::GpuRoPE;
-use crate::gpu_ops::GpuTensor;
+use crate::gpu::GpuTensor;
 use crate::rope::RoPE as CpuRoPE;
 use crate::WgpuContext;
 use anyhow::Result;
@@ -39,13 +39,13 @@ async fn test_gpu_rope_parity() -> Result<()> {
     let q_rot_gpu = GpuTensor::uninitialized(
         &context,
         q_gpu.shape().to_vec(),
-        crate::gpu_ops::DType::F32,
+        crate::gpu::DType::F32,
         "Rotated Q Output",
     );
     let k_rot_gpu = GpuTensor::uninitialized(
         &context,
         k_gpu.shape().to_vec(),
-        crate::gpu_ops::DType::F32,
+        crate::gpu::DType::F32,
         "Rotated K Output",
     );
 
