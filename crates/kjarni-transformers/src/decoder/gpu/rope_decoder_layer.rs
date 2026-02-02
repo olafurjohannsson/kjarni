@@ -1,11 +1,10 @@
 use crate::{
     WgpuContext,
     cache::GpuKVCache,
-    decoder::{gpu::GpuRoPEAttention, prelude::*},
-    gpu::normalization::{
-        GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
-        GpuRMSNormWeights,
-    },
+    decoder::prelude::*,
+    gpu::{GpuRoPEAttention, normalization::{
+        GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+    }},
     gpu_ops::{
         GpuTensor, GpuTensorPool, Kernel,
         blocks::{
@@ -155,6 +154,7 @@ mod rope_decoder_gpu_test {
     use crate::cpu::decoder::{CpuRoPEDecoderLayer, DecoderAttention};
     use crate::cpu::normalization::RMSNorm as CpuRMSNorm;
     use crate::feedforward::SwiGluFeedForward;
+    use crate::gpu::normalization::GpuRMSNormWeights;
     use crate::gpu_ops::blocks::{GpuFeedForwardWeights, GpuSwiGLUFFNWeights};
     use crate::gpu_ops::{GpuTensor, GpuTensorPool};
     use crate::linear_layer::LinearLayer;

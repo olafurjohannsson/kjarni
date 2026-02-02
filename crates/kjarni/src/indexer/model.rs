@@ -161,66 +161,6 @@ impl Indexer {
     // CREATE METHODS
     // =========================================================================
 
-        /// Create index from pre-chunked iterator
-    pub async fn create_from_chunks<I>(
-        &self,
-        index_path: &str,
-        chunks: I,
-    ) -> IndexerResult<IndexStats>
-    where
-        I: IntoIterator<Item = Chunk>,
-    {
-        let start = std::time::Instant::now();
-        let dimension = self.embedder.dimension();
-
-        let config = IndexConfig {
-            dimension,
-            max_docs_per_segment: self.max_docs_per_segment,
-            embedding_model: Some(self.embedder.model_name().to_string()),
-            ..Default::default()
-        };
-
-        let mut writer = IndexWriter::open(index_path, config)
-            .map_err(IndexerError::IndexingFailed)?;
-
-        let mut batch_texts: Vec<String> = Vec::with_capacity(self.batch_size);
-        let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(self.batch_size);
-        let mut total_docs = 0;
-
-        for (text, metadata) in chunks {
-            batch_texts.push(text);
-            batch_metadata.push(metadata);
-
-            if batch_texts.len() >= self.batch_size {
-                let added = self
-                    .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                    .await?;
-                total_docs += added;
-            }
-        }
-
-        if !batch_texts.is_empty() {
-            let added = self
-                .flush_batch(&mut writer, &mut batch_texts, &mut batch_metadata)
-                .await?;
-            total_docs += added;
-        }
-
-        writer.commit().map_err(IndexerError::IndexingFailed)?;
-
-        let size_bytes = calculate_index_size(index_path).unwrap_or(0);
-
-        Ok(IndexStats {
-            documents_indexed: total_docs,
-            chunks_created: total_docs,
-            dimension,
-            size_bytes,
-            files_processed: 0,
-            files_skipped: 0,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-        })
-    }
-
     /// Create a new index from files/directories
     pub async fn create(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<IndexStats> {
         self.create_internal(index_path, inputs, false).await

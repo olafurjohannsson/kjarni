@@ -23,11 +23,13 @@ pub mod prelude {
         DecoderAttention,
         DecoderLayer,
     };
+    pub use crate::gpu::{
+        decoder::backend::GpuDecoderBackend,
+    };
     pub use crate::decoder::{
         backend::AnyDecoderBackend,
         generator::DecoderGenerator,
         gpu::{
-            GpuDecoderBackend,
             GpuPreNormDecoderLayer,
             GpuRoPEDecoderLayer,
         },

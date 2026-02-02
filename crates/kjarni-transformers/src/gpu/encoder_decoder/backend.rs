@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 
 #[derive(Debug)]
-pub struct GpuBackend {
+pub struct GpuEncoderDecoderBackend {
     pub context: Arc<WgpuContext>,
 }
 
@@ -26,7 +26,7 @@ impl std::fmt::Debug for WgpuContext {
         f.debug_struct("WgpuContext").finish()
     }
 }
-impl GpuBackend {
+impl GpuEncoderDecoderBackend {
     pub fn new(context: Arc<WgpuContext>) -> Result<Self> {
         Ok(Self { context })
     }
@@ -42,7 +42,7 @@ pub enum GpuSeq2SeqState {
 }
 
 #[async_trait]
-impl EncoderDecoderGenerationBackend for GpuBackend {
+impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
     type Tensor = GpuSeq2SeqState;
 
     async fn encode(

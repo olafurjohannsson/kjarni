@@ -403,25 +403,19 @@ pub enum ModelType {
     BertMultilingualSentiment, // 5-class: 1-5 stars, multilingual
     ToxicBertMultilingual,
 
-    // Zero-Shot
-    BartLargeMNLI,    // Zero-shot (existing)
-    DebertaV3BaseNLI, // Better zero-shot, smaller than BART
-
     // Emotion
     RobertaGoEmotions,    // 28 emotions, multi-label
     DistilRobertaEmotion, // 7 emotions, simpler
 
-    // === The "Edge" Kings (< 4GB VRAM/RAM) ===
-    Qwen2_5_0_5B_Instruct, // Tiny Logic
+    // Smaller LLMs
+    Qwen2_5_0_5B_Instruct,
     Qwen2_5_1_5B_Instruct,
-    Llama3_2_1B_Instruct, // Fast Chat
-    Llama3_2_3B_Instruct, // Balanced Chat
-    Phi3_5_Mini_Instruct, // Logic Powerhouse (3.8B)
-
-    // === The "Workhorse" Tier (8GB+ RAM) ===
-    Mistral7B_v0_3_Instruct,      // 7B Standard
-    Llama3_1_8B_Instruct,         // 8B Standard
-    DeepSeek_R1_Distill_Llama_8B, // SOTA Reasoning (Distilled)
+    Llama3_2_1B_Instruct, 
+    Llama3_2_3B_Instruct, 
+    Phi3_5_Mini_Instruct, 
+    Mistral7B_v0_3_Instruct,
+    Llama3_1_8B_Instruct,   
+    DeepSeek_R1_Distill_Llama_8B,
 
     // === Seq2Seq ===
     FlanT5Base,
@@ -560,15 +554,12 @@ impl ModelType {
             Self::MiniLML6V2CrossEncoder => "minilm-l6-v2-cross-encoder", // Fixed: was empty
 
             // Classifiers
-                        // Sentiment
+            
+            // Sentiment
             Self::DistilBertSST2 => "distilbert-sentiment",
             Self::TwitterRobertaSentiment => "roberta-sentiment",
             Self::BertMultilingualSentiment => "bert-sentiment-multilingual",
-            
-            // Zero-Shot
-            Self::BartLargeMNLI => "bart-zeroshot",
-            Self::DebertaV3BaseNLI => "deberta-zeroshot",
-            
+   
             // Emotion
             Self::RobertaGoEmotions => "roberta-emotions",
             Self::DistilRobertaEmotion => "distilroberta-emotion",
@@ -728,11 +719,7 @@ impl ModelType {
             // ================================================================
             // Classifiers
             // ================================================================
-            // ================================================================
-            // SENTIMENT ANALYSIS
-            // ================================================================
 
-            // Existing - Binary sentiment
             Self::DistilBertSST2 => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
@@ -746,10 +733,8 @@ impl ModelType {
                 size_mb: 268,
                 params_millions: 66,
             },
-
-            // NEW - 3-class sentiment (social media optimized)
             Self::TwitterRobertaSentiment => ModelInfo {
-                architecture: ModelArchitecture::Bert, // RoBERTa is BERT-like
+                architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
                 paths: ModelPaths {
                     weights_url: "https://huggingface.co/olafuraron/twitter-roberta-base-sentiment-latest-safetensors/resolve/main/model.safetensors",
@@ -761,8 +746,6 @@ impl ModelType {
                 size_mb: 499,
                 params_millions: 125,
             },
-
-            // NEW - Multilingual 5-star sentiment
             Self::BertMultilingualSentiment => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
@@ -776,46 +759,6 @@ impl ModelType {
                 size_mb: 681,
                 params_millions: 168,
             },
-
-            // ================================================================
-            // ZERO-SHOT CLASSIFICATION
-            // ================================================================
-
-            // Existing
-            Self::BartLargeMNLI => ModelInfo {
-                architecture: ModelArchitecture::Bart,
-                task: ModelTask::ZeroShotClassification,
-                paths: ModelPaths {
-                    weights_url: "https://huggingface.co/facebook/bart-large-mnli/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/facebook/bart-large-mnli/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/facebook/bart-large-mnli/resolve/main/config.json",
-                    gguf_url: None,
-                },
-                description: "Zero-shot classifier. Classify text into ANY labels you provide at runtime.",
-                size_mb: 1630,
-                params_millions: 406,
-            },
-
-            // NEW - Smaller, often better zero-shot
-            Self::DebertaV3BaseNLI => ModelInfo {
-                architecture: ModelArchitecture::Bert, // DeBERTa is BERT-like for our purposes
-                task: ModelTask::ZeroShotClassification,
-                paths: ModelPaths {
-                    weights_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/model.safetensors",
-                    tokenizer_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/tokenizer.json",
-                    config_url: "https://huggingface.co/cross-encoder/nli-deberta-v3-base/resolve/main/config.json",
-                    gguf_url: None,
-                },
-                description: "Zero-shot via NLI. Often better than BART-MNLI, smaller footprint.",
-                size_mb: 738,
-                params_millions: 184,
-            },
-
-            // ================================================================
-            // EMOTION CLASSIFICATION
-            // ================================================================
-
-            // NEW - 28 emotions (multi-label)
             Self::RobertaGoEmotions => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
@@ -829,8 +772,6 @@ impl ModelType {
                 size_mb: 499,
                 params_millions: 125,
             },
-
-            // NEW - 7 emotions (simpler)
             Self::DistilRobertaEmotion => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
@@ -844,12 +785,6 @@ impl ModelType {
                 size_mb: 329,
                 params_millions: 82,
             },
-
-            // ================================================================
-            // TOXICITY/MODERATION
-            // ================================================================
-
-            // NEW - Toxic comment detection
             Self::ToxicBertMultilingual => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::Classification,
@@ -865,7 +800,7 @@ impl ModelType {
             },
 
             // ================================================================
-            // RERANKER (NOT a classifier!)
+            // RERANKER
             // ================================================================
             Self::MiniLML6V2CrossEncoder => ModelInfo {
                 architecture: ModelArchitecture::Bert,

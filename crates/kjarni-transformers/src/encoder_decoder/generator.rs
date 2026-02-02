@@ -2,7 +2,9 @@ use crate::cache::Cache;
 use crate::common::StreamedToken;
 use crate::common::{DecodingStrategy, GenerationConfig};
 use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
-use crate::encoder_decoder::gpu_backend::{self, GpuBackend};
+
+use crate::gpu::{GpuEncoderDecoderBackend, GpuSeq2SeqState};
+
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
@@ -22,7 +24,7 @@ use std::any::Any;
 #[derive(Debug)]
 pub enum AnyEncoderDecoderBackend {
     Cpu(CpuBackend),
-    Gpu(GpuBackend),
+    Gpu(GpuEncoderDecoderBackend),
 }
 
 #[async_trait]
@@ -68,10 +70,10 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
             }
             AnyEncoderDecoderBackend::Gpu(b) => {
                 let tokens = decoder_tokens
-                    .downcast_ref::<gpu_backend::GpuSeq2SeqState>()
+                    .downcast_ref::<GpuSeq2SeqState>()
                     .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
-                let state = encoder_state
-                    .downcast_ref::<gpu_backend::GpuSeq2SeqState>()
+                let state: &crate::gpu::GpuSeq2SeqState = encoder_state
+                    .downcast_ref::<GpuSeq2SeqState>()
                     .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
                 b.decode_step(model, tokens, state, cache).await
             }
@@ -101,7 +103,7 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
             }
             AnyEncoderDecoderBackend::Gpu(b) => {
                 let concrete_tensor = tensor
-                    .downcast_mut::<gpu_backend::GpuSeq2SeqState>()
+                    .downcast_mut::<GpuSeq2SeqState>()
                     .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
                 b.update_token_tensor(concrete_tensor, new_tokens)
             }
@@ -136,7 +138,7 @@ impl EncoderDecoderGenerator {
                 let context = model
                     .context()
                     .ok_or_else(|| anyhow!("GPU model missing WgpuContext"))?;
-                AnyEncoderDecoderBackend::Gpu(GpuBackend::new(context)?)
+                AnyEncoderDecoderBackend::Gpu(GpuEncoderDecoderBackend::new(context)?)
             }
         };
         Ok(Self { model, backend })

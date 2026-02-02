@@ -10,12 +10,11 @@
 mod beams;
 mod cpu_backend;
 mod generator;
-mod gpu_backend;
 pub mod traits;
 
 pub use crate::{Cache, CpuKVCache, GpuKVCache};
 pub use cpu_backend::CpuBackend;
-pub use gpu_backend::GpuBackend;
+
 pub mod config;
 
 pub mod decoder_self_attn;
@@ -31,7 +30,7 @@ pub use cpu_backend::CpuSeq2SeqState;
 
 pub use decoder_self_attn::DecoderSelfAttention;
 pub use generator::{AnyEncoderDecoderBackend, EncoderDecoderGenerator};
-pub use gpu_backend::GpuSeq2SeqState;
+
 
 
 #[cfg(test)]
