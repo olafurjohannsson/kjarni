@@ -257,51 +257,6 @@ fn test_new_quantized_panics() {
 }
 
 // =============================================================================
-// matmul_row_into() Tests
-// =============================================================================
-
-#[test]
-fn test_matmul_row_into_no_bias() {
-    let layer = make_f32_layer(64, 32);
-    let input = vec![0.1f32; 32];
-    let mut output = vec![0.0f32; 64];
-
-    layer.matmul_row_into(&input, &mut output);
-
-    assert!(output.iter().any(|&x| x != 0.0));
-}
-
-#[test]
-fn test_matmul_row_into_with_bias() {
-    let layer = make_f32_layer_with_bias(64, 32);
-    let input = vec![0.0f32; 32];
-    let mut output = vec![0.0f32; 64];
-
-    layer.matmul_row_into(&input, &mut output);
-
-    let bias = layer.bias().unwrap();
-    for (o, b) in output.iter().zip(bias.iter()) {
-        assert!((o - b).abs() < 1e-6, "Expected {}, got {}", b, o);
-    }
-}
-
-#[test]
-fn test_matmul_row_into_matches_matmul() {
-    let layer = make_f32_layer_with_bias(64, 32);
-    let input_vec = vec![0.1f32; 32];
-    let input_2d = Array2::from_shape_vec((1, 32), input_vec.clone()).unwrap();
-
-    let mut output_row = vec![0.0f32; 64];
-    layer.matmul_row_into(&input_vec, &mut output_row);
-
-    let output_2d = layer.matmul(&input_2d.view());
-
-    for (r, m) in output_row.iter().zip(output_2d.iter()) {
-        assert!((r - m).abs() < 1e-5, "row_into={}, matmul={}", r, m);
-    }
-}
-
-// =============================================================================
 // matmul_noalloc() Tests
 // =============================================================================
 

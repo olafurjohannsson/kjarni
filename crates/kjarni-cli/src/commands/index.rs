@@ -17,6 +17,7 @@ pub async fn run(action: IndexCommands) -> Result<()> {
     match action {
         IndexCommands::Create {
             output,
+            from_chunks,
             inputs,
             chunk_size,
             chunk_overlap,
@@ -26,6 +27,7 @@ pub async fn run(action: IndexCommands) -> Result<()> {
         } => {
             create(
                 &output,
+                from_chunks,
                 &inputs,
                 chunk_size,
                 chunk_overlap,
@@ -62,6 +64,7 @@ pub async fn run(action: IndexCommands) -> Result<()> {
 /// Create a new index from documents
 async fn create(
     output: &str,
+    from_chunks: Option<String>,
     inputs: &[String],
     chunk_size: usize,
     chunk_overlap: usize,

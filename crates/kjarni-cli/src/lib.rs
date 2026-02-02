@@ -394,9 +394,13 @@ pub enum IndexCommands {
         /// Output index file path
         output: String,
 
-        /// Input files or directories to index
-        #[arg(trailing_var_arg = true)]
+        /// Input files/directories (uses built-in chunking)
+        #[arg(trailing_var_arg = true, conflicts_with = "from_chunks")]
         inputs: Vec<String>,
+
+        /// Pre-chunked JSONL file (bypass chunking)
+        #[arg(long, conflicts_with = "inputs")]
+        from_chunks: Option<String>,
 
         /// Chunk size for splitting documents
         #[arg(long, default_value_t = 1000)]

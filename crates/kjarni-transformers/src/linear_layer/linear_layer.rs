@@ -135,7 +135,7 @@ pub enum F32MatmulStrategy {
 ///
 /// - [`LinearData`] — The underlying weight storage enum.
 /// - [`ModelWeights`] — Loading weights from files.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LinearLayer {
     /// The weight matrix in one of several supported formats.
     pub data: LinearData,
@@ -165,7 +165,7 @@ pub struct LinearLayer {
 /// assert_eq!(data.dtype(), DType::F32);
 /// ```
 #[allow(non_camel_case_types)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LinearData {
     /// 32-bit IEEE 754 floating point weights.
     ///
@@ -203,7 +203,6 @@ pub enum LinearData {
     /// Higher precision than Q4_K with approximately 5x compression.
     Q6_K(Arc<QuantizedMatrix<BlockQ6_K>>),
 }
-
 impl LinearData {
     /// Returns the data type of the stored weights.
     pub fn dtype(&self) -> DType {

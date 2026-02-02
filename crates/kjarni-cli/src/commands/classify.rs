@@ -19,6 +19,9 @@ pub async fn run(
     dtype: Option<&str>,
     quiet: bool,
 ) -> Result<()> {
+    if !quiet {
+        eprintln!("Running {:?} on text {}", model, "");
+    }
     // 1. Resolve input text
     let text = if input.is_empty() {
         crate::commands::util::resolve_input(None)?
