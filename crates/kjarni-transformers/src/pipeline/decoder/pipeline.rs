@@ -215,7 +215,7 @@ mod decoder_pipeline_test {
     use crate::tensor::DType;
     use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
     use crate::weights::ModelWeights;
-    use crate::{Cache, GpuKVCache, WgpuContext};
+    use crate::{Cache, gpu::cache::GpuKVCache, WgpuContext};
     use std::sync::Arc;
 
     struct MockCpuDecoder {

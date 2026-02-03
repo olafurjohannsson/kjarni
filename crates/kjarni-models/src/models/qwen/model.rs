@@ -18,16 +18,14 @@ use crate::models::qwen::config::QwenConfig;
 use kjarni_transformers::{
     ChatTemplate,
     WgpuContext,
-    // Add generic chat templates if available, or custom Qwen template
-    cache::{Cache, CpuKVCache, GpuKVCache},
+    cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
+    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
     loaders::LoadedRoPE,
-    tensor::DType,
     traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };

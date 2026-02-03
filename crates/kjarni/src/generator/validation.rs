@@ -1,67 +1,131 @@
-// =============================================================================
-// kjarni/src/generator/validation.rs
-// =============================================================================
-
 //! Model validation for text generation.
 
 use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
+
 use super::types::{GeneratorError, GeneratorResult};
 
-/// Validation result with optional warnings.
-pub struct ValidationResult {
-    pub warnings: Vec<String>,
-}
-
-/// Validate that a model is suitable for text generation.
-pub fn validate_for_generation(model_type: ModelType) -> GeneratorResult<ValidationResult> {
+/// Validate that a model can be used for text generation.
+pub fn validate_for_generation(model_type: ModelType) -> GeneratorResult<()> {
     let info = model_type.info();
-    let mut warnings = Vec::new();
+    let cli_name = model_type.cli_name();
 
-    // Check architecture
-    let valid_arch = matches!(
-        info.architecture,
+    match info.architecture {
+        // Decoder-only models can generate text
         ModelArchitecture::Llama
-            | ModelArchitecture::Qwen2
-            | ModelArchitecture::Mistral
-            | ModelArchitecture::GPT
-            | ModelArchitecture::Phi3
-    );
+        | ModelArchitecture::Qwen2
+        | ModelArchitecture::Mistral
+        | ModelArchitecture::Phi3
+        | ModelArchitecture::GPT => {
+            // Valid architecture
+        }
 
-    if !valid_arch {
-        return Err(GeneratorError::InvalidModel(
-            model_type.cli_name().to_string(),
-            format!(
-                "Architecture {:?} is not a decoder model. Use an encoder model for embeddings/classification.",
-                info.architecture
-            ),
-        ));
+        // Encoders cannot generate text
+        ModelArchitecture::Bert | ModelArchitecture::NomicBert => {
+            return Err(GeneratorError::InvalidModel(
+                cli_name.to_string(),
+                format!(
+                    "Architecture '{}' is an encoder and cannot generate text. Use Embedder instead.",
+                    info.architecture.display_name()
+                ),
+            ));
+        }
+
+        // Whisper is for speech
+        ModelArchitecture::Whisper => {
+            return Err(GeneratorError::InvalidModel(
+                cli_name.to_string(),
+                "Whisper is designed for speech-to-text. Use Transcriber instead.".to_string(),
+            ));
+        }
+
+        // Seq2seq models should use Seq2SeqGenerator
+        ModelArchitecture::T5 | ModelArchitecture::Bart => {
+            return Err(GeneratorError::InvalidModel(
+                cli_name.to_string(),
+                format!(
+                    "Architecture '{}' is a seq2seq model. Use Seq2SeqGenerator, Translator, or Summarizer instead.",
+                    info.architecture.display_name()
+                ),
+            ));
+        }
     }
 
-    // Warn about instruct models being used for raw generation
-    if info.task == ModelTask::Chat {
-        warnings.push(format!(
-            "Note: '{}' is an instruction-tuned model. For raw text completion, \
-             consider using a base model like 'gpt2' or 'llama3.2-1b'.",
-            model_type.cli_name()
-        ));
-    }
-
-    Ok(ValidationResult { warnings })
+    Ok(())
 }
 
-/// Get list of models suitable for generation.
-pub fn get_generation_models() -> Vec<String> {
+/// Get all available models for text generation.
+pub fn get_generator_models() -> Vec<&'static str> {
     ModelType::all()
-        .filter(|m| {
-            matches!(
-                m.info().architecture,
-                ModelArchitecture::Llama
-                    | ModelArchitecture::Qwen2
-                    | ModelArchitecture::Mistral
-                    | ModelArchitecture::GPT
-                    | ModelArchitecture::Phi3
-            )
-        })
-        .map(|m| m.cli_name().to_string())
+        .filter(|m| validate_for_generation(*m).is_ok())
+        .map(|m| m.cli_name())
         .collect()
+}
+
+/// Get suggested models for text generation.
+pub fn suggest_generator_models() -> Vec<&'static str> {
+    vec![
+        "qwen2.5-0.5b-instruct",
+        "qwen2.5-1.5b-instruct",
+        "llama3.2-1b-instruct",
+        "llama3.2-3b-instruct",
+        "mistral-7b-instruct",
+        "phi3.5-mini-instruct",
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_decoder_models() {
+        let valid_models = ["llama3.2-1b-instruct", "qwen2.5-0.5b-instruct"];
+
+        for name in valid_models {
+            if let Some(model_type) = ModelType::from_cli_name(name) {
+                assert!(
+                    validate_for_generation(model_type).is_ok(),
+                    "Model {} should be valid",
+                    name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_encoder_rejected() {
+        let encoder_models = ["minilm-l6-v2", "nomic-embed-text"];
+
+        for name in encoder_models {
+            if let Some(model_type) = ModelType::from_cli_name(name) {
+                assert!(
+                    validate_for_generation(model_type).is_err(),
+                    "Encoder {} should be rejected",
+                    name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_generator_models() {
+        let models = get_generator_models();
+        assert!(!models.is_empty());
+        
+        // Should contain LLM models
+        let has_llm = models.iter().any(|m| {
+            m.contains("llama") || m.contains("qwen") || m.contains("mistral") || m.contains("phi")
+        });
+        assert!(has_llm, "Should contain LLM models");
+        
+        // Should NOT contain encoders
+        assert!(!models.contains(&"minilm-l6-v2"));
+        assert!(!models.contains(&"nomic-embed-text"));
+    }
+
+    #[test]
+    fn test_suggest_generator_models() {
+        let models = suggest_generator_models();
+        assert!(!models.is_empty());
+    }
 }

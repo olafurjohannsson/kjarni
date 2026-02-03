@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use ndarray::{Array1, Array2, s};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, MapMode};
 
-use crate::cache::{Cache, GpuKVCache};
+use crate::cache::{Cache};
+use crate::gpu::cache::GpuKVCache;
 use crate::decoder::prelude::*;
 use crate::gpu_ops::primitives::layout::slice_last_token::GpuLastTokenSlice;
 use crate::gpu_ops::timeout::{GpuTimeoutConfig, GpuTimeoutError};

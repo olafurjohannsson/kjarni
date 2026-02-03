@@ -8,7 +8,7 @@ use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::blocks::{GpuFeedForward, GpuFeedForwardWeights};
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
-use crate::GpuKVCache;
+use crate::gpu::cache::GpuKVCache;
 use crate::WgpuContext;
 
 pub struct GpuPreNormDecoderLayer {

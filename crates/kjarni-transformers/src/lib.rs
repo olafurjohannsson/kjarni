@@ -68,14 +68,15 @@ pub use crate::{
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 
-pub use cache::{Cache, CpuKVCache, GpuKVCache};
+pub use cache::{Cache, CpuKVCache};
 pub use gpu_ops::context::WgpuContext;
 pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
 
 /// Commonly used types for convenience imports.
 pub mod prelude {
-    pub use crate::cache::{Cache, CpuKVCache, GpuKVCache};
+    pub use crate::cache::{Cache, CpuKVCache};
+    pub use crate::gpu::cache::{GpuKVCache, GpuBeamKVCache};
     pub use crate::gpu_ops::context::WgpuContext;
     pub use crate::models::LanguageModel;
     pub use crate::traits::Device;

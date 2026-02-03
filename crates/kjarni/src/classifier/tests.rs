@@ -560,7 +560,6 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_load_by_cli_name() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
@@ -571,7 +570,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download and local path"]
         async fn test_load_by_absolute_path() {
             // First download the model to get a known path
             let classifier_from_registry = Classifier::new("distilbert-sentiment")
@@ -603,7 +601,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires network - tests HF repo format"]
         async fn test_load_by_hf_repo_name() {
             // This tests that the CLI name maps to the correct HF repo
             // The actual loading happens through the registry
@@ -626,7 +623,6 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_distilbert_sentiment_binary() {
             let preset = &SENTIMENT_BINARY_V1;
             assert_eq!(preset.model, "distilbert-sentiment");
@@ -686,7 +682,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_roberta_sentiment_3class() {
             let preset = &SENTIMENT_3CLASS_V1;
             assert_eq!(preset.model, "roberta-sentiment");
@@ -742,7 +737,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_bert_sentiment_multilingual_5star() {
             let preset = &SENTIMENT_5STAR_V1;
             assert_eq!(preset.model, "bert-sentiment-multilingual");
@@ -823,7 +817,6 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_distilroberta_emotion_7class() {
             let preset = &EMOTION_V1;
             assert_eq!(preset.model, "distilroberta-emotion");
@@ -878,7 +871,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_roberta_emotions_28class_multilabel() {
             let preset = &EMOTION_DETAILED_V1;
             assert_eq!(preset.model, "roberta-emotions");
@@ -957,7 +949,6 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_toxic_bert_multilabel() {
             let preset = &TOXICITY_V1;
             assert_eq!(preset.model, "toxic-bert");
@@ -1058,7 +1049,6 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_batch_classification() {
             let classifier = Classifier::new("roberta-sentiment")
                 .await
@@ -1086,7 +1076,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
         async fn test_batch_multilingual() {
             let classifier = Classifier::new("bert-sentiment-multilingual")
                 .await
@@ -1188,7 +1177,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_label_count_mismatch_error() {
             // Try to load with wrong number of labels
             let result = Classifier::builder("distilbert-sentiment")
@@ -1200,7 +1189,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_threshold_filters_all_results() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
@@ -1237,7 +1226,7 @@ mod classifier_tests {
 
         /// Test that we can create a classifier (requires model).
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classifier_new() {
             let classifier = Classifier::new("distilbert-sentiment").await;
             assert!(
@@ -1249,7 +1238,7 @@ mod classifier_tests {
 
         /// Test single text classification.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classify_single() {
             let classifier = Classifier::new("distilroberta-emotion")
                 .await
@@ -1266,7 +1255,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classifier_explore_api_toxic_bert() {
             // --- SETUP ---
             const MODEL_NAME: &str = "toxic-bert";
@@ -1337,7 +1326,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classifier_full_api_distilroberta() {
             const MODEL_NAME: &str = "distilroberta-emotion";
             let happy_text = "I am so happy and excited for the weekend!";
@@ -1578,7 +1567,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_preset_sentiment_binary_v1() {
             // --- SETUP ---
             const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_BINARY_V1;
@@ -1631,7 +1620,7 @@ mod classifier_tests {
 
         /// An EXPLORATORY test for the SENTIMENT_3CLASS_V1 preset ('roberta-sentiment').
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_explore_sentiment_3class_v1() {
             // --- SETUP ---
             const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_3CLASS_V1;
@@ -1675,7 +1664,7 @@ mod classifier_tests {
 
         /// An EXPLORATORY test for the SENTIMENT_5STAR_V1 preset ('bert-sentiment-multilingual').
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_explore_sentiment_5star_v1() {
             // --- SETUP ---
             const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_5STAR_V1;
@@ -1710,7 +1699,7 @@ mod classifier_tests {
             );
         }
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classifier_builder_with_f16_dtype() {
             const MODEL_NAME: &str = "distilroberta-emotion";
             let happy_text = "I am so happy and excited for the weekend!";
@@ -1767,7 +1756,7 @@ mod classifier_tests {
 
         /// Test batch classification.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classify_batch() {
             let classifier = Classifier::new("distilroberta-emotion")
                 .await
@@ -1789,7 +1778,7 @@ mod classifier_tests {
 
         /// Test classification with custom overrides.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classify_with_config() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
@@ -1815,7 +1804,7 @@ mod classifier_tests {
 
         /// Test raw scores without labels.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classify_scores() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
@@ -1834,7 +1823,7 @@ mod classifier_tests {
 
         /// Test GPU classification (if available).
         #[tokio::test]
-        #[ignore = "Requires GPU and model download"]
+
         async fn test_classify_gpu() {
             let classifier = Classifier::builder("distilbert-sentiment")
                 .gpu()
@@ -1851,7 +1840,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-        #[ignore = "Requires GPU and model download"]
+
         async fn test_classify_gpu_parity_cpu() {
             let classifier = Classifier::builder("distilbert-sentiment")
                 .gpu()
@@ -1891,7 +1880,7 @@ mod classifier_tests {
 
         /// Test classifier accessors.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classifier_accessors() {
             let classifier = Classifier::new("distilroberta-emotion")
                 .await
@@ -1904,7 +1893,7 @@ mod classifier_tests {
 
         /// Test one-liner classify function.
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_classify_convenience_function() {
             let result = classify("distilroberta-emotion", "I love this!")
                 .await
@@ -1933,7 +1922,7 @@ mod classifier_tests {
             assert!(result.is_err());
         }
         #[tokio::test]
-        #[ignore = "Requires model download"]
+
         async fn test_model_distilroberta_emotion() {
             let classifier = Classifier::new("distilroberta-emotion").await.unwrap();
             let result = classifier.classify("I am so happy today!").await.unwrap();

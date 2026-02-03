@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 
 use kjarni_transformers::{
-    cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
+    cache::{Cache, CpuBeamKVCache},
     common::{
         BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults,
@@ -19,6 +19,9 @@ use kjarni_transformers::{
             cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
+    },
+    gpu::{
+        cache::{GpuBeamKVCache, GpuKVCache}
     },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,

@@ -11,6 +11,7 @@ use kjarni_transformers::WgpuContext;
 
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 use crate::generation::GenerationOverrides;
+use crate::generator::presets::GeneratorPreset;
 
 use super::model::Generator;
 use super::types::GeneratorResult;
@@ -111,6 +112,33 @@ impl GeneratorBuilder {
     // Generation Parameters
     // =========================================================================
 
+    /// Create a builder from a preset.
+    pub fn from_preset(preset: &GeneratorPreset) -> Self {
+        let mut builder = Self::new(preset.model);
+        builder.device = preset.recommended_device;
+
+        if let Some(temp) = preset.temperature {
+            builder.generation_overrides.temperature = Some(temp);
+        }
+        builder.generation_overrides.max_new_tokens = Some(preset.default_max_tokens);
+
+        builder
+    }
+
+    /// Configure for creative generation (high temperature).
+    pub fn creative(mut self) -> Self {
+        self.generation_overrides.temperature = Some(0.9);
+        self.generation_overrides.top_p = Some(0.95);
+        self
+    }
+
+    /// Configure for precise generation (low temperature).
+    pub fn precise(mut self) -> Self {
+        self.generation_overrides.temperature = Some(0.2);
+        self.generation_overrides.top_p = Some(0.9);
+        self
+    }
+
     /// Set the sampling temperature.
     ///
     /// Higher values (e.g., 1.0) make output more random.
@@ -155,6 +183,7 @@ impl GeneratorBuilder {
     /// Use greedy decoding (temperature = 0, deterministic).
     pub fn greedy(mut self) -> Self {
         self.generation_overrides.temperature = Some(0.0);
+        self.generation_overrides.do_sample = Some(false);
         self
     }
 

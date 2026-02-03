@@ -17,7 +17,7 @@
 //! 7. **Parity Tests**: CPU vs GPU output comparison
 //! 8. **AnyDecoderBackend Tests**: Type erasure and dispatch
 
-use crate::cache::{Cache, GpuKVCache};
+use crate::cache::{Cache};
 use crate::cpu::decoder::CpuDecoderBackend;
 use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::backend::AnyDecoderBackend;
@@ -26,7 +26,7 @@ use crate::decoder::traits::{
     CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel, GpuDecoder,
     GpuDecoderOps,
 };
-use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
+use crate::gpu::{GpuTensor};
 use crate::models::base::AutoregressiveLoop;
 use crate::traits::InferenceModel;
 use crate::{Device, LanguageModel, WgpuContext};
@@ -959,7 +959,6 @@ mod decoder_backend_tests {
         use super::*;
 
         #[tokio::test]
-        #[ignore]
         async fn test_many_decode_iterations_cpu() {
             let model = MockCpuDecoderModel::pipelined();
             let backend = CpuDecoderBackend::new();
@@ -979,7 +978,6 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
-        #[ignore]
         async fn test_many_decode_iterations_gpu() {
             let Some(context) = super::gpu_backend_tests::create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -995,7 +993,6 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
-        #[ignore]
         async fn test_concurrent_cpu_generations() {
             let model = Arc::new(MockCpuDecoderModel::pipelined());
             let backend = Arc::new(CpuDecoderBackend::new());

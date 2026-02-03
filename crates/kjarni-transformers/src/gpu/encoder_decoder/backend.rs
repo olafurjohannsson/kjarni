@@ -1,4 +1,5 @@
-use crate::cache::{Cache, GpuBeamKVCache};
+use crate::cache::{Cache};
+use crate::gpu::cache::GpuBeamKVCache;
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };

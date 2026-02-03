@@ -276,12 +276,8 @@ impl SequenceClassifier {
             return Ok(vec![]);
         }
 
-        let t = texts[0];
-
         let logits = self.predict_logits(texts).await?;
 
-        println!("\n=== RUST TEXT LOGITS ===");
-            println!("Logits: {:?}", logits); // Print the raw logits before softmax
         // Apply softmax to each row
         Ok(logits
             .into_iter()

@@ -5,12 +5,12 @@ use ndarray::s;
 
 use kjarni_transformers::{
     WgpuContext,
-    cache::GpuKVCache,
+    
     decoder::prelude::*,
     gpu::normalization::{
         GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights,
     },
-    gpu::{GpuTensor, GpuTensorPool},
+    gpu::{GpuTensor, GpuTensorPool, cache::GpuKVCache},
     gpu_ops::{
         
         blocks::{

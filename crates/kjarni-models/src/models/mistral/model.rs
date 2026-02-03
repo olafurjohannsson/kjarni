@@ -13,10 +13,10 @@ use crate::models::mistral::config::MistralConfig;
 
 use kjarni_transformers::{
     ChatTemplate, WgpuContext,
-    cache::{Cache, CpuKVCache, GpuKVCache},
+    cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
+    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},

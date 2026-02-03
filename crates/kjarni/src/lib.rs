@@ -7,9 +7,12 @@ pub mod embedder;
 pub mod reranker;
 mod generation;
 pub mod indexer;
+pub mod translator;
 pub mod searcher;
-
+pub mod seq2seq;
 pub mod common;
+pub mod summarizer;
+
 pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API
 pub use utils::*;
@@ -18,6 +21,8 @@ pub use kjarni_models::models::cross_encoder::CrossEncoder;
 pub use kjarni_models::models::sentence_encoder::SentenceEncoder;
 pub use kjarni_models::SequenceClassifier;
 
+pub use crate::summarizer::Summarizer;
+pub use crate::translator::Translator;
 pub use crate::classifier::Classifier;
 pub use crate::embedder::Embedder;
 pub use crate::reranker::Reranker;

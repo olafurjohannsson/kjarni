@@ -6,7 +6,8 @@ use ndarray::{Array1, Array2, Array3, Axis};
 use common::assert_tensors_are_close;
 
 use crate::attention::MultiHeadAttention;
-use crate::cache::{Cache, GpuKVCache};
+use crate::cache::{Cache};
+use crate::gpu::cache::GpuKVCache;
 use crate::gpu_ops::blocks::attention::{GpuAttention, GpuAttentionWeights};
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use crate::gpu::{GpuTensor, GpuTensorPool};

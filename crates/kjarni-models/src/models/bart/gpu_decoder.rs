@@ -3,7 +3,7 @@ use anyhow::Result;
 use kjarni_transformers::EmbeddingConfig;
 use kjarni_transformers::LoadedEmbeddings;
 use kjarni_transformers::cache::Cache;
-use kjarni_transformers::cache::GpuBeamKVCache;
+use kjarni_transformers::gpu::cache::GpuBeamKVCache;
 use kjarni_transformers::encoder_decoder::traits::{
     GpuCrossAttentionKVCache, GpuCrossDecoder, GpuCrossDecoderOutput,
 };

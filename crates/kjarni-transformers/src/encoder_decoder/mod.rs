@@ -12,7 +12,8 @@ mod cpu_backend;
 mod generator;
 pub mod traits;
 
-pub use crate::{Cache, CpuKVCache, GpuKVCache};
+pub use crate::{Cache, CpuKVCache};
+use crate::gpu::cache::GpuKVCache;
 pub use cpu_backend::CpuBackend;
 
 pub mod config;

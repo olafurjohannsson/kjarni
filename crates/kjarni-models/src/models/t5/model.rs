@@ -12,7 +12,7 @@ use super::config::T5Config;
 
 use kjarni_transformers::{
     LanguageModel, ModelType, WgpuContext,
-    cache::{Cache, CpuBeamKVCache, GpuBeamKVCache},
+    cache::{Cache, CpuBeamKVCache},
     common::{
         BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults, ModelGenerationDefaults,
@@ -24,6 +24,7 @@ use kjarni_transformers::{
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
     },
+    gpu::cache::GpuBeamKVCache,
     encoder_decoder::{
         config::TranslationParams,
         traits::{

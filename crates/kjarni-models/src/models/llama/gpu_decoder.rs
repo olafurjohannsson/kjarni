@@ -48,19 +48,13 @@
 use anyhow::{Context, Result};
 use kjarni_transformers::{
     WgpuContext,
-    cache::GpuKVCache,
     decoder::prelude::*,
-    gpu::{
-        normalization::{
-            GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights
-        },
+    gpu::normalization::{
+        GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights,
     },
-    gpu::{GpuTensor, GpuTensorPool},
-    gpu_ops::{
-        blocks::{
-            GpuFeedForwardWeights, GpuSwiGLUFFNWeights, attention::GpuAttentionWeights,
-            rope::GpuRoPE,
-        },
+    gpu::{GpuTensor, GpuTensorPool, cache::GpuKVCache},
+    gpu_ops::blocks::{
+        GpuFeedForwardWeights, GpuSwiGLUFFNWeights, attention::GpuAttentionWeights, rope::GpuRoPE,
     },
     models::base::{ModelInput, ModelLoadConfig},
     tensor::DType,

@@ -61,10 +61,10 @@ use crate::models::llama::{
 use kjarni_transformers::{
     // Utilities
     WgpuContext,
-    cache::{Cache, CpuKVCache, GpuKVCache},
+    cache::{Cache, CpuKVCache},
     decoder::prelude::*,
     execution::ExecutionPlan,
-    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
+    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     // Embeddings

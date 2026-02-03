@@ -205,7 +205,6 @@ mod chat_integration_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model download"]
     async fn test_real_streaming_manual_flow() {
         let chat = load_real_model().await;
         let mut convo = chat.conversation();
@@ -242,8 +241,7 @@ mod chat_integration_tests {
         );
     }
 
-  #[tokio::test]
-    #[ignore = "Requires model download"]
+    #[tokio::test]
     async fn test_real_system_prompt_adherence() {
         let chat = load_real_model().await;
 
@@ -262,14 +260,17 @@ mod chat_integration_tests {
         // Note: Small models (0.5B) are unreliable at following system prompts.
         // The main test here is that the system prompt is correctly included
         // in the conversation, not that the model perfectly follows it.
-        
+
         // Verify conversation structure works
         assert!(!response.is_empty(), "Model should generate a response");
-        assert!(convo.len() >= 2, "History should include user message and response");
-        
+        assert!(
+            convo.len() >= 2,
+            "History should include user message and response"
+        );
+
         // Check if model followed instructions (informational, not required to pass)
-        let followed_instructions = response.to_lowercase().contains("arrr") 
-            || response.to_lowercase().contains("pirate");
+        let followed_instructions =
+            response.to_lowercase().contains("arrr") || response.to_lowercase().contains("pirate");
         if !followed_instructions {
             eprintln!(
                 "Note: Small model did not follow system prompt (expected for 0.5B models). \
@@ -280,7 +281,6 @@ mod chat_integration_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model download"]
     async fn test_clear_history_with_real_model() {
         let chat = load_real_model().await;
         let mut convo = chat.conversation();
@@ -567,3 +567,7 @@ mod integration {
         assert!(!response.is_empty());
     }
 }
+
+
+#[cfg(test)]
+mod tests;

@@ -1574,7 +1574,7 @@ mod indexer_tests {
     // with appropriate setup (model files, etc.)
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_create_basic() {
         use crate::Indexer;
 
@@ -1614,7 +1614,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_info() {
         use crate::Indexer;
 
@@ -1649,7 +1649,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_delete() {
         use crate::Indexer;
 
@@ -1697,7 +1697,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_add_to_existing() {
         use crate::Indexer;
 
@@ -1741,7 +1741,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_force_overwrite() {
         use crate::Indexer;
 
@@ -1788,7 +1788,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_dimension_mismatch() {
         use crate::Indexer;
 
@@ -1836,7 +1836,7 @@ mod indexer_tests {
     // ============================================================================
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_with_progress_callback() {
         use crate::Indexer;
         use std::sync::Arc;
@@ -1885,7 +1885,7 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires model files - run with --ignored"]
+    
     async fn test_indexer_without_progress_callback() {
         use crate::Indexer;
 

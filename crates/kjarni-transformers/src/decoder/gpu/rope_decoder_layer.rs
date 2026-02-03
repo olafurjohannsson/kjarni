@@ -1,10 +1,8 @@
 use crate::{
     WgpuContext,
-    cache::GpuKVCache,
     decoder::prelude::*,
     gpu::{
-        GpuRoPEAttention, GpuTensor, GpuTensorPool, Kernel,
-        normalization::{GpuNormalization, GpuNormalizationWeights, GpuRMSNorm},
+        GpuKVCache, GpuRoPEAttention, GpuTensor, GpuTensorPool, Kernel, normalization::{GpuNormalization, GpuNormalizationWeights, GpuRMSNorm}
     },
     gpu_ops::{
         blocks::{
@@ -155,7 +153,7 @@ mod rope_decoder_gpu_test {
     use crate::cpu::normalization::RMSNorm as CpuRMSNorm;
     use crate::feedforward::SwiGluFeedForward;
     use crate::gpu::normalization::GpuRMSNormWeights;
-    use crate::gpu::{GpuTensor, GpuTensorPool};
+    use crate::gpu::{GpuKVCache, GpuTensor, GpuTensorPool};
     use crate::gpu_ops::blocks::{GpuFeedForwardWeights, GpuSwiGLUFFNWeights};
     use crate::linear_layer::LinearLayer;
     use crate::rope::RoPE;
@@ -315,7 +313,7 @@ mod rope_decoder_gpu_test {
 
         // GPU Cache: GpuKVCache
         let mut gpu_cache =
-            crate::cache::GpuKVCache::new(&context, 1, batch, kv_heads, head_dim, seq_len)?;
+            GpuKVCache::new(&context, 1, batch, kv_heads, head_dim, seq_len)?;
 
         // 5. Run CPU Forward
         let cpu_out = cpu_layer.forward(

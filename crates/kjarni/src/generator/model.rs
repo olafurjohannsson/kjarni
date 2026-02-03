@@ -51,11 +51,11 @@ impl Generator {
 
         let validation = validate_for_generation(model_type)?;
 
-        if !builder.quiet && !builder.allow_warnings {
-            for warning in &validation.warnings {
-                eprintln!("warning: {}", warning);
-            }
-        }
+        // if !builder.quiet && !builder.allow_warnings {
+        //     for warning in &validation.warnings {
+        //         eprintln!("warning: {}", warning);
+        //     }
+        // }
 
         let cache_dir = builder.cache_dir.clone().unwrap_or_else(|| {
             dirs::cache_dir()

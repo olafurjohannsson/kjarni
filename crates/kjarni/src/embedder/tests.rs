@@ -443,7 +443,7 @@ mod integration_tests {
 
     /// Test that we can create an embedder.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embedder_new() {
         let embedder = Embedder::new("minilm-l6-v2").await;
         assert!(embedder.is_ok(), "Failed to create embedder: {:?}", embedder.err());
@@ -451,7 +451,7 @@ mod integration_tests {
 
     /// Test single text embedding.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embed_single() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -469,7 +469,7 @@ mod integration_tests {
 
     /// Test batch embedding.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embed_batch() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -488,7 +488,7 @@ mod integration_tests {
 
     /// Test embedding with custom pooling.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embed_with_config() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -510,7 +510,7 @@ mod integration_tests {
 
     /// Test unnormalized embeddings.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embed_unnormalized() {
         let embedder = Embedder::builder("minilm-l6-v2")
             .normalize(false)
@@ -530,7 +530,7 @@ mod integration_tests {
 
     /// Test similarity computation.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -547,7 +547,7 @@ mod integration_tests {
 
     /// Test similarity with dissimilar texts.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_similarity_dissimilar() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -564,7 +564,7 @@ mod integration_tests {
 
     /// Test batch similarities.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_similarities() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -589,7 +589,7 @@ mod integration_tests {
 
     /// Test ranking by similarity.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_rank_by_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -613,7 +613,6 @@ mod integration_tests {
 
     /// Test GPU embedding (if available).
     #[tokio::test]
-    #[ignore = "Requires GPU and model download"]
     async fn test_embed_gpu() {
         let embedder = Embedder::builder("minilm-l6-v2")
             .gpu()
@@ -630,7 +629,7 @@ mod integration_tests {
 
     /// Test embedder accessors.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embedder_accessors() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -643,7 +642,7 @@ mod integration_tests {
 
     /// Test one-liner embed function.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_embed_convenience_function() {
         let embedding = embed("minilm-l6-v2", "Hello world")
             .await
@@ -654,7 +653,7 @@ mod integration_tests {
 
     /// Test one-liner similarity function.
     #[tokio::test]
-    #[ignore = "Requires model download"]
+    
     async fn test_similarity_convenience_function() {
         let sim = similarity("minilm-l6-v2", "Hello", "Hi there")
             .await
