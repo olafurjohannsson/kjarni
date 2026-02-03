@@ -433,28 +433,83 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
             log::warn!("streaming beam search is unstable, tokens may change. use greedy for stability.");
         }
 
+        // Track all generated tokens for proper decoding
+        let mut all_generated_tokens: Vec<u32> = Vec::new();
+        let mut prev_text_len = 0;
+
         for step in 0..config.max_length {
             let should_stop = beam_step(&mut ctx, step).await?;
+
+            // Check stop BEFORE yielding
+            if should_stop {
+                break;
+            }
 
             if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
                 let new_token = *best_beam.tokens.last().unwrap();
 
                 if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
-                    let text = ctx.model.tokenizer().decode(&[new_token], true).unwrap_or_default();
-                    yield StreamedToken {
-                        text,
-                        id: new_token,
-                        token_type: TokenType::Generated,
-                    };
+                    // Add to our accumulated tokens
+                    all_generated_tokens.push(new_token);
+                    
+                    // Decode ALL tokens so far to get proper spacing
+                    let full_text = ctx.model.tokenizer()
+                        .decode(&all_generated_tokens, true)
+                        .unwrap_or_default();
+                    
+                    // Yield only the NEW portion
+                    let new_text = &full_text[prev_text_len..];
+                    prev_text_len = full_text.len();
+                    
+                    if !new_text.is_empty() {
+                        yield StreamedToken {
+                            text: new_text.to_string(),
+                            id: new_token,
+                            token_type: TokenType::Generated,
+                        };
+                    }
                 }
-            }
-
-            if should_stop {
-                break;
             }
         }
     }
 }
+
+
+// pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
+//     model: &'a dyn EncoderDecoderLanguageModel,
+//     backend: &'a B,
+//     input_text: &'a str,
+//     config: &'a GenerationConfig,
+// ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
+//     try_stream! {
+//         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
+
+//         if ctx.num_beams > 1 {
+//             log::warn!("streaming beam search is unstable, tokens may change. use greedy for stability.");
+//         }
+
+//         for step in 0..config.max_length {
+//             let should_stop = beam_step(&mut ctx, step).await?;
+
+//             if should_stop {
+//                 break;
+//             }
+
+//             if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
+//                 let new_token = *best_beam.tokens.last().unwrap();
+
+//                 if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
+//                     let text = ctx.model.tokenizer().decode(&[new_token], true).unwrap_or_default();
+//                     yield StreamedToken {
+//                         text,
+//                         id: new_token,
+//                         token_type: TokenType::Generated,
+//                     };
+//                 }
+//             }
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

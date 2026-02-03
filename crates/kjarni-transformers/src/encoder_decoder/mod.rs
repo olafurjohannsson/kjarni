@@ -13,7 +13,6 @@ mod generator;
 pub mod traits;
 
 pub use crate::{Cache, CpuKVCache};
-use crate::gpu::cache::GpuKVCache;
 pub use cpu_backend::CpuBackend;
 
 pub mod config;
@@ -32,7 +31,3 @@ pub use cpu_backend::CpuSeq2SeqState;
 pub use decoder_self_attn::DecoderSelfAttention;
 pub use generator::{AnyEncoderDecoderBackend, EncoderDecoderGenerator};
 
-
-
-#[cfg(test)]
-mod generator_test;

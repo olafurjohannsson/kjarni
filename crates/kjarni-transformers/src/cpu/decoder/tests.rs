@@ -17,28 +17,27 @@
 //! 7. **Parity Tests**: CPU vs GPU output comparison
 //! 8. **AnyDecoderBackend Tests**: Type erasure and dispatch
 
-use crate::cache::{Cache};
+use crate::cache::Cache;
 use crate::cpu::decoder::CpuDecoderBackend;
-use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::backend::AnyDecoderBackend;
+use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::prelude::GpuDecoderBackend;
 use crate::decoder::traits::{
     CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel, GpuDecoder,
     GpuDecoderOps,
 };
-use crate::gpu::{GpuTensor};
+use crate::gpu::GpuTensor;
 use crate::models::base::AutoregressiveLoop;
 use crate::traits::InferenceModel;
 use crate::{Device, LanguageModel, WgpuContext};
 use anyhow::Result;
-use ndarray::{s, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, s};
 use std::any::Any;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokenizers::Tokenizer;
 use wgpu::CommandEncoder;
-
 
 #[cfg(test)]
 mod decoder_backend_tests {
@@ -573,7 +572,9 @@ mod decoder_backend_tests {
             // Decode loop
             let mut decode_token = backend.new_decode_token().unwrap();
             for i in 0..10 {
-                backend.update_decode_token(&mut decode_token, 100 + i).unwrap();
+                backend
+                    .update_decode_token(&mut decode_token, 100 + i)
+                    .unwrap();
                 let logits = backend
                     .decode_one(&model, &decode_token, 4 + i as usize, &mut cache)
                     .await
@@ -796,13 +797,14 @@ mod decoder_backend_tests {
         #[test]
         fn test_any_type_mismatch_error() {
             let backend = AnyDecoderBackend::cpu();
-
             // Create wrong type
             let mut fake: Box<dyn Any + Send + Sync> = Box::new(String::from("fake"));
-
             let result = backend.update_decode_token(&mut fake, 1);
             assert!(result.is_err());
-            assert!(result.unwrap_err().to_string().contains("Type mismatch"));
+            assert!(
+                result.unwrap_err().to_string().contains("wrong type"),
+                "Error should mention wrong type"
+            );
         }
 
         #[tokio::test]
@@ -847,7 +849,9 @@ mod decoder_backend_tests {
             // Decode
             let mut decode_token = backend.new_decode_token().unwrap();
             for i in 0..5 {
-                backend.update_decode_token(&mut decode_token, 100 + i).unwrap();
+                backend
+                    .update_decode_token(&mut decode_token, 100 + i)
+                    .unwrap();
                 let logits = backend
                     .decode_one(&model, &decode_token, 5 + i as usize, &mut cache)
                     .await
@@ -904,7 +908,6 @@ mod decoder_backend_tests {
             let diff = max_logit_diff(&a, &b);
             assert!((diff - 0.5).abs() < 0.001);
         }
-
     }
 
     // =========================================================================

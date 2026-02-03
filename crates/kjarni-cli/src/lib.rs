@@ -73,22 +73,25 @@ pub enum Commands {
         quiet: bool,
     },
 
-    /// Summarize text using an encoder-decoder model
+    /// Summarize text
     Summarize {
-        /// Input text, file path, or stdin if not provided
+        /// Input text (or read from stdin)
+        #[arg(short, long)]
         input: Option<String>,
 
+        /// Model to use
         #[arg(short, long, default_value = "distilbart-cnn")]
         model: String,
 
+        /// Path to local model
         #[arg(long)]
         model_path: Option<String>,
 
-        /// Minimum length of summary
+        /// Minimum summary length
         #[arg(long)]
         min_length: Option<usize>,
 
-        /// Maximum length of summary
+        /// Maximum summary length
         #[arg(long)]
         max_length: Option<usize>,
 
@@ -96,19 +99,82 @@ pub enum Commands {
         #[arg(long)]
         num_beams: Option<usize>,
 
-        /// Length penalty (>1.0 favors longer, <1.0 favors shorter)
+        /// Length penalty for beam search (< 1 shorter, > 1 longer)
         #[arg(long)]
         length_penalty: Option<f32>,
 
-        /// N-gram size to prevent repetition
+        /// Block repeated n-grams of this size
         #[arg(long)]
         no_repeat_ngram: Option<usize>,
+
+        /// Use greedy decoding (deterministic, fastest)
+        #[arg(long)]
+        greedy: bool,
+
+        /// Disable streaming output
+        #[arg(long)]
+        no_stream: bool,
 
         /// Use GPU
         #[arg(long)]
         gpu: bool,
 
-        /// Suppress status messages
+        /// Suppress progress messages
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
+    /// Translate text between languages
+    Translate {
+        /// Input text (or read from stdin)
+        #[arg(short, long)]
+        input: Option<String>,
+
+        /// Model to use
+        #[arg(short, long, default_value = "flan-t5-base")]
+        model: String,
+
+        /// Path to local model
+        #[arg(long)]
+        model_path: Option<String>,
+
+        /// Source language (e.g., en, de, fr)
+        #[arg(long)]
+        src: Option<String>,
+
+        /// Target language (e.g., en, de, fr)
+        #[arg(long)]
+        dst: Option<String>,
+
+        /// Maximum output length
+        #[arg(long)]
+        max_length: Option<usize>,
+
+        /// Number of beams for beam search
+        #[arg(long)]
+        num_beams: Option<usize>,
+
+        /// Length penalty for beam search (< 1 shorter, > 1 longer)
+        #[arg(long)]
+        length_penalty: Option<f32>,
+
+        /// Block repeated n-grams of this size
+        #[arg(long)]
+        no_repeat_ngram: Option<usize>,
+
+        /// Use greedy decoding (deterministic, fastest)
+        #[arg(long)]
+        greedy: bool,
+
+        /// Disable streaming output
+        #[arg(long)]
+        no_stream: bool,
+
+        /// Use GPU
+        #[arg(long)]
+        gpu: bool,
+
+        /// Suppress progress messages
         #[arg(short, long)]
         quiet: bool,
     },
@@ -138,24 +204,6 @@ pub enum Commands {
         /// Suppress status messages
         #[arg(short, long)]
         quiet: bool,
-    },
-
-    /// Translate text between languages
-    Translate {
-        /// Input text, file path, or stdin if not provided
-        input: Option<String>,
-
-        #[arg(short, long, default_value = "t5-flan")]
-        model: String,
-
-        #[arg(long)]
-        model_path: Option<String>,
-
-        #[arg(long)]
-        src: Option<String>,
-
-        #[arg(long)]
-        dst: Option<String>,
     },
 
     /// Transcribe audio to text

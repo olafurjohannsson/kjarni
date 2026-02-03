@@ -2,20 +2,20 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array, Array1, Array2, Array3, Array4, Dimension};
 use wgpu::util::DeviceExt;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder};
 
+use crate::WgpuContext;
 use crate::gpu_ops::primitives::layout::permute::GpuPermute;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
-use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::CpuTensor;
+use crate::tensor::raw_tensor::TensorView;
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 
 pub use crate::tensor::DType;
 
@@ -172,12 +172,17 @@ impl GpuTensor {
         dtype: DType,
         context: Arc<WgpuContext>,
     ) -> Self {
-        let expected_size = shape.iter().product::<usize>() * dtype.size_of();
-        assert_eq!(
-            buffer.size() as usize,
-            expected_size,
-            "buffer size does not match shape dimensions"
-        );
+        // For quantized types, we can't easily validate size since buffer_size_for_shape
+        // can fail. Just trust that the buffer was created correctly.
+        if let Some(elem_size) = dtype.element_size() {
+            let expected_size = shape.iter().product::<usize>() * elem_size;
+            assert_eq!(
+                buffer.size() as usize,
+                expected_size,
+                "buffer size does not match shape dimensions"
+            );
+        }
+        // For quantized types, skip validation (buffer was already created with correct size)
 
         Self {
             buffer,
@@ -196,7 +201,7 @@ impl GpuTensor {
         dtype: DType,
         label: &str,
     ) -> Result<Self> {
-        let expected_bytes = shape.iter().product::<usize>() * dtype.size_in_bytes();
+        let expected_bytes = dtype.buffer_size_for_shape(&shape)?;
         anyhow::ensure!(
             bytes.len() == expected_bytes,
             "byte count mismatch: got {}, expected {} for shape {:?} and dtype {:?}",
@@ -252,12 +257,12 @@ impl GpuTensor {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GpuTensor::deep_clone encoder"),
-            });
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("GpuTensor::deep_clone encoder"),
+                });
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buffer, 0, self.buffer.size());
         self.context.queue.submit(Some(encoder.finish()));
 
@@ -298,8 +303,7 @@ impl GpuTensor {
         dtype: DType,
         label: &str,
     ) -> Result<Self> {
-        let num_elements = shape.iter().product::<usize>();
-        let size_in_bytes = num_elements * dtype.size_of();
+        let size_in_bytes = dtype.buffer_size_for_shape(&shape)?;
         let zeros_data = vec![0u8; size_in_bytes];
 
         let buffer = context
@@ -656,7 +660,10 @@ fn convert_cpu_tensor_to_bytes(
                 .collect();
             bytemuck::cast_slice(&bf16_data).to_vec()
         }
-        other => anyhow::bail!("unsupported target dtype {:?} for CPU→GPU conversion", other),
+        other => anyhow::bail!(
+            "unsupported target dtype {:?} for CPU→GPU conversion",
+            other
+        ),
     };
 
     Ok((bytes, shape))

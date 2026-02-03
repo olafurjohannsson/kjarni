@@ -87,7 +87,7 @@ impl SummarizerBuilder {
         self
     }
 
-    // =========================================================================
+// =========================================================================
     // Generation Control
     // =========================================================================
 
@@ -103,8 +103,21 @@ impl SummarizerBuilder {
         self
     }
 
-    /// Use greedy decoding (fastest).
+    /// Set no-repeat n-gram size.
+    pub fn no_repeat_ngram_size(mut self, size: usize) -> Self {
+        self.overrides.no_repeat_ngram_size = Some(size);
+        self
+    }
+
+    /// Set repetition penalty.
+    pub fn repetition_penalty(mut self, penalty: f32) -> Self {
+        self.overrides.repetition_penalty = Some(penalty);
+        self
+    }
+
+    /// Use greedy decoding (fastest, deterministic).
     pub fn greedy(mut self) -> Self {
+        self.overrides.do_sample = Some(false);
         self.overrides.num_beams = Some(1);
         self
     }

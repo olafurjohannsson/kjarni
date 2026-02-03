@@ -64,22 +64,22 @@ pub trait CpuCrossDecoder: Send + Sync {
 
     fn layers(&self) -> &Vec<CrossDecoderLayer>;
 
-    /// Run a subset of layers `[start_layer, end_layer)`.
-    ///
-    /// # Arguments
-    /// * `hidden_states` - Input states from embedding or previous layer block.
-    fn forward_layers(
-        &self,
-        hidden_states: &Array3<f32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_attention_mask: Option<&Array2<f32>>,
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-        start_layer: usize,
-        end_layer: usize,
-    ) -> Result<CpuCrossDecoderOutput>;
+    // /// Run a subset of layers `[start_layer, end_layer)`.
+    // ///
+    // /// # Arguments
+    // /// * `hidden_states` - Input states from embedding or previous layer block.
+    // fn forward_layers(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     encoder_hidden_states: &Array3<f32>,
+    //     decoder_attention_mask: Option<&Array2<f32>>,
+    //     cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    //     start_layer: usize,
+    //     end_layer: usize,
+    // ) -> Result<CpuCrossDecoderOutput>;
     
-    fn forward_layers2(
+    fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
@@ -89,13 +89,9 @@ pub trait CpuCrossDecoder: Send + Sync {
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
         start_layer: usize,
         end_layer: usize,
-    ) -> Result<CpuCrossDecoderOutput> {
-        Ok(CpuCrossDecoderOutput {
-            new_self_attn_kv: Vec::new(),
-            last_hidden_state: Array3::<f32>::zeros((0, 0, 0)),
-        })
-    }
-    fn forward2(
+    ) -> Result<CpuCrossDecoderOutput>;
+
+    fn forward(
         &self,
         decoder_input_ids: &Array2<u32>,
         encoder_hidden_states: &Array3<f32>,
@@ -103,12 +99,8 @@ pub trait CpuCrossDecoder: Send + Sync {
         encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
         cache: Option<&mut dyn Cache>,
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-    ) -> Result<CpuCrossDecoderOutput> {
-        Ok(CpuCrossDecoderOutput {
-            new_self_attn_kv: Vec::new(),
-            last_hidden_state: Array3::<f32>::zeros((0, 0, 0)),
-        })
-    }
+    ) -> Result<CpuCrossDecoderOutput>;
+
     /// Metadata: Total number of layers.
     fn num_layers(&self) -> usize;
 
@@ -118,32 +110,32 @@ pub trait CpuCrossDecoder: Send + Sync {
 
     // --- High-level Default Implementation ---
 
-    /// Performs a full forward pass through the cross-attention decoder stack.
-    fn forward(
-        &self,
-        decoder_input_ids: &Array2<u32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_attention_mask: Option<&Array2<f32>>,
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-    ) -> Result<CpuCrossDecoderOutput> {
-        // 1. Calculate offset
-        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+    // /// Performs a full forward pass through the cross-attention decoder stack.
+    // fn forward(
+    //     &self,
+    //     decoder_input_ids: &Array2<u32>,
+    //     encoder_hidden_states: &Array3<f32>,
+    //     decoder_attention_mask: Option<&Array2<f32>>,
+    //     cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    // ) -> Result<CpuCrossDecoderOutput> {
+    //     // 1. Calculate offset
+    //     let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
 
-        // 2. Embed
-        let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
+    //     // 2. Embed
+    //     let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
 
-        // 3. Run all layers
-        self.forward_layers(
-            &hidden,
-            encoder_hidden_states,
-            decoder_attention_mask,
-            cache,
-            cross_kv_cache,
-            0,
-            self.num_layers(),
-        )
-    }
+    //     // 3. Run all layers
+    //     self.forward_layers(
+    //         &hidden,
+    //         encoder_hidden_states,
+    //         decoder_attention_mask,
+    //         cache,
+    //         cross_kv_cache,
+    //         0,
+    //         self.num_layers(),
+    //     )
+    // }
 }
 
 #[async_trait]

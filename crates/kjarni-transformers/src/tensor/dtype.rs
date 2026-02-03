@@ -1,5 +1,5 @@
 use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ8_0, QK_K};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,15 @@ impl DType {
             )),
         }
     }
-
+    pub fn element_size(&self) -> Option<usize> {
+        match self {
+            DType::F32 => Some(4),
+            DType::F16 => Some(2),
+            DType::BF16 => Some(2),
+            DType::U32 => Some(4),
+            DType::Q8_0 | DType::Q4_K | DType::Q5_K | DType::Q6_K => None,
+        }
+    }
     /// Maps a `gguf::Type` to our internal `DType`.
     pub fn from_gguf(dtype: gguf::GGMLType) -> Result<Self> {
         match dtype {

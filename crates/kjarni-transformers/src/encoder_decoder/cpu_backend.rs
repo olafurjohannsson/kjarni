@@ -103,7 +103,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         // create decoder padding mask, usually all 1s during auto regressive decode
         let attention_mask = Array2::ones(tokens.dim());
 
-        let decoder_output = ops.decoder().forward2(
+        let decoder_output = ops.decoder().forward(
             tokens,
             enc_state,
             Some(&attention_mask),

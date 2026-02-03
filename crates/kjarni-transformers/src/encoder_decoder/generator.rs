@@ -1,16 +1,5 @@
-use crate::cache::Cache;
-use crate::common::StreamedToken;
-use crate::common::{DecodingStrategy, GenerationConfig};
-use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
+use std::any::Any;
 
-use crate::gpu::{GpuEncoderDecoderBackend, GpuSeq2SeqState};
-
-use crate::encoder_decoder::traits::{
-    EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
-};
-use crate::encoder_decoder::{run_beam_search, run_beam_search_stream};
-use crate::models::base::LanguageModel;
-use crate::prelude::*;
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -19,7 +8,17 @@ use futures::{
     stream::{Stream, StreamExt},
 };
 use ndarray::Array3;
-use std::any::Any;
+
+use crate::cache::Cache;
+use crate::common::{DecodingStrategy, GenerationConfig, StreamedToken};
+use crate::encoder_decoder::cpu_backend::{self, CpuBackend};
+use crate::encoder_decoder::traits::{
+    EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
+};
+use crate::encoder_decoder::{run_beam_search, run_beam_search_stream};
+use crate::gpu::{GpuEncoderDecoderBackend, GpuSeq2SeqState};
+use crate::models::base::LanguageModel;
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub enum AnyEncoderDecoderBackend {
@@ -29,7 +28,6 @@ pub enum AnyEncoderDecoderBackend {
 
 #[async_trait]
 impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
-    // The associated Tensor type remains the same, using Box<dyn Any> for type erasure.
     type Tensor = Box<dyn Any + Send + Sync>;
 
     async fn encode(
@@ -50,7 +48,6 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
         }
     }
 
-    // The decode_step and reorder_cache methods are now generic over the Cache type.
     async fn decode_step(
         &self,
         model: &dyn EncoderDecoderLanguageModel,
@@ -62,19 +59,19 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
             AnyEncoderDecoderBackend::Cpu(b) => {
                 let tokens = decoder_tokens
                     .downcast_ref::<cpu_backend::CpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for CpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for cpu backend"))?;
                 let state = encoder_state
                     .downcast_ref::<cpu_backend::CpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for CpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for cpu backend"))?;
                 b.decode_step(model, tokens, state, cache).await
             }
             AnyEncoderDecoderBackend::Gpu(b) => {
                 let tokens = decoder_tokens
                     .downcast_ref::<GpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for gpu backend"))?;
                 let state: &crate::gpu::GpuSeq2SeqState = encoder_state
                     .downcast_ref::<GpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for gpu backend"))?;
                 b.decode_step(model, tokens, state, cache).await
             }
         }
@@ -98,13 +95,13 @@ impl EncoderDecoderGenerationBackend for AnyEncoderDecoderBackend {
             AnyEncoderDecoderBackend::Cpu(b) => {
                 let concrete_tensor = tensor
                     .downcast_mut::<cpu_backend::CpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for CpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for cpu backend"))?;
                 b.update_token_tensor(concrete_tensor, new_tokens)
             }
             AnyEncoderDecoderBackend::Gpu(b) => {
                 let concrete_tensor = tensor
                     .downcast_mut::<GpuSeq2SeqState>()
-                    .ok_or_else(|| anyhow!("Mismatched Tensor type for GpuBackend"))?;
+                    .ok_or_else(|| anyhow!("mismatched tensor type for gpu backend"))?;
                 b.update_token_tensor(concrete_tensor, new_tokens)
             }
         }
@@ -137,7 +134,7 @@ impl EncoderDecoderGenerator {
             Device::Wgpu => {
                 let context = model
                     .context()
-                    .ok_or_else(|| anyhow!("GPU model missing WgpuContext"))?;
+                    .ok_or_else(|| anyhow!("gpu model missing WgpuContext"))?;
                 AnyEncoderDecoderBackend::Gpu(GpuEncoderDecoderBackend::new(context)?)
             }
         };
@@ -147,7 +144,7 @@ impl EncoderDecoderGenerator {
     pub async fn generate(
         &self,
         input_text: &str,
-        config: Option<&GenerationConfig>, // add do_sample ?
+        config: Option<&GenerationConfig>,
     ) -> Result<String> {
         let t_start = std::time::Instant::now();
         let generation_config = config
@@ -172,22 +169,21 @@ impl EncoderDecoderGenerator {
             if num_tokens > 0 && elapsed.as_secs_f32() > 0.0 {
                 let tps = num_tokens as f32 / elapsed.as_secs_f32();
                 log::info!(
-                    "[Seq2Seq] Generated {} tokens in {:?}. Speed: {:.2} t/s",
+                    "seq2seq generated {} tokens in {:?}, {:.2} t/s",
                     num_tokens,
                     elapsed,
                     tps
                 );
             } else {
-                log::info!("[Seq2Seq] Total Generation Time: {:?}", elapsed);
+                log::info!("seq2seq generation time: {:?}", elapsed);
             }
         } else {
-            log::info!("[Seq2Seq] Total Generation Time (failed): {:?}", elapsed);
+            log::info!("seq2seq generation failed in {:?}", elapsed);
         }
 
         result
     }
 
-    // The method signature is now slightly different to accommodate the owned config
     pub fn generate_stream<'a>(
         &'a self,
         input_text: &'a str,
@@ -196,32 +192,22 @@ impl EncoderDecoderGenerator {
         let owned_config =
             config.map_or_else(|| self.model.get_default_generation_config(), |c| c.clone());
 
-        // We use an async_stream block to build the stream. `async move` allows it
-        // to take ownership of `owned_config`.
         try_stream! {
             if let DecodingStrategy::BeamSearch(params) = &owned_config.strategy {
                 if params.num_beams > 1 {
                     log::warn!(
-                        "Streaming with beam search is enabled. The optimal sequence may change \
-                         during generation, potentially causing the streamed output to differ from \
-                         the final result of the non-streaming `generate` method."
+                        "streaming with beam search enabled, output may differ from non-streaming generate"
                     );
                 }
             }
 
-            // `run_beam_search_stream` is now called inside the stream block.
             let stream = run_beam_search_stream(
                 self.model.as_ref(),
                 &self.backend,
                 input_text,
-                &owned_config, // Move the owned config into the function
+                &owned_config,
             );
 
-            // We yield each item from the inner stream.
-            // futures::Stream::pin_mut!(stream);
-            // while let Some(token) = futures::Stream::StreamExt::next(&mut stream).await {
-            //     yield token?;
-            // }
             let t_start = std::time::Instant::now();
             let mut token_count = 0;
 
@@ -231,7 +217,7 @@ impl EncoderDecoderGenerator {
                 let elapsed = t_start.elapsed();
                 if elapsed.as_secs_f32() > 0.0 {
                     let tps = token_count as f32 / elapsed.as_secs_f32();
-                    log::info!("[Stream] Token #{}, Speed: {:.2} t/s", token_count, tps);
+                    log::debug!("stream token #{}, {:.2} t/s", token_count, tps);
                 }
                 yield token?;
             }
@@ -241,19 +227,19 @@ impl EncoderDecoderGenerator {
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use tokenizers::Tokenizer;
+
     use super::*;
     use crate::cache::Cache;
     use crate::cpu::encoder::traits::EncoderLanguageModel;
     use crate::cpu::encoder::{CpuEncoderOps, GpuEncoderOps};
     use crate::encoder_decoder::traits::{CpuEncoderDecoderOps, GpuEncoderDecoderOps};
     use crate::traits::{Device, InferenceModel};
-    use ndarray::Array2;
-    use std::any::Any;
-    use std::collections::HashSet;
-    use std::sync::Arc;
-    use tokenizers::Tokenizer;
-
-    // --- Mocks ---
 
     struct MockModel {
         device: Device,
@@ -288,7 +274,7 @@ mod tests {
             100
         }
         fn tokenizer(&self) -> &Tokenizer {
-            unimplemented!("Mock tokenizer not available")
+            unimplemented!()
         }
         fn eos_token_id(&self) -> Option<u32> {
             Some(1)
@@ -339,8 +325,6 @@ mod tests {
         }
     }
 
-    // --- Tests ---
-
     #[test]
     fn test_generator_new_cpu() {
         let model = MockModel {
@@ -348,37 +332,30 @@ mod tests {
         };
         let generator = EncoderDecoderGenerator::new(Box::new(model));
         assert!(generator.is_ok());
-
-        // Verify backend type implicitly
-        // We can't access generator.backend (private), but success implies it matched
     }
 
     #[tokio::test]
     async fn test_generator_new_gpu_missing_context() {
-        // GPU model without context should fail
         let model = MockModel {
             device: Device::Wgpu,
         };
         let generator = EncoderDecoderGenerator::new(Box::new(model));
         assert!(generator.is_err());
-        assert_eq!(
-            generator.unwrap_err().to_string(),
-            "GPU model missing WgpuContext"
-        );
+        assert!(generator
+            .unwrap_err()
+            .to_string()
+            .contains("gpu model missing"));
     }
 
     #[test]
     fn test_backend_dispatch_cpu() {
-        // Test manual dispatch wrapper
         let backend =
             AnyEncoderDecoderBackend::Cpu(crate::encoder_decoder::cpu_backend::CpuBackend);
 
-        // create_token_tensor
         let tokens = vec![1, 2, 3];
         let tensor = backend.create_token_tensor(&tokens, 1);
         assert!(tensor.is_ok());
 
-        // Verify boxed type
         let boxed = tensor.unwrap();
         let concrete = boxed.downcast_ref::<crate::encoder_decoder::cpu_backend::CpuSeq2SeqState>();
         assert!(concrete.is_some());
@@ -389,16 +366,13 @@ mod tests {
         let backend =
             AnyEncoderDecoderBackend::Cpu(crate::encoder_decoder::cpu_backend::CpuBackend);
 
-        // Create Fake Tensor (String)
         let mut fake_tensor: Box<dyn Any + Send + Sync> = Box::new(String::from("fake"));
 
-        // Try to update using CpuBackend (expects CpuSeq2SeqState)
         let res = backend.update_token_tensor(&mut fake_tensor, &[1]);
         assert!(res.is_err());
-        assert!(
-            res.unwrap_err()
-                .to_string()
-                .contains("Mismatched Tensor type")
-        );
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("mismatched tensor type"));
     }
 }

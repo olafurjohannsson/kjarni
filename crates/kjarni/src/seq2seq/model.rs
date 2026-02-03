@@ -7,17 +7,17 @@ use futures::{Stream, StreamExt, pin_mut};
 use kjarni_models::models::bart::model::BartModel;
 use tokio::sync::mpsc;
 
+use kjarni_transformers::WgpuContext;
 use kjarni_transformers::common::GenerationConfig;
 use kjarni_transformers::encoder_decoder::{EncoderDecoderGenerator, EncoderDecoderLanguageModel};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
-use kjarni_transformers::traits::{Device};
-use kjarni_transformers::WgpuContext;
+use kjarni_transformers::traits::Device;
 
 use crate::common::DownloadPolicy;
 
 use super::builder::Seq2SeqGeneratorBuilder;
-use super::resolution::{resolve_seq2seq_config, ResolvedSeq2SeqConfig};
+use super::resolution::{ResolvedSeq2SeqConfig, resolve_seq2seq_config};
 use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqTask, Seq2SeqToken};
 use super::validation::validate_for_seq2seq;
 
@@ -58,9 +58,6 @@ pub struct Seq2SeqGenerator {
 
     /// Task hint (affects default config resolution).
     task: Option<Seq2SeqTask>,
-
-    /// Resolved generation config (model defaults + user overrides).
-    generation_config: ResolvedSeq2SeqConfig,
 
     /// User-provided overrides (stored for re-resolution with runtime overrides).
     user_overrides: Seq2SeqOverrides,
@@ -172,30 +169,18 @@ impl Seq2SeqGenerator {
                     source: e,
                 })?;
 
-        // Get model defaults before moving model into generator
-        let model_defaults = model.get_default_generation_config();
-
         // Create the encoder-decoder generator (takes ownership of model)
-        let encoder_decoder = Arc::new(
-            EncoderDecoderGenerator::new(model).map_err(|e| Seq2SeqError::LoadFailed {
+        let encoder_decoder = Arc::new(EncoderDecoderGenerator::new(model).map_err(|e| {
+            Seq2SeqError::LoadFailed {
                 model: builder.model.clone(),
                 source: e,
-            })?,
-        );
-
-        // Resolve generation config with user overrides
-        let generation_config = resolve_seq2seq_config(
-            model_defaults,
-            builder.task,
-            &builder.overrides,
-            &Seq2SeqOverrides::default(),
-        );
+            }
+        })?);
 
         Ok(Self {
             encoder_decoder,
             model_type,
             task: builder.task,
-            generation_config,
             user_overrides: builder.overrides,
             device,
             context,
@@ -262,33 +247,37 @@ impl Seq2SeqGenerator {
     ///
     /// Runtime overrides are merged with user overrides (from builder).
     /// Runtime takes precedence.
-    pub async fn generate_with_config(
-        &self,
-        input: &str,
-        runtime_overrides: &Seq2SeqOverrides,
-    ) -> Seq2SeqResult<String> {
-        // Re-resolve config with runtime overrides
-        let config = if runtime_overrides.is_empty() {
-            self.generation_config.clone()
-        } else {
-            let model_defaults = self.encoder_decoder.model.get_default_generation_config();
-            resolve_seq2seq_config(
-                model_defaults,
-                self.task,
-                &self.user_overrides,
-                runtime_overrides,
-            )
-        };
+pub async fn generate_with_config(
+    &self,
+    input: &str,
+    runtime_overrides: &Seq2SeqOverrides,
+) -> Seq2SeqResult<String> {
+    // Get task-specific model defaults based on INPUT content
+    // (T5 detects "translate X to Y:" prefix and returns appropriate config)
+    let model_defaults = self.encoder_decoder.model.get_generation_config_for_input(input);
+    
+    // Resolve with user and runtime overrides
+    let config = resolve_seq2seq_config(
+        model_defaults,
+        self.task,
+        &self.user_overrides,
+        runtime_overrides,
+    );
 
-        // Generate
-        let output = self
-            .encoder_decoder
-            .generate(input, Some(config.as_ref()))
-            .await
-            .map_err(Seq2SeqError::GenerationFailed)?;
+    // DEBUG: Print the resolved config
+    eprintln!("DEBUG input prefix: '{}'", &input[..input.len().min(60)]);
+    eprintln!("DEBUG resolved config: {:?}", config.as_ref());
 
-        Ok(output)
-    }
+    // Generate
+    let output = self
+        .encoder_decoder
+        .generate(input, Some(config.as_ref()))
+        .await
+        .map_err(Seq2SeqError::GenerationFailed)?;
+
+    Ok(output)
+}
+
 
     /// Stream generated tokens.
     pub async fn stream(
@@ -302,55 +291,53 @@ impl Seq2SeqGenerator {
 
     /// Stream with custom overrides.
     pub async fn stream_with_config(
-        &self,
-        input: &str,
-        runtime_overrides: Seq2SeqOverrides,
-    ) -> Seq2SeqResult<std::pin::Pin<Box<dyn Stream<Item = Seq2SeqResult<Seq2SeqToken>> + Send>>>
-    {
-        // Re-resolve config with runtime overrides
-        let config = if runtime_overrides.is_empty() {
-            self.generation_config.clone()
-        } else {
-            let model_defaults = self.encoder_decoder.model.get_default_generation_config();
-            resolve_seq2seq_config(
-                model_defaults,
-                self.task,
-                &self.user_overrides,
-                &runtime_overrides,
-            )
-        };
+    &self,
+    input: &str,
+    runtime_overrides: Seq2SeqOverrides,
+) -> Seq2SeqResult<std::pin::Pin<Box<dyn Stream<Item = Seq2SeqResult<Seq2SeqToken>> + Send>>>
+{
+    // Get task-specific model defaults based on INPUT content
+    let model_defaults = self.encoder_decoder.model.get_generation_config_for_input(input);
+    
+    // Resolve with user and runtime overrides
+    let config = resolve_seq2seq_config(
+        model_defaults,
+        self.task,
+        &self.user_overrides,
+        &runtime_overrides,
+    );
 
-        // Clone/own everything we need for the spawned task
-        let encoder_decoder = self.encoder_decoder.clone();
-        let config = config.into_inner();
-        let input = input.to_string();
+    // Clone/own everything we need for the spawned task
+    let encoder_decoder = self.encoder_decoder.clone();
+    let config = config.into_inner();
+    let input = input.to_string();
 
-        let (tx, rx) = mpsc::channel::<Seq2SeqResult<Seq2SeqToken>>(32);
+    let (tx, rx) = mpsc::channel::<Seq2SeqResult<Seq2SeqToken>>(32);
 
-        tokio::spawn(async move {
-            let stream = encoder_decoder.generate_stream(&input, Some(&config));
+    tokio::spawn(async move {
+        let stream = encoder_decoder.generate_stream(&input, Some(&config));
 
-            pin_mut!(stream);
+        pin_mut!(stream);
 
-            while let Some(result) = stream.next().await {
-                let msg = match result {
-                    Ok(token) => Ok(Seq2SeqToken {
-                        text: token.text,
-                        id: token.id,
-                        is_special: false,
-                    }),
-                    Err(e) => Err(Seq2SeqError::GenerationFailed(e)),
-                };
+        while let Some(result) = stream.next().await {
+            let msg = match result {
+                Ok(token) => Ok(Seq2SeqToken {
+                    text: token.text,
+                    id: token.id,
+                    is_special: false,
+                }),
+                Err(e) => Err(Seq2SeqError::GenerationFailed(e)),
+            };
 
-                if tx.send(msg).await.is_err() {
-                    break; // Receiver dropped
-                }
+            if tx.send(msg).await.is_err() {
+                break; // Receiver dropped
             }
-        });
+        }
+    });
 
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        Ok(Box::pin(stream))
-    }
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Ok(Box::pin(stream))
+}
 
     /// Stream as simple strings (convenience method).
     pub async fn stream_text(
@@ -369,11 +356,6 @@ impl Seq2SeqGenerator {
     /// Get the model's default generation config.
     pub fn get_model_defaults(&self) -> GenerationConfig {
         self.encoder_decoder.model.get_default_generation_config()
-    }
-
-    /// Get the currently resolved generation config.
-    pub fn generation_config(&self) -> &ResolvedSeq2SeqConfig {
-        &self.generation_config
     }
 
     // =========================================================================

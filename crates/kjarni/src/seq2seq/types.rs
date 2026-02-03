@@ -154,6 +154,8 @@ pub struct Seq2SeqOverrides {
     /// - `> 1.0` = favor longer outputs (BART summarization uses 2.0)
     pub length_penalty: Option<f32>,
 
+    pub do_sample: Option<bool>,
+
     /// Stop when `num_beams` complete sequences are found.
     ///
     /// - `true` = stop early (faster, default for most models)
@@ -251,6 +253,7 @@ impl Seq2SeqOverrides {
             && self.early_stopping.is_none()
             && self.no_repeat_ngram_size.is_none()
             && self.repetition_penalty.is_none()
+            && self.do_sample.is_none()
     }
 
     /// Merge with another set of overrides.
@@ -265,6 +268,7 @@ impl Seq2SeqOverrides {
             early_stopping: other.early_stopping.or(self.early_stopping),
             no_repeat_ngram_size: other.no_repeat_ngram_size.or(self.no_repeat_ngram_size),
             repetition_penalty: other.repetition_penalty.or(self.repetition_penalty),
+            do_sample: other.do_sample.or(self.do_sample),
         }
     }
 }

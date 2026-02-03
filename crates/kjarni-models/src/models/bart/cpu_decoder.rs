@@ -9,10 +9,10 @@ use ndarray::{Array2, Array3};
 use kjarni_transformers::activations::Activation;
 use kjarni_transformers::cache::{Cache, CpuBeamKVCache};
 use kjarni_transformers::cpu::encoder_decoder::{CrossDecoderLayer, DecoderCrossAttention};
+use kjarni_transformers::encoder_decoder::DecoderSelfAttention;
 use kjarni_transformers::encoder_decoder::traits::{
     CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput,
 };
-use kjarni_transformers::encoder_decoder::DecoderSelfAttention;
 use kjarni_transformers::feedforward::{FeedForward, LegacyFeedForward};
 use kjarni_transformers::linear_layer::LinearLayer;
 use kjarni_transformers::models::base::ModelLoadConfig;
@@ -179,7 +179,94 @@ impl CpuCrossDecoder for BartCpuDecoder {
     fn layers(&self) -> &Vec<CrossDecoderLayer> {
         &self.layers
     }
+    fn forward_layers(
+        &self,
+        hidden_states: &Array3<f32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
+        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<CpuCrossDecoderOutput> {
+        let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
 
+        let mut current_hidden_states = hidden_states.clone();
+        log::debug!("embed sum: {:?}", current_hidden_states.sum());
+        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
+
+        if start_layer >= self.layers.len() || end_layer > self.layers.len() {
+            return Err(anyhow::anyhow!("layer indices out of bounds"));
+        }
+    // pub fn forward(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     encoder_hidden_states: &Array3<f32>,
+    //     self_mask: Option<&Array2<f32>>,
+    //     cross_mask: Option<&Array2<f32>>,
+    //     past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
+    //     cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
+    //     position_bias: Option<&Array4<f32>>,
+    // ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
+        for i in start_layer..end_layer {
+            let layer = &self.layers[i];
+
+            let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
+            let self_attn_past_kv_views = self_attn_past_kv
+                .as_ref()
+                .map(|(k, v)| (k.view(), v.view()));
+
+            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
+
+            let (new_hidden, (new_k, new_v)) = layer.forward(
+                &current_hidden_states,
+                encoder_hidden_states,
+                encoder_padding_mask,
+                decoder_padding_mask,
+                self_attn_past_kv_views,
+                cross_kv_for_layer,
+                None,
+            )?;
+
+            current_hidden_states = new_hidden;
+            new_self_attn_kvs.push((new_k, new_v));
+
+            log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
+        }
+
+        Ok(CpuCrossDecoderOutput {
+            last_hidden_state: current_hidden_states,
+            new_self_attn_kv: new_self_attn_kvs,
+        })
+    }
+
+    fn forward(
+        &self,
+        decoder_input_ids: &Array2<u32>,
+        encoder_hidden_states: &Array3<f32>,
+        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
+        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        cache: Option<&mut dyn Cache>,
+        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    ) -> Result<CpuCrossDecoderOutput> {
+        // 1. Calculate offset
+        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+
+        // 2. Embed
+        let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
+
+        self.forward_layers(
+            &hidden,
+            encoder_hidden_states,
+            decoder_padding_mask,
+            encoder_padding_mask,
+            cache,
+            cross_kv_cache,
+            0,
+            self.num_layers(),
+        )
+    }
     fn hidden_size(&self) -> usize {
         self.config.d_model
     }
@@ -214,57 +301,57 @@ impl CpuCrossDecoder for BartCpuDecoder {
         Ok(self.embed_layer_norm.forward_3d(&hidden))
     }
 
-    fn forward_layers(
-        &self,
-        hidden_states: &Array3<f32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_attention_mask: Option<&Array2<f32>>,
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-        start_layer: usize,
-        end_layer: usize,
-    ) -> Result<CpuCrossDecoderOutput> {
-        let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
+    // fn forward_layers(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     encoder_hidden_states: &Array3<f32>,
+    //     decoder_attention_mask: Option<&Array2<f32>>,
+    //     cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    //     start_layer: usize,
+    //     end_layer: usize,
+    // ) -> Result<CpuCrossDecoderOutput> {
+    //     let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
 
-        let mut current_hidden_states = hidden_states.clone();
-        log::debug!("embed sum: {:?}", current_hidden_states.sum());
-        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
+    //     let mut current_hidden_states = hidden_states.clone();
+    //     log::debug!("embed sum: {:?}", current_hidden_states.sum());
+    //     let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
 
-        if start_layer >= self.layers.len() || end_layer > self.layers.len() {
-            return Err(anyhow::anyhow!("layer indices out of bounds"));
-        }
+    //     if start_layer >= self.layers.len() || end_layer > self.layers.len() {
+    //         return Err(anyhow::anyhow!("layer indices out of bounds"));
+    //     }
 
-        for i in start_layer..end_layer {
-            let layer = &self.layers[i];
+    //     for i in start_layer..end_layer {
+    //         let layer = &self.layers[i];
 
-            let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
-            let self_attn_past_kv_views = self_attn_past_kv
-                .as_ref()
-                .map(|(k, v)| (k.view(), v.view()));
+    //         let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
+    //         let self_attn_past_kv_views = self_attn_past_kv
+    //             .as_ref()
+    //             .map(|(k, v)| (k.view(), v.view()));
 
-            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
+    //         let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
 
-            let (new_hidden, (new_k, new_v)) = layer.forward(
-                &current_hidden_states,
-                encoder_hidden_states,
-                decoder_attention_mask,
-                None,
-                self_attn_past_kv_views,
-                cross_kv_for_layer,
-                None,
-            )?;
+    //         let (new_hidden, (new_k, new_v)) = layer.forward(
+    //             &current_hidden_states,
+    //             encoder_hidden_states,
+    //             decoder_attention_mask,
+    //             None,
+    //             self_attn_past_kv_views,
+    //             cross_kv_for_layer,
+    //             None,
+    //         )?;
 
-            current_hidden_states = new_hidden;
-            new_self_attn_kvs.push((new_k, new_v));
+    //         current_hidden_states = new_hidden;
+    //         new_self_attn_kvs.push((new_k, new_v));
 
-            log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
-        }
+    //         log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
+    //     }
 
-        Ok(CpuCrossDecoderOutput {
-            last_hidden_state: current_hidden_states,
-            new_self_attn_kv: new_self_attn_kvs,
-        })
-    }
+    //     Ok(CpuCrossDecoderOutput {
+    //         last_hidden_state: current_hidden_states,
+    //         new_self_attn_kv: new_self_attn_kvs,
+    //     })
+    // }
 }
 
 #[cfg(test)]
@@ -272,7 +359,7 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use ndarray::{s, Array2};
+    use ndarray::{Array2, s};
 
     use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
     use kjarni_transformers::traits::CpuTransformerCore;
@@ -396,6 +483,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )?;
 
         let hidden = &decoder_output.last_hidden_state;
@@ -454,6 +542,7 @@ mod tests {
             let decoder_output = decoder.forward(
                 &dec_input,
                 &encoder_output.last_hidden_state,
+                None,
                 None,
                 None,
                 None,
@@ -546,6 +635,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )?;
 
             let hidden = &decoder_output.last_hidden_state;
@@ -625,6 +715,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )?;
 
         let dec_actual: Vec<f32> = decoder_output
@@ -666,6 +757,7 @@ mod tests {
         let decoder_output = decoder.forward(
             &decoder_input_ids,
             &encoder_output.last_hidden_state,
+            None,
             None,
             None,
             None,

@@ -1433,6 +1433,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             &cpu_encoder_hidden,
             Some(&decoder_mask),
             None,
+            None,
             Some(&cpu_cross_kv),
             0,
             1,
@@ -1464,6 +1465,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             &cpu_encoder_hidden,
             Some(&decoder_mask),
             None, // No cache
+            None,
             Some(&cpu_cross_kv),
             0,
             1, // Layer 0 only
@@ -1534,6 +1536,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 &cpu_encoder_hidden,
                 Some(&decoder_mask),
                 None,
+                None,
                 Some(&cpu_cross_kv),
                 0,
                 n,
@@ -1600,6 +1603,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 &decoder_hidden,
                 &cpu_encoder_hidden,
                 Some(&decoder_mask),
+                None,
                 None,
                 Some(&cpu_cross_kv),
                 0,

@@ -508,7 +508,7 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         self.meta.hidden_size
     }
 
-    fn forward2(
+    fn forward(
         &self,
         decoder_input_ids: &Array2<u32>,
         encoder_hidden_states: &Array3<f32>,
@@ -523,12 +523,7 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         // 2. Embed
         let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
 
-        // println!("=== DECODER EMBED ===");
-        // println!("Decoder input token: {:?}", decoder_input_ids);
-        // println!("Embed [0,0,:10]: {:?}", hidden.slice(s![0, 0, ..10]));
-
-        // 3. Run all layers
-        self.forward_layers2(
+        self.forward_layers(
             &hidden,
             encoder_hidden_states,
             decoder_padding_mask,
@@ -577,7 +572,7 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         Ok(hidden)
     }
 
-    fn forward_layers2(
+    fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
         encoder_hidden_states: &Array3<f32>,
@@ -648,75 +643,75 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
             new_self_attn_kv: new_self_attn_kvs,
         })
     }
-    fn forward_layers(
-        &self,
-        hidden_states: &Array3<f32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_attention_mask: Option<&Array2<f32>>, // padding mask
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-        start_layer: usize,
-        end_layer: usize,
-    ) -> Result<CpuCrossDecoderOutput> {
-        let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
-        // let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
-        let position_offset = cpu_cache.map_or(0, |c| c.get_seq_length());
-        let position_bias = self.compute_position_bias(hidden_states, position_offset)?;
+    // fn forward_layers(
+    //     &self,
+    //     hidden_states: &Array3<f32>,
+    //     encoder_hidden_states: &Array3<f32>,
+    //     decoder_attention_mask: Option<&Array2<f32>>, // padding mask
+    //     cache: Option<&mut dyn Cache>,
+    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+    //     start_layer: usize,
+    //     end_layer: usize,
+    // ) -> Result<CpuCrossDecoderOutput> {
+    //     let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
+    //     // let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
+    //     let position_offset = cpu_cache.map_or(0, |c| c.get_seq_length());
+    //     let position_bias = self.compute_position_bias(hidden_states, position_offset)?;
 
-        let mut hidden = hidden_states.clone();
-        // log::error!("embed sum: {:?}", hidden.sum());
-        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
+    //     let mut hidden = hidden_states.clone();
+    //     // log::error!("embed sum: {:?}", hidden.sum());
+    //     let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
 
-        if start_layer >= self.layers.len() || end_layer > self.layers.len() {
-            return Err(anyhow!("Layer indices out of bounds"));
-        }
+    //     if start_layer >= self.layers.len() || end_layer > self.layers.len() {
+    //         return Err(anyhow!("Layer indices out of bounds"));
+    //     }
 
-        // let seq_len = hidden_states.dim().1;
+    //     // let seq_len = hidden_states.dim().1;
 
-        // let model_mask = self.get_decoder_mask(seq_len, position_offset);
-        // let effective_mask = match (model_mask, decoder_attention_mask) {
-        //     (Some(m), Some(p)) => Some(combine_masks(&m, p)), // Helper to merge them
-        //     (Some(m), None) => Some(m),
-        //     (None, Some(p)) => Some(p.clone()),
-        //     (None, None) => None,
-        // };
-        for i in start_layer..end_layer {
-            let layer = &self.layers[i];
+    //     // let model_mask = self.get_decoder_mask(seq_len, position_offset);
+    //     // let effective_mask = match (model_mask, decoder_attention_mask) {
+    //     //     (Some(m), Some(p)) => Some(combine_masks(&m, p)), // Helper to merge them
+    //     //     (Some(m), None) => Some(m),
+    //     //     (None, Some(p)) => Some(p.clone()),
+    //     //     (None, None) => None,
+    //     // };
+    //     for i in start_layer..end_layer {
+    //         let layer = &self.layers[i];
 
-            let past_kv = cpu_cache.and_then(|c| c.get(i));
-            let past_kv_views = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
+    //         let past_kv = cpu_cache.and_then(|c| c.get(i));
+    //         let past_kv_views = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
 
-            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
+    //         let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
 
-            let (new_hidden, new_kv) = layer.forward(
-                &hidden,
-                encoder_hidden_states,
-                //effective_mask,
-                decoder_attention_mask,
-                None, // cross_mask
-                past_kv_views,
-                cross_kv_for_layer,
-                position_bias.as_ref(),
-            )?;
+    //         let (new_hidden, new_kv) = layer.forward(
+    //             &hidden,
+    //             encoder_hidden_states,
+    //             //effective_mask,
+    //             decoder_attention_mask,
+    //             None, // cross_mask
+    //             past_kv_views,
+    //             cross_kv_for_layer,
+    //             position_bias.as_ref(),
+    //         )?;
 
-            hidden = new_hidden;
-            new_self_attn_kvs.push(new_kv);
+    //         hidden = new_hidden;
+    //         new_self_attn_kvs.push(new_kv);
 
-            // log::debug!("layer {} output sum: {:?}", i, hidden.sum());
-        }
+    //         // log::debug!("layer {} output sum: {:?}", i, hidden.sum());
+    //     }
 
-        // Apply final norm if this includes the last layer
-        if end_layer == self.layers.len() {
-            if let Some(norm) = &self.final_norm {
-                hidden = norm.forward(&hidden);
-            }
-        }
+    //     // Apply final norm if this includes the last layer
+    //     if end_layer == self.layers.len() {
+    //         if let Some(norm) = &self.final_norm {
+    //             hidden = norm.forward(&hidden);
+    //         }
+    //     }
 
-        Ok(CpuCrossDecoderOutput {
-            last_hidden_state: hidden,
-            new_self_attn_kv: new_self_attn_kvs,
-        })
-    }
+    //     Ok(CpuCrossDecoderOutput {
+    //         last_hidden_state: hidden,
+    //         new_self_attn_kv: new_self_attn_kvs,
+    //     })
+    // }
 }
 fn combine_masks(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
     // Standard element-wise multiplication works for 1.0/0.0 masks
@@ -1067,13 +1062,14 @@ mod seq2seq_decoder_tests {
         let cross_cache = decoder.precompute_cross_attention_kv(&enc_hidden)?;
 
         // Run Forward
-        let output = decoder.forward2(
+        let output = decoder.forward(
             &dec_ids,
             &enc_hidden,
             None, // decoder_padding_mask (None = all ones)
             None, // encoder_padding_mask (None = all ones)
             Some(&mut cache),
             Some(&cross_cache),
+            0
         )?;
 
         // Check Output
@@ -1130,13 +1126,14 @@ mod seq2seq_decoder_tests {
         let mut cache = CpuBeamKVCache::new(1, 1, 10, 4);
         let cross_cache = decoder.precompute_cross_attention_kv(&enc_hidden)?;
 
-        let output = decoder.forward2(
+        let output = decoder.forward(
             &dec_ids,
             &enc_hidden,
             None,
             None,
             Some(&mut cache),
             Some(&cross_cache),
+            0
         )?;
 
         // Golden Data (Generated by Python script for Whisper scenario)
@@ -1199,13 +1196,14 @@ mod seq2seq_decoder_tests {
         let cross_cache = decoder.precompute_cross_attention_kv(&enc_hidden)?;
 
         // Run Forward
-        let output = decoder.forward2(
+        let output = decoder.forward(
             &dec_ids,
             &enc_hidden,
             None,
             None,
             Some(&mut cache),
             Some(&cross_cache),
+            0
         )?;
 
         // Golden Data (Generated by Python script for T5 scenario)

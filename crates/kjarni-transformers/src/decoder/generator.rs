@@ -1,75 +1,11 @@
 //! Autoregressive text generation orchestrator for decoder-only models.
-//!
-//! This module provides the high-level generation API that bridges user requests
-//! with the low-level CPU/GPU backends. It handles the complete generation pipeline:
-//!
-//! 1. **Tokenization** - Converting text to token IDs
-//! 2. **Prefill** - Processing the prompt through the model
-//! 3. **Decode Loop** - Autoregressive token generation with sampling
-//! 4. **Detokenization** - Converting generated tokens back to text
-//!
-//! # Architecture
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────────────┐
-//! │                       DecoderGenerator                              │
-//! ├─────────────────────────────────────────────────────────────────────┤
-//! │                                                                     │
-//! │  User API                    Internal Pipeline                      │
-//! │  ────────                    ─────────────────                      │
-//! │                                                                     │
-//! │  generate(prompt) ──────►  encode() ──► prefill() ──► decode_loop() │
-//! │                                              │              │       │
-//! │  chat(conversation) ───►  format() ──►      ▼              ▼       │
-//! │                                         ┌────────┐    ┌────────┐   │
-//! │  generate_stream() ────►               │ Cache  │◄──►│ Sample │   │
-//! │                                         └────────┘    └────────┘   │
-//! │                                              │              │       │
-//! │                                              ▼              ▼       │
-//! │                                         ┌────────────────────┐     │
-//! │                                         │  Backend (CPU/GPU) │     │
-//! │                                         └────────────────────┘     │
-//! └─────────────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! # Backend Selection
-//!
-//! The generator automatically selects the appropriate backend based on the
-//! model's device configuration:
-//!
-//! | Model Device | Backend | Characteristics |
-//! |--------------|---------|-----------------|
-//! | `Device::Cpu` | `CpuDecoderBackend` | Uses ndarray, AVX2 SIMD |
-//! | `Device::Wgpu` | `GpuDecoderBackend` | Uses WebGPU/Vulkan compute |
-//!
-//! # Generation Modes
-//!
-//! ## Blocking Generation
-//! ```ignore
-//! let output = generator.generate("Once upon a time", &config).await?;
-//! ```
-//!
-//! ## Streaming Generation
-//! ```ignore
-//! let stream = generator.generate_stream("Once upon a time", &config).await?;
-//! while let Some(token) = stream.next().await {
-//!     print!("{}", token?.text);
-//! }
-//! ```
-//!
-//! ## Chat Generation
-//! ```ignore
-//! let mut conv = Conversation::new();
-//! conv.push_user("What is Rust?");
-//! let response = generator.chat(&conv, &config).await?;
-//! ```
-//!
-//! # Performance Characteristics
-//!
-//! - **Prefill**: O(n²) attention over prompt tokens, highly parallelizable
-//! - **Decode**: O(n) per token with KV cache, sequential
-//! - **Memory**: KV cache grows linearly with sequence length
-//! - **Bottleneck**: Typically memory bandwidth during decode phase
+
+use std::sync::Arc;
+
+use anyhow::{Result, anyhow};
+use futures::stream::{Stream, TryStreamExt};
+use log::{debug, trace};
+use ndarray::Array2;
 
 use crate::common::{
     CancellationToken, GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram,
@@ -80,106 +16,31 @@ use crate::decoder::prelude::*;
 use crate::models::base::AutoregressiveLoop;
 use crate::stats::GenerationStats;
 use crate::{Conversation, prelude::*};
-use anyhow::{Result, anyhow};
-// use futures_core::stream::Stream;
-use futures::stream::{Stream, TryStreamExt};
-//use futures::stream::TryStreamExt
-//use futures::Stream::TryStreamExt;
-use log::{debug, info, trace};
-use ndarray::Array2;
-use std::sync::Arc;
 
-/// Orchestrates autoregressive text generation for decoder-only models.
-///
-/// This is the primary entry point for text generation. It wraps a
-/// `DecoderLanguageModel` and provides high-level methods for generating
-/// text from prompts or conversations.
-///
-/// # Thread Safety
-///
-/// The generator is `!Send` due to GPU backend constraints. All generation
-/// must occur on the thread that created the generator.
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni_transformers::decoder::prelude::DecoderGenerator;
-/// use kjarni_transformers::common::GenerationConfig;
-///
-/// # async fn example(model: Box<dyn kjarni_transformers::decoder::prelude::DecoderLanguageModel>) -> anyhow::Result<()> {
-/// let generator = DecoderGenerator::new(model)?;
-///
-/// let config = GenerationConfig {
-///     max_new_tokens: Some(100),
-///     temperature: Some(0.7),
-///     ..Default::default()
-/// };
-///
-/// let output = generator.generate("The future of AI is", &config, None).await?;
-/// println!("{}", output);
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Resource Management
-///
-/// The generator owns the model and backend. KV caches are allocated per-generation
-/// and automatically freed when the generation completes or the stream is dropped.
 pub struct DecoderGenerator {
-    /// The underlying language model (Llama, GPT-2, Phi, etc.)
     pub model: Arc<dyn DecoderLanguageModel + Send + Sync>,
-
-    /// Device-specific execution backend
     backend: AnyDecoderBackend,
-
-    /// Optional draft model for speculative decoding.
-    /// Loaded via `load_draft_model()`, used when `config.speculation` is Some.
     draft: Option<DraftModelContext>,
 }
 
 impl DecoderGenerator {
-    /// Creates a new generator with automatic backend selection.
-    ///
-    /// The backend is chosen based on the model's device:
-    /// - `Device::Cpu` → `CpuDecoderBackend`
-    /// - `Device::Wgpu` → `GpuDecoderBackend`
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - A boxed decoder language model
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - GPU model lacks a `WgpuContext`
-    /// - Backend initialization fails
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// # use kjarni_transformers::decoder::prelude::*;
-    /// # fn example(model: Box<dyn DecoderLanguageModel>) -> anyhow::Result<()> {
-    /// let generator = DecoderGenerator::new(model)?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn new(model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<Self> {
         let backend = match model.device() {
             Device::Cpu => {
-                debug!("Initializing CPU decoder backend");
+                debug!("initializing cpu decoder backend");
                 AnyDecoderBackend::Cpu(CpuDecoderBackend)
             }
             Device::Wgpu => {
-                debug!("Initializing GPU decoder backend");
+                debug!("initializing gpu decoder backend");
                 let context = model
                     .context()
-                    .ok_or_else(|| anyhow!("GPU model requires WgpuContext, but none found."))?;
+                    .ok_or_else(|| anyhow!("gpu model requires WgpuContext"))?;
                 AnyDecoderBackend::Gpu(Arc::new(GpuDecoderBackend::new(context)?))
             }
         };
 
-        info!(
-            "DecoderGenerator initialized: device={:?}, vocab_size={}, context_size={}",
+        log::info!(
+            "decoder generator initialized: device={:?}, vocab_size={}, context_size={}",
             model.device(),
             model.vocab_size(),
             model.context_size()
@@ -192,94 +53,36 @@ impl DecoderGenerator {
         })
     }
 
-    // =========================================================================
-    // Speculative Decoding Setup
-    // =========================================================================
-
-    /// Loads a draft model for speculative decoding.
-    ///
-    /// Call this once before using `speculation: Some(...)` in GenerationConfig.
-    /// The draft model should be smaller and faster than the target (e.g., 1B for 8B target).
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the draft model
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// generator.load_draft_model(Path::new("/models/llama-3.2-1b"))?;
-    ///
-    /// let config = GenerationConfig {
-    ///     speculation: Some(SpeculationParams::default()),
-    ///     ..Default::default()
-    /// };
-    /// let output = generator.generate("Hello", &config, None).await?;
-    /// ```
-    pub fn load_draft_model(&mut self, model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<()> {
+    pub fn load_draft_model(
+        &mut self,
+        model: Arc<dyn DecoderLanguageModel + Send + Sync>,
+    ) -> Result<()> {
         let draft_ctx = DraftModelContext::load(model)?;
 
-        // Validate compatibility
         if draft_ctx.model.vocab_size() != self.model.vocab_size() {
             log::warn!(
-                "Vocab size mismatch: target={}, draft={}. Generation may fail.",
+                "vocab size mismatch: target={}, draft={}",
                 self.model.vocab_size(),
                 draft_ctx.model.vocab_size()
             );
         }
 
         self.draft = Some(draft_ctx);
-        log::info!("Draft model ready for speculative decoding");
+        log::info!("draft model ready for speculative decoding");
         Ok(())
     }
 
-    /// Unloads the draft model, freeing memory.
     pub fn unload_draft_model(&mut self) {
         if self.draft.is_some() {
             self.draft = None;
-            log::info!("Draft model unloaded");
+            log::info!("draft model unloaded");
         }
     }
 
-    /// Returns true if a draft model is loaded.
     pub fn has_draft_model(&self) -> bool {
         self.draft.is_some()
     }
 
-    // =========================================================================
-    // High-Level Generation API
-    // =========================================================================
-
-    /// Generates a complete text response from a prompt.
-    ///
-    /// This is a convenience method that collects all tokens from the internal
-    /// stream and joins them into a single string. Use `generate_stream` for
-    /// real-time token access.
-    ///
-    /// # Arguments
-    ///
-    /// * `prompt` - Input text to continue
-    /// * `config` - Generation parameters (temperature, top_p, max_tokens, etc.)
-    /// * `cancellation` - Token to check for cancellation
-    ///
-    /// # Returns
-    ///
-    /// The generated text (excluding the prompt).
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn example(generator: kjarni_transformers::decoder::prelude::DecoderGenerator) -> anyhow::Result<()> {
-    /// use kjarni_transformers::common::GenerationConfig;
-    /// use kjarni_transformers::common::CancellationToken;
-    ///
-    /// let (token, handle) = CancellationToken::new();
-    /// let config = GenerationConfig::default();
-    /// let output = generator.generate("Rust is", &config, Some(token)).await?;
-    /// // output: " a systems programming language..."
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn generate(
         &self,
         prompt: &str,
@@ -288,7 +91,6 @@ impl DecoderGenerator {
     ) -> Result<String> {
         let stream = self.generate_stream(prompt, config, cancellation).await?;
         let results: Vec<StreamedToken> = stream.try_collect().await?;
-        // Filter to only generated tokens (exclude prompt echo)
         let text: String = results
             .iter()
             .filter(|t| t.token_type == TokenType::Generated)
@@ -297,37 +99,6 @@ impl DecoderGenerator {
         Ok(text)
     }
 
-    /// Generates a response for a multi-turn conversation.
-    ///
-    /// Applies the model's chat template (if available) to format the
-    /// conversation before generation.
-    ///
-    /// # Arguments
-    ///
-    /// * `conversation` - The conversation history
-    /// * `config` - Generation parameters
-    /// * `cancellation` - Token to check for cancellation
-    ///
-    /// # Returns
-    ///
-    /// The assistant's response text.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn example(generator: kjarni_transformers::decoder::prelude::DecoderGenerator) -> anyhow::Result<()> {
-    /// use kjarni_transformers::Conversation;
-    /// use kjarni_transformers::common::GenerationConfig;
-    /// use kjarni_transformers::common::CancellationToken;
-    ///
-    /// let mut conv = Conversation::new();
-    /// conv.push_user("What is the capital of France?");
-    /// let (token, handle) = CancellationToken::new();
-    /// let response = generator.chat(&conv, &GenerationConfig::default(), Some(token)).await?;
-    /// // response: "The capital of France is Paris."
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn chat(
         &self,
         conversation: &Conversation,
@@ -335,45 +106,10 @@ impl DecoderGenerator {
         cancellation: Option<CancellationToken>,
     ) -> Result<String> {
         let prompt = self.format_conversation(conversation)?;
-        trace!("Formatted chat prompt: {} chars", prompt.len());
+        trace!("formatted chat prompt: {} chars", prompt.len());
         self.generate(&prompt, config, cancellation).await
     }
 
-    /// Generates a stream of tokens from a text prompt.
-    ///
-    /// Returns immediately with a stream that yields tokens as they are generated.
-    /// The stream first yields prompt tokens (echoed back), then generated tokens.
-    ///
-    /// # Arguments
-    ///
-    /// * `prompt` - Input text to continue
-    /// * `config` - Generation parameters
-    /// * `cancellation` - Token to check for cancellation
-    ///
-    /// # Returns
-    ///
-    /// A stream of `StreamedToken` results.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// # async fn example(generator: kjarni_transformers::decoder::prelude::DecoderGenerator) -> anyhow::Result<()> {
-    /// use futures::StreamExt;
-    /// use kjarni_transformers::common::GenerationConfig;
-    /// use kjarni_transformers::common::CancellationToken;
-    ///
-    /// let (token, handle) = CancellationToken::new();
-    /// let stream = generator.generate_stream("Once upon a time", &GenerationConfig::default(), Some(token)).await?;
-    /// futures::Stream::pin_mut!(stream);
-    ///
-    /// while let Some(token_result) = stream.next().await {
-    ///     let token = token_result?;
-    ///     print!("{}", token.text);
-    ///     std::io::Write::flush(&mut std::io::stdout())?;
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn generate_stream(
         &self,
         prompt: &str,
@@ -385,9 +121,6 @@ impl DecoderGenerator {
             .await
     }
 
-    /// Generates a stream of tokens for a conversation.
-    ///
-    /// Combines `format_conversation` and `generate_stream`.
     pub async fn chat_stream(
         &self,
         conversation: &Conversation,
@@ -400,83 +133,46 @@ impl DecoderGenerator {
             .await
     }
 
-    // =========================================================================
-    // Tokenization & Formatting
-    // =========================================================================
-
-    /// Encodes a text prompt into token IDs.
-    ///
-    /// Optionally prepends the BOS token if `config.add_bos_token` is true
-    /// and the model has a BOS token configured.
-    ///
-    /// # Arguments
-    ///
-    /// * `prompt` - Text to encode
-    /// * `config` - Generation config (for BOS token handling)
-    ///
-    /// # Returns
-    ///
-    /// Vector of token IDs.
     pub fn encode(&self, prompt: &str, config: &GenerationConfig) -> Result<Vec<u32>> {
         let tokenizer = self.model.tokenizer();
         let mut tokens = tokenizer
             .encode(prompt, false)
-            .map_err(|e| anyhow!("Tokenization failed: {}", e))?
+            .map_err(|e| anyhow!("tokenization failed: {}", e))?
             .get_ids()
             .to_vec();
 
-        // Prepend BOS token if configured
         if config.add_bos_token {
             if let Some(bos) = self.model.bos_token_id() {
                 if tokens.first() != Some(&bos) {
                     tokens.insert(0, bos);
-                    trace!("Prepended BOS token: {}", bos);
+                    trace!("prepended bos token: {}", bos);
                 }
             }
         }
 
         debug!(
-            "Encoded prompt: {} chars → {} tokens",
+            "encoded prompt: {} chars -> {} tokens",
             prompt.len(),
             tokens.len()
         );
         Ok(tokens)
     }
 
-    /// Formats a conversation using the model's chat template.
-    ///
-    /// If the model has no chat template, falls back to using the last
-    /// user message as the prompt.
-    ///
-    /// # Arguments
-    ///
-    /// * `conversation` - The conversation to format
-    ///
-    /// # Returns
-    ///
-    /// Formatted prompt string ready for tokenization.
     pub fn format_conversation(&self, conversation: &Conversation) -> Result<String> {
         if let Some(template) = self.model.chat_template() {
             Ok(template.apply(conversation))
         } else {
-            // Fallback for base models: use last user message
             conversation
                 .last()
                 .map(|m| m.content.clone())
-                .ok_or_else(|| anyhow!("Conversation is empty and model has no chat template"))
+                .ok_or_else(|| anyhow!("conversation is empty and model has no chat template"))
         }
     }
 
-    /// Returns whether this model requires a chat template for proper use.
-    ///
-    /// Instruct/chat-tuned models typically require specific formatting.
     pub fn requires_template(&self) -> bool {
         self.model.is_instruct_model()
     }
 
-    /// Returns the stop sequences from the model's chat template.
-    ///
-    /// These are strings that signal the end of generation (e.g., `<|eot_id|>`).
     pub fn stop_sequences(&self) -> Vec<String> {
         self.model
             .chat_template()
@@ -484,62 +180,19 @@ impl DecoderGenerator {
             .unwrap_or_default()
     }
 
-    // =========================================================================
-    // Core Generation Loop
-    // =========================================================================
-
-    /// Core generation implementation that operates on pre-tokenized input.
-    ///
-    /// This is the main generation loop that:
-    /// 1. Allocates a KV cache sized for the generation
-    /// 2. Runs prefill to process the prompt
-    /// 3. Iteratively samples and decodes new tokens
-    /// 4. Yields tokens via an async stream
-    ///
-    /// # Arguments
-    ///
-    /// * `input_tokens` - Pre-tokenized prompt
-    /// * `config` - Generation parameters
-    ///
-    /// # Returns
-    ///
-    /// Async stream yielding `StreamedToken` for each token (prompt + generated).
-    ///
-    /// # Generation Loop Details
-    ///
-    /// ```text
-    /// prefill(prompt) → logits
-    ///        ↓
-    /// ┌──────────────────────────────────────┐
-    /// │  while not done:                     │
-    /// │    1. Apply repetition penalty       │
-    /// │    2. Apply n-gram blocking          │
-    /// │    3. Sample next token              │
-    /// │    4. Check stop conditions          │
-    /// │    5. Yield token to stream          │
-    /// │    6. decode_one(token) → logits     │
-    /// └──────────────────────────────────────┘
-    /// ```
-    /// Generates a stream of tokens using a dedicated blocking thread.
     pub async fn generate_stream_from_tokens(
         &self,
         input_tokens: Vec<u32>,
         config: &GenerationConfig,
         cancellation: Option<CancellationToken>,
     ) -> Result<impl Stream<Item = Result<StreamedToken>>> {
-        // 1. Prepare data for transfer to the compute thread
         let model = self.model.clone();
         let backend = self.backend.clone();
         let config = config.clone();
 
-        // 2. Create a channel to bridge Compute Thread -> Async World
-        // Buffer size 32 is plenty for text generation
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-        // 3. Spawn the compute task on a dedicated OS thread
         tokio::task::spawn_blocking(move || {
-            // We need a minimal runtime to execute the backend's async methods
-            // synchronously within this blocking thread.
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
@@ -547,12 +200,11 @@ impl DecoderGenerator {
             let local_rt = match rt {
                 Ok(r) => r,
                 Err(e) => {
-                    let _ = tx.blocking_send(Err(anyhow!("Failed to create local runtime: {}", e)));
+                    let _ = tx.blocking_send(Err(anyhow!("failed to create local runtime: {}", e)));
                     return;
                 }
             };
 
-            // Run the generation logic
             local_rt.block_on(async {
                 if let Err(e) = run_generation_loop(
                     model,
@@ -564,258 +216,15 @@ impl DecoderGenerator {
                 )
                 .await
                 {
-                    // Send fatal errors to the stream
                     let _ = tx.send(Err(e)).await;
                 }
             });
         });
 
-        // 4. Return the stream wrapper immediately
         Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
-    // pub async fn generate_stream_from_tokens(
-    //     &self,
-    //     input_tokens: Vec<u32>,
-    //     config: &GenerationConfig,
-    //     cancellation: Option<CancellationToken>,
-    // ) -> Result<impl Stream<Item=Result<StreamedToken>>> {
-
-    //     // Prepare data for transfer to the compute thread
-    //     let model = self.model.clone();
-    //     let backend = self.backend.clone();
-    //     let config = config.clone();
-
-    //     // =====================================================================
-    //     // Setup Phase
-    //     // =====================================================================
-    //     log::info!("Generating stream from token");
-    //     let prompt_tokens = input_tokens.clone();
-    //     let prompt_len = prompt_tokens.len();
-    //     let mut tokens = input_tokens;
-
-    //     // Determine generation limits
-    //     let max_len = config.max_new_tokens
-    //         .map(|n| prompt_len + n)
-    //         .unwrap_or(config.max_length);
-
-    //     // Legacy autoregressive loops (GPT-2 style) need +1 cache capacity
-    //     // because they compute logits for position N from cache position N-1
-    //     let cache_capacity = match self.model.autoregressive_loop() {
-    //         AutoregressiveLoop::Legacy => max_len + 1,
-    //         AutoregressiveLoop::Pipelined => max_len,
-    //     };
-
-    //     debug!(
-    //         "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}",
-    //         prompt_len, max_len, cache_capacity, self.model.autoregressive_loop()
-    //     );
-
-    //     // Allocate KV cache
-    //     let mut cache: Box<dyn Cache> = self.model.new_cache(1, cache_capacity, 0)?;
-
-    //     // Pre-allocate token tensor for decode loop (avoids allocation per step)
-    //     let mut token_tensor = self.backend.new_token_tensor()?;
-    //     // =====================================================================
-    //     // Prefill Phase
-    //     // =====================================================================
-
-    //     let mut stats = GenerationStats::new();
-    //     stats.start_prefill(prompt_len);
-
-    //     debug!("Starting prefill: {} tokens", prompt_len);
-    //     let prefill_start = Instant::now();
-    //     let mut next_token_logits = self
-    //         .backend
-    //         .prefill(self.model.as_ref(), &tokens, cache.as_mut())
-    //         .await?;
-
-    //     stats.end_prefill();
-    //     info!(
-    //         "Prefill complete: {} tokens in {:.2}ms ({:.2} t/s)",
-    //         prompt_len,
-    //         prefill_start.elapsed().as_secs_f64() * 1000.0,
-    //         stats.prefill_tps()
-    //     );
-
-    //     // =====================================================================
-    //     // Decode Phase (Async Stream)
-    //     // =====================================================================
-
-    //     let context_limit = self.model.context_size();
-    //     let stop_tokens = self.model.stop_token_ids();
-    //     let tokenizer = self.model.tokenizer();
-    //     let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
-
-    //     Ok(try_stream! {
-    //         // Yield prompt tokens
-    //         for &token_id in &prompt_tokens {
-    //             // Check cancellation during prompt echo
-    //             if let Some(token) = &cancellation {
-    //                 if token.is_cancelled() {
-    //                     info!("Generation cancelled during prompt echo");
-    //                     return;
-    //                 }
-    //             }
-    //             // Skip BOS token in output
-    //             if Some(token_id) == self.model.bos_token_id() {
-    //                 continue;
-    //             }
-    //             let text = tokenizer
-    //                 .decode(&[token_id], false)
-    //                 .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
-    //             yield StreamedToken {
-    //                 text,
-    //                 id: token_id,
-    //                 token_type: TokenType::Prompt,
-    //             };
-    //         }
-
-    //         // Generation loop with cancellation checks
-    //         for step in 0..max_new_tokens {
-    //             if let Some(token) = &cancellation {
-    //                 if token.is_cancelled() {
-    //                     info!("Generation cancelled at step {}", step);
-    //                     return;
-    //                 }
-    //             }
-    //             // Check context window limit
-    //             if tokens.len() >= context_limit {
-    //                 warn!(
-    //                     "Context limit reached ({}/{}), stopping generation",
-    //                     tokens.len(), context_limit
-    //                 );
-    //                 break;
-    //             }
-
-    //             // Check max length limit
-    //             if tokens.len() >= max_len {
-    //                 debug!("Reached max_len={}, stopping generation", max_len);
-    //                 break;
-    //             }
-
-    //             //sampling
-    //             let sampling_start = Instant::now();
-    //             let mut logits = next_token_logits.clone();
-
-    //             // Apply repetition penalty
-    //             if config.repetition_penalty != 1.0 {
-    //                 apply_repetition_penalty_mut(
-    //                     &mut logits,
-    //                     &tokens,
-    //                     config.repetition_penalty
-    //                 );
-    //             }
-
-    //             // Apply n-gram blocking
-    //             if config.no_repeat_ngram_size > 0 {
-    //                 apply_no_repeat_ngram(
-    //                     &mut logits,
-    //                     &tokens,
-    //                     config.no_repeat_ngram_size
-    //                 );
-    //             }
-
-    //             // Sample next token (applies temperature, top-k, top-p, min-p)
-    //             let next_token = sample_token(logits, &config.strategy)?;
-
-    //             trace!(
-    //                 "Step {}: sampled token {} in {:.2}ms",
-    //                 step, next_token, sampling_start.elapsed().as_secs_f64() * 1000.0
-    //             );
-
-    //             tokens.push(next_token);
-
-    //             // check stop tokens
-    //             if stop_tokens.contains(&next_token) {
-    //                 debug!("Stop token {} generated at step {}", next_token, step);
-    //                 break;
-    //             }
-
-    //             // yield token
-    //             let text = tokenizer
-    //                 .decode(&[next_token], false)
-    //                 .map_err(|e| anyhow!("Detokenization failed: {}", e))?;
-
-    //             yield StreamedToken {
-    //                 text,
-    //                 id: next_token,
-    //                 token_type: TokenType::Generated,
-    //             };
-
-    //             stats.record_token();
-
-    //             if tokens.len() >= max_len {
-    //                 break;
-    //             }
-
-    //             // check cancel before decode
-    //             if let Some(cancellation) = &cancellation {
-    //                 if cancellation.is_cancelled() {
-    //                     info!("Generation cancelled at step {}", step);
-    //                     break;
-    //                 }
-    //             }
-
-    //             // decode in backend
-    //             self.backend.update_token_tensor(&mut token_tensor, next_token)?;
-    //             next_token_logits = self.backend.decode_one(
-    //                 self.model.as_ref(),
-    //                 &token_tensor,
-    //                 tokens.len(),
-    //                 cache.as_mut(),
-    //             ).await?;
-
-    //             // Periodic TPS logging
-    //             if GenerationStats::is_enabled() && step > 0 && step % 20 == 0 {
-    //                 debug!("Step {}: {:.2} tok/s", step, stats.decode_tps());
-    //             }
-    //         }
-
-    //         // generation complete
-    //         stats.print_summary();
-    //     })
-    // }
 }
 
-/// Runs the autoregressive generation loop.
-///
-/// This function orchestrates the full generation process:
-/// 1. Setup: Allocate cache, prepare decode token
-/// 2. Prefill: Process prompt, populate KV cache
-/// 3. Emit prompt tokens to stream
-/// 4. Decode loop: Generate tokens one at a time
-///
-/// # Arguments
-///
-/// * `model` - The decoder language model
-/// * `backend` - CPU or GPU backend for forward passes
-/// * `input_tokens` - Tokenized prompt
-/// * `config` - Generation parameters (max tokens, sampling, etc.)
-/// * `tx` - Channel to send generated tokens
-/// * `cancellation` - Optional cancellation token for early stopping
-///
-/// # Token Flow
-///
-/// ```text
-/// input_tokens (Vec<u32>)
-///        │
-///        ▼
-/// Array2<u32> ─────► prefill() ─────► first logits
-///        │                                  │
-///        │                                  ▼
-///        │                            sample_token()
-///        │                                  │
-///        ▼                                  ▼
-/// emit prompt tokens              ┌─────────────────┐
-///        │                        │  Decode Loop    │
-///        │                        │  ┌───────────┐  │
-///        └────────────────────────┤  │ update    │  │
-///                                 │  │ decode    │  │
-///                                 │  │ sample    │  │
-///                                 │  │ emit      │  │
-///                                 │  └───────────┘  │
-///                                 └─────────────────┘
-/// ```
 pub async fn run_generation_loop(
     model: Arc<dyn DecoderLanguageModel + Send + Sync>,
     backend: AnyDecoderBackend,
@@ -827,10 +236,9 @@ pub async fn run_generation_loop(
     let prompt_len = input_tokens.len();
 
     if prompt_len == 0 {
-        return Err(anyhow!("Cannot generate from empty prompt"));
+        return Err(anyhow!("cannot generate from empty prompt"));
     }
 
-    // --- Limits & Setup ---
     let context_limit = model.context_size();
     let max_len = config
         .max_new_tokens
@@ -843,7 +251,7 @@ pub async fn run_generation_loop(
     };
 
     debug!(
-        "Generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}, backend={}",
+        "generation setup: prompt_len={}, max_len={}, cache_capacity={}, loop={:?}, backend={}",
         prompt_len,
         max_len,
         cache_capacity,
@@ -851,22 +259,15 @@ pub async fn run_generation_loop(
         backend.backend_type()
     );
 
-    // Allocate KV cache
     let mut cache = model.new_cache(1, cache_capacity, 1)?;
-
-    // Allocate reusable decode token for the hot loop
     let mut decode_token = backend.new_decode_token()?;
-
-    // Track all tokens for repetition penalty
     let mut all_tokens = input_tokens.clone();
 
-    // --- Prefill ---
     let mut stats = GenerationStats::new();
     stats.start_prefill(prompt_len);
 
-    // Create Array2 view of input tokens for prefill
     let tokens_array = Array2::from_shape_vec((1, prompt_len), input_tokens.clone())
-        .map_err(|e| anyhow!("Failed to create token array: {}", e))?;
+        .map_err(|e| anyhow!("failed to create token array: {}", e))?;
 
     let mut next_token_logits = backend
         .prefill(model.as_ref(), &tokens_array, cache.as_mut())
@@ -874,28 +275,24 @@ pub async fn run_generation_loop(
 
     stats.end_prefill();
 
-    // --- Emit Prompt Tokens ---
     let tokenizer = model.tokenizer();
 
     for &token_id in &input_tokens {
-        // Check cancellation
         if let Some(ref c) = cancellation {
             if c.is_cancelled() {
-                debug!("Generation cancelled during prompt emission");
+                debug!("generation cancelled during prompt emission");
                 return Ok(());
             }
         }
 
-        // Skip BOS token in output
         if Some(token_id) == model.bos_token_id() {
             continue;
         }
 
         let text = tokenizer
             .decode(&[token_id], false)
-            .map_err(|e| anyhow!("Tokenizer decode error: {}", e))?;
+            .map_err(|e| anyhow!("tokenizer decode error: {}", e))?;
 
-        // Send to channel
         if tx
             .send(Ok(StreamedToken {
                 text,
@@ -905,60 +302,55 @@ pub async fn run_generation_loop(
             .await
             .is_err()
         {
-            debug!("Receiver dropped, stopping generation");
+            debug!("receiver dropped, stopping generation");
             return Ok(());
         }
     }
 
-    // --- Decode Loop ---
     let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
     let stop_tokens = model.stop_token_ids();
-    let mut seq_len = prompt_len + 1; // Current sequence length for decode_one
+    let mut seq_len = prompt_len + 1;
 
     for step in 0..max_new_tokens {
-        // Check cancellation
         if let Some(ref c) = cancellation {
             if c.is_cancelled() {
-                debug!("Generation cancelled at step {}", step);
+                debug!("generation cancelled at step {}", step);
                 break;
             }
         }
 
-        // Check context limit
         if all_tokens.len() >= context_limit {
-            debug!("Context limit reached ({}), stopping.", context_limit);
+            debug!("context limit reached ({})", context_limit);
             break;
         }
 
-        // Check max length
         if all_tokens.len() >= max_len {
-            debug!("Max length reached ({}), stopping.", max_len);
+            debug!("max length reached ({})", max_len);
             break;
         }
 
-        // --- Sampling ---
         let mut logits = next_token_logits.clone();
 
-        // Apply repetition penalty
         if config.repetition_penalty != 1.0 {
             apply_repetition_penalty_mut(&mut logits, &all_tokens, config.repetition_penalty);
         }
 
-        // Apply no-repeat n-gram blocking
         if config.no_repeat_ngram_size > 0 {
             apply_no_repeat_ngram(&mut logits, &all_tokens, config.no_repeat_ngram_size);
         }
 
-        // Sample next token
         let next_token = sample_token(logits, &config.strategy)?;
 
-        // Add to token history
+        if stop_tokens.contains(&next_token) {
+            debug!("stop token {} generated at step {}", next_token, step);
+            break;
+        }
+
         all_tokens.push(next_token);
 
-        // --- Emit Generated Token ---
         let text = tokenizer
             .decode(&[next_token], false)
-            .map_err(|e| anyhow!("Tokenizer decode error: {}", e))?;
+            .map_err(|e| anyhow!("tokenizer decode error: {}", e))?;
 
         if tx
             .send(Ok(StreamedToken {
@@ -969,19 +361,12 @@ pub async fn run_generation_loop(
             .await
             .is_err()
         {
-            debug!("Receiver dropped at step {}, stopping", step);
+            debug!("receiver dropped at step {}", step);
             break;
         }
 
         stats.record_token();
 
-        // Check for stop tokens
-        if stop_tokens.contains(&next_token) {
-            debug!("Stop token {} generated at step {}", next_token, step);
-            break;
-        }
-
-        // --- Compute Next Token Logits ---
         backend.update_decode_token(&mut decode_token, next_token)?;
 
         next_token_logits = backend
@@ -995,10 +380,6 @@ pub async fn run_generation_loop(
     Ok(())
 }
 
-/// Simplified generation that returns all tokens at once (non-streaming).
-///
-/// This is a convenience wrapper around `run_generation_loop` for cases
-/// where streaming is not needed.
 pub async fn generate_tokens(
     model: Arc<dyn DecoderLanguageModel + Send + Sync>,
     backend: AnyDecoderBackend,
@@ -1007,12 +388,10 @@ pub async fn generate_tokens(
 ) -> Result<Vec<u32>> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(256);
 
-    // Spawn generation task
     let handle = tokio::spawn(async move {
         run_generation_loop(model, backend, input_tokens, config, tx, None).await
     });
 
-    // Collect generated tokens
     let mut generated = Vec::new();
     while let Some(result) = rx.recv().await {
         match result {
@@ -1025,7 +404,6 @@ pub async fn generate_tokens(
         }
     }
 
-    // Wait for generation to complete
     handle.await??;
 
     Ok(generated)

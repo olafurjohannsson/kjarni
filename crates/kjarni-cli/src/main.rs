@@ -83,6 +83,8 @@ async fn main() -> Result<()> {
             num_beams,
             length_penalty,
             no_repeat_ngram,
+            greedy,
+            no_stream,
             gpu,
             quiet,
         } => {
@@ -95,6 +97,8 @@ async fn main() -> Result<()> {
                 num_beams,
                 length_penalty,
                 no_repeat_ngram,
+                greedy,
+                no_stream,
                 gpu,
                 quiet,
             )
@@ -107,6 +111,14 @@ async fn main() -> Result<()> {
             model_path,
             src,
             dst,
+            max_length,
+            num_beams,
+            length_penalty,
+            no_repeat_ngram,
+            greedy,
+            no_stream,
+            gpu,
+            quiet,
         } => {
             commands::translate::run(
                 input.as_deref(),
@@ -114,6 +126,14 @@ async fn main() -> Result<()> {
                 model_path.as_deref(),
                 src.as_deref(),
                 dst.as_deref(),
+                max_length,
+                num_beams,
+                length_penalty,
+                no_repeat_ngram,
+                greedy,
+                no_stream,
+                gpu,
+                quiet,
             )
             .await
         }
