@@ -8,7 +8,6 @@ use kjarni_transformers::{
 };
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WhisperConfig {
     pub d_model: usize,
@@ -43,19 +42,19 @@ impl ModelConfig for WhisperConfig {
     fn model_type(&self) -> &str {
         &self.model_type
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    // In WhisperConfig::metadata()
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.d_model,
             num_layers: self.encoder_layers,
             num_attention_heads: self.encoder_attention_heads,
-            num_kv_heads: self.encoder_attention_heads, // Whisper is not GQA
+            num_kv_heads: self.encoder_attention_heads,
             head_dim: self.d_model / self.encoder_attention_heads,
             vocab_size: self.vocab_size,
             max_seq_len: self.max_target_positions,
-            // Whisper usually defaults to 1e-5 implicitly if not in config
             norm_eps: 1e-5,
             activation: match self.activation_function.as_str() {
                 "gelu" => Activation::Gelu,
@@ -64,29 +63,28 @@ fn as_any(&self) -> &dyn std::any::Any {
             },
             rope_theta: None,
             rope_scaling: None,
-            // Explicitly False in Whisper
             scale_embeddings: self.scale_embedding,
-            normalize_embedding: false, // Whisper has LN in the blocks, not on embeddings immediately
+            normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: true, // Whisper is Pre-Norm
+            is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
-            normalization_strategy: NormalizationStrategy::LayerNorm, // Standard LN with Bias
+            normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
-            decoder_layers: None,
-            intermediate_size: 0,
+            decoder_layers: Some(self.decoder_layers), // <-- FIX: was None
+            intermediate_size: self.decoder_ffn_dim,   // <-- Also fix this while we're here
         }
     }
 
     fn layout(&self) -> ModelLayout {
-        // NOTE: Whisper Encoder doesn't have token embeddings. 
-        // We point this to the decoder's matrix for shared vocab operations, 
+        // NOTE: Whisper Encoder doesn't have token embeddings.
+        // We point this to the decoder's matrix for shared vocab operations,
         // but the Encoder Builder must know to ignore this for audio input.
         let shared = "model.decoder.embed_tokens.weight".to_string();
 
         ModelLayout {
             token_embedding: shared.clone(),
-            lm_head: "proj_out.weight".to_string(), // Whisper often has a specific proj_out
+            lm_head: shared.clone(),
 
             encoder: Some(EncoderLayout {
                 // Whisper Encoder uses Sinusoidal, computed on fly. No weight.
@@ -106,8 +104,11 @@ fn as_any(&self) -> &dyn std::any::Any {
                         v_bias: Some("model.encoder.layers.{}.self_attn.v_proj.bias".to_string()),
                         o_weight: "model.encoder.layers.{}.self_attn.out_proj.weight".to_string(),
                         o_bias: Some("model.encoder.layers.{}.self_attn.out_proj.bias".to_string()),
-                        norm_weight: "model.encoder.layers.{}.self_attn_layer_norm.weight".to_string(),
-                        norm_bias: Some("model.encoder.layers.{}.self_attn_layer_norm.bias".to_string()),
+                        norm_weight: "model.encoder.layers.{}.self_attn_layer_norm.weight"
+                            .to_string(),
+                        norm_bias: Some(
+                            "model.encoder.layers.{}.self_attn_layer_norm.bias".to_string(),
+                        ),
                     },
                     ffn: FeedForwardLayout {
                         up_weight: "model.encoder.layers.{}.fc1.weight".to_string(),
@@ -117,7 +118,9 @@ fn as_any(&self) -> &dyn std::any::Any {
                         gate_weight: None,
                         gate_bias: None,
                         norm_weight: "model.encoder.layers.{}.final_layer_norm.weight".to_string(),
-                        norm_bias: Some("model.encoder.layers.{}.final_layer_norm.bias".to_string()),
+                        norm_bias: Some(
+                            "model.encoder.layers.{}.final_layer_norm.bias".to_string(),
+                        ),
                     },
                 },
             }),
@@ -140,20 +143,35 @@ fn as_any(&self) -> &dyn std::any::Any {
                         v_bias: Some("model.decoder.layers.{}.self_attn.v_proj.bias".to_string()),
                         o_weight: "model.decoder.layers.{}.self_attn.out_proj.weight".to_string(),
                         o_bias: Some("model.decoder.layers.{}.self_attn.out_proj.bias".to_string()),
-                        norm_weight: "model.decoder.layers.{}.self_attn_layer_norm.weight".to_string(),
-                        norm_bias: Some("model.decoder.layers.{}.self_attn_layer_norm.bias".to_string()),
+                        norm_weight: "model.decoder.layers.{}.self_attn_layer_norm.weight"
+                            .to_string(),
+                        norm_bias: Some(
+                            "model.decoder.layers.{}.self_attn_layer_norm.bias".to_string(),
+                        ),
                     },
                     cross_attn: Some(AttentionLayout {
                         q_weight: "model.decoder.layers.{}.encoder_attn.q_proj.weight".to_string(),
-                        q_bias: Some("model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string()),
+                        q_bias: Some(
+                            "model.decoder.layers.{}.encoder_attn.q_proj.bias".to_string(),
+                        ),
                         k_weight: "model.decoder.layers.{}.encoder_attn.k_proj.weight".to_string(),
-                        k_bias: Some("model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string()),
+                        k_bias: Some(
+                            "model.decoder.layers.{}.encoder_attn.k_proj.bias".to_string(),
+                        ),
                         v_weight: "model.decoder.layers.{}.encoder_attn.v_proj.weight".to_string(),
-                        v_bias: Some("model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string()),
-                        o_weight: "model.decoder.layers.{}.encoder_attn.out_proj.weight".to_string(),
-                        o_bias: Some("model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string()),
-                        norm_weight: "model.decoder.layers.{}.encoder_attn_layer_norm.weight".to_string(),
-                        norm_bias: Some("model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string()),
+                        v_bias: Some(
+                            "model.decoder.layers.{}.encoder_attn.v_proj.bias".to_string(),
+                        ),
+                        o_weight: "model.decoder.layers.{}.encoder_attn.out_proj.weight"
+                            .to_string(),
+                        o_bias: Some(
+                            "model.decoder.layers.{}.encoder_attn.out_proj.bias".to_string(),
+                        ),
+                        norm_weight: "model.decoder.layers.{}.encoder_attn_layer_norm.weight"
+                            .to_string(),
+                        norm_bias: Some(
+                            "model.decoder.layers.{}.encoder_attn_layer_norm.bias".to_string(),
+                        ),
                     }),
                     ffn: FeedForwardLayout {
                         up_weight: "model.decoder.layers.{}.fc1.weight".to_string(),
@@ -163,14 +181,15 @@ fn as_any(&self) -> &dyn std::any::Any {
                         gate_weight: None,
                         gate_bias: None,
                         norm_weight: "model.decoder.layers.{}.final_layer_norm.weight".to_string(),
-                        norm_bias: Some("model.decoder.layers.{}.final_layer_norm.bias".to_string()),
+                        norm_bias: Some(
+                            "model.decoder.layers.{}.final_layer_norm.bias".to_string(),
+                        ),
                     },
                 },
             }),
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -205,7 +224,10 @@ mod tests {
 
         // Verify Whisper-specifics
         assert_eq!(meta.is_prenorm, true);
-        assert_eq!(meta.normalization_strategy, NormalizationStrategy::LayerNorm);
+        assert_eq!(
+            meta.normalization_strategy,
+            NormalizationStrategy::LayerNorm
+        );
         assert!(!meta.scale_embeddings);
 
         // Verify Encoder Attention Layout (Biased)

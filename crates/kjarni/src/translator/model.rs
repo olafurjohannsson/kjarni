@@ -1,13 +1,15 @@
 //! Core Translator implementation.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::{Stream, StreamExt};
+use log::{debug, info};
 
 use kjarni_transformers::models::ModelType;
 use kjarni_transformers::traits::Device;
 
-use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides, Seq2SeqTask};
+use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides};
 
 use super::builder::TranslatorBuilder;
 use super::languages::normalize_language;
@@ -71,36 +73,37 @@ impl Translator {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: TranslatorBuilder) -> TranslatorResult<Self> {
+        let build_start = Instant::now();
+
         // Resolve and validate model type
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| TranslatorError::UnknownModel(builder.model.clone()))?;
+
+        debug!("Resolved translator model '{}' -> {:?}", builder.model, model_type);
 
         validate_for_translation(model_type)?;
 
         // Normalize default languages if provided
         let default_from = if let Some(ref lang) = builder.default_from {
-            Some(
-                normalize_language(lang)
-                    .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?
-                    .to_string(),
-            )
+            let normalized = normalize_language(lang)
+                .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?;
+            debug!("Default source language: '{}' -> '{}'", lang, normalized);
+            Some(normalized.to_string())
         } else {
             None
         };
 
         let default_to = if let Some(ref lang) = builder.default_to {
-            Some(
-                normalize_language(lang)
-                    .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?
-                    .to_string(),
-            )
+            let normalized = normalize_language(lang)
+                .ok_or_else(|| TranslatorError::UnknownLanguage(lang.clone()))?;
+            debug!("Default target language: '{}' -> '{}'", lang, normalized);
+            Some(normalized.to_string())
         } else {
             None
         };
 
         // Build the underlying seq2seq generator
         let mut gen_builder = Seq2SeqGeneratorBuilder::new(&builder.model)
-            .for_translation()
             .device(builder.device)
             .download_policy(builder.download_policy)
             .with_overrides(builder.overrides);
@@ -118,6 +121,14 @@ impl Translator {
         }
 
         let generator = gen_builder.build().await?;
+
+        let build_elapsed = build_start.elapsed();
+        info!(
+            "Translator ready: model='{}', device={:?}, built in {:.2}s",
+            builder.model,
+            generator.device(),
+            build_elapsed.as_secs_f32()
+        );
 
         Ok(Self {
             generator,
@@ -145,6 +156,8 @@ impl Translator {
     /// let french = translator.translate("Hello", "english", "french").await?;
     /// ```
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
+        let translate_start = Instant::now();
+
         let from_normalized = normalize_language(from)
             .ok_or_else(|| TranslatorError::UnknownLanguage(from.to_string()))?;
         let to_normalized = normalize_language(to)
@@ -152,10 +165,34 @@ impl Translator {
 
         let prompt = self.format_prompt(text, from_normalized, to_normalized);
 
-        self.generator
+        debug!(
+            "Translation prompt: '{}' ({} chars)",
+            &prompt[..prompt.len().min(80)],
+            prompt.len()
+        );
+
+        info!(
+            "Translating {} -> {}: {} chars",
+            from_normalized,
+            to_normalized,
+            text.len()
+        );
+
+        let result = self
+            .generator
             .generate(&prompt)
             .await
-            .map_err(TranslatorError::from)
+            .map_err(TranslatorError::from)?;
+
+        let elapsed = translate_start.elapsed();
+        info!(
+            "Translation complete: {} -> {} chars in {:.2}s",
+            text.len(),
+            result.len(),
+            elapsed.as_secs_f32()
+        );
+
+        Ok(result)
     }
 
     /// Translate with custom generation overrides.
@@ -172,6 +209,11 @@ impl Translator {
             .ok_or_else(|| TranslatorError::UnknownLanguage(to.to_string()))?;
 
         let prompt = self.format_prompt(text, from_normalized, to_normalized);
+
+        debug!(
+            "Translation with overrides: {} -> {}, {:?}",
+            from_normalized, to_normalized, overrides
+        );
 
         self.generator
             .generate_with_config(&prompt, overrides)
@@ -208,6 +250,8 @@ impl Translator {
 
         let prompt = self.format_prompt(text, from, to);
 
+        debug!("Using default languages: {} -> {}", from, to);
+
         self.generator
             .generate(&prompt)
             .await
@@ -225,6 +269,8 @@ impl Translator {
 
         let prompt = self.format_prompt(text, from, to_normalized);
 
+        debug!("Translate to: {} -> {}", from, to_normalized);
+
         self.generator
             .generate(&prompt)
             .await
@@ -241,6 +287,8 @@ impl Translator {
             .ok_or(TranslatorError::MissingLanguage)?;
 
         let prompt = self.format_prompt(text, from_normalized, to);
+
+        debug!("Translate from: {} -> {}", from_normalized, to);
 
         self.generator
             .generate(&prompt)
@@ -267,6 +315,13 @@ impl Translator {
 
         let prompt = self.format_prompt(text, from_normalized, to_normalized);
 
+        info!(
+            "Streaming translation {} -> {}: {} chars",
+            from_normalized,
+            to_normalized,
+            text.len()
+        );
+
         let inner = self.generator.stream_text(&prompt).await?;
 
         let mapped = inner.map(|r| r.map_err(TranslatorError::from));
@@ -289,6 +344,13 @@ impl Translator {
             .ok_or(TranslatorError::MissingLanguage)?;
 
         let prompt = self.format_prompt(text, from, to);
+
+        info!(
+            "Streaming translation (defaults) {} -> {}: {} chars",
+            from,
+            to,
+            text.len()
+        );
 
         let inner = self.generator.stream_text(&prompt).await?;
 
@@ -337,5 +399,17 @@ impl Translator {
     /// Get a reference to the underlying generator.
     pub fn generator(&self) -> &Seq2SeqGenerator {
         &self.generator
+    }
+}
+
+
+impl std::fmt::Debug for Translator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Translator")
+            .field("model", &self.generator.model_name())
+            .field("device", &self.generator.device())
+            .field("default_from", &self.default_from)
+            .field("default_to", &self.default_to)
+            .finish()
     }
 }

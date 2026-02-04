@@ -35,6 +35,7 @@ toml = "0.8.10"
 walkdir = "2.5.0"
 glob-match = "0.2"
 tempfile = "3.23.0"
+log.workspace = true
 [features]
 default = []
 python = ["pyo3"]

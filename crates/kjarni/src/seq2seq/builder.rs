@@ -8,7 +8,7 @@ use kjarni_transformers::WgpuContext;
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder};
 
 use super::model::Seq2SeqGenerator;
-use super::types::{Seq2SeqOverrides, Seq2SeqResult, Seq2SeqTask};
+use super::types::{Seq2SeqOverrides, Seq2SeqResult};
 
 /// Builder for configuring a Seq2SeqGenerator instance.
 ///
@@ -28,9 +28,6 @@ pub struct Seq2SeqGeneratorBuilder {
     // Model selection
     pub(crate) model: String,
     pub(crate) model_path: Option<PathBuf>,
-
-    // Task hint
-    pub(crate) task: Option<Seq2SeqTask>,
 
     // Device configuration
     pub(crate) device: KjarniDevice,
@@ -59,7 +56,6 @@ impl Seq2SeqGeneratorBuilder {
         Self {
             model: model.into(),
             model_path: None,
-            task: None,
             device: KjarniDevice::default(),
             context: None,
             cache_dir: None,
@@ -71,26 +67,10 @@ impl Seq2SeqGeneratorBuilder {
         }
     }
 
-    // =========================================================================
-    // Task Configuration
-    // =========================================================================
-
-    /// Set a task hint for task-specific defaults.
-    ///
-    /// This helps the generator choose appropriate default parameters.
-    pub fn task(mut self, task: Seq2SeqTask) -> Self {
-        self.task = Some(task);
+    /// Load model from a local path instead of registry.
+    pub fn from_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_path = Some(path.into());
         self
-    }
-
-    /// Configure for translation task.
-    pub fn for_translation(self) -> Self {
-        self.task(Seq2SeqTask::Translation)
-    }
-
-    /// Configure for summarization task.
-    pub fn for_summarization(self) -> Self {
-        self.task(Seq2SeqTask::Summarization)
     }
 
     // =========================================================================

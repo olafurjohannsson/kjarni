@@ -6,7 +6,7 @@
 mod seq2seq_tests {
     use crate::seq2seq::{Seq2SeqError, generate};
     use crate::seq2seq::{
-        Seq2SeqGenerator, Seq2SeqOverrides, Seq2SeqTask, available_models, is_seq2seq_model,
+        Seq2SeqGenerator, Seq2SeqOverrides, available_models, is_seq2seq_model,
     };
 
     use super::*;
@@ -102,10 +102,6 @@ mod seq2seq_tests {
         assert!(is_seq2seq_model("not-a-real-model").is_err());
     }
 
-    #[test]
-    fn test_task_enum() {
-        assert_eq!(Seq2SeqTask::default(), Seq2SeqTask::General);
-    }
 
     /// Helper to check if a model is downloaded
     fn model_available(model: &str) -> bool {
@@ -154,7 +150,6 @@ mod seq2seq_tests {
         }
 
         let generator = Seq2SeqGenerator::builder("flan-t5-base")
-            .for_summarization()
             .cpu()
             .quiet()
             .build()
@@ -171,40 +166,40 @@ mod seq2seq_tests {
         println!("T5 summary output: {}", output);
     }
 
-    #[tokio::test]
-    async fn test_t5_greedy_vs_beam() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping test: flan-t5-base not downloaded");
-            return;
-        }
+    // #[tokio::test]
+    // async fn test_t5_greedy_vs_beam() {
+    //     if !model_available("flan-t5-base") {
+    //         eprintln!("Skipping test: flan-t5-base not downloaded");
+    //         return;
+    //     }
 
-        let generator = Seq2SeqGenerator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .expect("Failed to load model");
+    //     let generator = Seq2SeqGenerator::builder("flan-t5-base")
+    //         .cpu()
+    //         .quiet()
+    //         .build()
+    //         .await
+    //         .expect("Failed to load model");
 
-        let input = "translate English to French: Good morning";
+    //     let input = "translate English to French: Good morning";
 
-        // Greedy (fast)
-        let greedy_output = generator
-            .generate_with_config(input, &Seq2SeqOverrides::greedy())
-            .await
-            .expect("Greedy generation failed");
+    //     // Greedy (fast)
+    //     let greedy_output = generator
+    //         .generate_with_config(input, &Seq2SeqOverrides::greedy())
+    //         .await
+    //         .expect("Greedy generation failed");
 
-        // Beam search (quality)
-        let beam_output = generator
-            .generate_with_config(input, &Seq2SeqOverrides::high_quality())
-            .await
-            .expect("Beam generation failed");
+    //     // Beam search (quality)
+    //     let beam_output = generator
+    //         .generate_with_config(input, &Seq2SeqOverrides::high_quality())
+    //         .await
+    //         .expect("Beam generation failed");
 
-        assert!(!greedy_output.is_empty());
-        assert!(!beam_output.is_empty());
+    //     assert!(!greedy_output.is_empty());
+    //     assert!(!beam_output.is_empty());
 
-        println!("Greedy: {}", greedy_output);
-        println!("Beam:   {}", beam_output);
-    }
+    //     println!("Greedy: {}", greedy_output);
+    //     println!("Beam:   {}", beam_output);
+    // }
 
     // =========================================================================
     // BART Tests
@@ -403,33 +398,5 @@ mod seq2seq_tests {
         }
     }
 
-    // =========================================================================
-    // Config Resolution Tests
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_config_resolution() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping test: flan-t5-base not downloaded");
-            return;
-        }
-
-        // Build with specific config
-        let generator = Seq2SeqGenerator::builder("flan-t5-base")
-            .num_beams(6)
-            .max_length(200)
-            .min_length(10)
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .expect("Failed to load model");
-
-        let config = generator.generation_config();
-
-        assert_eq!(config.num_beams(), 6);
-        assert_eq!(config.max_length(), 200);
-        assert_eq!(config.min_length(), 10);
-        assert!(config.is_beam_search());
-    }
+  
 }

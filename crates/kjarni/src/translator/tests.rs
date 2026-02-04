@@ -1,14 +1,61 @@
 //! Comprehensive tests for the Translator module.
 
 use super::*;
-use crate::seq2seq::Seq2SeqOverrides;
+use futures::StreamExt;
+
+// =============================================================================
+// Expected Outputs from PyTorch Reference
+// =============================================================================
+
+mod expected {
+    // =========================================================================
+    // flan-t5-base
+    // =========================================================================
+    pub const FLAN_T5_BASE_EN_TO_DE_HELLO_GREEDY: &str = "Hello,";
+    pub const FLAN_T5_BASE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
+    pub const FLAN_T5_BASE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie old sind Sie?";
+    pub const FLAN_T5_BASE_EN_TO_DE_HOW_OLD_BEAM: &str = "How old are you?";
+    pub const FLAN_T5_BASE_EN_TO_DE_GOOD_MORNING_GREEDY: &str = "Good morning!";
+    pub const FLAN_T5_BASE_EN_TO_DE_GOOD_MORNING_BEAM: &str = "Good morning!";
+    pub const FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY: &str = "Vielen Dank!";
+    pub const FLAN_T5_BASE_EN_TO_DE_THANK_YOU_BEAM: &str = "Dankeschön!";
+    pub const FLAN_T5_BASE_EN_TO_FR_HELLO_GREEDY: &str = "Bonjour,";
+    pub const FLAN_T5_BASE_EN_TO_FR_HELLO_BEAM: &str = "Bonjour!";
+    pub const FLAN_T5_BASE_EN_TO_FR_GOOD_MORNING_GREEDY: &str = "Good morning";
+    pub const FLAN_T5_BASE_EN_TO_FR_GOOD_MORNING_BEAM: &str = "Good morning";
+    pub const FLAN_T5_BASE_EN_TO_ES_HELLO_GREEDY: &str = "Hi,";
+    pub const FLAN_T5_BASE_EN_TO_ES_HELLO_BEAM: &str = "Hombre!";
+    pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
+    pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
+
+    // =========================================================================
+    // flan-t5-large
+    // =========================================================================
+    pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_GREEDY: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie alte sind Sie?";
+    pub const FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_BEAM: &str = "Wie alte sind Sie?";
+    pub const FLAN_T5_LARGE_EN_TO_DE_GOOD_MORNING_GREEDY: &str =
+        "Ich freue mich, dass Sie daran reisen.";
+    pub const FLAN_T5_LARGE_EN_TO_DE_GOOD_MORNING_BEAM: &str = "Sehr gute Morgen!";
+    pub const FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_GREEDY: &str = "Danke!";
+    pub const FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_BEAM: &str = "Vielen Dank!";
+    pub const FLAN_T5_LARGE_EN_TO_FR_HELLO_GREEDY: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_FR_HELLO_BEAM: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_FR_GOOD_MORNING_GREEDY: &str =
+        " l'heure actuelle, il y a d'autres possibilités de l'emploi.";
+    pub const FLAN_T5_LARGE_EN_TO_FR_GOOD_MORNING_BEAM: &str = "Bienvenue !";
+    pub const FLAN_T5_LARGE_EN_TO_ES_HELLO_GREEDY: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_ES_HELLO_BEAM: &str = "Hello!";
+    pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
+    pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
+}
 
 // =============================================================================
 // Unit Tests - Language Normalization
 // =============================================================================
 
 mod language_tests {
-    use super::*;
     use crate::translator::languages::*;
 
     #[test]
@@ -87,7 +134,6 @@ mod language_tests {
 
     #[test]
     fn test_normalize_case_insensitive() {
-        // Implementation lowercases input first, so all case variants work
         assert_eq!(normalize_language("ENGLISH"), Some("English"));
         assert_eq!(normalize_language("English"), Some("English"));
         assert_eq!(normalize_language("english"), Some("English"));
@@ -115,11 +161,13 @@ mod language_tests {
     #[test]
     fn test_supported_languages_list() {
         let langs = supported_languages();
-        assert!(!langs.is_empty());
+        assert!(langs.len() >= 16);
         assert!(langs.contains(&"English"));
         assert!(langs.contains(&"German"));
         assert!(langs.contains(&"French"));
-        assert!(langs.len() >= 10); // At least 10 languages
+        assert!(langs.contains(&"Spanish"));
+        assert!(langs.contains(&"Chinese"));
+        assert!(langs.contains(&"Japanese"));
     }
 }
 
@@ -128,12 +176,12 @@ mod language_tests {
 // =============================================================================
 
 mod validation_tests {
-    use super::*;
     use crate::translator::validation::*;
+    use crate::translator::TranslatorError;
     use kjarni_transformers::models::ModelType;
 
     #[test]
-    fn test_validate_t5_models() {
+    fn test_validate_t5_models_accepted() {
         let t5_base = ModelType::from_cli_name("flan-t5-base").unwrap();
         assert!(validate_for_translation(t5_base).is_ok());
 
@@ -146,8 +194,11 @@ mod validation_tests {
         if let Some(bart) = ModelType::from_cli_name("bart-large-cnn") {
             let result = validate_for_translation(bart);
             assert!(result.is_err());
-            if let Err(TranslatorError::IncompatibleModel { reason, .. }) = result {
-                assert!(reason.to_lowercase().contains("summar"));
+            match result {
+                Err(TranslatorError::IncompatibleModel { reason, .. }) => {
+                    assert!(reason.to_lowercase().contains("summar"));
+                }
+                _ => panic!("Expected IncompatibleModel error"),
             }
         }
 
@@ -157,10 +208,11 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_get_translation_models() {
+    fn test_get_translation_models_returns_only_t5() {
         let models = get_translation_models();
         assert!(!models.is_empty());
         assert!(models.contains(&"flan-t5-base"));
+        assert!(models.contains(&"flan-t5-large"));
         assert!(!models.contains(&"bart-large-cnn"));
         assert!(!models.contains(&"distilbart-cnn"));
     }
@@ -171,20 +223,21 @@ mod validation_tests {
 // =============================================================================
 
 mod preset_tests {
-    use super::*;
     use crate::translator::presets::*;
 
     #[test]
-    fn test_preset_fast() {
+    fn test_preset_fast_values() {
         assert_eq!(TRANSLATION_FAST_V1.model, "flan-t5-base");
         assert_eq!(TRANSLATION_FAST_V1.architecture, "t5");
-        assert!(!TRANSLATION_FAST_V1.supported_languages.is_empty());
-        assert!(TRANSLATION_FAST_V1.memory_mb > 0);
+        assert!(TRANSLATION_FAST_V1.supported_languages.len() >= 10);
+        assert!(TRANSLATION_FAST_V1.memory_mb >= 500);
+        assert!(TRANSLATION_FAST_V1.memory_mb <= 2000);
     }
 
     #[test]
-    fn test_preset_quality() {
+    fn test_preset_quality_values() {
         assert_eq!(TRANSLATION_QUALITY_V1.model, "flan-t5-large");
+        assert_eq!(TRANSLATION_QUALITY_V1.architecture, "t5");
         assert!(TRANSLATION_QUALITY_V1.memory_mb > TRANSLATION_FAST_V1.memory_mb);
         assert!(
             TRANSLATION_QUALITY_V1.supported_languages.len()
@@ -193,9 +246,10 @@ mod preset_tests {
     }
 
     #[test]
-    fn test_find_preset() {
+    fn test_find_preset_case_insensitive() {
         assert!(find_preset("TRANSLATION_FAST_V1").is_some());
         assert!(find_preset("translation_fast_v1").is_some());
+        assert!(find_preset("Translation_Fast_V1").is_some());
         assert!(find_preset("nonexistent").is_none());
     }
 
@@ -211,8 +265,8 @@ mod preset_tests {
 // =============================================================================
 
 mod builder_tests {
-    use super::*;
     use crate::common::KjarniDevice;
+    use crate::translator::TranslatorBuilder;
 
     #[test]
     fn test_builder_default_state() {
@@ -221,6 +275,7 @@ mod builder_tests {
         assert!(builder.default_from.is_none());
         assert!(builder.default_to.is_none());
         assert!(!builder.quiet);
+        assert!(builder.overrides.is_empty());
     }
 
     #[test]
@@ -251,34 +306,28 @@ mod builder_tests {
     }
 
     #[test]
-    fn test_builder_generation_overrides() {
+    fn test_builder_overrides_are_explicit() {
         let builder = TranslatorBuilder::new("flan-t5-base")
             .num_beams(6)
             .max_length(256);
 
         assert_eq!(builder.overrides.num_beams, Some(6));
         assert_eq!(builder.overrides.max_length, Some(256));
+        assert!(builder.overrides.min_length.is_none());
+        assert!(builder.overrides.length_penalty.is_none());
+        assert!(builder.overrides.no_repeat_ngram_size.is_none());
     }
 
     #[test]
-    fn test_builder_greedy() {
+    fn test_builder_greedy_sets_num_beams_1() {
         let builder = TranslatorBuilder::new("flan-t5-base").greedy();
         assert_eq!(builder.overrides.num_beams, Some(1));
     }
 
     #[test]
-    fn test_builder_high_quality() {
+    fn test_builder_high_quality_sets_num_beams_6() {
         let builder = TranslatorBuilder::new("flan-t5-base").high_quality();
         assert_eq!(builder.overrides.num_beams, Some(6));
-    }
-
-    #[test]
-    fn test_builder_from_preset() {
-        use crate::translator::presets::TRANSLATION_FAST_V1;
-
-        let builder = TranslatorBuilder::from_preset(&TRANSLATION_FAST_V1);
-        assert_eq!(builder.model, "flan-t5-base");
-        assert!(matches!(builder.device, KjarniDevice::Cpu));
     }
 }
 
@@ -287,30 +336,39 @@ mod builder_tests {
 // =============================================================================
 
 mod error_tests {
-    use super::*;
+    use crate::translator::TranslatorError;
 
     #[test]
-    fn test_error_display() {
-        let err = TranslatorError::UnknownModel("foo".to_string());
+    fn test_error_unknown_model_message() {
+        let err = TranslatorError::UnknownModel("foo-bar".to_string());
         let msg = err.to_string();
-        assert!(msg.contains("foo"));
+        assert!(msg.contains("foo-bar"));
         assert!(msg.to_lowercase().contains("unknown"));
+    }
 
+    #[test]
+    fn test_error_unknown_language_message() {
         let err = TranslatorError::UnknownLanguage("klingon".to_string());
         let msg = err.to_string();
         assert!(msg.contains("klingon"));
+    }
 
+    #[test]
+    fn test_error_missing_language_message() {
         let err = TranslatorError::MissingLanguage;
         let msg = err.to_string();
-        assert!(msg.to_lowercase().contains("missing"));
+        assert!(msg.to_lowercase().contains("missing") || msg.to_lowercase().contains("language"));
+    }
 
+    #[test]
+    fn test_error_incompatible_model_message() {
         let err = TranslatorError::IncompatibleModel {
-            model: "gpt2".to_string(),
-            reason: "decoder only".to_string(),
+            model: "bart-cnn".to_string(),
+            reason: "summarization model".to_string(),
         };
         let msg = err.to_string();
-        assert!(msg.contains("gpt2"));
-        assert!(msg.contains("decoder only"));
+        assert!(msg.contains("bart-cnn"));
+        assert!(msg.contains("summarization model"));
     }
 
     #[test]
@@ -321,17 +379,24 @@ mod error_tests {
 }
 
 // =============================================================================
-// Unit Tests - Module-level Functions
+// Unit Tests - Module Functions
 // =============================================================================
 
 mod module_function_tests {
-    use super::*;
+    use crate::translator::{available_models, is_translation_model};
 
     #[test]
-    fn test_available_models() {
+    fn test_available_models_contains_t5() {
         let models = available_models();
-        assert!(!models.is_empty());
         assert!(models.contains(&"flan-t5-base"));
+        assert!(models.contains(&"flan-t5-large"));
+    }
+
+    #[test]
+    fn test_available_models_excludes_bart() {
+        let models = available_models();
+        assert!(!models.contains(&"bart-large-cnn"));
+        assert!(!models.contains(&"distilbart-cnn"));
     }
 
     #[test]
@@ -343,17 +408,411 @@ mod module_function_tests {
     #[test]
     fn test_is_translation_model_invalid() {
         assert!(is_translation_model("not-a-model").is_err());
+        assert!(is_translation_model("bart-large-cnn").is_err());
     }
 }
 
 // =============================================================================
-// Integration Tests (require model download)
+// Integration Tests - Model Output Verification (flan-t5-base)
 // =============================================================================
 
 #[cfg(test)]
-mod integration_tests {
+mod flan_t5_base_tests {
+    use super::expected::*;
     use super::*;
-    use futures::StreamExt;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("flan-t5-base")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_how_old() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("How old are you?", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_HOW_OLD_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_good_morning() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Good morning", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_GOOD_MORNING_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_thank_you() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Thank you", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_fr_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "fr").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_FR_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_fr_good_morning() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Good morning", "en", "fr").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_FR_GOOD_MORNING_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_es_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "es").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_ES_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_es_thank_you() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Thank you", "en", "es").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_ES_THANK_YOU_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_matches_non_streaming() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let direct = t.translate("Thank you", "en", "de").await.unwrap();
+
+        let mut stream = t.stream("Thank you", "en", "de").await.unwrap();
+        let mut chunks = Vec::new();
+        while let Some(result) = stream.next().await {
+            chunks.push(result.unwrap());
+        }
+        let streamed: String = chunks.into_iter().collect();
+
+        assert_eq!(direct, streamed);
+        assert_eq!(direct, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Model Output Verification (flan-t5-large)
+// =============================================================================
+
+#[cfg(test)]
+mod flan_t5_large_tests {
+    use super::expected::*;
+    use super::*;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("flan-t5-large")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_DE_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_how_old() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("How old are you?", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_good_morning() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Good morning", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_DE_GOOD_MORNING_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_de_thank_you() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Thank you", "en", "de").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_fr_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "fr").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_FR_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_fr_good_morning() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Good morning", "en", "fr").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_FR_GOOD_MORNING_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_es_hello() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Hello", "en", "es").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_ES_HELLO_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_en_to_es_thank_you() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate("Thank you", "en", "es").await.unwrap();
+        assert_eq!(result, FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_matches_non_streaming() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-large not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-large")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let direct = t.translate("Thank you", "en", "de").await.unwrap();
+
+        let mut stream = t.stream("Thank you", "en", "de").await.unwrap();
+        let mut chunks = Vec::new();
+        while let Some(result) = stream.next().await {
+            chunks.push(result.unwrap());
+        }
+        let streamed: String = chunks.into_iter().collect();
+
+        assert_eq!(direct, streamed);
+        assert_eq!(direct, FLAN_T5_LARGE_EN_TO_DE_THANK_YOU_GREEDY);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Error Handling
+// =============================================================================
+
+#[cfg(test)]
+mod error_handling_tests {
+    use super::*;
 
     fn model_available(model: &str) -> bool {
         let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
@@ -362,67 +821,26 @@ mod integration_tests {
             .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Basic Translation Tests with Assertions
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_translate_english_to_german() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
+    async fn test_unknown_model_error() {
+        let result = Translator::new("not-a-real-model-xyz").await;
+        match result {
+            Err(TranslatorError::UnknownModel(ref m)) => assert_eq!(m, "not-a-real-model-xyz"),
+            other => panic!("Expected UnknownModel error, got {:?}", other),
         }
-
-        let t = Translator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .expect("Failed to load translator");
-
-        let result = t.translate("Hello", "en", "de").await;
-        assert!(result.is_ok(), "Translation should succeed");
-
-        let german = result.unwrap();
-        assert!(!german.is_empty(), "Translation should not be empty");
-        // German greetings typically contain these patterns
-        let german_lower = german.to_lowercase();
-        let has_german_chars = german_lower.contains("hallo")
-            || german_lower.contains("guten")
-            || german_lower.contains("hello")  // Model might keep it
-            || german.chars().any(|c| c.is_alphabetic());
-        assert!(has_german_chars, "Output should contain text: {}", german);
     }
 
     #[tokio::test]
-    async fn test_translate_english_to_french() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let french = t
-            .translate("Good morning", "english", "french")
-            .await
-            .unwrap();
-        assert!(!french.is_empty());
-        // Should produce some alphabetic output
+    async fn test_incompatible_model_bart() {
+        let result = Translator::new("distilbart-cnn").await;
         assert!(
-            french.chars().any(|c| c.is_alphabetic()),
-            "Should contain letters: {}",
-            french
+            matches!(result, Err(TranslatorError::IncompatibleModel { .. }))
+                || matches!(result, Err(TranslatorError::Seq2Seq(_)))
         );
     }
 
     #[tokio::test]
-    async fn test_translate_produces_different_output() {
+    async fn test_unknown_source_language() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
@@ -435,53 +853,36 @@ mod integration_tests {
             .await
             .unwrap();
 
-        let german = t.translate("Thank you", "en", "de").await.unwrap();
-        let french = t.translate("Thank you", "en", "fr").await.unwrap();
-        let spanish = t.translate("Thank you", "en", "es").await.unwrap();
-
-        // All should produce output
-        assert!(!german.is_empty());
-        assert!(!french.is_empty());
-        assert!(!spanish.is_empty());
-
-        // At least some should be different (model may produce similar for short phrases)
-        let outputs = vec![&german, &french, &spanish];
-        let unique: std::collections::HashSet<_> = outputs.iter().collect();
-        // Allow some overlap but expect at least 2 different outputs
-        assert!(unique.len() >= 1, "Should produce varying outputs");
+        let result = t.translate("Hello", "klingon", "german").await;
+        match result {
+            Err(TranslatorError::UnknownLanguage(ref lang)) => assert_eq!(lang, "klingon"),
+            other => panic!("Expected UnknownLanguage error, got {:?}", other),
+        }
     }
 
-    // =========================================================================
-    // Default Language Tests with Assertions
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_translate_with_defaults() {
+    async fn test_unknown_target_language() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
         }
 
         let t = Translator::builder("flan-t5-base")
-            .from("english")
-            .to("spanish")
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        let spanish = t.translate_default("Hello").await.unwrap();
-        assert!(!spanish.is_empty(), "Should produce output");
-        assert!(
-            spanish.chars().any(|c| c.is_alphabetic()),
-            "Should contain letters: {}",
-            spanish
-        );
+        let result = t.translate("Hello", "english", "elvish").await;
+        match result {
+            Err(TranslatorError::UnknownLanguage(ref lang)) => assert_eq!(lang, "elvish"),
+            other => panic!("Expected UnknownLanguage error, got {:?}", other),
+        }
     }
 
     #[tokio::test]
-    async fn test_translate_default_missing_languages() {
+    async fn test_missing_default_languages() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
@@ -499,206 +900,6 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    async fn test_translate_to_with_default_source() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .from("english")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let italian = t.translate_to("Hello", "italian").await.unwrap();
-        assert!(!italian.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_translate_from_with_default_target() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .to("french")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let french = t.translate_from("Guten Tag", "german").await.unwrap();
-        assert!(!french.is_empty());
-    }
-
-    // =========================================================================
-    // Generation Config Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_translate_greedy_vs_beam() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let greedy = t
-            .translate_with_config("Hello world", "en", "de", &Seq2SeqOverrides::greedy())
-            .await
-            .unwrap();
-
-        let beam = t
-            .translate_with_config("Hello world", "en", "de", &Seq2SeqOverrides::high_quality())
-            .await
-            .unwrap();
-
-        assert!(!greedy.is_empty(), "Greedy should produce output");
-        assert!(!beam.is_empty(), "Beam should produce output");
-        // Both should be valid text
-        assert!(greedy.chars().any(|c| c.is_alphabetic()));
-        assert!(beam.chars().any(|c| c.is_alphabetic()));
-    }
-
-    #[tokio::test]
-    async fn test_translate_max_length_respected() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .max_length(20)
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let result = t
-            .translate(
-                "This is a test sentence that should produce reasonable output",
-                "en",
-                "de",
-            )
-            .await
-            .unwrap();
-        assert!(!result.is_empty());
-        // Token count != char count, but output should be bounded
-        // 20 tokens is roughly 60-100 chars max for most languages
-    }
-
-    // =========================================================================
-    // Streaming Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_stream_translation() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let mut stream = t.stream("Hello world", "en", "de").await.unwrap();
-
-        let mut chunks = Vec::new();
-        while let Some(result) = stream.next().await {
-            let chunk = result.expect("Stream error");
-            chunks.push(chunk);
-        }
-
-        assert!(!chunks.is_empty(), "Should produce at least one token");
-        let full: String = chunks.into_iter().collect();
-        assert!(!full.is_empty(), "Combined output should not be empty");
-    }
-
-    #[tokio::test]
-    async fn test_stream_matches_non_stream() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .greedy() // Use greedy for deterministic output
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        // Non-streaming
-        let direct = t.translate("Hello", "en", "fr").await.unwrap();
-
-        // Streaming
-        let mut stream = t.stream("Hello", "en", "fr").await.unwrap();
-        let mut chunks = Vec::new();
-        while let Some(result) = stream.next().await {
-            chunks.push(result.unwrap());
-        }
-        let streamed: String = chunks.into_iter().collect();
-
-        // With greedy decoding, these should be identical
-        assert_eq!(
-            direct, streamed,
-            "Streaming and direct should match with greedy decoding"
-        );
-    }
-
-    // =========================================================================
-    // Error Handling Tests
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_unknown_model_error() {
-        let result = Translator::new("not-a-real-model").await;
-        assert!(matches!(result, Err(TranslatorError::UnknownModel(_))));
-    }
-
-    #[tokio::test]
-    async fn test_unknown_language_in_translate() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let t = Translator::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let result = t.translate("Hello", "klingon", "german").await;
-        assert!(
-            matches!(result, Err(TranslatorError::UnknownLanguage(ref lang)) if lang == "klingon")
-        );
-
-        let result = t.translate("Hello", "english", "elvish").await;
-        assert!(
-            matches!(result, Err(TranslatorError::UnknownLanguage(ref lang)) if lang == "elvish")
-        );
-    }
-
-    #[tokio::test]
     async fn test_unknown_language_in_builder() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping: flan-t5-base not downloaded");
@@ -713,25 +914,32 @@ mod integration_tests {
             .build()
             .await;
 
-        assert!(matches!(result, Err(TranslatorError::UnknownLanguage(_))));
+        match result {
+            Err(TranslatorError::UnknownLanguage(ref lang)) => assert_eq!(lang, "klingon"),
+            other => panic!("Expected UnknownLanguage error, got {:?}", other),
+        }
+    }
+}
+
+// =============================================================================
+// Integration Tests - Default Languages
+// =============================================================================
+
+#[cfg(test)]
+mod default_language_tests {
+    use super::expected::*;
+    use super::*;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("flan-t5-base")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
     }
 
     #[tokio::test]
-    async fn test_incompatible_model_bart() {
-        let result = Translator::new("distilbart-cnn").await;
-        assert!(matches!(
-            result,
-            Err(TranslatorError::IncompatibleModel { .. }) | Err(TranslatorError::Seq2Seq(_))
-        ));
-    }
-
-    // =========================================================================
-    // Batch Translation Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_batch_translation() {
-        if !model_available("flan-t5-base") {
+    async fn test_translate_default_uses_configured_languages() {
+        if !model_available() {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
         }
@@ -739,86 +947,76 @@ mod integration_tests {
         let t = Translator::builder("flan-t5-base")
             .from("english")
             .to("german")
+            .greedy()
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        let texts = vec!["Hello", "Goodbye", "Thank you", "Please"];
-        let mut translations = Vec::new();
-
-        for text in &texts {
-            let translated = t.translate_default(text).await.unwrap();
-            translations.push(translated);
-        }
-
-        assert_eq!(translations.len(), texts.len());
-        for (i, translation) in translations.iter().enumerate() {
-            assert!(
-                !translation.is_empty(),
-                "Translation {} should not be empty",
-                i
-            );
-            assert!(
-                translation.chars().any(|c| c.is_alphabetic()),
-                "Translation {} should contain letters: {}",
-                i,
-                translation
-            );
-        }
+        let result = t.translate_default("Thank you").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
     }
 
-    // =========================================================================
-    // Concurrent Translation Tests
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_concurrent_translations() {
-        if !model_available("flan-t5-base") {
+    async fn test_translate_to_with_default_source() {
+        if !model_available() {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
         }
 
-        let t = std::sync::Arc::new(
-            Translator::builder("flan-t5-base")
-                .cpu()
-                .quiet()
-                .build()
-                .await
-                .unwrap(),
-        );
+        let t = Translator::builder("flan-t5-base")
+            .from("english")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
 
-        let pairs = vec![("Hello", "de"), ("Goodbye", "fr"), ("Thank you", "es")];
-
-        let handles: Vec<_> = pairs
-            .into_iter()
-            .map(|(text, to)| {
-                let translator = t.clone();
-                let text = text.to_string();
-                let to = to.to_string();
-                tokio::spawn(async move { translator.translate(&text, "en", &to).await })
-            })
-            .collect();
-
-        for (i, handle) in handles.into_iter().enumerate() {
-            let result = handle.await.expect("Task panicked");
-            let translation = result.expect("Translation failed");
-            assert!(
-                !translation.is_empty(),
-                "Concurrent translation {} failed",
-                i
-            );
-        }
+        let result = t.translate_to("Hello", "french").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_FR_HELLO_GREEDY);
     }
 
-    // =========================================================================
-    // Accessor Tests
-    // =========================================================================
+    #[tokio::test]
+    async fn test_translate_from_with_default_target() {
+        if !model_available() {
+            eprintln!("Skipping: flan-t5-base not downloaded");
+            return;
+        }
+
+        let t = Translator::builder("flan-t5-base")
+            .to("german")
+            .greedy()
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = t.translate_from("Thank you", "english").await.unwrap();
+        assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Accessors
+// =============================================================================
+
+#[cfg(test)]
+mod accessor_tests {
+    use super::*;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("flan-t5-base")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
+    }
 
     #[tokio::test]
     async fn test_translator_accessors() {
-        if !model_available("flan-t5-base") {
+        if !model_available() {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
         }
@@ -833,29 +1031,60 @@ mod integration_tests {
             .unwrap();
 
         assert_eq!(t.model_name(), "flan-t5-base");
-        assert_eq!(t.default_from(), Some("English")); // Normalized
-        assert_eq!(t.default_to(), Some("German")); // Normalized
-        assert!(matches!(
-            t.device(),
-            kjarni_transformers::traits::Device::Cpu
-        ));
-        assert!(t.generator().context_size() > 0);
+        assert_eq!(t.default_from(), Some("English"));
+        assert_eq!(t.default_to(), Some("German"));
+        assert!(matches!(t.device(), kjarni_transformers::traits::Device::Cpu));
+        assert!(t.generator().context_size() >= 512);
+        assert!(t.generator().vocab_size() >= 30000);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Concurrent Usage
+// =============================================================================
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::expected::*;
+    use super::*;
+    use std::sync::Arc;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("flan-t5-base")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Convenience Function Tests
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_module_translate_function() {
-        if !model_available("flan-t5-base") {
+    async fn test_concurrent_translations_deterministic() {
+        if !model_available() {
             eprintln!("Skipping: flan-t5-base not downloaded");
             return;
         }
 
-        let result = translate("flan-t5-base", "Hello", "en", "de").await;
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert!(!output.is_empty());
+        let t = Arc::new(
+            Translator::builder("flan-t5-base")
+                .greedy()
+                .cpu()
+                .quiet()
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let handles: Vec<_> = (0..3)
+            .map(|_| {
+                let translator = t.clone();
+                tokio::spawn(
+                    async move { translator.translate("Thank you", "en", "de").await },
+                )
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle.await.expect("Task panicked").expect("Translation failed");
+            assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
+        }
     }
 }

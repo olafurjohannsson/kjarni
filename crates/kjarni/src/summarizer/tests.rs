@@ -1,19 +1,52 @@
 //! Comprehensive tests for the Summarizer module.
 
 use super::*;
-use crate::seq2seq::Seq2SeqOverrides;
+use futures::StreamExt;
+
+// =============================================================================
+// Expected Outputs from PyTorch Reference
+// =============================================================================
+
+mod expected {
+    // =========================================================================
+    // Test Inputs
+    // =========================================================================
+    pub const INPUT_EIFFEL_TOWER: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. It was the first structure to reach a height of 300 metres. Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct.";
+    pub const INPUT_AMAZON_RAINFOREST: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers. The forest is home to approximately 10 percent of all species on Earth.";
+    pub const INPUT_PYTHON_LANGUAGE: &str = "Python is a high-level programming language known for its simple syntax and readability. It was created by Guido van Rossum and first released in 1991. Python is widely used in web development, data science, and artificial intelligence.";
+
+    // =========================================================================
+    // bart-large-cnn
+    // =========================================================================
+    pub const BART_LARGE_CNN_EIFFEL_TOWER_GREEDY: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct.";
+    pub const BART_LARGE_CNN_EIFFEL_TOWER_BEAM: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. Excluding transmitters, it is the second tallest free-standing structure in France after the Millau Viaduct.";
+    pub const BART_LARGE_CNN_AMAZON_RAINFOREST_GREEDY: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers. The forest is home to approximately 10 percent of all species on Earth.";
+    pub const BART_LARGE_CNN_AMAZON_RAINFOREST_BEAM: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers.";
+    pub const BART_LARGE_CNN_PYTHON_LANGUAGE_GREEDY: &str = "Python is a high-level programming language. It was created by Guido van Rossum and first released in 1991.";
+    pub const BART_LARGE_CNN_PYTHON_LANGUAGE_BEAM: &str = "Python is a high-level programming language. It was created by Guido van Rossum and first released in 1991. Python is widely used in web development, data science, and artificial intelligence.";
+
+    // =========================================================================
+    // distilbart-cnn
+    // =========================================================================
+    pub const DISTILBART_CNN_EIFFEL_TOWER_GREEDY: &str = " The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building . Excluding transmitters, it is the second tallest free-standing structure in France after the Millau Viaduct .";
+    pub const DISTILBART_CNN_EIFFEL_TOWER_BEAM: &str = " The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building . Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct .";
+    pub const DISTILBART_CNN_AMAZON_RAINFOREST_GREEDY: &str = " Amazon rainforest produces 20 percent of the world's oxygen . It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers . The forest is home to approximately 10 percent of all species on Earth .";
+    pub const DISTILBART_CNN_AMAZON_RAINFOREST_BEAM: &str = " The Amazon rainforest produces 20 percent of the world's oxygen . It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers . The forest is home to approximately 10 percent of all species on Earth .";
+    pub const DISTILBART_CNN_PYTHON_LANGUAGE_GREEDY: &str = " Python is widely used in web development, data science, and artificial intelligence . It was created by Guido van Rossum and first released in 1991 .";
+    pub const DISTILBART_CNN_PYTHON_LANGUAGE_BEAM: &str = " Python is widely used in web development, data science, and artificial intelligence . It was created by Guido van Rossum and first released in 1991 .";
+}
 
 // =============================================================================
 // Unit Tests - Validation
 // =============================================================================
 
 mod validation_tests {
-    use super::*;
     use crate::summarizer::validation::*;
+    use crate::summarizer::SummarizerError;
     use kjarni_transformers::models::ModelType;
 
     #[test]
-    fn test_validate_bart_models() {
+    fn test_validate_bart_models_accepted() {
         if let Some(bart) = ModelType::from_cli_name("bart-large-cnn") {
             assert!(validate_for_summarization(bart).is_ok());
         }
@@ -24,26 +57,26 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_t5_models() {
+    fn test_validate_t5_models_rejected() {
         let t5_base = ModelType::from_cli_name("flan-t5-base").unwrap();
-        assert!(validate_for_summarization(t5_base).is_ok());
-
-        let t5_large = ModelType::from_cli_name("flan-t5-large").unwrap();
-        assert!(validate_for_summarization(t5_large).is_ok());
+        let result = validate_for_summarization(t5_base);
+        assert!(result.is_err());
+        match result {
+            Err(SummarizerError::IncompatibleModel { reason, .. }) => {
+                assert!(reason.to_lowercase().contains("translation") || reason.to_lowercase().contains("t5"));
+            }
+            _ => panic!("Expected IncompatibleModel error"),
+        }
     }
 
     #[test]
-    fn test_get_summarization_models() {
+    fn test_get_summarization_models_returns_only_bart() {
         let models = get_summarization_models();
         assert!(!models.is_empty());
-        assert!(models.contains(&"flan-t5-base"));
-    }
-
-    #[test]
-    fn test_recommended_models() {
-        let models = recommended_summarization_models();
-        assert!(!models.is_empty());
-        assert!(models.len() >= 2);
+        assert!(models.contains(&"bart-large-cnn"));
+        assert!(models.contains(&"distilbart-cnn"));
+        assert!(!models.contains(&"flan-t5-base"));
+        assert!(!models.contains(&"flan-t5-large"));
     }
 }
 
@@ -52,53 +85,35 @@ mod validation_tests {
 // =============================================================================
 
 mod preset_tests {
-    use super::*;
     use crate::summarizer::presets::*;
 
     #[test]
-    fn test_preset_fast() {
+    fn test_preset_fast_values() {
         assert_eq!(SUMMARIZER_FAST_V1.model, "distilbart-cnn");
         assert_eq!(SUMMARIZER_FAST_V1.architecture, "bart");
-        assert!(SUMMARIZER_FAST_V1.default_min_length > 0);
-        assert!(SUMMARIZER_FAST_V1.default_max_length > SUMMARIZER_FAST_V1.default_min_length);
-        assert!(SUMMARIZER_FAST_V1.memory_mb > 0);
+        assert!(SUMMARIZER_FAST_V1.memory_mb >= 500);
+        assert!(SUMMARIZER_FAST_V1.memory_mb <= 2000);
     }
 
     #[test]
-    fn test_preset_quality() {
+    fn test_preset_quality_values() {
         assert_eq!(SUMMARIZER_QUALITY_V1.model, "bart-large-cnn");
+        assert_eq!(SUMMARIZER_QUALITY_V1.architecture, "bart");
         assert!(SUMMARIZER_QUALITY_V1.memory_mb > SUMMARIZER_FAST_V1.memory_mb);
     }
 
     #[test]
-    fn test_preset_t5() {
-        assert_eq!(SUMMARIZER_T5_V1.model, "flan-t5-base");
-        assert_eq!(SUMMARIZER_T5_V1.architecture, "t5");
-    }
-
-    #[test]
-    fn test_find_preset() {
+    fn test_find_preset_case_insensitive() {
         assert!(find_preset("SUMMARIZER_FAST_V1").is_some());
         assert!(find_preset("summarizer_fast_v1").is_some());
+        assert!(find_preset("Summarizer_Fast_V1").is_some());
         assert!(find_preset("nonexistent").is_none());
     }
 
     #[test]
     fn test_tier_resolution() {
         assert_eq!(SummarizerTier::Fast.resolve().model, "distilbart-cnn");
-        assert_eq!(SummarizerTier::Balanced.resolve().model, "flan-t5-base");
         assert_eq!(SummarizerTier::Quality.resolve().model, "bart-large-cnn");
-    }
-
-    #[test]
-    fn test_all_presets_valid() {
-        for preset in ALL_V1_PRESETS {
-            assert!(!preset.name.is_empty());
-            assert!(!preset.model.is_empty());
-            assert!(!preset.architecture.is_empty());
-            assert!(preset.default_max_length > preset.default_min_length);
-            assert!(preset.memory_mb > 0);
-        }
     }
 }
 
@@ -107,75 +122,57 @@ mod preset_tests {
 // =============================================================================
 
 mod builder_tests {
-    use super::*;
     use crate::common::KjarniDevice;
+    use crate::summarizer::SummarizerBuilder;
 
     #[test]
     fn test_builder_default_state() {
-        let builder = SummarizerBuilder::new("distilbart-cnn");
-        assert_eq!(builder.model, "distilbart-cnn");
+        let builder = SummarizerBuilder::new("bart-large-cnn");
+        assert_eq!(builder.model, "bart-large-cnn");
         assert!(!builder.quiet);
-        assert_eq!(builder.overrides.no_repeat_ngram_size, Some(3));
+        assert!(builder.overrides.is_empty());
+    }
+
+    #[test]
+    fn test_builder_device_methods() {
+        let cpu_builder = SummarizerBuilder::new("bart-large-cnn").cpu();
+        assert!(matches!(cpu_builder.device, KjarniDevice::Cpu));
+
+        let gpu_builder = SummarizerBuilder::new("bart-large-cnn").gpu();
+        assert!(matches!(gpu_builder.device, KjarniDevice::Gpu));
     }
 
     #[test]
     fn test_builder_length_presets() {
-        let short = SummarizerBuilder::new("distilbart-cnn").short();
+        let short = SummarizerBuilder::new("bart-large-cnn").short();
         assert_eq!(short.overrides.min_length, Some(30));
         assert_eq!(short.overrides.max_length, Some(60));
 
-        let medium = SummarizerBuilder::new("distilbart-cnn").medium();
+        let medium = SummarizerBuilder::new("bart-large-cnn").medium();
         assert_eq!(medium.overrides.min_length, Some(50));
         assert_eq!(medium.overrides.max_length, Some(150));
 
-        let long = SummarizerBuilder::new("distilbart-cnn").long();
+        let long = SummarizerBuilder::new("bart-large-cnn").long();
         assert_eq!(long.overrides.min_length, Some(100));
         assert_eq!(long.overrides.max_length, Some(300));
     }
 
     #[test]
-    fn test_builder_custom_length() {
-        let builder = SummarizerBuilder::new("distilbart-cnn")
-            .min_length(40)
-            .max_length(80);
-
-        assert_eq!(builder.overrides.min_length, Some(40));
-        assert_eq!(builder.overrides.max_length, Some(80));
-    }
-
-    #[test]
-    fn test_builder_generation_params() {
-        let builder = SummarizerBuilder::new("distilbart-cnn")
+    fn test_builder_overrides_are_explicit() {
+        let builder = SummarizerBuilder::new("bart-large-cnn")
             .num_beams(6)
-            .length_penalty(2.0);
+            .max_length(256);
 
         assert_eq!(builder.overrides.num_beams, Some(6));
-        assert_eq!(builder.overrides.length_penalty, Some(2.0));
+        assert_eq!(builder.overrides.max_length, Some(256));
+        assert!(builder.overrides.length_penalty.is_none());
+        assert!(builder.overrides.no_repeat_ngram_size.is_none());
     }
 
     #[test]
-    fn test_builder_greedy() {
-        let builder = SummarizerBuilder::new("distilbart-cnn").greedy();
+    fn test_builder_greedy_sets_num_beams_1() {
+        let builder = SummarizerBuilder::new("bart-large-cnn").greedy();
         assert_eq!(builder.overrides.num_beams, Some(1));
-    }
-
-    #[test]
-    fn test_builder_device_methods() {
-        let cpu = SummarizerBuilder::new("distilbart-cnn").cpu();
-        assert!(matches!(cpu.device, KjarniDevice::Cpu));
-
-        let gpu = SummarizerBuilder::new("distilbart-cnn").gpu();
-        assert!(matches!(gpu.device, KjarniDevice::Gpu));
-    }
-
-    #[test]
-    fn test_builder_from_preset() {
-        use crate::summarizer::presets::SUMMARIZER_FAST_V1;
-
-        let builder = SummarizerBuilder::from_preset(&SUMMARIZER_FAST_V1);
-        assert_eq!(builder.model, "distilbart-cnn");
-        assert_eq!(builder.overrides.min_length, Some(30));
-        assert_eq!(builder.overrides.max_length, Some(130));
     }
 }
 
@@ -184,18 +181,25 @@ mod builder_tests {
 // =============================================================================
 
 mod error_tests {
-    use super::*;
+    use crate::summarizer::SummarizerError;
 
     #[test]
-    fn test_error_display() {
-        let err = SummarizerError::UnknownModel("foo".to_string());
-        assert!(err.to_string().contains("foo"));
+    fn test_error_unknown_model_message() {
+        let err = SummarizerError::UnknownModel("foo-bar".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("foo-bar"));
+        assert!(msg.to_lowercase().contains("unknown"));
+    }
 
+    #[test]
+    fn test_error_incompatible_model_message() {
         let err = SummarizerError::IncompatibleModel {
-            model: "gpt2".to_string(),
-            reason: "decoder only".to_string(),
+            model: "flan-t5-base".to_string(),
+            reason: "translation model".to_string(),
         };
-        assert!(err.to_string().contains("gpt2"));
+        let msg = err.to_string();
+        assert!(msg.contains("flan-t5-base"));
+        assert!(msg.contains("translation model"));
     }
 
     #[test]
@@ -206,501 +210,304 @@ mod error_tests {
 }
 
 // =============================================================================
-// Unit Tests - Module-level Functions
+// Unit Tests - Module Functions
 // =============================================================================
 
 mod module_function_tests {
-    use super::*;
+    use crate::summarizer::{available_models, is_summarization_model};
 
     #[test]
-    fn test_available_models() {
+    fn test_available_models_contains_bart() {
         let models = available_models();
-        assert!(!models.is_empty());
+        assert!(models.contains(&"bart-large-cnn"));
+        assert!(models.contains(&"distilbart-cnn"));
     }
 
     #[test]
-    fn test_recommended_models() {
-        let models = recommended_models();
-        assert!(!models.is_empty());
+    fn test_available_models_excludes_t5() {
+        let models = available_models();
+        assert!(!models.contains(&"flan-t5-base"));
+        assert!(!models.contains(&"flan-t5-large"));
     }
 
     #[test]
     fn test_is_summarization_model_valid() {
-        assert!(is_summarization_model("flan-t5-base").is_ok());
+        assert!(is_summarization_model("bart-large-cnn").is_ok());
+        assert!(is_summarization_model("distilbart-cnn").is_ok());
     }
 
     #[test]
     fn test_is_summarization_model_invalid() {
         assert!(is_summarization_model("not-a-model").is_err());
+        assert!(is_summarization_model("flan-t5-base").is_err());
     }
 }
 
 // =============================================================================
-// Integration Tests (require model download)
+// Integration Tests - bart-large-cnn Output Verification
 // =============================================================================
 
 #[cfg(test)]
-mod integration_tests {
+mod bart_large_cnn_tests {
+    use super::expected::*;
     use super::*;
-    use futures::StreamExt;
 
-    const TEST_ARTICLE: &str = r#"
-        The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building,
-        and the tallest structure in Paris. Its base is square, measuring 125 metres (410 ft) on
-        each side. During its construction, the Eiffel Tower surpassed the Washington Monument to
-        become the tallest man-made structure in the world, a title it held for 41 years until the
-        Chrysler Building in New York City was finished in 1930. It was the first structure in the
-        world to surpass both the 200-metre and 300-metre mark in height. Due to the addition of a
-        broadcasting aerial at the top of the tower in 1957, it is now taller than the Chrysler
-        Building by 5.2 metres (17 ft). Excluding transmitters, the Eiffel Tower is the second
-        tallest free-standing structure in France after the Millau Viaduct.
-    "#;
-
-    fn model_available(model: &str) -> bool {
+    fn model_available() -> bool {
         let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
-        kjarni_transformers::models::ModelType::from_cli_name(model)
+        kjarni_transformers::models::ModelType::from_cli_name("bart-large-cnn")
             .map(|m| m.is_downloaded(&cache_dir))
             .unwrap_or(false)
     }
 
-    // =========================================================================
-    // BART Model Tests with Assertions
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_bart_basic_summarization() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
+    async fn test_greedy_eiffel_tower() {
+        if !model_available() {
+            eprintln!("Skipping: bart-large-cnn not downloaded");
             return;
         }
 
-        let s = Summarizer::builder("distilbart-cnn")
+        let s = Summarizer::builder("bart-large-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
             .cpu()
             .quiet()
             .build()
             .await
-            .expect("Failed to load summarizer");
+            .unwrap();
 
-        let summary = s
-            .summarize(TEST_ARTICLE)
-            .await
-            .expect("Summarization failed");
-
-        assert!(!summary.is_empty(), "Summary should not be empty");
-        assert!(
-            summary.len() < TEST_ARTICLE.len(),
-            "Summary should be shorter than input"
-        );
-
-        // BART summaries should mention key facts
-        let summary_lower = summary.to_lowercase();
-        let mentions_tower = summary_lower.contains("tower") || summary_lower.contains("eiffel");
-        let mentions_height = summary_lower.contains("metre")
-            || summary_lower.contains("meter")
-            || summary_lower.contains("tall")
-            || summary_lower.contains("height")
-            || summary_lower.contains("ft")
-            || summary_lower.contains("324");
-
-        assert!(
-            mentions_tower || mentions_height,
-            "Summary should mention tower or height: {}",
-            summary
-        );
+        let result = s.summarize(INPUT_EIFFEL_TOWER).await.unwrap();
+        assert_eq!(result, BART_LARGE_CNN_EIFFEL_TOWER_GREEDY);
     }
 
     #[tokio::test]
-    async fn test_bart_summary_is_shorter() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
+    async fn test_greedy_amazon_rainforest() {
+        if !model_available() {
+            eprintln!("Skipping: bart-large-cnn not downloaded");
             return;
         }
 
-        let s = Summarizer::builder("distilbart-cnn")
+        let s = Summarizer::builder("bart-large-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        let summary = s.summarize(TEST_ARTICLE).await.unwrap();
-
-        // Summary should be significantly shorter
-        let compression_ratio = summary.len() as f64 / TEST_ARTICLE.len() as f64;
-        assert!(
-            compression_ratio < 0.7,
-            "Summary should be at most 70% of original length, got {}%",
-            compression_ratio * 100.0
-        );
+        let result = s.summarize(INPUT_AMAZON_RAINFOREST).await.unwrap();
+        assert_eq!(result, BART_LARGE_CNN_AMAZON_RAINFOREST_GREEDY);
     }
 
     #[tokio::test]
-    async fn test_bart_short_vs_long_summary() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
+    async fn test_greedy_python_language() {
+        if !model_available() {
+            eprintln!("Skipping: bart-large-cnn not downloaded");
             return;
         }
 
-        let short_summarizer = Summarizer::builder("distilbart-cnn")
-            .short()
+        let s = Summarizer::builder("bart-large-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        let long_summarizer = Summarizer::builder("distilbart-cnn")
-            .long()
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let short_summary = short_summarizer.summarize(TEST_ARTICLE).await.unwrap();
-        let long_summary = long_summarizer.summarize(TEST_ARTICLE).await.unwrap();
-
-        assert!(!short_summary.is_empty());
-        assert!(!long_summary.is_empty());
-
-        // Long summary should generally be longer (though not guaranteed due to model behavior)
-        // At minimum, both should be valid
-        assert!(short_summary.chars().filter(|c| c.is_alphabetic()).count() > 10);
-        assert!(long_summary.chars().filter(|c| c.is_alphabetic()).count() > 10);
-    }
-
-    // =========================================================================
-    // T5 Model Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_t5_summarization() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("flan-t5-base")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .expect("Failed to load summarizer");
-
-        let summary = s
-            .summarize(TEST_ARTICLE)
-            .await
-            .expect("Summarization failed");
-
-        assert!(!summary.is_empty(), "Summary should not be empty");
-        assert!(
-            summary.len() < TEST_ARTICLE.len(),
-            "Summary should be shorter than input"
-        );
-        assert!(
-            summary.chars().any(|c| c.is_alphabetic()),
-            "Summary should contain letters: {}",
-            summary
-        );
+        let result = s.summarize(INPUT_PYTHON_LANGUAGE).await.unwrap();
+        assert_eq!(result, BART_LARGE_CNN_PYTHON_LANGUAGE_GREEDY);
     }
 
     #[tokio::test]
-    async fn test_t5_uses_prefix_internally() {
-        if !model_available("flan-t5-base") {
-            eprintln!("Skipping: flan-t5-base not downloaded");
+    async fn test_streaming_matches_non_streaming() {
+        if !model_available() {
+            eprintln!("Skipping: bart-large-cnn not downloaded");
             return;
         }
 
-        let s = Summarizer::builder("flan-t5-base")
+        let s = Summarizer::builder("bart-large-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        // Even short input should work (T5 prepends "summarize: ")
-        let summary = s.summarize("Short text to summarize").await.unwrap();
-        assert!(!summary.is_empty());
-    }
+        let direct = s.summarize(INPUT_PYTHON_LANGUAGE).await.unwrap();
 
-    #[tokio::test]
-    async fn test_bart_no_prefix_needed() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("distilbart-cnn")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        // BART doesn't need prefix
-        let summary = s.summarize("Short text to summarize").await.unwrap();
-        assert!(!summary.is_empty());
-    }
-
-    // =========================================================================
-    // Generation Config Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_summarize_greedy_vs_beam() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("distilbart-cnn")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let greedy = s
-            .summarize_with_config(TEST_ARTICLE, &Seq2SeqOverrides::greedy())
-            .await
-            .unwrap();
-
-        let beam = s
-            .summarize_with_config(TEST_ARTICLE, &Seq2SeqOverrides::high_quality())
-            .await
-            .unwrap();
-
-        assert!(!greedy.is_empty(), "Greedy should produce output");
-        assert!(!beam.is_empty(), "Beam should produce output");
-
-        // Both should be valid summaries
-        assert!(greedy.len() < TEST_ARTICLE.len());
-        assert!(beam.len() < TEST_ARTICLE.len());
-    }
-
-    #[tokio::test]
-    async fn test_summarize_with_length_penalty() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("distilbart-cnn")
-            .length_penalty(2.5)
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let summary = s.summarize(TEST_ARTICLE).await.unwrap();
-        assert!(!summary.is_empty());
-        assert!(summary.len() < TEST_ARTICLE.len());
-    }
-
-    // =========================================================================
-    // Streaming Tests with Assertions
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_stream_summarization() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("distilbart-cnn")
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let mut stream = s.stream(TEST_ARTICLE).await.unwrap();
-
-        let mut chunks = Vec::new();
-        while let Some(result) = stream.next().await {
-            let chunk = result.expect("Stream error");
-            chunks.push(chunk);
-        }
-
-        assert!(!chunks.is_empty(), "Should produce at least one token");
-        let full: String = chunks.into_iter().collect();
-        assert!(!full.is_empty(), "Combined output should not be empty");
-        assert!(full.len() < TEST_ARTICLE.len(), "Summary should be shorter");
-    }
-
-    #[tokio::test]
-    async fn test_stream_matches_non_stream() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = Summarizer::builder("distilbart-cnn")
-            .greedy() // Use greedy for deterministic output
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        // Non-streaming
-        let direct = s.summarize(TEST_ARTICLE).await.unwrap();
-
-        // Streaming
-        let mut stream = s.stream(TEST_ARTICLE).await.unwrap();
+        let mut stream = s.stream(INPUT_PYTHON_LANGUAGE).await.unwrap();
         let mut chunks = Vec::new();
         while let Some(result) = stream.next().await {
             chunks.push(result.unwrap());
         }
         let streamed: String = chunks.into_iter().collect();
 
-        // With greedy decoding, these should be identical
-        assert_eq!(
-            direct, streamed,
-            "Streaming and direct should match with greedy decoding"
-        );
+        assert_eq!(direct, streamed);
+        assert_eq!(direct, BART_LARGE_CNN_PYTHON_LANGUAGE_GREEDY);
+    }
+}
+
+// =============================================================================
+// Integration Tests - distilbart-cnn Output Verification
+// =============================================================================
+
+#[cfg(test)]
+mod distilbart_cnn_tests {
+    use super::expected::*;
+    use super::*;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("distilbart-cnn")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Error Handling Tests
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_unknown_model_error() {
-        let result = Summarizer::new("not-a-real-model").await;
-        assert!(matches!(result, Err(SummarizerError::UnknownModel(_))));
-    }
-
-    // =========================================================================
-    // Batch Summarization Tests
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_batch_summarization() {
-        if !model_available("distilbart-cnn") {
+    async fn test_greedy_eiffel_tower() {
+        if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
             return;
         }
 
         let s = Summarizer::builder("distilbart-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
             .cpu()
             .quiet()
             .build()
             .await
             .unwrap();
 
-        let articles = vec![
-            "Scientists discover water on Mars. The discovery was made by NASA's rover.",
-            "New AI system beats human at chess. The system uses neural networks.",
-            "Climate change impacts global agriculture. Farmers are adapting to new conditions.",
-        ];
-
-        let mut summaries = Vec::new();
-        for article in &articles {
-            let summary = s.summarize(article).await.unwrap();
-            summaries.push(summary);
-        }
-
-        assert_eq!(summaries.len(), articles.len());
-        for (i, summary) in summaries.iter().enumerate() {
-            assert!(!summary.is_empty(), "Summary {} should not be empty", i);
-        }
+        let result = s.summarize(INPUT_EIFFEL_TOWER).await.unwrap();
+        assert_eq!(result, DISTILBART_CNN_EIFFEL_TOWER_GREEDY);
     }
 
-    // =========================================================================
-    // Concurrent Summarization Tests
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_concurrent_summarization() {
-        if !model_available("distilbart-cnn") {
+    async fn test_greedy_amazon_rainforest() {
+        if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
             return;
         }
 
-        let s = std::sync::Arc::new(
-            Summarizer::builder("distilbart-cnn")
-                .cpu()
-                .quiet()
-                .build()
-                .await
-                .unwrap(),
+        let s = Summarizer::builder("distilbart-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = s.summarize(INPUT_AMAZON_RAINFOREST).await.unwrap();
+        assert_eq!(result, DISTILBART_CNN_AMAZON_RAINFOREST_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_greedy_python_language() {
+        if !model_available() {
+            eprintln!("Skipping: distilbart-cnn not downloaded");
+            return;
+        }
+
+        let s = Summarizer::builder("distilbart-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let result = s.summarize(INPUT_PYTHON_LANGUAGE).await.unwrap();
+        assert_eq!(result, DISTILBART_CNN_PYTHON_LANGUAGE_GREEDY);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_matches_non_streaming() {
+        if !model_available() {
+            eprintln!("Skipping: distilbart-cnn not downloaded");
+            return;
+        }
+
+        let s = Summarizer::builder("distilbart-cnn")
+            .greedy()
+            .min_length(10)
+            .max_length(60)
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let direct = s.summarize(INPUT_PYTHON_LANGUAGE).await.unwrap();
+
+        let mut stream = s.stream(INPUT_PYTHON_LANGUAGE).await.unwrap();
+        let mut chunks = Vec::new();
+        while let Some(result) = stream.next().await {
+            chunks.push(result.unwrap());
+        }
+        let streamed: String = chunks.into_iter().collect();
+
+        assert_eq!(direct, streamed);
+        assert_eq!(direct, DISTILBART_CNN_PYTHON_LANGUAGE_GREEDY);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Error Handling
+// =============================================================================
+
+#[cfg(test)]
+mod error_handling_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_unknown_model_error() {
+        let result = Summarizer::new("not-a-real-model-xyz").await;
+        match result {
+            Err(SummarizerError::UnknownModel(ref m)) => assert_eq!(m, "not-a-real-model-xyz"),
+            other => panic!("Expected UnknownModel error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_incompatible_model_t5() {
+        let result = Summarizer::new("flan-t5-base").await;
+        assert!(
+            matches!(result, Err(SummarizerError::IncompatibleModel { .. }))
+                || matches!(result, Err(SummarizerError::Seq2Seq(_)))
         );
-
-        let articles = vec![
-            "Article one about science and discovery.",
-            "Article two about technology and innovation.",
-            "Article three about art and culture.",
-        ];
-
-        let handles: Vec<_> = articles
-            .into_iter()
-            .map(|text| {
-                let summarizer = s.clone();
-                let text = text.to_string();
-                tokio::spawn(async move { summarizer.summarize(&text).await })
-            })
-            .collect();
-
-        for (i, handle) in handles.into_iter().enumerate() {
-            let result = handle.await.expect("Task panicked");
-            let summary = result.expect("Summarization failed");
-            assert!(
-                !summary.is_empty(),
-                "Concurrent summary {} should not be empty",
-                i
-            );
-        }
     }
+}
 
-    // =========================================================================
-    // Preset and Tier Tests
-    // =========================================================================
+// =============================================================================
+// Integration Tests - Accessors
+// =============================================================================
 
-    #[tokio::test]
-    async fn test_summarize_with_preset() {
-        use crate::summarizer::presets::SUMMARIZER_FAST_V1;
+#[cfg(test)]
+mod accessor_tests {
+    use super::*;
 
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        let s = SummarizerBuilder::from_preset(&SUMMARIZER_FAST_V1)
-            .cpu()
-            .quiet()
-            .build()
-            .await
-            .unwrap();
-
-        let summary = s.summarize(TEST_ARTICLE).await.unwrap();
-        assert!(!summary.is_empty());
-        assert!(summary.len() < TEST_ARTICLE.len());
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("distilbart-cnn")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
     }
-
-    #[tokio::test]
-    async fn test_summarize_tier() {
-        if !model_available("distilbart-cnn") {
-            eprintln!("Skipping: distilbart-cnn not downloaded");
-            return;
-        }
-
-        // Note: This creates a new Summarizer each time (not ideal for perf but tests the API)
-        let result = summarize_tier(SummarizerTier::Fast, TEST_ARTICLE).await;
-        if let Ok(summary) = result {
-            assert!(!summary.is_empty());
-        }
-    }
-
-    // =========================================================================
-    // Accessor Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_summarizer_accessors() {
-        if !model_available("distilbart-cnn") {
+        if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
             return;
         }
@@ -713,29 +520,89 @@ mod integration_tests {
             .unwrap();
 
         assert_eq!(s.model_name(), "distilbart-cnn");
-        assert!(matches!(
-            s.device(),
-            kjarni_transformers::traits::Device::Cpu
-        ));
-        assert!(s.generator().context_size() > 0);
-        assert!(s.generator().vocab_size() > 0);
+        assert!(matches!(s.device(), kjarni_transformers::traits::Device::Cpu));
+        assert!(s.generator().context_size() >= 512);
+        assert!(s.generator().vocab_size() >= 30000);
+    }
+}
+
+// =============================================================================
+// Integration Tests - Concurrent Usage
+// =============================================================================
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::expected::*;
+    use super::*;
+    use std::sync::Arc;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("distilbart-cnn")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Convenience Function Tests
-    // =========================================================================
-
     #[tokio::test]
-    async fn test_module_summarize_function() {
-        if !model_available("distilbart-cnn") {
+    async fn test_concurrent_summarizations_deterministic() {
+        if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
             return;
         }
 
-        let result = summarize("distilbart-cnn", TEST_ARTICLE).await;
-        assert!(result.is_ok());
-        let summary = result.unwrap();
-        assert!(!summary.is_empty());
-        assert!(summary.len() < TEST_ARTICLE.len());
+        let s = Arc::new(
+            Summarizer::builder("distilbart-cnn")
+                .greedy()
+                .min_length(10)
+                .max_length(60)
+                .cpu()
+                .quiet()
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let handles: Vec<_> = (0..3)
+            .map(|_| {
+                let summarizer = s.clone();
+                let input = INPUT_PYTHON_LANGUAGE.to_string();
+                tokio::spawn(async move { summarizer.summarize(&input).await })
+            })
+            .collect();
+
+        for handle in handles {
+            let result = handle.await.expect("Task panicked").expect("Summarization failed");
+            assert_eq!(result, DISTILBART_CNN_PYTHON_LANGUAGE_GREEDY);
+        }
+    }
+}
+
+// =============================================================================
+// Integration Tests - Module-level Convenience Function
+// =============================================================================
+
+#[cfg(test)]
+mod convenience_function_tests {
+    use super::expected::*;
+    use super::*;
+
+    fn model_available() -> bool {
+        let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
+        kjarni_transformers::models::ModelType::from_cli_name("distilbart-cnn")
+            .map(|m| m.is_downloaded(&cache_dir))
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn test_summarize_function() {
+        if !model_available() {
+            eprintln!("Skipping: distilbart-cnn not downloaded");
+            return;
+        }
+
+        let result = summarize("distilbart-cnn", INPUT_PYTHON_LANGUAGE).await.unwrap();
+        // Default may use beam search, so just verify non-empty and has content
+        assert!(!result.is_empty());
+        assert!(result.contains("Python"));
     }
 }

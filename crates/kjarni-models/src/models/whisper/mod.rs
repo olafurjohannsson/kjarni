@@ -1,8 +1,8 @@
 mod config;
-// mod model;
+mod model;
 
 pub use config::WhisperConfig;
-// pub use model::{WhisperModel, AudioEncoderOps};
+pub use model::{WhisperModel};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WhisperTask {

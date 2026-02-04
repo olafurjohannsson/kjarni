@@ -9,10 +9,14 @@ use kjarni_cli::{Cli, Commands, verbosity_to_log_level};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let log_level = verbosity_to_log_level(cli.verbose);
-    unsafe {
-        std::env::set_var("RUST_LOG", log_level);
+    // CLI verbosity flag takes precedence, otherwise use RUST_LOG env var
+    if cli.verbose > 0 {
+        let log_level = verbosity_to_log_level(cli.verbose);
+        unsafe {
+            std::env::set_var("RUST_LOG", log_level);
+        }
     }
+
     env_logger::init();
 
     match cli.command {

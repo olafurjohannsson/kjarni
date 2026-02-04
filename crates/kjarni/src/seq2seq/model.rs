@@ -1,14 +1,17 @@
 //! Core Seq2SeqGenerator implementation.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::anyhow;
 use futures::{Stream, StreamExt, pin_mut};
 use kjarni_models::models::bart::model::BartModel;
+use kjarni_models::models::t5::T5Model;
+use log::{debug, info};
 use tokio::sync::mpsc;
 
 use kjarni_transformers::WgpuContext;
-use kjarni_transformers::common::GenerationConfig;
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::encoder_decoder::{EncoderDecoderGenerator, EncoderDecoderLanguageModel};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
@@ -17,8 +20,8 @@ use kjarni_transformers::traits::Device;
 use crate::common::DownloadPolicy;
 
 use super::builder::Seq2SeqGeneratorBuilder;
-use super::resolution::{ResolvedSeq2SeqConfig, resolve_seq2seq_config};
-use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqTask, Seq2SeqToken};
+use super::resolution::apply_overrides;
+use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 use super::validation::validate_for_seq2seq;
 
 /// Generic text-to-text generator for encoder-decoder models.
@@ -37,11 +40,11 @@ use super::validation::validate_for_seq2seq;
 /// ```ignore
 /// use kjarni::seq2seq::Seq2SeqGenerator;
 ///
-/// // Basic usage
+/// // Basic usage - uses model defaults
 /// let generator = Seq2SeqGenerator::new("flan-t5-base").await?;
 /// let output = generator.generate("translate English to German: Hello").await?;
 ///
-/// // With custom config
+/// // With user overrides
 /// let generator = Seq2SeqGenerator::builder("flan-t5-large")
 ///     .num_beams(6)
 ///     .max_length(256)
@@ -56,10 +59,7 @@ pub struct Seq2SeqGenerator {
     /// Model type from registry.
     model_type: ModelType,
 
-    /// Task hint (affects default config resolution).
-    task: Option<Seq2SeqTask>,
-
-    /// User-provided overrides (stored for re-resolution with runtime overrides).
+    /// User-provided overrides (only what the user explicitly set).
     user_overrides: Seq2SeqOverrides,
 
     /// Device the model is running on.
@@ -76,7 +76,7 @@ impl Seq2SeqGenerator {
 
     /// Create a Seq2SeqGenerator with default settings.
     ///
-    /// Uses CPU, downloads model if needed.
+    /// Uses CPU, downloads model if needed. Model defaults are used for generation.
     pub async fn new(model: &str) -> Seq2SeqResult<Self> {
         Seq2SeqGeneratorBuilder::new(model).build().await
     }
@@ -88,9 +88,18 @@ impl Seq2SeqGenerator {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: Seq2SeqGeneratorBuilder) -> Seq2SeqResult<Self> {
+        let load_start = Instant::now();
+
         // Resolve model type
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| Seq2SeqError::UnknownModel(builder.model.clone()))?;
+
+        debug!(
+            "Resolved model '{}' -> {:?} ({:?})",
+            builder.model,
+            model_type,
+            model_type.info().architecture
+        );
 
         // Validate model for seq2seq
         let validation = validate_for_seq2seq(model_type)?;
@@ -118,6 +127,7 @@ impl Seq2SeqGenerator {
                     return Err(Seq2SeqError::ModelNotDownloaded(builder.model.clone()));
                 }
                 DownloadPolicy::IfMissing | DownloadPolicy::Eager => {
+                    info!("Downloading model '{}'...", builder.model);
                     if !builder.quiet {
                         eprintln!("downloading model '{}'...", builder.model);
                     }
@@ -144,6 +154,7 @@ impl Seq2SeqGenerator {
             if let Some(ctx) = builder.context {
                 Some(ctx)
             } else {
+                debug!("Initializing GPU context...");
                 Some(
                     WgpuContext::new()
                         .await
@@ -161,6 +172,13 @@ impl Seq2SeqGenerator {
             .unwrap_or_default();
 
         // Load the model based on architecture
+        info!(
+            "Loading {} model '{}' on {:?}...",
+            model_type.info().architecture,
+            builder.model,
+            device
+        );
+
         let model: Box<dyn EncoderDecoderLanguageModel> =
             Self::load_model(model_type, &cache_dir, device, context.clone(), load_config)
                 .await
@@ -177,10 +195,18 @@ impl Seq2SeqGenerator {
             }
         })?);
 
+        let load_elapsed = load_start.elapsed();
+        info!(
+            "Model '{}' loaded in {:.2}s (vocab={}, context={})",
+            builder.model,
+            load_elapsed.as_secs_f32(),
+            encoder_decoder.model.vocab_size(),
+            encoder_decoder.model.context_size()
+        );
+
         Ok(Self {
             encoder_decoder,
             model_type,
-            task: builder.task,
             user_overrides: builder.overrides,
             device,
             context,
@@ -199,7 +225,7 @@ impl Seq2SeqGenerator {
 
         match info.architecture {
             ModelArchitecture::T5 => {
-                use kjarni_models::models::t5::T5Model;
+                debug!("Loading T5 model from {:?}", cache_dir);
                 let model = T5Model::from_registry(
                     model_type,
                     Some(cache_dir.to_path_buf()),
@@ -212,6 +238,7 @@ impl Seq2SeqGenerator {
             }
 
             ModelArchitecture::Bart => {
+                debug!("Loading BART model from {:?}", cache_dir);
                 let model = BartModel::from_registry(
                     model_type,
                     Some(cache_dir.to_path_buf()),
@@ -236,50 +263,54 @@ impl Seq2SeqGenerator {
 
     /// Generate output from input text.
     ///
-    /// The input should be the fully-formatted prompt (e.g., "translate English to German: Hello").
-    /// For task-specific formatting, use `Translator` or `Summarizer` instead.
+    /// Uses model defaults. The input should be the fully-formatted prompt 
+    /// (e.g., "translate English to German: Hello").
     pub async fn generate(&self, input: &str) -> Seq2SeqResult<String> {
         self.generate_with_config(input, &Seq2SeqOverrides::default())
             .await
     }
 
-    /// Generate with custom overrides for this call only.
+    /// Generate with runtime overrides for this call only.
     ///
     /// Runtime overrides are merged with user overrides (from builder).
-    /// Runtime takes precedence.
-pub async fn generate_with_config(
-    &self,
-    input: &str,
-    runtime_overrides: &Seq2SeqOverrides,
-) -> Seq2SeqResult<String> {
-    // Get task-specific model defaults based on INPUT content
-    // (T5 detects "translate X to Y:" prefix and returns appropriate config)
-    let model_defaults = self.encoder_decoder.model.get_generation_config_for_input(input);
-    
-    // Resolve with user and runtime overrides
-    let config = resolve_seq2seq_config(
-        model_defaults,
-        self.task,
-        &self.user_overrides,
-        runtime_overrides,
-    );
+    /// If no overrides are set, model defaults are used (None is passed).
+    pub async fn generate_with_config(
+        &self,
+        input: &str,
+        runtime_overrides: &Seq2SeqOverrides,
+    ) -> Seq2SeqResult<String> {
+        let merged = self.user_overrides.merge(runtime_overrides);
 
-    // DEBUG: Print the resolved config
-    eprintln!("DEBUG input prefix: '{}'", &input[..input.len().min(60)]);
-    eprintln!("DEBUG resolved config: {:?}", config.as_ref());
+        // If no overrides, pass None - let model use its defaults
+        let config = if merged.is_empty() {
+            None
+        } else {
+            let mut cfg = self
+                .encoder_decoder
+                .model
+                .get_generation_config_for_input(input);
+            apply_overrides(&mut cfg, &merged);
+            Some(cfg)
+        };
 
-    // Generate
-    let output = self
-        .encoder_decoder
-        .generate(input, Some(config.as_ref()))
-        .await
-        .map_err(Seq2SeqError::GenerationFailed)?;
+        debug!(
+            "Generate: input_len={} chars, config={}",
+            input.len(),
+            if config.is_some() { "custom" } else { "model defaults" }
+        );
 
-    Ok(output)
-}
+        let output = self
+            .encoder_decoder
+            .generate(input, config.as_ref())
+            .await
+            .map_err(Seq2SeqError::GenerationFailed)?;
 
+        Ok(output)
+    }
 
     /// Stream generated tokens.
+    ///
+    /// Uses model defaults.
     pub async fn stream(
         &self,
         input: &str,
@@ -289,55 +320,66 @@ pub async fn generate_with_config(
             .await
     }
 
-    /// Stream with custom overrides.
+    /// Stream with runtime overrides.
+    ///
+    /// If no overrides are set, model defaults are used.
     pub async fn stream_with_config(
-    &self,
-    input: &str,
-    runtime_overrides: Seq2SeqOverrides,
-) -> Seq2SeqResult<std::pin::Pin<Box<dyn Stream<Item = Seq2SeqResult<Seq2SeqToken>> + Send>>>
-{
-    // Get task-specific model defaults based on INPUT content
-    let model_defaults = self.encoder_decoder.model.get_generation_config_for_input(input);
-    
-    // Resolve with user and runtime overrides
-    let config = resolve_seq2seq_config(
-        model_defaults,
-        self.task,
-        &self.user_overrides,
-        &runtime_overrides,
-    );
+        &self,
+        input: &str,
+        runtime_overrides: Seq2SeqOverrides,
+    ) -> Seq2SeqResult<std::pin::Pin<Box<dyn Stream<Item = Seq2SeqResult<Seq2SeqToken>> + Send>>>
+    {
+        let merged = self.user_overrides.merge(&runtime_overrides);
 
-    // Clone/own everything we need for the spawned task
-    let encoder_decoder = self.encoder_decoder.clone();
-    let config = config.into_inner();
-    let input = input.to_string();
+        // If no overrides, pass None - let model use its defaults
+        let config = if merged.is_empty() {
+            None
+        } else {
+            let mut cfg = self
+                .encoder_decoder
+                .model
+                .get_generation_config_for_input(input);
+            apply_overrides(&mut cfg, &merged);
+            Some(cfg)
+        };
 
-    let (tx, rx) = mpsc::channel::<Seq2SeqResult<Seq2SeqToken>>(32);
+        debug!(
+            "Stream: input_len={} chars, config={}",
+            input.len(),
+            if config.is_some() { "custom" } else { "model defaults" }
+        );
 
-    tokio::spawn(async move {
-        let stream = encoder_decoder.generate_stream(&input, Some(&config));
+        // Clone/own everything we need for the spawned task
+        let encoder_decoder = self.encoder_decoder.clone();
+        let input = input.to_string();
 
-        pin_mut!(stream);
+        let (tx, rx) = mpsc::channel::<Seq2SeqResult<Seq2SeqToken>>(32);
 
-        while let Some(result) = stream.next().await {
-            let msg = match result {
-                Ok(token) => Ok(Seq2SeqToken {
-                    text: token.text,
-                    id: token.id,
-                    is_special: false,
-                }),
-                Err(e) => Err(Seq2SeqError::GenerationFailed(e)),
-            };
+        tokio::spawn(async move {
+            let stream = encoder_decoder.generate_stream(&input, config.as_ref());
 
-            if tx.send(msg).await.is_err() {
-                break; // Receiver dropped
+            pin_mut!(stream);
+
+            while let Some(result) = stream.next().await {
+                let msg = match result {
+                    Ok(token) => Ok(Seq2SeqToken {
+                        text: token.text,
+                        id: token.id,
+                        is_special: false,
+                    }),
+                    Err(e) => Err(Seq2SeqError::GenerationFailed(e)),
+                };
+
+                if tx.send(msg).await.is_err() {
+                    debug!("Stream receiver dropped, stopping generation");
+                    break;
+                }
             }
-        }
-    });
+        });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    Ok(Box::pin(stream))
-}
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok(Box::pin(stream))
+    }
 
     /// Stream as simple strings (convenience method).
     pub async fn stream_text(
@@ -350,17 +392,13 @@ pub async fn generate_with_config(
     }
 
     // =========================================================================
-    // Config Access
+    // Accessors
     // =========================================================================
 
     /// Get the model's default generation config.
     pub fn get_model_defaults(&self) -> GenerationConfig {
         self.encoder_decoder.model.get_default_generation_config()
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model type.
     pub fn model_type(&self) -> ModelType {
@@ -393,8 +431,6 @@ pub async fn generate_with_config(
     }
 
     /// Get a reference to the underlying encoder-decoder generator.
-    ///
-    /// For advanced use cases that need direct access.
     pub fn encoder_decoder(&self) -> &EncoderDecoderGenerator {
         &self.encoder_decoder
     }

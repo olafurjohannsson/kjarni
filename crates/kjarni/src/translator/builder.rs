@@ -48,7 +48,7 @@ impl TranslatorBuilder {
             context: None,
             cache_dir: None,
             download_policy: DownloadPolicy::default(),
-            overrides: Seq2SeqOverrides::for_translation(),
+            overrides: Seq2SeqOverrides::default(),
             quiet: false,
         }
     }
@@ -63,7 +63,7 @@ impl TranslatorBuilder {
             context: None,
             cache_dir: None,
             download_policy: DownloadPolicy::default(),
-            overrides: Seq2SeqOverrides::for_translation(),
+            overrides: Seq2SeqOverrides::default(),
             quiet: false,
         }
     }

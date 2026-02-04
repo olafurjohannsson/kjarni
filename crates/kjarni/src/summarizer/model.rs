@@ -5,7 +5,7 @@ use futures::{Stream, StreamExt};
 use kjarni_transformers::models::{ModelArchitecture, ModelType};
 use kjarni_transformers::traits::Device;
 
-use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides, Seq2SeqTask};
+use crate::seq2seq::{Seq2SeqGenerator, Seq2SeqGeneratorBuilder, Seq2SeqOverrides};
 
 use super::builder::SummarizerBuilder;
 use super::types::{SummarizerError, SummarizerResult};
@@ -72,7 +72,6 @@ impl Summarizer {
 
         // Build the underlying seq2seq generator
         let mut gen_builder = Seq2SeqGeneratorBuilder::new(&builder.model)
-            .for_summarization()
             .device(builder.device)
             .download_policy(builder.download_policy)
             .with_overrides(builder.overrides);
@@ -180,5 +179,14 @@ impl Summarizer {
     /// Get a reference to the underlying generator.
     pub fn generator(&self) -> &Seq2SeqGenerator {
         &self.generator
+    }
+}
+
+impl std::fmt::Debug for Summarizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Summarizer")
+            .field("model", &self.generator.model_name())
+            .field("device", &self.generator.device())
+            .finish()
     }
 }

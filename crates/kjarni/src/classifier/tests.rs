@@ -14,6 +14,143 @@ use crate::classifier::{
 use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig};
 
 // =============================================================================
+// PyTorch Reference Constants
+// =============================================================================
+
+mod expected {
+    // =========================================================================
+    // Test Inputs
+    // =========================================================================
+    pub const INPUT_POSITIVE: &str = "I absolutely love this, it's amazing!";
+    pub const INPUT_NEGATIVE: &str = "This is terrible, I hate it so much.";
+    pub const INPUT_NEUTRAL: &str = "The meeting is scheduled for Tuesday.";
+    pub const INPUT_GERMAN_POSITIVE: &str = "Das ist wunderbar, ich liebe es!";
+    pub const INPUT_FRENCH_NEGATIVE: &str = "C'est terrible, je déteste ça.";
+    pub const INPUT_SPANISH_POSITIVE: &str = "¡Esto es increíble, me encanta!";
+    pub const INPUT_TOXIC: &str = "I hate you, you're worthless garbage.";
+    pub const INPUT_NON_TOXIC: &str = "Thank you for your help today.";
+    pub const INPUT_HAPPY: &str = "I am so happy and excited for the weekend!";
+    pub const INPUT_SAD: &str = "That was a truly disappointing and sad experience.";
+
+    // =========================================================================
+    // distilbert-sentiment (2 labels: NEGATIVE, POSITIVE)
+    // =========================================================================
+    pub const DISTILBERT_SENTIMENT_POSITIVE_LABEL: &str = "POSITIVE";
+    pub const DISTILBERT_SENTIMENT_POSITIVE_SCORE: f32 = 0.99987566;
+    pub const DISTILBERT_SENTIMENT_POSITIVE_LABEL_INDEX: usize = 1;
+    pub const DISTILBERT_SENTIMENT_NEGATIVE_LABEL: &str = "NEGATIVE";
+    pub const DISTILBERT_SENTIMENT_NEGATIVE_SCORE: f32 = 0.99950767;
+    pub const DISTILBERT_SENTIMENT_NEGATIVE_LABEL_INDEX: usize = 0;
+    pub const DISTILBERT_SENTIMENT_NEUTRAL_LABEL: &str = "POSITIVE";
+    pub const DISTILBERT_SENTIMENT_NEUTRAL_SCORE: f32 = 0.98554265;
+    pub const DISTILBERT_SENTIMENT_NEUTRAL_LABEL_INDEX: usize = 1;
+    pub const DISTILBERT_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00012436, 0.99987566];
+    pub const DISTILBERT_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.99950767, 0.00049234];
+    pub const DISTILBERT_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01445730, 0.98554265];
+
+    // =========================================================================
+    // roberta-sentiment (3 labels: negative, neutral, positive)
+    // =========================================================================
+    pub const ROBERTA_SENTIMENT_POSITIVE_LABEL: &str = "positive";
+    pub const ROBERTA_SENTIMENT_POSITIVE_SCORE: f32 = 0.98318094;
+    pub const ROBERTA_SENTIMENT_POSITIVE_LABEL_INDEX: usize = 2;
+    pub const ROBERTA_SENTIMENT_NEGATIVE_LABEL: &str = "negative";
+    pub const ROBERTA_SENTIMENT_NEGATIVE_SCORE: f32 = 0.94799244;
+    pub const ROBERTA_SENTIMENT_NEGATIVE_LABEL_INDEX: usize = 0;
+    pub const ROBERTA_SENTIMENT_NEUTRAL_LABEL: &str = "neutral";
+    pub const ROBERTA_SENTIMENT_NEUTRAL_SCORE: f32 = 0.92984450;
+    pub const ROBERTA_SENTIMENT_NEUTRAL_LABEL_INDEX: usize = 1;
+    pub const ROBERTA_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00723555, 0.00958345, 0.98318094];
+    pub const ROBERTA_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.94799244, 0.04338233, 0.00862524];
+    pub const ROBERTA_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01340395, 0.92984450, 0.05675153];
+
+    // =========================================================================
+    // bert-sentiment-multilingual (5 labels: 1-5 stars)
+    // =========================================================================
+    pub const BERT_MULTILINGUAL_POSITIVE_LABEL: &str = "5 stars";
+    pub const BERT_MULTILINGUAL_POSITIVE_SCORE: f32 = 0.96888399;
+    pub const BERT_MULTILINGUAL_POSITIVE_LABEL_INDEX: usize = 4;
+    pub const BERT_MULTILINGUAL_NEGATIVE_LABEL: &str = "1 star";
+    pub const BERT_MULTILINGUAL_NEGATIVE_SCORE: f32 = 0.93407023;
+    pub const BERT_MULTILINGUAL_NEGATIVE_LABEL_INDEX: usize = 0;
+    pub const BERT_MULTILINGUAL_GERMAN_POSITIVE_LABEL: &str = "5 stars";
+    pub const BERT_MULTILINGUAL_GERMAN_POSITIVE_SCORE: f32 = 0.88652706;
+    pub const BERT_MULTILINGUAL_GERMAN_POSITIVE_LABEL_INDEX: usize = 4;
+    pub const BERT_MULTILINGUAL_FRENCH_NEGATIVE_LABEL: &str = "1 star";
+    pub const BERT_MULTILINGUAL_FRENCH_NEGATIVE_SCORE: f32 = 0.76093268;
+    pub const BERT_MULTILINGUAL_FRENCH_NEGATIVE_LABEL_INDEX: usize = 0;
+    pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL: &str = "5 stars";
+    pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_SCORE: f32 = 0.93122756;
+    pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL_INDEX: usize = 4;
+
+    // =========================================================================
+    // distilroberta-emotion (7 labels: anger, disgust, fear, joy, neutral, sadness, surprise)
+    // =========================================================================
+    pub const DISTILROBERTA_EMOTION_POSITIVE_LABEL: &str = "joy";
+    pub const DISTILROBERTA_EMOTION_POSITIVE_SCORE: f32 = 0.86246377;
+    pub const DISTILROBERTA_EMOTION_POSITIVE_LABEL_INDEX: usize = 3;
+    pub const DISTILROBERTA_EMOTION_NEGATIVE_LABEL: &str = "disgust";
+    pub const DISTILROBERTA_EMOTION_NEGATIVE_SCORE: f32 = 0.78679681;
+    pub const DISTILROBERTA_EMOTION_NEGATIVE_LABEL_INDEX: usize = 1;
+    pub const DISTILROBERTA_EMOTION_HAPPY_LABEL: &str = "joy";
+    pub const DISTILROBERTA_EMOTION_HAPPY_SCORE: f32 = 0.98810238;
+    pub const DISTILROBERTA_EMOTION_HAPPY_LABEL_INDEX: usize = 3;
+    pub const DISTILROBERTA_EMOTION_SAD_LABEL: &str = "sadness";
+    pub const DISTILROBERTA_EMOTION_SAD_SCORE: f32 = 0.96455652;
+    pub const DISTILROBERTA_EMOTION_SAD_LABEL_INDEX: usize = 5;
+    pub const DISTILROBERTA_EMOTION_NEUTRAL_LABEL: &str = "neutral";
+    pub const DISTILROBERTA_EMOTION_NEUTRAL_SCORE: f32 = 0.73899311;
+    pub const DISTILROBERTA_EMOTION_NEUTRAL_LABEL_INDEX: usize = 4;
+    pub const DISTILROBERTA_EMOTION_POSITIVE_SCORES: &[f32] = &[
+        0.00477491, 0.00191224, 0.00230405, 0.86246377, 0.01962744, 0.00249050, 0.10642719,
+    ];
+    pub const DISTILROBERTA_EMOTION_NEGATIVE_SCORES: &[f32] = &[
+        0.11187306, 0.78679681, 0.07801756, 0.00140430, 0.00470836, 0.01464303, 0.00255702,
+    ];
+    pub const DISTILROBERTA_EMOTION_HAPPY_SCORES: &[f32] = &[
+        0.00100080, 0.00032470, 0.00030043, 0.98810238, 0.00171235, 0.00189455, 0.00666480,
+    ];
+    pub const DISTILROBERTA_EMOTION_SAD_SCORES: &[f32] = &[
+        0.00093757, 0.00351960, 0.00305090, 0.00237514, 0.01091948, 0.96455652, 0.01464079,
+    ];
+    pub const DISTILROBERTA_EMOTION_NEUTRAL_SCORES: &[f32] = &[
+        0.01819254, 0.00930141, 0.04236472, 0.10131434, 0.73899311, 0.03730628, 0.05252752,
+    ];
+
+    // =========================================================================
+    // roberta-emotions (28 labels, multi-label)
+    // =========================================================================
+    pub const ROBERTA_EMOTIONS_POSITIVE_LABEL: &str = "love";
+    pub const ROBERTA_EMOTIONS_POSITIVE_SCORE: f32 = 0.87999564;
+    pub const ROBERTA_EMOTIONS_POSITIVE_LABEL_INDEX: usize = 18;
+    pub const ROBERTA_EMOTIONS_NEGATIVE_LABEL: &str = "fear";
+    pub const ROBERTA_EMOTIONS_NEGATIVE_SCORE: f32 = 0.42559999;
+    pub const ROBERTA_EMOTIONS_NEGATIVE_LABEL_INDEX: usize = 14;
+    pub const ROBERTA_EMOTIONS_HAPPY_LABEL: &str = "excitement";
+    pub const ROBERTA_EMOTIONS_HAPPY_SCORE: f32 = 0.74202043;
+    pub const ROBERTA_EMOTIONS_HAPPY_LABEL_INDEX: usize = 13;
+    pub const ROBERTA_EMOTIONS_SAD_LABEL: &str = "sadness";
+    pub const ROBERTA_EMOTIONS_SAD_SCORE: f32 = 0.63250113;
+    pub const ROBERTA_EMOTIONS_SAD_LABEL_INDEX: usize = 25;
+    pub const ROBERTA_EMOTIONS_NEUTRAL_LABEL: &str = "neutral";
+    pub const ROBERTA_EMOTIONS_NEUTRAL_SCORE: f32 = 0.94425792;
+    pub const ROBERTA_EMOTIONS_NEUTRAL_LABEL_INDEX: usize = 27;
+
+    // =========================================================================
+    // toxic-bert (6 labels, multi-label)
+    // =========================================================================
+    pub const TOXIC_BERT_TOXIC_LABEL: &str = "toxic";
+    pub const TOXIC_BERT_TOXIC_SCORE: f32 = 0.99004936;
+    pub const TOXIC_BERT_TOXIC_LABEL_INDEX: usize = 0;
+    pub const TOXIC_BERT_NON_TOXIC_LABEL: &str = "toxic";
+    pub const TOXIC_BERT_NON_TOXIC_SCORE: f32 = 0.00050768;
+    pub const TOXIC_BERT_NON_TOXIC_LABEL_INDEX: usize = 0;
+    pub const TOXIC_BERT_POSITIVE_LABEL: &str = "toxic";
+    pub const TOXIC_BERT_POSITIVE_SCORE: f32 = 0.00057647;
+    pub const TOXIC_BERT_POSITIVE_LABEL_INDEX: usize = 0;
+}
+
+// =============================================================================
 // Type Tests
 // =============================================================================
 
@@ -212,6 +349,7 @@ mod classifier_tests {
             assert!(builder.quiet);
             assert_eq!(builder.download_policy, DownloadPolicy::Never);
         }
+
         #[test]
         fn test_builder_from_preset() {
             let builder = ClassifierBuilder::from_preset(&presets::SENTIMENT_BINARY_V1);
@@ -252,7 +390,7 @@ mod classifier_tests {
             assert_eq!(preset.model, "distilbert-sentiment");
             assert_eq!(preset.task, presets::ClassificationTask::Sentiment);
             assert!(preset.labels.is_some());
-            assert_eq!(preset.labels.unwrap().len(), 2); // NEGATIVE, POSITIVE
+            assert_eq!(preset.labels.unwrap().len(), 2);
         }
 
         #[test]
@@ -261,7 +399,7 @@ mod classifier_tests {
 
             assert_eq!(preset.name, "SENTIMENT_3CLASS_V1");
             assert_eq!(preset.model, "roberta-sentiment");
-            assert_eq!(preset.labels.unwrap().len(), 3); // negative, neutral, positive
+            assert_eq!(preset.labels.unwrap().len(), 3);
         }
 
         #[test]
@@ -320,9 +458,7 @@ mod classifier_tests {
             let fast = presets::ClassifierTier::Fast.resolve();
             let balanced = presets::ClassifierTier::Balanced.resolve();
 
-            // Fast defaults to binary sentiment
             assert_eq!(fast.name, "SENTIMENT_BINARY_V1");
-            // Balanced defaults to 3-class sentiment
             assert_eq!(balanced.name, "SENTIMENT_3CLASS_V1");
         }
 
@@ -344,10 +480,11 @@ mod classifier_tests {
             names.dedup();
             assert_eq!(names.len(), original_len, "Duplicate preset names found");
         }
+
         #[test]
         fn test_preset_lookup() {
             assert!(find_preset("SENTIMENT_BINARY_V1").is_some());
-            assert!(find_preset("sentiment_binary_v1").is_some()); // case insensitive
+            assert!(find_preset("sentiment_binary_v1").is_some());
             assert!(find_preset("nonexistent").is_none());
         }
 
@@ -375,9 +512,9 @@ mod classifier_tests {
     mod validation_tests {
         use super::*;
         use kjarni_transformers::models::ModelType;
+
         #[test]
         fn test_validate_sentiment_model() {
-            // DistilBERT-SST2 should be valid
             if let Some(model_type) = ModelType::from_cli_name("distilbert-sentiment") {
                 let result = validation::validate_for_classification(model_type);
                 assert!(
@@ -388,19 +525,7 @@ mod classifier_tests {
         }
 
         #[test]
-        fn test_validate_reranker_is_not_classifier() {
-            // Reranker should NOT be valid for classification
-            if let Some(model_type) = ModelType::from_cli_name("minilm-reranker") {
-                let result = validation::validate_for_classification(model_type);
-                // This depends on how you implement validation
-                // If ReRanking task is excluded, this should fail
-                // If you allow it, adjust the test
-            }
-        }
-
-        #[test]
         fn test_validate_decoder_invalid() {
-            // Decoder models should fail
             if let Some(model_type) = ModelType::from_cli_name("llama3.2-1b-instruct") {
                 let result = validation::validate_for_classification(model_type);
                 assert!(
@@ -413,13 +538,10 @@ mod classifier_tests {
         #[test]
         fn test_get_classifier_models() {
             let models = validation::get_classifier_models();
-            // Should return at least some models
             assert!(
                 !models.is_empty(),
                 "Should have at least one classifier model"
             );
-
-            // Should include sentiment model
             assert!(
                 models.iter().any(|m| m.contains("sentiment")
                     || m.contains("emotion")
@@ -427,9 +549,9 @@ mod classifier_tests {
                 "Should include at least one known classifier"
             );
         }
+
         #[test]
         fn test_validate_classifier_model() {
-            // Cross-encoder should be valid
             if let Some(model_type) = ModelType::from_cli_name("minilm-l6-v2-cross-encoder") {
                 let result = validation::validate_for_classification(model_type);
                 assert!(
@@ -441,7 +563,6 @@ mod classifier_tests {
 
         #[test]
         fn test_validate_non_classifier_model() {
-            // Decoder models should fail
             if let Some(model_type) = ModelType::from_cli_name("llama3.2-1b") {
                 let result = validation::validate_for_classification(model_type);
                 assert!(
@@ -510,7 +631,6 @@ mod classifier_tests {
         #[test]
         fn test_available_models_returns_list() {
             let models = available_models();
-            // Should not panic, may return empty or populated list
             assert!(models.len() >= 0);
         }
     }
@@ -522,17 +642,12 @@ mod classifier_tests {
     const TEST_TEXT_POSITIVE: &str = "I absolutely love this, it's amazing!";
     const TEST_TEXT_NEGATIVE: &str = "This is terrible, I hate it so much.";
     const TEST_TEXT_NEUTRAL: &str = "The meeting is scheduled for Tuesday.";
-
-    // Multilingual test phrases
     const TEST_TEXT_GERMAN_POSITIVE: &str = "Das ist wunderbar, ich liebe es!";
     const TEST_TEXT_FRENCH_NEGATIVE: &str = "C'est terrible, je déteste ça.";
     const TEST_TEXT_SPANISH_POSITIVE: &str = "¡Esto es increíble, me encanta!";
-
-    // Toxic test phrases
     const TEST_TEXT_TOXIC: &str = "I hate you, you're worthless garbage.";
     const TEST_TEXT_NON_TOXIC: &str = "Thank you for your help today.";
 
-    /// Helper to verify scores are valid probabilities
     fn assert_valid_probability(score: f32, context: &str) {
         assert!(
             (0.0..=1.0).contains(&score),
@@ -542,501 +657,933 @@ mod classifier_tests {
         );
     }
 
-    /// Helper to verify single-label scores sum to ~1.0
-    fn assert_scores_sum_to_one(scores: &[(String, f32)], tolerance: f32) {
-        let sum: f32 = scores.iter().map(|(_, s)| s).sum();
-        assert!(
-            (sum - 1.0).abs() < tolerance,
-            "Scores sum to {}, expected ~1.0",
-            sum
-        );
+    fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
+        (a - b).abs() < eps
     }
 
     // =============================================================================
-    // Loading Strategy Tests
+    // distilbert-sentiment Integration Tests
     // =============================================================================
 
-    mod loading_tests {
+    mod distilbert_sentiment_tests {
         use super::*;
 
         #[tokio::test]
-        async fn test_load_by_cli_name() {
+        async fn test_positive_text() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
-                .expect("Failed to load by CLI name");
+                .expect("Failed to load distilbert-sentiment");
 
-            assert_eq!(classifier.model_name(), "distilbert-sentiment");
-            assert_eq!(classifier.num_labels(), 2);
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILBERT_SENTIMENT_POSITIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILBERT_SENTIMENT_POSITIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILBERT_SENTIMENT_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILBERT_SENTIMENT_POSITIVE_SCORE,
+                result.score
+            );
         }
 
         #[tokio::test]
-        async fn test_load_by_absolute_path() {
-            // First download the model to get a known path
-            let classifier_from_registry = Classifier::new("distilbert-sentiment")
+        async fn test_negative_text() {
+            let classifier = Classifier::new("distilbert-sentiment")
                 .await
-                .expect("Failed to download model");
+                .expect("Failed to load distilbert-sentiment");
 
-            // Now test loading from local path
-            // Adjust this path based on your cache directory structure
-            let cache_dir = crate::common::default_cache_dir();
-            let model_path =
-                cache_dir.join("distilbert_distilbert-base-uncased-finetuned-sst-2-english");
+            let result = classifier
+                .classify(expected::INPUT_NEGATIVE)
+                .await
+                .expect("Classification failed");
 
-            if model_path.exists() {
-                let classifier = Classifier::from_path(&model_path)
-                    .labels(vec!["NEGATIVE", "POSITIVE"])
-                    .build()
-                    .await
-                    .expect("Failed to load by absolute path");
+            assert_eq!(result.label, expected::DISTILBERT_SENTIMENT_NEGATIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILBERT_SENTIMENT_NEGATIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILBERT_SENTIMENT_NEGATIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILBERT_SENTIMENT_NEGATIVE_SCORE,
+                result.score
+            );
+        }
 
-                assert_eq!(classifier.num_labels(), 2);
+        #[tokio::test]
+        async fn test_neutral_text() {
+            let classifier = Classifier::new("distilbert-sentiment")
+                .await
+                .expect("Failed to load distilbert-sentiment");
 
-                let result = classifier
-                    .classify(TEST_TEXT_POSITIVE)
-                    .await
-                    .expect("Classification failed");
+            let result = classifier
+                .classify(expected::INPUT_NEUTRAL)
+                .await
+                .expect("Classification failed");
 
-                assert_eq!(result.label, "POSITIVE");
+            assert_eq!(result.label, expected::DISTILBERT_SENTIMENT_NEUTRAL_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILBERT_SENTIMENT_NEUTRAL_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILBERT_SENTIMENT_NEUTRAL_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILBERT_SENTIMENT_NEUTRAL_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_scores_exact_match() {
+            let classifier = Classifier::new("distilbert-sentiment")
+                .await
+                .expect("Failed to load distilbert-sentiment");
+
+            let scores = classifier
+                .classify_scores(expected::INPUT_POSITIVE)
+                .await
+                .expect("Failed to get scores");
+
+            assert_eq!(scores.len(), 2);
+            for (i, (actual, &expected_score)) in scores
+                .iter()
+                .zip(expected::DISTILBERT_SENTIMENT_POSITIVE_SCORES.iter())
+                .enumerate()
+            {
+                assert!(
+                    approx_eq(*actual, expected_score, 1e-5),
+                    "Score mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected_score,
+                    actual
+                );
             }
         }
 
         #[tokio::test]
-        async fn test_load_by_hf_repo_name() {
-            // This tests that the CLI name maps to the correct HF repo
-            // The actual loading happens through the registry
-            let classifier = Classifier::builder("roberta-sentiment")
-                .build()
-                .await
-                .expect("Failed to load model");
-
-            // Verify it loaded the correct model
-            let labels = classifier.labels().expect("Should have labels");
-            assert_eq!(labels, vec!["negative", "neutral", "positive"]);
-        }
-    }
-
-    // =============================================================================
-    // Sentiment Models
-    // =============================================================================
-
-    mod sentiment_tests {
-        use super::*;
-
-        #[tokio::test]
-        async fn test_distilbert_sentiment_binary() {
-            let preset = &SENTIMENT_BINARY_V1;
-            assert_eq!(preset.model, "distilbert-sentiment");
-            assert_eq!(preset.task, ClassificationTask::Sentiment);
-
-            let classifier = Classifier::new(preset.model)
+        async fn test_scores_sum_to_one() {
+            let classifier = Classifier::new("distilbert-sentiment")
                 .await
                 .expect("Failed to load distilbert-sentiment");
 
-            // Verify preset contract
-            let expected_labels: Vec<String> = preset
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(classifier.num_labels(), expected_labels.len());
-            assert_eq!(
-                classifier.labels().expect("Should have labels"),
-                expected_labels
-            );
-
-            // Test positive text
-            let result = classifier
-                .classify(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Classification failed");
-            assert_eq!(result.label, "POSITIVE");
-            assert_valid_probability(result.score, "positive classification");
-            assert!(
-                result.score > 0.8,
-                "Expected high confidence for clear positive"
-            );
-
-            // Test negative text
-            let result = classifier
-                .classify(TEST_TEXT_NEGATIVE)
-                .await
-                .expect("Classification failed");
-            assert_eq!(result.label, "NEGATIVE");
-            assert!(
-                result.score > 0.8,
-                "Expected high confidence for clear negative"
-            );
-
-            // Verify single-label mode (softmax, scores sum to 1)
             let scores = classifier
-                .classify_scores(TEST_TEXT_POSITIVE)
+                .classify_scores(expected::INPUT_POSITIVE)
                 .await
                 .expect("Failed to get scores");
+
             let sum: f32 = scores.iter().sum();
             assert!(
-                (sum - 1.0).abs() < 0.01,
-                "Single-label scores should sum to 1.0, got {}",
+                approx_eq(sum, 1.0, 0.001),
+                "Scores should sum to 1.0, got {}",
                 sum
-            );
-        }
-
-        #[tokio::test]
-        async fn test_roberta_sentiment_3class() {
-            let preset = &SENTIMENT_3CLASS_V1;
-            assert_eq!(preset.model, "roberta-sentiment");
-
-            let classifier = Classifier::new(preset.model)
-                .await
-                .expect("Failed to load roberta-sentiment");
-
-            // Verify labels
-            let expected_labels: Vec<String> = preset
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(classifier.num_labels(), 3);
-            assert_eq!(
-                classifier.labels().expect("Should have labels"),
-                expected_labels
-            );
-
-            // Test positive
-            let result = classifier
-                .classify(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Classification failed");
-            assert_eq!(result.label, "positive");
-            assert!(result.score > 0.7);
-
-            // Test negative
-            let result = classifier
-                .classify(TEST_TEXT_NEGATIVE)
-                .await
-                .expect("Classification failed");
-            assert_eq!(result.label, "negative");
-            assert!(result.score > 0.7);
-
-            // Test neutral
-            let result = classifier
-                .classify(TEST_TEXT_NEUTRAL)
-                .await
-                .expect("Classification failed");
-            // Neutral text might not always be classified as neutral, but check it works
-            assert_valid_probability(result.score, "neutral classification");
-
-            // Verify softmax (single-label)
-            let scores = classifier
-                .classify_scores(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Failed to get scores");
-            let sum: f32 = scores.iter().sum();
-            assert!((sum - 1.0).abs() < 0.01);
-        }
-
-        #[tokio::test]
-        async fn test_bert_sentiment_multilingual_5star() {
-            let preset = &SENTIMENT_5STAR_V1;
-            assert_eq!(preset.model, "bert-sentiment-multilingual");
-
-            let classifier = Classifier::new(preset.model)
-                .await
-                .expect("Failed to load bert-sentiment-multilingual");
-
-            // Verify 5 labels
-            assert_eq!(classifier.num_labels(), 5);
-            let labels = classifier.labels().expect("Should have labels");
-            assert!(labels.iter().any(|l| l.contains("star")));
-
-            // Test English positive (should be 4 or 5 stars)
-            let result = classifier
-                .classify(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Classification failed");
-            assert!(
-                result.label.contains("4") || result.label.contains("5"),
-                "Expected 4-5 stars for positive text, got {}",
-                result.label
-            );
-
-            // Test English negative (should be 1 or 2 stars)
-            let result = classifier
-                .classify(TEST_TEXT_NEGATIVE)
-                .await
-                .expect("Classification failed");
-            assert!(
-                result.label.contains("1") || result.label.contains("2"),
-                "Expected 1-2 stars for negative text, got {}",
-                result.label
-            );
-
-            // Test German positive
-            let result = classifier
-                .classify(TEST_TEXT_GERMAN_POSITIVE)
-                .await
-                .expect("German classification failed");
-            assert!(
-                result.label.contains("4") || result.label.contains("5"),
-                "Expected 4-5 stars for German positive, got {}",
-                result.label
-            );
-
-            // Test French negative
-            let result = classifier
-                .classify(TEST_TEXT_FRENCH_NEGATIVE)
-                .await
-                .expect("French classification failed");
-            assert!(
-                result.label.contains("1")
-                    || result.label.contains("2")
-                    || result.label.contains("3"),
-                "Expected 1-3 stars for French negative, got {}",
-                result.label
-            );
-
-            // Test Spanish positive
-            let result = classifier
-                .classify(TEST_TEXT_SPANISH_POSITIVE)
-                .await
-                .expect("Spanish classification failed");
-            assert!(
-                result.label.contains("4") || result.label.contains("5"),
-                "Expected 4-5 stars for Spanish positive, got {}",
-                result.label
             );
         }
     }
 
     // =============================================================================
-    // Emotion Models
+    // roberta-sentiment Integration Tests
     // =============================================================================
 
-    mod emotion_tests {
+    mod roberta_sentiment_tests {
         use super::*;
 
         #[tokio::test]
-        async fn test_distilroberta_emotion_7class() {
-            let preset = &EMOTION_V1;
-            assert_eq!(preset.model, "distilroberta-emotion");
-            assert_eq!(preset.task, ClassificationTask::Emotion);
-
-            let classifier = Classifier::new(preset.model)
+        async fn test_positive_text() {
+            let classifier = Classifier::new("roberta-sentiment")
                 .await
-                .expect("Failed to load distilroberta-emotion");
+                .expect("Failed to load roberta-sentiment");
 
-            // Verify 7 labels
-            let expected_labels: Vec<String> = preset
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(classifier.num_labels(), 7);
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_SENTIMENT_POSITIVE_LABEL);
             assert_eq!(
-                classifier.labels().expect("Should have labels"),
-                expected_labels
+                result.label_index,
+                expected::ROBERTA_SENTIMENT_POSITIVE_LABEL_INDEX
             );
-
-            // This is single-label (not multi-label)
-            assert_eq!(classifier.mode(), ClassificationMode::SingleLabel);
-
-            // Test joyful text
-            let result = classifier
-                .classify(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Classification failed");
-            assert_eq!(result.label, "joy");
-            assert!(result.score > 0.7);
-
-            // Test sad/angry text
-            let result = classifier
-                .classify(TEST_TEXT_NEGATIVE)
-                .await
-                .expect("Classification failed");
             assert!(
-                result.label == "anger" || result.label == "sadness" || result.label == "disgust",
-                "Expected negative emotion, got {}",
-                result.label
+                approx_eq(
+                    result.score,
+                    expected::ROBERTA_SENTIMENT_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_SENTIMENT_POSITIVE_SCORE,
+                result.score
             );
-
-            // Verify softmax
-            let scores = classifier
-                .classify_scores(TEST_TEXT_POSITIVE)
-                .await
-                .expect("Failed to get scores");
-            let sum: f32 = scores.iter().sum();
-            assert!((sum - 1.0).abs() < 0.01);
         }
 
         #[tokio::test]
-        async fn test_roberta_emotions_28class_multilabel() {
-            let preset = &EMOTION_DETAILED_V1;
-            assert_eq!(preset.model, "roberta-emotions");
+        async fn test_negative_text() {
+            let classifier = Classifier::new("roberta-sentiment")
+                .await
+                .expect("Failed to load roberta-sentiment");
 
-            // Load with multi-label mode
-            let classifier = Classifier::builder(preset.model)
+            let result = classifier
+                .classify(expected::INPUT_NEGATIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_SENTIMENT_NEGATIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_SENTIMENT_NEGATIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::ROBERTA_SENTIMENT_NEGATIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_SENTIMENT_NEGATIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_neutral_text() {
+            let classifier = Classifier::new("roberta-sentiment")
+                .await
+                .expect("Failed to load roberta-sentiment");
+
+            let result = classifier
+                .classify(expected::INPUT_NEUTRAL)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_SENTIMENT_NEUTRAL_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_SENTIMENT_NEUTRAL_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::ROBERTA_SENTIMENT_NEUTRAL_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_SENTIMENT_NEUTRAL_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_scores_exact_match() {
+            let classifier = Classifier::new("roberta-sentiment")
+                .await
+                .expect("Failed to load roberta-sentiment");
+
+            let scores = classifier
+                .classify_scores(expected::INPUT_POSITIVE)
+                .await
+                .expect("Failed to get scores");
+
+            assert_eq!(scores.len(), 3);
+            for (i, (actual, &expected_score)) in scores
+                .iter()
+                .zip(expected::ROBERTA_SENTIMENT_POSITIVE_SCORES.iter())
+                .enumerate()
+            {
+                assert!(
+                    approx_eq(*actual, expected_score, 1e-5),
+                    "Score mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected_score,
+                    actual
+                );
+            }
+        }
+    }
+
+    // =============================================================================
+    // bert-sentiment-multilingual Integration Tests
+    // =============================================================================
+
+    mod bert_multilingual_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_english_positive() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load bert-sentiment-multilingual");
+
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::BERT_MULTILINGUAL_POSITIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::BERT_MULTILINGUAL_POSITIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::BERT_MULTILINGUAL_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::BERT_MULTILINGUAL_POSITIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_english_negative() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load bert-sentiment-multilingual");
+
+            let result = classifier
+                .classify(expected::INPUT_NEGATIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::BERT_MULTILINGUAL_NEGATIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::BERT_MULTILINGUAL_NEGATIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::BERT_MULTILINGUAL_NEGATIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::BERT_MULTILINGUAL_NEGATIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_german_positive() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load bert-sentiment-multilingual");
+
+            let result = classifier
+                .classify(expected::INPUT_GERMAN_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(
+                result.label,
+                expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_LABEL
+            );
+            assert_eq!(
+                result.label_index,
+                expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_french_negative() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load bert-sentiment-multilingual");
+
+            let result = classifier
+                .classify(expected::INPUT_FRENCH_NEGATIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(
+                result.label,
+                expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_LABEL
+            );
+            assert_eq!(
+                result.label_index,
+                expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_spanish_positive() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load bert-sentiment-multilingual");
+
+            let result = classifier
+                .classify(expected::INPUT_SPANISH_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(
+                result.label,
+                expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL
+            );
+            assert_eq!(
+                result.label_index,
+                expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_batch_multilingual() {
+            let classifier = Classifier::new("bert-sentiment-multilingual")
+                .await
+                .expect("Failed to load model");
+
+            let texts = &[
+                expected::INPUT_POSITIVE,
+                expected::INPUT_GERMAN_POSITIVE,
+                expected::INPUT_FRENCH_NEGATIVE,
+                expected::INPUT_SPANISH_POSITIVE,
+            ];
+
+            let results = classifier
+                .classify_batch(texts)
+                .await
+                .expect("Batch classification failed");
+
+            assert_eq!(results.len(), 4);
+
+            // English positive
+            assert_eq!(results[0].label, expected::BERT_MULTILINGUAL_POSITIVE_LABEL);
+            assert!(approx_eq(
+                results[0].score,
+                expected::BERT_MULTILINGUAL_POSITIVE_SCORE,
+                1e-5
+            ));
+
+            // German positive
+            assert_eq!(
+                results[1].label,
+                expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_LABEL
+            );
+            assert!(approx_eq(
+                results[1].score,
+                expected::BERT_MULTILINGUAL_GERMAN_POSITIVE_SCORE,
+                1e-5
+            ));
+
+            // French negative
+            assert_eq!(
+                results[2].label,
+                expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_LABEL
+            );
+            assert!(approx_eq(
+                results[2].score,
+                expected::BERT_MULTILINGUAL_FRENCH_NEGATIVE_SCORE,
+                1e-5
+            ));
+
+            // Spanish positive
+            assert_eq!(
+                results[3].label,
+                expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL
+            );
+            assert!(approx_eq(
+                results[3].score,
+                expected::BERT_MULTILINGUAL_SPANISH_POSITIVE_SCORE,
+                1e-5
+            ));
+        }
+    }
+
+    // =============================================================================
+    // distilroberta-emotion Integration Tests
+    // =============================================================================
+
+    mod distilroberta_emotion_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_positive_text() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_POSITIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILROBERTA_EMOTION_POSITIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILROBERTA_EMOTION_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILROBERTA_EMOTION_POSITIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_negative_text() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let result = classifier
+                .classify(expected::INPUT_NEGATIVE)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_NEGATIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILROBERTA_EMOTION_NEGATIVE_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILROBERTA_EMOTION_NEGATIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILROBERTA_EMOTION_NEGATIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_happy_text() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let result = classifier
+                .classify(expected::INPUT_HAPPY)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_HAPPY_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILROBERTA_EMOTION_HAPPY_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILROBERTA_EMOTION_HAPPY_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILROBERTA_EMOTION_HAPPY_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_sad_text() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let result = classifier
+                .classify(expected::INPUT_SAD)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_SAD_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILROBERTA_EMOTION_SAD_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILROBERTA_EMOTION_SAD_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILROBERTA_EMOTION_SAD_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_neutral_text() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let result = classifier
+                .classify(expected::INPUT_NEUTRAL)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_NEUTRAL_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::DISTILROBERTA_EMOTION_NEUTRAL_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::DISTILROBERTA_EMOTION_NEUTRAL_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::DISTILROBERTA_EMOTION_NEUTRAL_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_happy_scores_exact_match() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let scores = classifier
+                .classify_scores(expected::INPUT_HAPPY)
+                .await
+                .expect("Failed to get scores");
+
+            assert_eq!(scores.len(), 7);
+            for (i, (actual, &expected_score)) in scores
+                .iter()
+                .zip(expected::DISTILROBERTA_EMOTION_HAPPY_SCORES.iter())
+                .enumerate()
+            {
+                assert!(
+                    approx_eq(*actual, expected_score, 1e-5),
+                    "Score mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected_score,
+                    actual
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn test_sad_scores_exact_match() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load distilroberta-emotion");
+
+            let scores = classifier
+                .classify_scores(expected::INPUT_SAD)
+                .await
+                .expect("Failed to get scores");
+
+            assert_eq!(scores.len(), 7);
+            for (i, (actual, &expected_score)) in scores
+                .iter()
+                .zip(expected::DISTILROBERTA_EMOTION_SAD_SCORES.iter())
+                .enumerate()
+            {
+                assert!(
+                    approx_eq(*actual, expected_score, 1e-5),
+                    "Score mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected_score,
+                    actual
+                );
+            }
+        }
+    }
+
+    // =============================================================================
+    // roberta-emotions (Multi-Label) Integration Tests
+    // =============================================================================
+
+    mod roberta_emotions_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_positive_text_multilabel() {
+            let classifier = Classifier::builder("roberta-emotions")
                 .multi_label()
                 .build()
                 .await
                 .expect("Failed to load roberta-emotions");
 
-            // Verify 28 labels
-            assert_eq!(classifier.num_labels(), 28);
             assert_eq!(classifier.mode(), ClassificationMode::MultiLabel);
+            assert_eq!(classifier.num_labels(), 28);
 
-            let labels = classifier.labels().expect("Should have labels");
-            assert!(labels.contains(&"joy".to_string()));
-            assert!(labels.contains(&"love".to_string()));
-            assert!(labels.contains(&"anger".to_string()));
-            assert!(labels.contains(&"neutral".to_string()));
-
-            // Test classification
             let result = classifier
-                .classify(TEST_TEXT_POSITIVE)
+                .classify(expected::INPUT_POSITIVE)
                 .await
                 .expect("Classification failed");
 
-            // For multi-label, we expect emotions like joy, love, excitement
-            assert!(
-                result.label == "joy"
-                    || result.label == "love"
-                    || result.label == "excitement"
-                    || result.label == "admiration",
-                "Expected positive emotion, got {}",
-                result.label
+            assert_eq!(result.label, expected::ROBERTA_EMOTIONS_POSITIVE_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_EMOTIONS_POSITIVE_LABEL_INDEX
             );
+            assert!(
+                approx_eq(
+                    result.score,
+                    expected::ROBERTA_EMOTIONS_POSITIVE_SCORE,
+                    1e-5
+                ),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_EMOTIONS_POSITIVE_SCORE,
+                result.score
+            );
+        }
 
-            // Multi-label: scores are sigmoid, each in [0,1] but DON'T sum to 1
+        #[tokio::test]
+        async fn test_happy_text_multilabel() {
+            let classifier = Classifier::builder("roberta-emotions")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load roberta-emotions");
+
+            let result = classifier
+                .classify(expected::INPUT_HAPPY)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_EMOTIONS_HAPPY_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_EMOTIONS_HAPPY_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(result.score, expected::ROBERTA_EMOTIONS_HAPPY_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_EMOTIONS_HAPPY_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_sad_text_multilabel() {
+            let classifier = Classifier::builder("roberta-emotions")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load roberta-emotions");
+
+            let result = classifier
+                .classify(expected::INPUT_SAD)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_EMOTIONS_SAD_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_EMOTIONS_SAD_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(result.score, expected::ROBERTA_EMOTIONS_SAD_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_EMOTIONS_SAD_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_neutral_text_multilabel() {
+            let classifier = Classifier::builder("roberta-emotions")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load roberta-emotions");
+
+            let result = classifier
+                .classify(expected::INPUT_NEUTRAL)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, expected::ROBERTA_EMOTIONS_NEUTRAL_LABEL);
+            assert_eq!(
+                result.label_index,
+                expected::ROBERTA_EMOTIONS_NEUTRAL_LABEL_INDEX
+            );
+            assert!(
+                approx_eq(result.score, expected::ROBERTA_EMOTIONS_NEUTRAL_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::ROBERTA_EMOTIONS_NEUTRAL_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_multilabel_scores_do_not_sum_to_one() {
+            let classifier = Classifier::builder("roberta-emotions")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load roberta-emotions");
+
             let scores = classifier
-                .classify_scores(TEST_TEXT_POSITIVE)
+                .classify_scores(expected::INPUT_POSITIVE)
                 .await
                 .expect("Failed to get scores");
 
-            for (i, score) in scores.iter().enumerate() {
-                assert_valid_probability(*score, &format!("emotion score {}", i));
-            }
-
-            // Multi-label should have multiple high scores for emotional text
-            let high_scores: Vec<f32> = scores.iter().filter(|&&s| s > 0.3).copied().collect();
-            // Emotional text often triggers multiple labels
-            println!("Number of emotions > 0.3: {}", high_scores.len());
-
-            // Test with threshold override - get all emotions above threshold
-            let override_config = ClassificationOverrides {
-                threshold: Some(0.2),
-                ..Default::default()
-            };
-            let result = classifier
-                .classify_with_config(TEST_TEXT_POSITIVE, &override_config)
-                .await
-                .expect("Classification with threshold failed");
-
-            // Should return multiple emotions above threshold
-            println!(
-                "Emotions above 0.2 threshold: {:?}",
-                result.all_scores.iter().map(|(l, _)| l).collect::<Vec<_>>()
+            // Multi-label scores are sigmoid, NOT softmax - they don't sum to 1
+            let sum: f32 = scores.iter().sum();
+            assert!(
+                sum != 1.0,
+                "Multi-label scores should NOT sum to 1.0, got {}",
+                sum
             );
+
+            // Each score should be valid probability
+            for (i, &score) in scores.iter().enumerate() {
+                assert_valid_probability(score, &format!("score at index {}", i));
+            }
         }
     }
 
     // =============================================================================
-    // Toxicity Model
+    // toxic-bert (Multi-Label) Integration Tests
     // =============================================================================
 
-    mod toxicity_tests {
+    mod toxic_bert_tests {
         use super::*;
 
         #[tokio::test]
-        async fn test_toxic_bert_multilabel() {
-            let preset = &TOXICITY_V1;
-            assert_eq!(preset.model, "toxic-bert");
-            assert_eq!(preset.task, ClassificationTask::Toxicity);
-
-            // Load with multi-label mode (toxicity is inherently multi-label)
-            let classifier = Classifier::builder(preset.model)
+        async fn test_toxic_text() {
+            let classifier = Classifier::builder("toxic-bert")
                 .multi_label()
                 .build()
                 .await
                 .expect("Failed to load toxic-bert");
 
-            // Verify 6 labels
-            let expected_labels: Vec<String> = preset
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(classifier.num_labels(), 6);
             assert_eq!(classifier.mode(), ClassificationMode::MultiLabel);
+            assert_eq!(classifier.num_labels(), 6);
 
-            let labels = classifier.labels().expect("Should have labels");
-            assert!(labels.contains(&"toxic".to_string()));
-            assert!(labels.contains(&"insult".to_string()));
-            assert!(labels.contains(&"threat".to_string()));
-
-            // Test toxic text
             let result = classifier
-                .classify(TEST_TEXT_TOXIC)
+                .classify(expected::INPUT_TOXIC)
                 .await
                 .expect("Classification failed");
 
-            // Should detect toxicity
+            assert_eq!(result.label, expected::TOXIC_BERT_TOXIC_LABEL);
+            assert_eq!(result.label_index, expected::TOXIC_BERT_TOXIC_LABEL_INDEX);
             assert!(
-                result.label == "toxic" || result.label == "insult",
-                "Expected toxic/insult for toxic text, got {}",
-                result.label
-            );
-            assert!(result.score > 0.5, "Expected high toxicity score");
-
-            // Get all toxicity scores for toxic text
-            let scores = classifier
-                .classify_scores(TEST_TEXT_TOXIC)
-                .await
-                .expect("Failed to get scores");
-
-            // Multi-label: each score independently in [0,1]
-            for (i, score) in scores.iter().enumerate() {
-                assert_valid_probability(*score, &format!("toxicity score {} ({})", i, labels[i]));
-            }
-
-            // Toxic text should trigger multiple categories
-            let toxic_categories: Vec<&String> = labels
-                .iter()
-                .zip(scores.iter())
-                .filter(|(_, s)| **s > 0.3)
-                .map(|(l, _)| l)
-                .collect();
-            println!("Detected toxic categories: {:?}", toxic_categories);
-            assert!(
-                toxic_categories.len() >= 1,
-                "Should detect at least one toxicity category"
-            );
-
-            // Test non-toxic text
-            let result = classifier
-                .classify(TEST_TEXT_NON_TOXIC)
-                .await
-                .expect("Classification failed");
-
-            assert!(
-                result.score < 0.6,
-                "Non-toxic text should have low toxicity score, got {}",
+                approx_eq(result.score, expected::TOXIC_BERT_TOXIC_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::TOXIC_BERT_TOXIC_SCORE,
                 result.score
             );
+        }
 
-            // Should have low toxicity scores
-            let scores = classifier
-                .classify_scores(TEST_TEXT_NON_TOXIC)
+        #[tokio::test]
+        async fn test_non_toxic_text() {
+            let classifier = Classifier::builder("toxic-bert")
+                .multi_label()
+                .build()
                 .await
-                .expect("Failed to get scores");
+                .expect("Failed to load toxic-bert");
 
-            let max_score = scores.iter().cloned().fold(0.0f32, f32::max);
+            let result = classifier
+                .classify(expected::INPUT_NON_TOXIC)
+                .await
+                .expect("Classification failed");
+
+            // Non-toxic text should have very low toxicity score
             assert!(
-                max_score < 0.6,
-                "Non-toxic text should have low toxicity scores, max was {}",
-                max_score
+                approx_eq(result.score, expected::TOXIC_BERT_NON_TOXIC_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::TOXIC_BERT_NON_TOXIC_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_positive_text_not_toxic() {
+            let classifier = Classifier::builder("toxic-bert")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load toxic-bert");
+
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("Classification failed");
+
+            // Positive text should have very low toxicity score
+            assert!(
+                approx_eq(result.score, expected::TOXIC_BERT_POSITIVE_SCORE, 1e-5),
+                "Score mismatch: expected {}, got {}",
+                expected::TOXIC_BERT_POSITIVE_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_toxic_above_threshold() {
+            let classifier = Classifier::builder("toxic-bert")
+                .multi_label()
+                .build()
+                .await
+                .expect("Failed to load toxic-bert");
+
+            let result = classifier
+                .classify(expected::INPUT_TOXIC)
+                .await
+                .expect("Classification failed");
+
+            // Check above_threshold for toxic text
+            let above_50 = result.above_threshold(0.5);
+            assert!(
+                above_50.len() >= 1,
+                "Should have at least one toxicity category above 0.5"
+            );
+            assert!(
+                above_50.iter().any(|(label, _)| label == "toxic"),
+                "Should detect 'toxic' category"
             );
         }
     }
@@ -1049,12 +1596,16 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
-        async fn test_batch_classification() {
+        async fn test_batch_roberta_sentiment() {
             let classifier = Classifier::new("roberta-sentiment")
                 .await
                 .expect("Failed to load model");
 
-            let texts = &[TEST_TEXT_POSITIVE, TEST_TEXT_NEGATIVE, TEST_TEXT_NEUTRAL];
+            let texts = &[
+                expected::INPUT_POSITIVE,
+                expected::INPUT_NEGATIVE,
+                expected::INPUT_NEUTRAL,
+            ];
 
             let results = classifier
                 .classify_batch(texts)
@@ -1063,95 +1614,29 @@ mod classifier_tests {
 
             assert_eq!(results.len(), 3);
 
-            // First should be positive
-            assert_eq!(results[0].label, "positive");
-            assert!(results[0].score > 0.7);
+            // Positive
+            assert_eq!(results[0].label, expected::ROBERTA_SENTIMENT_POSITIVE_LABEL);
+            assert!(approx_eq(
+                results[0].score,
+                expected::ROBERTA_SENTIMENT_POSITIVE_SCORE,
+                1e-5
+            ));
 
-            // Second should be negative
-            assert_eq!(results[1].label, "negative");
-            assert!(results[1].score > 0.7);
+            // Negative
+            assert_eq!(results[1].label, expected::ROBERTA_SENTIMENT_NEGATIVE_LABEL);
+            assert!(approx_eq(
+                results[1].score,
+                expected::ROBERTA_SENTIMENT_NEGATIVE_SCORE,
+                1e-5
+            ));
 
-            // Third is neutral (may vary)
-            assert_valid_probability(results[2].score, "neutral batch result");
-        }
-
-        #[tokio::test]
-        async fn test_batch_multilingual() {
-            let classifier = Classifier::new("bert-sentiment-multilingual")
-                .await
-                .expect("Failed to load model");
-
-            let texts = &[
-                TEST_TEXT_POSITIVE,         // English
-                TEST_TEXT_GERMAN_POSITIVE,  // German
-                TEST_TEXT_FRENCH_NEGATIVE,  // French
-                TEST_TEXT_SPANISH_POSITIVE, // Spanish
-            ];
-
-            let results = classifier
-                .classify_batch(texts)
-                .await
-                .expect("Batch classification failed");
-
-            assert_eq!(results.len(), 4);
-
-            for result in &results {
-                println!("Batch result: {} (score: {})", result.label, result.score);
-            }
-
-            // Expected results from Python reference implementation:
-            // Index 0 (English positive): 5 stars (0.9689)
-            // Index 1 (German positive): 5 stars (0.8865)
-            // Index 2 (French negative): 1 star (0.7609)
-            // Index 3 (Spanish positive): 5 stars (0.9312)
-
-            // Test English positive
-            assert_eq!(
-                results[0].label, "5 stars",
-                "English positive should be 5 stars, got {}",
-                results[0].label
-            );
-            assert!(
-                results[0].score > 0.95,
-                "English positive score should be > 0.95, got {}",
-                results[0].score
-            );
-
-            // Test German positive
-            assert_eq!(
-                results[1].label, "5 stars",
-                "German positive should be 5 stars, got {}",
-                results[1].label
-            );
-            assert!(
-                results[1].score > 0.85,
-                "German positive score should be > 0.85, got {}",
-                results[1].score
-            );
-
-            // Test French negative
-            assert_eq!(
-                results[2].label, "1 star",
-                "French negative should be 1 star, got {}",
-                results[2].label
-            );
-            assert!(
-                results[2].score > 0.75,
-                "French negative score should be > 0.75, got {}",
-                results[2].score
-            );
-
-            // Test Spanish positive
-            assert_eq!(
-                results[3].label, "5 stars",
-                "Spanish positive should be 5 stars, got {}",
-                results[3].label
-            );
-            assert!(
-                results[3].score > 0.90,
-                "Spanish positive score should be > 0.90, got {}",
-                results[3].score
-            );
+            // Neutral
+            assert_eq!(results[2].label, expected::ROBERTA_SENTIMENT_NEUTRAL_LABEL);
+            assert!(approx_eq(
+                results[2].score,
+                expected::ROBERTA_SENTIMENT_NEUTRAL_SCORE,
+                1e-5
+            ));
         }
     }
 
@@ -1159,7 +1644,7 @@ mod classifier_tests {
     // Error Handling Tests
     // =============================================================================
 
-    mod error_tests_2 {
+    mod error_handling_tests {
         use super::*;
 
         #[tokio::test]
@@ -1177,11 +1662,9 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-
         async fn test_label_count_mismatch_error() {
-            // Try to load with wrong number of labels
             let result = Classifier::builder("distilbert-sentiment")
-                .labels(vec!["a", "b", "c", "d"]) // 4 labels, but model expects 2
+                .labels(vec!["a", "b", "c", "d"])
                 .build()
                 .await;
 
@@ -1189,7 +1672,6 @@ mod classifier_tests {
         }
 
         #[tokio::test]
-
         async fn test_threshold_filters_all_results() {
             let classifier = Classifier::new("distilbert-sentiment")
                 .await
@@ -1197,719 +1679,20 @@ mod classifier_tests {
 
             let result = classifier
                 .classify_with_config(
-                    TEST_TEXT_NEUTRAL,
+                    expected::INPUT_NEUTRAL,
                     &ClassificationOverrides {
-                        threshold: Some(0.9999), // Very high threshold
+                        threshold: Some(0.9999),
                         ..Default::default()
                     },
                 )
                 .await;
 
-            // Should error when all results filtered
             assert!(matches!(
                 result,
                 Err(ClassifierError::ClassificationFailed(_))
             ));
         }
-    }
 
-    // =============================================================================
-    // Preset Contract Tests
-    // =============================================================================
-
-    mod integration_tests {
-        use kjarni_transformers::Device;
-
-        use crate::classifier::presets::ClassificationTask;
-
-        use super::*;
-
-        /// Test that we can create a classifier (requires model).
-        #[tokio::test]
-
-        async fn test_classifier_new() {
-            let classifier = Classifier::new("distilbert-sentiment").await;
-            assert!(
-                classifier.is_ok(),
-                "Failed to create classifier: {:?}",
-                classifier.err()
-            );
-        }
-
-        /// Test single text classification.
-        #[tokio::test]
-
-        async fn test_classify_single() {
-            let classifier = Classifier::new("distilroberta-emotion")
-                .await
-                .expect("Failed to load classifier");
-
-            let result = classifier
-                .classify("I love this product! It's amazing!")
-                .await
-                .expect("Classification failed");
-
-            assert!(!result.label.is_empty());
-            assert!(result.score >= 0.0 && result.score <= 1.0);
-            assert!(!result.all_scores.is_empty());
-        }
-
-        #[tokio::test]
-
-        async fn test_classifier_explore_api_toxic_bert() {
-            // --- SETUP ---
-            const MODEL_NAME: &str = "toxic-bert";
-            let toxic_text = "You are a stupid idiot and I will find you.";
-
-            println!(
-                "\n\n--- Starting Exploratory Test for Multi-Label Model: '{}' ---",
-                MODEL_NAME
-            );
-
-            // ========================================================================
-            // 1. Observe Initialization in Multi-Label Mode
-            // ========================================================================
-            println!("\n--- [1] Observing Initialization ---");
-
-            // CRUCIAL: We must enable .multi_label() mode for this model.
-            let classifier = Classifier::builder(MODEL_NAME)
-                .multi_label()
-                .build()
-                .await
-                .expect("Failed to load classifier in multi-label mode");
-
-            println!("Loaded model '{}' successfully.", classifier.model_name());
-            println!("Classifier mode: {:?}", classifier.mode()); // Should be MultiLabel
-            println!("Model labels: {:?}", classifier.labels().unwrap());
-
-            // ========================================================================
-            // 2. Observe Multi-Label Classification
-            // ========================================================================
-            println!("\n--- [2] Observing Multi-Label Classification ---");
-
-            let result = classifier
-                .classify(toxic_text)
-                .await
-                .expect("classify() failed");
-
-            // For multi-label, the top score is less important than all scores above a threshold.
-            // The scores are independent probabilities (post-sigmoid).
-            println!("classify('{}') result:", toxic_text);
-            println!(
-                "  (Note: The top 'label' and 'score' are less meaningful in multi-label scenarios)"
-            );
-            println!(
-                "  Top Label: '{}' with Score: {}",
-                result.label, result.score
-            );
-            println!("  All Scores (sorted): {:?}", result.all_scores);
-
-            // This is the most common way to use a multi-label result.
-            let predictions_above_threshold = result.above_threshold(0.5);
-            println!(
-                "\n  Predictions with score > 0.5: {:?}",
-                predictions_above_threshold
-            );
-
-            // Observe raw scores (post-sigmoid)
-            let scores = classifier
-                .classify_scores(toxic_text)
-                .await
-                .expect("classify_scores() failed");
-            let sum: f32 = scores.iter().sum();
-            println!("\nclassify_scores('{}') result:", toxic_text);
-            println!("  Scores (post-sigmoid): {:?}", scores);
-            println!(
-                "  (Note: Sum is NOT expected to be 1.0 in multi-label. Sum = {})",
-                sum
-            );
-        }
-
-        #[tokio::test]
-
-        async fn test_classifier_full_api_distilroberta() {
-            const MODEL_NAME: &str = "distilroberta-emotion";
-            let happy_text = "I am so happy and excited for the weekend!";
-            let sad_text = "That was a truly disappointing and sad experience.";
-            let batch_texts = &[happy_text, sad_text];
-
-            const PRESET: &presets::ClassifierPreset = &presets::EMOTION_V1;
-            assert_eq!(PRESET.model, MODEL_NAME);
-            let model_name = PRESET.model;
-
-            println!("--- Verifying Preset Contract for '{}' ---", PRESET.name);
-
-            let classifier = Classifier::new(model_name)
-                .await
-                .expect("Failed to load model defined in preset");
-
-            assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
-            assert_eq!(
-                classifier.architecture(),
-                "roberta",
-                "Architecture mismatch"
-            );
-
-            let expected_labels: Vec<String> = PRESET
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(
-                classifier.num_labels(),
-                expected_labels.len(),
-                "Number of labels mismatch"
-            );
-            assert_eq!(
-                classifier.labels().expect("Model should have labels"),
-                expected_labels,
-                "Label content mismatch"
-            );
-
-            // ========================================================================
-            // 1. Test Initialization and Accessors
-            // ========================================================================
-
-            assert_eq!(classifier.model_name(), MODEL_NAME);
-            assert_eq!(classifier.num_labels(), 7);
-            assert_eq!(classifier.max_seq_length(), 514);
-            let expected_labels = vec![
-                "anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise",
-            ];
-            assert_eq!(classifier.labels().unwrap(), expected_labels);
-
-            // ========================================================================
-            // 2. Test Core Classification Methods
-            // ========================================================================
-
-            let eps = 1e-6;
-            let approx_eq = |a: f32, b: f32| (a - b).abs() < eps;
-
-            // classify() on happy text
-            let single_result = classifier
-                .classify(happy_text)
-                .await
-                .expect("classify() failed");
-
-            assert_eq!(single_result.label, "joy");
-            assert!(
-                approx_eq(single_result.score, 0.97546911),
-                "Happy score mismatch: expected 0.97546911, got {}",
-                single_result.score
-            );
-
-            // classify_batch()
-            let batch_results = classifier
-                .classify_batch(batch_texts)
-                .await
-                .expect("classify_batch() failed");
-
-            assert_eq!(batch_results.len(), 2);
-
-            // Batch result 0: happy text
-            assert_eq!(batch_results[0].label, "joy");
-            assert!(
-                approx_eq(batch_results[0].score, 0.97546911),
-                "Batch happy score mismatch: expected 0.97546911, got {}",
-                batch_results[0].score
-            );
-
-            // Batch result 1: sad text - CORRECTED VALUE
-            assert_eq!(batch_results[1].label, "sadness");
-            assert!(
-                approx_eq(batch_results[1].score, 0.97713542),
-                "Batch sad score mismatch: expected 0.97713542, got {}",
-                batch_results[1].score
-            );
-
-            // classify_scores() on HAPPY text
-            let happy_scores = classifier
-                .classify_scores(happy_text)
-                .await
-                .expect("classify_scores() on happy text failed");
-
-            let expected_happy_scores: Vec<f32> = vec![
-                0.00133714, // anger
-                0.00033000, // disgust
-                0.00030720, // fear
-                0.97546911, // joy ← winner
-                0.00330787, // neutral
-                0.00320903, // sadness
-                0.01603979, // surprise
-            ];
-
-            for (i, (actual, expected)) in happy_scores
-                .iter()
-                .zip(expected_happy_scores.iter())
-                .enumerate()
-            {
-                assert!(
-                    approx_eq(*actual, *expected),
-                    "Happy score mismatch at index {} ({}): actual {:.8}, expected {:.8}",
-                    i,
-                    expected_labels[i],
-                    actual,
-                    expected
-                );
-            }
-
-            // classify_scores() on SAD text - CORRECTED VALUES
-            let sad_scores = classifier
-                .classify_scores(sad_text)
-                .await
-                .expect("classify_scores() on sad text failed");
-
-            let expected_sad_scores: Vec<f32> = vec![
-                0.00074336, // anger
-                0.00194305, // disgust
-                0.00221157, // fear
-                0.00190714, // joy
-                0.00586602, // neutral
-                0.97713542, // sadness ← winner (CORRECTED FROM 0.96455652)
-                0.01019347, // surprise
-            ];
-
-            for (i, (actual, expected)) in sad_scores
-                .iter()
-                .zip(expected_sad_scores.iter())
-                .enumerate()
-            {
-                assert!(
-                    approx_eq(*actual, *expected),
-                    "Sad score mismatch at index {} ({}): actual {:.8}, expected {:.8}",
-                    i,
-                    expected_labels[i],
-                    actual,
-                    expected
-                );
-            }
-
-            // ========================================================================
-            // 3. Test Overrides with `classify_with_config()`
-            // ========================================================================
-
-            let top_k_override = ClassificationOverrides {
-                top_k: Some(3),
-                ..Default::default()
-            };
-            let top_k_result = classifier
-                .classify_with_config(sad_text, &top_k_override)
-                .await
-                .expect("top_k override failed");
-
-            assert_eq!(top_k_result.all_scores.len(), 3);
-            assert_eq!(top_k_result.all_scores[0].0, "sadness");
-            assert!(
-                approx_eq(top_k_result.all_scores[0].1, 0.97713542),
-                "Top-k sadness score mismatch"
-            );
-            assert_eq!(top_k_result.all_scores[1].0, "surprise");
-            assert!(
-                approx_eq(top_k_result.all_scores[1].1, 0.01019347),
-                "Top-k surprise score mismatch"
-            );
-            assert_eq!(top_k_result.all_scores[2].0, "neutral");
-            assert!(
-                approx_eq(top_k_result.all_scores[2].1, 0.00586602),
-                "Top-k neutral score mismatch"
-            );
-
-            let threshold_override = ClassificationOverrides {
-                threshold: Some(0.05),
-                ..Default::default()
-            };
-            let threshold_result = classifier
-                .classify_with_config(sad_text, &threshold_override)
-                .await
-                .expect("threshold override failed");
-
-            assert_eq!(threshold_result.all_scores.len(), 1);
-            assert_eq!(threshold_result.all_scores[0].0, "sadness");
-
-            let failing_threshold_override = ClassificationOverrides {
-                threshold: Some(0.999),
-                ..Default::default()
-            };
-            let failing_threshold_result = classifier
-                .classify_with_config(sad_text, &failing_threshold_override)
-                .await;
-
-            assert!(matches!(
-                failing_threshold_result,
-                Err(ClassifierError::ClassificationFailed(_))
-            ));
-
-            // ========================================================================
-            // 4. Test Builder Configuration (Custom Labels)
-            // ========================================================================
-
-            let custom_labels = vec!["A", "B", "C", "D", "E", "F", "G"];
-            let classifier_custom = Classifier::builder(MODEL_NAME)
-                .labels(custom_labels.clone())
-                .build()
-                .await
-                .expect("Failed to build classifier with custom labels");
-
-            assert!(classifier_custom.has_custom_labels());
-
-            let custom_result = classifier_custom
-                .classify(happy_text)
-                .await
-                .expect("classify() with custom labels failed");
-
-            assert_eq!(custom_result.label, "D"); // D maps to index 3 (joy)
-            assert!(
-                approx_eq(custom_result.score, 0.97546911),
-                "Custom labels score mismatch: expected 0.97546911, got {}",
-                custom_result.score
-            );
-        }
-
-        #[tokio::test]
-
-        async fn test_preset_sentiment_binary_v1() {
-            // --- SETUP ---
-            const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_BINARY_V1;
-            let model_name = PRESET.model;
-            assert_eq!("distilbert-sentiment", model_name);
-            assert_eq!(PRESET.task, ClassificationTask::Sentiment);
-            let positive_text = "This is a fantastic and wonderful product!";
-            let negative_text = "I absolutely hate this, it's a terrible experience.";
-
-            println!(
-                "--- Verifying Preset Contract & Outputs for '{}' ---",
-                PRESET.name
-            );
-
-            // --- 1. Load Model & Verify Preset Contract ---
-            let classifier = Classifier::new(model_name)
-                .await
-                .expect("Failed to load model defined in preset");
-
-            let expected_labels: Vec<String> = PRESET
-                .labels
-                .unwrap()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            assert_eq!(
-                classifier.labels().unwrap(),
-                expected_labels,
-                "Label content mismatch"
-            );
-            assert_eq!(classifier.model_name(), PRESET.model, "Model name mismatch");
-
-            // --- 2. Assert Positive Case ---
-            let positive_result = classifier.classify(positive_text).await.unwrap();
-            assert_eq!(positive_result.label, "POSITIVE");
-            // Assert the exact score from your verified Rust output
-            assert_eq!(positive_result.score, 0.99988973);
-
-            // --- 3. Assert Negative Case ---
-            let negative_result = classifier.classify(negative_text).await.unwrap();
-            assert_eq!(negative_result.label, "NEGATIVE");
-            // Assert the exact score from your verified Rust output
-            assert_eq!(negative_result.score, 0.99904543);
-
-            println!(
-                "Preset '{}' verified successfully with exact outputs.",
-                PRESET.name
-            );
-        }
-
-        /// An EXPLORATORY test for the SENTIMENT_3CLASS_V1 preset ('roberta-sentiment').
-        #[tokio::test]
-
-        async fn test_explore_sentiment_3class_v1() {
-            // --- SETUP ---
-            const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_3CLASS_V1;
-            let model_name = PRESET.model;
-            let positive_text = "I love this so much, it's the best day ever.";
-            let neutral_text = "The movie was okay, I guess.";
-            let negative_text = "That was an awful thing to say.";
-
-            println!(
-                "\n\n--- Starting Exploratory Test for Preset: '{}' ---",
-                PRESET.name
-            );
-
-            // --- LOAD MODEL ---
-            let classifier = Classifier::new(model_name)
-                .await
-                .expect("Failed to load classifier");
-
-            println!("Model: '{}'", classifier.model_name());
-            println!("Labels: {:?}", classifier.labels().unwrap());
-
-            // --- OBSERVE OUTPUTS ---
-            let positive_result = classifier.classify(positive_text).await.unwrap();
-            println!(
-                "\nclassify('{}') result:\n  {:?}",
-                positive_text, positive_result
-            );
-
-            let neutral_result = classifier.classify(neutral_text).await.unwrap();
-            println!(
-                "\nclassify('{}') result:\n  {:?}",
-                neutral_text, neutral_result
-            );
-
-            let negative_result = classifier.classify(negative_text).await.unwrap();
-            println!(
-                "\nclassify('{}') result:\n  {:?}",
-                negative_text, negative_result
-            );
-        }
-
-        /// An EXPLORATORY test for the SENTIMENT_5STAR_V1 preset ('bert-sentiment-multilingual').
-        #[tokio::test]
-
-        async fn test_explore_sentiment_5star_v1() {
-            // --- SETUP ---
-            const PRESET: &presets::ClassifierPreset = &presets::SENTIMENT_5STAR_V1;
-            let model_name = PRESET.model;
-            let five_star_text = "An absolute masterpiece, the best I've ever seen.";
-            let one_star_text = "Awful, a complete waste of time and money.";
-
-            println!(
-                "\n\n--- Starting Exploratory Test for Preset: '{}' ---",
-                PRESET.name
-            );
-
-            // --- LOAD MODEL ---
-            let classifier = Classifier::new(model_name)
-                .await
-                .expect("Failed to load classifier");
-
-            println!("Model: '{}'", classifier.model_name());
-            println!("Labels: {:?}", classifier.labels().unwrap());
-
-            // --- OBSERVE OUTPUTS ---
-            let five_star_result = classifier.classify(five_star_text).await.unwrap();
-            println!(
-                "\nclassify('{}') result:\n  {:?}",
-                five_star_text, five_star_result
-            );
-
-            let one_star_result = classifier.classify(one_star_text).await.unwrap();
-            println!(
-                "\nclassify('{}') result:\n  {:?}",
-                one_star_text, one_star_result
-            );
-        }
-        #[tokio::test]
-
-        async fn test_classifier_builder_with_f16_dtype() {
-            const MODEL_NAME: &str = "distilroberta-emotion";
-            let happy_text = "I am so happy and excited for the weekend!";
-
-            println!("--- Testing Classifier load with DType::F16 ---");
-
-            // Build the classifier, explicitly requesting F16 weights.
-            // The .f16() method is a convenient shortcut on the builder.
-            let classifier_f16 = Classifier::builder(MODEL_NAME)
-                .f16() // This sets the target_dtype in the LoadConfig
-                .build()
-                .await
-                .expect("Failed to build classifier with F16 dtype");
-
-            // The most important test is that the model loads and can produce a valid prediction.
-            // This proves the entire pipeline works with the converted F16 weights.
-            let result = classifier_f16
-                .classify(happy_text)
-                .await
-                .expect("Classification failed with F16 model");
-
-            // While we don't assert the exact score (it might differ slightly due to precision),
-            // we assert that the result is plausible and the top label is correct.
-            // This confirms the model is functioning correctly.
-            assert_eq!(
-                result.label, "joy",
-                "F16 model failed to predict the correct label."
-            );
-            // F16 score should be very close to F32 reference (0.98810238)
-            assert!(
-                result.score > 0.97,
-                "F16 model score was unexpectedly low: {}",
-                result.score
-            );
-
-            // Optional: verify F16 doesn't deviate too much from F32
-            let f32_reference = 0.97546911_f32;
-            let diff = (result.score - f32_reference).abs();
-            assert!(
-                diff < 0.001,
-                "F16 score {} differs too much from F32 reference {}",
-                result.score,
-                f32_reference
-            );
-
-            println!(
-                "F16 score: {}, F32 reference: {}, diff: {}",
-                result.score, f32_reference, diff
-            );
-            println!("Successfully loaded and ran inference with F16 precision.");
-
-            println!("Successfully loaded and ran inference with F16 precision.");
-        }
-
-        /// Test batch classification.
-        #[tokio::test]
-
-        async fn test_classify_batch() {
-            let classifier = Classifier::new("distilroberta-emotion")
-                .await
-                .expect("Failed to load classifier");
-
-            let texts = ["I love this!", "This is terrible.", "It's okay I guess."];
-
-            let results = classifier
-                .classify_batch(&texts)
-                .await
-                .expect("Batch classification failed");
-
-            assert_eq!(results.len(), 3);
-            for result in &results {
-                assert!(!result.label.is_empty());
-                assert!(result.score >= 0.0 && result.score <= 1.0);
-            }
-        }
-
-        /// Test classification with custom overrides.
-        #[tokio::test]
-
-        async fn test_classify_with_config() {
-            let classifier = Classifier::new("distilbert-sentiment")
-                .await
-                .expect("Failed to load classifier");
-
-            let overrides = ClassificationOverrides {
-                top_k: Some(2),
-                threshold: Some(0.01),
-                return_logits: false,
-                ..Default::default()
-            };
-
-            let result = classifier
-                .classify_with_config("Great product!", &overrides)
-                .await
-                .expect("Classification failed");
-
-            // top_k should limit results (but we get all_scores which may have more before filtering)
-            assert!(
-                result.all_scores.len() <= 2 || result.all_scores.iter().all(|(_, s)| *s >= 0.01)
-            );
-        }
-
-        /// Test raw scores without labels.
-        #[tokio::test]
-
-        async fn test_classify_scores() {
-            let classifier = Classifier::new("distilbert-sentiment")
-                .await
-                .expect("Failed to load classifier");
-
-            let scores = classifier
-                .classify_scores("Test text")
-                .await
-                .expect("Getting scores failed");
-
-            assert!(!scores.is_empty());
-            // Scores should be probabilities (after softmax)
-            let sum: f32 = scores.iter().sum();
-            assert!((sum - 1.0).abs() < 0.01, "Scores should sum to ~1.0");
-        }
-
-        /// Test GPU classification (if available).
-        #[tokio::test]
-
-        async fn test_classify_gpu() {
-            let classifier = Classifier::builder("distilbert-sentiment")
-                .gpu()
-                .build()
-                .await
-                .expect("Failed to load classifier on GPU");
-
-            let result = classifier
-                .classify("Test GPU classification")
-                .await
-                .expect("GPU classification failed");
-
-            assert!(!result.label.is_empty());
-        }
-
-        #[tokio::test]
-
-        async fn test_classify_gpu_parity_cpu() {
-            let classifier = Classifier::builder("distilbert-sentiment")
-                .gpu()
-                .build()
-                .await
-                .expect("Failed to load classifier on GPU");
-
-            let result = classifier
-                .classify("Test GPU classification")
-                .await
-                .expect("GPU classification failed");
-
-            let classifier_cpu = Classifier::builder("distilbert-sentiment")
-                .cpu()
-                .build()
-                .await
-                .expect("Failed to load classifier on CPU");
-
-            let result_cpu = classifier_cpu
-                .classify("Test GPU classification")
-                .await
-                .expect("CPU classification failed");
-
-            assert_eq!(result.label, result_cpu.label);
-
-            assert_eq!(result.label_index, result_cpu.label_index);
-            assert!((result.score - result_cpu.score).abs() < 0.0001);
-            for ((label_a, score_a), (label_b, score_b)) in
-                result.all_scores.iter().zip(result_cpu.all_scores.iter())
-            {
-                assert_eq!(label_a, label_b);
-                assert!((score_a - score_b).abs() < 0.0001);
-            }
-
-            assert!(!result.label.is_empty());
-        }
-
-        /// Test classifier accessors.
-        #[tokio::test]
-
-        async fn test_classifier_accessors() {
-            let classifier = Classifier::new("distilroberta-emotion")
-                .await
-                .expect("Failed to load classifier");
-
-            assert!(!classifier.model_name().is_empty());
-            assert!(classifier.max_seq_length() > 0);
-            // Labels may or may not be present depending on model
-        }
-
-        /// Test one-liner classify function.
-        #[tokio::test]
-
-        async fn test_classify_convenience_function() {
-            let result = classify("distilroberta-emotion", "I love this!")
-                .await
-                .expect("Classify function failed");
-
-            assert!(!result.label.is_empty());
-        }
-
-        /// Test unknown model error.
-        #[tokio::test]
-        async fn test_unknown_model_error() {
-            let result = Classifier::new("completely-fake-model-that-does-not-exist").await;
-            assert!(matches!(result, Err(ClassifierError::UnknownModel(_))));
-        }
-
-        /// Test offline mode with missing model.
         #[tokio::test]
         async fn test_offline_missing_model() {
             let result = Classifier::builder("minilm-l6-v2-cross-encoder")
@@ -1918,15 +1701,300 @@ mod classifier_tests {
                 .build()
                 .await;
 
-            // Should fail because model not downloaded and offline mode
             assert!(result.is_err());
         }
-        #[tokio::test]
+    }
 
-        async fn test_model_distilroberta_emotion() {
-            let classifier = Classifier::new("distilroberta-emotion").await.unwrap();
-            let result = classifier.classify("I am so happy today!").await.unwrap();
-            assert_eq!(result.label, "joy");
+    // =============================================================================
+    // GPU Parity Tests
+    // =============================================================================
+
+    mod gpu_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_gpu_classification() {
+            let classifier = Classifier::builder("distilbert-sentiment")
+                .gpu()
+                .build()
+                .await
+                .expect("Failed to load classifier on GPU");
+
+            let result = classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("GPU classification failed");
+
+            assert_eq!(result.label, expected::DISTILBERT_SENTIMENT_POSITIVE_LABEL);
+        }
+
+        #[tokio::test]
+        async fn test_gpu_cpu_parity() {
+            let gpu_classifier = Classifier::builder("distilbert-sentiment")
+                .gpu()
+                .build()
+                .await
+                .expect("Failed to load classifier on GPU");
+
+            let cpu_classifier = Classifier::builder("distilbert-sentiment")
+                .cpu()
+                .build()
+                .await
+                .expect("Failed to load classifier on CPU");
+
+            let gpu_result = gpu_classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("GPU classification failed");
+
+            let cpu_result = cpu_classifier
+                .classify(expected::INPUT_POSITIVE)
+                .await
+                .expect("CPU classification failed");
+
+            assert_eq!(gpu_result.label, cpu_result.label);
+            assert_eq!(gpu_result.label_index, cpu_result.label_index);
+            assert!(
+                approx_eq(gpu_result.score, cpu_result.score, 1e-4),
+                "GPU/CPU score mismatch: GPU={}, CPU={}",
+                gpu_result.score,
+                cpu_result.score
+            );
+        }
+    }
+
+    // =============================================================================
+    // F16 Precision Tests
+    // =============================================================================
+
+    mod f16_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_f16_classification() {
+            let classifier = Classifier::builder("distilroberta-emotion")
+                .f16()
+                .build()
+                .await
+                .expect("Failed to build classifier with F16 dtype");
+
+            let result = classifier
+                .classify(expected::INPUT_HAPPY)
+                .await
+                .expect("Classification failed with F16 model");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_HAPPY_LABEL);
+            assert!(
+                result.score > 0.97,
+                "F16 model score was unexpectedly low: {}",
+                result.score
+            );
+
+            // F16 should be close to F32 reference
+            let diff = (result.score - expected::DISTILROBERTA_EMOTION_HAPPY_SCORE).abs();
+            assert!(
+                diff < 0.01,
+                "F16 score {} differs too much from F32 reference {}",
+                result.score,
+                expected::DISTILROBERTA_EMOTION_HAPPY_SCORE
+            );
+        }
+    }
+
+    // =============================================================================
+    // Accessor Tests
+    // =============================================================================
+
+    mod accessor_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_distilbert_accessors() {
+            let classifier = Classifier::new("distilbert-sentiment")
+                .await
+                .expect("Failed to load classifier");
+
+            assert_eq!(classifier.model_name(), "distilbert-sentiment");
+            assert_eq!(classifier.num_labels(), 2);
+            assert!(classifier.max_seq_length() > 0);
+            assert_eq!(classifier.mode(), ClassificationMode::SingleLabel);
+
+            let labels = classifier.labels().expect("Should have labels");
+            assert_eq!(labels, vec!["NEGATIVE", "POSITIVE"]);
+        }
+
+        #[tokio::test]
+        async fn test_roberta_sentiment_accessors() {
+            let classifier = Classifier::new("roberta-sentiment")
+                .await
+                .expect("Failed to load classifier");
+
+            assert_eq!(classifier.model_name(), "roberta-sentiment");
+            assert_eq!(classifier.num_labels(), 3);
+
+            let labels = classifier.labels().expect("Should have labels");
+            assert_eq!(labels, vec!["negative", "neutral", "positive"]);
+        }
+
+        #[tokio::test]
+        async fn test_distilroberta_emotion_accessors() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load classifier");
+
+            assert_eq!(classifier.model_name(), "distilroberta-emotion");
+            assert_eq!(classifier.num_labels(), 7);
+            assert_eq!(classifier.architecture(), "roberta");
+            assert_eq!(classifier.max_seq_length(), 514);
+
+            let labels = classifier.labels().expect("Should have labels");
+            assert_eq!(
+                labels,
+                vec![
+                    "anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"
+                ]
+            );
+        }
+    }
+
+    // =============================================================================
+    // Convenience Function Tests
+    // =============================================================================
+
+    mod convenience_function_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_classify_function() {
+            let result = classify("distilroberta-emotion", expected::INPUT_HAPPY)
+                .await
+                .expect("Classify function failed");
+
+            assert_eq!(result.label, expected::DISTILROBERTA_EMOTION_HAPPY_LABEL);
+        }
+    }
+
+    // =============================================================================
+    // Override Tests
+    // =============================================================================
+
+    mod override_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_top_k_override() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load classifier");
+
+            let override_config = ClassificationOverrides {
+                top_k: Some(3),
+                ..Default::default()
+            };
+
+            let result = classifier
+                .classify_with_config(expected::INPUT_SAD, &override_config)
+                .await
+                .expect("Classification with top_k failed");
+
+            assert_eq!(result.all_scores.len(), 3);
+            assert_eq!(result.all_scores[0].0, "sadness");
+        }
+
+        #[tokio::test]
+        async fn test_threshold_override() {
+            let classifier = Classifier::new("distilroberta-emotion")
+                .await
+                .expect("Failed to load classifier");
+
+            let override_config = ClassificationOverrides {
+                threshold: Some(0.05),
+                ..Default::default()
+            };
+
+            let result = classifier
+                .classify_with_config(expected::INPUT_SAD, &override_config)
+                .await
+                .expect("Classification with threshold failed");
+
+            // Only sadness should be above 0.05 threshold (0.96455652)
+            assert_eq!(result.all_scores.len(), 1);
+            assert_eq!(result.all_scores[0].0, "sadness");
+        }
+    }
+
+    // =============================================================================
+    // Custom Labels Tests
+    // =============================================================================
+
+    mod custom_labels_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_custom_labels() {
+            let custom_labels = vec!["A", "B", "C", "D", "E", "F", "G"];
+            let classifier = Classifier::builder("distilroberta-emotion")
+                .labels(custom_labels.clone())
+                .build()
+                .await
+                .expect("Failed to build classifier with custom labels");
+
+            assert!(classifier.has_custom_labels());
+
+            let result = classifier
+                .classify(expected::INPUT_HAPPY)
+                .await
+                .expect("Classification with custom labels failed");
+
+            // D maps to index 3 (joy)
+            assert_eq!(result.label, "D");
+            assert!(approx_eq(
+                result.score,
+                expected::DISTILROBERTA_EMOTION_HAPPY_SCORE,
+                1e-5
+            ));
+        }
+    }
+
+    // =============================================================================
+    // Loading Tests
+    // =============================================================================
+
+    mod loading_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_load_by_cli_name() {
+            let classifier = Classifier::new("distilbert-sentiment")
+                .await
+                .expect("Failed to load by CLI name");
+
+            assert_eq!(classifier.model_name(), "distilbert-sentiment");
+            assert_eq!(classifier.num_labels(), 2);
+        }
+
+        #[tokio::test]
+        async fn test_load_by_absolute_path() {
+            let cache_dir = crate::common::default_cache_dir();
+            let model_path =
+                cache_dir.join("distilbert_distilbert-base-uncased-finetuned-sst-2-english");
+
+            if model_path.exists() {
+                let classifier = Classifier::from_path(&model_path)
+                    .labels(vec!["NEGATIVE", "POSITIVE"])
+                    .build()
+                    .await
+                    .expect("Failed to load by absolute path");
+
+                assert_eq!(classifier.num_labels(), 2);
+
+                let result = classifier
+                    .classify(expected::INPUT_POSITIVE)
+                    .await
+                    .expect("Classification failed");
+
+                assert_eq!(result.label, expected::DISTILBERT_SENTIMENT_POSITIVE_LABEL);
+            }
         }
     }
 }

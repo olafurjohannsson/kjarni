@@ -5,24 +5,36 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, s};
+use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 use super::config::WhisperConfig;
 
 use kjarni_transformers::{
-    LanguageModel, ModelType, WgpuContext, audio::{AudioConvFrontend, MelConfig, compute_mel_spectrogram}, cache::{Cache, CpuBeamKVCache}, common::{
-        BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
+    LanguageModel, ModelType, WgpuContext,
+    audio::{AudioConvFrontend, MelConfig},
+    cache::{Cache, CpuBeamKVCache},
+    common::{
+        DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults, ModelGenerationDefaults,
-    }, cpu::{
-        encoder::{CpuEncoderOps, prelude::*, traits::CpuEncoder},
-        encoder_decoder::{
-            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
-            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+    },
+    cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+    cpu::encoder_decoder::{
+        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+    },
+    encoder_decoder::{
+        config::Seq2SeqDecoderConfig as DecoderCfg,
+        config::Seq2SeqEncoderConfig as EncoderCfg,
+        traits::{
+            CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel,
+            GpuCrossDecoder, GpuEncoderDecoderOps,
         },
-    }, encoder_decoder::traits::{
-        CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
-    }, models::base::ModelLoadConfig, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights
+    },
+    models::base::ModelLoadConfig,
+    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
+    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 // =============================================================================
@@ -32,28 +44,160 @@ use kjarni_transformers::{
 pub struct WhisperModel {
     tokenizer: Tokenizer,
     config: Arc<WhisperConfig>,
-
-    // Audio frontend: conv1 + GELU + conv2 + GELU + positional embeddings
-    audio_frontend: AudioConvFrontend,
-
     pipeline: EncoderDecoderPipeline,
-
-    // Transformer encoder (reuses Seq2Seq infrastructure)
-    encoder: Seq2SeqCPUEncoder,
-
-    // Transformer decoder with cross-attention
-    decoder: Seq2SeqCPUDecoder,
-
-    // LM head weights for projecting to vocab
-    lm_head_weight: Array2<f32>,
-
-    // Mel spectrogram configuration
-    mel_config: MelConfig,
-
-    // Generation configuration
+    audio_frontend: AudioConvFrontend,
     generation_config: HFGenerationConfig,
 }
 
+impl WhisperModel {
+    // =========================================================================
+    // Construction
+    // =========================================================================
+
+    /// Load from Hugging Face model registry.
+    pub async fn from_registry(
+        model_type: ModelType,
+        cache_dir: Option<PathBuf>,
+        device: Device,
+        context: Option<Arc<WgpuContext>>,
+        load_config: Option<ModelLoadConfig>,
+    ) -> Result<Self> {
+        let info = model_type.info();
+        let cache_dir = cache_dir.unwrap_or_else(|| {
+            dirs::cache_dir()
+                .expect("No cache directory")
+                .join("kjarni")
+        });
+        let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
+
+        // Download model files
+        kjarni_transformers::models::download_model_files(
+            &model_dir,
+            &info.paths,
+            kjarni_transformers::models::registry::WeightsFormat::SafeTensors,
+            true,
+        )
+        .await?;
+
+        // Setup context for GPU if needed
+        let context = if device.is_gpu() && context.is_none() {
+            Some(WgpuContext::new().await?)
+        } else {
+            context
+        };
+
+        let generation_config = HFGenerationConfig::load_or_default(&model_dir);
+        let load_config = load_config.unwrap_or_default();
+
+        Self::from_pretrained(&model_dir, device, context, load_config, generation_config)
+    }
+
+    /// Load from local pretrained model directory.
+    pub fn from_pretrained(
+        model_path: &std::path::Path,
+        device: Device,
+        context: Option<Arc<WgpuContext>>,
+        load_config: ModelLoadConfig,
+        generation_config: HFGenerationConfig,
+    ) -> Result<Self> {
+        let weights = ModelWeights::new(model_path)?;
+
+        // 1. Load config
+        let config: WhisperConfig = serde_json::from_str(&weights.config_json())?;
+        let config = Arc::new(config);
+        let meta = config.metadata();
+        let layout = config.layout();
+
+        // 2. Load tokenizer
+        let tokenizer_path = model_path.join("tokenizer.json");
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+
+        // 3. Load audio frontend (Whisper-specific)
+        let audio_frontend = AudioConvFrontend::from_weights(
+            &weights,
+            "model.encoder",
+            config.max_source_positions,
+        )?;
+
+        // 4. Build encoder/decoder backends
+        let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = Self::build_backends(
+            &weights,
+            &meta,
+            &layout,
+            &config,
+            &load_config,
+            context.as_ref(),
+            device,
+        )?;
+
+        // 5. Build pipeline with audio encoder flag
+        let mut builder = EncoderDecoderPipelineBuilder::new(&weights, config.clone())
+            .with_load_config(load_config)
+            .with_context(context)
+            .with_encoder_backends(cpu_enc, gpu_enc)
+            .with_decoder_backends(cpu_dec, gpu_dec);
+        
+        builder.is_audio_encoder = true; // Skip encoder token embeddings
+        
+        let pipeline = builder.build()?;
+
+        Ok(Self {
+            tokenizer,
+            config,
+            pipeline,
+            audio_frontend,
+            generation_config,
+        })
+    }
+
+    // =========================================================================
+    // Audio Processing
+    // =========================================================================
+
+    /// Returns the expected mel spectrogram configuration.
+    ///
+    /// Use this to ensure your mel spectrograms match what the model expects.
+    pub fn expected_mel_config(&self) -> MelConfig {
+        MelConfig {
+            n_mels: self.config.num_mel_bins,
+            ..MelConfig::whisper()
+        }
+    }
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+
+    pub fn config(&self) -> &WhisperConfig {
+        &self.config
+    }
+
+    pub fn meta(&self) -> ModelMetadata {
+        self.config.metadata()
+    }
+
+    pub fn layout(&self) -> ModelLayout {
+        self.config.layout()
+    }
+
+    // =========================================================================
+    // Supported Models
+    // =========================================================================
+
+    pub const SUPPORTED_MODELS: &'static [ModelType] = &[
+        // ModelType::WhisperTiny,
+        // ModelType::WhisperBase,
+        ModelType::WhisperSmall,
+        // ModelType::WhisperMedium,
+        // ModelType::WhisperLarge,
+        // ModelType::WhisperLargeV2,
+        ModelType::WhisperLargeV3,
+    ];
+}
+
+// =============================================================================
+// EncoderDecoderModelFactory Implementation
+// =============================================================================
 
 impl EncoderDecoderModelFactory for WhisperModel {
     type Config = WhisperConfig;
@@ -69,7 +213,7 @@ impl EncoderDecoderModelFactory for WhisperModel {
         _layout: &ModelLayout,
         config: &Arc<WhisperConfig>,
         load_config: &ModelLoadConfig,
-        context: Option<&Arc<WgpuContext>>,
+        _context: Option<&Arc<WgpuContext>>,
         device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
@@ -79,13 +223,12 @@ impl EncoderDecoderModelFactory for WhisperModel {
     )> {
         let mut cpu_enc = None;
         let mut cpu_dec = None;
-        let gpu_enc = None; // TODO: GPU T5
+        let gpu_enc = None; // TODO: GPU Whisper
         let gpu_dec = None;
 
-        // CPU Backends
         if device.is_cpu() || load_config.offload_embeddings {
-            // T5 Encoder
-            let enc_config = Seq2SeqEncoderConfig::t5();
+            // Whisper Encoder (uses ::whisper() config)
+            let enc_config = Seq2SeqEncoderConfig::whisper();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
                 weights,
                 config.as_ref(),
@@ -93,8 +236,8 @@ impl EncoderDecoderModelFactory for WhisperModel {
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
 
-            // T5 Decoder
-            let dec_config = Seq2SeqDecoderConfig::t5();
+            // Whisper Decoder (uses ::whisper() config)
+            let dec_config = Seq2SeqDecoderConfig::whisper();
             cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
                 weights,
                 config.as_ref(),
@@ -102,11 +245,8 @@ impl EncoderDecoderModelFactory for WhisperModel {
                 *load_config,
             )?) as Box<dyn CpuCrossDecoder>);
         } else if device.is_gpu() {
-            todo!()
+            todo!("GPU Whisper not yet implemented")
         }
-
-        // TODO: GPU backends for T5
-        // if let Some(ctx) = context { ... }
 
         Ok((cpu_enc, gpu_enc, cpu_dec, gpu_dec))
     }
@@ -118,270 +258,13 @@ impl EncoderDecoderModelFactory for WhisperModel {
         _: Option<HFGenerationDefaults>,
         generation_config: HFGenerationConfig,
     ) -> Self {
-        Self {
-            pipeline,
-            tokenizer,
-            config,
-            generation_config,
-        }
+        // NOTE: This won't work correctly because we can't load AudioConvFrontend here.
+        // Use from_registry() or from_pretrained() instead.
+        panic!(
+            "WhisperModel::new_from_pipeline is not supported. \
+             Use WhisperModel::from_registry() or from_pretrained() instead."
+        );
     }
-}
-
-impl WhisperModel {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
-    pub async fn from_registry(
-        model_type: ModelType,
-        cache_dir: Option<PathBuf>,
-        device: Device,
-        _context: Option<Arc<WgpuContext>>,
-        load_config: Option<ModelLoadConfig>,
-    ) -> Result<Self> {
-       kjarni_transformers::pipeline::Seq2SeqLoader::load_from_registry::<Self>(
-            model_type,
-            cache_dir,
-            device,
-            context,
-            load_config,
-        )
-        .await
-    }
-
-    pub fn from_weights(
-        weights: ModelWeights,
-        config: Arc<WhisperConfig>,
-        tokenizer: Tokenizer,
-        generation_config: HFGenerationConfig,
-        load_config: ModelLoadConfig,
-    ) -> Result<Self> {
-        // 1. Load audio conv frontend
-        let audio_frontend = AudioConvFrontend::from_weights(
-            &weights,
-            "model.encoder",
-            config.max_source_positions,
-        )?;
-
-        // 2. Load encoder transformer layers
-        let enc_config = Seq2SeqEncoderConfig {
-            num_layers: config.encoder_layers,
-            hidden_size: config.d_model,
-            num_attention_heads: config.encoder_attention_heads,
-            intermediate_size: config.encoder_ffn_dim,
-            activation: config.activation_function.clone(),
-            layer_norm_eps: 1e-5,
-            // Whisper encoder doesn't use token embeddings - we handle that separately
-            skip_token_embedding: true,
-            use_bias: true,
-            is_prenorm: true,
-        };
-
-        let encoder = Seq2SeqCPUEncoder::new(
-            &weights,
-            config.as_ref(),
-            enc_config,
-            load_config,
-        )?;
-
-        // 3. Load decoder transformer layers
-        let dec_config = Seq2SeqDecoderConfig {
-            num_layers: config.decoder_layers,
-            hidden_size: config.d_model,
-            num_attention_heads: config.decoder_attention_heads,
-            intermediate_size: config.decoder_ffn_dim,
-            activation: config.activation_function.clone(),
-            layer_norm_eps: 1e-5,
-            use_bias: true,
-            is_prenorm: true,
-            has_cross_attention: true,
-            max_position_embeddings: config.max_target_positions,
-        };
-
-        let decoder = Seq2SeqCPUDecoder::new(
-            &weights,
-            config.as_ref(),
-            dec_config,
-            load_config,
-        )?;
-
-        // 4. Load LM head
-        // Whisper typically uses "proj_out.weight" or ties with decoder embeddings
-        let lm_head_weight = weights
-            .get_array2("proj_out.weight")
-            .or_else(|_| weights.get_array2("model.decoder.embed_tokens.weight"))
-            .map_err(|e| anyhow!("Failed to load LM head: {}", e))?;
-
-        // 5. Mel config for Whisper
-        let mel_config = MelConfig::whisper();
-
-        Ok(Self {
-            tokenizer,
-            config,
-            audio_frontend,
-            encoder,
-            decoder,
-            lm_head_weight,
-            mel_config,
-            generation_config,
-        })
-    }
-
-    // =========================================================================
-    // Audio Encoding
-    // =========================================================================
-
-    /// Encode mel spectrogram to hidden states.
-    ///
-    /// # Arguments
-    /// * `mel` - Mel spectrogram `[n_mels, frames]` (typically `[80, 3000]`)
-    ///
-    /// # Returns
-    /// Encoder hidden states `[1, seq_len, hidden_size]`
-    pub fn encode_mel(&self, mel: &Array2<f32>) -> Result<Array3<f32>> {
-        // Add batch dimension: [n_mels, frames] -> [1, n_mels, frames]
-        let mel_batch = mel.clone().insert_axis(ndarray::Axis(0));
-        self.encode_mel_batch(&mel_batch)
-    }
-
-    /// Encode batched mel spectrograms.
-    ///
-    /// # Arguments
-    /// * `mel` - Mel spectrograms `[batch, n_mels, frames]`
-    ///
-    /// # Returns
-    /// Encoder hidden states `[batch, seq_len, hidden_size]`
-    pub fn encode_mel_batch(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
-        // 1. Conv frontend: [batch, n_mels, frames] -> [batch, frames/2, hidden_size]
-        let hidden_states = self.audio_frontend.forward(mel)?;
-
-        // 2. Create attention mask (all ones for audio - no padding)
-        let (batch_size, seq_len, _) = hidden_states.dim();
-        let attention_mask = Array2::<f32>::ones((batch_size, seq_len));
-
-        // 3. Transformer encoder layers
-        let encoder_output = self.encoder.forward_layers(
-            &hidden_states,
-            &attention_mask,
-            0,
-            self.encoder.num_layers(),
-        )?;
-
-        // 4. Final layer norm
-        self.encoder.final_norm(&encoder_output)
-    }
-
-    /// Encode raw audio samples to hidden states.
-    ///
-    /// Convenience method that computes mel spectrogram first.
-    ///
-    /// # Arguments
-    /// * `audio` - Raw audio samples (16kHz, mono, normalized to [-1, 1])
-    ///
-    /// # Returns
-    /// Encoder hidden states `[1, seq_len, hidden_size]`
-    pub fn encode_audio(&self, audio: &[f32]) -> Result<Array3<f32>> {
-        let mel = compute_mel_spectrogram(audio, &self.mel_config)?;
-        self.encode_mel(&mel)
-    }
-
-    // =========================================================================
-    // Decoding
-    // =========================================================================
-
-    /// Decode with cross-attention to encoder states.
-    ///
-    /// # Arguments
-    /// * `decoder_input_ids` - Decoder token IDs `[batch, seq_len]`
-    /// * `encoder_hidden_states` - Encoder output `[batch, enc_seq_len, hidden_size]`
-    /// * `attention_mask` - Causal mask for decoder self-attention
-    /// * `position_offset` - Position offset for KV cache
-    /// * `cache` - Optional KV cache
-    ///
-    /// # Returns
-    /// Decoder hidden states `[batch, seq_len, hidden_size]`
-    pub fn decode(
-        &self,
-        decoder_input_ids: &Array2<u32>,
-        encoder_hidden_states: &Array3<f32>,
-        attention_mask: &Array2<f32>,
-        position_offset: usize,
-        cache: Option<&mut dyn Cache>,
-    ) -> Result<Array3<f32>> {
-        // Embed decoder tokens
-        let decoder_hidden = self.decoder.embed(decoder_input_ids, position_offset)?;
-
-        // Forward through decoder with cross-attention
-        self.decoder.forward_with_cross_attention(
-            &decoder_hidden,
-            encoder_hidden_states,
-            attention_mask,
-            position_offset,
-            cache,
-        )
-    }
-
-    // =========================================================================
-    // Projection
-    // =========================================================================
-
-    /// Project hidden states to vocabulary logits.
-    fn project_to_vocab(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        let (batch, seq_len, hidden_size) = hidden_states.dim();
-        let vocab_size = self.lm_head_weight.dim().0;
-
-        let mut logits = Array3::<f32>::zeros((batch, seq_len, vocab_size));
-
-        for b in 0..batch {
-            for s in 0..seq_len {
-                let hidden = hidden_states.slice(s![b, s, ..]);
-                for v in 0..vocab_size {
-                    let weight = self.lm_head_weight.slice(s![v, ..]);
-                    logits[[b, s, v]] = hidden.dot(&weight);
-                }
-            }
-        }
-
-        Ok(logits)
-    }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
-    /// Get the mel spectrogram configuration.
-    pub fn mel_config(&self) -> &MelConfig {
-        &self.mel_config
-    }
-
-    /// Get model config.
-    pub fn config(&self) -> &WhisperConfig {
-        &self.config
-    }
-
-    /// Get metadata.
-    pub fn meta(&self) -> ModelMetadata {
-        self.config.metadata()
-    }
-
-    /// Get layout.
-    pub fn layout(&self) -> ModelLayout {
-        self.config.layout()
-    }
-
-    // =========================================================================
-    // Supported Models
-    // =========================================================================
-
-    const SUPPORTED_MODELS: &'static [ModelType] = &[
-        ModelType::WhisperTiny,
-        ModelType::WhisperBase,
-        ModelType::WhisperSmall,
-        ModelType::WhisperMedium,
-        ModelType::WhisperLarge,
-        ModelType::WhisperLargeV2,
-        ModelType::WhisperLargeV3,
-    ];
 }
 
 // =============================================================================
@@ -390,15 +273,36 @@ impl WhisperModel {
 
 impl InferenceModel for WhisperModel {
     fn device(&self) -> Device {
-        Device::Cpu
+        self.pipeline.plan().layers
     }
 
     fn context(&self) -> Option<Arc<WgpuContext>> {
-        None
+        self.pipeline.context().cloned()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+impl CpuEncoderOps for WhisperModel {
+    fn encoder(&self) -> &dyn CpuEncoder {
+        self.pipeline.cpu_encoder().expect("CPU Encoder not active")
+    }
+
+    fn embed_tokens(
+        &self,
+        _input_ids: &Array2<u32>,
+        _token_type_ids: Option<&Array2<u32>>,
+        _pos: usize,
+    ) -> Result<Array3<f32>> {
+        Err(anyhow!(
+            "Whisper encoder uses audio input, not tokens. Use embed_audio() instead."
+        ))
+    }
+
+    fn embed_audio(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
+        self.audio_frontend.forward(mel)
     }
 }
 
@@ -469,15 +373,9 @@ impl LanguageModel for WhisperModel {
     }
 }
 
-impl CpuEncoderOps for WhisperModel {
-    fn encoder(&self) -> &dyn CpuEncoder {
-        &self.encoder
-    }
-}
-
 impl CpuEncoderDecoderOps for WhisperModel {
     fn decoder(&self) -> &dyn CpuCrossDecoder {
-        &self.decoder
+        self.pipeline.cpu_decoder().expect("CPU Decoder not active")
     }
 
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
@@ -500,7 +398,81 @@ impl CpuEncoderDecoderOps for WhisperModel {
     }
 
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-        self.project_to_vocab(hidden_states)
+        self.pipeline.lm_head().forward_cpu(hidden_states)
+    }
+}
+
+
+impl GpuEncoderOps for WhisperModel {
+    fn encoder(&self) -> &dyn GpuEncoder {
+        self.pipeline.gpu_encoder().expect("GPU Encoder not active")
+    }
+}
+
+#[async_trait]
+impl EncoderLanguageModel for WhisperModel {
+    fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
+        if self.pipeline.cpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
+        if self.pipeline.gpu_encoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+impl GpuEncoderDecoderOps for WhisperModel {
+    fn decoder(&self) -> &dyn GpuCrossDecoder {
+        self.pipeline.gpu_decoder().expect("GPU Decoder not active")
+    }
+
+    fn broadcast_encoder_states(
+        &self,
+        frame: &mut kjarni_transformers::gpu::GpuFrameContext,
+        encoder_hidden_states: &kjarni_transformers::gpu::GpuTensor,
+        num_beams: usize,
+    ) -> Result<kjarni_transformers::gpu::GpuTensor> {
+        let broadcast = self
+            .pipeline
+            .gpu_broadcast()
+            .ok_or_else(|| anyhow!("No broadcast kernel"))?;
+        let (encoder_cmd, _pool) = frame.resources();
+
+        let mut expanded_shape = encoder_hidden_states.shape().to_vec();
+        if expanded_shape.get(0) != Some(&1) {
+            return Err(anyhow!(
+                "Cannot broadcast encoder states with batch size != 1"
+            ));
+        }
+        expanded_shape[0] = num_beams;
+
+        let expanded_states = kjarni_transformers::gpu::GpuTensor::uninitialized(
+            self.context().as_ref().unwrap(),
+            expanded_shape,
+            encoder_hidden_states.dtype(),
+            "expanded_encoder_states",
+        );
+
+        broadcast.encode(encoder_cmd, encoder_hidden_states, &expanded_states, 0);
+        Ok(expanded_states)
+    }
+
+    fn project_to_logits(
+        &self,
+        frame: &mut kjarni_transformers::gpu::GpuFrameContext,
+        hidden_states: &kjarni_transformers::gpu::GpuTensor,
+    ) -> Result<kjarni_transformers::gpu::GpuTensor> {
+        let (encoder_cmd, pool) = frame.resources();
+        self.pipeline
+            .lm_head()
+            .forward_gpu(encoder_cmd, pool, hidden_states)
     }
 }
 
@@ -511,11 +483,15 @@ impl EncoderDecoderLanguageModel for WhisperModel {
     }
 
     fn encoder_decoder_cpu_ops(&self) -> Option<&dyn CpuEncoderDecoderOps> {
-        Some(self)
+        if self.pipeline.cpu_decoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
 
-    fn encoder_decoder_gpu_ops(&self) -> Option<&dyn kjarni_transformers::encoder_decoder::traits::GpuEncoderDecoderOps> {
-        None
+    fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> {
+        None // TODO: GPU support
     }
 
     fn decoder_start_token_id(&self) -> u32 {
@@ -532,45 +508,9 @@ impl EncoderDecoderLanguageModel for WhisperModel {
             repetition_penalty: 1.0,
             max_new_tokens: Some(448), // Whisper default
             add_bos_token: false,
-            strategy: DecodingStrategy::Greedy, // Whisper typically uses greedy
+            strategy: DecodingStrategy::Greedy,
+            speculation: None,
         }
-    }
-}
-
-// =============================================================================
-// Audio-Specific Encoder Trait
-// =============================================================================
-
-/// Extension trait for audio-capable models.
-pub trait AudioEncoderOps: Send + Sync {
-    /// Encode mel spectrogram to hidden states.
-    fn encode_mel(&self, mel: &Array2<f32>) -> Result<Array3<f32>>;
-
-    /// Encode mel spectrogram batch.
-    fn encode_mel_batch(&self, mel: &Array3<f32>) -> Result<Array3<f32>>;
-
-    /// Encode raw audio samples.
-    fn encode_audio(&self, audio: &[f32]) -> Result<Array3<f32>>;
-
-    /// Get mel config.
-    fn mel_config(&self) -> &MelConfig;
-}
-
-impl AudioEncoderOps for WhisperModel {
-    fn encode_mel(&self, mel: &Array2<f32>) -> Result<Array3<f32>> {
-        WhisperModel::encode_mel(self, mel)
-    }
-
-    fn encode_mel_batch(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
-        WhisperModel::encode_mel_batch(self, mel)
-    }
-
-    fn encode_audio(&self, audio: &[f32]) -> Result<Array3<f32>> {
-        WhisperModel::encode_audio(self, audio)
-    }
-
-    fn mel_config(&self) -> &MelConfig {
-        WhisperModel::mel_config(self)
     }
 }
 
@@ -583,7 +523,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mel_config() {
+    fn test_expected_mel_config() {
+        // Just verify the config is constructed correctly
         let mel_config = MelConfig::whisper();
         assert_eq!(mel_config.sample_rate, 16000);
         assert_eq!(mel_config.n_fft, 400);

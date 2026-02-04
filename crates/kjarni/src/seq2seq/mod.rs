@@ -75,8 +75,7 @@ mod validation;
 // Re-exports
 pub use builder::Seq2SeqGeneratorBuilder;
 pub use model::Seq2SeqGenerator;
-pub use resolution::ResolvedSeq2SeqConfig;
-pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqTask, Seq2SeqToken};
+pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 
 // ============================================================================
 // Convenience Functions
@@ -182,9 +181,6 @@ mod send_sync_tests {
 
         assert_send::<Seq2SeqError>();
         assert_sync::<Seq2SeqError>();
-
-        assert_send::<ResolvedSeq2SeqConfig>();
-        assert_sync::<ResolvedSeq2SeqConfig>();
     };
 }
 

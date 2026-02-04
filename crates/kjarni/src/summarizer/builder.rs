@@ -32,7 +32,7 @@ impl SummarizerBuilder {
             context: None,
             cache_dir: None,
             download_policy: DownloadPolicy::default(),
-            overrides: Seq2SeqOverrides::for_summarization(),
+            overrides: Seq2SeqOverrides::default(),
             quiet: false,
         }
     }
