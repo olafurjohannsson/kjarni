@@ -89,11 +89,11 @@ impl ModelConfig for WhisperConfig {
             encoder: Some(EncoderLayout {
                 // Whisper Encoder uses Sinusoidal, computed on fly. No weight.
                 position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
-                token_type_embedding: None,
-                embedding_norm_weight: Some("model.encoder.layer_norm.weight".to_string()),
-                embedding_norm_bias: Some("model.encoder.layer_norm.bias".to_string()),
-                final_norm_weight: None,
-                final_norm_bias: None,
+    token_type_embedding: None,
+    embedding_norm_weight: None,  // No embedding norm before layers
+    embedding_norm_bias: None,
+    final_norm_weight: Some("model.encoder.layer_norm.weight".to_string()),  // Final LN
+    final_norm_bias: Some("model.encoder.layer_norm.bias".to_string()),
                 layer: EncoderLayerLayout {
                     self_attn: AttentionLayout {
                         q_weight: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
