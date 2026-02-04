@@ -101,7 +101,7 @@ impl Seq2SeqEncoderConfig {
     /// Whisper-style configuration
     pub fn whisper() -> Self {
         Self {
-            position_encoding: PositionEncodingType::Sinusoidal,
+            position_encoding: PositionEncodingType::None,
             normalize_embeddings: false,
             final_layer_norm: true,
         }
