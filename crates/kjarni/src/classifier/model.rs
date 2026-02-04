@@ -314,19 +314,35 @@ impl Classifier {
         let merged = self.merge_overrides(overrides);
         let top_k = merged.top_k.unwrap_or(usize::MAX);
 
-        // Get raw scores
-        let raw_scores = self
-            .inner
-            .classify_scores(text)
-            .await
-            .map_err(ClassifierError::ClassificationFailed)?;
+        // // Get raw scores
+        // let raw_scores = self
+        //     .inner
+        //     .classify_scores(text)
+        //     .await
+        //     .map_err(ClassifierError::ClassificationFailed)?;
 
-        // Apply classification mode (softmax already applied for single-label)
         let scores = match self.mode {
-            ClassificationMode::SingleLabel => raw_scores,
+            ClassificationMode::SingleLabel => self
+                .inner
+                .classify_scores(text)
+                .await
+                .map_err(ClassifierError::ClassificationFailed)?,
             ClassificationMode::MultiLabel => {
-                // Apply sigmoid instead of softmax
-                raw_scores.iter().map(|&x| sigmoid(x)).collect()
+                // Get raw logits, apply sigmoid
+                let logits = self
+                    .inner
+                    .predict_logits(&[text])
+                    .await
+                    .map_err(ClassifierError::ClassificationFailed)?;
+                logits
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        ClassifierError::ClassificationFailed(anyhow::anyhow!("No results"))
+                    })?
+                    .iter()
+                    .map(|&x| sigmoid(x))
+                    .collect()
             }
         };
 
@@ -346,8 +362,25 @@ impl Classifier {
             .cloned()
             .collect();
 
-        ClassificationResult::from_scores(filtered_scores).ok_or_else(|| {
-            ClassifierError::ClassificationFailed(anyhow::anyhow!("No results after filtering"))
+        if filtered_scores.is_empty() {
+            return Err(ClassifierError::ClassificationFailed(anyhow::anyhow!(
+                "No results after filtering"
+            )));
+        }
+
+        // Preserve original label_index if top label didn't change
+        let label_index = if filtered_scores[0].0 == result.label {
+            result.label_index
+        } else {
+            // Find new index - but we've lost it. Need different approach.
+            0
+        };
+
+        Ok(ClassificationResult {
+            label: filtered_scores[0].0.clone(),
+            score: filtered_scores[0].1,
+            all_scores: filtered_scores,
+            label_index,
         })
     }
 

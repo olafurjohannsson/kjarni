@@ -23,7 +23,7 @@ like C++, Haskell, and Erlang.";
     // --- 1. SETUP ---
     log::info!("Loading models for CPU and GPU...");
     let ctx = get_test_context().await;
-    let model_type = ModelType::DistilBartCnn;
+    let model_type = ModelType::BartLargeCnn;
 
     let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =

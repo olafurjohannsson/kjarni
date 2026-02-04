@@ -410,7 +410,7 @@ impl AudioConvFrontend {
         let x = gelu_3d(&x);
 
         // Transpose: [batch, hidden, time] -> [batch, time, hidden]
-        let x = x.permuted_axes([0, 2, 1]).to_owned();
+        let x = x.permuted_axes([0, 2, 1]).as_standard_layout().to_owned();
 
         // Add position embeddings
         let (batch, seq_len, hidden_size) = x.dim();
