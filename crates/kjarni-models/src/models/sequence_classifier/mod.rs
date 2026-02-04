@@ -351,7 +351,7 @@ impl SequenceClassifier {
                 .cpu_encoder()
                 .ok_or_else(|| anyhow!("No CPU encoder available"))?;
 
-            let hidden_states = cpu_ops.embed_tokens(&input_ids, Some(&token_type_ids), 0)?;
+            let hidden_states = cpu_ops.embed_tokens(&input_ids, Some(&token_type_ids), 2)?;
 
             let normalized = cpu_encoder.embed_norm(&hidden_states)?;
 
@@ -360,7 +360,10 @@ impl SequenceClassifier {
                 .forward(&normalized, &attention_mask)?
                 .last_hidden_state
         };
-
+// Debug: print CLS token values
+let cls_hidden = hidden_states.slice(ndarray::s![0, 0, ..]);  // First batch, first token (CLS)
+println!("Rust CLS hidden first 10: {:?}", &cls_hidden.as_slice().unwrap()[..10]);
+println!("Rust CLS hidden last 10: {:?}", &cls_hidden.as_slice().unwrap()[cls_hidden.len()-10..]);
         // Forward through head
         let logits = self
             .pipeline

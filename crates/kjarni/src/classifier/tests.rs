@@ -1593,7 +1593,141 @@ mod classifier_tests {
     // =============================================================================
 
     mod batch_tests {
+        use kjarni_transformers::LanguageModel;
+
         use super::*;
+        #[tokio::test]
+        async fn test_roberta_sentiment_tokenization_parity() {
+            use crate::SequenceClassifier;
+            use kjarni_transformers::models::ModelType;
+            use kjarni_transformers::traits::Device;
+
+            // PyTorch reference values
+            const EXPECTED_INPUT_IDS: &[u32] = &[0, 100, 3668, 657, 42, 6, 24, 18, 2770, 328, 2];
+            const EXPECTED_ATTENTION_MASK: &[u32] = &[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+            const EXPECTED_LENGTH: usize = 11;
+
+            let model_type = ModelType::from_cli_name("roberta-sentiment").unwrap();
+            let cache_dir = crate::common::default_cache_dir();
+
+            let classifier = SequenceClassifier::from_registry(
+                model_type,
+                Some(cache_dir),
+                Device::Cpu,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to load");
+
+            let text = "I absolutely love this, it's amazing!";
+            let tokenizer = classifier.tokenizer();
+            let encoding = tokenizer.encode(text, true).expect("Failed to tokenize");
+
+            assert_eq!(encoding.get_ids(), EXPECTED_INPUT_IDS, "Input IDs mismatch");
+            assert_eq!(
+                encoding.get_attention_mask(),
+                EXPECTED_ATTENTION_MASK,
+                "Attention mask mismatch"
+            );
+            assert_eq!(encoding.len(), EXPECTED_LENGTH, "Sequence length mismatch");
+        }
+
+        #[tokio::test]
+        async fn test_roberta_sentiment_scores_parity() {
+            // PyTorch reference values
+            const EXPECTED_PROBS: [f32; 3] = [0.00723555, 0.00958345, 0.98318094];
+            const EXPECTED_LABEL: &str = "positive";
+            const EXPECTED_SCORE: f32 = 0.98318094;
+            const TOLERANCE: f32 = 1e-4;
+
+            let classifier = Classifier::new("roberta-sentiment")
+                .await
+                .expect("Failed to load model");
+
+            let text = "I absolutely love this, it's amazing!";
+
+            // Test raw scores
+            let scores = classifier
+                .classify_scores(text)
+                .await
+                .expect("Failed to get scores");
+
+            assert_eq!(scores.len(), 3, "Expected 3 scores");
+            for (i, (&actual, &expected)) in scores.iter().zip(EXPECTED_PROBS.iter()).enumerate() {
+                assert!(
+                    approx_eq(actual, expected, TOLERANCE),
+                    "Score mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected,
+                    actual
+                );
+            }
+
+            // Verify scores sum to 1.0 (softmax property)
+            let sum: f32 = scores.iter().sum();
+            assert!(
+                approx_eq(sum, 1.0, 1e-5),
+                "Scores should sum to 1.0, got {}",
+                sum
+            );
+
+            // Test classification result
+            let result = classifier
+                .classify(text)
+                .await
+                .expect("Classification failed");
+
+            assert_eq!(result.label, EXPECTED_LABEL, "Label mismatch");
+            assert!(
+                approx_eq(result.score, EXPECTED_SCORE, TOLERANCE),
+                "Score mismatch: expected {}, got {}",
+                EXPECTED_SCORE,
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn test_roberta_sentiment_logits_parity() {
+            use crate::SequenceClassifier;
+            use kjarni_transformers::models::ModelType;
+            use kjarni_transformers::traits::Device;
+
+            // PyTorch reference values
+            const EXPECTED_LOGITS: [f32; 3] = [-1.653445, -1.372414, 3.2583416];
+            const TOLERANCE: f32 = 1e-4;
+
+            let model_type = ModelType::from_cli_name("roberta-sentiment").unwrap();
+            let cache_dir = crate::common::default_cache_dir();
+
+            let classifier = SequenceClassifier::from_registry(
+                model_type,
+                Some(cache_dir),
+                Device::Cpu,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to load");
+
+            let text = "I absolutely love this, it's amazing!";
+            let logits = classifier.predict_logits(&[text]).await.expect("Failed");
+
+            assert_eq!(logits.len(), 1, "Expected 1 batch result");
+            assert_eq!(logits[0].len(), 3, "Expected 3 logits");
+
+            for (i, (&actual, &expected)) in
+                logits[0].iter().zip(EXPECTED_LOGITS.iter()).enumerate()
+            {
+                assert!(
+                    approx_eq(actual, expected, TOLERANCE),
+                    "Logit mismatch at index {}: expected {}, got {}",
+                    i,
+                    expected,
+                    actual
+                );
+            }
+        }
 
         #[tokio::test]
         async fn test_batch_roberta_sentiment() {
@@ -1615,6 +1749,12 @@ mod classifier_tests {
             assert_eq!(results.len(), 3);
 
             // Positive
+            println!("label: {} score: {}", results[0].label, results[0].score);
+            println!(
+                "expected label: {} expected score: {}",
+                expected::ROBERTA_SENTIMENT_POSITIVE_LABEL,
+                expected::ROBERTA_SENTIMENT_POSITIVE_SCORE,
+            );
             assert_eq!(results[0].label, expected::ROBERTA_SENTIMENT_POSITIVE_LABEL);
             assert!(approx_eq(
                 results[0].score,
@@ -1623,6 +1763,12 @@ mod classifier_tests {
             ));
 
             // Negative
+            println!("label: {} score: {}", results[1].label, results[1].score);
+            println!(
+                "expected label: {} expected score: {}",
+                expected::ROBERTA_SENTIMENT_NEGATIVE_LABEL,
+                expected::ROBERTA_SENTIMENT_NEGATIVE_SCORE,
+            );
             assert_eq!(results[1].label, expected::ROBERTA_SENTIMENT_NEGATIVE_LABEL);
             assert!(approx_eq(
                 results[1].score,
@@ -1631,6 +1777,12 @@ mod classifier_tests {
             ));
 
             // Neutral
+            println!("label: {} score: {}", results[2].label, results[2].score);
+            println!(
+                "expected label: {} expected score: {}",
+                expected::ROBERTA_SENTIMENT_NEUTRAL_LABEL,
+                expected::ROBERTA_SENTIMENT_NEUTRAL_SCORE,
+            );
             assert_eq!(results[2].label, expected::ROBERTA_SENTIMENT_NEUTRAL_LABEL);
             assert!(approx_eq(
                 results[2].score,

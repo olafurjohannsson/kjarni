@@ -118,6 +118,7 @@ impl Classifier {
             )
             .await?
         };
+        println!("model id: {}", model_id);
 
         // Resolve labels
         let custom_labels = builder.label_config.map(|c| c.labels);

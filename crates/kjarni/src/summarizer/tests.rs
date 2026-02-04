@@ -41,8 +41,8 @@ mod expected {
 // =============================================================================
 
 mod validation_tests {
-    use crate::summarizer::validation::*;
     use crate::summarizer::SummarizerError;
+    use crate::summarizer::validation::*;
     use kjarni_transformers::models::ModelType;
 
     #[test]
@@ -63,7 +63,10 @@ mod validation_tests {
         assert!(result.is_err());
         match result {
             Err(SummarizerError::IncompatibleModel { reason, .. }) => {
-                assert!(reason.to_lowercase().contains("translation") || reason.to_lowercase().contains("t5"));
+                assert!(
+                    reason.to_lowercase().contains("translation")
+                        || reason.to_lowercase().contains("t5")
+                );
             }
             _ => panic!("Expected IncompatibleModel error"),
         }
@@ -469,6 +472,8 @@ mod distilbart_cnn_tests {
 
 #[cfg(test)]
 mod error_handling_tests {
+    use crate::seq2seq::Seq2SeqOverrides;
+
     use super::*;
 
     #[tokio::test]
@@ -481,11 +486,33 @@ mod error_handling_tests {
     }
 
     #[tokio::test]
-    async fn test_incompatible_model_t5() {
-        let result = Summarizer::new("flan-t5-base").await;
-        assert!(
-            matches!(result, Err(SummarizerError::IncompatibleModel { .. }))
-                || matches!(result, Err(SummarizerError::Seq2Seq(_)))
+    async fn test_t5_model_can_summarize() {
+        // PyTorch reference: greedy decoding with max_new_tokens=64
+        const EXPECTED_SUMMARY: &str = "Eiffel Tower";
+
+        let summarizer = Summarizer::new("flan-t5-base")
+            .await
+            .expect("T5 should load for summarization");
+
+        let text = "The Eiffel Tower is a wrought-iron lattice tower in Paris, France. \
+                It was constructed from 1887 to 1889 as the entrance arch for the 1889 World's Fair.";
+
+        // Use explicit greedy config matching PyTorch
+        let overrides = Seq2SeqOverrides {
+            max_length: Some(64),
+            num_beams: Some(1),
+            ..Default::default()
+        };
+
+        let summary = summarizer
+            .summarize_with_config(text, &overrides)
+            .await
+            .expect("T5 should be able to summarize");
+
+        assert_eq!(
+            summary, EXPECTED_SUMMARY,
+            "Summary mismatch: expected '{}', got '{}'",
+            EXPECTED_SUMMARY, summary
         );
     }
 }
@@ -520,7 +547,11 @@ mod accessor_tests {
             .unwrap();
 
         assert_eq!(s.model_name(), "distilbart-cnn");
-        assert!(matches!(s.device(), kjarni_transformers::traits::Device::Cpu));
+        assert_eq!(s.model_type(), ModelType::DistilBartCnn);
+        assert!(matches!(
+            s.device(),
+            kjarni_transformers::traits::Device::Cpu
+        ));
         assert!(s.generator().context_size() >= 512);
         assert!(s.generator().vocab_size() >= 30000);
     }
@@ -571,7 +602,10 @@ mod concurrency_tests {
             .collect();
 
         for handle in handles {
-            let result = handle.await.expect("Task panicked").expect("Summarization failed");
+            let result = handle
+                .await
+                .expect("Task panicked")
+                .expect("Summarization failed");
             assert_eq!(result, DISTILBART_CNN_PYTHON_LANGUAGE_GREEDY);
         }
     }
@@ -600,7 +634,9 @@ mod convenience_function_tests {
             return;
         }
 
-        let result = summarize("distilbart-cnn", INPUT_PYTHON_LANGUAGE).await.unwrap();
+        let result = summarize("distilbart-cnn", INPUT_PYTHON_LANGUAGE)
+            .await
+            .unwrap();
         // Default may use beam search, so just verify non-empty and has content
         assert!(!result.is_empty());
         assert!(result.contains("Python"));
