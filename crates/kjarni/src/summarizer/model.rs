@@ -104,7 +104,7 @@ impl Summarizer {
     /// Summarize text with default settings.
     pub async fn summarize(&self, text: &str) -> SummarizerResult<String> {
         let prompt = self.format_prompt(text);
-
+        println!("DEBUG: needs_prefix={}, prompt starts with: {:?}", self.needs_prefix, &prompt[..50.min(prompt.len())]);
         self.generator
             .generate(&prompt)
             .await
@@ -118,7 +118,7 @@ impl Summarizer {
         overrides: &Seq2SeqOverrides,
     ) -> SummarizerResult<String> {
         let prompt = self.format_prompt(text);
-
+        println!("DEBUG: needs_prefix={}, prompt starts with: {:?}", self.needs_prefix, &prompt[..50.min(prompt.len())]);
         self.generator
             .generate_with_config(&prompt, overrides)
             .await

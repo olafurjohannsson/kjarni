@@ -1,22 +1,14 @@
-from transformers import T5ForConditionalGeneration, AutoTokenizer
+from transformers import AutoTokenizer
 
-model_path = "/home/olafurj/.cache/kjarni/google_flan-t5-base"
-model = T5ForConditionalGeneration.from_pretrained(model_path)
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model.eval()
+tokenizer = AutoTokenizer.from_pretrained("/home/olafurj/.cache/kjarni/google_flan-t5-base")
+print(f"EOS token ID: {tokenizer.eos_token_id}")
+print(f"EOS token: {tokenizer.eos_token}")
 
-text = "The Eiffel Tower is a wrought-iron lattice tower in Paris, France. It was constructed from 1887 to 1889 as the entrance arch for the 1889 World's Fair."
+# Encode "Eiffel Tower" to see tokens
+tokens = tokenizer.encode("Eiffel Tower", add_special_tokens=False)
+print(f"'Eiffel Tower' tokens: {tokens}")
 
-# T5 summarization prefix
-input_text = f"summarize: {text}"
-inputs = tokenizer(input_text, return_tensors="pt", truncation=True, max_length=512)
-
-outputs = model.generate(
-    **inputs,
-    max_new_tokens=64,
-    num_beams=1,  # greedy
-    do_sample=False,
-)
-
-summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
-print(f"Summary: {summary}")
+# Check what comes after in a generation
+text = "Eiffel Tower</s>"  # with EOS
+tokens = tokenizer.encode(text, add_special_tokens=False)
+print(f"'Eiffel Tower</s>' tokens: {tokens}")

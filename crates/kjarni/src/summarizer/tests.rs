@@ -484,7 +484,70 @@ mod error_handling_tests {
             other => panic!("Expected UnknownModel error, got {:?}", other),
         }
     }
+    #[tokio::test]
+async fn test_debug_t5_token_generation() {
+    use crate::seq2seq::Seq2SeqGenerator;
+    use futures::StreamExt;
+    
+    let generator = Seq2SeqGenerator::new("flan-t5-base")
+        .await
+        .expect("Should load");
 
+    let prompt = "summarize: The Eiffel Tower is a wrought-iron lattice tower in Paris, France. It was constructed from 1887 to 1889 as the entrance arch for the 1889 World's Fair.";
+
+    let overrides = Seq2SeqOverrides {
+        max_length: Some(64),
+        num_beams: Some(1),
+        do_sample: Some(false),
+        ..Default::default()
+    };
+
+    // Stream to see each token
+    let stream = generator.stream_with_config(prompt, overrides).await;
+    
+    match stream {
+        Ok(mut s) => {
+            let mut tokens = Vec::new();
+            while let Some(result) = s.next().await {
+                match result {
+                    Ok(token) => {
+                        println!("Token: {:?}", token);
+                        tokens.push(token);
+                    }
+                    Err(e) => println!("Error: {:?}", e),
+                }
+            }
+            println!("Total tokens: {}", tokens.len());
+        }
+        Err(e) => println!("Stream error: {:?}", e),
+    }
+}
+#[tokio::test]
+async fn test_debug_t5_generation_config() {
+    let summarizer = Summarizer::new("flan-t5-base")
+        .await
+        .expect("Should load");
+
+    let text = "The Eiffel Tower is a wrought-iron lattice tower in Paris, France. \
+                It was constructed from 1887 to 1889 as the entrance arch for the 1889 World's Fair.";
+
+let overrides = Seq2SeqOverrides {
+    max_length: Some(64),
+    num_beams: Some(1),
+    do_sample: Some(false),  // Add this explicitly
+    ..Default::default()
+};
+    
+    println!("Overrides: {:?}", overrides);
+    println!("is_empty: {}", overrides.is_empty());
+
+    let summary = summarizer
+        .summarize_with_config(text, &overrides)
+        .await
+        .expect("Should summarize");
+
+    println!("Summary: {}", summary);
+}
     #[tokio::test]
     async fn test_t5_model_can_summarize() {
         // PyTorch reference: greedy decoding with max_new_tokens=64
