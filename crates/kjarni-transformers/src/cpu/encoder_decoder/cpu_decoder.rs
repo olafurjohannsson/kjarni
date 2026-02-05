@@ -522,7 +522,8 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
 
         // 2. Embed
         let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
-
+        log::info!("Decoder embedded [0,0,:10]: {:?}", hidden.slice(ndarray::s![0, 0, ..10]));
+        log::info!("Decoder embedded [0,-1,:10]: {:?}", hidden.slice(ndarray::s![0, -1_i32, ..10]));
         self.forward_layers(
             &hidden,
             encoder_hidden_states,

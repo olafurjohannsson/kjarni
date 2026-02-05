@@ -152,7 +152,7 @@ impl Seq2SeqDecoderConfig {
     pub fn whisper() -> Self {
         Self {
             position_encoding: PositionEncodingType::Learned { offset: 0 },
-            normalize_embeddings: true,
+            normalize_embeddings: false,
             final_layer_norm: true,
             pre_norm: true,
         }

@@ -63,17 +63,20 @@ impl EncoderDecoderModelFactory for BartModel {
 
     fn load_config(weights: &ModelWeights) -> Result<Arc<Self::Config>> {
         let mut config = BartConfig::from_json(&weights.config_json())?;
-        // Helper to find shared key, same as before
         if config.shared_embedding_key.is_none() {
             let key = if weights.contains("model.shared.weight") {
                 "model.shared.weight"
-            } else {
-                "model.encoder.embed_tokens.weight" // fallback
-            };
-            
-            config.shared_embedding_key = Some(key.to_string());
-            println!("shared key {}", config.clone().shared_embedding_key.unwrap());
-        }
+            } else if weights.contains("model.encoder.embed_tokens.weight") {
+                "model.encoder.embed_tokens.weight"
+            } else if weights.contains("model.decoder.embed_tokens.weight") {
+                "model.decoder.embed_tokens.weight"
+        } else {
+            return Err(anyhow!("No shared embedding tensor found. Looked for: model.shared.weight, model.encoder.embed_tokens.weight, model.decoder.embed_tokens.weight"));
+        };
+
+    config.shared_embedding_key = Some(key.to_string());
+    println!("shared key {}", key);
+}
         Ok(Arc::new(config))
     }
 

@@ -129,10 +129,10 @@ impl ModelConfig for WhisperConfig {
                 // Whisper Decoder uses learned positions
                 position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
                 token_type_embedding: None,
-                embedding_norm_weight: Some("model.decoder.layer_norm.weight".to_string()),
-                embedding_norm_bias: Some("model.decoder.layer_norm.bias".to_string()),
-                final_norm_weight: None,
-                final_norm_bias: None,
+                embedding_norm_weight: None,  // No embedding norm!
+    embedding_norm_bias: None,
+    final_norm_weight: Some("model.decoder.layer_norm.weight".to_string()),
+    final_norm_bias: Some("model.decoder.layer_norm.bias".to_string()),
                 layer: DecoderLayerLayout {
                     self_attn: AttentionLayout {
                         q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),

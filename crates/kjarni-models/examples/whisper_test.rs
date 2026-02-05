@@ -70,6 +70,7 @@ let encoder_hidden_states = {
         encoder_hidden_states.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
         encoder_hidden_states.iter().sum::<f32>() / encoder_hidden_states.len() as f32
     );
+    log::info!("Encoder [0,0,:10]: {:?}", encoder_hidden_states.slice(s![0, 0, ..10]));
 
     // 6. Decode
     log::info!("Decoding...");
@@ -122,6 +123,7 @@ fn greedy_decode(
         (1, prompt_tokens.len()), 
         prompt_tokens.clone()
     )?;
+    log::info!("Decoder input_ids: {:?}", decoder_input_ids);
     let decoder_padding_mask = Array2::<f32>::ones((1, prompt_tokens.len()));
     
     let output = decoder.forward(
@@ -132,7 +134,7 @@ fn greedy_decode(
         Some(cpu_cache),
         Some(&cross_kv_cache),
     )?;
-    
+    log::info!("Decoder hidden [0,-1,:10]: {:?}", output.last_hidden_state.slice(s![0, -1_i32, ..10]));
     for (i, (k, v)) in output.new_self_attn_kv.into_iter().enumerate() {
         cpu_cache.update(i, &k, &v)?;
     }
