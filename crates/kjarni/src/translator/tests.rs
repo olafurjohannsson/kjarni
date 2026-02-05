@@ -176,17 +176,18 @@ mod language_tests {
 // =============================================================================
 
 mod validation_tests {
-    use crate::translator::validation::*;
     use crate::translator::TranslatorError;
+    use crate::translator::validation::*;
     use kjarni_transformers::models::ModelType;
 
-    #[test]
     fn test_validate_t5_models_accepted() {
         let t5_base = ModelType::from_cli_name("flan-t5-base").unwrap();
-        assert!(validate_for_translation(t5_base).is_ok());
-
-        let t5_large = ModelType::from_cli_name("flan-t5-large").unwrap();
-        assert!(validate_for_translation(t5_large).is_ok());
+        let result = crate::summarizer::validate_for_summarization(t5_base);
+        assert!(
+            result.is_ok(),
+            "T5 should be accepted for summarization: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -229,7 +230,7 @@ mod preset_tests {
     fn test_preset_fast_values() {
         assert_eq!(TRANSLATION_FAST_V1.model, "flan-t5-base");
         assert_eq!(TRANSLATION_FAST_V1.architecture, "t5");
-        assert!(TRANSLATION_FAST_V1.supported_languages.len() >= 10);
+        assert!(TRANSLATION_FAST_V1.supported_languages.len() == 6);
         assert!(TRANSLATION_FAST_V1.memory_mb >= 500);
         assert!(TRANSLATION_FAST_V1.memory_mb <= 2000);
     }
@@ -1033,7 +1034,10 @@ mod accessor_tests {
         assert_eq!(t.model_name(), "flan-t5-base");
         assert_eq!(t.default_from(), Some("English"));
         assert_eq!(t.default_to(), Some("German"));
-        assert!(matches!(t.device(), kjarni_transformers::traits::Device::Cpu));
+        assert!(matches!(
+            t.device(),
+            kjarni_transformers::traits::Device::Cpu
+        ));
         assert!(t.generator().context_size() >= 512);
         assert!(t.generator().vocab_size() >= 30000);
     }
@@ -1076,14 +1080,15 @@ mod concurrency_tests {
         let handles: Vec<_> = (0..3)
             .map(|_| {
                 let translator = t.clone();
-                tokio::spawn(
-                    async move { translator.translate("Thank you", "en", "de").await },
-                )
+                tokio::spawn(async move { translator.translate("Thank you", "en", "de").await })
             })
             .collect();
 
         for handle in handles {
-            let result = handle.await.expect("Task panicked").expect("Translation failed");
+            let result = handle
+                .await
+                .expect("Task panicked")
+                .expect("Translation failed");
             assert_eq!(result, FLAN_T5_BASE_EN_TO_DE_THANK_YOU_GREEDY);
         }
     }

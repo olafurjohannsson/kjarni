@@ -58,7 +58,7 @@ pub use builder::SummarizerBuilder;
 pub use model::Summarizer;
 pub use presets::{SummarizerPreset, SummarizerTier};
 pub use types::{SummarizerError, SummarizerResult};
-
+pub use validation::{get_summarization_models, recommended_summarization_models, validate_for_summarization};
 use kjarni_transformers::models::ModelType;
 
 // ============================================================================

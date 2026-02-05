@@ -1,14 +1,119 @@
-from transformers import AutoTokenizer
+import torch
+import numpy as np
+from transformers import WhisperModel, WhisperProcessor, WhisperForConditionalGeneration, WhisperFeatureExtractor, WhisperTokenizer
+import soundfile as sf
 
-tokenizer = AutoTokenizer.from_pretrained("/home/olafurj/.cache/kjarni/google_flan-t5-base")
-print(f"EOS token ID: {tokenizer.eos_token_id}")
-print(f"EOS token: {tokenizer.eos_token}")
+# Load audio
+audio, sr = sf.read("crates/kjarni-models/examples/hideyowife.wav")
+print(f"Audio: {len(audio)} samples, sr={sr}")
+if sr != 16000:
+    import resampy
+    audio = resampy.resample(audio, sr, 16000)
+    sr = 16000
 
-# Encode "Eiffel Tower" to see tokens
-tokens = tokenizer.encode("Eiffel Tower", add_special_tokens=False)
-print(f"'Eiffel Tower' tokens: {tokens}")
+# Get mel spectrogram from HF
+feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-base")
+mel_input = feature_extractor(audio, sampling_rate=sr, return_tensors="pt").input_features
+print(f"=== Mel Spectrogram ===")
+print(f"Shape: {mel_input.shape}")
+print(f"Min/Max: {mel_input.min().item():.6f} / {mel_input.max().item():.6f}")
+print(f"mel[0, 0, :10]: {mel_input[0, 0, :10].tolist()}")
+print(f"mel[0, 0, 100:110]: {mel_input[0, 0, 100:110].tolist()}")
+print()
 
-# Check what comes after in a generation
-text = "Eiffel Tower</s>"  # with EOS
-tokens = tokenizer.encode(text, add_special_tokens=False)
-print(f"'Eiffel Tower</s>' tokens: {tokens}")
+# Load HF model (whisper-base)
+model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
+model.eval()
+
+with torch.no_grad():
+    # === ENCODER ===
+    encoder = model.model.encoder
+    
+    # 1. Conv frontend
+    inputs_embeds = torch.nn.functional.gelu(encoder.conv1(mel_input))
+    print(f"=== After conv1 + GELU ===")
+    print(f"Shape: {inputs_embeds.shape}")
+    print(f"Min/Max: {inputs_embeds.min().item():.6f} / {inputs_embeds.max().item():.6f}")
+    print(f"[0, :5, 0]: {inputs_embeds[0, :5, 0].tolist()}")
+    print()
+    
+    inputs_embeds = torch.nn.functional.gelu(encoder.conv2(inputs_embeds))
+    print(f"=== After conv2 + GELU ===")
+    print(f"Shape: {inputs_embeds.shape}")
+    print(f"Min/Max: {inputs_embeds.min().item():.6f} / {inputs_embeds.max().item():.6f}")
+    print(f"[0, :5, 0]: {inputs_embeds[0, :5, 0].tolist()}")
+    print()
+    
+    inputs_embeds = inputs_embeds.permute(0, 2, 1)
+    print(f"=== After permute (before pos embed) ===")
+    print(f"Shape: {inputs_embeds.shape}")
+    print(f"[0, 0, :10]: {inputs_embeds[0, 0, :10].tolist()}")
+    print()
+    
+    # 2. Position embeddings
+    embed_pos = encoder.embed_positions.weight[:1500]
+    print(f"=== Position embeddings ===")
+    print(f"Shape: {embed_pos.shape}")
+    print(f"pos[0, :10]: {embed_pos[0, :10].tolist()}")
+    print(f"pos[1, :10]: {embed_pos[1, :10].tolist()}")
+    print()
+    
+    inputs_embeds = inputs_embeds + embed_pos
+    print(f"=== After adding positions ===")
+    print(f"Shape: {inputs_embeds.shape}")
+    print(f"[0, 0, :10]: {inputs_embeds[0, 0, :10].tolist()}")
+    print(f"Min/Max: {inputs_embeds.min().item():.6f} / {inputs_embeds.max().item():.6f}")
+    print()
+    
+    # 3. Full encoder output
+    encoder_output = model.model.encoder(mel_input)
+    enc_hidden = encoder_output.last_hidden_state
+    print(f"=== Encoder output ===")
+    print(f"Shape: {enc_hidden.shape}")
+    print(f"Min/Max: {enc_hidden.min().item():.6f} / {enc_hidden.max().item():.6f}")
+    print(f"Mean: {enc_hidden.mean().item():.6f}")
+    print(f"[0, 0, :10]: {enc_hidden[0, 0, :10].tolist()}")
+    print(f"[0, 0, -10:]: {enc_hidden[0, 0, -10:].tolist()}")
+    print()
+    
+    # === DECODER ===
+    decoder_input_ids = torch.tensor([[50258, 50259, 50359, 50363]])
+    
+    decoder_output = model.model.decoder(
+        input_ids=decoder_input_ids,
+        encoder_hidden_states=enc_hidden,
+    )
+    dec_hidden = decoder_output.last_hidden_state
+    print(f"=== Decoder output (after prompt) ===")
+    print(f"Shape: {dec_hidden.shape}")
+    print(f"[0, -1, :10]: {dec_hidden[0, -1, :10].tolist()}")
+    print()
+    
+    # Logits
+    logits = model.lm_head(dec_hidden)
+    last_logits = logits[0, -1]
+    print(f"=== Logits (last position) ===")
+    top_values, top_indices = torch.topk(last_logits, 10)
+    for val, idx in zip(top_values.tolist(), top_indices.tolist()):
+        print(f"  Token {idx}: {val:.4f}")
+    print()
+    
+    # Generate 20 tokens
+    next_token = last_logits.argmax().item()
+    generated = [next_token]
+    
+    for step in range(20):
+        all_ids = torch.tensor([[50258, 50259, 50359, 50363] + generated])
+        out = model(
+            encoder_outputs=(enc_hidden,),
+            decoder_input_ids=all_ids,
+        )
+        next_logits = out.logits[0, -1]
+        next_token = next_logits.argmax().item()
+        generated.append(next_token)
+        if next_token == 50257:
+            break
+    
+    tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-base")
+    print(f"Generated tokens: {generated}")
+    print(f"Decoded: {tokenizer.decode(generated, skip_special_tokens=True)}")

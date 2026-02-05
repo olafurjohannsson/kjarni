@@ -70,7 +70,9 @@ impl EncoderDecoderModelFactory for BartModel {
             } else {
                 "model.encoder.embed_tokens.weight" // fallback
             };
+            
             config.shared_embedding_key = Some(key.to_string());
+            println!("shared key {}", config.clone().shared_embedding_key.unwrap());
         }
         Ok(Arc::new(config))
     }
