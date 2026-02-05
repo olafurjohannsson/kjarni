@@ -122,29 +122,10 @@ pub fn compute_mel_spectrogram(audio: &[f32], config: &MelConfig) -> Result<Arra
         for (i, &mag) in magnitudes.iter().enumerate() {
             spectrogram[[i, frame_idx]] = if config.power { mag * mag } else { mag };
         }
-        if frame_idx == 100 {
-            println!("=== FFT Debug (frame 100) ===");
-            println!("Windowed[:5]: {:?}", &windowed[..5]);
-            println!("Magnitudes[:10]: {:?}", &magnitudes[..10]);
-            if config.power {
-                let powers: Vec<f32> = magnitudes.iter().map(|m| m * m).collect();
-                println!("Powers[:10]: {:?}", &powers[..10]);
-            }
-        }
     }
 
     // Apply mel filterbank
     let mel_spec = mel_filters.dot(&spectrogram);
-
-    // DEBUG: Print pre-log values
-    println!("=== Pre-log mel ===");
-    println!("Shape: {:?}", mel_spec.dim());
-    println!(
-        "Min/max: {:?} / {:?}",
-        mel_spec.iter().cloned().fold(f32::INFINITY, f32::min),
-        mel_spec.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
-    );
-    println!("mel_spec[0, :10]: {:?}", &mel_spec.slice(s![0, ..10]));
 
     // Log scale with appropriate normalization
     let log_mel = if config.whisper_normalize {

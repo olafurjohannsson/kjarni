@@ -206,19 +206,46 @@ pub enum Commands {
         quiet: bool,
     },
 
-    /// Transcribe audio to text
+        /// Transcribe audio to text
     Transcribe {
-        /// Path to audio file
+        /// Path to audio file (wav, mp3, flac, ogg)
         file: String,
 
-        #[arg(short, long, default_value = "whisper-tiny")]
+        /// Model to use (whisper-small, whisper-large-v3)
+        #[arg(short, long, default_value = "whisper-small")]
         model: String,
 
+        /// Path to local model directory (not yet implemented)
         #[arg(long)]
         model_path: Option<String>,
 
-        #[arg(long)]
+        /// Language code (e.g., en, fr, de). Omit for auto-detect.
+        #[arg(short, long)]
         language: Option<String>,
+
+        /// Translate to English instead of transcribing
+        #[arg(long)]
+        translate: bool,
+
+        /// Include timestamps in output
+        #[arg(short, long)]
+        timestamps: bool,
+
+        /// Maximum tokens per 30-second chunk
+        #[arg(long)]
+        max_tokens: Option<usize>,
+
+        /// Disable streaming (wait for full result)
+        #[arg(long)]
+        no_stream: bool,
+
+        /// Use GPU acceleration
+        #[arg(long)]
+        gpu: bool,
+
+        /// Suppress progress output
+        #[arg(short, long)]
+        quiet: bool,
     },
 
     /// Classify text using a classification model

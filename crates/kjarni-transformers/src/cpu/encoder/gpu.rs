@@ -2,25 +2,25 @@ use anyhow::{Context, Result};
 use ndarray::s;
 use std::sync::Arc;
 
-use crate::cpu::encoder::traits::GpuEncoder;
 use crate::EmbeddingConfig;
 use crate::LoadedEmbeddings;
+use crate::cpu::encoder::traits::GpuEncoder;
 use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::gpu_ops::blocks::encoder::GpuEncoderLayer;
 
 use crate::gpu::normalization::{
-    GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
-    GpuRMSNormWeights, GpuLayerNorm, GpuLayerNormWeights
+    GpuLayerNorm, GpuLayerNormWeights, GpuNormalization, GpuNormalizationWeights, GpuRMSNorm,
+    GpuRMSNormWeights,
 };
 
-use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
+use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::blocks::GpuSwiGLUFFNWeights;
 use crate::models::base::ModelInput;
 use crate::models::base::ModelLoadConfig;
 use crate::traits::NormalizationStrategy;
 use crate::traits::{Device, InferenceModel, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 
 pub struct GpuTransformerEncoder {
     embeddings: LoadedEmbeddings,
@@ -254,7 +254,6 @@ impl GpuTransformerEncoder {
                     .transpose()?;
                 // let gate_b = None; // Usually implicit or shared?
 
-                
                 let swiglu_weights = crate::gpu_ops::blocks::ffn_swiglu::GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,
                     // gate_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
@@ -270,7 +269,7 @@ impl GpuTransformerEncoder {
                 let up_w = weights.get_array2(&up_name)?;
                 // let down_w = load_transposed(&down_name)?;
                 let down_w = weights.get_array2(&down_name)?;
-                
+
                 let up_b = resolve_bias(&encoder_layout.layer.ffn.up_bias)
                     .map(|s| weights.get_array1(&s))
                     .transpose()?;
@@ -373,7 +372,18 @@ impl GpuEncoder for GpuTransformerEncoder {
         self.embeddings
             .embed(encoder, pool, input, token_type_ids, 0)
     }
-
+    fn embed_norm(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+    ) -> Result<GpuTensor> {
+        unimplemented!()
+        // let output = pool.get(hidden_states.shape().to_vec());
+        // self.embed_layer_norm
+        //     .encode(cmd_encoder, &self.embed_ln_weights, hidden_states, &output);
+        // Ok(output)
+    }
     fn embed_and_normalize(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,

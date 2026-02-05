@@ -11,30 +11,19 @@ use tokenizers::Tokenizer;
 use super::config::WhisperConfig;
 
 use kjarni_transformers::{
-    LanguageModel, ModelType, WgpuContext,
-    audio::{AudioConvFrontend, MelConfig},
-    cache::{Cache, CpuBeamKVCache},
-    common::{
+    LanguageModel, ModelType, WgpuContext, audio::{AudioConvFrontend, MelConfig}, cache::{Cache, CpuBeamKVCache}, common::{
         DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults, ModelGenerationDefaults,
-    },
-    cpu::encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
-    cpu::encoder_decoder::{
+    }, cpu::{encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder}, encoder_decoder::{
         cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
         cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
-    },
-    encoder_decoder::{
-        config::Seq2SeqDecoderConfig as DecoderCfg,
-        config::Seq2SeqEncoderConfig as EncoderCfg,
+    }}, encoder_decoder::{
+        config::{Seq2SeqDecoderConfig as DecoderCfg, Seq2SeqEncoderConfig as EncoderCfg},
         traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel,
             GpuCrossDecoder, GpuEncoderDecoderOps,
         },
-    },
-    models::base::ModelLoadConfig,
-    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
-    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    }, gpu::{GpuTensor, GpuTensorPool}, models::base::{ModelInput, ModelLoadConfig}, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 // =============================================================================
@@ -406,6 +395,19 @@ impl CpuEncoderDecoderOps for WhisperModel {
 impl GpuEncoderOps for WhisperModel {
     fn encoder(&self) -> &dyn GpuEncoder {
         self.pipeline.gpu_encoder().expect("GPU Encoder not active")
+    }
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor> {
+        unimplemented!()
+        // self.pipeline()
+        //     .embeddings()
+        //     .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 

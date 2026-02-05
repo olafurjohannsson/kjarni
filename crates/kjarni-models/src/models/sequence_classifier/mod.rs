@@ -547,6 +547,18 @@ impl GpuEncoderOps for SequenceClassifier {
             .gpu_encoder()
             .expect("GPU encoder not available")
     }
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor> {
+        self.pipeline()
+            .embeddings()
+            .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
+    }
 }
 
 #[async_trait]

@@ -11,31 +11,22 @@ use crate::models::t5::T5Task;
 use super::config::T5Config;
 
 use kjarni_transformers::{
-    LanguageModel, ModelType, WgpuContext,
-    cache::{Cache, CpuBeamKVCache},
-    common::{
+    LanguageModel, ModelType, WgpuContext, cache::{Cache, CpuBeamKVCache}, common::{
         BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults, ModelGenerationDefaults,
-    },
-    cpu::{
+    }, cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
             cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
-    },
-    gpu::cache::GpuBeamKVCache,
-    encoder_decoder::{
+    }, encoder_decoder::{
         config::TranslationParams,
         traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
             GpuEncoderDecoderOps,
         },
-    },
-    models::base::ModelLoadConfig,
-    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
-    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    }, gpu::{GpuTensor, GpuTensorPool, cache::GpuBeamKVCache}, models::base::{ModelInput, ModelLoadConfig}, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 pub struct T5Model {
@@ -250,6 +241,19 @@ impl CpuEncoderOps for T5Model {
 impl GpuEncoderOps for T5Model {
     fn encoder(&self) -> &dyn GpuEncoder {
         self.pipeline.gpu_encoder().expect("GPU Encoder not active")
+    }
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor> {
+        unimplemented!()
+        // self.pipeline()
+        //     .embeddings()
+        //     .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 

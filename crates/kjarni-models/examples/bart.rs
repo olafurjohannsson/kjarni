@@ -1,14 +1,10 @@
 use anyhow::Result;
 
 use kjarni_transformers::{
-    WgpuContext,
-    common::DecodingStrategy,
-    encoder_decoder::{
+    WgpuContext, common::DecodingStrategy, cpu::encoder::CpuEncoderOps, encoder_decoder::{
         CpuBackend, CpuSeq2SeqState, EncoderDecoderGenerator,
         traits::{CpuCrossDecoder, EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel},
-    },
-    gpu::encoder_decoder::backend::{GpuEncoderDecoderBackend, GpuSeq2SeqState},
-    models::{ModelType, base::ModelInput},
+    }, gpu::encoder_decoder::backend::{GpuEncoderDecoderBackend, GpuSeq2SeqState}, models::{ModelType, base::ModelInput}
 };
 
 use kjarni_models::models::bart::model::BartModel;
@@ -79,6 +75,157 @@ async fn main() -> Result<()> {
         .encode(article, true)
         .map_err(|e| anyhow!(e))?;
     let tokens = encoding.get_ids();
+
+
+    // === STEP 0: CONFIG CHECK ===
+log::info!("\n--- STEP 0: CONFIG CHECK ---");
+log::info!("CPU model normalize_embedding config: {}", cpu_model.config.normalize_embedding);
+log::info!("GPU model normalize_embedding config: {}", gpu_model.config.normalize_embedding);
+
+// === STEP 0a: ENCODER RAW EMBEDDINGS (before layernorm) ===
+log::info!("\n--- STEP 0a: ENCODER RAW EMBEDDINGS ---");
+
+let input_ids_2d = ndarray::Array2::from_shape_vec(
+    (1, tokens.len()),
+    tokens.iter().map(|&t| t).collect(),
+)?;
+
+// CPU: use the pipeline's encoder embeddings
+let cpu_enc_embed = cpu_model.embed_tokens(&input_ids_2d, None, 2)?;
+println!("CPU encoder embed shape: {:?}", cpu_enc_embed.shape());
+println!("CPU encoder embed first 5: {:?}", cpu_enc_embed.iter().take(5).collect::<Vec<_>>());
+
+// GPU
+let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
+let input_gpu_enc = GpuTensor::from_ndarray(&ctx, &input_ids_2d)?;
+{
+    let pool = ctx.get_inference_pool();
+    let pool_guard = pool.lock().await;
+    let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+    let (enc, pool_ref) = frame.resources();
+
+    let gpu_enc_embed = gpu_encoder.embed(
+        enc,
+        pool_ref,
+        ModelInput::TokensGpu(&input_gpu_enc),
+        None,
+    )?;
+    frame.finish();
+
+    let gpu_enc_embed_cpu = gpu_enc_embed.to_ndarray_3d::<f32>().await?;
+    println!("GPU encoder embed shape: {:?}", gpu_enc_embed_cpu.shape());
+    println!("GPU encoder embed first 5: {:?}", gpu_enc_embed_cpu.iter().take(5).collect::<Vec<_>>());
+
+    assert_all_close(
+        &cpu_enc_embed.view().into_dyn(),
+        &gpu_enc_embed_cpu.view().into_dyn(),
+        1e-3,
+        1e-4,
+        "Encoder Raw Embeddings",
+    );
+}
+
+// === STEP 0b: ENCODER EMBED + LAYERNORM ===
+log::info!("\n--- STEP 0b: ENCODER EMBED + LAYERNORM ---");
+
+// CPU: apply embed_norm manually
+let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
+let cpu_enc_normed = cpu_encoder.embed_norm(&cpu_enc_embed)?;
+println!("CPU encoder normed shape: {:?}", cpu_enc_normed.shape());
+println!("CPU encoder normed first 5: {:?}", cpu_enc_normed.iter().take(5).collect::<Vec<_>>());
+
+// GPU
+{
+    let pool = ctx.get_inference_pool();
+    let pool_guard = pool.lock().await;
+    let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+    let (enc, pool_ref) = frame.resources();
+
+    let gpu_enc_normed = gpu_encoder.embed_and_normalize(
+        enc,
+        pool_ref,
+        ModelInput::TokensGpu(&input_gpu_enc),
+        None,
+    )?;
+    frame.finish();
+
+    let gpu_enc_normed_cpu = gpu_enc_normed.to_ndarray_3d::<f32>().await?;
+    println!("GPU encoder normed shape: {:?}", gpu_enc_normed_cpu.shape());
+    println!("GPU encoder normed first 5: {:?}", gpu_enc_normed_cpu.iter().take(5).collect::<Vec<_>>());
+
+    assert_all_close(
+        &cpu_enc_normed.view().into_dyn(),
+        &gpu_enc_normed_cpu.view().into_dyn(),
+        1e-3,
+        1e-4,
+        "Encoder Embed + LayerNorm",
+    );
+}
+
+// === STEP 0c: LAYER-BY-LAYER ENCODER CHECK ===
+log::info!("\n--- STEP 0c: LAYER-BY-LAYER ENCODER CHECK ---");
+
+let cpu_encoder = cpu_model.pipeline.cpu_encoder().expect("No CPU encoder");
+let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
+
+// Get the normalized embeddings as starting point
+let attention_mask_cpu = ndarray::Array2::<f32>::ones((1, tokens.len()));
+let attention_mask_gpu = GpuTensor::from_ndarray(&ctx, &attention_mask_cpu)?;
+
+// Start with embed+normalize output
+let mut cpu_hidden = cpu_enc_normed.clone();  // from your Step 0b
+
+let mut gpu_hidden = {
+    let pool = ctx.get_inference_pool();
+    let pool_guard = pool.lock().await;
+    let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+    let (enc, pool_ref) = frame.resources();
+    let h = gpu_encoder.embed_and_normalize(enc, pool_ref, ModelInput::TokensGpu(&input_gpu_enc), None)?;
+    frame.finish();
+    h
+};
+
+// Check each layer individually
+let num_layers = cpu_encoder.num_layers();
+for layer_idx in 0..num_layers {
+    // CPU: run single layer
+    cpu_hidden = cpu_encoder.forward_layers(&cpu_hidden, &attention_mask_cpu, layer_idx, layer_idx + 1)?;
+
+    // GPU: run single layer
+    gpu_hidden = {
+        let pool = ctx.get_inference_pool();
+        let pool_guard = pool.lock().await;
+        let mut frame = GpuFrameContext::new(&ctx, pool_guard);
+        let (enc, pool_ref) = frame.resources();
+        let h = gpu_encoder.forward_layers(enc, pool_ref, &gpu_hidden, &attention_mask_gpu, layer_idx, layer_idx + 1)?;
+        frame.finish();
+        h
+    };
+
+    let gpu_hidden_cpu = gpu_hidden.to_ndarray_3d::<f32>().await?;
+    
+    let max_diff = cpu_hidden.iter()
+        .zip(gpu_hidden_cpu.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+
+    log::info!("Layer {} max diff: {:.6}", layer_idx, max_diff);
+    
+    if max_diff > 0.01 {
+        log::error!("Layer {} DIVERGED!", layer_idx);
+        log::error!("  CPU first 5: {:?}", cpu_hidden.iter().take(5).collect::<Vec<_>>());
+        log::error!("  GPU first 5: {:?}", gpu_hidden_cpu.iter().take(5).collect::<Vec<_>>());
+        
+        // Also check last 5 to see if error is position-dependent
+        // log::error!("  CPU last 5: {:?}", cpu_hidden.iter().rev().take(5).collect::<Vec<_>>());
+        // log::error!("  GPU last 5: {:?}", gpu_hidden_cpu.iter().rev().take(5).collect::<Vec<_>>());
+        break;
+    }
+}
+
+// Now continue with your existing STEP 1...
+    
+
 
     // --- 2. ENCODER PARITY CHECK ---
     log::info!("\n--- STEP 1: CHECKING ENCODER PARITY ---");

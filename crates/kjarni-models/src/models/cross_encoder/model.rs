@@ -6,7 +6,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -216,12 +216,8 @@ impl CrossEncoder {
         }
 
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
-            ops.forward_tokens(
-                &input_ids,
-                Some(&attention_mask),
-                Some(&token_type_ids),
-                0
-            )?.last_hidden_state
+            ops.forward_tokens(&input_ids, Some(&attention_mask), Some(&token_type_ids), 0)?
+                .last_hidden_state
         } else if let Some(ops) = self.encoder_gpu_ops() {
             let context = self
                 .context()
@@ -378,7 +374,6 @@ impl InferenceModel for CrossEncoder {
     }
 }
 
-
 impl CpuEncoderOps for CrossEncoder {
     fn encoder(&self) -> &dyn CpuEncoder {
         self.pipeline
@@ -402,6 +397,18 @@ impl GpuEncoderOps for CrossEncoder {
         self.pipeline
             .gpu_encoder()
             .expect("GPU encoder not available")
+    }
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor> {
+        self.pipeline()
+            .embeddings()
+            .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 

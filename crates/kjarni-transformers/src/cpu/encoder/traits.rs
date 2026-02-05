@@ -14,7 +14,7 @@ use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;
-use crate::{last_token_pool, max_pool};
+use crate::{WgpuContext, last_token_pool, max_pool};
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -323,7 +323,7 @@ pub trait CpuEncoderOps: Send + Sync {
     ) -> Result<CpuEncoderOutput> {
         let hidden: Array3<f32> = self.embed_tokens(input_ids, token_type_ids, pos)?;
 
-        // normalize 
+        // normalize
         let normalized = self.encoder().embed_norm(&hidden)?;
 
         let mask = match attention_mask {
@@ -434,6 +434,25 @@ pub trait GpuEncoder: Send + Sync {
         end_layer: usize,
     ) -> Result<GpuTensor>;
 
+    /// Apply embedding layer normalization (BART-specific, after embed lookup)
+    fn embed_norm(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+    ) -> Result<GpuTensor>;
+
+    /// Apply final layer normalization (T5/Whisper have this, BART doesn't)
+    fn final_norm(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+    ) -> Result<GpuTensor> {
+        // Default: no final norm (BART)
+        Ok(hidden_states.clone())
+    }
+
     /// Number of encoder layers in this model.
     fn num_layers(&self) -> usize;
 
@@ -464,10 +483,116 @@ pub trait GpuEncoder: Send + Sync {
             last_hidden_state: output,
         })
     }
+    fn forward2(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+        attention_mask: &GpuTensor,
+    ) -> Result<GpuEncoderOutput> {
+        let output = self.forward_layers(
+            cmd_encoder,
+            pool,
+            hidden_states,
+            attention_mask,
+            0,
+            self.num_layers(),
+        )?;
+        let normalized = self.final_norm(cmd_encoder, pool, &output)?;
+        Ok(GpuEncoderOutput {
+            last_hidden_state: normalized,
+        })
+    }
 }
 
 pub trait GpuEncoderOps: Send + Sync {
+    /// Access the underlying encoder (transformer layers)
     fn encoder(&self) -> &dyn GpuEncoder;
+
+    /// Embed tokens to hidden states (no normalization)
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor>;
+
+    /// Embed audio -> hidden states (Whisper)
+    fn embed_audio(
+        &self,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _mel: &GpuTensor,
+    ) -> Result<GpuTensor> {
+        Err(anyhow!("Audio embedding not supported for this model"))
+    }
+
+    fn get_attention_mask(&self, ctx: &Arc<WgpuContext>, seq_len: usize) -> Result<GpuTensor> {
+        let mask_cpu = Array2::<f32>::ones((1, seq_len));
+        Ok(GpuTensor::from_ndarray(ctx, &mask_cpu)?)
+    }
+
+    // =========================================================================
+    // Default Implementations
+    // =========================================================================
+
+    /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
+    fn forward_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        ctx: &Arc<WgpuContext>,
+        input_ids: ModelInput<'_>,
+        attention_mask: Option<&GpuTensor>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuEncoderOutput> {
+        // 1. Embed tokens
+        let hidden = self.embed_tokens(cmd_encoder, pool, input_ids, token_type_ids, pos)?;
+
+        // 2. Apply embedding normalization
+        let normalized = self.encoder().embed_norm(cmd_encoder, pool, &hidden)?;
+
+        // 3. Get or create attention mask
+        let mask = match attention_mask {
+            Some(m) => m.clone(),
+            None => self.get_attention_mask(ctx, normalized.shape()[1])?,
+        };
+
+        // 4. Run through encoder layers + final norm
+        self.encoder().forward2(
+            cmd_encoder,
+            pool,
+            &normalized,
+            &mask,
+        )
+    }
+
+    /// Forward from mel spectrogram (Whisper)
+    fn forward_audio(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        ctx: &Arc<WgpuContext>,
+        mel: &GpuTensor,
+        attention_mask: Option<&GpuTensor>,
+    ) -> Result<GpuEncoderOutput> {
+        let hidden = self.embed_audio(cmd_encoder, pool, mel)?;
+
+        let mask = match attention_mask {
+            Some(m) => m.clone(),
+            None => self.get_attention_mask(ctx, hidden.shape()[1])?,
+        };
+
+        self.encoder().forward2(
+            cmd_encoder,
+            pool,
+            &hidden,
+            &mask,
+        )
+    }
 }
 
 pub fn l2_normalize_inplace(embeddings: &mut Array2<f32>) {
@@ -610,7 +735,11 @@ mod tests_trait {
             token_type_ids: Option<&Array2<u32>>,
             pos: usize,
         ) -> Result<Array3<f32>> {
-            Ok(Array3::zeros((input_ids.dim().0, input_ids.dim().1, self.hidden_size())))
+            Ok(Array3::zeros((
+                input_ids.dim().0,
+                input_ids.dim().1,
+                self.hidden_size(),
+            )))
         }
     }
 

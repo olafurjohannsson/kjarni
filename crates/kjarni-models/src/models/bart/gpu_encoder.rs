@@ -5,8 +5,8 @@ use kjarni_transformers::cpu::encoder::prelude::*;
 use kjarni_transformers::gpu_ops::blocks::attention::GpuAttentionWeights;
 use kjarni_transformers::{EmbeddingConfig, Embeddings, LoadedEmbeddings};
 
-use kjarni_transformers::gpu_ops::blocks::{GpuFeedForwardWeights, GpuFeedForwardWeightsStd};
 use kjarni_transformers::gpu_ops::blocks::encoder::GpuEncoderLayer;
+use kjarni_transformers::gpu_ops::blocks::{GpuFeedForwardWeights, GpuFeedForwardWeightsStd};
 
 use kjarni_transformers::gpu::{
     GpuEmbeddingWeights, GpuEmbeddings,
@@ -26,12 +26,8 @@ pub struct BartGpuEncoder {
     config: Arc<BartConfig>,
     load_config: ModelLoadConfig,
 
-    // --- GPU Kernels ---
-    gpu_embeddings: GpuEmbeddings,
     embed_layer_norm: GpuNormalization,
 
-    // --- GPU Weights (None if using CPU embeddings) ---
-    gpu_embedding_weights: Option<GpuEmbeddingWeights>,
     embed_ln_weights: GpuNormalizationWeights,
 
     // --- CPU Embeddings (None if using GPU embeddings) ---
@@ -118,8 +114,6 @@ impl BartGpuEncoder {
             (None, Some(gpu_weights))
         };
 
-        let gpu_embeddings = GpuEmbeddings::new(context)?;
-
         let position_embedding = encoder_layout.position_embedding.as_ref().unwrap();
 
         let embedding_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
@@ -132,6 +126,14 @@ impl BartGpuEncoder {
         //    embedding_builder.type_embedding(type_embedding);
         // };
         let embedding_config = embedding_builder.build();
+        log::info!("BartGpuEncoder embedding_config:");
+        log::info!("  word_embedding_key: {}", embedding_config.word_embedding);
+        log::info!(
+            "  position_embedding_key: {:?}",
+            embedding_config.position_embedding
+        );
+        log::info!("  position_offset: {}", embedding_config.position_offset);
+        log::info!("  scale_embeddings: {}", embedding_config.scale_embeddings);
         let embeddings = LoadedEmbeddings::new(
             Some(context),
             weights,
@@ -173,9 +175,7 @@ impl BartGpuEncoder {
             context: context.clone(),
             config,
             load_config,
-            gpu_embeddings,
             embed_layer_norm,
-            gpu_embedding_weights,
             embed_ln_weights,
             cpu_embeddings,
             layers,
@@ -411,6 +411,17 @@ impl GpuEncoder for BartGpuEncoder {
             0, // position_offset (always 0 for Encoders)
         )
     }
+    fn embed_norm(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+    ) -> Result<GpuTensor> {
+        let output = pool.get(hidden_states.shape().to_vec());
+        self.embed_layer_norm
+            .encode(cmd_encoder, &self.embed_ln_weights, hidden_states, &output);
+        Ok(output)
+    }
 
     fn embed_and_normalize(
         &self,
@@ -423,8 +434,9 @@ impl GpuEncoder for BartGpuEncoder {
         let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids)?;
 
         // Apply embedding layer normalization
-        let ln_output = pool.get(hidden_states.shape().to_vec());
+
         if self.config.normalize_embedding {
+            let ln_output = pool.get(hidden_states.shape().to_vec());
             self.embed_layer_norm.encode(
                 cmd_encoder,
                 &self.embed_ln_weights,
@@ -433,7 +445,7 @@ impl GpuEncoder for BartGpuEncoder {
             );
         }
 
-        Ok(ln_output)
+        Ok(hidden_states)
     }
 
     fn forward_layers(

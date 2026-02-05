@@ -20,15 +20,12 @@ use kjarni_transformers::{
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
     },
-    gpu::{
-        cache::{GpuBeamKVCache, GpuKVCache}
-    },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu::{GpuFrameContext, GpuTensor},
-    models::{ModelType, base::ModelLoadConfig},
+    gpu::{GpuFrameContext, GpuTensor, GpuTensorPool, cache::{GpuBeamKVCache, GpuKVCache}},
+    models::{ModelType, base::{ModelInput, ModelLoadConfig}},
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
     prelude::*,
     traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
@@ -44,7 +41,7 @@ use crate::models::bart::{
 
 pub struct BartModel {
     tokenizer: Tokenizer,
-    config: Arc<BartConfig>,
+    pub config: Arc<BartConfig>,
     pub pipeline: EncoderDecoderPipeline,
     generation_defaults: Option<HFGenerationDefaults>,
 }
@@ -70,13 +67,15 @@ impl EncoderDecoderModelFactory for BartModel {
                 "model.encoder.embed_tokens.weight"
             } else if weights.contains("model.decoder.embed_tokens.weight") {
                 "model.decoder.embed_tokens.weight"
-        } else {
-            return Err(anyhow!("No shared embedding tensor found. Looked for: model.shared.weight, model.encoder.embed_tokens.weight, model.decoder.embed_tokens.weight"));
-        };
+            } else {
+                return Err(anyhow!(
+                    "No shared embedding tensor found. Looked for: model.shared.weight, model.encoder.embed_tokens.weight, model.decoder.embed_tokens.weight"
+                ));
+            };
 
-    config.shared_embedding_key = Some(key.to_string());
-    println!("shared key {}", key);
-}
+            config.shared_embedding_key = Some(key.to_string());
+            println!("shared key {}", key);
+        }
         Ok(Arc::new(config))
     }
 
@@ -223,6 +222,18 @@ impl CpuEncoderOps for BartModel {
 impl GpuEncoderOps for BartModel {
     fn encoder(&self) -> &dyn GpuEncoder {
         self.pipeline.gpu_encoder().expect("GPU Encoder not active")
+    }
+    fn embed_tokens(
+        &self,
+        cmd_encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input_ids: ModelInput<'_>,
+        token_type_ids: Option<ModelInput<'_>>,
+        pos: usize,
+    ) -> Result<GpuTensor> {
+        self.get_pipeline()
+            .encoder_embeddings().unwrap()
+            .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 

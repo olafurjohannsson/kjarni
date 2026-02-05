@@ -12,6 +12,7 @@ pub mod searcher;
 pub mod seq2seq;
 pub mod common;
 pub mod summarizer;
+pub mod transcriber;
 
 pub use kjarni_transformers::PoolingStrategy;
 // Re-export main API

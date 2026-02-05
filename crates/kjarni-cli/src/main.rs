@@ -147,9 +147,26 @@ async fn main() -> Result<()> {
             model,
             model_path,
             language,
+            translate,
+            timestamps,
+            max_tokens,
+            no_stream,
+            gpu,
+            quiet,
         } => {
-            commands::transcribe::run(&file, &model, model_path.as_deref(), language.as_deref())
-                .await
+            commands::transcribe::run(
+                &file,
+                &model,
+                model_path.as_deref(),
+                language.as_deref(),
+                translate,
+                timestamps,
+                max_tokens,
+                no_stream,
+                gpu,
+                quiet,
+            )
+            .await
         }
 
         Commands::Classify {
