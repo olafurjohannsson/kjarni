@@ -236,7 +236,7 @@ mod tests {
 
         // Whisper
         let whisper = Seq2SeqEncoderConfig::whisper();
-        assert!(matches!(whisper.position_encoding, PositionEncodingType::Sinusoidal));
+        assert!(matches!(whisper.position_encoding, PositionEncodingType::None)); // audio frontend handles positions
     }
 
     #[test]

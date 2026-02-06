@@ -334,19 +334,6 @@ impl CpuDecoder for MockCpuDecoder {
     fn num_layers(&self) -> usize {
         self.num_layers
     }
-
-    // fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
-    //     let (batch, seq) = match input {
-    //         ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
-    //         _ => (1, 1),
-    //     };
-    //     Ok(Array3::zeros((batch, seq, self.hidden_size)))
-    // }
-
-    // fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
-    //     self.embed(input, offset)
-    // }
-
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,

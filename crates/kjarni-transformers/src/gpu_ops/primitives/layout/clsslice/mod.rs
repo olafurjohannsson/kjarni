@@ -176,3 +176,6 @@ impl GpuClsSlice {
         compute_pass.dispatch_workgroups(num_workgroups, 1, 1);
     }
 }
+
+#[cfg(test)]
+mod tests;

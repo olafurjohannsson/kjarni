@@ -77,11 +77,13 @@ impl WgpuContext {
         let adapter_info = adapter.get_info();
         let adapter_limits = adapter.limits();
 
-        log::info!(
-            "gpu: {} ({:?})",
-            adapter_info.name,
-            adapter_info.backend
-        );
+log::info!(
+    "Adapter reported limits: max_storage_buffer_binding_size={} ({:.2}MB), max_buffer_size={} ({:.2}GB)",
+    adapter_limits.max_storage_buffer_binding_size,
+    adapter_limits.max_storage_buffer_binding_size as f64 / 1_048_576.0,
+    adapter_limits.max_buffer_size,
+    adapter_limits.max_buffer_size as f64 / 1_073_741_824.0,
+);
 
         let memory_info = Self::calculate_memory_info(&adapter, &config)?;
         memory_info.print_summary();

@@ -308,17 +308,7 @@ impl CpuTransformerEncoder {
         token_type_ids: Option<&Array2<u32>>,
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
-        // Embeddings still allocate (could optimize later)
         unimplemented!()
-        // let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
-        
-
-        // // Forward through layers (noalloc for layer computations)
-        // self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;
-
-        // Ok(CpuEncoderOutput {
-        //     last_hidden_state: hidden,
-        // })
     }
 
     /// Creates appropriately sized buffers for this encoder.
@@ -386,7 +376,6 @@ impl CpuEncoder for CpuTransformerEncoder {
         attention_mask: &Array2<f32>,
         buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
-        // let mut hidden = self.embed_and_normalize(input_ids, token_type_ids);
         let mut hidden = hidden_states.clone();
         
         self.forward_layers_noalloc(&mut hidden, attention_mask, 0, self.num_layers(), buffers)?;

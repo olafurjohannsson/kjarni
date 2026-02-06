@@ -264,12 +264,7 @@
       50% { opacity: 0; }
     }
     
-    .terminal-comment {
-      color: var(--color-text-subtle);
-      font-style: italic;
-    }
-    
-    /* Install */
+    /* Install Section */
     .install-section {
       display: flex;
       flex-direction: column;
@@ -292,6 +287,7 @@
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
+      transition: all 0.15s;
     }
     
     .install-tab:first-child {
@@ -302,32 +298,44 @@
       border-radius: 0 8px 0 0;
     }
     
+    .install-tab:hover {
+      color: var(--color-text);
+    }
+    
     .install-tab.active {
       background: var(--color-bg-secondary);
       color: var(--color-text);
     }
     
-    .install-command {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
+    .install-content {
       background: var(--color-bg-secondary);
       border: 1px solid var(--color-border);
       border-radius: 0 0 8px 8px;
       padding: 14px 24px;
       font-family: var(--font-mono);
       font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
     
-    .install-command code {
+    .install-content code {
       color: var(--color-text-muted);
     }
     
-    .install-command code span {
+    .install-content code span {
       color: var(--color-success);
     }
     
-    .install-command button {
+    .install-panel {
+      display: none;
+    }
+    
+    .install-panel.active {
+      display: flex;
+    }
+    
+    .copy-btn {
       background: none;
       border: none;
       color: var(--color-text-muted);
@@ -335,7 +343,7 @@
       padding: 4px;
     }
     
-    .install-command button:hover {
+    .copy-btn:hover {
       color: var(--color-text);
     }
     
@@ -472,11 +480,57 @@
       color: var(--color-accent);
     }
     
-    /* Code Example */
+    /* Code Examples Section */
     .code-section {
       max-width: 1280px;
       margin: 0 auto;
       padding: 100px 32px;
+    }
+    
+    /* Language Tabs for Examples */
+    .lang-tabs {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      margin-bottom: 32px;
+    }
+    
+    .lang-tab {
+      padding: 8px 20px;
+      background: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-muted);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    
+    .lang-tab:first-child {
+      border-radius: 6px 0 0 6px;
+    }
+    
+    .lang-tab:last-child {
+      border-radius: 0 6px 6px 0;
+    }
+    
+    .lang-tab:hover {
+      color: var(--color-text);
+      background: var(--color-bg-tertiary);
+    }
+    
+    .lang-tab.active {
+      background: var(--color-accent-emphasis);
+      border-color: var(--color-accent-emphasis);
+      color: #fff;
+    }
+    
+    .lang-content {
+      display: none;
+    }
+    
+    .lang-content.active {
+      display: block;
     }
     
     .code-examples {
@@ -691,6 +745,10 @@
         gap: 24px;
         text-align: center;
       }
+      
+      .lang-tabs {
+        flex-wrap: wrap;
+      }
     }
   </style>
 </head>
@@ -738,7 +796,7 @@
     <p class="hero-tagline">The SQLite of AI</p>
     
     <p class="hero-capabilities">
-      Embeddings <span>·</span> Search <span>·</span> Chat <span>·</span> Translation <span>·</span> Transcription <span>·</span> Reranking <span>·</span> Summarization
+      Embeddings <span>·</span> Search <span>·</span> Chat <span>·</span> Translation <span>·</span> Transcription <span>·</span> Reranking <span>·</span> Classification
     </p>
     
     <p class="hero-subtitle">
@@ -755,23 +813,19 @@
       </div>
       <div class="terminal-body">
         <div class="terminal-line">
-          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni transcribe</span> <span class="terminal-flag">meeting.mp3</span>
-          <span class="terminal-output">"We need to finalize the Q4 roadmap by Friday and..."</span>
+          <span class="terminal-prompt">$</span> <span class="terminal-command">echo</span> <span class="terminal-flag">"The market crashed 500 points"</span> <span class="terminal-command">| kjarni classify</span>
+          <span class="terminal-output">NEGATIVE   96.42%  ██████████████████████████████████████</span>
+          <span class="terminal-output">POSITIVE    3.58%  █</span>
         </div>
         
         <div class="terminal-line">
-          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni translate</span> <span class="terminal-flag">--to is</span> <span class="terminal-command">"Hello, how are you?"</span>
-          <span class="terminal-output">"Halló, hvernig hefur þú það?"</span>
+          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni translate</span> <span class="terminal-flag">--dst is</span> <span class="terminal-command">"The future of AI is local"</span>
+          <span class="terminal-output">"Framtíð gervigreindar er staðbundin"</span>
         </div>
         
         <div class="terminal-line">
-          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni embed</span> <span class="terminal-flag">"semantic search"</span> <span class="terminal-command">| head -c 50</span>
-          <span class="terminal-output">[0.023, -0.089, 0.120, 0.041, -0.067, 0.089, ...</span>
-        </div>
-        
-        <div class="terminal-line">
-          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni chat</span> <span class="terminal-flag">llama-3.2-3b</span>
-          <span class="terminal-output" style="color: var(--color-text-subtle);">> Explain recursion in one sentence</span>
+          <span class="terminal-prompt">$</span> <span class="terminal-command">kjarni chat</span> <span class="terminal-flag">qwen2.5-3b</span>
+          <span class="terminal-output" style="color: var(--color-text-subtle);">> What is recursion?</span>
           <span class="terminal-output terminal-streaming">Recursion is when a function calls itself to solve smaller versions of the same problem until reaching a base case.<span class="terminal-cursor"></span></span>
         </div>
       </div>
@@ -780,19 +834,48 @@
     <!-- Install -->
     <div class="install-section" id="install">
       <div class="install-tabs">
-        <button class="install-tab active">C# / .NET</button>
-        <button class="install-tab">Python</button>
-        <button class="install-tab">Rust</button>
-        <button class="install-tab">CLI</button>
+        <button class="install-tab active" data-target="install-cli">CLI</button>
+        <button class="install-tab" data-target="install-rust">Rust</button>
+        <button class="install-tab" data-target="install-csharp">C#</button>
+        <button class="install-tab" data-target="install-python">Python</button>
       </div>
-      <div class="install-command">
-        <code>dotnet add package <span>Kjarni</span></code>
-        <button title="Copy to clipboard">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
-            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
-          </svg>
-        </button>
+      <div class="install-content">
+        <div id="install-cli" class="install-panel active">
+          <code>cargo install <span>kjarni</span></code>
+          <button class="copy-btn" title="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+            </svg>
+          </button>
+        </div>
+        <div id="install-rust" class="install-panel">
+          <code>cargo add <span>kjarni</span></code>
+          <button class="copy-btn" title="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+            </svg>
+          </button>
+        </div>
+        <div id="install-csharp" class="install-panel">
+          <code>dotnet add package <span>Kjarni</span></code>
+          <button class="copy-btn" title="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+            </svg>
+          </button>
+        </div>
+        <div id="install-python" class="install-panel">
+          <code>pip install <span>kjarni</span></code>
+          <button class="copy-btn" title="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
     
@@ -833,51 +916,75 @@
     
     <div class="capabilities-grid">
       <div class="capability-card">
-        <h3>Chat & Generation</h3>
-        <p>Run LLMs locally with streaming responses, system prompts, and conversation history.</p>
-        <div class="capability-models">Llama · Mistral · Qwen · GPT-2</div>
+        <h3>Chat</h3>
+        <p>Interactive conversations with instruction-tuned models. Streaming, system prompts, history.</p>
+        <div class="capability-models">Llama · Mistral · Qwen</div>
+      </div>
+      
+      <div class="capability-card">
+        <h3>Generation</h3>
+        <p>Text completion from base models. Control temperature, top-k, repetition penalty.</p>
+        <div class="capability-models">Llama · GPT-2 · Qwen</div>
       </div>
       
       <div class="capability-card">
         <h3>Embeddings</h3>
-        <p>Generate dense vectors for semantic similarity, clustering, and retrieval.</p>
+        <p>Dense vectors for semantic similarity, clustering, and retrieval.</p>
         <div class="capability-models">BGE · E5 · MiniLM · GTE</div>
       </div>
       
       <div class="capability-card">
         <h3>Search</h3>
-        <p>Vector indexing with HNSW and keyword search. Hybrid retrieval out of the box.</p>
+        <p>Vector indexing with HNSW and BM25. Hybrid retrieval out of the box.</p>
         <div class="capability-models">Semantic · BM25 · Hybrid</div>
       </div>
       
       <div class="capability-card">
         <h3>Reranking</h3>
-        <p>Cross-encoder reranking to dramatically improve search and RAG quality.</p>
+        <p>Cross-encoder scoring to boost search and RAG quality.</p>
         <div class="capability-models">BGE Reranker · Cross-Encoder</div>
       </div>
       
       <div class="capability-card">
         <h3>Classification</h3>
-        <p>Zero-shot and fine-tuned text classification with encoder models.</p>
-        <div class="capability-models">BERT · RoBERTa · DeBERTa</div>
+        <p>Sentiment, topic, intent. Pipe text and get labels with confidence scores.</p>
+        <div class="capability-models">DistilBERT · RoBERTa</div>
       </div>
       
       <div class="capability-card">
         <h3>Translation</h3>
         <p>Neural machine translation across 100+ language pairs.</p>
-        <div class="capability-models">NLLB · M2M-100</div>
+        <div class="capability-models">NLLB · Flan-T5 · M2M</div>
       </div>
       
       <div class="capability-card">
         <h3>Transcription</h3>
-        <p>Speech-to-text from audio files or streams with timestamps.</p>
+        <p>Speech-to-text from audio files with timestamps.</p>
         <div class="capability-models">Whisper</div>
       </div>
       
       <div class="capability-card">
         <h3>Summarization</h3>
-        <p>Extract key points from long documents. Abstractive and extractive.</p>
-        <div class="capability-models">BART · T5</div>
+        <p>Condense long documents into key points.</p>
+        <div class="capability-models">BART · T5 · Flan-T5</div>
+      </div>
+      
+      <div class="capability-card">
+        <h3>Similarity</h3>
+        <p>Compute semantic similarity between text pairs.</p>
+        <div class="capability-models">Any embedding model</div>
+      </div>
+      
+      <div class="capability-card">
+        <h3>Indexing</h3>
+        <p>Build searchable indexes from documents, folders, or streams.</p>
+        <div class="capability-models">HNSW · Flat</div>
+      </div>
+      
+      <div class="capability-card">
+        <h3>Model Management</h3>
+        <p>Download, list, and manage models from the registry.</p>
+        <div class="capability-models">HuggingFace · Local</div>
       </div>
     </div>
   </section>
@@ -903,7 +1010,7 @@
         
         <div class="why-card">
           <h3>Optimized Runtime</h3>
-          <p>Hand-tuned Rust core with SIMD acceleration. Runs efficiently on CPU with optional GPU acceleration via WebGPU.</p>
+          <p>Hand-tuned Rust core with SIMD acceleration. Runs on CPU with optional GPU via WebGPU.</p>
           <ul>
             <li>4-bit & 8-bit quantization</li>
             <li>Speculative decoding</li>
@@ -913,7 +1020,7 @@
         
         <div class="why-card">
           <h3>Native Bindings</h3>
-          <p>First-class FFI bindings that feel native in every language. No subprocess overhead, no serialization penalty.</p>
+          <p>First-class FFI bindings that feel native in every language. No subprocess overhead.</p>
           <ul>
             <li>C# / .NET</li>
             <li>Python</li>
@@ -929,68 +1036,341 @@
   <section class="code-section" id="examples">
     <div class="section-header">
       <h2>Clean, Simple API</h2>
-      <p>Get started in minutes, not hours</p>
+      <p>See how each capability works in your language</p>
     </div>
     
-    <div class="code-examples">
-      <div class="code-example">
-        <div class="code-example-header">Chat with Llama</div>
-        <pre><code><span class="keyword">using</span> Kjarni;
+    <!-- Language Tabs -->
+    <div class="lang-tabs">
+      <button class="lang-tab active" data-target="lang-cli">CLI</button>
+      <button class="lang-tab" data-target="lang-rust">Rust</button>
+      <button class="lang-tab" data-target="lang-csharp">C#</button>
+      <button class="lang-tab" data-target="lang-python">Python</button>
+    </div>
+    
+    <!-- CLI Examples -->
+    <div id="lang-cli" class="lang-content active">
+      <div class="code-examples">
+        <div class="code-example">
+          <div class="code-example-header">Chat</div>
+          <pre><code><span class="comment"># Interactive chat with Llama</span>
+$ kjarni chat --model llama-3.2-3b-instruct
+
+<span class="comment"># With system prompt</span>
+$ kjarni chat -m qwen2.5-3b -s "You are a helpful assistant"</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Classification</div>
+          <pre><code><span class="comment"># Classify sentiment</span>
+$ echo "I love this product" | kjarni classify
+
+<span class="comment"># Custom labels</span>
+$ kjarni classify "Server is down" --labels "urgent,normal,low"</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Translation</div>
+          <pre><code><span class="comment"># Translate to Icelandic</span>
+$ kjarni translate -i "Hello world" --dst is
+
+<span class="comment"># Specify source and target</span>
+$ kjarni translate -i "Bonjour" --src fr --dst en</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Transcription</div>
+          <pre><code><span class="comment"># Transcribe audio file</span>
+$ kjarni transcribe meeting.mp3
+
+<span class="comment"># With timestamps</span>
+$ kjarni transcribe podcast.wav --timestamps</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Search & Index</div>
+          <pre><code><span class="comment"># Create an index from a folder</span>
+$ kjarni index create ./docs --name my-docs
+
+<span class="comment"># Search the index</span>
+$ kjarni search ./my-docs "password reset" --top-k 5</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Reranking</div>
+          <pre><code><span class="comment"># Rerank documents by relevance</span>
+$ kjarni rerank "best programming language" \
+    "Python is great" \
+    "Rust is fast" \
+    "JavaScript runs everywhere"</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Embeddings</div>
+          <pre><code><span class="comment"># Generate embedding vector</span>
+$ kjarni embed "semantic search is powerful"
+
+<span class="comment"># Output as JSON</span>
+$ kjarni embed "hello world" --format json</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Similarity</div>
+          <pre><code><span class="comment"># Compare two texts</span>
+$ kjarni similarity "king" "queen"
+0.87
+
+$ kjarni similarity "cat" "democracy"
+0.12</code></pre>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Rust Examples -->
+    <div id="lang-rust" class="lang-content">
+      <div class="code-examples">
+        <div class="code-example">
+          <div class="code-example-header">Chat</div>
+          <pre><code><span class="keyword">use</span> kjarni::chat::{Chat, ChatConfig};
+
+<span class="keyword">let</span> config = ChatConfig::default()
+    .model(<span class="string">"llama-3.2-3b-instruct"</span>)
+    .system(<span class="string">"You are helpful."</span>);
+
+<span class="keyword">let mut</span> chat = Chat::new(config)?;
+
+<span class="keyword">for</span> token <span class="keyword">in</span> chat.stream(<span class="string">"What is Rust?"</span>)? {
+    print!(<span class="string">"{}"</span>, token);
+}</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Classification</div>
+          <pre><code><span class="keyword">use</span> kjarni::classify::Classifier;
+
+<span class="keyword">let</span> classifier = Classifier::new(<span class="string">"distilbert-sentiment"</span>)?;
+
+<span class="keyword">let</span> result = classifier.classify(<span class="string">"I love this!"</span>)?;
+
+println!(<span class="string">"{}: {:.2}%"</span>, result.label, result.score * <span class="number">100.0</span>);</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Translation</div>
+          <pre><code><span class="keyword">use</span> kjarni::translate::Translator;
+
+<span class="keyword">let</span> translator = Translator::new(<span class="string">"nllb-200"</span>)?;
+
+<span class="keyword">let</span> result = translator.translate(
+    <span class="string">"Hello world"</span>,
+    <span class="string">"en"</span>,
+    <span class="string">"is"</span>
+)?;
+
+println!(<span class="string">"{}"</span>, result); <span class="comment">// "Halló heimur"</span></code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Embeddings & Search</div>
+          <pre><code><span class="keyword">use</span> kjarni::{Embedder, Indexer};
+
+<span class="keyword">let</span> embedder = Embedder::new(<span class="string">"bge-small-en"</span>)?;
+<span class="keyword">let mut</span> index = Indexer::new(embedder.dim());
+
+<span class="keyword">for</span> doc <span class="keyword">in</span> &docs {
+    index.add(embedder.embed(&doc.text)?, doc.id);
+}
+
+<span class="keyword">let</span> results = index.search(embedder.embed(query)?, <span class="number">10</span>);</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Transcription</div>
+          <pre><code><span class="keyword">use</span> kjarni::transcribe::Transcriber;
+
+<span class="keyword">let</span> whisper = Transcriber::new(<span class="string">"whisper-small"</span>)?;
+
+<span class="keyword">let</span> result = whisper.transcribe(<span class="string">"meeting.mp3"</span>)?;
+
+<span class="keyword">for</span> seg <span class="keyword">in</span> result.segments {
+    println!(<span class="string">"[{:?}] {}"</span>, seg.start, seg.text);
+}</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Reranking</div>
+          <pre><code><span class="keyword">use</span> kjarni::rerank::Reranker;
+
+<span class="keyword">let</span> reranker = Reranker::new(<span class="string">"bge-reranker-base"</span>)?;
+
+<span class="keyword">let</span> docs = <span class="keyword">vec!</span>[<span class="string">"doc1"</span>, <span class="string">"doc2"</span>, <span class="string">"doc3"</span>];
+<span class="keyword">let</span> ranked = reranker.rerank(<span class="string">"query"</span>, &docs, <span class="number">3</span>)?;
+
+<span class="keyword">for</span> (doc, score) <span class="keyword">in</span> ranked {
+    println!(<span class="string">"{:.3}: {}"</span>, score, doc);
+}</code></pre>
+        </div>
+      </div>
+    </div>
+    
+    <!-- C# Examples -->
+    <div id="lang-csharp" class="lang-content">
+      <div class="code-examples">
+        <div class="code-example">
+          <div class="code-example-header">Chat</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
 
 <span class="keyword">var</span> chat = <span class="keyword">new</span> <span class="type">Chat</span>(<span class="string">"llama-3.2-3b-instruct"</span>);
+chat.System(<span class="string">"You are a helpful assistant."</span>);
 
-chat.<span class="function">System</span>(<span class="string">"You are a helpful assistant."</span>);
-
-<span class="keyword">await foreach</span> (<span class="keyword">var</span> token <span class="keyword">in</span> chat.<span class="function">Stream</span>(<span class="string">"What is Rust?"</span>))
+<span class="keyword">await foreach</span> (<span class="keyword">var</span> token <span class="keyword">in</span> chat.Stream(<span class="string">"What is Rust?"</span>))
 {
-    Console.<span class="function">Write</span>(token);
+    Console.Write(token);
 }</code></pre>
-      </div>
-      
-      <div class="code-example">
-        <div class="code-example-header">Semantic Search</div>
-        <pre><code><span class="keyword">using</span> Kjarni;
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Classification</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
 
-<span class="keyword">var</span> embedder = <span class="keyword">new</span> <span class="type">Embedder</span>(<span class="string">"bge-small-en"</span>);
-<span class="keyword">var</span> index = <span class="keyword">new</span> <span class="type">Indexer</span>(embedder.Dimension);
+<span class="keyword">var</span> classifier = <span class="keyword">new</span> <span class="type">Classifier</span>(<span class="string">"distilbert-sentiment"</span>);
 
-<span class="comment">// Index documents</span>
-<span class="keyword">foreach</span> (<span class="keyword">var</span> doc <span class="keyword">in</span> documents)
-    index.<span class="function">Add</span>(embedder.<span class="function">Embed</span>(doc.Text), doc.Id);
+<span class="keyword">var</span> result = classifier.Classify(<span class="string">"I love this product!"</span>);
 
-<span class="comment">// Search</span>
-<span class="keyword">var</span> results = index.<span class="function">Search</span>(
-    embedder.<span class="function">Embed</span>(<span class="string">"password reset"</span>), k: <span class="number">10</span>
-);</code></pre>
-      </div>
-      
-      <div class="code-example">
-        <div class="code-example-header">Transcription</div>
-        <pre><code><span class="keyword">using</span> Kjarni;
-
-<span class="keyword">var</span> whisper = <span class="keyword">new</span> <span class="type">Transcriber</span>(<span class="string">"whisper-small"</span>);
-
-<span class="keyword">var</span> result = whisper.<span class="function">Transcribe</span>(<span class="string">"meeting.mp3"</span>);
-
-Console.<span class="function">WriteLine</span>(result.Text);
-
-<span class="keyword">foreach</span> (<span class="keyword">var</span> seg <span class="keyword">in</span> result.Segments)
-    Console.<span class="function">WriteLine</span>(<span class="string">$"[{seg.Start:mm\\:ss}] {seg.Text}"</span>);</code></pre>
-      </div>
-      
-      <div class="code-example">
-        <div class="code-example-header">Translation</div>
-        <pre><code><span class="keyword">using</span> Kjarni;
+Console.WriteLine(<span class="string">$"{result.Label}: {result.Score:P}"</span>);</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Translation</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
 
 <span class="keyword">var</span> translator = <span class="keyword">new</span> <span class="type">Translator</span>(<span class="string">"nllb-200"</span>);
 
-<span class="keyword">var</span> icelandic = translator.<span class="function">Translate</span>(
-    <span class="string">"The quick brown fox"</span>,
+<span class="keyword">var</span> result = translator.Translate(
+    <span class="string">"Hello world"</span>,
     source: <span class="string">"en"</span>,
     target: <span class="string">"is"</span>
 );
 
-<span class="comment">// "Fljóti brúni refurinn"</span></code></pre>
+Console.WriteLine(result); <span class="comment">// "Halló heimur"</span></code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Embeddings & Search</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
+
+<span class="keyword">var</span> embedder = <span class="keyword">new</span> <span class="type">Embedder</span>(<span class="string">"bge-small-en"</span>);
+<span class="keyword">var</span> index = <span class="keyword">new</span> <span class="type">Indexer</span>(embedder.Dimension);
+
+<span class="keyword">foreach</span> (<span class="keyword">var</span> doc <span class="keyword">in</span> documents)
+    index.Add(embedder.Embed(doc.Text), doc.Id);
+
+<span class="keyword">var</span> results = index.Search(embedder.Embed(query), k: <span class="number">10</span>);</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Transcription</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
+
+<span class="keyword">var</span> whisper = <span class="keyword">new</span> <span class="type">Transcriber</span>(<span class="string">"whisper-small"</span>);
+
+<span class="keyword">var</span> result = whisper.Transcribe(<span class="string">"meeting.mp3"</span>);
+
+<span class="keyword">foreach</span> (<span class="keyword">var</span> seg <span class="keyword">in</span> result.Segments)
+    Console.WriteLine(<span class="string">$"[{seg.Start:mm\\:ss}] {seg.Text}"</span>);</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Reranking</div>
+          <pre><code><span class="keyword">using</span> Kjarni;
+
+<span class="keyword">var</span> reranker = <span class="keyword">new</span> <span class="type">Reranker</span>(<span class="string">"bge-reranker-base"</span>);
+
+<span class="keyword">var</span> docs = <span class="keyword">new</span>[] { <span class="string">"doc1"</span>, <span class="string">"doc2"</span>, <span class="string">"doc3"</span> };
+<span class="keyword">var</span> ranked = reranker.Rerank(<span class="string">"query"</span>, docs, topK: <span class="number">3</span>);
+
+<span class="keyword">foreach</span> (<span class="keyword">var</span> (doc, score) <span class="keyword">in</span> ranked)
+    Console.WriteLine(<span class="string">$"{score:F3}: {doc}"</span>);</code></pre>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Python Examples -->
+    <div id="lang-python" class="lang-content">
+      <div class="code-examples">
+        <div class="code-example">
+          <div class="code-example-header">Chat</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Chat
+
+chat = Chat(<span class="string">"llama-3.2-3b-instruct"</span>)
+chat.system(<span class="string">"You are a helpful assistant."</span>)
+
+<span class="keyword">for</span> token <span class="keyword">in</span> chat.stream(<span class="string">"What is Rust?"</span>):
+    print(token, end=<span class="string">""</span>, flush=<span class="keyword">True</span>)</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Classification</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Classifier
+
+classifier = Classifier(<span class="string">"distilbert-sentiment"</span>)
+
+result = classifier.classify(<span class="string">"I love this product!"</span>)
+
+print(<span class="string">f"</span>{result.label}<span class="string">: </span>{result.score:.2%}<span class="string">"</span>)</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Translation</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Translator
+
+translator = Translator(<span class="string">"nllb-200"</span>)
+
+result = translator.translate(
+    <span class="string">"Hello world"</span>,
+    source=<span class="string">"en"</span>,
+    target=<span class="string">"is"</span>
+)
+
+print(result)  <span class="comment"># "Halló heimur"</span></code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Embeddings & Search</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Embedder, Indexer
+
+embedder = Embedder(<span class="string">"bge-small-en"</span>)
+index = Indexer(embedder.dimension)
+
+<span class="keyword">for</span> doc <span class="keyword">in</span> documents:
+    index.add(embedder.embed(doc.text), doc.id)
+
+results = index.search(embedder.embed(query), k=<span class="number">10</span>)</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Transcription</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Transcriber
+
+whisper = Transcriber(<span class="string">"whisper-small"</span>)
+
+result = whisper.transcribe(<span class="string">"meeting.mp3"</span>)
+
+<span class="keyword">for</span> seg <span class="keyword">in</span> result.segments:
+    print(<span class="string">f"[</span>{seg.start}<span class="string">] </span>{seg.text}<span class="string">"</span>)</code></pre>
+        </div>
+        
+        <div class="code-example">
+          <div class="code-example-header">Reranking</div>
+          <pre><code><span class="keyword">from</span> kjarni <span class="keyword">import</span> Reranker
+
+reranker = Reranker(<span class="string">"bge-reranker-base"</span>)
+
+docs = [<span class="string">"doc1"</span>, <span class="string">"doc2"</span>, <span class="string">"doc3"</span>]
+ranked = reranker.rerank(<span class="string">"query"</span>, docs, top_k=<span class="number">3</span>)
+
+<span class="keyword">for</span> doc, score <span class="keyword">in</span> ranked:
+    print(<span class="string">f"</span>{score:.3f}<span class="string">: </span>{doc}<span class="string">"</span>)</code></pre>
+        </div>
       </div>
     </div>
   </section>
@@ -1051,6 +1431,53 @@ Console.<span class="function">WriteLine</span>(result.Text);
       </div>
     </div>
   </footer>
+
+  <script>
+    // Tab functionality for install section
+    document.querySelectorAll('.install-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Remove active from all tabs
+        document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+        // Add active to clicked tab
+        tab.classList.add('active');
+        
+        // Hide all panels
+        document.querySelectorAll('.install-panel').forEach(p => p.classList.remove('active'));
+        // Show target panel
+        const target = document.getElementById(tab.dataset.target);
+        if (target) target.classList.add('active');
+      });
+    });
+    
+    // Tab functionality for language examples
+    document.querySelectorAll('.lang-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Remove active from all tabs
+        document.querySelectorAll('.lang-tab').forEach(t => t.classList.remove('active'));
+        // Add active to clicked tab
+        tab.classList.add('active');
+        
+        // Hide all content
+        document.querySelectorAll('.lang-content').forEach(c => c.classList.remove('active'));
+        // Show target content
+        const target = document.getElementById(tab.dataset.target);
+        if (target) target.classList.add('active');
+      });
+    });
+    
+    // Copy to clipboard functionality
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const code = btn.parentElement.querySelector('code').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+          setTimeout(() => {
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>';
+          }, 2000);
+        });
+      });
+    });
+  </script>
 
 </body>
 </html>

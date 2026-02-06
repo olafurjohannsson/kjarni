@@ -7,108 +7,6 @@ use ndarray::{Array2, Array3, Array4, ArrayView2, ArrayView4, Axis, Zip};
 use rayon::prelude::*;
 const MASK_VALUE: f32 = -1e9;
 
-// =========================================================================
-//  SECTION 1: HARDWARE SPECIFIC KERNELS
-// =========================================================================
-
-/// 1. AVX2 CHUNK KERNEL (x86 Only)
-/// Handles a batch of outputs using AVX2.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[target_feature(enable = "avx2")]
-#[target_feature(enable = "fma")]
-unsafe fn compute_chunk_avx2(
-    out_chunk: &mut [f32],
-    a_ptr_base: *const f32,
-    mut b_ptr: *const u16,
-    k: usize,
-) {
-    #[cfg(target_arch = "x86")]
-    use std::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64::*;
-
-    // Outer Loop: Iterate over the rows in this chunk
-    for val in out_chunk.iter_mut() {
-        let mut a_ptr = a_ptr_base;
-
-        let mut sum0 = _mm256_setzero_ps();
-        let mut sum1 = _mm256_setzero_ps();
-        let mut sum2 = _mm256_setzero_ps();
-        let mut sum3 = _mm256_setzero_ps();
-
-        let mut n = k;
-        unsafe {
-            // Inner Loop: The Dot Product
-            while n >= 32 {
-                _mm_prefetch(b_ptr.add(128) as *const i8, _MM_HINT_T0);
-                _mm_prefetch(a_ptr.add(128) as *const i8, _MM_HINT_T0);
-
-                let a0 = _mm256_loadu_ps(a_ptr);
-                let a1 = _mm256_loadu_ps(a_ptr.add(8));
-                let a2 = _mm256_loadu_ps(a_ptr.add(16));
-                let a3 = _mm256_loadu_ps(a_ptr.add(24));
-
-                let b0_u16 = _mm_loadu_si128(b_ptr as *const __m128i);
-                let b1_u16 = _mm_loadu_si128(b_ptr.add(8) as *const __m128i);
-                let b2_u16 = _mm_loadu_si128(b_ptr.add(16) as *const __m128i);
-                let b3_u16 = _mm_loadu_si128(b_ptr.add(24) as *const __m128i);
-
-                // BF16 expansion
-                let b0_u32 = _mm256_cvtepu16_epi32(b0_u16);
-                let b1_u32 = _mm256_cvtepu16_epi32(b1_u16);
-                let b2_u32 = _mm256_cvtepu16_epi32(b2_u16);
-                let b3_u32 = _mm256_cvtepu16_epi32(b3_u16);
-
-                let b0_f = _mm256_castsi256_ps(_mm256_slli_epi32(b0_u32, 16));
-                let b1_f = _mm256_castsi256_ps(_mm256_slli_epi32(b1_u32, 16));
-                let b2_f = _mm256_castsi256_ps(_mm256_slli_epi32(b2_u32, 16));
-                let b3_f = _mm256_castsi256_ps(_mm256_slli_epi32(b3_u32, 16));
-
-                sum0 = _mm256_fmadd_ps(a0, b0_f, sum0);
-                sum1 = _mm256_fmadd_ps(a1, b1_f, sum1);
-                sum2 = _mm256_fmadd_ps(a2, b2_f, sum2);
-                sum3 = _mm256_fmadd_ps(a3, b3_f, sum3);
-
-                a_ptr = a_ptr.add(32);
-                b_ptr = b_ptr.add(32);
-                n -= 32;
-            }
-
-            sum0 = _mm256_add_ps(sum0, sum1);
-            sum2 = _mm256_add_ps(sum2, sum3);
-            sum0 = _mm256_add_ps(sum0, sum2);
-
-            let mut temp = [0.0f32; 8];
-            _mm256_storeu_ps(temp.as_mut_ptr(), sum0);
-            let mut sum = temp.iter().sum::<f32>();
-
-            // Remainder
-            while n > 0 {
-                let val_a = *a_ptr;
-                let val_b = f32::from_bits((*b_ptr as u32) << 16);
-                sum += val_a * val_b;
-                a_ptr = a_ptr.add(1);
-                b_ptr = b_ptr.add(1);
-                n -= 1;
-            }
-
-            *val = sum;
-            // Do NOT advance a_ptr_base (we reuse input vector)
-            // Advance b_ptr to the next row of weights
-            b_ptr = b_ptr.add(k); // Note: b_ptr was incremented inside inner loop? No.
-            // Wait: The inner loop increments local b_ptr copy.
-            // The outer b_ptr needs to jump K elements *after* the inner loop finishes?
-            // No, in the logic above `b_ptr.add(32)` modifies the loop variable.
-            // We need to ensure we point to the START of the next row.
-            // Since we modified b_ptr inside the `while n >= 32`, it is currently at end of row.
-            // So actually, we don't need to add K again if we consumed the whole row.
-            // BUT: if n > 0 (remainder), we consumed it.
-            // Logic check: `b_ptr` is local to the function args.
-            // We need a separate cursor for the inner loop.
-        }
-    }
-}
-
 // Redefine to fix cursor logic clearly
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
@@ -1120,4 +1018,827 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
     }
 
     scores
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{Array1, Array2, Array3, Array4};
+
+    fn assert_close(a: &[f32], b: &[f32], tol: f32, msg: &str) {
+        assert_eq!(a.len(), b.len(), "{}: length mismatch", msg);
+        for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
+            let diff = (x - y).abs();
+            assert!(
+                diff <= tol,
+                "{}: mismatch at {}: {} vs {} (diff: {})",
+                msg, i, x, y, diff
+            );
+        }
+    }
+
+    fn reference_matmul_2d(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
+        let (m, k) = a.dim();
+        let (k2, n) = b.dim();
+        assert_eq!(k, k2);
+        let mut c = Array2::<f32>::zeros((m, n));
+        for i in 0..m {
+            for j in 0..n {
+                let mut sum = 0.0;
+                for l in 0..k {
+                    sum += a[[i, l]] * b[[l, j]];
+                }
+                c[[i, j]] = sum;
+            }
+        }
+        c
+    }
+
+    fn reference_matmul_2d_transposed(a: &Array2<f32>, b_t: &Array2<f32>) -> Array2<f32> {
+        let (m, k) = a.dim();
+        let (n, k2) = b_t.dim();
+        assert_eq!(k, k2);
+        let mut c = Array2::<f32>::zeros((m, n));
+        for i in 0..m {
+            for j in 0..n {
+                let mut sum = 0.0;
+                for l in 0..k {
+                    sum += a[[i, l]] * b_t[[j, l]];
+                }
+                c[[i, j]] = sum;
+            }
+        }
+        c
+    }
+
+    // ========================================================================
+    // matmul_2d tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_simple() {
+        let a = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let b = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d simple",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_single_row() {
+        let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let b = Array2::from_shape_vec((4, 3), (0..12).map(|x| x as f32).collect()).unwrap();
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d single row",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_single_column() {
+        let a = Array2::from_shape_vec((4, 3), (0..12).map(|x| x as f32).collect()).unwrap();
+        let b = Array2::from_shape_vec((3, 1), vec![1.0, 2.0, 3.0]).unwrap();
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d single column",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_square() {
+        let a = Array2::from_shape_fn((4, 4), |(i, j)| (i * 4 + j) as f32);
+        let b = Array2::from_shape_fn((4, 4), |(i, j)| (i + j) as f32);
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d square",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_large() {
+        let a = Array2::from_shape_fn((64, 128), |(i, j)| ((i + j) % 10) as f32 * 0.1);
+        let b = Array2::from_shape_fn((128, 32), |(i, j)| ((i * j) % 7) as f32 * 0.1);
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-4,
+            "matmul_2d large",
+        );
+    }
+
+    // ========================================================================
+    // matmul_2d_transposed tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_transposed_simple() {
+        let a = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let b_t = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+
+        let result = matmul_2d_transposed(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d_transposed simple",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_transposed_single_row() {
+        let a = Array2::from_shape_vec((1, 64), (0..64).map(|x| x as f32 * 0.1).collect()).unwrap();
+        let b_t = Array2::from_shape_fn((32, 64), |(i, j)| ((i + j) % 5) as f32);
+
+        let result = matmul_2d_transposed(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-4,
+            "matmul_2d_transposed single row",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_transposed_large() {
+        let a = Array2::from_shape_fn((16, 256), |(i, j)| ((i + j) % 10) as f32 * 0.1);
+        let b_t = Array2::from_shape_fn((64, 256), |(i, j)| ((i * j) % 7) as f32 * 0.1);
+
+        let result = matmul_2d_transposed(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-3,
+            "matmul_2d_transposed large",
+        );
+    }
+
+    // ========================================================================
+    // matmul_2d_f32_notranspose tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_f32_notranspose_simple() {
+        let a = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let b_t = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+
+        let result = matmul_2d_f32_notranspose(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_2d_f32_notranspose simple",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_f32_notranspose_single_row() {
+        let a = Array2::from_shape_vec((1, 64), (0..64).map(|x| x as f32 * 0.1).collect()).unwrap();
+        let b_t = Array2::from_shape_fn((32, 64), |(i, j)| ((i + j) % 5) as f32);
+
+        let result = matmul_2d_f32_notranspose(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-4,
+            "matmul_2d_f32_notranspose single row",
+        );
+    }
+
+    #[test]
+    fn test_matmul_2d_f32_notranspose_batch() {
+        let a = Array2::from_shape_fn((8, 128), |(i, j)| (i * 128 + j) as f32 * 0.01);
+        let b_t = Array2::from_shape_fn((64, 128), |(i, j)| ((i + j) % 10) as f32 * 0.1);
+
+        let result = matmul_2d_f32_notranspose(&a.view(), &b_t.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_t);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-3,
+            "matmul_2d_f32_notranspose batch",
+        );
+    }
+
+    // ========================================================================
+    // matmul_2d_mixed_bf16 tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_mixed_bf16_simple() {
+        let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let b_f32 = Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
+        let b_u16: Array2<u16> = b_f32.mapv(|x| half::bf16::from_f32(x).to_bits());
+
+        let result = matmul_2d_mixed_bf16(&a.view(), &b_u16.view());
+
+        assert!((result[[0, 0]] - 1.0).abs() < 0.01);
+        assert!((result[[0, 1]] - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_matmul_2d_mixed_bf16_identity() {
+        let a = Array2::from_shape_fn((1, 8), |(_, j)| (j + 1) as f32);
+        let mut b_f32 = Array2::<f32>::zeros((8, 8));
+        for i in 0..8 {
+            b_f32[[i, i]] = 1.0;
+        }
+        let b_u16: Array2<u16> = b_f32.mapv(|x| half::bf16::from_f32(x).to_bits());
+
+        let result = matmul_2d_mixed_bf16(&a.view(), &b_u16.view());
+
+        for j in 0..8 {
+            assert!(
+                (result[[0, j]] - (j + 1) as f32).abs() < 0.1,
+                "identity mismatch at {}",
+                j
+            );
+        }
+    }
+
+    #[test]
+    fn test_matmul_2d_mixed_bf16_batch() {
+        let a = Array2::from_shape_fn((4, 32), |(i, j)| ((i + j) % 5) as f32 * 0.5);
+        let b_f32 = Array2::from_shape_fn((16, 32), |(i, j)| ((i * j) % 7) as f32 * 0.3);
+        let b_u16: Array2<u16> = b_f32.mapv(|x| half::bf16::from_f32(x).to_bits());
+
+        let result = matmul_2d_mixed_bf16(&a.view(), &b_u16.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_f32);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            0.5,
+            "matmul_2d_mixed_bf16 batch",
+        );
+    }
+
+    // ========================================================================
+    // matmul_2d_mixed_bf16_new tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_mixed_bf16_new_simple() {
+        let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let b_f32 = Array2::from_shape_vec((2, 4), vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
+        let b_bf16: Array2<half::bf16> = b_f32.mapv(half::bf16::from_f32);
+
+        let result = matmul_2d_mixed_bf16_new(&a.view(), &b_bf16.view());
+
+        assert!((result[[0, 0]] - 1.0).abs() < 0.01);
+        assert!((result[[0, 1]] - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_matmul_2d_mixed_bf16_new_batch() {
+        let a = Array2::from_shape_fn((4, 32), |(i, j)| ((i + j) % 5) as f32 * 0.5);
+        let b_f32 = Array2::from_shape_fn((16, 32), |(i, j)| ((i * j) % 7) as f32 * 0.3);
+        let b_bf16: Array2<half::bf16> = b_f32.mapv(half::bf16::from_f32);
+
+        let result = matmul_2d_mixed_bf16_new(&a.view(), &b_bf16.view());
+        let expected = reference_matmul_2d_transposed(&a, &b_f32);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            0.5,
+            "matmul_2d_mixed_bf16_new batch",
+        );
+    }
+
+    // ========================================================================
+    // matmul_3d_2d tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_3d_2d_simple() {
+        let a = Array3::from_shape_fn((2, 3, 4), |(b, i, j)| (b * 12 + i * 4 + j) as f32);
+        let b = Array2::from_shape_fn((4, 5), |(i, j)| (i + j) as f32);
+
+        let result = matmul_3d_2d(&a, &b);
+
+        assert_eq!(result.dim(), (2, 3, 5));
+
+        for batch in 0..2 {
+            let a_slice = a.slice(ndarray::s![batch, .., ..]).to_owned();
+            let expected = reference_matmul_2d(&a_slice, &b);
+            let result_slice = result.slice(ndarray::s![batch, .., ..]);
+            assert_close(
+                result_slice.as_slice().unwrap(),
+                expected.as_slice().unwrap(),
+                1e-4,
+                &format!("matmul_3d_2d batch {}", batch),
+            );
+        }
+    }
+
+    #[test]
+    fn test_matmul_3d_2d_transformer_shape() {
+        let a = Array3::from_shape_fn((2, 16, 64), |(b, s, h)| ((b + s + h) % 10) as f32 * 0.1);
+        let b = Array2::from_shape_fn((64, 128), |(i, j)| ((i * j) % 7) as f32 * 0.1);
+
+        let result = matmul_3d_2d(&a, &b);
+
+        assert_eq!(result.dim(), (2, 16, 128));
+    }
+
+    // ========================================================================
+    // matmul_3d_2d_transposed tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_3d_2d_transposed_simple() {
+        let a = Array3::from_shape_fn((2, 3, 4), |(b, i, j)| (b * 12 + i * 4 + j) as f32);
+        let b_t = Array2::from_shape_fn((5, 4), |(i, j)| (i + j) as f32);
+
+        let result = matmul_3d_2d_transposed(&a, &b_t);
+
+        assert_eq!(result.dim(), (2, 3, 5));
+
+        for batch in 0..2 {
+            let a_slice = a.slice(ndarray::s![batch, .., ..]).to_owned();
+            let expected = reference_matmul_2d_transposed(&a_slice, &b_t);
+            let result_slice = result.slice(ndarray::s![batch, .., ..]);
+            assert_close(
+                result_slice.as_slice().unwrap(),
+                expected.as_slice().unwrap(),
+                1e-4,
+                &format!("matmul_3d_2d_transposed batch {}", batch),
+            );
+        }
+    }
+
+    #[test]
+    fn test_matmul_3d_2d_transposed_transformer_shape() {
+        let a = Array3::from_shape_fn((2, 16, 768), |(b, s, h)| ((b + s + h) % 10) as f32 * 0.1);
+        let b_t = Array2::from_shape_fn((3072, 768), |(i, j)| ((i + j) % 7) as f32 * 0.01);
+
+        let result = matmul_3d_2d_transposed(&a, &b_t);
+
+        assert_eq!(result.dim(), (2, 16, 3072));
+    }
+
+    // ========================================================================
+    // matmul_4d tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_simple() {
+        let a = Array4::from_shape_fn((1, 2, 3, 4), |(b, h, i, j)| (b + h + i + j) as f32);
+        let b = Array4::from_shape_fn((1, 2, 4, 5), |(b, h, i, j)| (b * h + i + j) as f32);
+
+        let result = matmul_4d(&a, &b);
+
+        assert_eq!(result.dim(), (1, 2, 3, 5));
+    }
+
+    #[test]
+    fn test_matmul_4d_attention_shape() {
+        let batch = 2;
+        let heads = 8;
+        let seq = 16;
+        let head_dim = 64;
+
+        let q = Array4::from_shape_fn((batch, heads, seq, head_dim), |(b, h, s, d)| {
+            ((b + h + s + d) % 10) as f32 * 0.1
+        });
+        let k_t = Array4::from_shape_fn((batch, heads, head_dim, seq), |(b, h, d, s)| {
+            ((b * h + d + s) % 7) as f32 * 0.1
+        });
+
+        let scores = matmul_4d(&q, &k_t);
+
+        assert_eq!(scores.dim(), (batch, heads, seq, seq));
+    }
+
+    #[test]
+    fn test_matmul_4d_matches_old() {
+        let a = Array4::from_shape_fn((2, 4, 8, 16), |(b, h, i, j)| ((b + h + i + j) % 10) as f32);
+        let b = Array4::from_shape_fn((2, 4, 16, 8), |(b, h, i, j)| ((b * h + i * j) % 7) as f32);
+
+        let result_new = matmul_4d(&a, &b);
+        let result_old = matmul_4d_old(&a, &b);
+
+        assert_close(
+            result_new.as_slice().unwrap(),
+            result_old.as_slice().unwrap(),
+            1e-5,
+            "matmul_4d vs matmul_4d_old",
+        );
+    }
+
+    // ========================================================================
+    // matmul_4d_noalloc tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_noalloc_simple() {
+        let a = Array4::from_shape_fn((1, 2, 3, 4), |(b, h, i, j)| (b + h + i + j) as f32);
+        let b = Array4::from_shape_fn((1, 2, 4, 5), |(b, h, i, j)| (b * h + i + j) as f32);
+        let mut out = Array4::<f32>::zeros((1, 2, 3, 5));
+
+        matmul_4d_noalloc(&a, &b, &mut out);
+
+        let expected = matmul_4d(&a, &b);
+        assert_close(
+            out.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul_4d_noalloc",
+        );
+    }
+
+    #[test]
+    fn test_matmul_4d_noalloc_reuse_buffer() {
+        let a1 = Array4::from_shape_fn((2, 4, 8, 16), |(b, h, i, j)| (b + h + i + j) as f32);
+        let b1 = Array4::from_shape_fn((2, 4, 16, 8), |(b, h, i, j)| (b * h + i + j) as f32);
+
+        let a2 = Array4::from_shape_fn((2, 4, 8, 16), |(b, h, i, j)| (b * 2 + h + i + j) as f32);
+        let b2 = Array4::from_shape_fn((2, 4, 16, 8), |(b, h, i, j)| (b + h * 2 + i + j) as f32);
+
+        let mut out = Array4::<f32>::zeros((2, 4, 8, 8));
+
+        matmul_4d_noalloc(&a1, &b1, &mut out);
+        let expected1 = matmul_4d(&a1, &b1);
+        assert_close(
+            out.as_slice().unwrap(),
+            expected1.as_slice().unwrap(),
+            1e-5,
+            "matmul_4d_noalloc first",
+        );
+
+        matmul_4d_noalloc(&a2, &b2, &mut out);
+        let expected2 = matmul_4d(&a2, &b2);
+        assert_close(
+            out.as_slice().unwrap(),
+            expected2.as_slice().unwrap(),
+            1e-5,
+            "matmul_4d_noalloc second",
+        );
+    }
+
+    // ========================================================================
+    // matmul_4d_decode tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_decode_simple() {
+        let q = Array4::from_shape_fn((1, 4, 1, 64), |(_, h, _, d)| (h + d) as f32 * 0.1);
+        let k_t = Array4::from_shape_fn((1, 4, 64, 8), |(_, h, d, s)| (h * d + s) as f32 * 0.01);
+
+        let result = matmul_4d_decode(&q, &k_t);
+
+        assert_eq!(result.dim(), (1, 4, 1, 8));
+    }
+
+    #[test]
+    fn test_matmul_4d_decode_batched() {
+        let batch = 4;
+        let heads = 8;
+        let head_dim = 64;
+        let cache_len = 128;
+
+        let q = Array4::from_shape_fn((batch, heads, 1, head_dim), |(b, h, _, d)| {
+            ((b + h + d) % 10) as f32 * 0.1
+        });
+        let k_t = Array4::from_shape_fn((batch, heads, head_dim, cache_len), |(b, h, d, s)| {
+            ((b * h + d + s) % 7) as f32 * 0.1
+        });
+
+        let result = matmul_4d_decode(&q, &k_t);
+
+        assert_eq!(result.dim(), (batch, heads, 1, cache_len));
+    }
+
+    // ========================================================================
+    // matmul_4d_context tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_context_simple() {
+        let scores = Array4::from_shape_fn((1, 4, 1, 8), |(_, h, _, s)| (h + s) as f32 * 0.1);
+        let v = Array4::from_shape_fn((1, 4, 8, 64), |(_, h, s, d)| (h * s + d) as f32 * 0.01);
+
+        let result = matmul_4d_context(&scores, &v);
+
+        assert_eq!(result.dim(), (1, 4, 1, 64));
+    }
+
+    #[test]
+    fn test_matmul_4d_context_batched() {
+        let batch = 4;
+        let heads = 8;
+        let cache_len = 128;
+        let head_dim = 64;
+
+        let scores = Array4::from_shape_fn((batch, heads, 1, cache_len), |(b, h, _, s)| {
+            ((b + h + s) % 10) as f32 * 0.01
+        });
+        let v = Array4::from_shape_fn((batch, heads, cache_len, head_dim), |(b, h, s, d)| {
+            ((b * h + s + d) % 7) as f32 * 0.1
+        });
+
+        let result = matmul_4d_context(&scores, &v);
+
+        assert_eq!(result.dim(), (batch, heads, 1, head_dim));
+    }
+
+    // ========================================================================
+    // matmul_4d_decode_gqa tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_decode_gqa_simple() {
+        let batch = 1;
+        let heads = 8;
+        let kv_heads = 2;
+        let n_rep = heads / kv_heads;
+        let head_dim = 64;
+        let cache_len = 16;
+
+        let q = Array4::from_shape_fn((batch, heads, 1, head_dim), |(b, h, _, d)| {
+            (b + h + d) as f32 * 0.1
+        });
+        let k_t = Array4::from_shape_fn((batch, kv_heads, head_dim, cache_len), |(b, h, d, s)| {
+            (b * h + d + s) as f32 * 0.01
+        });
+
+        let result = matmul_4d_decode_gqa(&q, &k_t.view(), n_rep);
+
+        assert_eq!(result.dim(), (batch, heads, 1, cache_len));
+    }
+
+    #[test]
+    fn test_matmul_4d_decode_gqa_batched() {
+        let batch = 2;
+        let heads = 32;
+        let kv_heads = 8;
+        let n_rep = heads / kv_heads;
+        let head_dim = 128;
+        let cache_len = 64;
+
+        let q = Array4::from_shape_fn((batch, heads, 1, head_dim), |(b, h, _, d)| {
+            ((b + h + d) % 10) as f32 * 0.1
+        });
+        let k_t = Array4::from_shape_fn((batch, kv_heads, head_dim, cache_len), |(b, h, d, s)| {
+            ((b * h + d + s) % 7) as f32 * 0.1
+        });
+
+        let result = matmul_4d_decode_gqa(&q, &k_t.view(), n_rep);
+
+        assert_eq!(result.dim(), (batch, heads, 1, cache_len));
+    }
+
+    // ========================================================================
+    // matmul_4d_context_gqa tests
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_4d_context_gqa_simple() {
+        let batch = 1;
+        let heads = 8;
+        let kv_heads = 2;
+        let n_rep = heads / kv_heads;
+        let cache_len = 16;
+        let head_dim = 64;
+
+        let scores = Array4::from_shape_fn((batch, heads, 1, cache_len), |(b, h, _, s)| {
+            (b + h + s) as f32 * 0.01
+        });
+        let v = Array4::from_shape_fn((batch, kv_heads, cache_len, head_dim), |(b, h, s, d)| {
+            (b * h + s + d) as f32 * 0.1
+        });
+
+        let result = matmul_4d_context_gqa(&scores, &v.view(), n_rep);
+
+        assert_eq!(result.dim(), (batch, heads, 1, head_dim));
+    }
+
+    #[test]
+    fn test_matmul_4d_context_gqa_batched() {
+        let batch = 2;
+        let heads = 32;
+        let kv_heads = 8;
+        let n_rep = heads / kv_heads;
+        let cache_len = 64;
+        let head_dim = 128;
+
+        let scores = Array4::from_shape_fn((batch, heads, 1, cache_len), |(b, h, _, s)| {
+            ((b + h + s) % 10) as f32 * 0.01
+        });
+        let v = Array4::from_shape_fn((batch, kv_heads, cache_len, head_dim), |(b, h, s, d)| {
+            ((b * h + s + d) % 7) as f32 * 0.1
+        });
+
+        let result = matmul_4d_context_gqa(&scores, &v.view(), n_rep);
+
+        assert_eq!(result.dim(), (batch, heads, 1, head_dim));
+    }
+
+    // ========================================================================
+    // apply_attention_mask tests
+    // ========================================================================
+
+    #[test]
+    fn test_apply_attention_mask_simple() {
+        let scores = Array4::from_shape_fn((1, 2, 4, 4), |_| 1.0f32);
+        let mask = Array2::from_shape_vec((1, 4), vec![1.0, 1.0, 0.0, 0.0]).unwrap();
+
+        let result = apply_attention_mask(scores, &mask);
+
+        for h in 0..2 {
+            for q in 0..4 {
+                assert_eq!(result[[0, h, q, 0]], 1.0);
+                assert_eq!(result[[0, h, q, 1]], 1.0);
+                assert_eq!(result[[0, h, q, 2]], MASK_VALUE);
+                assert_eq!(result[[0, h, q, 3]], MASK_VALUE);
+            }
+        }
+    }
+
+    #[test]
+    fn test_apply_attention_mask_broadcast() {
+        let scores = Array4::from_shape_fn((4, 8, 16, 32), |_| 0.5f32);
+        let mask = Array2::from_shape_fn((1, 32), |(_, j)| if j < 16 { 1.0 } else { 0.0 });
+
+        let result = apply_attention_mask(scores, &mask);
+
+        for b in 0..4 {
+            for h in 0..8 {
+                for q in 0..16 {
+                    for k in 0..32 {
+                        if k < 16 {
+                            assert_eq!(result[[b, h, q, k]], 0.5);
+                        } else {
+                            assert_eq!(result[[b, h, q, k]], MASK_VALUE);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_apply_attention_mask_all_ones() {
+        let scores = Array4::from_shape_fn((2, 4, 8, 8), |(b, h, q, k)| (b + h + q + k) as f32);
+        let mask = Array2::ones((2, 8));
+
+        let result = apply_attention_mask(scores.clone(), &mask);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            scores.as_slice().unwrap(),
+            1e-6,
+            "apply_attention_mask all ones",
+        );
+    }
+
+    #[test]
+    fn test_apply_attention_mask_all_zeros() {
+        let scores = Array4::from_shape_fn((2, 4, 8, 8), |_| 1.0f32);
+        let mask = Array2::zeros((2, 8));
+
+        let result = apply_attention_mask(scores, &mask);
+
+        for val in result.iter() {
+            assert_eq!(*val, MASK_VALUE);
+        }
+    }
+
+    #[test]
+    fn test_apply_attention_mask_length_mismatch() {
+        let scores = Array4::from_shape_fn((1, 2, 4, 8), |_| 1.0f32);
+        let mask = Array2::zeros((1, 16));
+
+        let result = apply_attention_mask(scores.clone(), &mask);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            scores.as_slice().unwrap(),
+            1e-6,
+            "apply_attention_mask length mismatch returns unchanged",
+        );
+    }
+
+    #[test]
+    fn test_apply_attention_mask_per_batch() {
+        let scores = Array4::from_shape_fn((2, 1, 2, 4), |_| 1.0f32);
+        let mask = Array2::from_shape_vec((2, 4), vec![
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 0.0,
+        ]).unwrap();
+
+        let result = apply_attention_mask(scores, &mask);
+
+        assert_eq!(result[[0, 0, 0, 3]], 1.0);
+        assert_eq!(result[[1, 0, 0, 2]], MASK_VALUE);
+        assert_eq!(result[[1, 0, 0, 3]], MASK_VALUE);
+        assert_eq!(result[[1, 0, 0, 0]], 1.0);
+    }
+
+    // ========================================================================
+    // Edge cases and numerical stability
+    // ========================================================================
+
+    #[test]
+    fn test_matmul_2d_zeros() {
+        let a = Array2::<f32>::zeros((4, 8));
+        let b = Array2::from_shape_fn((8, 4), |(i, j)| (i + j) as f32);
+
+        let result = matmul_2d(&a.view(), &b.view());
+
+        for val in result.iter() {
+            assert_eq!(*val, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_matmul_2d_identity() {
+        let a = Array2::from_shape_fn((4, 4), |(i, j)| (i * 4 + j) as f32);
+        let mut identity = Array2::<f32>::zeros((4, 4));
+        for i in 0..4 {
+            identity[[i, i]] = 1.0;
+        }
+
+        let result = matmul_2d(&a.view(), &identity.view());
+
+        assert_close(
+            result.as_slice().unwrap(),
+            a.as_slice().unwrap(),
+            1e-6,
+            "matmul_2d identity",
+        );
+    }
+
+    #[test]
+    fn test_matmul_negative_values() {
+        let a = Array2::from_shape_fn((3, 4), |(i, j)| -((i + j) as f32));
+        let b = Array2::from_shape_fn((4, 3), |(i, j)| (i as f32) - (j as f32));
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-5,
+            "matmul negative values",
+        );
+    }
+
+    #[test]
+    fn test_matmul_small_values() {
+        let a = Array2::from_shape_fn((4, 8), |(i, j)| ((i + j) as f32) * 1e-6);
+        let b = Array2::from_shape_fn((8, 4), |(i, j)| ((i * j) as f32) * 1e-6);
+
+        let result = matmul_2d(&a.view(), &b.view());
+        let expected = reference_matmul_2d(&a, &b);
+
+        assert_close(
+            result.as_slice().unwrap(),
+            expected.as_slice().unwrap(),
+            1e-10,
+            "matmul small values",
+        );
+    }
 }

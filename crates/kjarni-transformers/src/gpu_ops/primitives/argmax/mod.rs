@@ -113,3 +113,7 @@ impl GpuArgMax {
         pass.dispatch_workgroups(1, 1, 1);
     }
 }
+
+
+#[cfg(test)]
+mod tests;

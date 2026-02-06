@@ -162,60 +162,6 @@ impl<'a> CpuLayerFactory<'a> {
         ))
     }
 
-    pub fn build_decoder_attention_new(
-        &self,
-        meta: &ModelMetadata,
-        layout: &AttentionLayout,
-        idx: usize,
-    ) -> Result<DecoderAttentionNew> {
-        let i_str = idx.to_string();
-        let strategy = Some(F32MatmulStrategy::CustomSimd);
-
-        // Helper to resolve template strings
-        let name = |t: &String| t.replace("{}", &i_str);
-        let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &i_str));
-
-        // 1. Load the 4 Linear Layers
-        // LinearLayer::from_weights handles the bias automatically if opt_name returns Some
-        let q = Self::build_linear(
-            &self,
-            &layout.q_weight,
-            opt_name(&layout.q_bias).as_deref(),
-            idx,
-        )?;
-
-        let k = Self::build_linear(
-            &self,
-            &layout.k_weight,
-            opt_name(&layout.k_bias).as_deref(),
-            idx,
-        )?;
-
-        let v = Self::build_linear(
-            &self,
-            &layout.v_weight,
-            opt_name(&layout.v_bias).as_deref(),
-            idx,
-        )?;
-
-        let o = Self::build_linear(
-            &self,
-            &layout.o_weight,
-            opt_name(&layout.o_bias).as_deref(),
-            idx,
-        )?;
-
-        // 2. Construct the DecoderAttention brick
-        Ok(DecoderAttentionNew::new(
-            meta.hidden_size,
-            meta.num_attention_heads,
-            q,
-            k,
-            v,
-            o,
-            Some(meta.num_kv_heads),
-        ))
-    }
 }
 
 #[cfg(test)]
@@ -446,5 +392,624 @@ mod tests {
         assert!(attn.q_proj.has_bias());
         assert!(!attn.k_proj.has_bias());
         assert_eq!(attn.q_proj.shape(), [4, 4]);
+    }
+    // =========================================================================
+    //  Factory Construction Tests
+    // =========================================================================
+
+    #[test]
+    fn test_factory_new() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        let factory = CpuLayerFactory::new(&weights);
+        
+        assert!(factory.target_dtype.is_none());
+        assert!(matches!(factory.f32_strategy, Some(F32MatmulStrategy::CustomSimd)));
+    }
+
+    #[test]
+    fn test_factory_with_target_dtype() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        let factory = CpuLayerFactory::new(&weights)
+            .with_target_dtype(Some(DType::F32));
+        
+        assert_eq!(factory.target_dtype, Some(DType::F32));
+    }
+
+    #[test]
+    fn test_factory_with_target_dtype_none() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        let factory = CpuLayerFactory::new(&weights)
+            .with_target_dtype(None);
+        
+        assert!(factory.target_dtype.is_none());
+    }
+
+    #[test]
+    fn test_factory_with_load_config() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        let mut load_config = ModelLoadConfig::default();
+        load_config.target_dtype = Some(DType::F32);
+        
+        let factory = CpuLayerFactory::new(&weights)
+            .with_load_config(&load_config);
+        
+        assert_eq!(factory.target_dtype, Some(DType::F32));
+    }
+
+    // =========================================================================
+    //  Resolve Helper Tests
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_single_placeholder() {
+        let result = CpuLayerFactory::resolve("layer.{}.weight", 5);
+        assert_eq!(result, "layer.5.weight");
+    }
+
+    #[test]
+    fn test_resolve_multiple_placeholders() {
+        let result = CpuLayerFactory::resolve("model.layer.{}.attn.{}.weight", 3);
+        assert_eq!(result, "model.layer.3.attn.3.weight");
+    }
+
+    #[test]
+    fn test_resolve_no_placeholder() {
+        let result = CpuLayerFactory::resolve("model.weight", 0);
+        assert_eq!(result, "model.weight");
+    }
+
+    #[test]
+    fn test_resolve_zero_index() {
+        let result = CpuLayerFactory::resolve("layer.{}.norm", 0);
+        assert_eq!(result, "layer.0.norm");
+    }
+
+    #[test]
+    fn test_resolve_large_index() {
+        let result = CpuLayerFactory::resolve("layer.{}.weight", 999);
+        assert_eq!(result, "layer.999.weight");
+    }
+
+    // =========================================================================
+    //  build_linear Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_linear_weight_only() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.weight", vec![0.1; 16], vec![4, 4]),
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let linear = factory.build_linear("layer.{}.weight", None, 0).unwrap();
+        
+        assert_eq!(linear.shape(), [4, 4]);
+        assert!(!linear.has_bias());
+    }
+
+    #[test]
+    fn test_build_linear_with_bias() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.weight", vec![0.1; 16], vec![4, 4]),
+            ("layer.0.bias", vec![0.0; 4], vec![4]),
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let linear = factory.build_linear(
+            "layer.{}.weight",
+            Some("layer.{}.bias"),
+            0
+        ).unwrap();
+        
+        assert_eq!(linear.shape(), [4, 4]);
+        assert!(linear.has_bias());
+    }
+
+    #[test]
+    fn test_build_linear_different_layer_indices() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.weight", vec![0.1; 16], vec![4, 4]),
+            ("layer.1.weight", vec![0.2; 16], vec![4, 4]),
+            ("layer.2.weight", vec![0.3; 16], vec![4, 4]),
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        
+        let linear0 = factory.build_linear("layer.{}.weight", None, 0).unwrap();
+        let linear1 = factory.build_linear("layer.{}.weight", None, 1).unwrap();
+        let linear2 = factory.build_linear("layer.{}.weight", None, 2).unwrap();
+        
+        assert_eq!(linear0.shape(), [4, 4]);
+        assert_eq!(linear1.shape(), [4, 4]);
+        assert_eq!(linear2.shape(), [4, 4]);
+    }
+
+    #[test]
+    fn test_build_linear_missing_weight() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let result = factory.build_linear("nonexistent.{}.weight", None, 0);
+        
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_linear_non_square() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("proj.0.weight", vec![0.1; 32], vec![8, 4]), // [out, in]
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let linear = factory.build_linear("proj.{}.weight", None, 0).unwrap();
+        
+        assert_eq!(linear.shape(), [8, 4]);
+    }
+
+    // =========================================================================
+    //  build_norm Additional Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_norm_different_eps() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("norm.0.weight", vec![1.0; 8], vec![8]),
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        
+        let norm1 = factory.build_norm(
+            &"norm.{}.weight".to_string(),
+            &None,
+            1e-5,
+            0
+        ).unwrap();
+        
+        let norm2 = factory.build_norm(
+            &"norm.{}.weight".to_string(),
+            &None,
+            1e-6,
+            0
+        ).unwrap();
+        
+        match (norm1, norm2) {
+            (Normalization::RMSNorm(rms1), Normalization::RMSNorm(rms2)) => {
+                assert_eq!(rms1.eps, 1e-5);
+                assert_eq!(rms2.eps, 1e-6);
+            }
+            _ => panic!("Expected RMSNorm"),
+        }
+    }
+
+    #[test]
+    fn test_build_norm_different_layers() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.norm.weight", vec![1.0; 4], vec![4]),
+            ("layer.1.norm.weight", vec![2.0; 4], vec![4]),
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        
+        let norm0 = factory.build_norm(
+            &"layer.{}.norm.weight".to_string(),
+            &None,
+            1e-5,
+            0
+        ).unwrap();
+        
+        let norm1 = factory.build_norm(
+            &"layer.{}.norm.weight".to_string(),
+            &None,
+            1e-5,
+            1
+        ).unwrap();
+        
+        match (norm0, norm1) {
+            (Normalization::RMSNorm(rms0), Normalization::RMSNorm(rms1)) => {
+                assert_eq!(rms0.weight[0], 1.0);
+                assert_eq!(rms1.weight[0], 2.0);
+            }
+            _ => panic!("Expected RMSNorm"),
+        }
+    }
+
+    #[test]
+    fn test_build_norm_missing_weight() {
+        let (_dir, weights) = create_dummy_weights(vec![]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let result = factory.build_norm(
+            &"nonexistent.{}.weight".to_string(),
+            &None,
+            1e-5,
+            0
+        );
+        
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_layernorm_missing_bias() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.ln.weight", vec![1.0; 4], vec![4]),
+            // Missing bias!
+        ]);
+        
+        let factory = CpuLayerFactory::new(&weights);
+        let result = factory.build_norm(
+            &"layer.{}.ln.weight".to_string(),
+            &Some("layer.{}.ln.bias".to_string()),
+            1e-5,
+            0
+        );
+        
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    //  build_decoder_attention Additional Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_decoder_attention_all_biases() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.o.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.q.bias", vec![0.0; 4], vec![4]),
+            ("l.0.k.bias", vec![0.0; 4], vec![4]),
+            ("l.0.v.bias", vec![0.0; 4], vec![4]),
+            ("l.0.o.bias", vec![0.0; 4], vec![4]),
+        ]);
+
+        let layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: Some("l.{}.q.bias".to_string()),
+            k_bias: Some("l.{}.k.bias".to_string()),
+            v_bias: Some("l.{}.v.bias".to_string()),
+            o_bias: Some("l.{}.o.bias".to_string()),
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let meta = dummy_metadata();
+        let factory = CpuLayerFactory::new(&weights);
+        let attn = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
+
+        assert!(attn.q_proj.has_bias());
+        assert!(attn.k_proj.has_bias());
+        assert!(attn.v_proj.has_bias());
+        assert!(attn.o_proj.has_bias());
+    }
+
+    #[test]
+    fn test_build_decoder_attention_no_biases() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.o.weight", vec![0.1; 16], vec![4, 4]),
+        ]);
+
+        let layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: None,
+            k_bias: None,
+            v_bias: None,
+            o_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let meta = dummy_metadata();
+        let factory = CpuLayerFactory::new(&weights);
+        let attn = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
+
+        assert!(!attn.q_proj.has_bias());
+        assert!(!attn.k_proj.has_bias());
+        assert!(!attn.v_proj.has_bias());
+        assert!(!attn.o_proj.has_bias());
+    }
+
+    #[test]
+    fn test_build_decoder_attention_missing_weight() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
+            // Missing v.weight and o.weight!
+        ]);
+
+        let layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: None,
+            k_bias: None,
+            v_bias: None,
+            o_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let meta = dummy_metadata();
+        let factory = CpuLayerFactory::new(&weights);
+        let result = factory.build_decoder_attention(&meta, &layout, 0);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_decoder_attention_different_layers() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.o.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.1.q.weight", vec![0.2; 16], vec![4, 4]),
+            ("l.1.k.weight", vec![0.2; 16], vec![4, 4]),
+            ("l.1.v.weight", vec![0.2; 16], vec![4, 4]),
+            ("l.1.o.weight", vec![0.2; 16], vec![4, 4]),
+        ]);
+
+        let layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: None,
+            k_bias: None,
+            v_bias: None,
+            o_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let meta = dummy_metadata();
+        let factory = CpuLayerFactory::new(&weights);
+        
+        let attn0 = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
+        let attn1 = factory.build_decoder_attention(&meta, &layout, 1).unwrap();
+
+        assert_eq!(attn0.q_proj.shape(), [4, 4]);
+        assert_eq!(attn1.q_proj.shape(), [4, 4]);
+    }
+
+
+    // =========================================================================
+    //  build_swiglu_ffn Additional Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_swiglu_ffn_with_biases() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
+            ("layer.0.gate.bias", vec![0.0; 8], vec![8]),
+            ("layer.0.up.weight", vec![0.2; 32], vec![8, 4]),
+            ("layer.0.up.bias", vec![0.0; 8], vec![8]),
+            ("layer.0.down.weight", vec![0.3; 32], vec![4, 8]),
+            ("layer.0.down.bias", vec![0.0; 4], vec![4]),
+        ]);
+
+        let layout = FeedForwardLayout {
+            gate_weight: Some("layer.{}.gate.weight".to_string()),
+            gate_bias: Some("layer.{}.gate.bias".to_string()),
+            up_weight: "layer.{}.up.weight".to_string(),
+            up_bias: Some("layer.{}.up.bias".to_string()),
+            down_weight: "layer.{}.down.weight".to_string(),
+            down_bias: Some("layer.{}.down.bias".to_string()),
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let factory = CpuLayerFactory::new(&weights);
+        let ffn = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
+
+        assert!(ffn.gate.has_bias());
+        assert!(ffn.up.has_bias());
+        assert!(ffn.down.has_bias());
+    }
+
+    #[test]
+    fn test_build_swiglu_ffn_different_activations() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
+            ("layer.0.up.weight", vec![0.2; 32], vec![8, 4]),
+            ("layer.0.down.weight", vec![0.3; 32], vec![4, 8]),
+        ]);
+
+        let layout = FeedForwardLayout {
+            gate_weight: Some("layer.{}.gate.weight".to_string()),
+            gate_bias: None,
+            up_weight: "layer.{}.up.weight".to_string(),
+            up_bias: None,
+            down_weight: "layer.{}.down.weight".to_string(),
+            down_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let factory = CpuLayerFactory::new(&weights);
+        
+        // SiLU (Llama-style)
+        let ffn_silu = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
+        assert_eq!(ffn_silu.activation, Activation::SilU);
+        
+        // GELU (some models)
+        let ffn_gelu = factory.build_swiglu_ffn(&layout, Activation::Gelu, 0).unwrap();
+        assert_eq!(ffn_gelu.activation, Activation::Gelu);
+    }
+
+    #[test]
+    fn test_build_swiglu_ffn_different_layers() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
+            ("layer.0.up.weight", vec![0.1; 32], vec![8, 4]),
+            ("layer.0.down.weight", vec![0.1; 32], vec![4, 8]),
+            ("layer.1.gate.weight", vec![0.2; 32], vec![8, 4]),
+            ("layer.1.up.weight", vec![0.2; 32], vec![8, 4]),
+            ("layer.1.down.weight", vec![0.2; 32], vec![4, 8]),
+        ]);
+
+        let layout = FeedForwardLayout {
+            gate_weight: Some("layer.{}.gate.weight".to_string()),
+            gate_bias: None,
+            up_weight: "layer.{}.up.weight".to_string(),
+            up_bias: None,
+            down_weight: "layer.{}.down.weight".to_string(),
+            down_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let factory = CpuLayerFactory::new(&weights);
+        
+        let ffn0 = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
+        let ffn1 = factory.build_swiglu_ffn(&layout, Activation::SilU, 1).unwrap();
+
+        assert_eq!(ffn0.gate.shape(), [8, 4]);
+        assert_eq!(ffn1.gate.shape(), [8, 4]);
+    }
+
+    #[test]
+    fn test_build_swiglu_ffn_missing_up_weight() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
+            // Missing up.weight!
+            ("layer.0.down.weight", vec![0.3; 32], vec![4, 8]),
+        ]);
+
+        let layout = FeedForwardLayout {
+            gate_weight: Some("layer.{}.gate.weight".to_string()),
+            gate_bias: None,
+            up_weight: "layer.{}.up.weight".to_string(),
+            up_bias: None,
+            down_weight: "layer.{}.down.weight".to_string(),
+            down_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let factory = CpuLayerFactory::new(&weights);
+        let result = factory.build_swiglu_ffn(&layout, Activation::SilU, 0);
+
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    //  Metadata Variations Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_attention_gqa_config() {
+        // GQA: num_kv_heads < num_attention_heads
+        let (_dir, weights) = create_dummy_weights(vec![
+            ("l.0.q.weight", vec![0.1; 64], vec![16, 4]), // 4 heads * head_dim=4
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),  // 1 kv head * head_dim=4
+            ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),  // 1 kv head * head_dim=4
+            ("l.0.o.weight", vec![0.1; 64], vec![4, 16]),
+        ]);
+
+        let layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: None,
+            k_bias: None,
+            v_bias: None,
+            o_bias: None,
+            norm_weight: "".to_string(),
+            norm_bias: None,
+        };
+
+        let mut meta = dummy_metadata();
+        meta.hidden_size = 4;
+        meta.num_attention_heads = 4;
+        meta.num_kv_heads = 1; // GQA
+        meta.head_dim = 4;
+
+        let factory = CpuLayerFactory::new(&weights);
+        let attn = factory.build_decoder_attention(&meta, &layout, 0).unwrap();
+
+        assert_eq!(attn.q_proj.shape(), [16, 4]);
+        assert_eq!(attn.k_proj.shape(), [4, 4]);
+    }
+
+    // =========================================================================
+    //  Integration-style Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_full_layer_components() {
+        let (_dir, weights) = create_dummy_weights(vec![
+            // Attention
+            ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),
+            ("l.0.o.weight", vec![0.1; 16], vec![4, 4]),
+            // FFN
+            ("l.0.gate.weight", vec![0.1; 32], vec![8, 4]),
+            ("l.0.up.weight", vec![0.1; 32], vec![8, 4]),
+            ("l.0.down.weight", vec![0.1; 32], vec![4, 8]),
+            // Norms
+            ("l.0.attn_norm.weight", vec![1.0; 4], vec![4]),
+            ("l.0.ffn_norm.weight", vec![1.0; 4], vec![4]),
+        ]);
+
+        let attn_layout = AttentionLayout {
+            q_weight: "l.{}.q.weight".to_string(),
+            k_weight: "l.{}.k.weight".to_string(),
+            v_weight: "l.{}.v.weight".to_string(),
+            o_weight: "l.{}.o.weight".to_string(),
+            q_bias: None,
+            k_bias: None,
+            v_bias: None,
+            o_bias: None,
+            norm_weight: "l.{}.attn_norm.weight".to_string(),
+            norm_bias: None,
+        };
+
+        let ffn_layout = FeedForwardLayout {
+            gate_weight: Some("l.{}.gate.weight".to_string()),
+            gate_bias: None,
+            up_weight: "l.{}.up.weight".to_string(),
+            up_bias: None,
+            down_weight: "l.{}.down.weight".to_string(),
+            down_bias: None,
+            norm_weight: "l.{}.ffn_norm.weight".to_string(),
+            norm_bias: None,
+        };
+
+        let meta = dummy_metadata();
+        let factory = CpuLayerFactory::new(&weights);
+
+        // Build all components for layer 0
+        let attn = factory.build_decoder_attention(&meta, &attn_layout, 0).unwrap();
+        let ffn = factory.build_swiglu_ffn(&ffn_layout, Activation::SilU, 0).unwrap();
+        let attn_norm = factory.build_norm(
+            &attn_layout.norm_weight,
+            &attn_layout.norm_bias,
+            meta.norm_eps,
+            0
+        ).unwrap();
+        let ffn_norm = factory.build_norm(
+            &ffn_layout.norm_weight,
+            &ffn_layout.norm_bias,
+            meta.norm_eps,
+            0
+        ).unwrap();
+
+        assert_eq!(attn.q_proj.shape(), [4, 4]);
+        assert_eq!(ffn.gate.shape(), [8, 4]);
+        assert!(matches!(attn_norm, Normalization::RMSNorm(_)));
+        assert!(matches!(ffn_norm, Normalization::RMSNorm(_)));
     }
 }

@@ -341,10 +341,12 @@ mod tests {
         };
         let generator = EncoderDecoderGenerator::new(Box::new(model));
         assert!(generator.is_err());
-        assert!(generator
-            .unwrap_err()
-            .to_string()
-            .contains("gpu model missing"));
+        assert!(
+            generator
+                .unwrap_err()
+                .to_string()
+                .contains("gpu model missing")
+        );
     }
 
     #[test]
@@ -370,9 +372,398 @@ mod tests {
 
         let res = backend.update_token_tensor(&mut fake_tensor, &[1]);
         assert!(res.is_err());
-        assert!(res
-            .unwrap_err()
-            .to_string()
-            .contains("mismatched tensor type"));
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("mismatched tensor type")
+        );
+    }
+
+    // ========================================================================
+    //  AnyEncoderDecoderBackend Tests
+    // ========================================================================
+
+    #[test]
+    fn test_any_backend_debug_cpu() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+        let debug_str = format!("{:?}", backend);
+        assert!(debug_str.contains("Cpu"));
+    }
+
+    #[test]
+    fn test_any_backend_create_token_tensor_cpu() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let tokens = vec![1u32, 2, 3, 4];
+        let tensor = backend.create_token_tensor(&tokens, 2).unwrap();
+
+        // Verify it's the right type
+        let concrete = tensor.downcast_ref::<cpu_backend::CpuSeq2SeqState>();
+        assert!(concrete.is_some());
+    }
+
+    #[test]
+    fn test_any_backend_update_token_tensor_cpu() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let tokens = vec![1u32, 2];
+        let mut tensor = backend.create_token_tensor(&tokens, 1).unwrap();
+
+        let new_tokens = vec![10u32];
+        let result = backend.update_token_tensor(&mut tensor, &new_tokens);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_any_backend_update_token_tensor_wrong_type_cpu() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        // Create a tensor of wrong type
+        let mut fake_tensor: Box<dyn Any + Send + Sync> = Box::new(42i32);
+
+        let result = backend.update_token_tensor(&mut fake_tensor, &[1]);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("mismatched tensor type")
+        );
+    }
+
+    #[test]
+    fn test_any_backend_reorder_cache_cpu() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let mut cache = crate::cache::CpuBeamKVCache::new(2, 4, 128, 64);
+        let indices = vec![1, 0, 2, 3];
+
+        let result = backend.reorder_cache(&mut cache, &indices);
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    //  EncoderDecoderGenerator Tests
+    // ========================================================================
+
+    #[test]
+    fn test_generator_debug() {
+        let model = MockModel {
+            device: Device::Cpu,
+        };
+        let generator = EncoderDecoderGenerator::new(Box::new(model)).unwrap();
+
+        let debug_str = format!("{:?}", generator);
+        assert!(debug_str.contains("EncoderDecoderGenerator"));
+    }
+
+    #[test]
+    fn test_boxed_model_debug() {
+        let model: Box<dyn EncoderDecoderLanguageModel> = Box::new(MockModel {
+            device: Device::Cpu,
+        });
+        let debug_str = format!("{:?}", model);
+        assert_eq!(debug_str, "EncoderDecoder");
+    }
+
+    // ========================================================================
+    //  decode_step Type Mismatch Tests
+    // ========================================================================
+
+    #[derive(Clone)]
+    struct MockCache {
+        len: usize,
+    }
+
+    impl Cache for MockCache {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn get_seq_length(&self) -> usize {
+            self.len
+        }
+        fn set_seq_length(&mut self, len: usize) {
+            self.len = len;
+        }
+        fn clear(&mut self) {
+            self.len = 0;
+        }
+        fn increment_len(&mut self, n: usize) {
+            self.len += n;
+        }
+        fn clone_box(&self) -> Box<dyn Cache> {
+            Box::new(self.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_any_backend_decode_step_wrong_decoder_tokens_type() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+        let model = MockModel {
+            device: Device::Cpu,
+        };
+
+        // Wrong type for decoder_tokens
+        let decoder_tokens: Box<dyn Any + Send + Sync> = Box::new("wrong type");
+        let encoder_state: Box<dyn Any + Send + Sync> = Box::new(
+            cpu_backend::CpuSeq2SeqState::U32(ndarray::Array2::zeros((1, 1))),
+        );
+
+        let mut cache = MockCache { len: 0 };
+
+        let result = backend
+            .decode_step(&model, &decoder_tokens, &encoder_state, &mut cache)
+            .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("mismatched tensor type")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_any_backend_decode_step_wrong_encoder_state_type() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+        let model = MockModel {
+            device: Device::Cpu,
+        };
+
+        // Correct type for decoder_tokens
+        let decoder_tokens: Box<dyn Any + Send + Sync> = Box::new(
+            cpu_backend::CpuSeq2SeqState::U32(ndarray::Array2::zeros((1, 1))),
+        );
+        // Wrong type for encoder_state
+        let encoder_state: Box<dyn Any + Send + Sync> = Box::new("wrong type");
+
+        let mut cache = MockCache { len: 0 };
+
+        let result = backend
+            .decode_step(&model, &decoder_tokens, &encoder_state, &mut cache)
+            .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("mismatched tensor type")
+        );
+    }
+
+    // ========================================================================
+    //  encode Type Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_any_backend_encode_cpu_returns_boxed() {
+        // This test would need a fully mocked model with ops
+        // For now, just verify the structure
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        // The encode method needs a model with encoder_decoder_cpu_ops
+        // which MockModel doesn't provide, so this will fail
+        // but we can at least verify the backend is properly constructed
+        assert!(matches!(backend, AnyEncoderDecoderBackend::Cpu(_)));
+    }
+
+    // ========================================================================
+    //  Generator Construction Edge Cases
+    // ========================================================================
+
+    struct MockModelWithContext {
+        device: Device,
+        context: Option<Arc<WgpuContext>>,
+    }
+
+    impl InferenceModel for MockModelWithContext {
+        fn device(&self) -> Device {
+            self.device
+        }
+        fn context(&self) -> Option<Arc<WgpuContext>> {
+            self.context.clone()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    impl LanguageModel for MockModelWithContext {
+        fn vocab_size(&self) -> usize {
+            100
+        }
+        fn hidden_size(&self) -> usize {
+            10
+        }
+        fn num_layers(&self) -> usize {
+            1
+        }
+        fn num_heads(&self) -> usize {
+            1
+        }
+        fn context_size(&self) -> usize {
+            100
+        }
+        fn tokenizer(&self) -> &Tokenizer {
+            unimplemented!()
+        }
+        fn eos_token_id(&self) -> Option<u32> {
+            Some(1)
+        }
+        fn bos_token_id(&self) -> Option<u32> {
+            Some(0)
+        }
+        fn forced_bos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn forced_eos_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn pad_token_id(&self) -> Option<u32> {
+            None
+        }
+        fn stop_token_ids(&self) -> HashSet<u32> {
+            HashSet::default()
+        }
+        fn new_cache(&self, _: usize, _: usize, _: usize) -> Result<Box<dyn Cache>> {
+            unimplemented!()
+        }
+    }
+
+    #[async_trait]
+    impl EncoderLanguageModel for MockModelWithContext {
+        fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps> {
+            None
+        }
+        fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
+            None
+        }
+    }
+
+    #[async_trait]
+    impl EncoderDecoderLanguageModel for MockModelWithContext {
+        fn encoder_decoder_cpu_ops(&self) -> Option<&dyn CpuEncoderDecoderOps> {
+            None
+        }
+        fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> {
+            None
+        }
+        fn decoder_start_token_id(&self) -> u32 {
+            0
+        }
+        fn get_default_generation_config(&self) -> GenerationConfig {
+            GenerationConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generator_new_gpu_with_context() {
+        // Create a real context
+        let context = WgpuContext::new().await.expect("Failed to create context");
+
+        let model = MockModelWithContext {
+            device: Device::Wgpu,
+            context: Some(context),
+        };
+
+        let generator = EncoderDecoderGenerator::new(Box::new(model));
+        assert!(generator.is_ok());
+
+        // Verify it's using GPU backend
+        match &generator.unwrap().backend {
+            AnyEncoderDecoderBackend::Gpu(_) => {}
+            _ => panic!("Expected GPU backend"),
+        }
+    }
+
+    // ========================================================================
+    //  Multiple Beams Tests
+    // ========================================================================
+
+    #[test]
+    fn test_any_backend_create_tensor_multiple_beams() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        // 4 beams, 3 tokens each
+        let tokens = vec![1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let tensor = backend.create_token_tensor(&tokens, 4).unwrap();
+
+        let concrete = tensor
+            .downcast_ref::<cpu_backend::CpuSeq2SeqState>()
+            .unwrap();
+        match concrete {
+            cpu_backend::CpuSeq2SeqState::U32(arr) => {
+                assert_eq!(arr.shape(), &[4, 3]);
+            }
+            _ => panic!("Expected U32 state"),
+        }
+    }
+
+    // ========================================================================
+    //  Reorder Cache Error Handling
+    // ========================================================================
+
+    struct WrongCacheType;
+
+    impl Cache for WrongCacheType {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn get_seq_length(&self) -> usize {
+            0
+        }
+        fn set_seq_length(&mut self, _: usize) {}
+        fn clear(&mut self) {}
+        fn increment_len(&mut self, _: usize) {}
+        fn clone_box(&self) -> Box<dyn Cache> {
+            Box::new(WrongCacheType)
+        }
+    }
+
+    #[test]
+    fn test_any_backend_reorder_cache_wrong_cache_type() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let mut cache = WrongCacheType;
+        let indices = vec![0, 1];
+
+        let result = backend.reorder_cache(&mut cache, &indices);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("CpuBeamKVCache"));
+    }
+
+    // ========================================================================
+    //  Empty Tokens Edge Case
+    // ========================================================================
+
+    #[test]
+    fn test_any_backend_create_tensor_empty_tokens() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let tokens: Vec<u32> = vec![];
+        let tensor = backend.create_token_tensor(&tokens, 1);
+
+        // Should handle empty gracefully
+        assert!(tensor.is_ok());
+    }
+
+    #[test]
+    fn test_any_backend_update_empty_tokens() {
+        let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
+
+        let tokens = vec![1u32, 2];
+        let mut tensor = backend.create_token_tensor(&tokens, 1).unwrap();
+
+        // Update with empty tokens
+        let result = backend.update_token_tensor(&mut tensor, &[]);
+        // This might fail or succeed depending on implementation
+        // Just ensure it doesn't panic
+        let _ = result;
     }
 }

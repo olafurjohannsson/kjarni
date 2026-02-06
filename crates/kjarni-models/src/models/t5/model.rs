@@ -11,22 +11,31 @@ use crate::models::t5::T5Task;
 use super::config::T5Config;
 
 use kjarni_transformers::{
-    LanguageModel, ModelType, WgpuContext, cache::{Cache, CpuBeamKVCache}, common::{
+    LanguageModel, ModelType, WgpuContext,
+    cache::{Cache, CpuBeamKVCache},
+    common::{
         BeamSearchParams, DecodingStrategy, GenerationConfig, HFGenerationConfig,
         HFGenerationDefaults, ModelGenerationDefaults,
-    }, cpu::{
+    },
+    cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
             cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
-    }, encoder_decoder::{
+    },
+    encoder_decoder::{
         config::TranslationParams,
         traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
             GpuEncoderDecoderOps,
         },
-    }, gpu::{GpuTensor, GpuTensorPool, cache::GpuBeamKVCache}, models::base::{ModelInput, ModelLoadConfig}, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights
+    },
+    gpu::{GpuTensor, GpuTensorPool, cache::GpuBeamKVCache},
+    models::base::{ModelInput, ModelLoadConfig},
+    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
+    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 pub struct T5Model {
@@ -377,6 +386,15 @@ impl CpuEncoderDecoderOps for T5Model {
     fn decoder(&self) -> &dyn CpuCrossDecoder {
         self.pipeline.cpu_decoder().expect("CPU Decoder not active")
     }
+    fn embed_decoder_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        position_offset: usize,
+    ) -> Result<Array3<f32>> {
+        self.pipeline
+            .decoder_embeddings()
+            .embed_cpu(input_ids, None, position_offset)
+    }
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
         // Creates a triangular matrix where 1.0 is allowed and 0.0 is masked
         // This prevents the decoder from "looking ahead"
@@ -411,6 +429,18 @@ impl CpuEncoderDecoderOps for T5Model {
 impl GpuEncoderDecoderOps for T5Model {
     fn decoder(&self) -> &dyn GpuCrossDecoder {
         self.pipeline.gpu_decoder().expect("GPU Decoder not active")
+    }
+
+    fn embed_decoder_tokens(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        self.pipeline
+            .decoder_embeddings()
+            .embed(encoder, pool, input, None, position_offset)
     }
 
     fn broadcast_encoder_states(

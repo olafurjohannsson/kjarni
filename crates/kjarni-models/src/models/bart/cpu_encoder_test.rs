@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3, s};
 
 use kjarni_transformers::activations::softmax_4d_inplace;
 use kjarni_transformers::feedforward::FeedForward;
@@ -11,7 +11,6 @@ use kjarni_transformers::utils::linear_algebra::{apply_attention_mask, matmul_4d
 use kjarni_transformers::weights::ModelWeights;
 
 use crate::models::bart::config::BartConfig;
-use crate::models::bart::cpu_encoder::BartCpuEncoder;
 
 const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
@@ -19,8 +18,10 @@ const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart
 mod tests {
     use super::*;
 
-    use kjarni_transformers::traits::{CpuTransformerCore, ModelConfig};
     use kjarni_transformers::Embeddings;
+    use kjarni_transformers::cpu::encoder_decoder::Seq2SeqCPUEncoder;
+    use kjarni_transformers::encoder_decoder::config::Seq2SeqEncoderConfig;
+    use kjarni_transformers::traits::{CpuTransformerCore, ModelConfig};
 
     mod golden {
         pub const LAYER0_INPUT: [f32; 10] = [
@@ -148,7 +149,7 @@ mod tests {
         }
     }
 
-    fn setup_encoder() -> Result<(BartCpuEncoder, Array3<f32>)> {
+    fn setup_encoder() -> Result<(Seq2SeqCPUEncoder, Array3<f32>)> {
         let path = Path::new(DISTILBART_PATH);
         if !path.exists() {
             anyhow::bail!("weights not found at {}", DISTILBART_PATH);
@@ -157,7 +158,13 @@ mod tests {
         let weights = ModelWeights::new(path)?;
         let config_json = std::fs::read_to_string(path.join("config.json"))?;
         let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
-        let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
+        let enc_config = Seq2SeqEncoderConfig::bart();
+        let encoder = Seq2SeqCPUEncoder::new(
+            &weights,
+            config.as_ref(),
+            enc_config,
+            ModelLoadConfig::default(),
+        )?;
         let meta = config.metadata();
         let layout = config.layout();
 
@@ -191,7 +198,7 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let attn_out = encoder.layers[0]
+        let attn_out = encoder.get_layers()[0]
             .self_attn
             .forward(&hidden, &mask, None, None)?;
         let actual: Vec<f32> = attn_out.slice(s![0, 0, 0..10]).to_vec();
@@ -205,15 +212,20 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let attn_out = encoder.layers[0]
+        let attn_out = encoder.get_layers()[0]
             .self_attn
             .forward(&hidden, &mask, None, None)?;
-        let post_attn = encoder.layers[0]
+        let post_attn = encoder.get_layers()[0]
             .self_attn_layer_norm
             .forward(&(&hidden + &attn_out));
         let actual: Vec<f32> = post_attn.slice(s![0, 0, 0..10]).to_vec();
 
-        assert_close(&actual, &golden::POST_ATTN_LN, 1e-4, "post-attention layernorm");
+        assert_close(
+            &actual,
+            &golden::POST_ATTN_LN,
+            1e-4,
+            "post-attention layernorm",
+        );
         Ok(())
     }
 
@@ -222,14 +234,14 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let attn_out = encoder.layers[0]
+        let attn_out = encoder.get_layers()[0]
             .self_attn
             .forward(&hidden, &mask, None, None)?;
-        let post_attn = encoder.layers[0]
+        let post_attn = encoder.get_layers()[0]
             .self_attn_layer_norm
             .forward(&(&hidden + &attn_out));
 
-        let fc1_out = match &encoder.layers[0].feedforward {
+        let fc1_out = match &encoder.get_layers()[0].feedforward {
             FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
             FeedForward::Legacy(ff) => ff.fc1(&post_attn)?,
             _ => anyhow::bail!("unexpected feedforward type"),
@@ -245,20 +257,20 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let attn_out = encoder.layers[0]
+        let attn_out = encoder.get_layers()[0]
             .self_attn
             .forward(&hidden, &mask, None, None)?;
-        let post_attn = encoder.layers[0]
+        let post_attn = encoder.get_layers()[0]
             .self_attn_layer_norm
             .forward(&(&hidden + &attn_out));
 
-        let mut fc1_out = match &encoder.layers[0].feedforward {
+        let mut fc1_out = match &encoder.get_layers()[0].feedforward {
             FeedForward::Standard(ff) => ff.fc1(&post_attn)?,
             FeedForward::Legacy(ff) => ff.fc1(&post_attn)?,
             _ => anyhow::bail!("unexpected feedforward type"),
         };
 
-        match &encoder.layers[0].feedforward {
+        match &encoder.get_layers()[0].feedforward {
             FeedForward::Standard(ff) => ff.apply_activation(&mut fc1_out),
             FeedForward::Legacy(ff) => ff.apply_activation(&mut fc1_out),
             _ => anyhow::bail!("unexpected feedforward type"),
@@ -274,14 +286,14 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let attn_out = encoder.layers[0]
+        let attn_out = encoder.get_layers()[0]
             .self_attn
             .forward(&hidden, &mask, None, None)?;
-        let post_attn = encoder.layers[0]
+        let post_attn = encoder.get_layers()[0]
             .self_attn_layer_norm
             .forward(&(&hidden + &attn_out));
 
-        let ffn_out = encoder.layers[0].feedforward.forward(&post_attn)?;
+        let ffn_out = encoder.get_layers()[0].feedforward.forward(&post_attn)?;
         let actual: Vec<f32> = ffn_out.slice(s![0, 0, 0..10]).to_vec();
 
         assert_close(&actual, &golden::FFN_OUT, 1e-3, "ffn output");
@@ -293,7 +305,7 @@ mod tests {
         let (encoder, hidden) = setup_encoder()?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let layer0_out = encoder.layers[0].forward(hidden, &mask, None, false, None)?;
+        let layer0_out = encoder.get_layers()[0].forward(hidden, &mask, None, false, None)?;
         let actual: Vec<f32> = layer0_out.slice(s![0, 0, 0..10]).to_vec();
 
         assert_close(&actual, &golden::LAYER0_OUTPUT, 1e-4, "layer 0 output");
@@ -303,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn test_self_attention_scores_and_softmax() -> Result<()> {
         let (encoder, hidden) = setup_encoder()?;
-        let self_attn = &encoder.layers[0].self_attn;
+        let self_attn = &encoder.get_layers()[0].self_attn;
         let mask = Array2::<f32>::ones((1, 10));
 
         let (batch, seq_len, _) = hidden.dim();
@@ -332,7 +344,12 @@ mod tests {
         scores.mapv_inplace(|x| x * self_attn.scale_factor);
 
         let scaled_actual: Vec<f32> = scores.slice(s![0, 0, 0, 0..5]).to_vec();
-        assert_close(&scaled_actual, &golden::SCALED_SCORES, 1e-4, "scaled scores");
+        assert_close(
+            &scaled_actual,
+            &golden::SCALED_SCORES,
+            1e-4,
+            "scaled scores",
+        );
 
         scores = apply_attention_mask(scores, &mask);
         softmax_4d_inplace(&mut scores);

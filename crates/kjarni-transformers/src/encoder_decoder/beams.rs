@@ -5,9 +5,8 @@ use ndarray::{Array2, s};
 
 use crate::cache::Cache;
 use crate::common::{
-    DecodingStrategy, GenerationConfig, StreamedToken, TokenType,
-    apply_no_repeat_ngram_inplace, apply_repetition_penalty_inplace,
-    get_top_k_from_log_probs, log_softmax_1d,
+    DecodingStrategy, GenerationConfig, StreamedToken, TokenType, apply_no_repeat_ngram_inplace,
+    apply_repetition_penalty_inplace, get_top_k_from_log_probs, log_softmax_1d,
 };
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
@@ -451,16 +450,16 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
                 if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
                     // Add to our accumulated tokens
                     all_generated_tokens.push(new_token);
-                    
+
                     // Decode ALL tokens so far to get proper spacing
                     let full_text = ctx.model.tokenizer()
                         .decode(&all_generated_tokens, true)
                         .unwrap_or_default();
-                    
+
                     // Yield only the NEW portion
                     let new_text = &full_text[prev_text_len..];
                     prev_text_len = full_text.len();
-                    
+
                     if !new_text.is_empty() {
                         yield StreamedToken {
                             text: new_text.to_string(),
@@ -473,7 +472,6 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
         }
     }
 }
-
 
 // pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
 //     model: &'a dyn EncoderDecoderLanguageModel,
@@ -599,11 +597,8 @@ mod tests {
 
     #[test]
     fn test_find_best_beams_candidates_sorting() {
-        let logits = Array2::from_shape_vec(
-            (2, 3),
-            vec![-1.0, -2.0, -3.0, -0.5, -4.0, -5.0],
-        )
-        .unwrap();
+        let logits =
+            Array2::from_shape_vec((2, 3), vec![-1.0, -2.0, -3.0, -0.5, -4.0, -5.0]).unwrap();
 
         let beams = vec![
             BeamHypothesis {
@@ -913,5 +908,597 @@ mod tests {
         assert_eq!(ctx.beams.len(), 2);
         assert_eq!(ctx.beams[0].tokens.last(), Some(&5));
         assert!(!done);
+    }
+
+    // ========================================================================
+    //  BeamHypothesis Tests
+    // ========================================================================
+
+    #[test]
+    fn test_normalized_score_zero_length() {
+        let beam = BeamHypothesis {
+            tokens: vec![0], // len = 1
+            score: -5.0,
+        };
+        let prompt_len = 1.0; // effective len = 0
+
+        // When len <= 0, lp = 1.0
+        let score = beam.normalized_score(2.0, prompt_len);
+        assert!((score - (-5.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_normalized_score_negative_effective_length() {
+        let beam = BeamHypothesis {
+            tokens: vec![0],
+            score: -10.0,
+        };
+        let prompt_len = 5.0; // effective len = 1 - 5 = -4
+
+        // When len <= 0, lp = 1.0
+        let score = beam.normalized_score(2.0, prompt_len);
+        assert!((score - (-10.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_beam_hypothesis_clone() {
+        let beam = BeamHypothesis {
+            tokens: vec![1, 2, 3],
+            score: -2.5,
+        };
+        let cloned = beam.clone();
+
+        assert_eq!(cloned.tokens, vec![1, 2, 3]);
+        assert_eq!(cloned.score, -2.5);
+    }
+
+    #[test]
+    fn test_beam_hypothesis_debug() {
+        let beam = BeamHypothesis {
+            tokens: vec![1, 2],
+            score: -1.0,
+        };
+        let debug_str = format!("{:?}", beam);
+        assert!(debug_str.contains("BeamHypothesis"));
+        assert!(debug_str.contains("tokens"));
+        assert!(debug_str.contains("score"));
+    }
+
+    // ========================================================================
+    //  FinishedHypotheses Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_finished_hypotheses_empty_best() {
+        let finished = FinishedHypotheses::new(2, 1.0, 0);
+        assert!(finished.best().is_none());
+    }
+
+    #[test]
+    fn test_finished_hypotheses_single_beam() {
+        let mut finished = FinishedHypotheses::new(1, 1.0, 0);
+
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 3],
+            score: -3.0,
+        });
+
+        assert_eq!(finished.len(), 1);
+        assert!(finished.is_done(true, -10.0, 10));
+    }
+
+    #[test]
+    fn test_finished_hypotheses_equal_scores() {
+        let mut finished = FinishedHypotheses::new(2, 1.0, 0);
+
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -5.0,
+        });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -5.0, // Same score
+        });
+
+        assert_eq!(finished.len(), 2);
+    }
+
+    #[test]
+    fn test_finished_hypotheses_is_done_not_full() {
+        let mut finished = FinishedHypotheses::new(3, 1.0, 0);
+
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -5.0,
+        });
+
+        // Not done because we don't have num_beams hypotheses yet
+        assert!(!finished.is_done(false, -1.0, 10));
+        assert!(!finished.is_done(true, -1.0, 10));
+    }
+
+    #[test]
+    fn test_finished_hypotheses_length_penalty_zero() {
+        let mut finished = FinishedHypotheses::new(2, 0.0, 0);
+
+        // With length_penalty = 0, len^0 = 1 for any len > 0
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 100],
+            score: -10.0,
+        });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 2],
+            score: -5.0,
+        });
+
+        // Shorter one should be best since scores are raw (no length normalization benefit)
+        assert_eq!(finished.best().unwrap().score, -5.0);
+    }
+
+    #[test]
+    fn test_finished_hypotheses_high_length_penalty() {
+        let mut finished = FinishedHypotheses::new(2, 3.0, 0);
+
+        // High penalty favors longer sequences more
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 10],
+            score: -20.0, // normalized: -20 / 10^3 = -0.02
+        });
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 2],
+            score: -2.0, // normalized: -2 / 2^3 = -0.25
+        });
+
+        // Longer one should be best due to high length penalty
+        assert_eq!(finished.best().unwrap().tokens.len(), 10);
+    }
+
+    // ========================================================================
+    //  find_best_beams_and_get_candidates Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_find_best_beams_single_beam() {
+        let logits = Array2::from_shape_vec((1, 5), vec![0.0, 1.0, 2.0, 3.0, 4.0]).unwrap();
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0],
+            score: 0.0,
+        }];
+
+        let candidates = find_best_beams_and_get_candidates(logits, &beams, 1);
+
+        assert!(!candidates.is_empty());
+        // Best token should be 4 (highest logit)
+        assert_eq!(candidates[0].1, 4);
+    }
+
+    #[test]
+    fn test_find_best_beams_all_dead() {
+        let logits = Array2::zeros((2, 5));
+        let beams = vec![
+            BeamHypothesis {
+                tokens: vec![],
+                score: f32::NEG_INFINITY,
+            },
+            BeamHypothesis {
+                tokens: vec![],
+                score: f32::NEG_INFINITY,
+            },
+        ];
+
+        let candidates = find_best_beams_and_get_candidates(logits, &beams, 2);
+
+        // Should return empty since all beams are dead
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn test_find_best_beams_one_alive_one_dead() {
+        let logits = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 0.0, 0.0, 0.0]).unwrap();
+
+        let beams = vec![
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+            BeamHypothesis {
+                tokens: vec![0],
+                score: f32::NEG_INFINITY, // Dead
+            },
+        ];
+
+        let candidates = find_best_beams_and_get_candidates(logits, &beams, 2);
+
+        // All candidates should come from beam 0
+        for (_, _, source_beam, _) in &candidates {
+            assert_eq!(*source_beam, 0);
+        }
+    }
+
+    #[test]
+    fn test_find_best_beams_preserves_token_history() {
+        let logits = Array2::from_shape_vec((1, 3), vec![0.0, 1.0, 0.0]).unwrap();
+        let beams = vec![BeamHypothesis {
+            tokens: vec![10, 20, 30],
+            score: -1.0,
+        }];
+
+        let candidates = find_best_beams_and_get_candidates(logits, &beams, 1);
+
+        // New beam should have old tokens plus new one
+        let new_beam = &candidates[0].0;
+        assert_eq!(new_beam.tokens.len(), 4);
+        assert_eq!(&new_beam.tokens[..3], &[10, 20, 30]);
+    }
+
+    #[test]
+    fn test_find_best_beams_score_accumulation() {
+        let logits = Array2::from_shape_vec((1, 3), vec![0.0, 0.0, 0.0]).unwrap();
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0],
+            score: -5.0,
+        }];
+
+        let candidates = find_best_beams_and_get_candidates(logits, &beams, 1);
+
+        // Score should be previous score + log_softmax(logit)
+        // log_softmax([0,0,0]) = [-1.0986, -1.0986, -1.0986] (ln(1/3))
+        let expected_score = -5.0 + (-1.0986);
+        assert!((candidates[0].0.score - expected_score).abs() < 0.01);
+    }
+
+    // ========================================================================
+    //  beam_step Edge Cases
+    // ========================================================================
+
+    struct MockBackendWithForcedBos {
+        forced_token: u32,
+    }
+
+    #[async_trait]
+    impl EncoderDecoderGenerationBackend for MockBackendWithForcedBos {
+        type Tensor = Array2<u32>;
+
+        async fn encode(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &[u32],
+            _: usize,
+        ) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn create_token_tensor(&self, _: &[u32], _: usize) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn update_token_tensor(&self, _: &mut Self::Tensor, _: &[u32]) -> Result<()> {
+            Ok(())
+        }
+        fn reorder_cache(&self, _: &mut dyn Cache, _: &[usize]) -> Result<()> {
+            Ok(())
+        }
+        async fn decode_step(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &Self::Tensor,
+            _: &Self::Tensor,
+            _: &mut dyn Cache,
+        ) -> Result<Array3<f32>> {
+            // Return uniform logits - forced BOS logic should override
+            Ok(Array3::<f32>::zeros((1, 1, 10)))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beam_step_with_forced_bos() {
+        let num_beams = 1;
+        let forced_bos = 7u32;
+        let model = MockModel {
+            vocab: 10,
+            eos: 1,
+            decoder_start: 0,
+        };
+        let backend = MockBackendWithForcedBos {
+            forced_token: forced_bos,
+        };
+        let config = GenerationConfig::default();
+
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0],
+            score: 0.0,
+        }];
+
+        let mut ctx = BeamContext {
+            model: &model,
+            backend: &backend,
+            config: &config,
+            cache: Box::new(MockCache { len: 0 }),
+            current_tokens_tensor: Array2::zeros((1, 1)),
+            encoder_state: Array2::zeros((1, 1)),
+            beams,
+            finished: FinishedHypotheses::new(num_beams, 1.0, 2),
+            num_beams,
+            eos_token_id: 1,
+            decoder_start_token_id: 0,
+            forced_bos_token_id: Some(forced_bos),
+            forced_eos_token_id: None,
+            early_stopping: false,
+        };
+
+        beam_step(&mut ctx, 0).await.unwrap();
+
+        // First step should have forced BOS token
+        assert_eq!(ctx.beams[0].tokens.last(), Some(&forced_bos));
+    }
+
+    struct MockBackendReturnsEos;
+
+    #[async_trait]
+    impl EncoderDecoderGenerationBackend for MockBackendReturnsEos {
+        type Tensor = Array2<u32>;
+
+        async fn encode(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &[u32],
+            _: usize,
+        ) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn create_token_tensor(&self, _: &[u32], _: usize) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn update_token_tensor(&self, _: &mut Self::Tensor, _: &[u32]) -> Result<()> {
+            Ok(())
+        }
+        fn reorder_cache(&self, _: &mut dyn Cache, _: &[usize]) -> Result<()> {
+            Ok(())
+        }
+        async fn decode_step(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &Self::Tensor,
+            _: &Self::Tensor,
+            _: &mut dyn Cache,
+        ) -> Result<Array3<f32>> {
+            // All beams strongly prefer EOS
+            let mut logits = Array3::<f32>::zeros((2, 1, 10));
+            logits[[0, 0, 1]] = 100.0; // EOS = 1
+            logits[[1, 0, 1]] = 100.0;
+            Ok(logits)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beam_step_all_beams_finish() {
+        let num_beams = 2;
+        let model = MockModel {
+            vocab: 10,
+            eos: 1,
+            decoder_start: 0,
+        };
+        let backend = MockBackendReturnsEos;
+        let config = GenerationConfig::default();
+
+        let beams = vec![
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+        ];
+
+        let mut ctx = BeamContext {
+            model: &model,
+            backend: &backend,
+            config: &config,
+            cache: Box::new(MockCache { len: 0 }),
+            current_tokens_tensor: Array2::zeros((1, 1)),
+            encoder_state: Array2::zeros((1, 1)),
+            beams,
+            finished: FinishedHypotheses::new(num_beams, 1.0, 0),
+            num_beams,
+            eos_token_id: 1,
+            decoder_start_token_id: 0,
+            forced_bos_token_id: None,
+            forced_eos_token_id: None,
+            early_stopping: true,
+        };
+
+        let done = beam_step(&mut ctx, 0).await.unwrap();
+
+        // Should be done since all beams hit EOS and early_stopping=true
+        assert!(done || ctx.finished.len() == num_beams);
+    }
+
+    #[tokio::test]
+    async fn test_beam_step_min_length_blocks_eos() {
+        let num_beams = 1;
+        let model = MockModel {
+            vocab: 10,
+            eos: 1,
+            decoder_start: 0,
+        };
+        let backend = MockBackendReturnsEos;
+
+        let mut config = GenerationConfig::default();
+        config.min_length = 10; // EOS should be blocked until length >= 10
+
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0],
+            score: 0.0,
+        }];
+
+        let mut ctx = BeamContext {
+            model: &model,
+            backend: &backend,
+            config: &config,
+            cache: Box::new(MockCache { len: 0 }),
+            current_tokens_tensor: Array2::zeros((1, 1)),
+            encoder_state: Array2::zeros((1, 1)),
+            beams,
+            finished: FinishedHypotheses::new(num_beams, 1.0, 0),
+            num_beams,
+            eos_token_id: 1,
+            decoder_start_token_id: 0,
+            forced_bos_token_id: None,
+            forced_eos_token_id: None,
+            early_stopping: false,
+        };
+
+        beam_step(&mut ctx, 0).await.unwrap();
+
+        // EOS should have been blocked, so should pick a different token
+        let last_token = ctx.beams[0].tokens.last().unwrap();
+        assert_ne!(*last_token, 1); // Should not be EOS
+    }
+
+    struct MockBackendWithLogits {
+        logits: Array3<f32>,
+    }
+
+    #[async_trait]
+    impl EncoderDecoderGenerationBackend for MockBackendWithLogits {
+        type Tensor = Array2<u32>;
+
+        async fn encode(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &[u32],
+            _: usize,
+        ) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn create_token_tensor(&self, _: &[u32], _: usize) -> Result<Self::Tensor> {
+            Ok(Array2::zeros((1, 1)))
+        }
+        fn update_token_tensor(&self, _: &mut Self::Tensor, _: &[u32]) -> Result<()> {
+            Ok(())
+        }
+        fn reorder_cache(&self, _: &mut dyn Cache, _: &[usize]) -> Result<()> {
+            Ok(())
+        }
+        async fn decode_step(
+            &self,
+            _: &dyn EncoderDecoderLanguageModel,
+            _: &Self::Tensor,
+            _: &Self::Tensor,
+            _: &mut dyn Cache,
+        ) -> Result<Array3<f32>> {
+            Ok(self.logits.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beam_step_forced_eos_at_max_length() {
+        let num_beams = 1;
+        let forced_eos = 9u32;
+        let model = MockModel {
+            vocab: 10,
+            eos: 1,
+            decoder_start: 0,
+        };
+
+        // Uniform logits - forced EOS should override
+        let logits = Array3::<f32>::zeros((1, 1, 10));
+        let backend = MockBackendWithLogits { logits };
+
+        let mut config = GenerationConfig::default();
+        config.max_length = 3; // current_len will be step + 2 = 0 + 2 = 2, then 3 at step 1
+
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0, 5], // Already have 2 tokens
+            score: 0.0,
+        }];
+
+        let mut ctx = BeamContext {
+            model: &model,
+            backend: &backend,
+            config: &config,
+            cache: Box::new(MockCache { len: 1 }),
+            current_tokens_tensor: Array2::zeros((1, 1)),
+            encoder_state: Array2::zeros((1, 1)),
+            beams,
+            finished: FinishedHypotheses::new(num_beams, 1.0, 0),
+            num_beams,
+            eos_token_id: 1,
+            decoder_start_token_id: 0,
+            forced_bos_token_id: None,
+            forced_eos_token_id: Some(forced_eos),
+            early_stopping: false,
+        };
+
+        // Step 1: current_len = 1 + 2 = 3 >= max_length - 1 = 2, should force EOS
+        beam_step(&mut ctx, 1).await.unwrap();
+
+        // Should have forced EOS token
+        let last_token = ctx.beams[0].tokens.last().unwrap();
+        assert_eq!(*last_token, forced_eos);
+    }
+
+    #[tokio::test]
+    async fn test_beam_step_cache_increment() {
+        let num_beams = 1;
+        let model = MockModel {
+            vocab: 10,
+            eos: 9, // Use 9 so we don't hit EOS
+            decoder_start: 0,
+        };
+
+        let mut logits = Array3::<f32>::zeros((1, 1, 10));
+        logits[[0, 0, 5]] = 100.0;
+        let backend = MockBackendWithLogits { logits };
+        let config = GenerationConfig::default();
+
+        let beams = vec![BeamHypothesis {
+            tokens: vec![0],
+            score: 0.0,
+        }];
+
+        let cache = Box::new(MockCache { len: 0 });
+        let mut ctx = BeamContext {
+            model: &model,
+            backend: &backend,
+            config: &config,
+            cache,
+            current_tokens_tensor: Array2::zeros((1, 1)),
+            encoder_state: Array2::zeros((1, 1)),
+            beams,
+            finished: FinishedHypotheses::new(num_beams, 1.0, 0),
+            num_beams,
+            eos_token_id: 9,
+            decoder_start_token_id: 0,
+            forced_bos_token_id: None,
+            forced_eos_token_id: None,
+            early_stopping: false,
+        };
+
+        beam_step(&mut ctx, 0).await.unwrap();
+
+        // Cache should have been incremented
+        assert_eq!(ctx.cache.get_seq_length(), 1);
+    }
+
+    // ========================================================================
+    //  FinishedHypotheses::is_done heuristic
+    // ========================================================================
+
+    #[test]
+    fn test_is_done_with_length_penalty() {
+        let mut finished = FinishedHypotheses::new(1, 2.0, 0);
+
+        finished.add(BeamHypothesis {
+            tokens: vec![0; 5],
+            score: -10.0, // normalized: -10 / 5^2 = -0.4
+        });
+
+        // Best possible at cur_len=10: score / 10^2 = score / 100
+        // For is_done to be true: worst_score >= best_sum_logprobs / lp
+        // -0.4 >= best_sum / 100 => best_sum <= -40
+
+        assert!(!finished.is_done(false, -30.0, 10)); // -30/100 = -0.3 > -0.4
+        assert!(finished.is_done(false, -50.0, 10)); // -50/100 = -0.5 < -0.4
     }
 }

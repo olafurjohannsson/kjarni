@@ -11,19 +11,32 @@ use tokenizers::Tokenizer;
 use super::config::WhisperConfig;
 
 use kjarni_transformers::{
-    LanguageModel, ModelType, WgpuContext, audio::{AudioConvFrontend, MelConfig}, cache::{Cache, CpuBeamKVCache}, common::{
-        DecodingStrategy, GenerationConfig, HFGenerationConfig,
-        HFGenerationDefaults, ModelGenerationDefaults,
-    }, cpu::{encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder}, encoder_decoder::{
-        cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
-        cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
-    }}, encoder_decoder::{
+    LanguageModel, ModelType, WgpuContext,
+    audio::{AudioConvFrontend, MelConfig},
+    cache::{Cache, CpuBeamKVCache},
+    common::{
+        DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults,
+        ModelGenerationDefaults,
+    },
+    cpu::{
+        encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
+        encoder_decoder::{
+            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+        },
+    },
+    encoder_decoder::{
         config::{Seq2SeqDecoderConfig as DecoderCfg, Seq2SeqEncoderConfig as EncoderCfg},
         traits::{
-            CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel,
-            GpuCrossDecoder, GpuEncoderDecoderOps,
+            CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
+            GpuEncoderDecoderOps,
         },
-    }, gpu::{GpuTensor, GpuTensorPool}, models::base::{ModelInput, ModelLoadConfig}, pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder}, traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata}, weights::ModelWeights
+    },
+    gpu::{GpuTensor, GpuTensorPool},
+    models::base::{ModelInput, ModelLoadConfig},
+    pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
+    traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
 };
 
 // =============================================================================
@@ -125,9 +138,9 @@ impl WhisperModel {
             .with_context(context)
             .with_encoder_backends(cpu_enc, gpu_enc)
             .with_decoder_backends(cpu_dec, gpu_dec);
-        
+
         builder.is_audio_encoder = true; // Skip encoder token embeddings
-        
+
         let pipeline = builder.build()?;
 
         Ok(Self {
@@ -367,8 +380,20 @@ impl CpuEncoderDecoderOps for WhisperModel {
         self.pipeline.cpu_decoder().expect("CPU Decoder not active")
     }
 
+    fn embed_decoder_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        position_offset: usize,
+    ) -> Result<Array3<f32>> {
+        self.pipeline
+            .decoder_embeddings()
+            .embed_cpu(input_ids, None, position_offset)
+    }
+
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
-        Some(kjarni_transformers::utils::create_causal_mask(seq_len, past_len))
+        Some(kjarni_transformers::utils::create_causal_mask(
+            seq_len, past_len,
+        ))
     }
 
     fn broadcast_encoder_states(
@@ -390,7 +415,6 @@ impl CpuEncoderDecoderOps for WhisperModel {
         self.pipeline.lm_head().forward_cpu(hidden_states)
     }
 }
-
 
 impl GpuEncoderOps for WhisperModel {
     fn encoder(&self) -> &dyn GpuEncoder {
@@ -433,6 +457,18 @@ impl EncoderLanguageModel for WhisperModel {
 impl GpuEncoderDecoderOps for WhisperModel {
     fn decoder(&self) -> &dyn GpuCrossDecoder {
         self.pipeline.gpu_decoder().expect("GPU Decoder not active")
+    }
+
+    fn embed_decoder_tokens(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        self.pipeline
+            .decoder_embeddings()
+            .embed(encoder, pool, input, None, position_offset)
     }
 
     fn broadcast_encoder_states(

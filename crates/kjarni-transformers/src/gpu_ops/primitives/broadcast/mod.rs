@@ -145,3 +145,7 @@ impl GpuBroadcast {
         cpass.dispatch_workgroups(dispatch_count, 1, 1);
     }
 }
+
+
+#[cfg(test)]
+mod tests;

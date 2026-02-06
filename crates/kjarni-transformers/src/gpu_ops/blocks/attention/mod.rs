@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 
-use crate::gpu_ops::blocks::rope::GpuRoPE;
+use crate::WgpuContext;
 use crate::gpu::kernel::Kernel;
+use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::blocks::rope::GpuRoPE;
 use crate::gpu_ops::primitives::add_bias::GpuAddBias;
 use crate::gpu_ops::primitives::apply_mask::GpuApplyMask;
 use crate::gpu_ops::primitives::bmm::GpuBatchedMatMul;
@@ -18,16 +20,14 @@ use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::gpu_ops::primitives::matmul::GpuMatMul;
 use crate::gpu_ops::primitives::repeat_kv::GpuRepeatKV;
 use crate::gpu_ops::primitives::softmax::GpuSoftmax;
-use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::tensor::DType;
 use crate::traits::{AttentionLayout, ModelLayout};
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 
-pub mod ops;
 mod cross_decoder_attention;
 mod decoder_self_attention;
 mod encoder_self_attention;
+pub mod ops;
 
 pub use cross_decoder_attention::GpuCrossAttention;
 pub use decoder_self_attention::{DecoderSelfAttentionOutput, GpuDecoderSelfAttention};
@@ -54,6 +54,7 @@ impl GpuAttentionWeights {
         layer_idx: usize,
         target_dtype: Option<DType>,
         label_prefix: &str,
+        hidden_size: usize, // Add this parameter
     ) -> Result<Self> {
         let i_str = &layer_idx.to_string();
 
@@ -67,26 +68,28 @@ impl GpuAttentionWeights {
             )
         };
 
-        let load_opt = |template: &Option<String>, label: &str| {
-            let name = template.as_ref().ok_or_else(|| {
-                anyhow!(
-                    "attention layout for {} is missing required tensor: {}",
-                    label_prefix,
-                    label
-                )
-            })?;
-            load(name, label)
+        // Load optional bias - returns zero tensor if not present
+        let load_bias_opt = |template: &Option<String>, label: &str| -> Result<GpuTensor> {
+            match template {
+                Some(name) => load(name, label),
+                None => GpuTensor::zeros(
+                    context,
+                    vec![hidden_size],
+                    target_dtype.unwrap_or(DType::F32),
+                    &format!("{}.{}", label_prefix, label),
+                ),
+            }
         };
 
         Self::new(
             load(&attn_layout.q_weight, "q_w")?,
-            Some(load_opt(&attn_layout.q_bias, "q_b")?),
+            Some(load_bias_opt(&attn_layout.q_bias, "q_b")?),
             load(&attn_layout.k_weight, "k_w")?,
-            Some(load_opt(&attn_layout.k_bias, "k_b")?),
+            Some(load_bias_opt(&attn_layout.k_bias, "k_b")?),
             load(&attn_layout.v_weight, "v_w")?,
-            Some(load_opt(&attn_layout.v_bias, "v_b")?),
+            Some(load_bias_opt(&attn_layout.v_bias, "v_b")?),
             load(&attn_layout.o_weight, "o_w")?,
-            Some(load_opt(&attn_layout.o_bias, "o_b")?),
+            Some(load_bias_opt(&attn_layout.o_bias, "o_b")?),
         )
     }
 
@@ -96,6 +99,7 @@ impl GpuAttentionWeights {
         layout: &ModelLayout,
         layer_index: usize,
         target_dt: Option<DType>,
+        hidden_size: usize,
     ) -> Result<Self> {
         let decoder_layout = layout
             .decoder
@@ -109,6 +113,7 @@ impl GpuAttentionWeights {
             layer_index,
             target_dt,
             &format!("decoder.layer{}.self_attn", layer_index),
+            hidden_size,
         )
     }
 
@@ -118,6 +123,7 @@ impl GpuAttentionWeights {
         layout: &ModelLayout,
         layer_index: usize,
         target_dt: Option<DType>,
+        hidden_size: usize,
     ) -> Result<Self> {
         let encoder_layout = layout
             .encoder
@@ -131,6 +137,7 @@ impl GpuAttentionWeights {
             layer_index,
             target_dt,
             &format!("encoder.layer{}.self_attn", layer_index),
+            hidden_size,
         )
     }
 
@@ -140,6 +147,7 @@ impl GpuAttentionWeights {
         layout: &ModelLayout,
         layer_index: usize,
         target_dt: Option<DType>,
+        hidden_size: usize,
     ) -> Result<Self> {
         let decoder_layout = layout
             .decoder
@@ -158,6 +166,7 @@ impl GpuAttentionWeights {
             layer_index,
             target_dt,
             &format!("layer{}.cross_attn", layer_index),
+            hidden_size,
         )
     }
 
@@ -171,15 +180,16 @@ impl GpuAttentionWeights {
         output_weight: GpuTensor,
         output_bias: Option<GpuTensor>,
     ) -> Result<Self> {
-        let resolve_bias = |w: &GpuTensor, b: Option<GpuTensor>, label: &str| -> Result<GpuTensor> {
-            match b {
-                Some(tensor) => Ok(tensor),
-                None => {
-                    let out_features = w.shape()[0];
-                    GpuTensor::zeros(w.context(), vec![out_features], w.dtype(), label)
+        let resolve_bias =
+            |w: &GpuTensor, b: Option<GpuTensor>, label: &str| -> Result<GpuTensor> {
+                match b {
+                    Some(tensor) => Ok(tensor),
+                    None => {
+                        let out_features = w.shape()[0];
+                        GpuTensor::zeros(w.context(), vec![out_features], w.dtype(), label)
+                    }
                 }
-            }
-        };
+            };
 
         let q_b = resolve_bias(&q_weight, q_bias, "q_bias_zero")?;
         let k_b = resolve_bias(&k_weight, k_bias, "k_bias_zero")?;

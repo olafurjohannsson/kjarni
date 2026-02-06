@@ -243,17 +243,7 @@ mod decoder_pipeline_test {
         fn num_attention_heads(&self) -> usize {
             0
         }
-        // fn embed(&self, input: ModelInput<'_>, _offset: usize) -> Result<Array3<f32>> {
-        //     let (batch, seq) = match input {
-        //         ModelInput::TokensCpu(t) => (t.nrows(), t.ncols()),
-        //         _ => (1, 1),
-        //     };
-        //     Ok(Array3::zeros((batch, seq, 1)))
-        // }
 
-        // fn embed_and_normalize(&self, input: ModelInput<'_>, offset: usize) -> Result<Array3<f32>> {
-        //     self.embed(input, offset)
-        // }
         fn forward_layers(
             &self,
             _: &Array3<f32>,

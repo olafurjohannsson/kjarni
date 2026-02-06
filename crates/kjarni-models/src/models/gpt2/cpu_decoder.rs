@@ -317,14 +317,6 @@ impl CpuDecoder for Gpt2CpuDecoder {
     fn num_kv_heads(&self) -> usize {
         0
     }
-    // fn embed_and_normalize(
-    //     &self,
-    //     input: ModelInput<'_>,
-    //     position_offset: usize,
-    // ) -> Result<Array3<f32>> {
-    //     // GPT-2 is Pre-Norm (norms inside layers). No initial norm.
-    //     self.embed(input, position_offset)
-    // }
 
     fn forward_layers(
         &self,
@@ -384,10 +376,6 @@ impl CpuDecoder for Gpt2CpuDecoder {
         position_offset: usize,
         cache: Option<&mut dyn Cache>,
     ) -> Result<Array3<f32>> {
-        // 1. Embed
-        // let hidden = self.embed_and_normalize(input, position_offset)?;
-
-        // 2. Layers
         let mut output = self.forward_layers(
             &hidden,
             attention_mask,

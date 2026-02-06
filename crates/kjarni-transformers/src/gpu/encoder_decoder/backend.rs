@@ -75,17 +75,27 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             let input_ids_gpu = GpuTensor::from_ndarray(&self.context, &input_ids_cpu)?;
             let attention_mask_gpu =
                 GpuTensor::from_ndarray(&self.context, &Array2::<f32>::ones(input_ids_cpu.dim()))?;
-
             encoder_ops
-                .encoder()
-                .forward(
+                .forward_tokens(
                     encoder_cmd,
                     pool_ref,
+                    &self.context,
                     ModelInput::TokensGpu(&input_ids_gpu),
-                    &attention_mask_gpu,
+                    Some(&attention_mask_gpu),
                     None,
+                    0
                 )?
                 .last_hidden_state
+            // encoder_ops
+            //     .encoder()
+            //     .forward(
+            //         encoder_cmd,
+            //         pool_ref,
+            //         ModelInput::TokensGpu(&input_ids_gpu),
+            //         &attention_mask_gpu,
+            //         None,
+            //     )?
+            //     .last_hidden_state
         };
 
         // The model's ops are responsible for broadcasting for beam search
@@ -154,16 +164,41 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         let seq_len = cache.get_seq_length() + 1;
         let mask_cpu = Array2::<f32>::ones((batch_size, seq_len));
         let attention_mask = GpuTensor::from_ndarray(&self.context, &mask_cpu)?;
+        let position_offset = cache.get_seq_length();
+        
+        let embed = ops.embed_decoder_tokens(
+            encoder_cmd, pool_ref, ModelInput::TokensGpu(&decoder_input_ids), position_offset)?;
+
+        let embed_normed = ops.decoder().embed_norm(
+            encoder_cmd, pool_ref, &embed)?;
 
         // b) Run the decoder stack
-        let decoder_hidden_states: GpuCrossDecoderOutput = ops.decoder().forward(
+        let decoder_hidden_states = ops.decoder().forward_layers(
             encoder_cmd,
             pool_ref,
-            ModelInput::TokensGpu(decoder_input_ids),
+            &embed_normed,
             encoder_hidden_states,
             &attention_mask,
+            position_offset,
             Some(cache),
-            Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
+            Some(&cross_attention_kv_cache),
+            0,
+            ops.decoder().num_layers(),
+        )?;
+        // let decoder_hidden_states: GpuCrossDecoderOutput = ops.decoder().forward(
+        //     encoder_cmd,
+        //     pool_ref,
+        //     ModelInput::TokensGpu(decoder_input_ids),
+        //     encoder_hidden_states,
+        //     &attention_mask,
+        //     Some(cache),
+        //     Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
+        // )?;
+
+        let final_hidden = ops.decoder().final_norm(
+            encoder_cmd,
+            pool_ref,
+            &decoder_hidden_states.last_hidden_state,
         )?;
 
         let gpu_cache = cache.as_any_mut().downcast_mut::<GpuBeamKVCache>().unwrap();
@@ -182,7 +217,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         // gpu_cache.increment_len(1);
         // c) Project to logits
         let logits_gpu =
-            ops.project_to_logits(&mut frame, &decoder_hidden_states.last_hidden_state)?;
+            ops.project_to_logits(&mut frame, &final_hidden)?;
 
         frame.finish();
 
@@ -232,5 +267,333 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         gpu_cache.reorder(&mut encoder, &indices_gpu);
         self.context.queue.submit(Some(encoder.finish()));
         Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{Array1, Array2};
+
+    // ========================================================================
+    //  Test Helper
+    // ========================================================================
+
+    async fn get_test_context() -> Arc<WgpuContext> {
+        WgpuContext::new().await.expect("Failed to create WgpuContext")
+    }
+
+    // ========================================================================
+    //  GpuSeq2SeqState Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_gpu_seq2seq_state_token_ids() {
+        let ctx = get_test_context().await;
+        let tokens = Array2::from_shape_vec((1, 3), vec![1u32, 2, 3]).unwrap();
+        let tensor = GpuTensor::from_ndarray(&ctx, &tokens).unwrap();
+        
+        let state = GpuSeq2SeqState::TokenIds(tensor);
+        
+        match &state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                assert_eq!(t.shape(), &[1, 3]);
+            }
+            _ => panic!("Expected TokenIds state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gpu_seq2seq_state_encoder_output() {
+        let ctx = get_test_context().await;
+        let hidden: Array3<f32> = Array3::zeros((1, 10, 64));
+        let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden).unwrap();
+        let cross_kv = GpuCrossAttentionKVCache::default();
+        
+        let state = GpuSeq2SeqState::EncoderOutput {
+            hidden_states: hidden_gpu,
+            cross_attention_kv_cache: cross_kv,
+        };
+        
+        match &state {
+            GpuSeq2SeqState::EncoderOutput {
+                hidden_states,
+                cross_attention_kv_cache,
+            } => {
+                assert_eq!(hidden_states.shape(), &[1, 10, 64]);
+                assert!(cross_attention_kv_cache.0.is_empty());
+            }
+            _ => panic!("Expected EncoderOutput state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gpu_seq2seq_state_debug() {
+        let ctx = get_test_context().await;
+        let tokens = Array2::from_shape_vec((1, 2), vec![1u32, 2]).unwrap();
+        let tensor = GpuTensor::from_ndarray(&ctx, &tokens).unwrap();
+        let state = GpuSeq2SeqState::TokenIds(tensor);
+        
+        // Should not panic - Debug is derived
+        let debug_str = format!("{:?}", state);
+        assert!(debug_str.contains("TokenIds"));
+    }
+
+    // ========================================================================
+    //  GpuEncoderDecoderBackend Construction Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_backend_new() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone());
+        
+        assert!(backend.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_backend_debug() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx).unwrap();
+        
+        let debug_str = format!("{:?}", backend);
+        assert!(debug_str.contains("GpuEncoderDecoderBackend"));
+    }
+
+    // ========================================================================
+    //  create_token_tensor Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_token_tensor_single_beam() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        let tokens = vec![1u32, 2, 3, 4, 5];
+        let state = backend.create_token_tensor(&tokens, 1).unwrap();
+        
+        match &state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                assert_eq!(t.shape(), &[1, 5]);
+                
+                // Verify contents by downloading
+                let downloaded: Array2<u32> = t.to_ndarray_2d().await.unwrap();
+                assert_eq!(downloaded[[0, 0]], 1);
+                assert_eq!(downloaded[[0, 4]], 5);
+            }
+            _ => panic!("Expected TokenIds state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_token_tensor_multiple_beams() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        // 4 beams, 3 tokens each = 12 total tokens
+        let tokens = vec![1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let state = backend.create_token_tensor(&tokens, 4).unwrap();
+        
+        match &state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                assert_eq!(t.shape(), &[4, 3]);
+                
+                let downloaded: Array2<u32> = t.to_ndarray_2d().await.unwrap();
+                // First beam: [1, 2, 3]
+                assert_eq!(downloaded[[0, 0]], 1);
+                assert_eq!(downloaded[[0, 2]], 3);
+                // Last beam: [10, 11, 12]
+                assert_eq!(downloaded[[3, 0]], 10);
+                assert_eq!(downloaded[[3, 2]], 12);
+            }
+            _ => panic!("Expected TokenIds state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_token_tensor_zero_beams() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        let tokens = vec![1u32, 2, 3];
+        // Zero beams - tokens.len() / 0 would panic, but the code handles it
+        let state = backend.create_token_tensor(&tokens, 0);
+        
+        // This should handle the edge case gracefully
+        match state {
+            Ok(GpuSeq2SeqState::TokenIds(t)) => {
+                // Shape depends on implementation
+                assert_eq!(t.shape()[0], 0); // 0 beams
+            }
+            Err(_) => {
+                // Also acceptable if it errors on invalid input
+            }
+            _ => panic!("Unexpected state type"),
+        }
+    }
+
+    // ========================================================================
+    //  update_token_tensor Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_update_token_tensor_basic() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        // Create initial state
+        let tokens = vec![1u32, 2, 3, 4];
+        let mut state = backend.create_token_tensor(&tokens, 2).unwrap(); // 2 beams, 2 tokens each
+        
+        // Update with new tokens
+        let new_tokens = vec![10u32, 20];
+        backend.update_token_tensor(&mut state, &new_tokens).unwrap();
+        
+        // Verify the buffer was updated
+        match &state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                let downloaded: Array2<u32> = t.to_ndarray_2d().await.unwrap();
+                // The write_buffer writes from offset 0, so first elements change
+                assert_eq!(downloaded[[0, 0]], 10);
+                assert_eq!(downloaded[[0, 1]], 20);
+            }
+            _ => panic!("Expected TokenIds state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_token_tensor_wrong_type() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        // Create EncoderOutput state instead of TokenIds
+        let hidden = Array3::<f32>::zeros((1, 10, 64));
+        let hidden_gpu = GpuTensor::from_ndarray(&ctx, &hidden).unwrap();
+        let mut state = GpuSeq2SeqState::EncoderOutput {
+            hidden_states: hidden_gpu,
+            cross_attention_kv_cache: GpuCrossAttentionKVCache::default(),
+        };
+        
+        let new_tokens = vec![1u32];
+        let result = backend.update_token_tensor(&mut state, &new_tokens);
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid tensor type"));
+    }
+
+    // ========================================================================
+    //  reorder_cache Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_reorder_cache_basic() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        // Create a GPU cache
+        let mut cache = GpuBeamKVCache::new(&ctx, 2, 4, 128, 64, 512).unwrap(); // layers, beams, max_len, hidden
+        
+        // Reorder beams
+        let indices = vec![1, 0, 2, 3];
+        let result = backend.reorder_cache(&mut cache, &indices);
+        
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reorder_cache_identity() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        let mut cache = GpuBeamKVCache::new(&ctx, 1, 3, 128, 64, 512).unwrap();
+        
+        // Identity reorder
+        let indices = vec![0, 1, 2];
+        let result = backend.reorder_cache(&mut cache, &indices);
+        
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reorder_cache_duplicate_indices() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        let mut cache = GpuBeamKVCache::new(&ctx, 1, 4, 128, 64, 512).unwrap();
+        
+        // Duplicate beam 0 to all positions
+        let indices = vec![0, 0, 0, 0];
+        let result = backend.reorder_cache(&mut cache, &indices);
+        
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    //  Integration Flow Tests (state management only)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_typical_generation_flow_states() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        
+        // 1. Create initial decoder tokens (decoder_start_token)
+        let initial_tokens = vec![2u32]; // e.g., <s> token
+        let decoder_state = backend.create_token_tensor(&initial_tokens, 1).unwrap();
+        
+        match &decoder_state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                assert_eq!(t.shape(), &[1, 1]);
+            }
+            _ => panic!("Expected TokenIds"),
+        }
+        
+        // 2. Update with new token
+        let mut decoder_state = decoder_state;
+        let new_tokens = vec![100u32];
+        backend.update_token_tensor(&mut decoder_state, &new_tokens).unwrap();
+        
+        match &decoder_state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                let downloaded: Array2<u32> = t.to_ndarray_2d().await.unwrap();
+                assert_eq!(downloaded[[0, 0]], 100);
+            }
+            _ => panic!("Expected TokenIds"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beam_search_flow_states() {
+        let ctx = get_test_context().await;
+        let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
+        let num_beams = 4;
+        
+        // 1. Create initial tokens for beam search
+        let initial_tokens: Vec<u32> = vec![2; num_beams];
+        let decoder_state = backend.create_token_tensor(&initial_tokens, num_beams).unwrap();
+        
+        match &decoder_state {
+            GpuSeq2SeqState::TokenIds(t) => {
+                assert_eq!(t.shape(), &[4, 1]);
+            }
+            _ => panic!("Expected TokenIds"),
+        }
+        
+        // 2. Create and reorder cache
+        let mut cache = GpuBeamKVCache::new(&ctx, 6, num_beams, 128, 64, 512).unwrap();
+        let reorder_indices = vec![2, 2, 0, 1];
+        backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
+    }
+
+    // ========================================================================
+    //  WgpuContext Debug Test
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_wgpu_context_debug() {
+        let ctx = get_test_context().await;
+        let debug_str = format!("{:?}", ctx);
+        assert!(debug_str.contains("WgpuContext"));
     }
 }

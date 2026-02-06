@@ -10,9 +10,11 @@ use std::{any::Any, sync::Arc};
 
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
-    Normalization, WgpuContext,
-    cpu::encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
-    Embeddings,
+    Embeddings, Normalization, WgpuContext,
+    cpu::{
+        decoder::DecoderLayer,
+        encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
+    },
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::Seq2SeqFactory,
     traits::{
@@ -233,7 +235,9 @@ impl Seq2SeqCPUEncoder {
             layout,
         })
     }
-
+    pub fn get_layers(&self) -> &Vec<EncoderLayer> {
+        &self.layers
+    }
     /// Forward pass accepting ModelInput.
     ///
     /// # Arguments
@@ -248,19 +252,33 @@ impl Seq2SeqCPUEncoder {
         attention_mask: &Array2<f32>,
     ) -> Result<EncoderOutput> {
         // 1. Get initial hidden states based on input type
-        let (mut hidden, is_raw_hidden) = match input {
+        let mut hidden = match input {
             ModelInput::TokensCpu(tokens) => {
                 let embeddings = self
                     .embeddings
                     .as_ref()
                     .ok_or_else(|| anyhow!("No embeddings available for token input"))?;
-
-                // Convert view to owned for embedding lookup
                 let tokens_owned = tokens.to_owned();
-                let e = embeddings.forward(&tokens_owned, None, self.position_offset(), false);
-                (e, false)
+
+                // Embed tokens (includes positions if learned embeddings)
+                let mut h = embeddings.forward(
+                    &tokens_owned,
+                    None,
+                    self.position_offset(),
+                    self.meta.scale_embeddings,
+                );
+
+                // Apply sinusoidal position encoding (for T5-style, not BART)
+                h = self.apply_position_encoding(h)?;
+
+                // Embedding layer normalization
+                if let Some(norm) = &self.embed_norm {
+                    h = norm.forward(&h);
+                }
+
+                h
             }
-            ModelInput::HiddenCpu(hidden_states) => (hidden_states.to_owned(), true),
+            ModelInput::HiddenCpu(hidden_states) => hidden_states.to_owned(),
             ModelInput::TokensGpu(_) | ModelInput::HiddenGpu(_) => {
                 return Err(anyhow!(
                     "GPU input not supported by CPU encoder. Use Seq2SeqGpuEncoder."
@@ -268,15 +286,15 @@ impl Seq2SeqCPUEncoder {
             }
         };
 
-        if !is_raw_hidden {
-            // 2. Add position encoding (for non-learned positions)
-        }
-        hidden = self.apply_position_encoding(hidden)?;
+        // if !is_raw_hidden {
+        //     // 2. Add position encoding (for non-learned positions)
+        // }
+        // hidden = self.apply_position_encoding(hidden)?;
 
-        // 3. Embedding layer normalization
-        if let Some(norm) = &self.embed_norm {
-            hidden = norm.forward(&hidden);
-        }
+        // // 3. Embedding layer normalization
+        // if let Some(norm) = &self.embed_norm {
+        //     hidden = norm.forward(&hidden);
+        // }
 
         // 4. Compute relative position bias (T5)
         let position_bias = self.compute_position_bias(&hidden)?;
@@ -452,7 +470,6 @@ impl InferenceModel for Seq2SeqCPUEncoder {
     }
 }
 
-
 #[async_trait]
 impl CpuTransformerCore for Seq2SeqCPUEncoder {
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
@@ -523,7 +540,9 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
         // DON'T do embedding here - it's already done!
         let output = self.forward_layers(hidden_states, mask, 0, self.num_layers())?;
         let normed = self.final_norm(&output)?;
-        Ok(CpuEncoderOutput { last_hidden_state: normed })
+        Ok(CpuEncoderOutput {
+            last_hidden_state: normed,
+        })
     }
 }
 

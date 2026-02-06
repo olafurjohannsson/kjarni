@@ -16,16 +16,21 @@ use kjarni_transformers::{
     cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
-            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
-            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
+            Seq2SeqGPUDecoder, Seq2SeqGPUEncoder, cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig}, cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig}
         },
     },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu::{GpuFrameContext, GpuTensor, GpuTensorPool, cache::{GpuBeamKVCache, GpuKVCache}},
-    models::{ModelType, base::{ModelInput, ModelLoadConfig}},
+    gpu::{
+        GpuFrameContext, GpuTensor, GpuTensorPool,
+        cache::{GpuBeamKVCache},
+    },
+    models::{
+        ModelType,
+        base::{ModelInput, ModelLoadConfig},
+    },
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline},
     prelude::*,
     traits::{InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
@@ -34,9 +39,6 @@ use kjarni_transformers::{
 
 use crate::models::bart::{
     config::{BartConfig, BartLikeConfig},
-    cpu_decoder::BartCpuDecoder,
-    gpu_decoder::BartGpuDecoder,
-    gpu_encoder::BartGpuEncoder,
 };
 
 pub struct BartModel {
@@ -97,11 +99,13 @@ impl EncoderDecoderModelFactory for BartModel {
         let mut cpu_dec = None;
         let mut gpu_enc = None;
         let mut gpu_dec = None;
+        let enc_config = Seq2SeqEncoderConfig::bart();
+        let dec_config = Seq2SeqDecoderConfig::bart();
 
         // CPU Backends
         if device.is_cpu() || load_config.offload_embeddings {
             // Unified Encoder
-            let enc_config = Seq2SeqEncoderConfig::bart();
+
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
                 weights,
                 config.as_ref(), // Pass as &dyn ModelConfig
@@ -109,7 +113,7 @@ impl EncoderDecoderModelFactory for BartModel {
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
 
-            let dec_config = Seq2SeqDecoderConfig::bart();
+            
             cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
                 weights,
                 config.as_ref(),
@@ -121,17 +125,19 @@ impl EncoderDecoderModelFactory for BartModel {
         else if let Some(ctx) = context
             && device.is_gpu()
         {
-            gpu_enc = Some(Box::new(BartGpuEncoder::new(
+            gpu_enc = Some(Box::new(Seq2SeqGPUEncoder::new(
                 ctx,
                 weights,
-                config.clone(),
+                config.as_ref(),
+                enc_config,
                 *load_config,
             )?) as Box<dyn GpuEncoder>);
 
-            gpu_dec = Some(Box::new(BartGpuDecoder::new(
+            gpu_dec = Some(Box::new(Seq2SeqGPUDecoder::new(
                 ctx,
                 weights,
-                config.clone(),
+                config.as_ref(),
+                dec_config,
                 *load_config,
             )?) as Box<dyn GpuCrossDecoder>);
         } else {
@@ -174,21 +180,6 @@ impl BartModel {
         )
         .await
     }
-    pub fn bart_cpu_decoder(&self) -> Option<&BartCpuDecoder> {
-        // self.cpu_decoder.as_ref()
-        None
-    }
-    pub fn bart_gpu_decoder(&self) -> Option<&BartGpuDecoder> {
-        // self.gpu_decoder.as_ref()
-        None
-    }
-
-    pub fn bart_gpu_encoder(&self) -> Option<&BartGpuEncoder> {
-        // self.gpu_encoder.as_ref()
-        None
-    }
-    const SUPPORTED_MODELS: &'static [ModelType] =
-        &[ModelType::BartLargeCnn, ModelType::DistilBartCnn];
 }
 
 impl InferenceModel for BartModel {
@@ -231,9 +222,13 @@ impl GpuEncoderOps for BartModel {
         token_type_ids: Option<ModelInput<'_>>,
         pos: usize,
     ) -> Result<GpuTensor> {
-        self.get_pipeline()
-            .encoder_embeddings().unwrap()
-            .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
+        self.get_pipeline().encoder_embeddings().unwrap().embed(
+            cmd_encoder,
+            pool,
+            input_ids,
+            token_type_ids,
+            pos,
+        )
     }
 }
 
@@ -346,6 +341,13 @@ impl CpuEncoderDecoderOps for BartModel {
     fn decoder(&self) -> &dyn CpuCrossDecoder {
         self.pipeline.cpu_decoder().expect("CPU Decoder not active")
     }
+    fn embed_decoder_tokens(
+        &self,
+        input_ids: &Array2<u32>,
+        position_offset: usize,
+    ) -> Result<Array3<f32>> {
+        unimplemented!()
+    }
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
         None
     }
@@ -374,6 +376,15 @@ impl CpuEncoderDecoderOps for BartModel {
 impl GpuEncoderDecoderOps for BartModel {
     fn decoder(&self) -> &dyn GpuCrossDecoder {
         self.pipeline.gpu_decoder().expect("GPU Decoder not active")
+    }
+    fn embed_decoder_tokens(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        self.get_pipeline().decoder_embeddings().embed(encoder, pool, input, None, position_offset)
     }
     fn broadcast_encoder_states(
         &self,

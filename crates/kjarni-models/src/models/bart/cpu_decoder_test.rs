@@ -23,348 +23,21 @@ use kjarni_transformers::{Embeddings, Normalization};
 
 use crate::models::bart::config::BartConfig;
 
-pub struct BartCpuDecoder {
-    pub embeddings: Embeddings,
-    pub layers: Vec<CrossDecoderLayer>,
-    pub embed_layer_norm: LayerNorm,
-    pub config: Arc<BartConfig>,
-    pub meta: ModelMetadata,
-}
-
-impl BartCpuDecoder {
-    pub fn new(
-        weights: &ModelWeights,
-        config: Arc<BartConfig>,
-        _load_config: ModelLoadConfig,
-    ) -> Result<Self> {
-        let meta = config.metadata();
-        let layout = config.layout();
-
-        let word_embeddings = weights.get_array2(&layout.token_embedding)?;
-        let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
-
-        let embeddings = Embeddings::new(
-            embed,
-            Some(weights.get_array2("model.decoder.embed_positions.weight")?),
-            None,
-        );
-
-        let embed_layer_norm = LayerNorm::new(
-            weights.get_array1("model.decoder.layernorm_embedding.weight")?,
-            weights.get_array1("model.decoder.layernorm_embedding.bias")?,
-            meta.norm_eps,
-        );
-
-        let mut layers = Vec::with_capacity(config.decoder_layers);
-        for i in 0..config.decoder_layers {
-            layers.push(Self::load_layer(weights, &config, i)?);
-        }
-
-        Ok(Self {
-            embeddings,
-            layers,
-            embed_layer_norm,
-            config,
-            meta,
-        })
-    }
-
-    fn load_layer(
-        weights: &ModelWeights,
-        config: &BartConfig,
-        i: usize,
-    ) -> Result<CrossDecoderLayer> {
-        let prefix = format!("model.decoder.layers.{}", i);
-        let dtype = None;
-
-        let self_attn = DecoderSelfAttention::new(
-            config.d_model,
-            config.decoder_attention_heads,
-            LinearLayer::builder(weights, &format!("{}.self_attn.q_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.self_attn.k_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.self_attn.v_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.self_attn.out_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-        );
-
-        let self_attn_norm = Normalization::LayerNorm(LayerNorm::new(
-            weights.get_array1(&format!("{}.self_attn_layer_norm.weight", prefix))?,
-            weights.get_array1(&format!("{}.self_attn_layer_norm.bias", prefix))?,
-            config.layer_norm_eps,
-        ));
-
-        let cross_attn = DecoderCrossAttention::new(
-            config.d_model,
-            config.decoder_attention_heads,
-            LinearLayer::builder(weights, &format!("{}.encoder_attn.q_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.encoder_attn.k_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.encoder_attn.v_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-            LinearLayer::builder(weights, &format!("{}.encoder_attn.out_proj.weight", prefix))
-                .with_optional_bias(None)
-                .with_target_dtype(dtype)
-                .build()?,
-        );
-
-        let cross_attn_norm = Normalization::LayerNorm(LayerNorm::new(
-            weights.get_array1(&format!("{}.encoder_attn_layer_norm.weight", prefix))?,
-            weights.get_array1(&format!("{}.encoder_attn_layer_norm.bias", prefix))?,
-            config.layer_norm_eps,
-        ));
-
-        let fc1 = weights.get_array2(&format!("{}.fc1.weight", prefix))?;
-        let fc2 = weights.get_array2(&format!("{}.fc2.weight", prefix))?;
-
-        let ffn = FeedForward::Legacy(LegacyFeedForward::new(
-            fc1.t().as_standard_layout().to_owned(),
-            weights.get_array1(&format!("{}.fc1.bias", prefix))?,
-            fc2.t().as_standard_layout().to_owned(),
-            weights.get_array1(&format!("{}.fc2.bias", prefix))?,
-            Activation::Gelu,
-        ));
-
-        let ffn_norm = Normalization::LayerNorm(LayerNorm::new(
-            weights.get_array1(&format!("{}.final_layer_norm.weight", prefix))?,
-            weights.get_array1(&format!("{}.final_layer_norm.bias", prefix))?,
-            config.layer_norm_eps,
-        ));
-
-        Ok(CrossDecoderLayer {
-            self_attn,
-            self_attn_layer_norm: self_attn_norm,
-            cross_attn,
-            cross_attn_layer_norm: cross_attn_norm,
-            feedforward: ffn,
-            ffn_layer_norm: ffn_norm,
-            pre_norm: false,
-        })
-    }
-}
-
-impl InferenceModel for BartCpuDecoder {
-    fn device(&self) -> Device {
-        Device::Cpu
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-#[async_trait]
-impl CpuCrossDecoder for BartCpuDecoder {
-    fn num_layers(&self) -> usize {
-        self.layers.len()
-    }
-
-    fn layers(&self) -> &Vec<CrossDecoderLayer> {
-        &self.layers
-    }
-    fn forward_layers(
-        &self,
-        hidden_states: &Array3<f32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
-        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-        start_layer: usize,
-        end_layer: usize,
-    ) -> Result<CpuCrossDecoderOutput> {
-        let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
-
-        let mut current_hidden_states = hidden_states.clone();
-        log::debug!("embed sum: {:?}", current_hidden_states.sum());
-        let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
-
-        if start_layer >= self.layers.len() || end_layer > self.layers.len() {
-            return Err(anyhow::anyhow!("layer indices out of bounds"));
-        }
-    // pub fn forward(
-    //     &self,
-    //     hidden_states: &Array3<f32>,
-    //     encoder_hidden_states: &Array3<f32>,
-    //     self_mask: Option<&Array2<f32>>,
-    //     cross_mask: Option<&Array2<f32>>,
-    //     past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
-    //     cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
-    //     position_bias: Option<&Array4<f32>>,
-    // ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        for i in start_layer..end_layer {
-            let layer = &self.layers[i];
-
-            let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
-            let self_attn_past_kv_views = self_attn_past_kv
-                .as_ref()
-                .map(|(k, v)| (k.view(), v.view()));
-
-            let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
-
-            let (new_hidden, (new_k, new_v)) = layer.forward(
-                &current_hidden_states,
-                encoder_hidden_states,
-                encoder_padding_mask,
-                decoder_padding_mask,
-                self_attn_past_kv_views,
-                cross_kv_for_layer,
-                None,
-            )?;
-
-            current_hidden_states = new_hidden;
-            new_self_attn_kvs.push((new_k, new_v));
-
-            log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
-        }
-
-        Ok(CpuCrossDecoderOutput {
-            last_hidden_state: current_hidden_states,
-            new_self_attn_kv: new_self_attn_kvs,
-        })
-    }
-
-    fn forward(
-        &self,
-        decoder_input_ids: &Array2<u32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
-        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-    ) -> Result<CpuCrossDecoderOutput> {
-        // 1. Calculate offset
-        let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
-
-        // 2. Embed
-        let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
-
-        self.forward_layers(
-            &hidden,
-            encoder_hidden_states,
-            decoder_padding_mask,
-            encoder_padding_mask,
-            cache,
-            cross_kv_cache,
-            0,
-            self.num_layers(),
-        )
-    }
-    fn hidden_size(&self) -> usize {
-        self.config.d_model
-    }
-
-    fn precompute_cross_attention_kv(
-        &self,
-        encoder_hidden_states: &Array3<f32>,
-    ) -> Result<CpuCrossAttentionKVCache> {
-        let mut cache_vec = Vec::with_capacity(self.layers.len());
-        for layer in &self.layers {
-            let (k, v) = layer.precompute_cross_kv(encoder_hidden_states)?;
-            cache_vec.push((k, v));
-        }
-        Ok(CpuCrossAttentionKVCache(cache_vec))
-    }
-
-    fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
-        self.embeddings.forward(
-            decoder_input_ids,
-            None,
-            position_offset + 2,
-            self.meta.scale_embeddings,
-        )
-    }
-
-    fn embed_and_normalize(
-        &self,
-        input_ids: &Array2<u32>,
-        position_offset: usize,
-    ) -> Result<Array3<f32>> {
-        let hidden = self.embed(input_ids, position_offset);
-        Ok(self.embed_layer_norm.forward_3d(&hidden))
-    }
-
-    // fn forward_layers(
-    //     &self,
-    //     hidden_states: &Array3<f32>,
-    //     encoder_hidden_states: &Array3<f32>,
-    //     decoder_attention_mask: Option<&Array2<f32>>,
-    //     cache: Option<&mut dyn Cache>,
-    //     cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-    //     start_layer: usize,
-    //     end_layer: usize,
-    // ) -> Result<CpuCrossDecoderOutput> {
-    //     let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
-
-    //     let mut current_hidden_states = hidden_states.clone();
-    //     log::debug!("embed sum: {:?}", current_hidden_states.sum());
-    //     let mut new_self_attn_kvs = Vec::with_capacity(end_layer - start_layer);
-
-    //     if start_layer >= self.layers.len() || end_layer > self.layers.len() {
-    //         return Err(anyhow::anyhow!("layer indices out of bounds"));
-    //     }
-
-    //     for i in start_layer..end_layer {
-    //         let layer = &self.layers[i];
-
-    //         let self_attn_past_kv = cpu_cache.and_then(|c| c.get(i));
-    //         let self_attn_past_kv_views = self_attn_past_kv
-    //             .as_ref()
-    //             .map(|(k, v)| (k.view(), v.view()));
-
-    //         let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
-
-    //         let (new_hidden, (new_k, new_v)) = layer.forward(
-    //             &current_hidden_states,
-    //             encoder_hidden_states,
-    //             decoder_attention_mask,
-    //             None,
-    //             self_attn_past_kv_views,
-    //             cross_kv_for_layer,
-    //             None,
-    //         )?;
-
-    //         current_hidden_states = new_hidden;
-    //         new_self_attn_kvs.push((new_k, new_v));
-
-    //         log::debug!("layer {} output sum: {:?}", i, current_hidden_states.sum());
-    //     }
-
-    //     Ok(CpuCrossDecoderOutput {
-    //         last_hidden_state: current_hidden_states,
-    //         new_self_attn_kv: new_self_attn_kvs,
-    //     })
-    // }
-}
 
 #[cfg(test)]
-mod tests {
+mod cpu_seq2seq_decoder_test {
     use super::*;
     use std::path::Path;
 
+    use kjarni_transformers::cpu::encoder_decoder::{Seq2SeqCPUDecoder, Seq2SeqCPUEncoder};
+    use kjarni_transformers::encoder_decoder::config::{
+        Seq2SeqDecoderConfig, Seq2SeqEncoderConfig,
+    };
+    use kjarni_transformers::models::base::ModelInput;
     use ndarray::{Array2, s};
 
-    use kjarni_transformers::cpu::encoder::traits::CpuEncoder;
     use kjarni_transformers::traits::CpuTransformerCore;
 
-    use crate::models::bart::cpu_encoder::BartCpuEncoder;
 
     const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
 
@@ -426,8 +99,8 @@ mod tests {
     }
 
     fn setup() -> Result<(
-        BartCpuEncoder,
-        BartCpuDecoder,
+        Seq2SeqCPUEncoder,
+        Seq2SeqCPUDecoder,
         Arc<BartConfig>,
         Embeddings,
         ModelMetadata,
@@ -442,12 +115,23 @@ mod tests {
         let config: Arc<BartConfig> = Arc::new(serde_json::from_str(&config_json)?);
         let meta = config.metadata();
         let layout = config.layout();
-
+        let enc_config = Seq2SeqEncoderConfig::bart();
+        let dec_config = Seq2SeqDecoderConfig::bart();
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
         let embed = kjarni_transformers::EmbeddingData::F32(Arc::new(word_embeddings));
 
-        let encoder = BartCpuEncoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
-        let decoder = BartCpuDecoder::new(&weights, config.clone(), ModelLoadConfig::default())?;
+        let encoder = Seq2SeqCPUEncoder::new(
+            &weights,
+            config.as_ref(),
+            enc_config,
+            ModelLoadConfig::default(),
+        )?;
+        let decoder = Seq2SeqCPUDecoder::new(
+            &weights,
+            config.as_ref(),
+            dec_config,
+            ModelLoadConfig::default(),
+        )?;
         let embeddings = Embeddings::new(
             embed,
             Some(weights.get_array2("model.encoder.embed_positions.weight")?),
@@ -474,7 +158,7 @@ mod tests {
             embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
 
         let normalized = encoder.embed_norm(&hidden_states)?;
-        let encoder_output = encoder.forward(&normalized, &mask)?;
+        let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let dec_input = Array2::from_shape_vec((1, 1), vec![2u32])?;
         let decoder_output = decoder.forward(
@@ -484,6 +168,7 @@ mod tests {
             None,
             None,
             None,
+            0,
         )?;
 
         let hidden = &decoder_output.last_hidden_state;
@@ -530,7 +215,7 @@ mod tests {
             embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
 
         let normalized = encoder.embed_norm(&hidden_states)?;
-        let encoder_output = encoder.forward(&normalized, &mask)?;
+        let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let mut decoder_ids = vec![2u32];
 
@@ -546,6 +231,7 @@ mod tests {
                 None,
                 None,
                 None,
+                0,
             )?;
 
             let hidden = &decoder_output.last_hidden_state;
@@ -615,7 +301,7 @@ mod tests {
         let hidden_states = embeddings.forward(&input_ids, None, 2, false);
 
         let normalized = encoder.embed_norm(&hidden_states)?;
-        let encoder_output = encoder.forward(&normalized, &mask)?;
+        let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let golden_tokens: Vec<u32> = vec![
             23083, 16, 10, 3228, 12, 5489, 625, 35045, 6, 937, 12, 25064, 8326, 2777, 479, 85,
@@ -636,6 +322,7 @@ mod tests {
                 None,
                 None,
                 None,
+                0,
             )?;
 
             let hidden = &decoder_output.last_hidden_state;
@@ -696,10 +383,12 @@ mod tests {
         )?;
         let mask = Array2::<f32>::ones((1, 10));
 
-        let hidden_states =
-            embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
+         let hidden_states =
+             embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
+        
         let normalized = encoder.embed_norm(&hidden_states)?;
-        let encoder_output = encoder.forward(&normalized, &mask)?;
+        
+        let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let enc_actual: Vec<f32> = encoder_output
             .last_hidden_state
@@ -716,6 +405,7 @@ mod tests {
             None,
             None,
             None,
+            0,
         )?;
 
         let dec_actual: Vec<f32> = decoder_output
@@ -751,7 +441,7 @@ mod tests {
         let hidden_states =
             embeddings.forward(&input_ids, None, 2, model_metadata.scale_embeddings);
         let normalized = encoder.embed_norm(&hidden_states)?;
-        let encoder_output = encoder.forward(&normalized, &mask)?;
+        let encoder_output = encoder.forward(ModelInput::HiddenCpu(normalized.view()), &mask)?;
 
         let decoder_input_ids = Array2::from_shape_vec((1, 1), vec![2u32])?;
         let decoder_output = decoder.forward(
@@ -761,6 +451,7 @@ mod tests {
             None,
             None,
             None,
+            0,
         )?;
 
         let hidden = &decoder_output.last_hidden_state;

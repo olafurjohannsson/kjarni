@@ -462,6 +462,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Full forward pass through the encoder.
     ///
     /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
+    #[deprecated]
     fn forward(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
