@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use ndarray::{s, Array3, ArrayView3};
+use ndarray::{Array3, ArrayView3, s};
 use rayon::prelude::*;
 
 use crate::traits::Cache;
@@ -46,10 +46,7 @@ impl CpuBeamKVCache {
     }
 
     pub fn num_beams(&self) -> usize {
-        self.layers_k
-            .first()
-            .map(|k| k.shape()[0])
-            .unwrap_or(0)
+        self.layers_k.first().map(|k| k.shape()[0]).unwrap_or(0)
     }
 
     pub fn num_layers(&self) -> usize {
@@ -57,10 +54,7 @@ impl CpuBeamKVCache {
     }
 
     pub fn hidden_size(&self) -> usize {
-        self.layers_k
-            .first()
-            .map(|k| k.shape()[2])
-            .unwrap_or(0)
+        self.layers_k.first().map(|k| k.shape()[2]).unwrap_or(0)
     }
 
     pub fn reorder(&mut self, indices: &[usize]) {
@@ -133,6 +127,18 @@ impl CpuBeamKVCache {
         cache_k.slice_mut(target_slice).assign(new_k);
         cache_v.slice_mut(target_slice).assign(new_v);
 
+        Ok(())
+    }
+
+    pub fn update_and_increment(
+        &mut self,
+        layer_idx: usize,
+        new_k: &Array3<f32>,
+        new_v: &Array3<f32>,
+        new_tokens_len: usize,
+    ) -> anyhow::Result<()> {
+        self.update(layer_idx, new_k, new_v);
+        self.increment_len(new_tokens_len);
         Ok(())
     }
 

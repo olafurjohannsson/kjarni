@@ -154,8 +154,7 @@ impl GpuBeamKVCache {
             num_beams
         );
 
-        // ASSERTION 6: Can't reorder empty cache
-        assert!(self.seq_length > 0, "Cannot reorder empty cache!");
+        assert!(self.seq_length > 0, "Cannot reorder empty GPU cache!");
 
         // Original reorder code...
         for i in 0..self.k_tensors.len() {

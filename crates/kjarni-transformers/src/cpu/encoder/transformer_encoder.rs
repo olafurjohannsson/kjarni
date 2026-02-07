@@ -41,15 +41,6 @@ impl CpuTransformerEncoder {
             .as_ref()
             .context("ModelLayout is missing the required 'encoder' layout")?;
 
-        // 2. Embeddings
-        let embeddings = Embeddings::from_weights(
-            weights,
-            &layout.token_embedding,
-            encoder_layout.position_embedding.as_deref(),
-            encoder_layout.token_type_embedding.as_deref(),
-            load_cfg.target_dtype,
-        )?;
-
         // 3. Embedding LayerNorm
         let emb_norm_w = encoder_layout
             .embedding_norm_weight

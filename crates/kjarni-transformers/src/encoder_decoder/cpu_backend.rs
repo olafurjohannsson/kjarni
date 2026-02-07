@@ -355,50 +355,162 @@ mod tests {
 
     // ========================================================================
     //  CpuBackend::reorder_cache Tests
-    // ========================================================================
-
+    // ===========================================
     #[test]
     fn test_reorder_cache_basic() {
         let backend = CpuBackend;
+        let num_layers = 2;
+        let num_beams = 4;
+        let max_len = 128;
+        let hidden_size = 64;
 
-        // Create a cache with some data
-        // new(num_layers, num_beams, max_len, hidden_size)
-        let mut cache = CpuBeamKVCache::new(2, 4, 128, 64);
+        let mut cache = CpuBeamKVCache::new(num_layers, num_beams, max_len, hidden_size);
 
-        // Initialize with some values
-        let k = Array3::from_shape_vec((4, 3, 64), (0..768).map(|x| x as f32).collect()).unwrap();
-        let v = Array3::from_shape_vec((4, 3, 64), (0..768).map(|x| x as f32).collect()).unwrap();
-        cache.update(0, &k, &v).unwrap();
+        // Populate cache with one token for all layers
+        // Shape: (num_beams, seq_len=1, hidden_size)
+        let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * hidden_size + h) as f32
+        });
+        let v = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * hidden_size + h) as f32 * 0.5
+        });
 
-        // Reorder: swap beams 0 and 1
+        // Update all layers
+        for layer in 0..num_layers {
+            cache.update(layer, &k, &v).unwrap();
+        }
+        // CRITICAL: increment seq_length after updating all layers
+        cache.increment_len(1);
+
+        // Now reorder should work
         let indices = vec![1, 0, 2, 3];
-        backend.reorder_cache(&mut cache, &indices).unwrap();
-
-        // Verify reorder happened (cache internal state changed)
-        // The reorder method exists and doesn't panic
+        let result = backend.reorder_cache(&mut cache, &indices);
+        assert!(result.is_ok());
     }
 
     #[test]
     fn test_reorder_cache_identity() {
         let backend = CpuBackend;
-        let mut cache = CpuBeamKVCache::new(1, 3, 128, 64);
+        let num_layers = 1;
+        let num_beams = 3;
+        let hidden_size = 64;
 
-        // Identity reorder - should be a no-op
+        let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
+
+        // Populate and increment
+        let k = Array3::zeros((num_beams, 1, hidden_size));
+        let v = Array3::zeros((num_beams, 1, hidden_size));
+        cache.update(0, &k, &v).unwrap();
+        cache.increment_len(1);
+
+        // Identity reorder
         let indices = vec![0, 1, 2];
         let result = backend.reorder_cache(&mut cache, &indices);
-
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_reorder_cache_duplicate_indices() {
         let backend = CpuBackend;
-        let mut cache = CpuBeamKVCache::new(1, 4, 128, 64);
+        let num_layers = 1;
+        let num_beams = 4;
+        let hidden_size = 64;
 
-        // Duplicate beam 0 to all positions (common in beam search when one beam dominates)
+        let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
+
+        // Populate with distinct values per beam
+        let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * 100 + h) as f32
+        });
+        let v = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * 100 + h) as f32
+        });
+        cache.update(0, &k, &v).unwrap();
+        cache.increment_len(1);
+
+        // Duplicate beam 0 to all positions
         let indices = vec![0, 0, 0, 0];
         let result = backend.reorder_cache(&mut cache, &indices);
+        assert!(result.is_ok());
+    }
 
+    #[test]
+    fn test_beam_search_flow_states() {
+        let backend = CpuBackend;
+        let num_beams = 4;
+        let num_layers = 6;
+        let hidden_size = 64;
+
+        // 1. Create initial tokens for beam search
+        let initial_tokens: Vec<u32> = vec![2; num_beams];
+        let decoder_state = backend
+            .create_token_tensor(&initial_tokens, num_beams)
+            .unwrap();
+
+        match &decoder_state {
+            CpuSeq2SeqState::U32(t) => {
+                assert_eq!(t.shape(), &[4, 1]);
+            }
+            _ => panic!("Expected U32"),
+        }
+
+        // 2. After first decode step, update with selected tokens
+        let mut decoder_state = decoder_state;
+        let selected_tokens = vec![10u32, 20, 30, 40];
+        backend
+            .update_token_tensor(&mut decoder_state, &selected_tokens)
+            .unwrap();
+
+        match &decoder_state {
+            CpuSeq2SeqState::U32(t) => {
+                assert_eq!(t.shape(), &[4, 1]);
+                assert_eq!(t[[0, 0]], 10);
+                assert_eq!(t[[3, 0]], 40);
+            }
+            _ => panic!("Expected U32"),
+        }
+
+        // 3. Create and populate cache before reordering
+        let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
+
+        // Simulate one decode step - populate all layers then increment
+        let k = Array3::zeros((num_beams, 1, hidden_size));
+        let v = Array3::zeros((num_beams, 1, hidden_size));
+        for layer in 0..num_layers {
+            cache.update(layer, &k, &v).unwrap();
+        }
+        cache.increment_len(1); // <-- Critical!
+
+        // 4. Now reorder cache based on beam scores
+        let reorder_indices = vec![2, 2, 0, 1];
+        backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
+    }
+
+    #[test]
+    fn test_reorder_cache_after_multiple_tokens() {
+        let backend = CpuBackend;
+        let num_layers = 2;
+        let num_beams = 4;
+        let hidden_size = 64;
+
+        let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
+
+        // Simulate 3 decode steps
+        for _step in 0..3 {
+            let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);
+            let v = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);
+
+            for layer in 0..num_layers {
+                cache.update(layer, &k, &v).unwrap();
+            }
+            cache.increment_len(1); // Increment after each step
+        }
+
+        assert_eq!(cache.get_seq_length(), 3);
+
+        // Reorder after accumulating multiple tokens
+        let indices = vec![3, 2, 1, 0]; // Reverse order
+        let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
     }
     // ========================================================================
@@ -412,32 +524,7 @@ mod tests {
         assert_eq!(debug_str, "CpuBackend");
     }
 
-    // ========================================================================
-    //  Integration-style Tests (partial - no full model)
-    // ========================================================================
-
-    #[test]
-    fn test_decode_step_invalid_decoder_tokens_type() {
-        // We can test error handling without a full model
-        let backend = CpuBackend;
-
-        // Using EncoderState as decoder_tokens should fail
-        let decoder_tokens = CpuSeq2SeqState::EncoderState {
-            hidden_states: Array3::zeros((1, 1, 1)),
-            cross_attention_kv_cache: CpuCrossAttentionKVCache::default(),
-            encoder_padding_mask: Array2::zeros((1, 1)),
-        };
-
-        let encoder_state = CpuSeq2SeqState::EncoderState {
-            hidden_states: Array3::zeros((1, 10, 64)),
-            cross_attention_kv_cache: CpuCrossAttentionKVCache::default(),
-            encoder_padding_mask: Array2::ones((1, 10)),
-        };
-
-        // This will fail because we have no model, but we can at least
-        // verify the state matching works
-        // Note: Can't fully test without a model mock
-    }
+    //
 
     #[test]
     fn test_typical_generation_flow_states() {
@@ -472,44 +559,5 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_beam_search_flow_states() {
-        let backend = CpuBackend;
-        let num_beams = 4;
 
-        // 1. Create initial tokens for beam search
-        let initial_tokens: Vec<u32> = vec![2; num_beams];
-        let decoder_state = backend
-            .create_token_tensor(&initial_tokens, num_beams)
-            .unwrap();
-
-        match &decoder_state {
-            CpuSeq2SeqState::U32(t) => {
-                assert_eq!(t.shape(), &[4, 1]);
-            }
-            _ => panic!("Expected U32"),
-        }
-
-        // 2. After first decode step, update with selected tokens
-        let mut decoder_state = decoder_state;
-        let selected_tokens = vec![10u32, 20, 30, 40];
-        backend
-            .update_token_tensor(&mut decoder_state, &selected_tokens)
-            .unwrap();
-
-        match &decoder_state {
-            CpuSeq2SeqState::U32(t) => {
-                assert_eq!(t.shape(), &[4, 1]);
-                assert_eq!(t[[0, 0]], 10);
-                assert_eq!(t[[3, 0]], 40);
-            }
-            _ => panic!("Expected U32"),
-        }
-
-        // 3. Reorder cache based on beam scores
-        // new(num_layers, num_beams, max_len, hidden_size)
-        let mut cache = CpuBeamKVCache::new(6, num_beams, 128, 64);
-        let reorder_indices = vec![2, 2, 0, 1];
-        backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
-    }
 }

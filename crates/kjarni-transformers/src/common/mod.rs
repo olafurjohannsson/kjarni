@@ -316,6 +316,8 @@ pub struct HFGenerationDefaults {
     pub max_length: Option<usize>,
     #[serde(default)]
     pub repetition_penalty: Option<f32>,
+    #[serde(default)]
+    pub decoder_start_token_id: Option<usize>,
 }
 
 fn default_temperature() -> f32 {
