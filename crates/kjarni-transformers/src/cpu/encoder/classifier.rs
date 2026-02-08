@@ -380,7 +380,7 @@ impl GpuSequenceClassificationHead {
         let (batch, seq_len, hidden) = encoder_hidden_states.dims3();
         let (encoder_cmd, pool) = frame.resources();
 
-        // 1. Slice the [CLS] token.
+        // Slice the CLS token
         let hidden_states_4d = encoder_hidden_states.view(vec![batch, 1, seq_len, hidden]);
         let cls_embedding_4d = pool.get(vec![batch, 1, 1, hidden]);
         self.slicer.encode(
@@ -391,7 +391,7 @@ impl GpuSequenceClassificationHead {
         );
         let cls_embedding_2d = cls_embedding_4d.view(vec![batch, hidden]);
 
-        // 2. Pass through the pooler layer, if it exists.
+        // pooler layer, if it exists.
         let pooled_output =
             if let (Some(weight), Some(bias)) = (&self.pooler_weight, &self.pooler_bias) {
                 let pooled_linear_out = pool.get(vec![batch, weight.shape()[0]]);
@@ -406,7 +406,6 @@ impl GpuSequenceClassificationHead {
                     &pooled_with_bias,
                 );
 
-                // --- FIX: Apply Tanh activation in-place ---
                 self.tanh.encode_inplace(encoder_cmd, &pooled_with_bias);
 
                 pooled_with_bias
@@ -414,7 +413,7 @@ impl GpuSequenceClassificationHead {
                 cls_embedding_2d
             };
 
-        // 3. Pass through the final classifier linear layer.
+        // final classifier linear layer.
         let logits_linear_out = pool.get(vec![batch, self.classifier_weight.shape()[0]]);
         self.linear.encode(
             encoder_cmd,
@@ -484,16 +483,13 @@ mod classification_head_tests {
         Ok((weights, dir))
     }
 
-    // =========================================================================
-    // TEST 1: BART HEAD
-    // =========================================================================
     // BART logic: LastToken Pooling (input is already EOS) -> Dense -> Tanh -> Classifier
     #[test]
     fn test_bart_head_golden() -> Result<()> {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
 
-        // 1. Load Golden Data
+        // Load Golden Data
         let bart_dense_weight_data = vec![
             0.257632, -0.220689, -0.096931, 0.234684, -0.470718, 0.299859, -0.102863, 0.254372,
             0.069508, -0.061222, 0.138680, 0.024666, 0.182614, -0.194851, -0.036454, -0.045014,
@@ -534,7 +530,7 @@ mod classification_head_tests {
 
         let (weights, _tmp) = create_test_weights(w, s)?;
 
-        // 2. Configure Head
+        //  Configure Head
         let pre_classifier = LinearLayer::builder(&weights, "classification_head.dense.weight")
             .with_optional_bias(Some("classification_head.dense.bias"))
             .build()?;
@@ -552,15 +548,12 @@ mod classification_head_tests {
             None,
         )?;
 
-        // 3. Inputs
+        //  Inputs
         let input_data = vec![0.336690, 0.128809, 0.234462, 0.230333];
         let input = Array3::from_shape_vec((1, 1, 4), input_data)?;
-
-        // 4. Run (Seq len 1 -> LastToken works without mask in your implementation logic)
-        // If seq_len > 1, mask required.
         let output = head.forward(&input, None)?;
 
-        // 5. Validation
+        //  Validation
         let golden_data = vec![0.103089, -0.002410];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
 
@@ -573,9 +566,6 @@ mod classification_head_tests {
         Ok(())
     }
 
-    // =========================================================================
-    // TEST 2: RoBERTa HEAD
-    // =========================================================================
     // RoBERTa logic: CLS Pooling (Index 0) -> Dense -> Tanh -> Classifier
     #[test]
     fn test_roberta_head_golden() -> Result<()> {
@@ -656,9 +646,7 @@ mod classification_head_tests {
         Ok(())
     }
 
-    // =========================================================================
-    // TEST 3: BERT HEAD
-    // =========================================================================
+
     // BERT logic: CLS Pooling (Index 0) -> Pooler (Dense+Tanh) -> Classifier
     #[test]
     fn test_bert_head_golden() -> Result<()> {
@@ -728,9 +716,7 @@ mod classification_head_tests {
         Ok(())
     }
 
-    // ==========================================
-    // TEST 4: DISTILBERT HEAD (ReLU)
-    // ==========================================
+
     #[test]
     fn test_distilbert_head_golden() -> Result<()> {
         let mut w = HashMap::new();
@@ -786,7 +772,6 @@ mod classification_head_tests {
             None,
         )?;
 
-        // UPDATE: Use the correct inputs from the Python output
         let input_data = vec![
             0.336690, 0.128809, 0.234462, 0.230333, -1.122856, -0.186328, 2.208201, -0.637997,
             0.461657, 0.267351, 0.534905, 0.809357,
@@ -794,7 +779,6 @@ mod classification_head_tests {
         let input = Array3::from_shape_vec((1, 3, 4), input_data)?;
         let output = head.forward(&input, None)?;
 
-        // UPDATE: Use correct logits
         let golden_data = vec![0.070543, -0.038873];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
 
@@ -805,9 +789,7 @@ mod classification_head_tests {
         Ok(())
     }
 
-    // ==========================================
-    // TEST 5: SIMPLE HEAD (Linear)
-    // ==========================================
+
     #[test]
     fn test_simple_head_golden() -> Result<()> {
         let mut w = HashMap::new();
@@ -857,9 +839,7 @@ mod classification_head_tests {
         Ok(())
     }
 
-    // ==========================================
-    // TEST 6: GELU HEAD (DeBERTa style)
-    // ==========================================
+
     #[test]
     fn test_gelu_head_golden() -> Result<()> {
         let mut w = HashMap::new();
@@ -909,7 +889,6 @@ mod classification_head_tests {
             None,
         )?;
 
-        // UPDATE: Use correct inputs
         let input_data = vec![
             -0.197415, 1.942783, -1.401702, -0.762557, 0.631213, -0.899135, -0.557793, 0.690719,
             0.222459, -0.666225, 0.684642, 0.574002,
@@ -917,7 +896,6 @@ mod classification_head_tests {
         let input = Array3::from_shape_vec((1, 3, 4), input_data)?;
         let output = head.forward(&input, None)?;
 
-        // UPDATE: Use correct logits
         let golden_data = vec![0.004101, 0.051191];
         let golden = Array2::from_shape_vec((1, 2), golden_data)?;
 
@@ -927,6 +905,7 @@ mod classification_head_tests {
         assert!(max_diff < 1e-5);
         Ok(())
     }
+
     fn make_linear_layer(in_features: usize, out_features: usize) -> LinearLayer {
         let mut weight = Array2::<f32>::zeros((out_features, in_features));
         // Fill diagonal-ish to make it act like identity
@@ -952,14 +931,11 @@ mod classification_head_tests {
         // Should be [batch, num_classes] = [2,2]
         assert_eq!(logits.shape(), &[2, 2]);
 
-        // Check first row: matmul with identity-truncated weight (2x3) and zero bias
-        // Weight: [[1,0,0],[0,1,0]] -> first 2 hidden dims
         assert_eq!(logits[[0, 0]], 1.0); // corresponds to first hidden dim
         assert_eq!(logits[[0, 1]], 2.0);
         assert_eq!(logits[[1, 0]], 10.0);
         assert_eq!(logits[[1, 1]], 11.0);
 
-        // num_classes()
         assert_eq!(head.num_classes(), 2);
     }
 
@@ -982,15 +958,12 @@ mod classification_head_tests {
         let logits = head.forward(&hidden_states, None).unwrap();
         assert_eq!(logits.shape(), &[2, 2]);
 
-        // Values are deterministic based on our identity-like linear layers
-        // The Tanh activation is applied to pooler output
         for b in 0..2 {
             for c in 0..2 {
                 assert!(logits[[b, c]].is_finite());
             }
         }
 
-        // num_classes()
         assert_eq!(head.num_classes(), 2);
     }
 

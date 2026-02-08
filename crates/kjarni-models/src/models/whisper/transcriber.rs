@@ -15,10 +15,6 @@ use kjarni_transformers::{
 
 use super::WhisperModel;
 
-// =============================================================================
-// Constants
-// =============================================================================
-
 /// Whisper native sample rate.
 pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
 
@@ -27,8 +23,6 @@ pub const WHISPER_CHUNK_LENGTH_SECS: f32 = 30.0;
 
 /// Number of samples in one 30-second chunk at 16 kHz.
 pub const WHISPER_CHUNK_SAMPLES: usize = 480_000;
-
-// --- Special token IDs (standard Whisper tokenizer) ---
 
 const SOT_TOKEN: u32 = 50258;           // <|startoftranscript|>
 const EOT_TOKEN: u32 = 50257;           // <|endoftext|>
@@ -40,10 +34,6 @@ const FIRST_SPECIAL_TOKEN: u32 = 50257;
 
 /// Each timestamp token represents 0.02 seconds.
 const TIMESTAMP_RESOLUTION: f32 = 0.02;
-
-// =============================================================================
-// Types
-// =============================================================================
 
 /// Configuration for Whisper transcription, passed down from the high-level API.
 #[derive(Debug, Clone)]
@@ -200,12 +190,10 @@ impl WhisperModel {
         let eos_token_id = self.eos_token_id().unwrap_or(EOT_TOKEN);
         let prompt_tokens = self.build_prompt_tokens(config);
 
-        // Decoder ops (project_to_logits lives here)
         let decoder_ops = self
             .encoder_decoder_cpu_ops()
             .ok_or_else(|| anyhow!("CPU decoder ops not available"))?;
 
-        // --- KV cache ---
         let max_len = prompt_tokens.len() + config.max_tokens_per_chunk;
         let mut cache_box = self.new_cache(1, max_len, 0)?;
         let cache = cache_box
@@ -213,16 +201,12 @@ impl WhisperModel {
             .downcast_mut::<CpuBeamKVCache>()
             .ok_or_else(|| anyhow!("Expected CpuBeamKVCache"))?;
 
-        // --- Pre-compute cross-attention KV ---
         let decoder = decoder_ops.decoder();
         let cross_kv = decoder.precompute_cross_attention_kv(encoder_hidden_states)?;
 
         let enc_seq_len = encoder_hidden_states.dim().1;
         let encoder_mask = Array2::<f32>::ones((1, enc_seq_len));
 
-        // =================================================================
-        // Process prompt tokens
-        // =================================================================
         let input_ids = Array2::from_shape_vec(
             (1, prompt_tokens.len()),
             prompt_tokens.clone(),

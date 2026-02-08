@@ -10,12 +10,9 @@ use kjarni_transformers::{
 };
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
-// ============================================================================
-// 1. BERT Configuration (MiniLM, Nomic, etc.)
-// ============================================================================
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct BertConfig {
-    // --- Aliases handle Nomic-BERT's variable names ---
     #[serde(alias = "n_embd")]
     pub hidden_size: usize,
 
@@ -36,11 +33,8 @@ pub struct BertConfig {
     pub num_labels: Option<usize>,
     #[serde(alias = "hidden_act")]
     pub activation_function: Option<String>,
-    // Computed: ordered labels (NOT from JSON, computed in from_json)
     #[serde(skip)]
     pub labels_vec: Option<Vec<String>>,
-    // --- FIX: Separate fields to avoid "duplicate field" error ---
-    // Standard BERT
     pub max_position_embeddings: Option<usize>,
     // Nomic / Mosaic BERT
     pub n_positions: Option<usize>,
@@ -76,7 +70,7 @@ fn default_true() -> bool {
 impl BertConfig {
     pub fn from_json(json: &str) -> Result<Self> {
         let mut config: Self = serde_json::from_str(json)?;
-        
+
         // Convert id2label HashMap to sorted Vec
         if let Some(ref map) = config.id2label {
             let mut labels: Vec<(usize, String)> = map
@@ -91,14 +85,13 @@ impl BertConfig {
                 config.num_labels = Some(config.labels_vec.as_ref().unwrap().len());
             }
         }
-        
+
         Ok(config)
     }
     fn is_hf_classification(&self) -> bool {
         // Classification models from HuggingFace transformers use bert. prefix
         self.id2label.is_some() || self.num_labels.is_some()
     }
-
 
     pub fn from_loader(loader: &dyn WeightLoader, config_json: Option<&str>) -> Result<Arc<Self>> {
         if loader.has_metadata() {
@@ -119,7 +112,7 @@ impl BertConfig {
                         .unwrap_or("gelu")
                         .to_string(),
                 ),
-                // GGUF provides 'context_length', map it to standard field
+                // GGUF provides 'context_length'
                 max_position_embeddings: Some(get_u32("context_length").unwrap_or(2048) as usize),
                 n_positions: None,
                 vocab_size: loader.get_u32("general.vocabulary_size").unwrap_or(30522) as usize,
@@ -152,7 +145,6 @@ impl BertConfig {
             .or(self.max_position_embeddings)
             .unwrap_or(512)
     }
-    
 }
 
 impl ModelConfig for BertConfig {
@@ -178,7 +170,7 @@ impl ModelConfig for BertConfig {
         self.labels_vec.as_deref()
     }
     fn metadata(&self) -> ModelMetadata {
-        // Nomic sets rotary_emb_fraction (usually 1.0) if enabled
+        // Nomic sets rotary_emb_fraction
         let uses_rope =
             self.rotary_embedding_fraction.is_some() || self.rotary_embedding_base.is_some();
 
@@ -195,7 +187,6 @@ impl ModelConfig for BertConfig {
             num_kv_heads: self.num_attention_heads,
             head_dim: self.hidden_size / self.num_attention_heads,
             vocab_size: self.vocab_size,
-            // Use helper to resolve max len
             max_seq_len: self.get_max_seq_len(),
             norm_eps: self.layer_norm_eps,
             activation: match self.activation_function.as_deref() {
@@ -214,7 +205,6 @@ impl ModelConfig for BertConfig {
             normalize_embedding: false,
             extra_pos_embeddings: 0,
             is_prenorm: false,
-            // Nomic (SwiGlu) weights usually match LinearLayer expectation better
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
@@ -228,10 +218,7 @@ impl ModelConfig for BertConfig {
 
             let encoder_layer = EncoderLayerLayout {
                 self_attn: AttentionLayout {
-                    // GPT-2 Style: Point all to the fused tensor.
-                    // The loader will detect this and slice.
                     q_weight: format!("{}.attn.Wqkv.weight", prefix),
-                    // Pointing K/V to the same file signals "It's fused"
                     k_weight: format!("{}.attn.Wqkv.weight", prefix),
                     v_weight: format!("{}.attn.Wqkv.weight", prefix),
 
@@ -241,7 +228,7 @@ impl ModelConfig for BertConfig {
                     v_bias: None,
 
                     o_weight: format!("{}.attn.out_proj.weight", prefix),
-                    o_bias: None, // Verified from your list: no bias for out_proj
+                    o_bias: None,
 
                     norm_weight: format!("{}.norm1.weight", prefix),
                     norm_bias: Some(format!("{}.norm1.bias", prefix)),
@@ -278,7 +265,6 @@ impl ModelConfig for BertConfig {
                 decoder: None,
             }
         } else {
-            // === STANDARD BERT LAYOUT (MiniLM) ===
             let encoder_layer = if self.is_hf_classification() {
                 EncoderLayerLayout {
                     self_attn: AttentionLayout {
@@ -289,20 +275,26 @@ impl ModelConfig for BertConfig {
                         v_weight: "bert.encoder.layer.{}.attention.self.value.weight".to_string(),
                         v_bias: Some("bert.encoder.layer.{}.attention.self.value.bias".to_string()),
                         o_weight: "bert.encoder.layer.{}.attention.output.dense.weight".to_string(),
-                        o_bias: Some("bert.encoder.layer.{}.attention.output.dense.bias".to_string()),
-                        norm_weight: "bert.encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
-                    norm_bias: Some("bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
-                },
-                ffn: FeedForwardLayout {
-                    up_weight: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
-                    up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
-                    down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
-                    down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
-                    gate_weight: None,
-                    gate_bias: None,
-                    norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
-                    norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
-                } }
+                        o_bias: Some(
+                            "bert.encoder.layer.{}.attention.output.dense.bias".to_string(),
+                        ),
+                        norm_weight: "bert.encoder.layer.{}.attention.output.LayerNorm.weight"
+                            .to_string(),
+                        norm_bias: Some(
+                            "bert.encoder.layer.{}.attention.output.LayerNorm.bias".to_string(),
+                        ),
+                    },
+                    ffn: FeedForwardLayout {
+                        up_weight: "bert.encoder.layer.{}.intermediate.dense.weight".to_string(),
+                        up_bias: Some("bert.encoder.layer.{}.intermediate.dense.bias".to_string()),
+                        down_weight: "bert.encoder.layer.{}.output.dense.weight".to_string(),
+                        down_bias: Some("bert.encoder.layer.{}.output.dense.bias".to_string()),
+                        gate_weight: None,
+                        gate_bias: None,
+                        norm_weight: "bert.encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                        norm_bias: Some("bert.encoder.layer.{}.output.LayerNorm.bias".to_string()),
+                    },
+                }
             } else {
                 EncoderLayerLayout {
                     self_attn: AttentionLayout {
@@ -314,19 +306,23 @@ impl ModelConfig for BertConfig {
                         v_bias: Some("encoder.layer.{}.attention.self.value.bias".to_string()),
                         o_weight: "encoder.layer.{}.attention.output.dense.weight".to_string(),
                         o_bias: Some("encoder.layer.{}.attention.output.dense.bias".to_string()),
-                        norm_weight: "encoder.layer.{}.attention.output.LayerNorm.weight".to_string(),
-                    norm_bias: Some("encoder.layer.{}.attention.output.LayerNorm.bias".to_string()),
-                },
-                ffn: FeedForwardLayout {
-                    up_weight: "encoder.layer.{}.intermediate.dense.weight".to_string(),
-                    up_bias: Some("encoder.layer.{}.intermediate.dense.bias".to_string()),
-                    down_weight: "encoder.layer.{}.output.dense.weight".to_string(),
-                    down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
-                    gate_weight: None,
-                    gate_bias: None,
-                    norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
-                    norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
-                } }
+                        norm_weight: "encoder.layer.{}.attention.output.LayerNorm.weight"
+                            .to_string(),
+                        norm_bias: Some(
+                            "encoder.layer.{}.attention.output.LayerNorm.bias".to_string(),
+                        ),
+                    },
+                    ffn: FeedForwardLayout {
+                        up_weight: "encoder.layer.{}.intermediate.dense.weight".to_string(),
+                        up_bias: Some("encoder.layer.{}.intermediate.dense.bias".to_string()),
+                        down_weight: "encoder.layer.{}.output.dense.weight".to_string(),
+                        down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
+                        gate_weight: None,
+                        gate_bias: None,
+                        norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                        norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
+                    },
+                }
             };
 
             ModelLayout {
@@ -366,9 +362,8 @@ impl ModelConfig for BertConfig {
         }
     }
 }
-// ============================================================================
-// 2. MPNet Configuration
-// ============================================================================
+
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MpnetConfig {
     pub hidden_size: usize,
@@ -387,7 +382,6 @@ impl MpnetConfig {
     }
 
     pub fn from_loader(_loader: &dyn WeightLoader, config_json: Option<&str>) -> Result<Arc<Self>> {
-        // MPNet GGUF support is rare, prioritizing JSON path
         let json_str = config_json.context("Config JSON required for MPNet")?;
         Ok(Arc::new(Self::from_json(json_str)?))
     }
@@ -397,7 +391,7 @@ impl ModelConfig for MpnetConfig {
     fn model_type(&self) -> &str {
         "mpnet"
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn metadata(&self) -> ModelMetadata {
@@ -416,7 +410,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             rope_scaling: None,
             scale_embeddings: false,
             normalize_embedding: false,
-            extra_pos_embeddings: 0,
+            extra_pos_embeddings: 2, //0,
             is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
@@ -427,29 +421,28 @@ fn as_any(&self) -> &dyn std::any::Any {
     }
 
     fn layout(&self) -> ModelLayout {
-        // MPNet uses 'mpnet.encoder' prefix
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
-                q_weight: "mpnet.encoder.layer.{}.attention.attn.q.weight".to_string(),
-                q_bias: Some("mpnet.encoder.layer.{}.attention.attn.q.bias".to_string()),
-                k_weight: "mpnet.encoder.layer.{}.attention.attn.k.weight".to_string(),
-                k_bias: Some("mpnet.encoder.layer.{}.attention.attn.k.bias".to_string()),
-                v_weight: "mpnet.encoder.layer.{}.attention.attn.v.weight".to_string(),
-                v_bias: Some("mpnet.encoder.layer.{}.attention.attn.v.bias".to_string()),
-                o_weight: "mpnet.encoder.layer.{}.attention.attn.o.weight".to_string(),
-                o_bias: Some("mpnet.encoder.layer.{}.attention.attn.o.bias".to_string()),
-                norm_weight: "mpnet.encoder.layer.{}.attention.LayerNorm.weight".to_string(),
-                norm_bias: Some("mpnet.encoder.layer.{}.attention.LayerNorm.bias".to_string()),
+                q_weight: "encoder.layer.{}.attention.attn.q.weight".to_string(),
+                q_bias: Some("encoder.layer.{}.attention.attn.q.bias".to_string()),
+                k_weight: "encoder.layer.{}.attention.attn.k.weight".to_string(),
+                k_bias: Some("encoder.layer.{}.attention.attn.k.bias".to_string()),
+                v_weight: "encoder.layer.{}.attention.attn.v.weight".to_string(),
+                v_bias: Some("encoder.layer.{}.attention.attn.v.bias".to_string()),
+                o_weight: "encoder.layer.{}.attention.attn.o.weight".to_string(),
+                o_bias: Some("encoder.layer.{}.attention.attn.o.bias".to_string()),
+                norm_weight: "encoder.layer.{}.attention.LayerNorm.weight".to_string(),
+                norm_bias: Some("encoder.layer.{}.attention.LayerNorm.bias".to_string()),
             },
             ffn: FeedForwardLayout {
-                up_weight: "mpnet.encoder.layer.{}.ffn.intermediate.weight".to_string(),
-                up_bias: Some("mpnet.encoder.layer.{}.ffn.intermediate.bias".to_string()),
-                down_weight: "mpnet.encoder.layer.{}.ffn.output.weight".to_string(),
-                down_bias: Some("mpnet.encoder.layer.{}.ffn.output.bias".to_string()),
+                up_weight: "encoder.layer.{}.intermediate.dense.weight".to_string(),
+                up_bias: Some("encoder.layer.{}.intermediate.dense.bias".to_string()),
+                down_weight: "encoder.layer.{}.output.dense.weight".to_string(),
+                down_bias: Some("encoder.layer.{}.output.dense.bias".to_string()),
                 gate_weight: None,
                 gate_bias: None,
-                norm_weight: "mpnet.encoder.layer.{}.LayerNorm.weight".to_string(),
-                norm_bias: Some("mpnet.encoder.layer.{}.LayerNorm.bias".to_string()),
+                norm_weight: "encoder.layer.{}.output.LayerNorm.weight".to_string(),
+                norm_bias: Some("encoder.layer.{}.output.LayerNorm.bias".to_string()),
             },
         };
 
@@ -458,11 +451,11 @@ fn as_any(&self) -> &dyn std::any::Any {
             lm_head: "classifier.weight".to_string(),
             encoder: Some(EncoderLayout {
                 position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
-                token_type_embedding: Some("embeddings.token_type_embeddings.weight".to_string()),
+                token_type_embedding: None,
                 embedding_norm_weight: Some("embeddings.LayerNorm.weight".to_string()),
                 embedding_norm_bias: Some("embeddings.LayerNorm.bias".to_string()),
-                final_norm_weight: Some("mpnet.pooler.dense.weight".to_string()),
-                final_norm_bias: Some("mpnet.pooler.dense.bias".to_string()),
+                final_norm_weight: Some("pooler.dense.weight".to_string()),
+                final_norm_bias: Some("pooler.dense.bias".to_string()),
                 layer: encoder_layer,
             }),
             decoder: None,
@@ -470,14 +463,10 @@ fn as_any(&self) -> &dyn std::any::Any {
     }
 }
 
-// ============================================================================
-// 3. DistilBERT Configuration
-// ============================================================================
 
-/// DistilBERT configuration supporting both base and sequence classification variants.
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DistilBertConfig {
-    // Core architecture
     pub activation: String,
     pub dim: usize,
     pub hidden_dim: usize,
@@ -486,7 +475,6 @@ pub struct DistilBertConfig {
     pub max_position_embeddings: usize,
     pub vocab_size: usize,
 
-    // Dropout (optional, for reference)
     #[serde(default)]
     pub attention_dropout: Option<f32>,
     #[serde(default)]
@@ -494,7 +482,6 @@ pub struct DistilBertConfig {
     #[serde(default)]
     pub seq_classif_dropout: Option<f32>,
 
-    // Classification head config
     #[serde(default)]
     pub id2label: Option<HashMap<String, String>>,
     #[serde(default)]
@@ -502,17 +489,14 @@ pub struct DistilBertConfig {
     #[serde(default)]
     pub num_labels: Option<usize>,
 
-    // Computed field (not from JSON)
     #[serde(skip)]
     pub labels_vec: Option<Vec<String>>,
 
-    // Architecture detection
     #[serde(default)]
     pub architectures: Option<Vec<String>>,
     #[serde(default)]
     pub finetuning_task: Option<String>,
 
-    // Other optional fields
     #[serde(default)]
     pub pad_token_id: Option<usize>,
     #[serde(default)]
@@ -522,7 +506,6 @@ pub struct DistilBertConfig {
 }
 
 impl DistilBertConfig {
-    /// Get the classification head layout for DistilBERT sequence classification.
     pub fn classification_head_layout(&self) -> ClassificationHeadLayout {
         ClassificationHeadLayout {
             // DistilBERT has a pre_classifier layer before the final classifier
@@ -612,7 +595,7 @@ impl ModelConfig for DistilBertConfig {
     fn model_type(&self) -> &str {
         "distilbert"
     }
-fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
     fn id2label(&self) -> Option<&[String]> {

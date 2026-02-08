@@ -17,25 +17,19 @@ async fn test_gpu_rope_parity() -> Result<()> {
     let theta = 10000.0;
     let position_offset = 16;
 
-    // --- 1. Setup CPU and GPU RoPE instances ---
     let cpu_rope = CpuRoPE::new(d, max_seq, theta);
     let gpu_rope = GpuRoPE::from_cpu_rope(&context, &cpu_rope)?;
 
-    // --- 2. Create CPU and GPU input tensors ---
     let q_cpu = Array::random((b, h, s, d), Uniform::new(-1.0, 1.0));
     let k_cpu = Array::random((b, h, s, d), Uniform::new(-1.0, 1.0));
 
-    // Use turbofish to specify the f32 type
     let q_gpu = GpuTensor::from_ndarray::<f32, _>(&context, &q_cpu)?;
     let k_gpu = GpuTensor::from_ndarray::<f32, _>(&context, &k_cpu)?;
 
-    // --- 3. Calculate the expected result on the CPU ---
     let (expected_q, expected_k) = cpu_rope.apply_4d(&q_cpu, &k_cpu, position_offset);
 
-    // --- 4. Run the GPU RoPE kernel (Out-of-Place) ---
     let mut encoder = context.device.create_command_encoder(&Default::default());
 
-    // Create uninitialized output tensors for the results
     let q_rot_gpu = GpuTensor::uninitialized(
         &context,
         q_gpu.shape().to_vec(),
@@ -49,7 +43,6 @@ async fn test_gpu_rope_parity() -> Result<()> {
         "Rotated K Output",
     );
 
-    // Call the new, out-of-place encode function
     gpu_rope.encode(&mut encoder, &q_gpu, &q_rot_gpu, position_offset);
     gpu_rope.encode(&mut encoder, &k_gpu, &k_rot_gpu, position_offset);
 

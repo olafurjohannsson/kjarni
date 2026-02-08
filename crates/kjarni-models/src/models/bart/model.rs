@@ -1,4 +1,3 @@
-// --- Standard Library ---
 use ndarray::{Array2, Array3};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -264,7 +263,6 @@ impl EncoderLanguageModel for BartModel {
     }
 }
 
-// --- LanguageModel Implementation ---
 impl LanguageModel for BartModel {
     fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
@@ -273,14 +271,12 @@ impl LanguageModel for BartModel {
         self.config.metadata().max_seq_len
     }
     fn forced_eos_token_id(&self) -> Option<u32> {
-        // If explicit forced_eos_token_id is set, use it
         if self.config.forced_eos_token_id.is_some() {
             return self.config.forced_eos_token_id;
         }
         None
     }
     fn forced_bos_token_id(&self) -> Option<u32> {
-        // If explicit forced_bos_token_id is set, use it
         if self.config.forced_bos_token_id.is_some() {
             return self.config.forced_bos_token_id;
         }

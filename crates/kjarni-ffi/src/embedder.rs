@@ -1,9 +1,10 @@
 //! Embedder FFI bindings
 
-use crate::{get_runtime, KjarniErrorCode, KjarniFloatArray, KjarniFloat2DArray};
-use crate::error::{set_last_error, map_result};
+use crate::error::{map_result, set_last_error};
+use crate::{KjarniErrorCode, KjarniFloat2DArray, KjarniFloatArray, get_runtime};
 use kjarni::Embedder;
-use std::ffi::{c_char, c_float, CStr};
+use kjarni::embedder::EmbedderError;
+use std::ffi::{CStr, c_char, c_float};
 use std::ptr;
 
 /// Device selection for inference.
@@ -68,7 +69,11 @@ pub unsafe extern "C" fn kjarni_embedder_new(
 
     // Use defaults if config is null
     let default_config = kjarni_embedder_config_default();
-    let config = if config.is_null() { &default_config } else { &*config };
+    let config = if config.is_null() {
+        &default_config
+    } else {
+        &*config
+    };
 
     let result = get_runtime().block_on(async {
         let mut builder = Embedder::builder("minilm-l6-v2");
@@ -110,7 +115,13 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         // Build
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniErrorCode::LoadFailed
+            match &e {
+                EmbedderError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
+                EmbedderError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
+                EmbedderError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+                EmbedderError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+                _ => KjarniErrorCode::LoadFailed,
+            }
         })
     });
 
@@ -159,9 +170,7 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let result = get_runtime().block_on(async {
-        embedder.embed(text).await
-    });
+    let result = get_runtime().block_on(async { embedder.embed(text).await });
 
     match result {
         Ok(embedding) => {
@@ -264,9 +273,7 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let result = get_runtime().block_on(async {
-        embedder_ref.similarity(text1, text2).await
-    });
+    let result = get_runtime().block_on(async { embedder_ref.similarity(text1, text2).await });
 
     match result {
         Ok(sim) => {
@@ -292,8 +299,6 @@ pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) ->
     }
 
     let embedder_ref = &(*embedder).inner;
-    
-    get_runtime().block_on(async {
-        embedder_ref.dimension()
-    })
+
+    get_runtime().block_on(async { embedder_ref.dimension() })
 }

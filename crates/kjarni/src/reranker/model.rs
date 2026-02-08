@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use kjarni_transformers::{models::ModelType, traits::Device, WgpuContext};
+use kjarni_transformers::{WgpuContext, models::ModelType, traits::Device};
 
-use crate::common::{default_cache_dir, ensure_model_downloaded};
 use crate::CrossEncoder;
+use crate::common::{default_cache_dir, ensure_model_downloaded};
 
 use super::builder::RerankerBuilder;
 use super::types::{RerankOverrides, RerankResult, RerankerError, RerankerResult};
@@ -82,8 +82,14 @@ impl Reranker {
         // Determine loading strategy
         let (inner, model_type, model_id) = if let Some(model_path) = &builder.model_path {
             // Load from local path
-            Self::load_from_path(model_path, device, context.clone(), load_config, builder.quiet)
-                .await?
+            Self::load_from_path(
+                model_path,
+                device,
+                context.clone(),
+                load_config,
+                builder.quiet,
+            )
+            .await?
         } else {
             // Load from registry
             Self::load_from_registry(
@@ -118,8 +124,7 @@ impl Reranker {
         download_policy: crate::common::DownloadPolicy,
         quiet: bool,
     ) -> RerankerResult<(CrossEncoder, Option<ModelType>, String)> {
-        let model_type = ModelType::from_cli_name(model)
-            .ok_or_else(|| RerankerError::UnknownModel(model.to_string()))?;
+        let model_type = ModelType::resolve(model).map_err(RerankerError::UnknownModel)?;
 
         // Validate for reranking
         validate_for_reranking(model_type)?;
@@ -167,9 +172,7 @@ impl Reranker {
     ) -> RerankerResult<(CrossEncoder, Option<ModelType>, String)> {
         // Validate path exists
         if !path.exists() {
-            return Err(RerankerError::ModelPathNotFound(
-                path.display().to_string(),
-            ));
+            return Err(RerankerError::ModelPathNotFound(path.display().to_string()));
         }
 
         // Check for required files
@@ -238,7 +241,11 @@ impl Reranker {
     /// Rerank documents by relevance to a query.
     ///
     /// Returns results sorted by score (highest first).
-    pub async fn rerank(&self, query: &str, documents: &[&str]) -> RerankerResult<Vec<RerankResult>> {
+    pub async fn rerank(
+        &self,
+        query: &str,
+        documents: &[&str],
+    ) -> RerankerResult<Vec<RerankResult>> {
         self.rerank_with_config(query, documents, &RerankOverrides::default())
             .await
     }
@@ -266,9 +273,7 @@ impl Reranker {
         // Convert to results and apply filters
         let mut results: Vec<RerankResult> = ranked
             .into_iter()
-            .filter(|(_, score)| {
-                merged.threshold.map(|t| *score >= t).unwrap_or(true)
-            })
+            .filter(|(_, score)| merged.threshold.map(|t| *score >= t).unwrap_or(true))
             .map(|(index, score)| RerankResult {
                 index,
                 score,
@@ -374,7 +379,8 @@ impl Reranker {
         RerankOverrides {
             top_k: runtime.top_k.or(self.default_overrides.top_k),
             threshold: runtime.threshold.or(self.default_overrides.threshold),
-            return_raw_scores: runtime.return_raw_scores || self.default_overrides.return_raw_scores,
+            return_raw_scores: runtime.return_raw_scores
+                || self.default_overrides.return_raw_scores,
             batch_size: runtime.batch_size.or(self.default_overrides.batch_size),
         }
     }

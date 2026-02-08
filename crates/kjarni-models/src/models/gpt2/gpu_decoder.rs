@@ -192,7 +192,6 @@ impl Gpt2GpuDecoder {
             Some(GpuTensor::from_ndarray(&context, &o_bias)?),
         )?;
 
-        // --- Attention LayerNorm logic preserved ---
         let gamma = weights.get_array1(&name(&self_attn_layout.norm_weight))?;
         let beta = weights.get_array1(&opt_name(&self_attn_layout.norm_bias))?;
         let self_attn_norm =
@@ -202,7 +201,6 @@ impl Gpt2GpuDecoder {
             GpuTensor::from_ndarray(&context, &beta)?,
         )?);
 
-        // --- FFN weights with transpose logic preserved ---
         let intermediate_w_raw = weights.get_array2(&name(&ffn_layout.up_weight))?;
         let output_w_raw = weights.get_array2(&name(&ffn_layout.down_weight))?;
 
@@ -221,7 +219,6 @@ impl Gpt2GpuDecoder {
 
         let feedforward = GpuFeedForward::Standard(GpuStandardFFN::new(&context, meta.activation)?);
 
-        // --- FFN LayerNorm logic preserved ---
         let ffn_norm_weights = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
             GpuTensor::from_ndarray(
                 &context,

@@ -6,7 +6,7 @@ use crate::traits::{AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForw
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::{Array2, Array3};
-/// Mock config for testing embeddings
+
 struct MockEmbedConfig {
     hidden_size: usize,
     vocab_size: usize,
@@ -24,22 +24,18 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
     fn metadata(&self) -> crate::traits::ModelMetadata {
         crate::traits::ModelMetadata {
             decoder_layers: None,
-            // --- From Struct ---
             hidden_size: self.hidden_size,
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position,
             scale_embeddings: self.scale,
             normalize_embedding: false,
             intermediate_size: 0,
-            // --- Fixed Defaults for Testing ---
             num_layers: 1,
             num_attention_heads: 4,
             num_kv_heads: 4,
             head_dim: self.hidden_size / 4,
             norm_eps: 1e-5,
             activation: crate::activations::Activation::Gelu,
-
-            // Absolute position embeddings (implied by "pos" name), so no RoPE
             rope_theta: None,
             rope_scaling: None,
 
@@ -53,7 +49,6 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
     }
 
     fn layout(&self) -> ModelLayout {
-        // --- Define the Decoder's Layer Structure for the test ---
         let decoder_layer = DecoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "layer.{}.q.weight".to_string(),
@@ -67,7 +62,7 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
                 norm_weight: "layer.{}.attn_ln.weight".to_string(),
                 norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
             },
-            cross_attn: None, // No cross-attention in this test model
+            cross_attn: None,
             ffn: FeedForwardLayout {
                 up_weight: "layer.{}.up.weight".to_string(),
                 up_bias: Some("layer.{}.up.bias".to_string()),
@@ -80,11 +75,10 @@ impl crate::traits::ModelConfig for MockEmbedConfig {
             },
         };
 
-        // --- Assemble the final ModelLayout ---
         ModelLayout {
             token_embedding: "word".to_string(),
             lm_head: "lm_head.weight".to_string(),
-            encoder: None, // This is a decoder-only test model
+            encoder: None,
             decoder: Some(DecoderLayout {
                 position_embedding: Some("pos".to_string()),
                 token_type_embedding: None,
@@ -148,7 +142,6 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
     let (word_emb, _) = make_embeddings(vocab_size, 128, hidden_size);
 
     // CPU
-
     let cpu_embed = Embeddings::new(
         crate::EmbeddingData::F32(Arc::new(word_emb.clone())),
         None,
@@ -162,13 +155,6 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
         token_type_embeddings: None,
     };
     let gpu_embed = GpuEmbeddings::new(&ctx)?;
-
-    let config = MockEmbedConfig {
-        hidden_size,
-        vocab_size,
-        max_position: 128,
-        scale: false,
-    };
 
     let input_ids: Vec<u32> = vec![1, 50, 100, 200, 500, 999, 0, 10, 20, 30, 40, 50];
     let input_ids_cpu = Array2::from_shape_vec((batch_size, seq_len), input_ids.clone())?;

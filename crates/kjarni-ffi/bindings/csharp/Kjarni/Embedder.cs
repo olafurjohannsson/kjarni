@@ -115,6 +115,13 @@ namespace Kjarni
             return result;
         }
 
+        public static float CosineSimilarity(float[] a, float[] b)
+        {
+            if (a.Length != b.Length)
+                throw new ArgumentException($"Vector dimensions must match: {a.Length} vs {b.Length}");
+            return Native.kjarni_cosine_similarity(a, b, (nuint)a.Length);
+        }
+
         /// <summary>
         /// Get the embedding dimension.
         /// </summary>

@@ -127,16 +127,10 @@ mod feedforward_new_tests {
         );
     }
 
-    /// Helper to create a LinearLayer from raw data.
-    /// 
-    /// Correctly uses `new_f32` to match your existing API.
-    /// Shape must be `(out_features, in_features)` to match LinearLayer's internal layout.
     fn mock_linear(weights_data: Vec<f32>, shape: (usize, usize)) -> LinearLayer {
         let weights = Array2::from_shape_vec(shape, weights_data).unwrap();
-        // FIXED: calling new_f32 instead of new (which takes dims)
         LinearLayer::new_f32(weights, None) 
     }
-
 
     #[test]
     fn test_ffn_shapes() -> Result<()> {

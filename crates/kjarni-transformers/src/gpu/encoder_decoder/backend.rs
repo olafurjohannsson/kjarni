@@ -52,7 +52,6 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         log::info!("[GpuBackend] Encoding {} tokens...", tokens.len());
         let t_start = std::time::Instant::now();
 
-        // 1. Get the GPU Operations Strategy from the model
         let seq2seq_ops = model
             .encoder_decoder_gpu_ops()
             .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
@@ -61,11 +60,10 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             .encoder_gpu_ops()
             .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
 
-        // 2. Prepare inputs on GPU
         let pool = self.context.get_inference_pool();
         let mut pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
-        // --- 3. Run the Encoder Pass ---
+
         let encoder_hidden_states = {
             let (encoder_cmd, pool_ref) = frame.resources();
 
@@ -84,19 +82,8 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
                     0,
                 )?
                 .last_hidden_state
-            // encoder_ops
-            //     .encoder()
-            //     .forward(
-            //         encoder_cmd,
-            //         pool_ref,
-            //         ModelInput::TokensGpu(&input_ids_gpu),
-            //         &attention_mask_gpu,
-            //         None,
-            //     )?
-            //     .last_hidden_state
         };
 
-        // The model's ops are responsible for broadcasting for beam search
         let final_hidden_states = if num_beams > 1 {
             seq2seq_ops.broadcast_encoder_states(&mut frame, &encoder_hidden_states, num_beams)?
         } else {
@@ -110,7 +97,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             seq2seq_ops.decoder().precompute_cross_attention_kv(
                 encoder_cmd,
                 pool_ref,
-                &final_hidden_states, // Use the final, broadcasted states
+                &final_hidden_states, 
             )?
         };
 
@@ -132,12 +119,10 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
     ) -> Result<Array3<f32>> {
         let t_start = std::time::Instant::now();
 
-        // 1. Get the GPU Operations Strategy from the model
         let ops = model
             .encoder_decoder_gpu_ops()
             .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
 
-        // 2. Extract tensors
         let GpuSeq2SeqState::TokenIds(decoder_input_ids) = decoder_tokens else {
             return Err(anyhow!("Invalid tensor type for decoder_tokens"));
         };
@@ -155,9 +140,6 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         let (encoder_cmd, pool_ref) = frame.resources();
 
-        // --- REFACTOR: All logic moves to the `ops` trait ---
-
-        // a) Create the decoder attention mask (can also be moved to ops if it gets complex)
         let (batch_size, _) = decoder_input_ids.dims2();
         let seq_len = cache.get_seq_length() + 1;
         let mask_cpu = Array2::<f32>::ones((batch_size, seq_len));
@@ -173,7 +155,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
 
         let embed_normed = ops.decoder().embed_norm(encoder_cmd, pool_ref, &embed)?;
 
-        // b) Run the decoder stack
+        // Run the decoder stack
         let decoder_hidden_states = ops.decoder().forward_layers(
             encoder_cmd,
             pool_ref,
@@ -186,16 +168,6 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             0,
             ops.decoder().num_layers(),
         )?;
-        // let decoder_hidden_states: GpuCrossDecoderOutput = ops.decoder().forward(
-        //     encoder_cmd,
-        //     pool_ref,
-        //     ModelInput::TokensGpu(decoder_input_ids),
-        //     encoder_hidden_states,
-        //     &attention_mask,
-        //     Some(cache),
-        //     Some(cross_attention_kv_cache), // Precomputed cross-KV is now an internal detail of the ops
-        // )?;
-
         let final_hidden = ops.decoder().final_norm(
             encoder_cmd,
             pool_ref,
@@ -209,19 +181,15 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             .into_iter()
             .enumerate()
         {
-            // The update command is recorded into the SAME command encoder
             match gpu_cache.update(encoder_cmd, i, &k, &v) {
                 Ok(()) => {}
                 Err(e) => log::error!("Failed to update GPU cache: {:?}", e),
             }
         }
-        // gpu_cache.increment_len(1);
-        // c) Project to logits
         let logits_gpu = ops.project_to_logits(&mut frame, &final_hidden)?;
 
         frame.finish();
 
-        // d) Download the result
         let logits_cpu = logits_gpu.to_ndarray_3d::<f32>().await?;
 
         log::info!(
@@ -275,19 +243,11 @@ mod tests {
     use super::*;
     use ndarray::{Array1, Array2, Array4};
 
-    // ========================================================================
-    //  Test Helper
-    // ========================================================================
-
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new()
             .await
             .expect("Failed to create WgpuContext")
     }
-
-    // ========================================================================
-    //  GpuSeq2SeqState Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_gpu_seq2seq_state_token_ids() {
@@ -341,10 +301,6 @@ mod tests {
         assert!(debug_str.contains("TokenIds"));
     }
 
-    // ========================================================================
-    //  GpuEncoderDecoderBackend Construction Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_backend_new() {
         let ctx = get_test_context().await;
@@ -361,10 +317,6 @@ mod tests {
         let debug_str = format!("{:?}", backend);
         assert!(debug_str.contains("GpuEncoderDecoderBackend"));
     }
-
-    // ========================================================================
-    //  create_token_tensor Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_create_token_tensor_single_beam() {
@@ -421,22 +373,15 @@ mod tests {
         // Zero beams - tokens.len() / 0 would panic, but the code handles it
         let state = backend.create_token_tensor(&tokens, 0);
 
-        // This should handle the edge case gracefully
         match state {
             Ok(GpuSeq2SeqState::TokenIds(t)) => {
-                // Shape depends on implementation
                 assert_eq!(t.shape()[0], 0); // 0 beams
             }
             Err(_) => {
-                // Also acceptable if it errors on invalid input
             }
             _ => panic!("Unexpected state type"),
         }
     }
-
-    // ========================================================================
-    //  update_token_tensor Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_update_token_tensor_basic() {
@@ -453,7 +398,6 @@ mod tests {
             .update_token_tensor(&mut state, &new_tokens)
             .unwrap();
 
-        // Verify the buffer was updated
         match &state {
             GpuSeq2SeqState::TokenIds(t) => {
                 let downloaded: Array2<u32> = t.to_ndarray_2d().await.unwrap();

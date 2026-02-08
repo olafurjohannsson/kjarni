@@ -54,7 +54,6 @@ impl GpuLookup {
         input_ids: &GpuTensor,       // The [batch_size, seq_len] u32 IDs
         output: &GpuTensor,          // The [batch_size, seq_len, hidden_size] f32 output
     ) {
-        // --- Validation ---
         assert_eq!(embedding_table.rank(), 2, "Embedding table must be 2D");
         assert_eq!(input_ids.rank(), 2, "Input IDs must be 2D");
         assert_eq!(output.rank(), 3, "Output must be 3D");
@@ -85,7 +84,6 @@ impl GpuLookup {
             "Hidden size dimensions must match"
         );
 
-        // --- Uniforms ---
         let uniforms = LookupUniforms {
             output_size: output.num_elements() as u32,
             output_batch_stride: (seq_len * hidden_size) as u32,
@@ -102,7 +100,6 @@ impl GpuLookup {
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
 
-        // --- Bind Group ---
         let bind_group = self
             .context
             .device
@@ -129,7 +126,6 @@ impl GpuLookup {
                 ],
             });
 
-        // --- Dispatch ---
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Lookup Pass"),
             timestamp_writes: None,
@@ -154,7 +150,6 @@ fn compile_lookup_pipeline(
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Lookup Bind Group Layout"),
                 entries: &[
-                    // Uniforms @binding(0)
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::COMPUTE,

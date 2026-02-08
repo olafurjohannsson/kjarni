@@ -1,9 +1,10 @@
 //! Reranker FFI bindings
 
-use crate::{get_runtime, KjarniErrorCode, KjarniDevice};
 use crate::error::set_last_error;
+use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use kjarni::Reranker;
-use std::ffi::{c_char, c_float, CStr, CString};
+use kjarni::reranker::RerankerError;
+use std::ffi::{CStr, CString, c_char, c_float};
 use std::ptr;
 
 /// Single rerank result
@@ -22,7 +23,10 @@ pub struct KjarniRerankResults {
 
 impl KjarniRerankResults {
     pub fn empty() -> Self {
-        Self { results: ptr::null_mut(), len: 0 }
+        Self {
+            results: ptr::null_mut(),
+            len: 0,
+        }
     }
 
     pub fn from_results(results: Vec<(usize, f32)>) -> Self {
@@ -89,7 +93,11 @@ pub unsafe extern "C" fn kjarni_reranker_new(
     }
 
     let default_config = kjarni_reranker_config_default();
-    let config = if config.is_null() { &default_config } else { &*config };
+    let config = if config.is_null() {
+        &default_config
+    } else {
+        &*config
+    };
 
     let result = get_runtime().block_on(async {
         // Default model name
@@ -99,7 +107,7 @@ pub unsafe extern "C" fn kjarni_reranker_new(
                 Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
             }
         } else {
-            "cross-encoder-minilm"  // Default cross-encoder
+            "minilm-l6-v2-cross-encoder" // Default cross-encoder
         };
 
         let mut builder = Reranker::builder(model_name);
@@ -130,7 +138,13 @@ pub unsafe extern "C" fn kjarni_reranker_new(
 
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniErrorCode::LoadFailed
+            match &e {
+                RerankerError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
+                RerankerError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
+                RerankerError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+                RerankerError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+                _ => KjarniErrorCode::LoadFailed,
+            }
         })
     });
 
@@ -176,9 +190,7 @@ pub unsafe extern "C" fn kjarni_reranker_score(
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let result = get_runtime().block_on(async {
-        reranker_ref.score(query, document).await
-    });
+    let result = get_runtime().block_on(async { reranker_ref.score(query, document).await });
 
     match result {
         Ok(score) => {
@@ -232,15 +244,12 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
     }
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
 
-    let result = get_runtime().block_on(async {
-        reranker_ref.rerank(query, &doc_refs).await
-    });
+    let result = get_runtime().block_on(async { reranker_ref.rerank(query, &doc_refs).await });
 
     match result {
         Ok(results) => {
-            let ranked: Vec<(usize, f32)> = results.into_iter()
-                .map(|r| (r.index, r.score))
-                .collect();
+            let ranked: Vec<(usize, f32)> =
+                results.into_iter().map(|r| (r.index, r.score)).collect();
             *out = KjarniRerankResults::from_results(ranked);
             KjarniErrorCode::Ok
         }
@@ -292,15 +301,13 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
     }
     let doc_refs: Vec<&str> = doc_vec.iter().map(|s| s.as_str()).collect();
 
-    let result = get_runtime().block_on(async {
-        reranker_ref.rerank_top_k(query, &doc_refs, top_k).await
-    });
+    let result =
+        get_runtime().block_on(async { reranker_ref.rerank_top_k(query, &doc_refs, top_k).await });
 
     match result {
         Ok(results) => {
-            let ranked: Vec<(usize, f32)> = results.into_iter()
-                .map(|r| (r.index, r.score))
-                .collect();
+            let ranked: Vec<(usize, f32)> =
+                results.into_iter().map(|r| (r.index, r.score)).collect();
             *out = KjarniRerankResults::from_results(ranked);
             KjarniErrorCode::Ok
         }

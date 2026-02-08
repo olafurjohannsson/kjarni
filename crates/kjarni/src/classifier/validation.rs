@@ -11,7 +11,7 @@ pub fn validate_for_classification(model_type: ModelType) -> ClassifierResult<()
 
     // Check architecture
     match info.architecture {
-        ModelArchitecture::Bert | ModelArchitecture::NomicBert => {
+        ModelArchitecture::Bert | ModelArchitecture::NomicBert | ModelArchitecture::Mpnet => {
             // Valid encoder architectures
         }
         _ => {

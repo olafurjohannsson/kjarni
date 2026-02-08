@@ -1,47 +1,31 @@
 //! GPT-2 style decoder-only language model.
-//!
-//! This module provides the `Gpt2Model`, a model container responsible for loading
-//! weights and configuration for models like GPT-2, DistilGPT2, etc.
-//!
-//! The actual text generation is handled by the generic `Generator` struct,
-//! which can operate on any model that implements the `DecoderLanguageModel` trait.
 
-// --- Standard Library ---
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-// --- External Crates ---
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{InferenceModel, ModelConfig};
 use ndarray::{Array2, Array3};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-// --- Workspace Crates ---
 use kjarni_transformers::{
     WgpuContext,
     decoder::prelude::*,
-    gpu::{GpuTensor, GpuTensorPool, GpuFrameContext},
-    gpu_ops::{primitives::linear::GpuLinearLayer},
+    gpu::{GpuFrameContext, GpuTensor},
+    gpu_ops::primitives::linear::GpuLinearLayer,
     linear_layer::LinearLayer,
     models::{
         LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
     },
     prelude::*,
-    tensor::DType,
     weights::ModelWeights,
 };
 
-// --- Crate-Specific ---
 use crate::models::gpt2::{
     config::Gpt2Config, cpu_decoder::Gpt2CpuDecoder, gpu_decoder::Gpt2GpuDecoder,
 };
 
-/// A model container for GPT-2 and its variants (e.g., DistilGPT2).
-///
-/// This struct holds the model's components (decoder, tokenizer, config) but
-/// delegates the actual text generation task to the `Generator`.
 pub struct Gpt2Model {
     cpu_decoder: Option<Gpt2CpuDecoder>,
     gpu_decoder: Option<Gpt2GpuDecoder>,
@@ -66,6 +50,7 @@ impl Gpt2Model {
     pub fn concrete_config(&self) -> &Arc<Gpt2Config> {
         &self.config
     }
+
     /// Creates a `Gpt2Model` from the HuggingFace model registry.
     ///
     /// This will download the model files to a local cache directory if they
@@ -85,12 +70,8 @@ impl Gpt2Model {
         // }
         let info = model_type.info();
 
-        // 2. Validate Architecture
-        // Since 'ModelArchitecture::Encoder' is gone, we check for specific Encoder families.
         match info.architecture {
-            ModelArchitecture::GPT => {
-                // These are valid encoders
-            }
+            ModelArchitecture::GPT => {}
             _ => {
                 return Err(anyhow!(
                     "Model {:?} is not an GPT (architecture: {:?})",
@@ -117,7 +98,6 @@ impl Gpt2Model {
         Self::from_pretrained(&model_dir, model_type, device, context, decoder_config)
     }
 
-    /// Creates a `Gpt2Model` from a local directory containing the model files.
     pub fn from_pretrained(
         model_path: &Path,
         model_type: ModelType,
@@ -155,7 +135,7 @@ impl Gpt2Model {
         // Split CPU/GPU paths
         match device {
             Device::Cpu => {
-                log::info!("Building CPU decoder...");
+                log::debug!("Building CPU decoder...");
                 let cpu_decoder = Gpt2CpuDecoder::new(&weights, config.clone())?;
 
                 Ok(Self {
@@ -171,7 +151,7 @@ impl Gpt2Model {
                 })
             }
             Device::Wgpu => {
-                log::info!("Building GPU decoder...");
+                log::debug!("Building GPU decoder...");
                 let ctx = context.ok_or_else(|| anyhow!("GPU device requires context"))?;
 
                 ctx.print_memory_usage();
@@ -185,7 +165,7 @@ impl Gpt2Model {
 
                 let gpu_lm_head = lm_head.to_gpu(&ctx)?;
 
-                log::info!("✓ GPU model loaded successfully");
+                log::debug!("✓ GPU model loaded successfully");
 
                 Ok(Self {
                     cpu_decoder: None,
@@ -316,7 +296,6 @@ impl CpuDecoderOps for Gpt2Model {
     }
 }
 
-// --- 2. Implement GPU Operations ---
 impl GpuDecoderOps for Gpt2Model {
     fn decoder(&self) -> &dyn GpuDecoder {
         self.gpu_decoder
@@ -330,25 +309,10 @@ impl GpuDecoderOps for Gpt2Model {
         seq_len: usize,
         max_len: usize,
     ) -> Result<GpuTensor> {
-        // Standard Causal Mask: [1, MaxLen]
-        // 1.0 for valid positions (0..seq_len), 0.0 for future/padding.
         let mask_data: Vec<f32> = (0..max_len)
             .map(|i| if i < seq_len { 1.0 } else { 0.0 })
             .collect();
         GpuTensor::create(ctx.context, &mask_data, vec![1, max_len], "AttentionMask")
-        // Upload using Cow::Owned to fix the type mismatch error
-        // let tensor = GpuTensor::from_raw(
-        //     ctx.context,
-        //     &TensorView {
-        //         bytes: std::borrow::Cow::Owned(bytemuck::cast_slice(&mask_data).to_vec()),
-        //         shape: vec![1, max_len],
-        //         dtype: DType::F32,
-        //         name: "AttentionMask".to_string(),
-        //     },
-        //     "AttentionMask",
-        // )?;
-
-        // Ok(tensor)
     }
 
     fn project_to_logits(
@@ -356,15 +320,14 @@ impl GpuDecoderOps for Gpt2Model {
         ctx: &mut GpuFrameContext,
         last_hidden_state: &GpuTensor,
     ) -> Result<GpuTensor> {
-        let lm_head = self.gpu_lm_head_transposed.as_ref().unwrap(); // This is [Out, In]
-        let linear_layer = self.gpu_lm_head_layer.as_ref().unwrap(); // This expects [Out, In]
+        let lm_head = self.gpu_lm_head_transposed.as_ref().unwrap();
+        let linear_layer = self.gpu_lm_head_layer.as_ref().unwrap();
 
         let (batch, seq, _hidden) = last_hidden_state.dims3();
-        let vocab_size = lm_head.shape()[0]; // Correctly gets Vocab size from [Vocab, Hidden]
+        let vocab_size = lm_head.shape()[0];
 
         let logits = ctx.pool_guard.get(vec![batch, seq, vocab_size]);
 
-        // This call is now valid.
         linear_layer.encode(
             ctx.encoder.as_mut().unwrap(),
             last_hidden_state,
@@ -376,7 +339,6 @@ impl GpuDecoderOps for Gpt2Model {
     }
 }
 
-// --- 3. Implement Main Trait ---
 #[async_trait]
 impl DecoderLanguageModel for Gpt2Model {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
@@ -415,26 +377,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_distilgpt2_architectural_properties() -> Result<()> {
-        // 1. Arrange: Load the model.
         {
             let model = load_distilgpt2_for_test().await?;
             let config = model.concrete_config();
 
-            // 2. Assert: Check architectural values directly from the config struct.
             assert_eq!(config.vocab_size, 50257);
             assert_eq!(config.n_embd, 768); // hidden size
             assert_eq!(config.n_layer, 6);
             assert_eq!(config.n_head, 12);
             assert_eq!(config.n_ctx, 1024); // max_position_embeddings
 
-            // 3. Assert: Check that the trait implementations correctly expose these values.
             assert_eq!(model.vocab_size(), 50257);
             assert_eq!(model.hidden_size(), 768);
             assert_eq!(model.num_layers(), 6);
             assert_eq!(model.num_heads(), 12);
             assert_eq!(model.max_length(), 1024);
 
-            // Check token IDs. GPT-2 uses the same ID for BOS, EOS, and PAD.
             assert_eq!(model.bos_token_id(), Some(50256));
             assert_eq!(model.eos_token_id(), Some(50256));
             assert_eq!(model.pad_token_id(), Some(50256));
@@ -445,38 +403,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_distilgpt2_generation_parity_2() -> Result<()> {
-        // This test verifies that our implementation produces the exact same output
-        // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-
-        // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
         let model_type = ModelType::DistilGpt2;
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-        // The "golden" output string from the Python reference script and your now-working Rust implementation.
         let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
 
-        // Create a config that perfectly matches the reference implementations.
         let config = GenerationConfig {
             max_new_tokens: Some(20),
             strategy: DecodingStrategy::Greedy,
             repetition_penalty: 1.1,
-            add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+            add_bos_token: false,
             ..Default::default()
         };
-
-        // 2. Load model and create the generator.
-        //    We run on CPU to match the Python script's environment.
         {
             let gpt2_model =
                 Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
             let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
-            // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
             let generated_text = generator.generate(prompt, &config, None).await?;
-
-            // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-            //    We trim both strings to avoid any potential whitespace differences at the end.
             let concat_prompt = prompt.to_string() + "" + &generated_text;
             assert_eq!(concat_prompt.trim(), expected_output.trim());
         }
@@ -486,31 +431,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
-        // This test verifies that our implementation produces the exact same output
-        // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-
-        // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
         let model_type = ModelType::DistilGpt2;
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-        // Create a config that perfectly matches the reference implementations.
         let config = GenerationConfig {
             max_new_tokens: Some(5),
             strategy: DecodingStrategy::Greedy,
             repetition_penalty: 1.1,
-            add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+            add_bos_token: false,
             ..Default::default()
         };
 
-        // 2. Load model and create the generator.
-        //    We run on CPU to match the Python script's environment.
         {
             let gpt2_model =
                 Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
             let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
 
-            // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
             let generated_text = generator.generate(prompt, &config, None).await?;
 
             let ctx = WgpuContext::new().await?;
@@ -518,9 +455,6 @@ mod tests {
                 Gpt2Model::from_registry(model_type, None, Device::Wgpu, Some(ctx), None).await?;
             let generator_2 = DecoderGenerator::new(Arc::new(gpt2_model_2))?;
             let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
-
-            // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-            //    We trim both strings to avoid any potential whitespace differences at the end.
             assert_eq!(generated_text.trim(), generated_text_2.trim());
         }
         kjarni_transformers::weights::clear_mmap_cache();

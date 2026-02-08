@@ -6,14 +6,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
 use serde_json::json;
 
+use super::WeightLoader;
 use super::gguf_loader::GgufLoader;
 use super::safetensors_loader::SafeTensorsLoader;
-use super::WeightLoader;
 use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::raw_to_typed_gguf;
@@ -62,7 +62,8 @@ impl ModelWeights {
             if path.join("model.safetensors").exists()
                 || path.join("model.safetensors.index.json").exists()
             {
-                let loader = Box::new(SafeTensorsLoader::new(path)?) as Box<dyn WeightLoader + Send + Sync>;
+                let loader =
+                    Box::new(SafeTensorsLoader::new(path)?) as Box<dyn WeightLoader + Send + Sync>;
                 let config_json = std::fs::read_to_string(path.join("config.json"))
                     .unwrap_or_else(|_| "{}".to_string());
 
@@ -98,7 +99,8 @@ impl ModelWeights {
         }
 
         if path.exists() {
-            let loader = Box::new(SafeTensorsLoader::new(path)?) as Box<dyn WeightLoader + Send + Sync>;
+            let loader =
+                Box::new(SafeTensorsLoader::new(path)?) as Box<dyn WeightLoader + Send + Sync>;
             return Ok(Self {
                 inner: Arc::new(ModelWeightsInner {
                     loader,
@@ -202,7 +204,11 @@ impl ModelWeights {
     pub fn is_bert(&self) -> bool {
         matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("bert"))
     }
-
+    
+    pub fn is_mpnet(&self) -> bool {
+        matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("mpnet"))
+    }
+    
     pub fn is_distilbert(&self) -> bool {
         matches!(self.model_type(), Some(mt) if mt.eq_ignore_ascii_case("distilbert"))
     }
@@ -346,7 +352,10 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    fn create_test_safetensors(dir: &TempDir, tensors: &[(&str, Vec<f32>, Vec<usize>)]) -> Result<()> {
+    fn create_test_safetensors(
+        dir: &TempDir,
+        tensors: &[(&str, Vec<f32>, Vec<usize>)],
+    ) -> Result<()> {
         use safetensors::tensor::{Dtype, TensorView as StTensorView};
 
         let stored: Vec<(String, Vec<usize>, Vec<u8>)> = tensors
@@ -379,7 +388,11 @@ mod tests {
     #[test]
     fn test_model_weights_new_safetensors() {
         let dir = tempfile::tempdir().unwrap();
-        create_test_safetensors(&dir, &[("test.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])]).unwrap();
+        create_test_safetensors(
+            &dir,
+            &[("test.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])],
+        )
+        .unwrap();
 
         let weights = ModelWeights::new(dir.path()).unwrap();
         assert!(!weights.is_gguf());
@@ -390,7 +403,11 @@ mod tests {
     #[test]
     fn test_with_raw_tensor() {
         let dir = tempfile::tempdir().unwrap();
-        create_test_safetensors(&dir, &[("layer.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])]).unwrap();
+        create_test_safetensors(
+            &dir,
+            &[("layer.weight", vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])],
+        )
+        .unwrap();
 
         let weights = ModelWeights::new(dir.path()).unwrap();
 
@@ -443,7 +460,9 @@ mod tests {
 
         let weights = ModelWeights::new(dir.path()).unwrap();
 
-        let dtype = weights.resolve_dtype("test.weight", Some(DType::F16)).unwrap();
+        let dtype = weights
+            .resolve_dtype("test.weight", Some(DType::F16))
+            .unwrap();
         assert_eq!(dtype, DType::F16);
 
         let dtype = weights.resolve_dtype("test.weight", None).unwrap();

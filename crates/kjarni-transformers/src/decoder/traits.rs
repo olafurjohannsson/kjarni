@@ -419,10 +419,6 @@ pub trait DecoderLanguageModel: LanguageModel {
         self.chat_template().is_some()
     }
 
-    // --- Helper Utilities (Direct Forward Pass) ---
-
-    /// Convenience method to run a CPU forward pass given text input.
-    /// Useful for testing, feature extraction, or sanity checks without the Generator.
     fn get_logits_cpu(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
         let seq_len = input_ids.ncols();
@@ -431,13 +427,11 @@ pub trait DecoderLanguageModel: LanguageModel {
             .decoder_cpu_ops()
             .ok_or_else(|| anyhow!("CPU Ops not available"))?;
 
-        // Use model-specific mask generation
         let attention_mask = ops.get_attention_mask(seq_len, 0)?;
 
         let tokens = ops.embed(&input_ids, 0)?;
 
         let decoder_output = ops.decoder().forward(
-            // ModelInput::from_tokens(input_ids.as_slice().unwrap()),
             &tokens,
             &attention_mask,
             0,
@@ -446,9 +440,7 @@ pub trait DecoderLanguageModel: LanguageModel {
 
         ops.project_to_logits(&decoder_output)
     }
-
-    /// Convenience method to run a GPU forward pass given text input.
-    /// Useful for testing, feature extraction, or sanity checks without the Generator.
+    
     async fn get_logits_gpu(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
         // let input_slice = input_ids.as_slice().unwrap();

@@ -52,7 +52,7 @@ namespace Kjarni
         /// <param name="model">Embedding model name (must match the model used to create the index)</param>
         /// <param name="device">Compute device - "cpu" or "gpu"</param>
         /// <param name="cacheDir">Directory to cache downloaded models</param>
-        /// <param name="rerankModel">Optional cross-encoder model for reranking</param>
+        /// <param name="rerankerModel">Optional cross-encoder model for reranking</param>
         /// <param name="defaultMode">Default search mode</param>
         /// <param name="defaultTopK">Default number of results</param>
         /// <param name="quiet">Suppress progress output</param>
@@ -60,7 +60,7 @@ namespace Kjarni
             string model = "minilm-l6-v2",
             string device = "cpu",
             string? cacheDir = null,
-            string? rerankModel = null,
+            string? rerankerModel = null,
             SearchMode defaultMode = SearchMode.Hybrid,
             int defaultTopK = 10,
             bool quiet = false)
@@ -92,9 +92,9 @@ namespace Kjarni
                     config.CacheDir = cacheDirHandle.Value.AddrOfPinnedObject();
                 }
 
-                if (rerankModel != null)
+                if (rerankerModel != null)
                 {
-                    var rerankBytes = System.Text.Encoding.UTF8.GetBytes(rerankModel + "\0");
+                    var rerankBytes = System.Text.Encoding.UTF8.GetBytes(rerankerModel + "\0");
                     rerankHandle = GCHandle.Alloc(rerankBytes, GCHandleType.Pinned);
                     config.RerankModel = rerankHandle.Value.AddrOfPinnedObject();
                 }

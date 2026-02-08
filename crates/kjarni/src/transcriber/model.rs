@@ -161,7 +161,6 @@ impl Transcriber {
         let config = self.build_config();
         let mel_config = self.model.expected_mel_config();
 
-        // --- Chunk ---
         let chunks = WhisperModel::chunk_audio(samples, WHISPER_SAMPLE_RATE);
         let total_chunks = chunks.len();
         let mut chunk_results: Vec<WhisperChunkResult> = Vec::with_capacity(total_chunks);
@@ -169,7 +168,7 @@ impl Transcriber {
         for (i, chunk) in chunks.iter().enumerate() {
             let offset = i as f32 * WHISPER_CHUNK_LENGTH_SECS;
 
-            // --- Mel spectrogram ---
+            // Mel spectrogram
             self.report_progress(
                 TranscriptionStage::Encoding,
                 i,
@@ -180,13 +179,13 @@ impl Transcriber {
             let mel = compute_mel_spectrogram(chunk, &mel_config)
                 .map_err(TranscriberError::TranscriptionFailed)?;
 
-            // --- Encoder ---
+            // Encoder
             let encoder_out = self
                 .model
                 .encode_mel(&mel)
                 .map_err(TranscriberError::TranscriptionFailed)?;
 
-            // --- Decoder ---
+            // Decoder
             self.report_progress(
                 TranscriptionStage::Decoding,
                 i,
@@ -202,7 +201,7 @@ impl Transcriber {
             chunk_results.push(result);
         }
 
-        // --- Stitch ---
+        // Stitch
         self.report_progress(TranscriptionStage::Stitching, 0, 0, None);
 
         let (text, segments) = WhisperModel::stitch_segments(chunk_results);

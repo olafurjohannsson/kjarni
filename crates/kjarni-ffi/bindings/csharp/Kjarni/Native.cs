@@ -690,6 +690,9 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_searcher_reranker_model(IntPtr handle, IntPtr buf, UIntPtr buf_len);
 
+[DllImport(LibName)]
+public static extern float kjarni_cosine_similarity(float[] a, float[] b, nuint len);
+
         // =================================================================
         // Helpers
         // =================================================================

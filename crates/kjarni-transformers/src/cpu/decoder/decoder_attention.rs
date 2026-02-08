@@ -722,15 +722,13 @@ mod decoder_attention_test {
     }
     #[test]
     fn test_decoder_attention_golden_gqa() -> Result<()> {
-        // --- Configuration ---
         let hidden = 16;
         let heads = 4;
-        let kv_heads = 2; // GQA (2:1 ratio)
+        let kv_heads = 2;
         let head_dim = hidden / heads; // 4
 
         let (weight_k_data, weight_o_data, weight_q_data, weight_v_data) = get_weights();
 
-        // --- 1. Load Weights ---
         let q = load_linear(hidden, hidden, weight_q_data);
         let k = load_linear(kv_heads * head_dim, hidden, weight_k_data);
         let v = load_linear(kv_heads * head_dim, hidden, weight_v_data);
@@ -738,24 +736,17 @@ mod decoder_attention_test {
 
         let attn = DecoderAttention::new(hidden, heads, q, k, v, o, Some(kv_heads));
 
-        // --- 2. Prepare Inputs ---
-        // attn_input_hidden Shape: [1, 1, 16]
         let attn_input_hidden_data = vec![
             0.344363, -3.101606, -1.458723, -1.431826, -0.607127, -0.259738, -0.719019, -0.385831,
             0.523353, -0.821177, -0.470869, 0.601642, -0.282511, 0.769268, -0.766892, -0.949487,
         ];
         let hidden_in = Array3::from_shape_vec((1, 1, 16), attn_input_hidden_data)?;
 
-        // Prepare Cache Buffer
-        // Total len = 2 (history) + 1 (new) = 3
-        // Cache Shape: [Batch, TotalLen, KV_Heads * HeadDim] -> [1, 3, 2 * 4] = [1, 3, 8]
         let total_len = 3;
         let cache_dim = kv_heads * head_dim;
         let mut k_cache = Array3::zeros((1, total_len, cache_dim));
         let mut v_cache = Array3::zeros((1, total_len, cache_dim));
 
-        // Fill History (First 2 slots)
-        // attn_history_k Shape: [1, 2, 8]
         let attn_history_k_data = vec![
             0.016917, 0.080277, 0.744841, 1.345485, -0.734670, 0.044657, -1.521120, 0.347838,
             0.126822, -2.452072, 0.415976, 1.902536, 0.740177, 1.416200, 0.683398, -0.138252,
@@ -767,22 +758,18 @@ mod decoder_attention_test {
         let history_k = Array3::from_shape_vec((1, 2, 8), attn_history_k_data)?;
         let history_v = Array3::from_shape_vec((1, 2, 8), attn_history_v_data)?;
 
-        // Copy history into cache
         k_cache.slice_mut(s![.., ..2, ..]).assign(&history_k);
         v_cache.slice_mut(s![.., ..2, ..]).assign(&history_v);
 
-        // --- 3. Run Forward ---
         let output = attn.forward(
             &hidden_in,
-            None, // No mask for basic golden test
+            None, 
             k_cache.view_mut(),
             v_cache.view_mut(),
-            2,    // Offset (not used in this test as RoPE is None, but good practice)
+            2,    
             None, // No RoPE
         )?;
 
-        // --- 4. Verify Output ---
-        // attn_output Shape: [1, 1, 16]
         let attn_output_data = vec![
             0.060655, 0.152719, -0.276075, 0.318217, -0.113340, 0.063543, 0.101776, 0.033563,
             -0.264849, -0.573791, 0.028018, -0.277676, -0.501199, 0.055808, -0.315817, 0.134697,
@@ -794,31 +781,23 @@ mod decoder_attention_test {
         println!("GQA Output Max Diff: {:.6}", max_diff);
         assert!(max_diff < 1e-4, "GQA Output mismatch");
 
-        // --- 5. Verify In-Place Cache Updates ---
-        // We check the LAST slot (index 2) of the cache
         let k_updated_slot = k_cache.slice(s![.., 2, ..]);
         let v_updated_slot = v_cache.slice(s![.., 2, ..]);
 
-        // attn_update_k Shape: [1, 1, 8]
         let attn_update_k_data = vec![
             -0.023620, -0.556388, 0.501513, -0.782774, -0.089049, -0.192072, 0.180540, -0.909185,
         ];
         let golden_k_update = Array2::from_shape_vec((1, 8), attn_update_k_data)?; // Sliced to 2D
 
-        // Check K
-        // Note: slice() returns ArrayView, need to compare properly.
-        // k_updated_slot is [1, 8] (Batch, Dim)
         let k_diff = (&k_updated_slot - &golden_k_update).mapv(|x| x.abs());
         let max_k_diff = k_diff.fold(0.0f32, |a, &b| a.max(b));
         assert!(max_k_diff < 1e-4, "Cache K update mismatch");
 
-        // attn_update_v Shape: [1, 1, 8]
         let attn_update_v_data = vec![
             -0.204815, -0.367078, 0.186254, -0.480577, 0.723541, 0.553549, 0.399943, -0.224999,
         ];
         let golden_v_update = Array2::from_shape_vec((1, 8), attn_update_v_data)?;
 
-        // Check V
         let v_diff = (&v_updated_slot - &golden_v_update).mapv(|x| x.abs());
         let max_v_diff = v_diff.fold(0.0f32, |a, &b| a.max(b));
         assert!(max_v_diff < 1e-4, "Cache V update mismatch");
@@ -829,7 +808,6 @@ mod decoder_attention_test {
     fn test_decoder_attention_masking() -> Result<()> {
         let hidden = 8;
         let heads = 2;
-        // Identity weights
         let eye = Array2::eye(hidden);
         let q = LinearLayer::new_f32(eye.clone(), None);
         let k = LinearLayer::new_f32(eye.clone(), None);
@@ -838,25 +816,14 @@ mod decoder_attention_test {
 
         let attn = DecoderAttention::new(hidden, heads, q, k, v, o, None);
 
-        // 1. Input: Small value (1.0) so dot products don't explode Softmax
         let hidden_in = Array3::from_elem((1, 1, hidden), 1.0);
 
-        // 2. Cache Setup
-        // History (Indices 0, 1): V = 5.0, K = 1.0
-        // New     (Index 2):      V = 1.0, K = 1.0 (Written by forward pass via Identity)
         let total_len = 3;
         let mut k_cache = Array3::ones((1, total_len, hidden));
         let mut v_cache = Array3::zeros((1, total_len, hidden));
 
-        // Set distinct history values so we know if they are being included
         v_cache.slice_mut(s![.., 0..2, ..]).fill(5.0);
 
-        // --- CASE 1: UNMASKED ---
-        // Q = 1.0.
-        // K = [1.0, 1.0, 1.0].
-        // Scores = [1.0, 1.0, 1.0]. Softmax -> [0.33, 0.33, 0.33].
-        // V = [5.0, 5.0, 1.0].
-        // Expected Output = (5 + 5 + 1) / 3 = 3.666...
         let out_unmasked = attn.forward(
             &hidden_in,
             None,
@@ -866,13 +833,8 @@ mod decoder_attention_test {
             None,
         )?;
 
-        // Reset the "new" slot in V cache (index 2) just to be clean
         v_cache.slice_mut(s![.., 2, ..]).fill(0.0);
 
-        // --- CASE 2: MASKED ---
-        // Mask out indices 0 and 1.
-        // Softmax -> [0.0, 0.0, 1.0].
-        // Expected Output = 1.0.
         let mask = Array2::from_shape_vec((1, 3), vec![0.0, 0.0, 1.0]).unwrap();
 
         let out_masked = attn.forward(
@@ -893,11 +855,9 @@ mod decoder_attention_test {
             out_masked.mean().unwrap()
         );
 
-        // Verification
         let diff = (&out_unmasked - &out_masked).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
-        // The difference should be ~2.66
         assert!(
             max_diff > 1.0,
             "Masking failed: Output didn't change enough!"
@@ -905,7 +865,7 @@ mod decoder_attention_test {
 
         Ok(())
     }
-    // Helper to create a lightweight DecoderAttention without real weights
+    
     fn create_dummy_attn(hidden: usize, heads: usize, kv_heads: usize) -> DecoderAttention {
         let eye = Array2::eye(hidden);
         let dummy_linear1 = LinearLayer::new_f32(eye.clone(), None);
@@ -926,40 +886,29 @@ mod decoder_attention_test {
 
     #[test]
     fn test_prepare_kv_heads_gqa_expansion() {
-        // Setup: 4 Query Heads, 2 KV Heads (Group Size = 2)
-        // Hidden = 4, Head Dim = 1
         let hidden = 4;
         let heads = 4;
         let kv_heads = 2;
         let attn = create_dummy_attn(hidden, heads, kv_heads);
 
-        // Input: [Batch=1, Seq=1, Dim=2(KV_Heads * HeadDim)]
-        // KV Head 0 value: 10.0
-        // KV Head 1 value: 20.0
         let input_data = vec![10.0, 20.0];
         let kv_input = Array3::from_shape_vec((1, 1, 2), input_data).unwrap();
 
-        // Run
         let out = attn
             .prepare_kv_heads(&kv_input, 1)
             .expect("prepare_kv_heads failed");
 
-        // Expected Shape: [Batch, Q_Heads, Seq, HeadDim] -> [1, 4, 1, 1]
         assert_eq!(out.shape(), &[1, 4, 1, 1]);
 
-        // Verify Repetition logic
-        // Group 0 (Q Heads 0 & 1) should come from KV Head 0 (Value 10.0)
         assert_eq!(out[[0, 0, 0, 0]], 10.0, "Q Head 0 should match KV Head 0");
         assert_eq!(out[[0, 1, 0, 0]], 10.0, "Q Head 1 should match KV Head 0");
 
-        // Group 1 (Q Heads 2 & 3) should come from KV Head 1 (Value 20.0)
         assert_eq!(out[[0, 2, 0, 0]], 20.0, "Q Head 2 should match KV Head 1");
         assert_eq!(out[[0, 3, 0, 0]], 20.0, "Q Head 3 should match KV Head 1");
     }
 
     #[test]
     fn test_prepare_kv_heads_mha_no_expansion() {
-        // Setup: 2 Heads, 2 KV Heads (1:1 mapping)
         let hidden = 2;
         let heads = 2;
         let kv_heads = 2;
@@ -970,35 +919,27 @@ mod decoder_attention_test {
 
         let out = attn.prepare_kv_heads(&kv_input, 1).unwrap();
 
-        // Should map directly without duplication
         assert_eq!(out[[0, 0, 0, 0]], 10.0);
         assert_eq!(out[[0, 1, 0, 0]], 20.0);
     }
 
     #[test]
     fn test_apply_causal_mask_structure() {
-        // Setup: 3x3 Attention Matrix (Pure Prefill)
         let hidden = 4;
         let attn = create_dummy_attn(hidden, 1, 1);
 
-        // [Batch=1, Heads=1, Q_Len=3, K_Len=3]
         let mut scores = Array4::<f32>::zeros((1, 1, 3, 3));
 
-        // Apply Mask with cache_len = 0
         attn.apply_causal_mask(&mut scores, 0);
 
-        // Expected Lower Triangular Mask (0 = Keep, -inf = Mask)
-        // Row 0: [0, X, X]
         assert_eq!(scores[[0, 0, 0, 0]], 0.0, "Pos 0 attends to 0");
         assert_eq!(scores[[0, 0, 0, 1]], MASK_VALUE, "Pos 0 CANNOT attend to 1");
         assert_eq!(scores[[0, 0, 0, 2]], MASK_VALUE, "Pos 0 CANNOT attend to 2");
 
-        // Row 1: [0, 0, X]
         assert_eq!(scores[[0, 0, 1, 0]], 0.0);
         assert_eq!(scores[[0, 0, 1, 1]], 0.0);
         assert_eq!(scores[[0, 0, 1, 2]], MASK_VALUE);
 
-        // Row 2: [0, 0, 0]
         assert_eq!(scores[[0, 0, 2, 0]], 0.0);
         assert_eq!(scores[[0, 0, 2, 1]], 0.0);
         assert_eq!(scores[[0, 0, 2, 2]], 0.0);
@@ -1006,25 +947,18 @@ mod decoder_attention_test {
 
     #[test]
     fn test_apply_causal_mask_with_cache_offset() {
-        // Setup: We have 2 tokens in history, processing 2 new tokens.
-        // Total K Len = 4. Q Len = 2.
         let hidden = 4;
         let attn = create_dummy_attn(hidden, 1, 1);
 
-        // [Batch=1, Heads=1, Q_Len=2, Total_K_Len=4]
         let mut scores = Array4::<f32>::zeros((1, 1, 2, 4));
 
-        // Apply Mask with cache_len = 2
-        // This means Q_Index 0 is actually Global Position 2.
         attn.apply_causal_mask(&mut scores, 2);
 
-        // Q Row 0 (Global Pos 2): Should attend to 0, 1, 2. Mask 3.
         assert_eq!(scores[[0, 0, 0, 0]], 0.0); // History
         assert_eq!(scores[[0, 0, 0, 1]], 0.0); // History
         assert_eq!(scores[[0, 0, 0, 2]], 0.0); // Self
         assert_eq!(scores[[0, 0, 0, 3]], MASK_VALUE, "Future");
 
-        // Q Row 1 (Global Pos 3): Should attend to 0, 1, 2, 3.
         assert_eq!(scores[[0, 0, 1, 0]], 0.0);
         assert_eq!(scores[[0, 0, 1, 1]], 0.0);
         assert_eq!(scores[[0, 0, 1, 2]], 0.0);

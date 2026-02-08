@@ -36,17 +36,12 @@ pub fn configure_threading() {
         (logical_cores, false)
     };
 
-    // FIX: Set affinity for the main thread regardless of hybrid status
-    // On your Xeon, this pins the main thread to Core 0.
     #[cfg(target_os = "linux")]
     set_thread_affinity(num_threads);
 
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .start_handler(move |thread_index| {
-            // FIX: Pin every Rayon worker thread to its own core
-            // This ensures Thread 0 is on Core 0, Thread 1 on Core 1, etc.
-            // This is CRITICAL for consistent memory bandwidth.
             #[cfg(target_os = "linux")]
             unsafe {
                 let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
@@ -63,19 +58,19 @@ fn is_intel_hybrid() -> bool {
     // Check for Intel 12th gen+ hybrid architecture
     #[cfg(target_os = "linux")]
     {
-        // Method 1: Check core_type sysfs (kernel 5.18+)
+        //Check core_type sysfs (kernel 5.18+)
         if std::path::Path::new("/sys/devices/system/cpu/cpu0/topology/core_type").exists() {
             return true; // Hybrid system
         }
 
-        // Method 2: Check CPU model name
+        //  Check CPU model name
         if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
             let model = cpuinfo
                 .lines()
                 .find(|l| l.starts_with("model name"))
                 .unwrap_or("");
 
-            // Intel 12th, 13th, 14th gen are hybrid
+            // Intel 12th, 13th, 14th gen hybrid
             if model.contains("12th Gen Intel")
                 || model.contains("13th Gen Intel")
                 || model.contains("14th Gen Intel")

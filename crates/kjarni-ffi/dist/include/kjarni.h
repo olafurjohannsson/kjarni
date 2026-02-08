@@ -484,6 +484,8 @@ kjarni_ void kjarni_string_free(char *s);
  */
 kjarni_ void kjarni_string_array_free(struct KjarniKjarniStringArray arr);
 
+kjarni_ float kjarni_cosine_similarity(const float *a, const float *b, uintptr_t len);
+
 kjarni_ struct KjarniKjarniCancelToken *kjarni_cancel_token_new(void);
 
 kjarni_ void kjarni_cancel_token_cancel(struct KjarniKjarniCancelToken *token);

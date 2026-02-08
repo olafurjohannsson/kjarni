@@ -218,12 +218,10 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
 
 #[tokio::test]
 async fn test_gpu_ffn_parity_encode() -> Result<()> {
-    // --- SETUP (Unchanged) ---
     let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::Gelu;
 
-    // Create CPU and GPU modules with identical weights
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })
@@ -249,20 +247,14 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
 
-    // Create identical inputs
     let input_cpu = Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
 
-    // --- RUN CPU REFERENCE ---
     let expected_cpu = cpu_ffn.forward(&input_cpu)?;
 
-    // --- START CORRECTION ---
-
-    // 1. Create the encoder and pool directly for the test.
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let mut pool = GpuTensorPool::new(context.clone());
 
-    // 2. Call the encode function with the raw &mut encoder and &mut pool.
     let output_gpu = gpu_ffn.encode(&mut encoder, &input_gpu, &gpu_weights, &mut pool);
     context.queue.submit(Some(encoder.finish()));
     pool.next_frame();
@@ -271,8 +263,8 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
         &expected_cpu,
         &output_gpu,
         "FFN FC2 Fused Output",
-        1e-4, // Relative tolerance: 0.01%
-        1e-5, // Absolute tolerance
+        1e-4, 
+        1e-5, 
     )
     .await;
 
@@ -312,7 +304,6 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
 
-    // FIX 1: Reduce random range to -0.5 to 0.5 to minimize FP drift in tanh/pow
     let input_cpu = Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-0.5, 0.5));
     let input_gpu = GpuTensor::from_ndarray(&context, &input_cpu)?;
 
@@ -332,13 +323,11 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
     gpu_ffn.run_fc1(&mut encoder, &gpu_weights, &input_gpu, &output_gpu);
     context.queue.submit(Some(encoder.finish()));
 
-    // FIX 2: Explicitly poll and check for errors
     match context.device.poll(wgpu::PollType::wait_indefinitely()) {
         Ok(_) => {} // Success
         Err(e) => panic!("GPU Poll failed: {:?}", e),
     }
 
-    // FIX 3: Relax tolerance slightly (2e-4) to account for GeluNew precision diffs
     assert_tensors_are_close(
         &expected_cpu_output,
         &output_gpu,
@@ -536,12 +525,10 @@ async fn test_gpu_ffn_fc1_isolated_tanh() -> Result<()> {
 }
 #[tokio::test]
 async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
-    // --- SETUP (Identical to the previous tests) ---
     let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
     let activation = Activation::Gelu;
 
-    // Create CPU and GPU modules with identical weights
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })
@@ -569,23 +556,14 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
 
-    // --- CREATE A CONSISTENT INPUT FOR FC2 ---
-    // 1. Create a random initial input.
     let initial_input_cpu =
         Array3::random((batch_size, seq_len, hidden_size), Uniform::new(-1.5, 1.5));
-    // 2. Pass it through the CPU's fc1 and activation to get a realistic intermediate tensor.
-    //    This tensor will be the input for both the CPU and GPU fc2 operations.
     let mut intermediate_input_cpu = cpu_ffn.fc1(&initial_input_cpu)?;
     cpu_ffn.apply_activation(&mut intermediate_input_cpu);
-    // 3. Upload this consistent input to the GPU.
     let intermediate_input_gpu = GpuTensor::from_ndarray(&context, &intermediate_input_cpu)?;
 
-    // --- RUN CPU REFERENCE (FC2 only) ---
-    // Run the fc2 method on the intermediate CPU tensor.
     let expected_cpu_output = cpu_ffn.fc2(&intermediate_input_cpu)?;
 
-    // --- RUN GPU KERNEL (FC2 only) ---
-    // 1. Create the encoder and a destination tensor for the GPU output.
     let mut encoder = context.device.create_command_encoder(&Default::default());
     let final_output_shape = expected_cpu_output.shape().to_vec();
     let output_gpu = GpuTensor::uninitialized(
@@ -595,7 +573,6 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         "FC2 Isolated Test Output",
     );
 
-    // 2. Call the isolated run_fc2 function.
     gpu_ffn.run_fc2(
         &mut encoder,
         &gpu_weights,
@@ -603,7 +580,6 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         &output_gpu,
     );
 
-    // 3. Submit the work to the GPU.
     context.queue.submit(Some(encoder.finish()));
 
     assert_tensors_are_close_relative(
@@ -624,13 +600,11 @@ pub async fn assert_tensors_are_close_relative(
     relative_tolerance: f32,
     absolute_tolerance: f32,
 ) {
-    // 1. Get the GPU data back to the CPU. This is the only async part.
     let gpu_tensor_cpu = gpu_tensor
         .to_ndarray_3d::<f32>()
         .await
         .expect("Failed to read GPU tensor back to CPU for comparison");
 
-    // 2. Sanity check that the shapes are identical.
     assert_eq!(
         cpu_tensor.shape(),
         gpu_tensor_cpu.shape(),
@@ -639,8 +613,6 @@ pub async fn assert_tensors_are_close_relative(
         cpu_tensor.shape(),
         gpu_tensor_cpu.shape()
     );
-
-    // 3. Find the element with the largest absolute difference to create a useful error message.
     let mut max_abs_diff = 0.0;
     let mut worst_cpu_val = 0.0;
     let mut worst_gpu_val = 0.0;
@@ -666,10 +638,8 @@ pub async fn assert_tensors_are_close_relative(
         }
     }
 
-    // 4. Calculate the allowed tolerance for the single worst element.
     let allowed_diff = absolute_tolerance + (relative_tolerance * worst_cpu_val.abs());
 
-    // 5. Perform the final check and panic with a detailed message if it fails.
     if max_abs_diff > allowed_diff {
         panic!(
             "\n\nTensor '{}' is not close enough to its GPU counterpart.\n\
@@ -702,8 +672,6 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
     let fc1_w_cpu = Array2::<f32>::zeros((hidden_size, intermediate_size));
     let fc1_b_cpu = Array1::<f32>::zeros(intermediate_size);
 
-    // 2. Use the new "smart" constructor to create the weights struct.
-    //    This single function call handles all transpositions and GpuTensor conversions internally.
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,
     )?;
@@ -746,8 +714,6 @@ async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
     let dummy_fc2_w_cpu = Array2::<f32>::zeros((intermediate_size, hidden_size));
     let dummy_fc2_b_cpu = Array1::<f32>::zeros(hidden_size);
 
-    // 2. Use the new "smart" constructor to create the weights struct.
-    //    This single function call handles all transpositions and GpuTensor conversions internally.
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context,
         &fc1_w_cpu,

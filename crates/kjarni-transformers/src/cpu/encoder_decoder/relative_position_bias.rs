@@ -104,9 +104,9 @@ impl T5RelativePositionBias {
         let mut ret = 0;
 
         if self.is_bidirectional {
-            num_buckets /= 2; // FIX: Reduce buckets for half-space
+            num_buckets /= 2;
             if n < 0 {
-                ret += num_buckets; // Add offset (e.g. +16)
+                ret += num_buckets; // Add offset
             }
             n = n.abs();
         } else {

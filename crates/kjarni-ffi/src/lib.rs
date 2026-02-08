@@ -14,6 +14,7 @@ pub use callback::*;
 pub use error::*;
 pub use embedder::*;
 pub use classifier::*;
+use kjarni::cosine_similarity;
 pub use reranker::*;
 pub use indexer::*;
 pub use searcher::*;
@@ -186,6 +187,20 @@ pub unsafe extern "C" fn kjarni_string_array_free(arr: KjarniStringArray) {
             let _ = Box::from_raw(strings.as_mut_ptr());
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_cosine_similarity(
+    a: *const f32,
+    b: *const f32,
+    len: usize,
+) -> f32 {
+    if a.is_null() || b.is_null() || len == 0 {
+        return 0.0;
+    }
+    let a = std::slice::from_raw_parts(a, len);
+    let b = std::slice::from_raw_parts(b, len);
+    cosine_similarity(a, b)
 }
 
 // =============================================================================

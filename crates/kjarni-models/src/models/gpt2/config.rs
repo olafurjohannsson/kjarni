@@ -85,17 +85,13 @@ fn as_any(&self) -> &dyn std::any::Any {
             "h.{}"
         };
 
-        // --- Define the Decoder's Layer Structure ---
         let decoder_layer = DecoderLayerLayout {
             self_attn: AttentionLayout {
-                // NOTE: GPT-2 uses a fused QKV weight matrix. We point q_weight to it
-                // and leave k/v empty to signal to the loader that it's a fused operation.
-                // The loader for the GPT-2 layer will need to handle this special case.
                 q_weight: format!("{}.attn.c_attn.weight", lp),
                 q_bias: Some(format!("{}.attn.c_attn.bias", lp)),
-                k_weight: String::new(), // Empty indicates fused with Q
+                k_weight: String::new(), 
                 k_bias: None,
-                v_weight: String::new(), // Empty indicates fused with Q
+                v_weight: String::new(),
                 v_bias: None,
                 o_weight: format!("{}.attn.c_proj.weight", lp),
                 o_bias: Some(format!("{}.attn.c_proj.bias", lp)),
@@ -108,14 +104,13 @@ fn as_any(&self) -> &dyn std::any::Any {
                 up_bias: Some(format!("{}.mlp.c_fc.bias", lp)),
                 down_weight: format!("{}.mlp.c_proj.weight", lp),
                 down_bias: Some(format!("{}.mlp.c_proj.bias", lp)),
-                gate_weight: None, // GPT-2 uses GELU, not SwiGLU
+                gate_weight: None, // GPT-2 uses GELU
                 gate_bias: None,
                 norm_weight: format!("{}.ln_2.weight", lp),
                 norm_bias: Some(format!("{}.ln_2.bias", lp)),
             },
         };
 
-        // --- Assemble the final ModelLayout ---
         ModelLayout {
             token_embedding: format!("{}wte.weight", p),
             lm_head: format!("{}wte.weight", p), // GPT-2 ties weights
@@ -162,14 +157,12 @@ mod tests {
         let meta = config.metadata();
         let layout = config.layout();
 
-        // --- Get the nested decoder layout ---
         let decoder_layout = layout
             .decoder
             .as_ref()
             .expect("GPT-2 should have a decoder layout");
         let layer_layout = &decoder_layout.layer;
 
-        // --- Verify Architectural Correctness ---
         assert!(
             layout.encoder.is_none(),
             "GPT-2 is decoder-only, encoder should be None"
@@ -179,7 +172,6 @@ mod tests {
             "GPT-2 has no cross-attention"
         );
 
-        // --- Verify Naming Conventions ---
         assert_eq!(meta.hidden_size, 768);
         assert_eq!(layout.token_embedding, "wte.weight");
         assert_eq!(
@@ -188,19 +180,16 @@ mod tests {
         );
         assert_eq!(layout.lm_head, "wte.weight");
 
-        // Verify a self-attention name
         assert_eq!(
             layer_layout.self_attn.q_weight.replace("{}", "0"),
             "h.0.attn.c_attn.weight"
         );
 
-        // Verify an FFN name
         assert_eq!(
             layer_layout.ffn.down_weight.replace("{}", "11"),
             "h.11.mlp.c_proj.weight"
         );
 
-        // Verify a final norm name
         assert_eq!(
             decoder_layout.final_norm_weight.as_ref().unwrap(),
             "ln_f.weight"
@@ -213,14 +202,12 @@ mod tests {
         let meta = config.metadata();
         let layout = config.layout();
 
-        // --- Get the nested decoder layout ---
         let decoder_layout = layout
             .decoder
             .as_ref()
             .expect("DistilGPT2 should have a decoder layout");
         let layer_layout = &decoder_layout.layer;
 
-        // --- Verify Architectural Correctness ---
         assert!(
             layout.encoder.is_none(),
             "DistilGPT2 is decoder-only, encoder should be None"
@@ -230,7 +217,6 @@ mod tests {
             "DistilGPT2 has no cross-attention"
         );
 
-        // --- Verify Naming Conventions ---
         assert_eq!(meta.num_layers, 6);
         assert_eq!(layout.token_embedding, "transformer.wte.weight");
         assert_eq!(
@@ -239,13 +225,11 @@ mod tests {
         );
         assert_eq!(layout.lm_head, "transformer.wte.weight");
 
-        // Verify an FFN name
         assert_eq!(
             layer_layout.ffn.up_weight.replace("{}", "0"),
             "transformer.h.0.mlp.c_fc.weight"
         );
 
-        // Verify a self-attention name
         assert_eq!(
             layer_layout
                 .self_attn

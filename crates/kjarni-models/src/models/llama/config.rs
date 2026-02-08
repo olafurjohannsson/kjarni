@@ -111,13 +111,11 @@ pub struct LlamaConfig {
     #[serde(default = "default_hidden_act")]
     pub hidden_act: String,
 
-    // --- RoPE (Rotary Position Embedding) ---
     #[serde(default = "default_rope_theta")]
     pub rope_theta: f32,
     pub rope_scaling: Option<RopeScalingConfig>,
     pub head_dim: Option<usize>,
 
-    // --- Token IDs ---
     #[serde(deserialize_with = "deserialize_token_id")]
     pub bos_token_id: u32,
     #[serde(deserialize_with = "deserialize_token_ids")]
@@ -126,11 +124,9 @@ pub struct LlamaConfig {
     #[serde(default)]
     pub pad_token_id: Option<u32>,
 
-    // --- Critical Logic Flags ---
     #[serde(default = "default_tie_word_embeddings")]
     pub tie_word_embeddings: bool,
 
-    // --- Identity & Metadata ---
     #[serde(default)]
     pub architectures: Vec<String>,
     #[serde(default)]
@@ -138,7 +134,6 @@ pub struct LlamaConfig {
     #[serde(default)]
     pub torch_dtype: Option<String>,
 
-    // --- Execution Hints ---
     #[serde(default)]
     pub attention_bias: bool,
     #[serde(default)]
@@ -174,7 +169,6 @@ impl LlamaConfig {
             * 8
     }
 
-    /// Helper to get the head dimension, falling back to calculation if not explicitly set
     pub fn get_head_dim(&self) -> usize {
         self.head_dim
             .unwrap_or(self.hidden_size / self.num_attention_heads)
@@ -247,13 +241,11 @@ fn as_any(&self) -> &dyn std::any::Any {
     }
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
-            // --- Basic Dimensions ---
             hidden_size: self.hidden_size,
             num_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
             num_kv_heads: self.num_key_value_heads,
             decoder_layers: None,
-            // Calculate head_dim if not explicitly provided (Standard Llama logic)
             head_dim: self
                 .head_dim
                 .unwrap_or(self.hidden_size / self.num_attention_heads),
@@ -261,7 +253,6 @@ fn as_any(&self) -> &dyn std::any::Any {
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
 
-            // --- Math Constants ---
             norm_eps: self.rms_norm_eps,
             activation: match self.hidden_act.as_str() {
                 "relu" => Activation::Relu,
@@ -272,16 +263,14 @@ fn as_any(&self) -> &dyn std::any::Any {
                 _ => Activation::SilU, // Llama default is SiLU
             },
 
-            // --- Positional Math (RoPE) ---
             rope_theta: Some(self.rope_theta),
             rope_scaling: self.rope_scaling.clone(),
 
-            // --- Style Flags ---
-            scale_embeddings: false, // Llama does not use sqrt(d) scaling
+            scale_embeddings: false, 
             normalize_embedding: false,
             extra_pos_embeddings: 0, // Llama has no position offset
             is_prenorm: true,        // Llama uses Pre-Normalization
-            transpose_ffn_weights: false, // Standard Llama weights are [Out, In]
+            transpose_ffn_weights: false, 
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
@@ -290,7 +279,6 @@ fn as_any(&self) -> &dyn std::any::Any {
     }
 
     fn layout(&self) -> ModelLayout {
-        // --- Define the Decoder's Layer Structure ---
         let decoder_layer = DecoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "model.layers.{}.self_attn.q_proj.weight".to_string(),
@@ -304,7 +292,7 @@ fn as_any(&self) -> &dyn std::any::Any {
                 norm_weight: "model.layers.{}.input_layernorm.weight".to_string(),
                 norm_bias: None,
             },
-            cross_attn: None, // Llama is decoder-only
+            cross_attn: None,
             ffn: FeedForwardLayout {
                 up_weight: "model.layers.{}.mlp.up_proj.weight".to_string(),
                 up_bias: None,
@@ -318,7 +306,6 @@ fn as_any(&self) -> &dyn std::any::Any {
             },
         };
 
-        // --- Assemble the final ModelLayout ---
         ModelLayout {
             token_embedding: "model.embed_tokens.weight".to_string(),
             lm_head: if self.tie_word_embeddings {
@@ -327,9 +314,9 @@ fn as_any(&self) -> &dyn std::any::Any {
                 "lm_head.weight"
             }
                 .to_string(),
-            encoder: None, // Llama is decoder-only
+            encoder: None,
             decoder: Some(DecoderLayout {
-                position_embedding: None, // Llama uses RoPE, not learned positional embeddings
+                position_embedding: None, // Llama uses RoPE
                 token_type_embedding: None,
                 embedding_norm_weight: None, // Llama has no embedding norm
                 embedding_norm_bias: None,

@@ -1,9 +1,10 @@
 //! Classifier FFI bindings
 
-use crate::{get_runtime, KjarniErrorCode, KjarniDevice, KjarniStringArray};
 use crate::error::set_last_error;
+use crate::{KjarniDevice, KjarniErrorCode, KjarniStringArray, get_runtime};
 use kjarni::Classifier;
-use std::ffi::{c_char, c_float, CStr, CString};
+use kjarni::classifier::ClassifierError;
+use std::ffi::{CStr, CString, c_char, c_float};
 use std::ptr;
 
 /// Single classification result (label + score).
@@ -26,7 +27,10 @@ pub struct KjarniClassResults {
 
 impl KjarniClassResults {
     pub fn empty() -> Self {
-        Self { results: ptr::null_mut(), len: 0 }
+        Self {
+            results: ptr::null_mut(),
+            len: 0,
+        }
     }
 
     pub fn from_scores(scores: Vec<(String, f32)>) -> Self {
@@ -124,11 +128,15 @@ pub unsafe extern "C" fn kjarni_classifier_new(
     }
 
     let default_config = kjarni_classifier_config_default();
-    let config = if config.is_null() { &default_config } else { &*config };
+    let config = if config.is_null() {
+        &default_config
+    } else {
+        &*config
+    };
 
     let result = get_runtime().block_on(async {
         let mut builder = Classifier::builder("sentiment"); // default
-        
+
         // Device
         match config.device {
             KjarniDevice::Gpu => builder = builder.gpu(),
@@ -184,7 +192,13 @@ pub unsafe extern "C" fn kjarni_classifier_new(
 
         builder.build().await.map_err(|e| {
             set_last_error(e.to_string());
-            KjarniErrorCode::LoadFailed
+            match &e {
+                ClassifierError::UnknownModel(_) => KjarniErrorCode::ModelNotFound,
+                ClassifierError::ModelNotDownloaded(_) => KjarniErrorCode::ModelNotFound,
+                ClassifierError::GpuUnavailable => KjarniErrorCode::GpuUnavailable,
+                ClassifierError::InvalidConfig(_) => KjarniErrorCode::InvalidConfig,
+                _ => KjarniErrorCode::LoadFailed,
+            }
         })
     });
 
@@ -230,9 +244,7 @@ pub unsafe extern "C" fn kjarni_classifier_classify(
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    let result = get_runtime().block_on(async {
-        classifier_ref.classify(text).await
-    });
+    let result = get_runtime().block_on(async { classifier_ref.classify(text).await });
 
     match result {
         Ok(classification) => {
@@ -280,7 +292,10 @@ pub unsafe extern "C" fn kjarni_classifier_labels(
             KjarniErrorCode::Ok
         }
         None => {
-            *out = KjarniStringArray { strings: ptr::null_mut(), len: 0 };
+            *out = KjarniStringArray {
+                strings: ptr::null_mut(),
+                len: 0,
+            };
             KjarniErrorCode::Ok
         }
     }
@@ -288,7 +303,9 @@ pub unsafe extern "C" fn kjarni_classifier_labels(
 
 /// Get number of labels.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_classifier_num_labels(classifier: *const KjarniClassifier) -> usize {
+pub unsafe extern "C" fn kjarni_classifier_num_labels(
+    classifier: *const KjarniClassifier,
+) -> usize {
     if classifier.is_null() {
         return 0;
     }

@@ -6,7 +6,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ChatError {
-    #[error("unknown model: '{0}'. run 'kjarni model list --task chat' to see available models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     #[error("model '{0}' not downloaded. run: kjarni model download {0}")]

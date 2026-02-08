@@ -53,6 +53,8 @@ hound = "3.5"           # WAV loading (simple, no dependencies)
 rubato = "0.14"         # High-quality resampling
 ndarray = { workspace = true }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Graphics_Dxgi"] }
 
 [dev-dependencies]
 env_logger = "0.10"

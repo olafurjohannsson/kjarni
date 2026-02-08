@@ -96,7 +96,6 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
     }
 
     fn layout(&self) -> ModelLayout {
-        // --- Define the Encoder's Layer Structure ---
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "bert.encoder.layer.{}.attention.self.query.weight".to_string(),
@@ -124,10 +123,8 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             },
         };
 
-        // --- Assemble the final ModelLayout ---
         ModelLayout {
             token_embedding: "bert.embeddings.word_embeddings.weight".to_string(),
-            // For encoder-only models, lm_head is often a separate classifier or pooler.
             lm_head: "classifier.weight".to_string(),
             encoder: Some(EncoderLayout {
                 position_embedding: Some("bert.embeddings.position_embeddings.weight".to_string()),
@@ -136,8 +133,6 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
                 ),
                 embedding_norm_weight: Some("bert.embeddings.LayerNorm.weight".to_string()),
                 embedding_norm_bias: Some("bert.embeddings.LayerNorm.bias".to_string()),
-                // For BERT, the "final_norm" is often considered the pooler layer.
-                // If you have a model with a true final norm, you would populate this.
                 final_norm_weight: Some("bert.pooler.dense.weight".to_string()),
                 final_norm_bias: Some("bert.pooler.dense.bias".to_string()), // Pooler has a bias
                 layer: encoder_layer,
@@ -148,16 +143,9 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
 }
 
 
-
-
-// ============================================================================
-// 4. RoBERTa Configuration
-// ============================================================================
-
 /// RoBERTa configuration for sequence classification.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RobertaConfig {
-    // Core architecture
     pub hidden_size: usize,
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
@@ -168,11 +156,9 @@ pub struct RobertaConfig {
     pub layer_norm_eps: f32,
     pub type_vocab_size: usize,
     
-    // Position embedding type (e.g., "absolute")
     #[serde(default)]
     pub position_embedding_type: String,
 
-    // Classification head config
     #[serde(default)]
     pub id2label: Option<HashMap<String, String>>,
     #[serde(default)]
@@ -186,11 +172,9 @@ pub struct RobertaConfig {
 }
 
 impl RobertaConfig {
-    /// Deserializes the config from a JSON string and processes the labels.
     pub fn from_json(json: &str) -> Result<Self> {
         let mut config: Self = serde_json::from_str(json)?;
 
-        // Convert id2label HashMap to a deterministically sorted Vec
         if let Some(ref map) = config.id2label {
             let mut labels: Vec<(usize, String)> = map
                 .iter()
@@ -199,7 +183,6 @@ impl RobertaConfig {
             labels.sort_by_key(|(idx, _)| *idx);
             config.labels_vec = Some(labels.into_iter().map(|(_, v)| v).collect());
 
-            // Infer num_labels if not explicitly set
             if config.num_labels.is_none() {
                 config.num_labels = Some(config.labels_vec.as_ref().unwrap().len());
             }
@@ -236,11 +219,7 @@ fn as_any(&self) -> &dyn std::any::Any {
                 "relu" => Activation::Relu,
                 _ => Activation::Gelu, // Default to Gelu
             },
-            // RoBERTa has a padding offset for position embeddings.
-            // max_position_embeddings is often 514 (512 + 2 for padding).
             extra_pos_embeddings: 2, 
-            
-            // RoBERTa does not use these features
             rope_theta: None,
             rope_scaling: None,
             decoder_layers: None,
@@ -256,8 +235,6 @@ fn as_any(&self) -> &dyn std::any::Any {
     }
 
     fn layout(&self) -> ModelLayout {
-        // This layout is derived directly from the tensor names you provided.
-        // The key is the "roberta." prefix on all encoder and embedding layers.
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "roberta.encoder.layer.{}.attention.self.query.weight".to_string(),
@@ -285,8 +262,6 @@ fn as_any(&self) -> &dyn std::any::Any {
 
         ModelLayout {
             token_embedding: "roberta.embeddings.word_embeddings.weight".to_string(),
-            // For sequence classification, the "head" consists of the classifier layers.
-            // Pointing lm_head to a terminal weight like this is a convention.
             lm_head: "classifier.out_proj.weight".to_string(),
             encoder: Some(EncoderLayout {
                 position_embedding: Some("roberta.embeddings.position_embeddings.weight".to_string()),
@@ -297,7 +272,7 @@ fn as_any(&self) -> &dyn std::any::Any {
                 final_norm_bias: None,
                 layer: encoder_layer,
             }),
-            decoder: None, // This is an encoder-only model
+            decoder: None,
         }
     }
 }

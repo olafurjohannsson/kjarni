@@ -8,10 +8,8 @@ use kjarni_transformers::{
     Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::{LegacyFeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelInput, normalization::LayerNorm, tensor::DType, traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
-// --- Crate-Specific ---
 use crate::models::gpt2::config::Gpt2Config;
 
-/// The CPU-native implementation of the GPT-2 decoder architecture.
 pub struct Gpt2CpuDecoder {
     pub embeddings: Embeddings,
     pub layers: Vec<GptPreNormDecoderLayer>,
@@ -32,7 +30,6 @@ impl Gpt2CpuDecoder {
             .as_ref()
             .expect("GPT-2 layout must have a decoder section");
 
-        // 1. Embeddings
         let word_embeddings = weights.get_array2(&layout.token_embedding)?;
         let position_embeddings = if let Some(pos_name) = &decoder_layout.position_embedding {
             debug!("[CPU Decoder] Position embeddings: {}", pos_name);
@@ -48,7 +45,6 @@ impl Gpt2CpuDecoder {
             None,
         );
 
-        // 2. Final Layer Norm
         debug!("  Loading final layer norm...");
         let final_norm_weight = decoder_layout.final_norm_weight.as_ref().unwrap();
         let final_norm_bias = decoder_layout.final_norm_bias.as_deref().unwrap_or("");
@@ -59,7 +55,6 @@ impl Gpt2CpuDecoder {
         )?
         .ok_or_else(|| anyhow!("Final layer normalization is required"))?;
 
-        // 3. Build decoder layers
         debug!("  Building {} decoder layers...", meta.num_layers);
         let mut layers = Vec::with_capacity(meta.num_layers);
 
@@ -106,12 +101,10 @@ impl Gpt2CpuDecoder {
         let head_dim = meta.head_dim;
         let kv_dim = meta.num_kv_heads * head_dim;
 
-        // --- 1. Load Attention Weights ---
         // GPT-2 uses fused QKV (c_attn).
         let qkv_weight_name = name(&self_attn_layout.q_weight);
         let qkv_bias_name = opt_name(&self_attn_layout.q_bias);
 
-        // The logic for splitting the fused tensor is preserved.
         let (q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias) =
             if !qkv_weight_name.is_empty() {
                 // GPT-2 style: Combined QKV
@@ -139,7 +132,6 @@ impl Gpt2CpuDecoder {
                     q_weight, k_weight, v_weight, o_weight, q_bias, k_bias, v_bias, o_bias,
                 )
             } else {
-                // Fallback for separate weights (not used by GPT-2 but preserved for robustness)
                 let q_weight = weights.get_array2(&name(&self_attn_layout.q_weight))?;
                 let k_weight = weights.get_array2(&name(&self_attn_layout.k_weight))?;
                 let v_weight = weights.get_array2(&name(&self_attn_layout.v_weight))?;
@@ -179,7 +171,6 @@ impl Gpt2CpuDecoder {
             Some(meta.num_kv_heads),
         );
 
-        // --- 2. Load FFN ---
         let feed_forward = {
             let intermediate_weight = if meta.transpose_ffn_weights {
                 weights
@@ -209,7 +200,6 @@ impl Gpt2CpuDecoder {
             let output_bias =
                 Self::load_optional_bias(weights, &opt_name(&ffn_layout.down_bias), hidden_size)?;
 
-            // Logic to choose between Legacy and Standard FFN path is preserved
             FeedForward::Legacy(LegacyFeedForward::new(
                 intermediate_weight,
                 intermediate_bias,
@@ -219,7 +209,6 @@ impl Gpt2CpuDecoder {
             ))
         };
 
-        // --- 3. Load Normalizations ---
         let attn_norm_name = name(&self_attn_layout.norm_weight);
         let attn_norm_bias = opt_name(&self_attn_layout.norm_bias);
 
@@ -273,29 +262,8 @@ impl Gpt2CpuDecoder {
     }
 }
 
-// --- Trait Implementation ---
-
 impl CpuDecoder for Gpt2CpuDecoder {
-    // fn embed(&self, input: ModelInput<'_>, position_offset: usize) -> Result<Array3<f32>> {
-    //     match input {
-    //         ModelInput::TokensCpu(ids) => {
-    //             let seq_len = ids.len();
-    //             // let input_ids = Array2::from_shape_vec((1, seq_len), ids.to_vec())?;
-
-    //             // GPT-2 uses absolute position embeddings, so position_offset matters
-    //             Ok(self.embeddings.forward(
-    //                 &ids.to_owned(),
-    //                 None,
-    //                 position_offset,
-    //                 self.meta.scale_embeddings,
-    //             ))
-    //         }
-    //         ModelInput::HiddenCpu(hidden) => Ok(hidden.to_owned()),
-    //         _ => Err(anyhow!(
-    //             "Gpt2CpuDecoder received GPU input. Transfer to CPU first."
-    //         )),
-    //     }
-    // }
+   
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -330,10 +298,10 @@ impl CpuDecoder for Gpt2CpuDecoder {
         let mut hidden = hidden_states.clone();
         let seq_len = hidden.shape()[1];
 
-        // 1. Downcast Cache
+        //  Downcast Cache
         let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
-        // 2. Temp storage for new KV
+        // Temp storage for new KV
         let mut new_key_values = Vec::with_capacity(end_layer - start_layer);
 
         for i in start_layer..end_layer {
@@ -342,11 +310,11 @@ impl CpuDecoder for Gpt2CpuDecoder {
             }
             let layer = &self.layers[i];
 
-            // 3. Get View
+            // Get View
             let past_kv_owned = cpu_cache_opt.as_ref().and_then(|c| c.get(i));
             let past_kv_views = past_kv_owned.as_ref().map(|(k, v)| (k.view(), v.view()));
 
-            // 4. Forward
+            // Forward
             let (new_hidden, (new_k, new_v)) =
                 layer.forward(&hidden, attention_mask, past_kv_views)?;
 
@@ -354,7 +322,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
             new_key_values.push((new_k, new_v));
         }
 
-        // 5. Update Cache
+        //  Update Cache
         if let Some(cache) = cpu_cache_opt {
             for (local_idx, (k, v)) in new_key_values.into_iter().enumerate() {
                 cache.update(start_layer + local_idx, &k, &v)?;
@@ -385,14 +353,12 @@ impl CpuDecoder for Gpt2CpuDecoder {
             self.num_layers(),
         )?;
 
-        // 3. Final Norm (GPT-2 has a final LayerNorm)
         output = self.final_layer_norm.forward(&output);
 
         Ok(output)
     }
 }
 
-// GPT 2 is pre norm and load In, Out
 
 pub struct GptPreNormDecoderLayer {
     pub self_attn: MultiHeadAttention,

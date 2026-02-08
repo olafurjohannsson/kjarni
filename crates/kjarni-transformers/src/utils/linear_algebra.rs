@@ -311,7 +311,6 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
 
     let c_ptr_head = c.as_mut_ptr();
 
-    // Check Hardware ONCE
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     let use_avx2 = is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma");
 
@@ -319,13 +318,11 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
         let output_slice = unsafe { std::slice::from_raw_parts_mut(c_ptr_head, n) };
         let num_threads = rayon::current_num_threads();
 
-        // FIX: Threshold on total work, not just n
         let total_work = n * k;
-        let min_work_per_thread = 32 * 1024; // ~32K ops minimum per thread
+        let min_work_per_thread = 32 * 1024;
         let min_parallel_work = num_threads * min_work_per_thread;
 
         if total_work >= min_parallel_work && n >= num_threads {
-            // Parallel path
             let chunk_size = (n + num_threads - 1) / num_threads;
             output_slice
                 .par_chunks_mut(chunk_size)

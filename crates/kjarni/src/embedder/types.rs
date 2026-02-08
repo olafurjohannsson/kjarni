@@ -8,7 +8,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum EmbedderError {
     /// Model not found.
-    #[error("Unknown model: '{0}'. Run 'kjarni model list --task embedding' to see available models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model cannot embed.

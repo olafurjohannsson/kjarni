@@ -118,7 +118,6 @@ impl Classifier {
             )
             .await?
         };
-        println!("model id: {}", model_id);
 
         // Resolve labels
         let custom_labels = builder.label_config.map(|c| c.labels);
@@ -160,8 +159,7 @@ impl Classifier {
         download_policy: crate::common::DownloadPolicy,
         quiet: bool,
     ) -> ClassifierResult<(SequenceClassifier, Option<ModelType>, String)> {
-        let model_type = ModelType::from_cli_name(model)
-            .ok_or_else(|| ClassifierError::UnknownModel(model.to_string()))?;
+        let model_type = ModelType::resolve(model).map_err(ClassifierError::UnknownModel)?;
 
         // Validate for classification
         validate_for_classification(model_type)?;

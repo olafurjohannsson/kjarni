@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum KjarniError {
     /// Model not found in registry.
-    #[error("Unknown model: '{0}'. Run 'kjarni model list' to see available models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model cannot perform the requested task.

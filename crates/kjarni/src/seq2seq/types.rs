@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Seq2SeqError {
     /// Model name not found in registry.
-    #[error("Unknown model: '{0}'. Use seq2seq::available_models() to list valid models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model exists but hasn't been downloaded.

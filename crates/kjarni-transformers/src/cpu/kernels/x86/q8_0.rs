@@ -25,7 +25,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
 
             let mut a_ptr_local = a_ptr;
 
-            // 4 separate accumulators to break dependency chains
+            // accum
             let mut sum0 = _mm256_setzero_ps();
             let mut sum1 = _mm256_setzero_ps();
             let mut sum2 = _mm256_setzero_ps();
@@ -34,7 +34,6 @@ pub unsafe fn matmul_vec_q8_0_avx2(
             // Process blocks in groups of 4 (4 * 32 = 128 weights)
             let mut chunks = row_blocks.chunks_exact(4);
             while let Some(chunk) = chunks.next() {
-                // --- Block 0 ---
                 {
                     let b = &chunk[0];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -61,7 +60,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                     sum0 = _mm256_fmadd_ps(_mm256_mul_ps(q3_f, d_vec), a3, sum0);
                 }
 
-                // --- Block 1 ---
+                // Block 1
                 {
                     let b = &chunk[1];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -89,7 +88,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                     sum1 = _mm256_fmadd_ps(_mm256_mul_ps(q3_f, d_vec), a3, sum1);
                 }
 
-                // --- Block 2 ---
+                // Block 2 
                 {
                     let b = &chunk[2];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -117,7 +116,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                     sum2 = _mm256_fmadd_ps(_mm256_mul_ps(q3_f, d_vec), a3, sum2);
                 }
 
-                // --- Block 3 ---
+                // Block 3 
                 {
                     let b = &chunk[3];
                     let d_vec = _mm256_set1_ps(b.d.to_f32());
@@ -148,7 +147,7 @@ pub unsafe fn matmul_vec_q8_0_avx2(
                 a_ptr_local = a_ptr_local.add(128);
             }
 
-            // Handle remainder blocks (less than 4)
+            //  remainder blocks 
             for b in chunks.remainder() {
                 let d_vec = _mm256_set1_ps(b.d.to_f32());
                 let q_ptr = b.qs.as_ptr() as *const __m128i;
@@ -189,11 +188,9 @@ mod tests {
     use crate::cpu::kernels::scalar::matmul_vec_q8_0_scalar;
     use half::f16;
 
-    /// Deterministic, non-degenerate Q8_0 block generator.
     fn create_test_block(seed: i8) -> BlockQ8_0 {
         let mut qs = [0i8; 32];
         for (i, q) in qs.iter_mut().enumerate() {
-            // Range roughly [-64, 63], avoids overflow and zeros
             *q = ((i as i8 + seed) % 63) - 31;
         }
 
@@ -203,18 +200,13 @@ mod tests {
         }
     }
 
-    /// AVX2+FMA test body.
-    /// Must be separated due to `#[target_feature]`.
     #[target_feature(enable = "avx2", enable = "fma")]
     unsafe fn run_q8_0_avx2_vs_scalar() {
-        let k = 256; // must be divisible by 32
-        let m = 4; // number of output rows
+        let k = 256;
+        let m = 4;
 
-        // Input vector
         let a: Vec<f32> = (0..k).map(|i| (i as f32) * 0.01).collect();
 
-        // Blocks are laid out row-major:
-        // m rows × (k / 32) blocks per row
         let blocks: Vec<BlockQ8_0> = (0..m)
             .flat_map(|row| (0..(k / 32)).map(move |b| create_test_block((row * 13 + b) as i8)))
             .collect();
@@ -222,13 +214,10 @@ mod tests {
         let mut out_scalar = vec![0.0f32; m];
         let mut out_avx2 = vec![0.0f32; m];
 
-        // Scalar reference
         matmul_vec_q8_0_scalar(&mut out_scalar, &a, &blocks, k);
 
-        // AVX2 kernel
         unsafe { matmul_vec_q8_0_avx2(&mut out_avx2, a.as_ptr(), &blocks, k) };
 
-        // Compare
         for i in 0..m {
             let diff = (out_scalar[i] - out_avx2[i]).abs();
             assert!(
@@ -242,7 +231,6 @@ mod tests {
         }
     }
 
-    /// Safe test entry point.
     #[test]
     fn test_matmul_vec_q8_0_avx2_matches_scalar() {
         if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {

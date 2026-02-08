@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum GeneratorError {
     /// Model name not found in registry.
-    #[error("Unknown model: '{0}'. Run 'kjarni model list --task chat' to see available models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model files not present locally.

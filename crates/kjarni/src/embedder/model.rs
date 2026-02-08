@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use kjarni_transformers::{models::ModelType, traits::Device, WgpuContext, LanguageModel};
+use kjarni_transformers::{LanguageModel, WgpuContext, models::ModelType, traits::Device};
 
-use crate::common::{default_cache_dir, ensure_model_downloaded};
 use crate::SentenceEncoder;
+use crate::common::{default_cache_dir, ensure_model_downloaded};
 
 use super::builder::EmbedderBuilder;
-use super::types::{EmbeddingOverrides, EmbedderError, EmbedderResult};
+use super::types::{EmbedderError, EmbedderResult, EmbeddingOverrides};
 use super::validation::validate_for_embedding;
 
 /// High-level text embedder.
@@ -53,26 +53,31 @@ impl Embedder {
 
     /// Internal: construct from builder.
     pub(crate) async fn from_builder(builder: EmbedderBuilder) -> EmbedderResult<Self> {
-        // 1. Resolve model type
-        let model_type = ModelType::from_cli_name(&builder.model)
-            .ok_or_else(|| EmbedderError::UnknownModel(builder.model.clone()))?;
+        // Resolve model type
+        let model_type =
+            ModelType::resolve(&builder.model).map_err(|msg| EmbedderError::UnknownModel(msg))?;
 
         // 2. Validate for embedding
         validate_for_embedding(model_type)?;
 
         // 3. Ensure model is downloaded
         let cache_dir = builder.cache_dir.clone().unwrap_or_else(default_cache_dir);
-        ensure_model_downloaded(model_type, Some(&cache_dir), builder.download_policy, builder.quiet)
-            .await
-            .map_err(|e| match e {
-                crate::common::KjarniError::ModelNotDownloaded(m) => {
-                    EmbedderError::ModelNotDownloaded(m)
-                }
-                crate::common::KjarniError::DownloadFailed { model, source } => {
-                    EmbedderError::DownloadFailed { model, source }
-                }
-                other => EmbedderError::EmbeddingFailed(other.into()),
-            })?;
+        ensure_model_downloaded(
+            model_type,
+            Some(&cache_dir),
+            builder.download_policy,
+            builder.quiet,
+        )
+        .await
+        .map_err(|e| match e {
+            crate::common::KjarniError::ModelNotDownloaded(m) => {
+                EmbedderError::ModelNotDownloaded(m)
+            }
+            crate::common::KjarniError::DownloadFailed { model, source } => {
+                EmbedderError::DownloadFailed { model, source }
+            }
+            other => EmbedderError::EmbeddingFailed(other.into()),
+        })?;
 
         // 4. Resolve device
         let device = builder.device.to_device();
@@ -146,8 +151,14 @@ impl Embedder {
             .map_err(EmbedderError::EmbeddingFailed)
     }
 
-    pub async fn embed_batch_flat(&self, texts: &[&str]) -> EmbedderResult<(Vec<f32>, usize, usize)> {
-        self.inner.encode_batch_flat(texts).await.map_err(EmbedderError::EmbeddingFailed)
+    pub async fn embed_batch_flat(
+        &self,
+        texts: &[&str],
+    ) -> EmbedderResult<(Vec<f32>, usize, usize)> {
+        self.inner
+            .encode_batch_flat(texts)
+            .await
+            .map_err(EmbedderError::EmbeddingFailed)
     }
 
     /// Embed multiple texts.
@@ -183,11 +194,7 @@ impl Embedder {
     }
 
     /// Compute similarities between a query and multiple documents.
-    pub async fn similarities(
-        &self,
-        query: &str,
-        documents: &[&str],
-    ) -> EmbedderResult<Vec<f32>> {
+    pub async fn similarities(&self, query: &str, documents: &[&str]) -> EmbedderResult<Vec<f32>> {
         let mut all_texts = vec![query];
         all_texts.extend(documents);
 
@@ -247,7 +254,10 @@ impl Embedder {
 
     fn merge_overrides(&self, runtime: &EmbeddingOverrides) -> EmbeddingOverrides {
         EmbeddingOverrides {
-            pooling: runtime.pooling.clone().or(self.default_overrides.pooling.clone()),
+            pooling: runtime
+                .pooling
+                .clone()
+                .or(self.default_overrides.pooling.clone()),
             normalize: runtime.normalize.or(self.default_overrides.normalize),
             max_length: runtime.max_length.or(self.default_overrides.max_length),
         }

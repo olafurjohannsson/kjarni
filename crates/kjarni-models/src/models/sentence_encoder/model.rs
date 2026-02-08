@@ -25,9 +25,9 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
-use crate::models::sequence_classifier::configs::RobertaConfig;
 use super::configs::{BertConfig, DistilBertConfig};
-
+use crate::MpnetConfig;
+use crate::models::sequence_classifier::configs::RobertaConfig;
 
 // =============================================================================
 // Sentence Encoder
@@ -48,13 +48,14 @@ pub struct SentenceEncoder {
 
 impl EncoderModelFactory for SentenceEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
-        // Auto-detect config type from JSON
         if weights.is_distilbert() {
             Ok(Arc::new(DistilBertConfig::from_json(
                 &weights.config_json(),
             )?))
         } else if weights.is_roberta() || weights.is_distilroberta() {
             Ok(Arc::new(RobertaConfig::from_json(&weights.config_json())?))
+        } else if weights.is_mpnet() {
+            Ok(Arc::new(MpnetConfig::from_json(&weights.config_json())?))
         } else {
             // Default to BertConfig for BERT-like models
             Ok(Arc::new(BertConfig::from_json(&weights.config_json())?))
@@ -223,14 +224,13 @@ impl SentenceEncoder {
 
     pub async fn encode_batch_flat(&self, texts: &[&str]) -> Result<(Vec<f32>, usize, usize)> {
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
-        
+
         let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?;
 
         // let config = EncodingConfig {
         //     normalize: false,
         //     pooling_strategy: self.pipeline.pooling_strategy(),
         // };
-        
 
         kjarni_transformers::cpu::encoder::traits::l2_normalize_inplace(&mut pooled);
 
@@ -376,11 +376,11 @@ impl CpuEncoderOps for SentenceEncoder {
             .expect("CPU encoder not available")
     }
     fn embed_tokens(
-            &self,
-            input_ids: &ndarray::Array2<u32>,
-            token_type_ids: Option<&ndarray::Array2<u32>>,
-            pos: usize,
-        ) -> Result<ndarray::Array3<f32>> {
+        &self,
+        input_ids: &ndarray::Array2<u32>,
+        token_type_ids: Option<&ndarray::Array2<u32>>,
+        pos: usize,
+    ) -> Result<ndarray::Array3<f32>> {
         self.pipeline
             .embeddings()
             .embed_cpu(input_ids, token_type_ids, pos)

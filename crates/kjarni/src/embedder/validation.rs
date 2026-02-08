@@ -11,7 +11,7 @@ pub fn validate_for_embedding(model_type: ModelType) -> EmbedderResult<()> {
 
     // Check architecture
     match info.architecture {
-        ModelArchitecture::Bert | ModelArchitecture::NomicBert => {
+        ModelArchitecture::Bert | ModelArchitecture::NomicBert | ModelArchitecture::Mpnet => {
             // Valid encoder architectures
         }
         _ => {

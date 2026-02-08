@@ -1,0 +1,7 @@
+<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" fill="#0d1117"/>
+  <!-- Regular hexagon centered at (128,128), radius=112 -->
+  <polygon points="128,16 225,72 225,184 128,240 31,184 31,72" fill="#e6edf3"/>
+  <!-- Kaun rune centered at y=128, uniform arm clearance -->
+  <path d="M168,56 L80,128 L168,200 L148,228 L42,128 L148,28 Z" fill="#0d1117"/>
+</svg>

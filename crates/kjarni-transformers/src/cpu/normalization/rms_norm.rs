@@ -244,11 +244,8 @@ mod tests {
 
     #[test]
     fn test_rmsnorm_pytorch_parity() {
-        // --- 1. Arrange: Use the golden values from the Python script ---
         let eps = 1e-5;
 
-        // --- RMSNorm Input ---
-        // Shape: [1, 1, 8]
         let input_vec = vec![
             0.33669036626815796,
             0.12880940735340118,
@@ -261,13 +258,9 @@ mod tests {
         ];
         let input_cpu = Array3::from_shape_vec((1, 1, 8), input_vec).unwrap();
 
-        // --- RMSNorm Gamma (Weight) ---
-        // Shape: [8]
         let gamma_vec = vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
         let gamma_cpu = Array1::from_vec(gamma_vec);
 
-        // --- RMSNorm Golden Output ---
-        // Shape: [1, 1, 8]
         let expected_output_vec = vec![
             0.18237116932868958,
             0.1395414024591446,
@@ -280,14 +273,9 @@ mod tests {
         ];
         let expected_output_cpu = Array3::from_shape_vec((1, 1, 8), expected_output_vec).unwrap();
 
-        // --- 2. Act: Run our Rust RMSNorm implementation ---
         let rms_norm = RMSNorm::new(gamma_cpu, eps);
-        // Directly call the `forward_3d` method which matches the tensor shape.
         let actual_output_cpu = rms_norm.forward_3d(&input_cpu);
 
-        // --- 3. Assert: Compare the results ---
-        // A slightly higher tolerance might be needed if libm implementations differ,
-        // but 1e-6 is a good starting point for CPU-to-CPU.
         let tolerance = 1e-6;
         assert_tensors_approx_equal(&expected_output_cpu, &actual_output_cpu, tolerance);
 
@@ -296,16 +284,13 @@ mod tests {
 
     #[test]
     fn test_rms_norm_near_zero() {
-        // Test stability with near-zero values
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
 
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![1e-8, 2e-8, 1e-8]).unwrap();
-        // Call the method being tested
         let output = rms_norm.forward_3d(&hidden);
 
-        // Should not panic or produce NaN/Inf
         assert!(output[[0, 0, 0]].is_finite());
         assert!(output[[0, 0, 1]].is_finite());
         assert!(output[[0, 0, 2]].is_finite());
@@ -313,18 +298,14 @@ mod tests {
     }
     #[test]
     fn test_rms_norm_basic() {
-        // Simple test with known values
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
 
-        // Input: [1, 1, 3] tensor with values [3.0, 4.0, 0.0]
-        // Expected RMS = sqrt((9 + 16 + 0) / 3) = sqrt(25/3) = sqrt(8.333...) ≈ 2.8868
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![3.0, 4.0, 0.0]).unwrap();
 
         let output = rms_norm.forward_3d(&hidden);
 
-        // Expected output ≈ [1.0392, 1.3856, 0.0]
         let rms = ((3.0_f32.powi(2) + 4.0_f32.powi(2) + 0.0_f32.powi(2)) / 3.0).sqrt();
         let expected_0 = 3.0 / rms;
         let expected_1 = 4.0 / rms;
@@ -337,7 +318,6 @@ mod tests {
 
     #[test]
     fn test_rms_norm_with_scale() {
-        // Test with non-unit weight
         let weight = Array1::from_vec(vec![2.0, 0.5, 1.5]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
@@ -357,12 +337,10 @@ mod tests {
 
     #[test]
     fn test_rms_norm_batch() {
-        // Test with batch size > 1
         let weight = Array1::from_vec(vec![1.0, 1.0]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
 
-        // [2, 2, 2] - batch=2, seq=2, hidden=2
         let hidden = Array3::from_shape_vec(
             (2, 2, 2),
             vec![

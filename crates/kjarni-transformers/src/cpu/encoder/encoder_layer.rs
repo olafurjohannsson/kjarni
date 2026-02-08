@@ -187,50 +187,7 @@ impl EncoderLayer {
         Ok(())
     }
 
-    // fn forward_postnorm_noalloc(
-    //     &self,
-    //     hidden: &mut Array3<f32>,
-    //     attention_mask: &Array2<f32>,
-    //     position_bias: Option<&ndarray::Array4<f32>>,
-    //     rope: Option<&RoPE>,
-    //     buffers: &mut EncoderBuffers,
-    // ) -> Result<()> {
-    //     let (batch, seq, hidden_dim) = hidden.dim();
-    //     let tokens = batch * seq;
-
-    //     // 1. Self attention (writes to buffers.attn_output)
-    //     self.self_attn
-    //         .forward_noalloc(hidden, attention_mask, position_bias, rope, buffers)?;
-
-    //     // 2. Residual + norm: hidden = norm(hidden + attn_output)
-    //     {
-    //         let attn_out_slice = buffers.attn_output.slice(s![..tokens, ..]);
-    //         let hidden_flat = hidden.as_slice_mut().unwrap();
-    //         let attn_flat = attn_out_slice.as_slice().unwrap();
-    //         for (h, a) in hidden_flat.iter_mut().zip(attn_flat.iter()) {
-    //             *h += a;
-    //         }
-    //     }
-    //     *hidden = self.self_attn_layer_norm.forward(hidden);
-
-    //     // 3. FFN
-    //     let hidden_2d = hidden.view().into_shape_with_order((tokens, hidden_dim))?;
-    //     self.feedforward.forward_noalloc(&hidden_2d, buffers);
-
-    //     // 4. Residual + norm: hidden = norm(hidden + ffn_output)
-    //     {
-    //         let ffn_out_slice = buffers.ffn_output.slice(s![..tokens, ..]);
-    //         let hidden_flat = hidden.as_slice_mut().unwrap();
-    //         let ffn_flat = ffn_out_slice.as_slice().unwrap();
-    //         for (h, f) in hidden_flat.iter_mut().zip(ffn_flat.iter()) {
-    //             *h += f;
-    //         }
-    //     }
-    //     *hidden = self.ffn_layer_norm.forward(hidden);
-
-    //     Ok(())
-    // }
-
+ 
     /// Forward pass with configurable norm order
     ///
     /// # Arguments

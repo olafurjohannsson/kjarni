@@ -155,9 +155,19 @@ namespace Kjarni
         {
             if (!_disposed)
             {
-                Native.kjarni_reranker_free(_handle);
+                if (_handle != IntPtr.Zero)
+                {
+                    Native.kjarni_reranker_free(_handle);
+                    _handle = IntPtr.Zero;
+                }
                 _disposed = true;
             }
+            GC.SuppressFinalize(this);
+        }
+
+        ~Reranker()
+        {
+            Dispose();
         }
 
         private void ThrowIfDisposed()

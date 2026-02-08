@@ -613,8 +613,6 @@ mod seq2seq_encoder_tests {
                 token_embedding: "token_emb".to_string(),
                 lm_head: "lm_head".to_string(),
                 encoder: Some(EncoderLayout {
-                    // FIX: T5/Whisper don't use learned positional embeddings, so we can omit this from layout
-                    // to prevent the factory from trying to load it.
                     position_embedding: if self.no_pos_emb_in_layout {
                         None
                     } else {
@@ -627,7 +625,6 @@ mod seq2seq_encoder_tests {
                     final_norm_bias: Some("final_ln.bias".to_string()),
                     layer: EncoderLayerLayout {
                         self_attn: AttentionLayout {
-                            // FIX: Add .weight suffix to match what LinearLayer loader expects
                             q_weight: "l0.q.weight".to_string(),
                             q_bias: None,
                             k_weight: "l0.k.weight".to_string(),
@@ -715,7 +712,6 @@ mod seq2seq_encoder_tests {
         w.insert("final_ln.bias".into(), vec![0.01; 4]);
         s.insert("final_ln.bias".into(), vec![4]);
 
-        // FIX: Keys updated to include .weight
         w.insert(
             "l0.q.weight".into(),
             vec![
@@ -778,7 +774,6 @@ mod seq2seq_encoder_tests {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
 
-        // FIX: Add dummy token_emb because factory builds Embeddings object even if unused for hidden-input flow
         w.insert("token_emb".into(), vec![0.0; 40]);
         s.insert("token_emb".into(), vec![10, 4]);
 
@@ -791,7 +786,6 @@ mod seq2seq_encoder_tests {
         w.insert("final_ln.bias".into(), vec![0.01; 4]);
         s.insert("final_ln.bias".into(), vec![4]);
 
-        // FIX: Add .weight suffix
         w.insert(
             "l0.q.weight".into(),
             vec![
@@ -997,7 +991,6 @@ mod seq2seq_encoder_tests {
             num_layers: 1,
             num_heads: 2,
             is_prenorm: true,
-            // FIX: Whisper has no learned positions
             no_pos_emb_in_layout: true,
         };
 
@@ -1051,7 +1044,6 @@ mod seq2seq_encoder_tests {
             num_layers: 1,
             num_heads: 2,
             is_prenorm: true,
-            // FIX: T5 has no learned positions in layout
             no_pos_emb_in_layout: true,
         };
 

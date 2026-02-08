@@ -40,25 +40,22 @@ mod sentence_encoder_loading_tests {
         let data_bias = vec![0.0f32; 4];
         let bytes_bias: Vec<u8> = data_bias.iter().flat_map(|f| f.to_le_bytes()).collect();
 
-        // --- Embeddings ---
         tensors.insert(
             "embeddings.word_embeddings.weight".to_string(),
             TensorView::new(Dtype::F32, shape_emb.clone(), &bytes_emb)?,
         );
 
-        // FIX: Use bytes_pos (large buffer) for position embeddings
         tensors.insert(
             "embeddings.position_embeddings.weight".to_string(),
             TensorView::new(Dtype::F32, vec![512, 4], &bytes_pos)?,
         );
 
-        let token_type_bytes = &bytes_layer[0..32]; // Slice exactly 32 bytes
+        let token_type_bytes = &bytes_layer[0..32]; 
         tensors.insert(
             "embeddings.token_type_embeddings.weight".to_string(),
             TensorView::new(Dtype::F32, vec![2, 4], token_type_bytes)?,
         );
 
-        // Biases are [4], needing 4 floats (16 bytes). bytes_bias is correct size (16 bytes).
         tensors.insert(
             "embeddings.LayerNorm.weight".to_string(),
             TensorView::new(Dtype::F32, shape_bias.clone(), &bytes_bias)?,

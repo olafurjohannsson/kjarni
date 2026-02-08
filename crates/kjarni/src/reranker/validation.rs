@@ -11,7 +11,7 @@ pub fn validate_for_reranking(model_type: ModelType) -> RerankerResult<()> {
 
     // Check architecture - must be encoder-based
     match info.architecture {
-        ModelArchitecture::Bert | ModelArchitecture::NomicBert => {
+        ModelArchitecture::Bert | ModelArchitecture::NomicBert | ModelArchitecture::Mpnet => {
             // Valid encoder architectures for cross-encoding
         }
         _ => {

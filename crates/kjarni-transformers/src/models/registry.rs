@@ -145,6 +145,12 @@ pub enum ModelArchitecture {
     /// and named entity recognition.
     Bert,
 
+    /// MPNet with relative attention bias.
+    ///
+    /// Similar to BERT but uses relative position bias and different
+    /// attention naming. Used by all-mpnet-base-v2 for embeddings.
+    Mpnet,
+
     /// NomicBERT with rotary position embeddings.
     ///
     /// Modern encoder using RoPE instead of learned positional embeddings.
@@ -171,7 +177,7 @@ pub enum ModelArchitecture {
     GPT,
 
     /// Whisper family for speech-to-text.
-    /// 
+    ///
     /// OpenAI's encoder-decoder model for automatic speech recognition (ASR).
     /// Uses convolutional front-end and mel spectrogram inputs.
     Whisper,
@@ -197,6 +203,7 @@ impl ModelArchitecture {
             Self::Mistral => "Mistral (SWA)",
             Self::Phi3 => "Phi-3 (LongRoPE)",
             Self::Bert => "BERT",
+            Self::Mpnet => "Mpnet",
             Self::NomicBert => "Nomic-BERT",
             Self::T5 => "T5",
             Self::Bart => "BART",
@@ -227,7 +234,7 @@ impl ModelArchitecture {
             Self::Llama | Self::Qwen2 | Self::Mistral | Self::Phi3 | Self::GPT => "decoder",
 
             // Encoders (Embeddings/Classifiers)
-            Self::Bert | Self::NomicBert => "encoder",
+            Self::Bert | Self::NomicBert | Self::Mpnet => "encoder",
 
             // Seq2Seq
             Self::T5 | Self::Bart | Self::Whisper => "encoder-decoder",
@@ -410,11 +417,11 @@ pub enum ModelType {
     // Smaller LLMs
     Qwen2_5_0_5B_Instruct,
     Qwen2_5_1_5B_Instruct,
-    Llama3_2_1B_Instruct, 
-    Llama3_2_3B_Instruct, 
-    Phi3_5_Mini_Instruct, 
+    Llama3_2_1B_Instruct,
+    Llama3_2_3B_Instruct,
+    Phi3_5_Mini_Instruct,
     Mistral7B_v0_3_Instruct,
-    Llama3_1_8B_Instruct,   
+    Llama3_1_8B_Instruct,
     DeepSeek_R1_Distill_Llama_8B,
 
     // === Seq2Seq ===
@@ -547,29 +554,29 @@ impl ModelType {
             Self::MiniLML6V2 => "minilm-l6-v2",
             Self::NomicEmbedText => "nomic-embed-text",
             Self::BgeM3 => "bge-m3",
-            Self::MpnetBaseV2 => "mpnet-base-v2", // Fixed: was empty
-            Self::DistilBertBaseCased => "distilbert-base", // Fixed: was empty
+            Self::MpnetBaseV2 => "mpnet-base-v2",
+            Self::DistilBertBaseCased => "distilbert-base",
 
             // Reranker
-            Self::MiniLML6V2CrossEncoder => "minilm-l6-v2-cross-encoder", // Fixed: was empty
+            Self::MiniLML6V2CrossEncoder => "minilm-l6-v2-cross-encoder",
 
             // Classifiers
-            
+
             // Sentiment
             Self::DistilBertSST2 => "distilbert-sentiment",
             Self::TwitterRobertaSentiment => "roberta-sentiment",
             Self::BertMultilingualSentiment => "bert-sentiment-multilingual",
-   
+
             // Emotion
             Self::RobertaGoEmotions => "roberta-emotions",
             Self::DistilRobertaEmotion => "distilroberta-emotion",
-            
+
             // Toxicity
             Self::ToxicBertMultilingual => "toxic-bert",
 
             // Edge LLMs
             Self::Qwen2_5_0_5B_Instruct => "qwen2.5-0.5b-instruct",
-            Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b", // Fixed: was "wen2.5-1.5b"
+            Self::Qwen2_5_1_5B_Instruct => "qwen2.5-1.5b",
             Self::Llama3_2_1B_Instruct => "llama3.2-1b-instruct",
             Self::Llama3_2_3B_Instruct => "llama3.2-3b-instruct",
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini",
@@ -603,8 +610,7 @@ impl ModelType {
             | ModelTask::Summarization
             | ModelTask::Translation
             | ModelTask::TextToText
-            | ModelTask::SpeechToText
-            => "Seq2Seq",
+            | ModelTask::SpeechToText => "Seq2Seq",
 
             // Group 3: Vector Search
             ModelTask::Embedding => "Embedding",
@@ -662,7 +668,7 @@ impl ModelType {
             },
 
             Self::MpnetBaseV2 => ModelInfo {
-                architecture: ModelArchitecture::Bert,
+                architecture: ModelArchitecture::Mpnet,
                 task: ModelTask::Embedding,
                 paths: ModelPaths {
                     weights_url: "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/main/model.safetensors",
@@ -719,7 +725,6 @@ impl ModelType {
             // ================================================================
             // Classifiers
             // ================================================================
-
             Self::DistilBertSST2 => ModelInfo {
                 architecture: ModelArchitecture::Bert,
                 task: ModelTask::SentimentAnalysis,
@@ -845,9 +850,9 @@ impl ModelType {
                         "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
                     ),
                 },
-                description: "Balanced edge model. Good reasoning in a small package.", // Fixed
-                size_mb: 3100,         // Fixed: ~3.1 GB
-                params_millions: 1540, // Fixed: 1.54B params
+                description: "Balanced edge model. Good reasoning in a small package.", 
+                size_mb: 3100,         
+                params_millions: 1540, 
             },
             Self::Llama3_2_1B_Instruct => ModelInfo {
                 architecture: ModelArchitecture::Llama,
@@ -1060,7 +1065,38 @@ impl ModelType {
         }
     }
 
-    // --- Utility Methods (Keep these short) ---
+    pub fn resolve(name: &str) -> Result<ModelType, String> {
+        if let Some(m) = Self::from_cli_name(name) {
+            return Ok(m);
+        }
+
+        // Try substring match first
+        let all_names: Vec<&str> = ModelType::all().map(|m| m.cli_name()).collect();
+        let substring_matches: Vec<&str> = all_names
+            .iter()
+            .filter(|n| n.contains(&name.to_lowercase()))
+            .copied()
+            .collect();
+
+        if !substring_matches.is_empty() {
+            return Err(format!(
+                "Unknown model '{name}'. Did you mean: {}?",
+                substring_matches.join(", ")
+            ));
+        }
+
+        // Fall back to Levenshtein
+        let suggestions = Self::find_similar(name);
+        if suggestions.is_empty() {
+            Err(format!("Unknown model '{name}'"))
+        } else {
+            let names: Vec<&str> = suggestions.iter().map(|(n, _)| n.as_str()).collect();
+            Err(format!(
+                "Unknown model '{name}'. Did you mean: {}?",
+                names.join(", ")
+            ))
+        }
+    }
 
     pub fn from_cli_name(name: &str) -> Option<ModelType> {
         use strum::IntoEnumIterator;

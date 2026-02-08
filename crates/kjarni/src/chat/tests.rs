@@ -852,3 +852,387 @@ mod integration_tests {
         assert_send_sync::<History>();
     }
 }
+
+#[cfg(test)]
+mod chat_tests {
+    use super::*;
+    use crate::chat::presets::ChatPreset;
+    use crate::chat::types::Role;
+
+    // =========================================================================
+    // Unit Tests (No Model Required)
+    // =========================================================================
+
+    #[test]
+    fn test_history_empty() {
+        let history = History::new();
+        assert!(history.is_empty());
+        assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn test_history_push_sequence() {
+        let mut history = History::new();
+
+        history.push_user("User 1");
+        history.push_assistant("Assistant 1");
+
+        let msgs = history.messages();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[0].content, "User 1");
+        assert_eq!(msgs[1].role, Role::Assistant);
+        assert_eq!(msgs[1].content, "Assistant 1");
+    }
+
+    #[test]
+    fn test_history_clear_without_system() {
+        let mut history = History::new();
+        history.push_user("User 1");
+        history.push_assistant("Assistant 1");
+
+        history.clear(true); // keep_system=true, but no system exists
+        assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn test_history_with_system() {
+        let history = History::with_system("System prompt");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.messages()[0].role, Role::System);
+        assert_eq!(history.messages()[0].content, "System prompt");
+    }
+
+    #[test]
+    fn test_history_clear_keeps_system() {
+        let mut history = History::with_system("System prompt");
+        history.push_user("User 1");
+        history.push_assistant("Assistant 1");
+        assert_eq!(history.len(), 3);
+
+        history.clear(true); // keep_system=true
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.messages()[0].role, Role::System);
+    }
+
+    #[test]
+    fn test_history_clear_removes_all() {
+        let mut history = History::with_system("System prompt");
+        history.push_user("User 1");
+        history.push_assistant("Assistant 1");
+
+        history.clear(false); // keep_system=false
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn test_chat_mode_creative() {
+        let mode = ChatMode::Creative;
+        assert!(mode.default_temperature() > 0.8);
+        assert!(mode.default_max_tokens() >= 1024);
+    }
+
+    #[test]
+    fn test_chat_mode_reasoning() {
+        let mode = ChatMode::Reasoning;
+        assert!(mode.default_temperature() < 0.5);
+    }
+
+    #[test]
+    fn test_chat_mode_default() {
+        let mode = ChatMode::Default;
+        assert_eq!(mode.default_temperature(), 0.7);
+    }
+
+    #[test]
+    fn test_preset_fast() {
+        let preset = ChatPreset::FAST;
+        assert_eq!(preset.model, "qwen2.5-0.5b-instruct");
+        assert!(preset.temperature.is_some());
+    }
+
+    #[test]
+    fn test_preset_coding() {
+        let preset = ChatPreset::CODING;
+        assert_eq!(preset.mode, ChatMode::Reasoning);
+        assert!(
+            preset
+                .system_prompt
+                .unwrap()
+                .to_lowercase()
+                .contains("coding")
+        );
+    }
+
+    #[test]
+    fn test_tier_fast() {
+        assert_eq!(ChatTier::Fast.resolve().model, ChatPreset::FAST.model);
+    }
+
+    #[test]
+    fn test_tier_balanced() {
+        assert_eq!(
+            ChatTier::Balanced.resolve().model,
+            ChatPreset::BALANCED.model
+        );
+    }
+
+    #[test]
+    fn test_tier_quality() {
+        assert_eq!(ChatTier::Quality.resolve().model, ChatPreset::QUALITY.model);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests2 {
+    use super::*;
+    use crate::chat::presets::ChatPreset;
+    use crate::chat::types::Role;
+    use crate::common::DownloadPolicy;
+    use crate::generation::GenerationOverrides;
+    use futures::StreamExt;
+
+    async fn load_test_model() -> Chat {
+        Chat::builder(ChatPreset::FAST.model) // "qwen2.5-0.5b-instruct"
+            .download_policy(DownloadPolicy::IfMissing)
+            .cpu()
+            .generation_config(GenerationOverrides {
+                max_new_tokens: Some(50),
+                do_sample: Some(false),
+                ..GenerationOverrides::default()
+            })
+            .quiet()
+            .build()
+            .await
+            .expect("Failed to load test model")
+    }
+
+    // -------------------------------------------------------------------------
+    // Basic Conversation
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_send_single_message() {
+        let chat = load_test_model().await;
+        let response = chat.send("Hello!").await.unwrap();
+
+        assert!(!response.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_conversation_history_grows() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        let _ = convo.send("Hello!").await.unwrap();
+        assert_eq!(convo.len(), 2); // User + Assistant
+
+        let _ = convo.send("How are you?").await.unwrap();
+        assert_eq!(convo.len(), 4); // 2 User + 2 Assistant
+    }
+
+    #[tokio::test]
+    async fn test_conversation_context_retention() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        let _ = convo.send("My name is Olafur.").await.unwrap();
+        let response = convo.send("What is my name?").await.unwrap();
+
+        // Small models may not always recall, but should at least respond
+        assert!(!response.is_empty());
+
+        // Log whether context was retained (informational)
+        if !response.contains("Olafur") {
+            eprintln!(
+                "Note: Model did not recall name (expected for small models). Response: '{}'",
+                response
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // System Prompt
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_conversation_with_system_prompt() {
+        let chat = load_test_model().await;
+        let mut convo =
+            ChatConversation::with_system(&chat, "You are a helpful assistant.".to_string());
+
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.history().messages()[0].role, Role::System);
+
+        let response = convo.send("Hello").await.unwrap();
+        assert!(!response.is_empty());
+        assert_eq!(convo.len(), 3); // System + User + Assistant
+    }
+
+    #[tokio::test]
+    async fn test_system_prompt_via_builder() {
+        let chat = Chat::builder(ChatPreset::FAST.model)
+            .system("You are a pirate. End sentences with 'Arrr'.")
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let response = chat.send("Who are you?").await.unwrap();
+
+        // Small models may not follow instructions reliably
+        assert!(!response.is_empty());
+
+        // Log adherence (informational, not required to pass)
+        let followed =
+            response.to_lowercase().contains("arrr") || response.to_lowercase().contains("pirate");
+        if !followed {
+            eprintln!(
+                "Note: Model did not follow system prompt (expected for 0.5B). Response: '{}'",
+                response
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Streaming
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_streaming_returns_tokens() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        convo.push_user("Count from 1 to 3.");
+        let mut stream = convo.stream_next().await.unwrap();
+
+        let mut full_response = String::new();
+        while let Some(token_res) = stream.next().await {
+            let token = token_res.unwrap();
+            full_response.push_str(&token);
+        }
+
+        assert!(!full_response.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_streaming_does_not_auto_add_to_history() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        convo.push_user("Hello");
+        assert_eq!(convo.len(), 1);
+
+        let mut stream = convo.stream_next().await.unwrap();
+        let mut full_response = String::new();
+        while let Some(token_res) = stream.next().await {
+            full_response.push_str(&token_res.unwrap());
+        }
+
+        // Streaming should NOT auto-add to history
+        assert_eq!(
+            convo.len(),
+            1,
+            "History should still only have User message"
+        );
+
+        // Manual push required
+        convo.push_assistant(&full_response);
+        assert_eq!(convo.len(), 2);
+        assert_eq!(
+            convo.history().messages().last().unwrap().content,
+            full_response
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // History Management
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_clear_history_keeps_system() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation_with_system("System info");
+
+        let _ = convo.send("Hello").await.unwrap();
+        assert_eq!(convo.len(), 3); // System + User + Assistant
+
+        convo.clear(true);
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo.history().messages()[0].role, Role::System);
+    }
+
+    #[tokio::test]
+    async fn test_clear_history_allows_new_conversation() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        // First conversation
+        let _ = convo.send("Hello").await.unwrap();
+        assert_eq!(convo.len(), 2);
+
+        // Clear
+        convo.clear(false);
+        assert!(convo.is_empty());
+
+        // New conversation works
+        let response = convo.send("Hi again").await.unwrap();
+        assert!(!response.is_empty());
+        assert_eq!(convo.len(), 2); // Fresh start
+    }
+
+    // -------------------------------------------------------------------------
+    // Builder Overrides
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_builder_temperature_override() {
+        let chat = Chat::builder(ChatPreset::FAST.model)
+            .temperature(0.1)
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let response = chat.send("Say Hi").await.unwrap();
+        assert!(!response.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_builder_max_tokens_override() {
+        let chat = Chat::builder(ChatPreset::FAST.model)
+            .max_tokens(10)
+            .cpu()
+            .quiet()
+            .build()
+            .await
+            .unwrap();
+
+        let response = chat.send("Tell me a long story").await.unwrap();
+        // Response should be truncated (though exact token count is hard to verify)
+        assert!(!response.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Manual History Management
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_push_user_and_assistant_manually() {
+        let chat = load_test_model().await;
+        let mut convo = chat.conversation();
+
+        convo.push_user("Hello");
+        convo.push_assistant("Hi there!");
+        convo.push_user("How are you?");
+
+        assert_eq!(convo.len(), 3);
+
+        let msgs = convo.history().messages();
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[1].role, Role::Assistant);
+        assert_eq!(msgs[2].role, Role::User);
+    }
+}

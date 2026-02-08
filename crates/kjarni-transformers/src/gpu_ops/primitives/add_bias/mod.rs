@@ -47,7 +47,6 @@ impl Kernel for GpuAddBias {
         let input = inputs[0];
         let bias = inputs[1];
 
-        // --- Assertions for correctness ---
         assert_eq!(inputs.len(), 2, "GpuAddBias kernel expects 2 inputs: [input, bias]");
         assert_eq!(input.shape(), output.shape(), "Input and output shapes must match for AddBias");
         assert_eq!(bias.rank(), 1, "Bias tensor must be 1D");
@@ -101,10 +100,6 @@ fn run_internal_add_bias(
         ],
     });
 
-    // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-    //     label: Some("AddBias Compute Pass"),
-    //     timestamp_writes: None,
-    // });
     let label = format!("AddBias");
     context.profiler.profile(encoder, &label, |compute_pass| {
         compute_pass.set_pipeline(pipeline);

@@ -883,8 +883,6 @@ mod tests_trait {
 
     #[tokio::test]
     async fn test_pooling_strategies_golden() -> Result<()> {
-        // 1. Load Golden Hidden States
-        // hidden_states Shape: [2, 5, 4]
         let hidden_states_data = vec![
             -1.331580, -0.437194, 0.457193, 1.351581, -1.331581, -0.437193, 0.457194, 1.351580,
             -1.331581, -0.437194, 0.457194, 1.351581, -1.331581, -0.437194, 0.457194, 1.351581,
@@ -897,10 +895,9 @@ mod tests_trait {
             hidden_states: hidden,
         };
 
-        // --- TEST A: MEAN POOLING ---
         let config_mean = EncodingConfig {
             pooling_strategy: PoolingStrategy::Mean,
-            normalize: false, // Check raw first
+            normalize: false,
         };
         let out_mean = model.encode_batch(&["a", "b"], &config_mean).await?;
 
@@ -919,7 +916,6 @@ mod tests_trait {
             }
         }
 
-        // --- TEST B: CLS POOLING ---
         let config_cls = EncodingConfig {
             pooling_strategy: PoolingStrategy::Cls,
             normalize: false,
@@ -936,7 +932,6 @@ mod tests_trait {
             }
         }
 
-        // --- TEST C: MAX POOLING ---
         let config_max = EncodingConfig {
             pooling_strategy: PoolingStrategy::Max,
             normalize: false,
@@ -953,7 +948,6 @@ mod tests_trait {
             }
         }
 
-        // --- TEST D: LAST TOKEN POOLING ---
         let config_last = EncodingConfig {
             pooling_strategy: PoolingStrategy::LastToken,
             normalize: false,
@@ -970,7 +964,6 @@ mod tests_trait {
             }
         }
 
-        // --- TEST E: NORMALIZATION (Mean Pool + Norm) ---
         let config_norm = EncodingConfig {
             pooling_strategy: PoolingStrategy::Mean,
             normalize: true,

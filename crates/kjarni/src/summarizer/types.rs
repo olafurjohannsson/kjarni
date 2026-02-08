@@ -8,7 +8,7 @@ use crate::seq2seq::Seq2SeqError;
 #[derive(Debug, Error)]
 pub enum SummarizerError {
     /// Unknown model name.
-    #[error("Unknown model: '{0}'")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model incompatible with summarization.

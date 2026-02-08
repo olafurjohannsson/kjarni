@@ -296,11 +296,9 @@ mod tests {
     async fn test_bart_weights_loading_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
 
-        // Path to your model
         let model_path =
             std::path::Path::new("/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6");
 
-        // Skip test if file doesn't exist (prevents CI failures if local path is missing)
         if !model_path.exists() {
             println!("Skipping test: Model path not found at {:?}", model_path);
             return Ok(());
@@ -311,21 +309,12 @@ mod tests {
 
         println!("Testing parity for tensor: {}", tensor_name);
 
-        // --- Method 1: The "Production" Path (Zero-Copy) ---
-        // Uses GpuTensor::from_model_weights. This exercises the logic we just wrote.
-        // We pass None for target_dt to accept the file's native dtype (likely F32 for BART).
         let q_gpu_production =
             GpuTensor::from_model_weights(&ctx, &weights, tensor_name, None, "production_q")?;
 
-        // --- Method 2: The "Reference" Path (CPU Roundtrip) ---
-        // Forces a load to CPU RAM via ndarray, then uploads.
-        // This is our "ground truth" for value correctness.
         let q_cpu_arr = weights.get_array2(tensor_name)?;
         let q_gpu_reference = GpuTensor::from_ndarray(&ctx, &q_cpu_arr)?;
 
-        // --- VERIFICATION ---
-
-        // 1. Check Metadata
         assert_eq!(
             q_gpu_production.shape(),
             q_gpu_reference.shape(),
@@ -339,11 +328,9 @@ mod tests {
 
         println!("Shape verified: {:?}", q_gpu_production.shape());
 
-        // 2. Download both back to CPU for bit-exact comparison
         let prod_values = q_gpu_production.to_ndarray_2d::<f32>().await?;
         let ref_values = q_gpu_reference.to_ndarray_2d::<f32>().await?;
 
-        // 3. Compare Values
         let max_diff = prod_values
             .iter()
             .zip(ref_values.iter())
@@ -352,11 +339,7 @@ mod tests {
 
         println!("Max diff between loading methods: {:.10e}", max_diff);
 
-        // 4. Debug Print on Failure
         if max_diff > 1e-6 {
-            println!("\n!!! MISMATCH DETECTED !!!");
-            println!("Index | Production | Reference | Diff");
-            println!("-------------------------------------");
             let mut errors_printed = 0;
             for (idx, (a, b)) in prod_values.iter().zip(ref_values.iter()).enumerate() {
                 let diff = (a - b).abs();
@@ -376,9 +359,7 @@ mod tests {
             "Weights differ significantly based on loading method!"
         );
 
-        // 5. Cleanup
-        // (Optional: clear mmap cache if this was a huge model to free RAM for other tests)
-        drop(weights); // Drop struct first
+        drop(weights);
         crate::weights::clear_mmap_cache();
 
         Ok(())
@@ -408,7 +389,6 @@ mod tests {
         }
     }
 
-    /// Create deterministic "random" weights for reproducibility
     fn make_weight(rows: usize, cols: usize, seed: usize) -> Array2<f32> {
         Array2::from_shape_fn((rows, cols), |(i, j)| {
             let idx = seed * 10000 + i * cols + j;
@@ -434,10 +414,6 @@ mod tests {
         let seq_len = 8;
         let eps = 1e-5;
 
-        // === Create weights (shared between CPU and GPU) ===
-        // All weights in [Out, In] layout
-
-        // Attention weights [hidden, hidden]
         let q_w = make_weight(hidden_size, hidden_size, 1);
         let k_w = make_weight(hidden_size, hidden_size, 2);
         let v_w = make_weight(hidden_size, hidden_size, 3);
@@ -447,19 +423,16 @@ mod tests {
         let v_b = make_bias(hidden_size, 3);
         let o_b = make_bias(hidden_size, 4);
 
-        // FFN weights [Out, In]
         let fc1_w = make_weight(intermediate_size, hidden_size, 5); // [512, 256]
         let fc2_w = make_weight(hidden_size, intermediate_size, 6); // [256, 512]
         let fc1_b = make_bias(intermediate_size, 5);
         let fc2_b = make_bias(hidden_size, 6);
 
-        // LayerNorm weights
         let attn_ln_w = Array1::from_elem(hidden_size, 1.0f32);
         let attn_ln_b = Array1::zeros(hidden_size);
         let ffn_ln_w = Array1::from_elem(hidden_size, 1.0f32);
         let ffn_ln_b = Array1::zeros(hidden_size);
 
-        // === Build CPU EncoderLayer ===
         let cpu_layer = {
             let self_attn = EncoderSelfAttention::new(
                 hidden_size,
@@ -491,7 +464,6 @@ mod tests {
             EncoderLayer::new(self_attn, self_attn_ln, ffn, ffn_ln)
         };
 
-        // === Build GPU EncoderLayer ===
         let gpu_layer = {
             let self_attn_weights = GpuAttentionWeights::new(
                 GpuTensor::from_ndarray(&ctx, &q_w)?,
@@ -540,7 +512,7 @@ mod tests {
                 normalize_embedding: false,
                 scale_embeddings: false,
                 extra_pos_embeddings: 0,
-                is_prenorm: false, // BERT/Mock style
+                is_prenorm: false,
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
                 normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
@@ -557,16 +529,13 @@ mod tests {
             )?
         };
 
-        // === Create test input ===
         let input = Array3::from_shape_fn((batch_size, seq_len, hidden_size), |(b, s, h)| {
             ((b * 1000 + s * 100 + h) % 200) as f32 * 0.01 - 1.0
         });
         let mask = Array2::<f32>::ones((batch_size, seq_len));
 
-        // === Run CPU ===
         let cpu_output = cpu_layer.forward(input.clone(), &mask, None, false, None)?; // post-norm
 
-        // === Run GPU ===
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask)?;
 
@@ -582,14 +551,12 @@ mod tests {
 
         let gpu_output = gpu_output_tensor.to_ndarray_3d::<f32>().await?;
 
-        // === Compare ===
         assert_close(&cpu_output, &gpu_output, 1e-4, "EncoderLayer PostNorm");
 
         println!("✓ CPU vs GPU EncoderLayer parity test passed!");
         Ok(())
     }
 
-    // Mock config for the GPU layer
     struct MockConfig {
         hidden_size: usize,
         num_heads: usize,
@@ -630,7 +597,6 @@ mod tests {
         }
 
         fn layout(&self) -> ModelLayout {
-            // --- Define the Decoder's Layer Structure for the test ---
             let decoder_layer = DecoderLayerLayout {
                 self_attn: AttentionLayout {
                     q_weight: "layer.{}.attn.q.weight".to_string(),
@@ -644,24 +610,23 @@ mod tests {
                     norm_weight: "layer.{}.attn_ln.weight".to_string(),
                     norm_bias: Some("layer.{}.attn_ln.bias".to_string()),
                 },
-                cross_attn: None, // No cross-attention in this test model
+                cross_attn: None, 
                 ffn: FeedForwardLayout {
                     up_weight: "layer.{}.ffn.up.weight".to_string(),
                     up_bias: Some("layer.{}.ffn.up.bias".to_string()),
                     down_weight: "layer.{}.ffn.down.weight".to_string(),
                     down_bias: Some("layer.{}.ffn.down.bias".to_string()),
-                    gate_weight: None, // Standard FFN for this test
+                    gate_weight: None,
                     gate_bias: None,
                     norm_weight: "layer.{}.ffn_ln.weight".to_string(),
                     norm_bias: Some("layer.{}.ffn_ln.bias".to_string()),
                 },
             };
 
-            // --- Assemble the final ModelLayout ---
             ModelLayout {
                 token_embedding: "embeddings.word_embeddings.weight".to_string(),
                 lm_head: "lm_head.weight".to_string(),
-                encoder: None, // This is a decoder-only test model
+                encoder: None, 
                 decoder: Some(DecoderLayout {
                     position_embedding: Some("embeddings.position_embeddings.weight".to_string()),
                     token_type_embedding: None,

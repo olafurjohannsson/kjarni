@@ -183,7 +183,7 @@ pub enum Commands {
         /// Input text, file path, or stdin if not provided
         input: Option<String>,
 
-        #[arg(short, long, default_value = "minilm-l6v2")]
+        #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
         #[arg(long)]
@@ -206,7 +206,7 @@ pub enum Commands {
         quiet: bool,
     },
 
-        /// Transcribe audio to text
+    /// Transcribe audio to text
     Transcribe {
         /// Path to audio file (wav, mp3, flac, ogg)
         file: String,
@@ -251,7 +251,6 @@ pub enum Commands {
     /// Classify text using a classification model
     Classify {
         /// Input text(s) to classify. Use - for stdin.
-        #[arg(trailing_var_arg = true)]
         input: Vec<String>,
 
         /// Model name from registry
@@ -310,7 +309,6 @@ pub enum Commands {
         query: String,
 
         /// Documents to rerank (or read from stdin, one per line)
-        #[arg(trailing_var_arg = true)]
         documents: Vec<String>,
 
         #[arg(short, long, default_value = "minilm-l6-v2-cross-encoder")]
@@ -470,7 +468,7 @@ pub enum IndexCommands {
         output: String,
 
         /// Input files/directories (uses built-in chunking)
-        #[arg(trailing_var_arg = true, conflicts_with = "from_chunks")]
+        #[arg(conflicts_with = "from_chunks")]
         inputs: Vec<String>,
 
         /// Pre-chunked JSONL file (bypass chunking)
@@ -502,18 +500,15 @@ pub enum IndexCommands {
         index_path: String,
 
         /// Input files or directories to add
-        #[arg(trailing_var_arg = true)]
         inputs: Vec<String>,
 
         /// Chunk size for splitting documents
         #[arg(long, default_value_t = 1000)]
         chunk_size: usize,
 
-        /// Chunk overlap
         #[arg(long, default_value_t = 200)]
         chunk_overlap: usize,
 
-        /// Encoder model (must match index)
         #[arg(short, long, default_value = "minilm-l6-v2")]
         model: String,
 
@@ -1486,7 +1481,7 @@ mod tests {
                 ..
             } => {
                 assert!(input.is_none());
-                assert_eq!(model, "t5-flan");
+                assert_eq!(model, "t5-flan-base");
                 assert!(src.is_none());
                 assert!(dst.is_none());
             }
@@ -1523,10 +1518,22 @@ mod tests {
                 ..
             } => {
                 assert_eq!(file, "audio.wav");
-                assert_eq!(model, "whisper-tiny");
+                assert_eq!(model, "whisper-small");
                 assert!(language.is_none());
             }
             _ => panic!("Expected Transcribe command"),
+        }
+    }
+
+    #[test]
+    fn test_classify_with_model() {
+        let cli = parse_args(&["classify", "i hate mondays", "--model", "toxic-bert"]).unwrap();
+        match cli.command {
+            Commands::Classify { input, model, .. } => {
+                assert_eq!(input, vec!["i hate mondays".to_string()]);
+                assert_eq!(model, "toxic-bert");
+            }
+            _ => panic!("Expected Classify command"),
         }
     }
 

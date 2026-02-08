@@ -13,7 +13,6 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     kjarni_transformers::utils::configure_threading();
 
-    // --- Config ---
     let prompt = "Describe the theory of relativity in simple terms (max 50 words):\n";
     let model_type = ModelType::Llama3_2_3B_Instruct;
 
@@ -28,9 +27,6 @@ async fn main() -> anyhow::Result<()> {
 
     GenerationStats::enable();
 
-    // =========================================================================
-    //                            CPU Generation
-    // =========================================================================
     println!("\n--- Running on CPU ---");
     println!("Prompt: {}", prompt);
 
@@ -53,9 +49,6 @@ async fn main() -> anyhow::Result<()> {
     }
     println!("\n");
 
-    // =========================================================================
-    //                            GPU Generation
-    // =========================================================================
     println!("--- Running on GPU ---");
     println!("Prompt: {}", prompt);
 

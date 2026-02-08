@@ -107,20 +107,17 @@ impl GpuTransformerEncoder {
             }
         };
 
-        // 4. Build Layers
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
             let idx = i.to_string();
             let name = |t: &String| t.replace("{}", &idx);
             let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
 
-            // --- ATTENTION LOADING (Handles Nomic Fused QKV) ---
             let q_name = name(&encoder_layout.layer.self_attn.q_weight);
             let k_name = name(&encoder_layout.layer.self_attn.k_weight);
             let v_name = name(&encoder_layout.layer.self_attn.v_weight);
 
             let (q_t, k_t, v_t, q_b, k_b, v_b) = if q_name == k_name && k_name == v_name {
-                // Fused Path
                 let fused_w = weights.get_array2(&q_name)?;
                 let hidden = meta.hidden_size;
                 let q_w = fused_w.slice(s![0..hidden, ..]).to_owned();

@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum RerankerError {
     /// Model not found.
-    #[error("Unknown model: '{0}'. Run 'kjarni model list --task reranking' to see available models.")]
+    #[error("{0}")]
     UnknownModel(String),
 
     /// Model cannot rerank.

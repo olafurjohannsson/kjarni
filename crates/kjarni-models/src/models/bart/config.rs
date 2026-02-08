@@ -168,7 +168,6 @@ impl ModelConfig for BartConfig {
     fn layout(&self) -> ModelLayout {
         let shared = self.get_shared_weight_name();
 
-        // --- Define the Encoder's Layer Structure ---
         let encoder_layer = EncoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
@@ -194,7 +193,6 @@ impl ModelConfig for BartConfig {
             },
         };
 
-        // --- Define the Decoder's Layer Structure ---
         let decoder_layer = DecoderLayerLayout {
             self_attn: AttentionLayout {
                 q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),
@@ -232,7 +230,6 @@ impl ModelConfig for BartConfig {
             },
         };
 
-        // --- Assemble the final ModelLayout ---
         ModelLayout {
             token_embedding: shared.clone(),
             lm_head: shared,
@@ -309,7 +306,6 @@ mod tests {
         let config: BartConfig = serde_json::from_str(DISTILBART_CNN_CONFIG_JSON).unwrap();
         let layout = config.layout();
 
-        // --- Get nested layouts for both encoder and decoder ---
         let encoder_layout = layout
             .encoder
             .as_ref()
@@ -319,11 +315,9 @@ mod tests {
             .as_ref()
             .expect("BART should have a decoder layout");
 
-        // --- Verify Root/Shared Names ---
         assert_eq!(layout.token_embedding, "model.shared.weight");
         assert_eq!(layout.lm_head, "model.shared.weight");
 
-        // --- Verify Encoder-Specific Names ---
         assert_eq!(
             encoder_layout.layer.self_attn.q_weight.replace("{}", "5"),
             "model.encoder.layers.5.self_attn.q_proj.weight"
@@ -337,14 +331,11 @@ mod tests {
             "model.encoder.layernorm_embedding.weight"
         );
 
-        // --- Verify Decoder-Specific Names ---
-        // Test decoder's SELF-attention (the source of the original bug)
         assert_eq!(
             decoder_layout.layer.self_attn.q_weight.replace("{}", "3"),
             "model.decoder.layers.3.self_attn.q_proj.weight"
         );
 
-        // Test decoder's CROSS-attention
         let cross_attn_layout = decoder_layout.layer.cross_attn.as_ref().unwrap();
         assert_eq!(
             cross_attn_layout.q_weight.replace("{}", "1"),
@@ -359,7 +350,6 @@ mod tests {
             "model.decoder.layers.4.encoder_attn_layer_norm.bias"
         );
 
-        // Test decoder's FFN
         assert_eq!(
             decoder_layout
                 .layer
