@@ -39,13 +39,34 @@ mod types_tests {
 
     #[test]
     fn test_pooling_strategy_from_str() {
-        assert_eq!("mean".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::Mean);
-        assert_eq!("max".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::Max);
-        assert_eq!("cls".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::Cls);
-        assert_eq!("last_token".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::LastToken);
-        assert_eq!("lasttoken".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::LastToken);
-        assert_eq!("last".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::LastToken);
-        assert_eq!("MEAN".parse::<PoolingStrategy>().unwrap(), PoolingStrategy::Mean);
+        assert_eq!(
+            "mean".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Mean
+        );
+        assert_eq!(
+            "max".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Max
+        );
+        assert_eq!(
+            "cls".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Cls
+        );
+        assert_eq!(
+            "last_token".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "lasttoken".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "last".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "MEAN".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Mean
+        );
     }
 
     #[test]
@@ -131,8 +152,7 @@ mod builder_tests {
 
     #[test]
     fn test_builder_cache_dir() {
-        let builder = EmbedderBuilder::new("test-model")
-            .cache_dir("/tmp/test-cache");
+        let builder = EmbedderBuilder::new("test-model").cache_dir("/tmp/test-cache");
 
         assert_eq!(
             builder.cache_dir,
@@ -142,8 +162,7 @@ mod builder_tests {
 
     #[test]
     fn test_builder_model_path() {
-        let builder = EmbedderBuilder::new("test-model")
-            .model_path("/path/to/model");
+        let builder = EmbedderBuilder::new("test-model").model_path("/path/to/model");
 
         assert_eq!(
             builder.model_path,
@@ -153,8 +172,7 @@ mod builder_tests {
 
     #[test]
     fn test_builder_pooling() {
-        let builder = EmbedderBuilder::new("test-model")
-            .pooling(PoolingStrategy::Cls);
+        let builder = EmbedderBuilder::new("test-model").pooling(PoolingStrategy::Cls);
 
         assert_eq!(builder.overrides.pooling, Some(PoolingStrategy::Cls));
     }
@@ -206,7 +224,10 @@ mod builder_tests {
         let builder = EmbedderBuilder::from_preset(&presets::EMBEDDING_SMALL_V1);
 
         assert_eq!(builder.model, presets::EMBEDDING_SMALL_V1.model);
-        assert_eq!(builder.device, presets::EMBEDDING_SMALL_V1.recommended_device);
+        assert_eq!(
+            builder.device,
+            presets::EMBEDDING_SMALL_V1.recommended_device
+        );
         assert_eq!(
             builder.overrides.pooling,
             Some(presets::EMBEDDING_SMALL_V1.default_pooling)
@@ -331,6 +352,189 @@ mod validation_tests {
     }
 }
 
+mod embedder_golden_values_test {
+    use super::*;
+
+    /// Helper: assert two f32 slices are approximately equal
+    fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
+        assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (a - e).abs() < tolerance,
+                "{label}[{i}]: expected {e:.6}, got {a:.6} (diff: {:.6})",
+                (a - e).abs()
+            );
+        }
+    }
+
+    // =============================================================================
+    // Embeddings: minilm-l6-v2
+    // =============================================================================
+
+    #[tokio::test]
+    async fn golden_embed_hello_dimension() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+        assert_eq!(vec.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn golden_embed_hello_normalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+
+        // Normalized output should have L2 norm ≈ 1.0
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Expected norm ≈ 1.0, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_hello_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+
+        // HuggingFace reference (unnormalized, mean pooling)
+        let expected_first_10: [f32; 10] = [
+            -0.378313, 0.331226, 0.314387, 0.517039, -0.498711, -0.449437, 0.413166, 0.110871,
+            -0.494266, -0.225311,
+        ];
+        let expected_norm: f32 = 6.026801;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "hello");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_fox_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb
+            .embed("The quick brown fox jumps over the lazy dog")
+            .await
+            .unwrap();
+
+        let expected_first_10: [f32; 10] = [
+            0.195029, 0.336722, 0.289504, 0.388472, 0.181868, -0.168507, 0.036375, -0.336157,
+            -0.007285, 0.05849,
+        ];
+        let expected_norm: f32 = 5.494254;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "fox");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_kjarni_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("Kjarni is the SQLite of AI").await.unwrap();
+
+        let expected_first_10: [f32; 10] = [
+            -0.300013, -0.165611, -0.500337, -0.374199, -0.059137, -0.156641, 0.762686, -0.083305,
+            -0.201395, 0.509203,
+        ];
+        let expected_norm: f32 = 6.380726;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "kjarni");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_king_queen() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("king", "queen").await.unwrap();
+        assert!(
+            (sim - 0.6807).abs() < 0.02,
+            "Expected cosine(king, queen) ≈ 0.6807, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_king_potato() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("king", "potato").await.unwrap();
+        assert!(
+            (sim - 0.3596).abs() < 0.02,
+            "Expected cosine(king, potato) ≈ 0.3596, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_cat_dog() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("cat", "dog").await.unwrap();
+        assert!(
+            (sim - 0.6606).abs() < 0.02,
+            "Expected cosine(cat, dog) ≈ 0.6606, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_cat_democracy() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("cat", "democracy").await.unwrap();
+        assert!(
+            (sim - 0.2668).abs() < 0.02,
+            "Expected cosine(cat, democracy) ≈ 0.2668, got {sim:.4}"
+        );
+    }
+}
+
 // =============================================================================
 // Error Tests
 // =============================================================================
@@ -443,21 +647,26 @@ mod integration_tests {
 
     /// Test that we can create an embedder.
     #[tokio::test]
-    
+
     async fn test_embedder_new() {
         let embedder = Embedder::new("minilm-l6-v2").await;
-        assert!(embedder.is_ok(), "Failed to create embedder: {:?}", embedder.err());
+        assert!(
+            embedder.is_ok(),
+            "Failed to create embedder: {:?}",
+            embedder.err()
+        );
     }
 
     /// Test single text embedding.
     #[tokio::test]
-    
+
     async fn test_embed_single() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
             .expect("Failed to load embedder");
 
-        let embedding = embedder.embed("Hello world!")
+        let embedding = embedder
+            .embed("Hello world!")
             .await
             .expect("Embedding failed");
 
@@ -469,14 +678,15 @@ mod integration_tests {
 
     /// Test batch embedding.
     #[tokio::test]
-    
+
     async fn test_embed_batch() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
             .expect("Failed to load embedder");
 
         let texts = ["Hello world", "How are you?", "This is a test"];
-        let embeddings = embedder.embed_batch(&texts)
+        let embeddings = embedder
+            .embed_batch(&texts)
             .await
             .expect("Batch embedding failed");
 
@@ -488,7 +698,7 @@ mod integration_tests {
 
     /// Test embedding with custom pooling.
     #[tokio::test]
-    
+
     async fn test_embed_with_config() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -510,7 +720,7 @@ mod integration_tests {
 
     /// Test unnormalized embeddings.
     #[tokio::test]
-    
+
     async fn test_embed_unnormalized() {
         let embedder = Embedder::builder("minilm-l6-v2")
             .normalize(false)
@@ -518,9 +728,7 @@ mod integration_tests {
             .await
             .expect("Failed to load embedder");
 
-        let embedding = embedder.embed("Test text")
-            .await
-            .expect("Embedding failed");
+        let embedding = embedder.embed("Test text").await.expect("Embedding failed");
 
         // Unnormalized embedding may not have unit norm
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -530,41 +738,49 @@ mod integration_tests {
 
     /// Test similarity computation.
     #[tokio::test]
-    
+
     async fn test_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
             .expect("Failed to load embedder");
 
-        let sim = embedder.similarity(
-            "The cat sat on the mat",
-            "A feline was sitting on a rug"
-        ).await.expect("Similarity failed");
+        let sim = embedder
+            .similarity("The cat sat on the mat", "A feline was sitting on a rug")
+            .await
+            .expect("Similarity failed");
 
         // Similar sentences should have high similarity
-        assert!(sim > 0.5, "Similar sentences should have sim > 0.5, got {}", sim);
+        assert!(
+            sim > 0.5,
+            "Similar sentences should have sim > 0.5, got {}",
+            sim
+        );
     }
 
     /// Test similarity with dissimilar texts.
     #[tokio::test]
-    
+
     async fn test_similarity_dissimilar() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
             .expect("Failed to load embedder");
 
-        let sim = embedder.similarity(
-            "The cat sat on the mat",
-            "Stock prices rose today"
-        ).await.expect("Similarity failed");
+        let sim = embedder
+            .similarity("The cat sat on the mat", "Stock prices rose today")
+            .await
+            .expect("Similarity failed");
 
         // Dissimilar sentences should have lower similarity
-        assert!(sim < 0.5, "Dissimilar sentences should have sim < 0.5, got {}", sim);
+        assert!(
+            sim < 0.5,
+            "Dissimilar sentences should have sim < 0.5, got {}",
+            sim
+        );
     }
 
     /// Test batch similarities.
     #[tokio::test]
-    
+
     async fn test_similarities() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -577,7 +793,8 @@ mod integration_tests {
             "Deep learning uses neural networks",
         ];
 
-        let similarities = embedder.similarities(query, &docs)
+        let similarities = embedder
+            .similarities(query, &docs)
             .await
             .expect("Similarities failed");
 
@@ -589,7 +806,7 @@ mod integration_tests {
 
     /// Test ranking by similarity.
     #[tokio::test]
-    
+
     async fn test_rank_by_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -602,7 +819,8 @@ mod integration_tests {
             "Paris is the capital of France",
         ];
 
-        let ranked = embedder.rank_by_similarity(query, &docs)
+        let ranked = embedder
+            .rank_by_similarity(query, &docs)
             .await
             .expect("Ranking failed");
 
@@ -620,7 +838,8 @@ mod integration_tests {
             .await
             .expect("Failed to load embedder on GPU");
 
-        let embedding = embedder.embed("Test GPU embedding")
+        let embedding = embedder
+            .embed("Test GPU embedding")
             .await
             .expect("GPU embedding failed");
 
@@ -629,7 +848,7 @@ mod integration_tests {
 
     /// Test embedder accessors.
     #[tokio::test]
-    
+
     async fn test_embedder_accessors() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -642,7 +861,7 @@ mod integration_tests {
 
     /// Test one-liner embed function.
     #[tokio::test]
-    
+
     async fn test_embed_convenience_function() {
         let embedding = embed("minilm-l6-v2", "Hello world")
             .await
@@ -653,7 +872,7 @@ mod integration_tests {
 
     /// Test one-liner similarity function.
     #[tokio::test]
-    
+
     async fn test_similarity_convenience_function() {
         let sim = similarity("minilm-l6-v2", "Hello", "Hi there")
             .await

@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: kjarni
+Version: 0.1.0a1
+Summary: Kjarni - Cross-platform ML inference engine. Embeddings, classification, reranking, and RAG search.
+Author: Ólafur Aron Jóhannsson
+License: MIT
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Requires-Python: >=3.8

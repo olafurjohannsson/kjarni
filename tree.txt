@@ -95,7 +95,13 @@ crates/
 │       │   ├── types.rs
 │       │   └── validation.rs
 │       ├── transcriber
-│       │   └── mod.rs
+│       │   ├── builder.rs
+│       │   ├── model.rs
+│       │   ├── mod.rs
+│       │   ├── presets.rs
+│       │   ├── tests.rs
+│       │   ├── types.rs
+│       │   └── validation.rs
 │       ├── translator
 │       │   ├── builder.rs
 │       │   ├── languages.rs
@@ -138,20 +144,104 @@ crates/
 │   ├── bindings
 │   │   ├── csharp
 │   │   │   ├── Kjarni
+│   │   │   │   ├── bin
+│   │   │   │   │   ├── Debug
+│   │   │   │   │   │   └── net8.0
+│   │   │   │   │   │       ├── Kjarni.deps.json
+│   │   │   │   │   │       ├── Kjarni.dll
+│   │   │   │   │   │       ├── Kjarni.pdb
+│   │   │   │   │   │       └── libkjarni_ffi.so
+│   │   │   │   │   └── Release
+│   │   │   │   │       ├── Kjarni.0.1.0-preview.1.nupkg
+│   │   │   │   │       └── net8.0
+│   │   │   │   │           ├── Kjarni.deps.json
+│   │   │   │   │           ├── Kjarni.dll
+│   │   │   │   │           └── Kjarni.pdb
 │   │   │   │   ├── Classifier.cs
 │   │   │   │   ├── Embedder.cs
 │   │   │   │   ├── Indexer.cs
 │   │   │   │   ├── Kjarni.csproj
 │   │   │   │   ├── Native.cs
+│   │   │   │   ├── obj
+│   │   │   │   │   ├── Debug
+│   │   │   │   │   │   └── net8.0
+│   │   │   │   │   │       ├── Kjarni.AssemblyInfo.cs
+│   │   │   │   │   │       ├── Kjarni.AssemblyInfoInputs.cache
+│   │   │   │   │   │       ├── Kjarni.assets.cache
+│   │   │   │   │   │       ├── Kjarni.csproj.CoreCompileInputs.cache
+│   │   │   │   │   │       ├── Kjarni.csproj.FileListAbsolute.txt
+│   │   │   │   │   │       ├── Kjarni.dll
+│   │   │   │   │   │       ├── Kjarni.GeneratedMSBuildEditorConfig.editorconfig
+│   │   │   │   │   │       ├── Kjarni.pdb
+│   │   │   │   │   │       ├── Kjarni.sourcelink.json
+│   │   │   │   │   │       ├── ref
+│   │   │   │   │   │       └── refint
+│   │   │   │   │   ├── Kjarni.csproj.nuget.dgspec.json
+│   │   │   │   │   ├── Kjarni.csproj.nuget.g.props
+│   │   │   │   │   ├── Kjarni.csproj.nuget.g.targets
+│   │   │   │   │   ├── project.assets.json
+│   │   │   │   │   ├── project.nuget.cache
+│   │   │   │   │   └── Release
+│   │   │   │   │       ├── Kjarni.0.1.0-preview.1.nuspec
+│   │   │   │   │       └── net8.0
+│   │   │   │   │           ├── Kjarni.AssemblyInfo.cs
+│   │   │   │   │           ├── Kjarni.AssemblyInfoInputs.cache
+│   │   │   │   │           ├── Kjarni.assets.cache
+│   │   │   │   │           ├── Kjarni.csproj.CoreCompileInputs.cache
+│   │   │   │   │           ├── Kjarni.csproj.FileListAbsolute.txt
+│   │   │   │   │           ├── Kjarni.dll
+│   │   │   │   │           ├── Kjarni.GeneratedMSBuildEditorConfig.editorconfig
+│   │   │   │   │           ├── Kjarni.pdb
+│   │   │   │   │           ├── Kjarni.sourcelink.json
+│   │   │   │   │           ├── ref
+│   │   │   │   │           └── refint
+│   │   │   │   ├── README.md
 │   │   │   │   ├── Reranker.cs
 │   │   │   │   └── Searcher.cs
 │   │   │   ├── Kjarni.sln
 │   │   │   └── Kjarni.Tests
+│   │   │       ├── bin
+│   │   │       │   └── Debug
+│   │   │       │       └── net8.0
+│   │   │       │           ├── Kjarni.dll
+│   │   │       │           ├── Kjarni.pdb
+│   │   │       │           ├── Kjarni.Tests
+│   │   │       │           ├── Kjarni.Tests.deps.json
+│   │   │       │           ├── Kjarni.Tests.dll
+│   │   │       │           ├── Kjarni.Tests.pdb
+│   │   │       │           ├── Kjarni.Tests.runtimeconfig.json
+│   │   │       │           └── libkjarni_ffi.so
 │   │   │       ├── Classify.cs
 │   │   │       ├── Compare.cs
 │   │   │       ├── Kjarni.Tests.csproj
+│   │   │       ├── obj
+│   │   │       │   ├── Debug
+│   │   │       │   │   └── net8.0
+│   │   │       │   │       ├── apphost
+│   │   │       │   │       ├── Kjarni.Tests.AssemblyInfo.cs
+│   │   │       │   │       ├── Kjarni.Tests.AssemblyInfoInputs.cache
+│   │   │       │   │       ├── Kjarni.Tests.assets.cache
+│   │   │       │   │       ├── Kjarni.Tests.csproj.AssemblyReference.cache
+│   │   │       │   │       ├── Kjarni.Tests.csproj.CopyComplete
+│   │   │       │   │       ├── Kjarni.Tests.csproj.CoreCompileInputs.cache
+│   │   │       │   │       ├── Kjarni.Tests.csproj.FileListAbsolute.txt
+│   │   │       │   │       ├── Kjarni.Tests.dll
+│   │   │       │   │       ├── Kjarni.Tests.GeneratedMSBuildEditorConfig.editorconfig
+│   │   │       │   │       ├── Kjarni.Tests.genruntimeconfig.cache
+│   │   │       │   │       ├── Kjarni.Tests.pdb
+│   │   │       │   │       ├── Kjarni.Tests.sourcelink.json
+│   │   │       │   │       ├── ref
+│   │   │       │   │       └── refint
+│   │   │       │   ├── Kjarni.Tests.csproj.nuget.dgspec.json
+│   │   │       │   ├── Kjarni.Tests.csproj.nuget.g.props
+│   │   │       │   ├── Kjarni.Tests.csproj.nuget.g.targets
+│   │   │       │   ├── project.assets.json
+│   │   │       │   └── project.nuget.cache
 │   │   │       └── Program.cs
 │   │   └── python
+│   │       ├── dist
+│   │       │   ├── kjarni-0.1.0a1-py3-none-any.whl
+│   │       │   └── kjarni-0.1.0a1.tar.gz
 │   │       ├── example
 │   │       │   ├── classify.py
 │   │       │   ├── compare.py
@@ -164,7 +254,6 @@ crates/
 │   │       │   │   └── test.cpython-313.pyc
 │   │       │   ├── searching.py
 │   │       │   └── test.py
-│   │       ├── f.txt
 │   │       ├── __init__.py
 │   │       ├── kjarni
 │   │       │   ├── classifier.py
@@ -196,6 +285,11 @@ crates/
 │   │       │   │   └── searcher.cpython-36.pyc
 │   │       │   ├── reranker.py
 │   │       │   └── searcher.py
+│   │       ├── kjarni.egg-info
+│   │       │   ├── dependency_links.txt
+│   │       │   ├── PKG-INFO
+│   │       │   ├── SOURCES.txt
+│   │       │   └── top_level.txt
 │   │       └── pyproject.toml
 │   ├── build.rs
 │   ├── Cargo.toml
@@ -244,11 +338,8 @@ crates/
 │       ├── models
 │       │   ├── bart
 │       │   │   ├── config.rs
-│       │   │   ├── cpu_decoder.rs
-│       │   │   ├── cpu_encoder.rs
+│       │   │   ├── cpu_decoder_test.rs
 │       │   │   ├── cpu_encoder_test.rs
-│       │   │   ├── gpu_decoder.rs
-│       │   │   ├── gpu_encoder.rs
 │       │   │   ├── model.rs
 │       │   │   └── mod.rs
 │       │   ├── cross_encoder
@@ -295,7 +386,8 @@ crates/
 │       │   └── whisper
 │       │       ├── config.rs
 │       │       ├── model.rs
-│       │       └── mod.rs
+│       │       ├── mod.rs
+│       │       └── transcriber.rs
 │       ├── tests
 │       │   ├── beam_tests.rs
 │       │   ├── decoder_parity_test.rs
@@ -401,6 +493,8 @@ crates/
         │   │   ├── cpu_encoder.rs
         │   │   ├── decoder_cross_attn_layer.rs
         │   │   ├── decoder_cross_attn.rs
+        │   │   ├── gpu_decoder.rs
+        │   │   ├── gpu_encoder.rs
         │   │   ├── mod.rs
         │   │   └── relative_position_bias.rs
         │   ├── feedforward
@@ -567,7 +661,8 @@ crates/
         │   │   │   └── tests.rs
         │   │   ├── argmax
         │   │   │   ├── argmax.wgsl
-        │   │   │   └── mod.rs
+        │   │   │   ├── mod.rs
+        │   │   │   └── tests.rs
         │   │   ├── bmm
         │   │   │   ├── bmm.wgsl
         │   │   │   ├── gemv.wgsl
@@ -575,11 +670,13 @@ crates/
         │   │   │   └── tests.rs
         │   │   ├── broadcast
         │   │   │   ├── broadcast.wgsl
-        │   │   │   └── mod.rs
+        │   │   │   ├── mod.rs
+        │   │   │   └── tests.rs
         │   │   ├── layout
         │   │   │   ├── clsslice
         │   │   │   │   ├── clsslice.wgsl
-        │   │   │   │   └── mod.rs
+        │   │   │   │   ├── mod.rs
+        │   │   │   │   └── tests.rs
         │   │   │   ├── concatenate
         │   │   │   │   ├── concatenate.wgsl
         │   │   │   │   ├── mod.rs
@@ -715,4 +812,4 @@ crates/
             ├── safetensors_loader.rs
             └── tests.rs
 
-142 directories, 574 files
+166 directories, 647 files

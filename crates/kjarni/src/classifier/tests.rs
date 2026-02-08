@@ -615,6 +615,118 @@ mod classifier_tests {
         }
     }
 
+    mod classifier_golden_values_test {
+        use crate::Classifier;
+
+
+        fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
+            assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
+            for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+                assert!(
+                    (a - e).abs() < tolerance,
+                    "{label}[{i}]: expected {e:.6}, got {a:.6} (diff: {:.6})",
+                    (a - e).abs()
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn golden_classify_love_product() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("I love this product").await.unwrap();
+            assert_eq!(result.label, "POSITIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn golden_classify_terrible() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("This is terrible").await.unwrap();
+            assert_eq!(result.label, "NEGATIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn golden_classify_weather_okay() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("The weather is okay").await.unwrap();
+            assert_eq!(result.label, "POSITIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn golden_classify_love_kjarni() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("I love kjarni").await.unwrap();
+            assert_eq!(result.label, "POSITIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn golden_classify_not_bad() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("not bad").await.unwrap();
+            assert_eq!(result.label, "POSITIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+
+        #[tokio::test]
+        async fn golden_classify_not_happy() {
+            let clf = Classifier::builder("distilbert-sentiment")
+                .quiet(true)
+                .build()
+                .await
+                .unwrap();
+            let result = clf.classify("I'm not happy").await.unwrap();
+            assert_eq!(result.label, "NEGATIVE");
+            assert!(
+                result.score > 0.999,
+                "Expected score > 0.999, got {}",
+                result.score
+            );
+        }
+    }
+
     // =============================================================================
     // Convenience Function Tests
     // =============================================================================

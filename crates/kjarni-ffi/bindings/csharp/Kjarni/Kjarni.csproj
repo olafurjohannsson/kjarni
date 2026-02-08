@@ -10,18 +10,20 @@
     <!-- Package metadata -->
     <PackageId>Kjarni</PackageId>
     <Version>0.1.0</Version>
-    <Authors>Your Name</Authors>
+    <Authors>Ólafur Aron Jóhannsson</Authors>
     <Description>Kjarni ML Library - Embeddings, Classification, Reranking, and RAG Search</Description>
     <PackageTags>ml;embeddings;rag;search;nlp</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- Native library configuration -->
-  <!-- UPDATE THIS PATH to point to your compiled libkjarni_ffi.so / .dylib / .dll -->
   <PropertyGroup>
     <NativeLibraryPath>/home/olafurj/dev/edgebert/target/release/</NativeLibraryPath>
   </PropertyGroup>
-
-  <!-- Copy native library to output directory -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+  
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
     <None Include="$(NativeLibraryPath)/libkjarni_ffi.so" 
           CopyToOutputDirectory="PreserveNewest" 
@@ -44,3 +46,6 @@
   </ItemGroup>
 
 </Project>
+
+
+  </PropertyGroup>

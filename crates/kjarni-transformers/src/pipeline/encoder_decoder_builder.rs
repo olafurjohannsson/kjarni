@@ -2,7 +2,6 @@ use crate::{
     WgpuContext,
     cpu::encoder::{CpuEncoder, GpuEncoder},
     decoder::prelude::{CpuDecoder, GpuDecoder},
-    {EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
     gpu::GpuTensor,
@@ -11,6 +10,7 @@ use crate::{
     pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineConfig},
     traits::{Device, ModelConfig},
     weights::ModelWeights,
+    {EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -200,12 +200,20 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             self.load_config.target_dtype,
         )?;
 
+        let final_logits_bias = self
+            .weights
+            .get_array2("final_logits_bias")
+            .ok()
+            .map(|t| t.into_dimensionality::<ndarray::Ix2>())
+            .transpose()?;
+
         // 5. Load LM Head (The "Tied" Check)
         let lm_head = if tied_weights {
             log::info!("Using tied weights between embeddings and LM head");
             LoadedLMHead::from_shared_weights(
                 ctx,
                 shared_word_cpu.map(|e| e.to_linear_layer()),
+                final_logits_bias,
                 shared_word_gpu,
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
                 None,
@@ -214,6 +222,7 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             LoadedLMHead::new(
                 ctx,
                 self.weights,
+                final_logits_bias,
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
                 plan.lm_head == Device::Cpu,
                 plan.lm_head == Device::Wgpu,

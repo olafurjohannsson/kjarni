@@ -115,6 +115,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         for (i, (k, v)) in decoder_output.new_self_attn_kv.into_iter().enumerate() {
             cpu_cache.update(i, &k, &v)?;
         }
+        // TODO: missing increment_len ?
         let logits = ops.project_to_logits(&decoder_output.last_hidden_state)?;
 
         let last_logits = logits.slice(ndarray::s![0, -1, ..]);

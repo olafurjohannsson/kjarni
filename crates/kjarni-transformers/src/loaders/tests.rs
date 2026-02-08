@@ -42,6 +42,7 @@ mod cpu_tests {
             cpu_weights: Some(linear),
             gpu_weights: None,
             gpu_kernel: None,
+            bias: None,
             vocab_size,
             hidden_size,
             context: None,
@@ -123,6 +124,7 @@ mod cpu_tests {
             cpu_weights: Some(linear),
             gpu_weights: None,
             gpu_kernel: None,
+            bias: None,
             vocab_size,
             hidden_size,
             context: None,
@@ -158,6 +160,7 @@ mod cpu_tests {
             cpu_weights: None,
             gpu_weights: None,
             gpu_kernel: None,
+            bias: None,
             vocab_size: 1000,
             hidden_size: 256,
             context: None,
@@ -223,6 +226,7 @@ async fn create_gpu_lm_head(
         cpu_weights: None,
         gpu_weights: Some(gpu_weights),
         gpu_kernel: Some(gpu_kernel),
+        bias: None,
         vocab_size,
         hidden_size,
         context: Some(ctx.clone()),
@@ -284,6 +288,7 @@ async fn test_loaded_lm_head_forward_gpu_values() {
         cpu_weights: None,
         gpu_weights: Some(gpu_weights),
         gpu_kernel: Some(gpu_kernel),
+        bias: None,
         vocab_size,
         hidden_size,
         context: Some(ctx.clone()),
@@ -320,6 +325,7 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
         cpu_weights: None,
         gpu_weights: None,
         gpu_kernel: None,
+        bias: None,
         vocab_size: 1000,
         hidden_size: 256,
         context: Some(ctx.clone()),
@@ -367,6 +373,7 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
         cpu_weights: Some(linear),
         gpu_weights: Some(gpu_weights),
         gpu_kernel: Some(gpu_kernel),
+        bias: None,
         vocab_size,
         hidden_size,
         context: Some(ctx.clone()),
@@ -451,7 +458,11 @@ fn test_loaded_lm_head_from_real_weights() {
 
     let head = LoadedLMHead::new(
         None, // No GPU
-        &weights, config, true,  // Load CPU
+        &weights, 
+        None,
+        config, 
+        true,  // Load CPU
+        
         false, // Don't load GPU
         None,  // Default dtype
     )

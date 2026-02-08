@@ -4,14 +4,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array3, s};
+use ndarray::{Array1, Array2, Array3, s};
 
-use crate::gpu_ops::primitives::linear::GpuLinearLayer;
+use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
 
 /// Configuration for the LM head.
 pub struct LMHeadConfig {
@@ -35,6 +35,7 @@ pub struct LoadedLMHead {
     pub cpu_weights: Option<LinearLayer>,
     pub gpu_weights: Option<GpuTensor>,
     pub gpu_kernel: Option<GpuLinearLayer>,
+    pub bias: Option<Array2<f32>>,
     pub vocab_size: usize,
     pub hidden_size: usize,
     pub context: Option<Arc<WgpuContext>>,
@@ -45,6 +46,7 @@ impl LoadedLMHead {
     pub fn new(
         ctx: Option<&Arc<WgpuContext>>,
         weights: &ModelWeights,
+        bias: Option<Array2<f32>>,
         config: LMHeadConfig,
         load_cpu: bool,
         load_gpu: bool,
@@ -83,6 +85,7 @@ impl LoadedLMHead {
             cpu_weights,
             gpu_weights,
             gpu_kernel,
+            bias,
             vocab_size: config.vocab_size,
             hidden_size: config.hidden_size,
             context: ctx.cloned(),
@@ -93,6 +96,7 @@ impl LoadedLMHead {
     pub fn from_shared_weights(
         ctx: Option<&Arc<WgpuContext>>,
         cpu_weights: Option<LinearLayer>,
+        bias: Option<Array2<f32>>,
         gpu_weights: Option<GpuTensor>,
         config: LMHeadConfig,
         quantize_dtype: Option<DType>,
@@ -105,7 +109,10 @@ impl LoadedLMHead {
 
         let final_cpu_weights = if let Some(cpu_emb) = cpu_weights {
             if let Some(dtype) = quantize_dtype {
-                log::info!("creating quantized ({:?}) copy of tied LM head weights", dtype);
+                log::info!(
+                    "creating quantized ({:?}) copy of tied LM head weights",
+                    dtype
+                );
                 Some(cpu_emb.to_quantized(dtype)?)
             } else {
                 Some(cpu_emb.clone())
@@ -118,6 +125,7 @@ impl LoadedLMHead {
             cpu_weights: final_cpu_weights,
             gpu_weights,
             gpu_kernel,
+            bias,
             vocab_size: config.vocab_size,
             hidden_size: config.hidden_size,
             context: ctx.cloned(),
@@ -156,8 +164,12 @@ impl LoadedLMHead {
             .into_shape_with_order((batch * seq, hidden))?;
 
         let t_matmul = Instant::now();
-        let logits_2d = cpu_weights.matmul(&hidden_2d);
+        let mut logits_2d = cpu_weights.matmul(&hidden_2d);
         let d_matmul = t_matmul.elapsed();
+
+        if let Some(bias) = &self.bias {
+            logits_2d += &bias.slice(s![0, ..]);
+        }
 
         let result = logits_2d
             .into_shape_with_order((batch, seq, self.vocab_size))

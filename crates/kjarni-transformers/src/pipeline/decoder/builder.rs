@@ -112,6 +112,7 @@ impl<'a> DecoderPipelineBuilder<'a> {
             LoadedLMHead::from_shared_weights(
                 ctx,
                 embeddings.word_embeddings_cpu(),
+                None,
                 embeddings.word_embeddings_gpu(),
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
                 self.load_config.quantize_lm_head,
@@ -120,6 +121,7 @@ impl<'a> DecoderPipelineBuilder<'a> {
             LoadedLMHead::new(
                 ctx,
                 self.weights,
+                None,
                 LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
                 plan.lm_head == Device::Cpu,
                 plan.lm_head == Device::Wgpu,

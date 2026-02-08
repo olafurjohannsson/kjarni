@@ -361,6 +361,84 @@ mod bart_large_cnn_tests {
     }
 }
 
+mod bart_large_golden_values_test {
+    use super::*;
+
+    #[tokio::test]
+    async fn golden_summarize_ai_paragraph() {
+        let summarizer = Summarizer::builder("bart-large-cnn")
+            .quiet()
+            .greedy()
+            .min_length(30)
+            .max_length(142)
+            .build()
+            .await
+            .unwrap();
+
+        let input = concat!(
+            "Artificial intelligence has rapidly become a central component of modern ",
+            "software systems, influencing industries such as healthcare, finance, ",
+            "transportation, and education. Advances in machine learning, particularly ",
+            "deep learning and transformer-based models, have enabled computers to ",
+            "process natural language, images, and large volumes of data with ",
+            "unprecedented accuracy. As a result, organizations are increasingly ",
+            "adopting AI-driven tools to automate tasks, improve decision-making, and ",
+            "gain competitive advantages. However, the growing reliance on AI also ",
+            "raises important concerns related to data privacy, model transparency, ",
+            "bias, and ethical responsibility. Governments and regulatory bodies are ",
+            "beginning to introduce frameworks to ensure that AI systems are developed ",
+            "and deployed in a safe and accountable manner. At the same time, ",
+            "researchers continue to explore ways to make models more efficient, ",
+            "interpretable, and accessible, balancing innovation with societal impact.",
+        );
+
+        let expected = concat!(
+            "Artificial intelligence has rapidly become a central component of modern software systems. ",
+            "Advances in machine learning have enabled computers to process natural language, images, ",
+            "and large volumes of data with unprecedented accuracy. Organizations are increasingly ",
+            "adopting AI-driven tools to automate tasks, improve decision-making, and gain competitive advantages.",
+        );
+
+        let summary = summarizer.summarize(input).await.unwrap();
+        assert_eq!(
+            summary.trim(),
+            expected.trim(),
+            "AI paragraph summary mismatch"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_summarize_news_style() {
+        let summarizer = Summarizer::builder("bart-large-cnn")
+            .quiet()
+            .greedy()
+            .min_length(20)
+            .max_length(80)
+            .build()
+            .await
+            .unwrap();
+
+        let input = concat!(
+            "The Federal Reserve announced today that it would hold interest rates ",
+            "steady at their current level, citing ongoing concerns about inflation ",
+            "and economic uncertainty. The decision was widely expected by analysts ",
+            "and marks the third consecutive meeting where rates have remained unchanged. ",
+            "Fed Chair Jerome Powell stated that the central bank remains committed to ",
+            "bringing inflation down to its two percent target but acknowledged that ",
+            "progress has been slower than anticipated. Markets reacted positively to ",
+            "the announcement, with the S&P 500 rising half a percent in afternoon trading.",
+        );
+
+        let expected = concat!(
+            "The Federal Reserve announced today that it would hold interest rates steady at their current level. ",
+            "The decision was widely expected by analysts and marks the third consecutive meeting where rates have remained unchanged.",
+        );
+
+        let summary = summarizer.summarize(input).await.unwrap();
+        assert_eq!(summary.trim(), expected.trim(), "News summary mismatch");
+    }
+}
+
 // =============================================================================
 // Integration Tests - distilbart-cnn Output Verification
 // =============================================================================

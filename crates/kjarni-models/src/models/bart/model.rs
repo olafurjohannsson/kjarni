@@ -16,17 +16,16 @@ use kjarni_transformers::{
     cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
-            Seq2SeqGPUDecoder, Seq2SeqGPUEncoder, cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig}, cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig}
+            Seq2SeqGPUDecoder, Seq2SeqGPUEncoder,
+            cpu_decoder::{Seq2SeqCPUDecoder, Seq2SeqDecoderConfig},
+            cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
     },
     encoder_decoder::traits::{
         CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
         GpuEncoderDecoderOps,
     },
-    gpu::{
-        GpuFrameContext, GpuTensor, GpuTensorPool,
-        cache::{GpuBeamKVCache},
-    },
+    gpu::{GpuFrameContext, GpuTensor, GpuTensorPool, cache::GpuBeamKVCache},
     models::{
         ModelType,
         base::{ModelInput, ModelLoadConfig},
@@ -37,9 +36,7 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
-use crate::models::bart::{
-    config::{BartConfig, BartLikeConfig},
-};
+use crate::models::bart::config::{BartConfig, BartLikeConfig};
 
 pub struct BartModel {
     tokenizer: Tokenizer,
@@ -76,7 +73,25 @@ impl EncoderDecoderModelFactory for BartModel {
             };
 
             config.shared_embedding_key = Some(key.to_string());
-            println!("shared key {}", key);
+        }
+        // Compute extra_pos_embeddings from actual tensor shape.
+        // BART position embeddings have shape [max_pos + offset, hidden_size].
+        // Some config.json files omit extra_pos_embeddings, defaulting to 0.
+        if config.extra_pos_embeddings == 0 {
+            let pos_key = "model.decoder.embed_positions.weight";
+            if let Ok(shape) = weights.tensor_shape(pos_key) {
+                let actual_rows = shape[0];
+                let offset = actual_rows.saturating_sub(config.max_position_embeddings);
+                if offset > 0 {
+                    log::info!(
+                        "Inferred extra_pos_embeddings={} from tensor shape ({} - {})",
+                        offset,
+                        actual_rows,
+                        config.max_position_embeddings
+                    );
+                    config.extra_pos_embeddings = offset as u32;
+                }
+            }
         }
         Ok(Arc::new(config))
     }
@@ -113,7 +128,6 @@ impl EncoderDecoderModelFactory for BartModel {
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
 
-            
             cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
                 weights,
                 config.as_ref(),
@@ -384,7 +398,9 @@ impl GpuEncoderDecoderOps for BartModel {
         input: ModelInput<'_>,
         position_offset: usize,
     ) -> Result<GpuTensor> {
-        self.get_pipeline().decoder_embeddings().embed(encoder, pool, input, None, position_offset)
+        self.get_pipeline()
+            .decoder_embeddings()
+            .embed(encoder, pool, input, None, position_offset)
     }
     fn broadcast_encoder_states(
         &self,

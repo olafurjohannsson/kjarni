@@ -520,12 +520,14 @@ mod tests {
         num_heads: usize,
         head_dim: usize,
     ) {
-        // KV cache update expects: [num_beams, num_heads, 1, head_dim] for single token
-        let k_data = Array4::from_shape_fn((num_beams, num_heads, 1, head_dim), |(b, h, _, d)| {
-            (b * num_heads * head_dim + h * head_dim + d) as f32
+        let hidden_size = num_heads * head_dim;
+
+        // update() expects 3D: [num_beams, seq_len=1, hidden_size]
+        let k_data = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * hidden_size + h) as f32
         });
-        let v_data = Array4::from_shape_fn((num_beams, num_heads, 1, head_dim), |(b, h, _, d)| {
-            (b * num_heads * head_dim + h * head_dim + d) as f32 * 0.5
+        let v_data = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
+            (b * hidden_size + h) as f32 * 0.5
         });
 
         let k_tensor = GpuTensor::from_ndarray(ctx, &k_data).unwrap();
@@ -616,6 +618,7 @@ mod tests {
         let num_beams = 4;
         let num_heads = 8;
         let head_dim = 64;
+        let hidden_size = num_heads * head_dim;
         let capacity = 128;
 
         let mut cache =
@@ -623,15 +626,11 @@ mod tests {
 
         // Simulate 3 decode steps
         for _step in 0..3 {
-            // Shape: [num_beams, num_heads, 1, head_dim]
+            // Shape: [num_beams, 1, hidden_size] (3D, not 4D)
             let k_data =
-                Array4::from_shape_fn((num_beams, num_heads, 1, head_dim), |(b, h, _, d)| {
-                    (b + h + d) as f32
-                });
+                Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);
             let v_data =
-                Array4::from_shape_fn((num_beams, num_heads, 1, head_dim), |(b, h, _, d)| {
-                    (b + h + d) as f32
-                });
+                Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);
 
             let k_tensor = GpuTensor::from_ndarray(&ctx, &k_data).unwrap();
             let v_tensor = GpuTensor::from_ndarray(&ctx, &v_data).unwrap();

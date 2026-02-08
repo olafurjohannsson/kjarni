@@ -71,9 +71,6 @@ impl<'a> ChatConversation<'a> {
         let conversation = self.chat.history_to_conversation(&self.history);
         let prompt = self.chat.format_prompt(&conversation);
 
-        // Debug: uncomment to see what's being sent
-        // eprintln!("DEBUG prompt:\n{}", prompt);
-
         let response = self
             .chat
             .generate(&prompt, &GenerationOverrides::default())
