@@ -178,34 +178,34 @@ log::info!(
 
     #[cfg(target_os = "windows")]
     fn query_gpu_memory(_adapter: &Adapter) -> Option<u64> {
-        use windows::core::Interface;
-        use windows::Win32::Graphics::Dxgi::*;
+        // use windows::core::Interface;
+        // use windows::Win32::Graphics::Dxgi::*;
 
-        unsafe {
-            if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory4>() {
-                for i in 0..16 {
-                    if let Ok(dxgi_adapter) = factory.EnumAdapters1(i) {
-                        let mut video_memory_info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-                        if dxgi_adapter
-                            .QueryVideoMemoryInfo(
-                                0,
-                                DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-                                &mut video_memory_info,
-                            )
-                            .is_ok()
-                        {
-                            if video_memory_info.Budget > 0 {
-                                return Some(video_memory_info.Budget);
-                            }
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
+        // unsafe {
+        //     if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory4>() {
+        //         for i in 0..16 {
+        //             if let Ok(dxgi_adapter) = factory.EnumAdapters1(i) {
+        //                 let mut video_memory_info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+        //                 if dxgi_adapter
+        //                     .QueryVideoMemoryInfo(
+        //                         0,
+        //                         DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+        //                         &mut video_memory_info,
+        //                     )
+        //                     .is_ok()
+        //                 {
+        //                     if video_memory_info.Budget > 0 {
+        //                         return Some(video_memory_info.Budget);
+        //                     }
+        //                 }
+        //             } else {
+        //                 break;
+        //             }
+        //         }
+        //     }
+        // }
 
-        log::warn!("failed to query gpu memory via dxgi");
+        // log::warn!("failed to query gpu memory via dxgi");
         None
     }
 

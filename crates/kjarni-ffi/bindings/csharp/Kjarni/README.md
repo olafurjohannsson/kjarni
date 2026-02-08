@@ -1,7 +1,7 @@
 # Kjarni
 
 AI inference for .NET — embeddings, classification, reranking, and search.  
-No Python. No ONNX. No CUDA. One NuGet package.
+No Python. No ONNX. No API keys. One NuGet package.
 
 ## Install
 
@@ -18,9 +18,42 @@ using Kjarni;
 
 using var classifier = new Classifier("distilbert-sentiment");
 var result = classifier.Classify("I love this product!");
-
 Console.WriteLine(result);
 // POSITIVE (99.9%)
+```
+
+### Content Moderation
+
+```csharp
+using var classifier = new Classifier("toxic-bert");
+var result = classifier.Classify("You are an idiot");
+var toxicScore = result.AllScores.First(s => s.Label == "toxic").Score;
+Console.WriteLine($"Toxic: {toxicScore > 0.5} ({toxicScore:P0})");
+// Toxic: True (72%)
+```
+
+### Semantic Search
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+
+// Index your documents
+var docs = new[] {
+    "Refunds are processed within 5-7 business days.",
+    "Shipping takes 3-5 business days.",
+    "Premium members get free expedited shipping.",
+};
+var docVectors = docs.Select(d => embedder.Encode(d)).ToArray();
+
+// Search by meaning — no keyword overlap needed
+var query = embedder.Encode("how do I get my money back?");
+var best = docVectors
+    .Select((v, i) => (Doc: docs[i], Score: Embedder.CosineSimilarity(query, v)))
+    .OrderByDescending(r => r.Score)
+    .First();
+
+Console.WriteLine($"{best.Score:F3}: {best.Doc}");
+// 0.489: Refunds are processed within 5-7 business days.
 ```
 
 ### Generate Embeddings
@@ -28,7 +61,6 @@ Console.WriteLine(result);
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2");
 float[] vector = embedder.Encode("Hello world");
-
 Console.WriteLine($"Dimensions: {vector.Length}");
 // Dimensions: 384
 ```
@@ -38,16 +70,14 @@ Console.WriteLine($"Dimensions: {vector.Length}");
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2");
 float score = embedder.Similarity("cat", "dog");
-
 Console.WriteLine($"Similarity: {score:F4}");
-// Similarity: 0.8012
+// Similarity: 0.6606
 ```
 
 ### Rerank Search Results
 
 ```csharp
 using var reranker = new Reranker();
-
 var results = reranker.Rerank(
     "What is machine learning?",
     new[] {
@@ -58,17 +88,6 @@ var results = reranker.Rerank(
 
 foreach (var r in results)
     Console.WriteLine($"[{r.Index}] {r.Score:F4} {r.Document}");
-```
-
-### Batch Embeddings
-
-```csharp
-using var embedder = new Embedder("minilm-l6-v2");
-float[][] vectors = embedder.EncodeBatch(new[] {
-    "First document",
-    "Second document",
-    "Third document",
-});
 ```
 
 ### Index & Search Documents (RAG)
@@ -82,23 +101,25 @@ Console.WriteLine($"Indexed {stats.DocumentsIndexed} documents");
 // Search the index
 using var searcher = new Searcher(model: "minilm-l6-v2");
 var results = searcher.Search("my_index", "What is machine learning?");
-
 foreach (var r in results)
     Console.WriteLine($"{r.Score:F4}: {r.Text[..60]}...");
 ```
 
-## Supported Models
-
-| Task | Model | Description |
-|------|-------|-------------|
-| Embeddings | `minilm-l6-v2` | Fast, 384 dimensions |
-| Embeddings | `bge-small-en` | High quality, 384 dimensions |
-| Embeddings | `gte-small` | General text, 384 dimensions |
-| Classification | `distilbert-sentiment` | Positive/negative sentiment |
-| Classification | `roberta-emotion` | 28 emotion labels |
-| Reranking | `minilm-l6-v2-cross-encoder` | Cross-encoder reranker |
+## Models
 
 Models are downloaded automatically on first use and cached locally.
+
+| Task | Model | Size | Description |
+|------|-------|------|-------------|
+| Embeddings | `minilm-l6-v2` | 90MB | Fast, 384 dimensions |
+| Embeddings | `mpnet-base-v2` | 420MB | High quality, 768 dimensions |
+| Embeddings | `distilbert-base` | 260MB | General purpose, 768 dimensions |
+| Classification | `distilbert-sentiment` | 268MB | Positive/negative |
+| Classification | `roberta-sentiment` | 499MB | Negative/neutral/positive |
+| Classification | `bert-sentiment-multilingual` | 681MB | 5-star rating, 6 languages |
+| Classification | `distilroberta-emotion` | 329MB | 7 emotions |
+| Classification | `toxic-bert` | 438MB | Toxicity detection, 6 labels |
+| Reranking | `minilm-l6-v2-cross-encoder` | 90MB | Passage reranking |
 
 ## Configuration
 
@@ -149,10 +170,10 @@ The C# package includes precompiled native libraries for each platform. `dotnet 
 | Platform | Architecture | Status |
 |----------|-------------|--------|
 | Linux | x64 | ✅ |
-| Linux | ARM64 | ✅ |
 | Windows | x64 | ✅ |
-| macOS | x64 | ✅ |
-| macOS | ARM64 (Apple Silicon) | ✅ |
+| macOS | ARM64 (Apple Silicon) | Planned |
+| macOS | x64 | Planned |
+| Linux | ARM64 | Planned |
 
 ## License
 
