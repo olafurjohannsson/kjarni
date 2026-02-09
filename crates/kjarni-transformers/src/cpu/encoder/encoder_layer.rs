@@ -216,50 +216,15 @@ impl EncoderLayer {
         position_bias: Option<&Array4<f32>>,
         rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
-        let layer_start = Instant::now();
-        let (b, s, d) = hidden.dim();
-        // 1. Attention Block
-        // let residual = &hidden;
         let normed = self.self_attn_layer_norm.forward(&hidden);
-
-        let t_attn_start = Instant::now();
         let attn_out = self
             .self_attn
             .forward(&normed, attention_mask, position_bias, rope)?;
-        let t_attn = t_attn_start.elapsed();
-
-        // Note: &residual + &attn_out allocates a NEW array.
-        // This is a memory copy operation!
-        // let hidden = residual + &attn_out;
         add_inplace(&mut hidden, &attn_out.view());
-
-        // 2. FFN Block
         let residual = &hidden;
         let normed = self.ffn_layer_norm.forward(&hidden);
-
-        let t_ffn_start = Instant::now();
         let ffn_out = self.feedforward.forward(&normed)?;
-        let t_ffn = t_ffn_start.elapsed();
-
         let hidden = residual + &ffn_out;
-
-        let total = layer_start.elapsed();
-
-        // Only print if it's taking a significant amount of time (e.g. > 1ms)
-        // to avoid spamming for small inputs.
-        // if total.as_millis() > 5 {
-        //     println!(
-        //         "PRENORM SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-        //         b,
-        //         s,
-        //         d, // <--- PRINT SHAPE
-        //         total.as_millis(),
-        //         t_attn.as_millis(),
-        //         t_ffn.as_millis(),
-        //         (total - t_attn - t_ffn).as_millis()
-        //     );
-        // }
-
         Ok(hidden)
     }
 
@@ -270,47 +235,14 @@ impl EncoderLayer {
         position_bias: Option<&Array4<f32>>,
         rope: Option<&RoPE>,
     ) -> Result<Array3<f32>> {
-        let layer_start = Instant::now();
-        let (b, s, d) = hidden.dim();
-        // 1. Attention Block
-        // let attn_residual = &hidden;
-
-        let t_attn_start = Instant::now();
         let attn_out = self
             .self_attn
             .forward(&hidden, attention_mask, position_bias, rope)?;
-        let t_attn = t_attn_start.elapsed();
-
-        // Overhead: Addition + LayerNorm
-        // let i = &(attn_residual + &attn_out);
         add_inplace(&mut hidden, &attn_out.view());
         let ffn_input = self.self_attn_layer_norm.forward(&hidden);
-
-        // 2. FFN Block
         let ffn_residual = &ffn_input;
-
-        let t_ffn_start = Instant::now();
         let ffn_out = self.feedforward.forward(&ffn_residual)?;
-        let t_ffn = t_ffn_start.elapsed();
-
-        // Overhead: Addition + LayerNorm
         let hidden = self.ffn_layer_norm.forward(&(ffn_residual + &ffn_out));
-
-        let total = layer_start.elapsed();
-
-        // if total.as_millis() > 5 {
-        //     println!(
-        //         "SHAPE: [{}, {}, {}] | Total: {:>3}ms | Attn: {:>3}ms | FFN: {:>3}ms | Overhead: {:>3}ms",
-        //         b,
-        //         s,
-        //         d, // <--- PRINT SHAPE
-        //         total.as_millis(),
-        //         t_attn.as_millis(),
-        //         t_ffn.as_millis(),
-        //         (total - t_attn - t_ffn).as_millis()
-        //     );
-        // }
-
         Ok(hidden)
     }
 }
@@ -331,19 +263,13 @@ mod encoder_layer_tests {
     ) -> EncoderLayer {
         let mut count = 1;
 
-        // Python: fixed_vals = torch.arange(count, count + num_elements) * 0.001
         let mut get_linear_weights = |rows: usize, cols: usize| -> Array2<f32> {
             let size = rows * cols;
             let data: Vec<f32> = (count..count + size).map(|x| x as f32 * 0.001).collect();
             count += size;
-            // PyTorch Linear is [Out, In], Array2::from_shape_vec fills row-major
             Array2::from_shape_vec((rows, cols), data).unwrap()
         };
-
         let bias_val = 0.01;
-
-        // 1. Self Attention (Q, K, V, Out)
-        // Note: PyTorch named_parameters() order for the mocks provided
         let q_w = get_linear_weights(hidden_size, hidden_size);
         let q_b = Array1::from_elem(hidden_size, bias_val);
 
@@ -365,15 +291,12 @@ mod encoder_layer_tests {
             LinearLayer::new_f32(o_w, Some(o_b)),
         );
 
-        // 2. Attn LayerNorm
-        // Python: weights (gamma) = 1.0, bias (beta) = 0.01
         let ln1 = Normalization::LayerNorm(LayerNorm::new(
             Array1::ones(hidden_size),
             Array1::from_elem(hidden_size, bias_val),
             1e-5,
         ));
 
-        // 3. FeedForward (FC1, FC2)
         let fc1_w = get_linear_weights(intermediate_size, hidden_size);
         let fc1_b = Array1::from_elem(intermediate_size, bias_val);
 
@@ -385,10 +308,8 @@ mod encoder_layer_tests {
             fc1_b.clone(),
             fc2_w.clone(),
             fc2_b.clone(),
-            Activation::Gelu, // Using Standard Gelu (not New/Tanh) to match Python default
+            Activation::Gelu,
         ));
-
-        // 4. FFN LayerNorm
         let ln2 = Normalization::LayerNorm(LayerNorm::new(
             Array1::ones(hidden_size),
             Array1::from_elem(hidden_size, bias_val),
@@ -402,24 +323,14 @@ mod encoder_layer_tests {
     #[test]
     fn test_noalloc_attention_only() -> Result<()> {
         let (batch, seq, hidden, intermediate, heads) = (4, 16, 32, 128, 4);
-
         let layer = create_deterministic_layer(hidden, intermediate, heads);
-
         let input_data: Vec<f32> = (0..batch * seq * hidden)
             .map(|i| (i as f32 * 0.001) % 1.0)
             .collect();
         let input = Array3::from_shape_vec((batch, seq, hidden), input_data.clone())?;
-
-        let mask: Array2<f32> = Array2::ones((batch, seq)); // All 1s for simplicity
-
-        // Test attention only
         let tokens = batch * seq;
         let hidden_2d = input.view().into_shape_with_order((tokens, hidden))?;
-
-        // Allocating
         let (q_alloc, k_alloc, v_alloc) = layer.self_attn.qkv_proj.forward(&hidden_2d);
-
-        // NoAlloc
         let use_fused = hidden <= 512;
         let mut buffers = EncoderBuffers::new(batch, seq, hidden, heads, intermediate, use_fused);
         layer
@@ -471,15 +382,9 @@ mod encoder_layer_tests {
             0.160000, 0.170000,
         ];
         let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
-
-        // Create buffers
         let mut buffers =
             EncoderBuffers::new(batch, seq, hidden, heads, intermediate, hidden <= 512);
-
-        // Run forward_noalloc (modifies input in-place)
         layer.forward_noalloc(&mut input, &mask, Some(&pos_bias), true, None, &mut buffers)?;
-
-        // Validate against golden values
         let golden_output_prenorm_data = vec![
             0.030466, 0.131298, 0.232129, 0.332961, 0.430466, 0.531298, 0.632130, 0.732961,
             0.830467, 0.931298, 1.032130, 1.132961, 1.230467, 1.331298, 1.432130, 1.532961,
@@ -684,8 +589,6 @@ mod encoder_layer_tests {
         layer
             .feedforward
             .forward_noalloc(&input_2d.view(), &mut buffers);
-
-        // Use relative tolerance for large values
         let mut max_rel_diff = 0.0f32;
         let noalloc_slice = buffers.ffn_output.slice(s![..tokens, ..]);
         for t in 0..tokens {
@@ -806,11 +709,7 @@ mod encoder_layer_tests {
     #[test]
     fn test_golden_prenorm() -> Result<()> {
         let (batch, seq, hidden, intermediate, heads) = (2, 3, 4, 8, 2);
-
-        // 1. Initialize Layer with exact deterministic weights
         let layer = create_deterministic_layer(hidden, intermediate, heads);
-
-        // 2. Prepare Inputs
         let input_hidden_data = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
             0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
@@ -826,28 +725,17 @@ mod encoder_layer_tests {
             0.080000, 0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000,
             0.160000, 0.170000,
         ];
-        // Note: Python broadcasts [1, heads, seq, seq] to batch automatically.
-        // Rust implementation likely handles the broadcast inside forward or expects matching dims.
-        // Assuming implementation handles broadcasting of dimension 0.
         let pos_bias = Array4::from_shape_vec((1, heads, seq, seq), pos_bias_data)?;
-
-        // 3. Run Forward (Pre-Norm = true)
         let output = layer.forward(input, &mask, Some(&pos_bias), true, None)?;
-
-        // 4. Validate against Golden Values
         let golden_output_prenorm_data = vec![
             0.030466, 0.131298, 0.232129, 0.332961, 0.430466, 0.531298, 0.632130, 0.732961,
             0.830467, 0.931298, 1.032130, 1.132961, 1.230467, 1.331298, 1.432130, 1.532961,
             1.630466, 1.731298, 1.832129, 1.932961, 2.030467, 2.131298, 2.232130, 2.332961,
         ];
         let golden = Array3::from_shape_vec((batch, seq, hidden), golden_output_prenorm_data)?;
-
         let diff = &output - &golden;
         let max_diff = diff.mapv(|x| x.abs()).fold(0.0f32, |a, b| f32::max(a, *b));
-
         println!("Pre-Norm Max Diff: {:.6}", max_diff);
-
-        // Allow small float error (accumulated via multiple matmuls)
         assert!(
             max_diff < 1e-4,
             "Pre-norm golden value mismatch. Max diff: {}",

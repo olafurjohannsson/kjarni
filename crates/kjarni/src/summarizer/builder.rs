@@ -45,11 +45,6 @@ impl SummarizerBuilder {
         builder.overrides.max_length = Some(preset.default_max_length);
         builder
     }
-
-    // =========================================================================
-    // Length Control
-    // =========================================================================
-
     /// Set minimum summary length.
     pub fn min_length(mut self, len: usize) -> Self {
         self.overrides.min_length = Some(len);
@@ -61,10 +56,6 @@ impl SummarizerBuilder {
         self.overrides.max_length = Some(len);
         self
     }
-
-// =========================================================================
-    // Generation Control
-    // =========================================================================
 
     /// Set the number of beams for beam search.
     pub fn num_beams(mut self, n: usize) -> Self {
@@ -90,29 +81,25 @@ impl SummarizerBuilder {
         self
     }
 
-    /// Use greedy decoding (fastest, deterministic).
+    /// Use greedy 
     pub fn greedy(mut self) -> Self {
         self.overrides.do_sample = Some(false);
         self.overrides.num_beams = Some(1);
         self
     }
 
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
-
-    /// Set the device for inference.
+    /// Set the device 
     pub fn device(mut self, device: KjarniDevice) -> Self {
         self.device = device;
         self
     }
 
-    /// Use CPU for inference.
+    /// Use CPU 
     pub fn cpu(self) -> Self {
         self.device(KjarniDevice::Cpu)
     }
 
-    /// Use GPU for inference.
+    /// Use GPU 
     pub fn gpu(self) -> Self {
         self.device(KjarniDevice::Gpu)
     }
@@ -123,10 +110,6 @@ impl SummarizerBuilder {
         self.device = KjarniDevice::Gpu;
         self
     }
-
-    // =========================================================================
-    // Loading Configuration
-    // =========================================================================
 
     /// Set the cache directory.
     pub fn cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
@@ -151,10 +134,6 @@ impl SummarizerBuilder {
         self.quiet = true;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Summarizer instance.
     pub async fn build(self) -> SummarizerResult<Summarizer> {

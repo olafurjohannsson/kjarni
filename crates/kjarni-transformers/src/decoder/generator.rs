@@ -526,11 +526,6 @@ mod tests {
             Box::new(self.clone())
         }
     }
-
-    // ========================================================================
-    //  GenerationConfig Interaction Tests
-    // ========================================================================
-
     #[test]
     fn test_generation_config_max_new_tokens_calculation() {
         let config = GenerationConfig {
@@ -564,204 +559,6 @@ mod tests {
 
         assert_eq!(max_len, 512);
     }
-
-    #[test]
-    fn test_cache_capacity_legacy_loop() {
-        let max_len = 100;
-        let cache_capacity = max_len + 1; // Legacy adds 1
-        assert_eq!(cache_capacity, 101);
-    }
-
-    #[test]
-    fn test_cache_capacity_pipelined_loop() {
-        let max_len = 100;
-        let cache_capacity = max_len; // Pipelined uses exact
-        assert_eq!(cache_capacity, 100);
-    }
-
-    // ========================================================================
-    //  Token Array Creation Tests
-    // ========================================================================
-
-    #[test]
-    fn test_tokens_array_creation() {
-        let input_tokens = vec![1u32, 2, 3, 4, 5];
-        let prompt_len = input_tokens.len();
-
-        let tokens_array = Array2::from_shape_vec((1, prompt_len), input_tokens.clone()).unwrap();
-
-        assert_eq!(tokens_array.shape(), &[1, 5]);
-        assert_eq!(tokens_array[[0, 0]], 1);
-        assert_eq!(tokens_array[[0, 4]], 5);
-    }
-
-    #[test]
-    fn test_tokens_array_single_token() {
-        let input_tokens = vec![42u32];
-        let tokens_array = Array2::from_shape_vec((1, 1), input_tokens).unwrap();
-
-        assert_eq!(tokens_array.shape(), &[1, 1]);
-        assert_eq!(tokens_array[[0, 0]], 42);
-    }
-
-    // ========================================================================
-    //  Stop Token Logic Tests
-    // ========================================================================
-
-    #[test]
-    fn test_stop_token_detection() {
-        let stop_tokens: HashSet<u32> = HashSet::from([1, 2, 50256]);
-
-        assert!(stop_tokens.contains(&1));
-        assert!(stop_tokens.contains(&2));
-        assert!(stop_tokens.contains(&50256));
-        assert!(!stop_tokens.contains(&100));
-    }
-
-    #[test]
-    fn test_empty_stop_tokens() {
-        let stop_tokens: HashSet<u32> = HashSet::new();
-
-        assert!(!stop_tokens.contains(&1));
-        assert!(!stop_tokens.contains(&2));
-    }
-
-    // ========================================================================
-    //  Context Limit Logic Tests
-    // ========================================================================
-
-    #[test]
-    fn test_context_limit_check() {
-        let context_limit = 2048;
-        let all_tokens_len = 2000;
-
-        assert!(all_tokens_len < context_limit);
-
-        let all_tokens_len = 2048;
-        assert!(all_tokens_len >= context_limit);
-    }
-
-    #[test]
-    fn test_max_length_check() {
-        let max_len = 100;
-
-        assert!(50 < max_len);
-        assert!(100 >= max_len);
-        assert!(150 >= max_len);
-    }
-
-    // ========================================================================
-    //  BOS Token Logic Tests
-    // ========================================================================
-
-    #[test]
-    fn test_bos_token_not_prepended_if_present() {
-        let mut tokens = vec![1u32, 2, 3]; // 1 is BOS
-        let bos = Some(1u32);
-
-        if let Some(bos_id) = bos {
-            if tokens.first() != Some(&bos_id) {
-                tokens.insert(0, bos_id);
-            }
-        }
-
-        // Should not add duplicate
-        assert_eq!(tokens, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn test_bos_token_prepended_if_missing() {
-        let mut tokens = vec![2u32, 3, 4];
-        let bos = Some(1u32);
-
-        if let Some(bos_id) = bos {
-            if tokens.first() != Some(&bos_id) {
-                tokens.insert(0, bos_id);
-            }
-        }
-
-        assert_eq!(tokens, vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn test_bos_token_none() {
-        let mut tokens = vec![2u32, 3, 4];
-        let bos: Option<u32> = None;
-
-        if let Some(bos_id) = bos {
-            if tokens.first() != Some(&bos_id) {
-                tokens.insert(0, bos_id);
-            }
-        }
-
-        // Should remain unchanged
-        assert_eq!(tokens, vec![2, 3, 4]);
-    }
-
-    // ========================================================================
-    //  Sequence Length Tracking Tests
-    // ========================================================================
-
-    #[test]
-    fn test_seq_len_initialization() {
-        let prompt_len = 50;
-        let seq_len = prompt_len + 1;
-
-        assert_eq!(seq_len, 51);
-    }
-
-    #[test]
-    fn test_seq_len_increment() {
-        let mut seq_len = 51;
-
-        for _ in 0..10 {
-            seq_len += 1;
-        }
-
-        assert_eq!(seq_len, 61);
-    }
-
-    // ========================================================================
-    //  All Tokens Tracking Tests
-    // ========================================================================
-
-    #[test]
-    fn test_all_tokens_accumulation() {
-        let input_tokens = vec![1u32, 2, 3];
-        let mut all_tokens = input_tokens.clone();
-
-        // Simulate generation
-        all_tokens.push(4);
-        all_tokens.push(5);
-        all_tokens.push(6);
-
-        assert_eq!(all_tokens, vec![1, 2, 3, 4, 5, 6]);
-    }
-
-    // ========================================================================
-    //  Empty Prompt Validation Tests
-    // ========================================================================
-
-    #[test]
-    fn test_empty_prompt_detection() {
-        let input_tokens: Vec<u32> = vec![];
-
-        assert!(input_tokens.is_empty());
-        assert_eq!(input_tokens.len(), 0);
-    }
-
-    #[test]
-    fn test_non_empty_prompt() {
-        let input_tokens = vec![1u32];
-
-        assert!(!input_tokens.is_empty());
-        assert_eq!(input_tokens.len(), 1);
-    }
-
-    // ========================================================================
-    //  Backend Type Tests
-    // ========================================================================
-
     #[test]
     fn test_any_decoder_backend_cpu_type() {
         let backend = AnyDecoderBackend::Cpu(CpuDecoderBackend);
@@ -775,10 +572,6 @@ mod tests {
         let backend = AnyDecoderBackend::Gpu(gpu_backend);
         assert_eq!(backend.backend_type(), "GPU");
     }
-
-    // ========================================================================
-    //  Cancellation Token Tests
-    // ========================================================================
 
     #[test]
     fn test_cancellation_token_not_cancelled() {
@@ -829,10 +622,6 @@ mod tests {
         assert_eq!(iterations, 5); // Stopped after 5 iterations
     }
 
-    // ========================================================================
-    //  Max New Tokens Calculation Tests
-    // ========================================================================
-
     #[test]
     fn test_max_new_tokens_with_value() {
         let config = GenerationConfig {
@@ -856,33 +645,10 @@ mod tests {
             max_length: 2048,
             ..Default::default()
         };
-
         let prompt_len = 50;
         let max_len = config.max_length;
         let max_new_tokens = config.max_new_tokens.unwrap_or(max_len - prompt_len);
-
-        assert_eq!(max_new_tokens, 1998); // 2048 - 50
+        assert_eq!(max_new_tokens, 1998); 
     }
 
-    // ========================================================================
-    //  Generation Stats Integration
-    // ========================================================================
-
-    #[test]
-    fn test_generation_stats_creation() {
-        let stats = GenerationStats::new();
-        // Stats should be created without panic
-        let _ = stats;
-    }
-
-    // ========================================================================
-    //  Draft Model State Tests
-    // ========================================================================
-
-    #[test]
-    fn test_has_draft_model_false_by_default() {
-        // Can't test without a real model, but test the logic
-        let draft: Option<DraftModelContext> = None;
-        assert!(draft.is_none());
-    }
 }

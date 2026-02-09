@@ -138,16 +138,11 @@ impl LoadConfigBuilder {
 mod tests {
     use super::*;
 
-    // =========================================================================
-    // LoadConfig::new tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_new() {
         let config = LoadConfig::new();
         let inner = config.as_inner();
         
-        // Should have default values
         assert!(!inner.offload_embeddings);
         assert!(!inner.offload_lm_head);
         assert!(inner.target_dtype.is_none());
@@ -156,17 +151,11 @@ mod tests {
         assert!(inner.max_sequence_length.is_none());
         assert!(!inner.use_gguf);
     }
-
-    // =========================================================================
-    // LoadConfig::default tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_default() {
         let config = LoadConfig::default();
         let inner = config.as_inner();
         
-        // Default should be same as new()
         assert!(!inner.offload_embeddings);
         assert!(!inner.offload_lm_head);
     }
@@ -176,7 +165,6 @@ mod tests {
         let new_config = LoadConfig::new();
         let default_config = LoadConfig::default();
         
-        // Both should produce equivalent configs
         assert_eq!(
             new_config.as_inner().offload_embeddings,
             default_config.as_inner().offload_embeddings
@@ -191,16 +179,11 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // LoadConfig::into_inner tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_into_inner() {
         let config = LoadConfig::new();
         let inner: ModelLoadConfig = config.into_inner();
         
-        // Should get the inner config
         assert!(!inner.offload_embeddings);
     }
 
@@ -208,14 +191,7 @@ mod tests {
     fn test_load_config_into_inner_consumes() {
         let config = LoadConfig::new();
         let _inner = config.into_inner();
-        
-        // config is now moved, can't use it
-        // This is a compile-time check, not runtime
     }
-
-    // =========================================================================
-    // LoadConfig::as_inner tests
-    // =========================================================================
 
     #[test]
     fn test_load_config_as_inner() {
@@ -223,8 +199,6 @@ mod tests {
         let inner = config.as_inner();
         
         assert!(!inner.offload_embeddings);
-        
-        // Can still use config after as_inner
         let _inner2 = config.as_inner();
     }
 
@@ -232,17 +206,11 @@ mod tests {
     fn test_load_config_as_inner_multiple_calls() {
         let config = LoadConfig::new();
         
-        // Can call as_inner multiple times
         let inner1 = config.as_inner();
         let inner2 = config.as_inner();
         
         assert_eq!(inner1.offload_embeddings, inner2.offload_embeddings);
     }
-
-    // =========================================================================
-    // LoadConfig From trait tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_from_model_load_config() {
         let mut inner = ModelLoadConfig::default();
@@ -278,10 +246,6 @@ mod tests {
         assert!(result.use_gguf);
     }
 
-    // =========================================================================
-    // LoadConfig Debug and Clone tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_debug() {
         let config = LoadConfig::new();
@@ -309,29 +273,17 @@ mod tests {
         let config = LoadConfig::new();
         let cloned = config.clone();
         
-        // Both should work independently
         let _inner1 = config.into_inner();
         let _inner2 = cloned.into_inner();
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::new tests
-    // =========================================================================
-
     #[test]
     fn test_builder_new() {
         let builder = LoadConfigBuilder::new();
         let config = builder.build();
         
-        // Should have defaults
         assert!(!config.as_inner().offload_embeddings);
         assert!(!config.as_inner().offload_lm_head);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::default tests
-    // =========================================================================
-
     #[test]
     fn test_builder_default() {
         let builder = LoadConfigBuilder::default();
@@ -353,10 +305,6 @@ mod tests {
             default_config.as_inner().offload_embeddings
         );
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::from_config tests
-    // =========================================================================
 
     #[test]
     fn test_builder_from_config() {
@@ -382,15 +330,9 @@ mod tests {
             .offload_lm_head(true)
             .build();
         
-        // Original setting preserved
         assert!(config.as_inner().offload_embeddings);
-        // New setting added
         assert!(config.as_inner().offload_lm_head);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::from_inner tests
-    // =========================================================================
 
     #[test]
     fn test_builder_from_inner() {
@@ -402,11 +344,6 @@ mod tests {
         
         assert!(config.as_inner().use_gguf);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::offload_embeddings tests
-    // =========================================================================
-
     #[test]
     fn test_builder_offload_embeddings_true() {
         let config = LoadConfigBuilder::new()
@@ -435,11 +372,6 @@ mod tests {
         // Last value wins
         assert!(!config.as_inner().offload_embeddings);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::offload_lm_head tests
-    // =========================================================================
-
     #[test]
     fn test_builder_offload_lm_head_true() {
         let config = LoadConfigBuilder::new()
@@ -457,11 +389,6 @@ mod tests {
         
         assert!(!config.as_inner().offload_lm_head);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::dtype tests
-    // =========================================================================
-
     #[test]
     fn test_builder_dtype_f16() {
         let config = LoadConfigBuilder::new()
@@ -499,11 +426,6 @@ mod tests {
         // Last value wins
         assert_eq!(config.as_inner().target_dtype, Some(DType::BF16));
     }
-
-    // =========================================================================
-    // LoadConfigBuilder convenience dtype methods tests
-    // =========================================================================
-
     #[test]
     fn test_builder_f16_method() {
         let config = LoadConfigBuilder::new()
@@ -541,11 +463,6 @@ mod tests {
             via_dtype.as_inner().target_dtype
         );
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::quantize_lm_head tests
-    // =========================================================================
-
     #[test]
     fn test_builder_quantize_lm_head() {
         let config = LoadConfigBuilder::new()
@@ -574,11 +491,6 @@ mod tests {
             via_dtype.as_inner().quantize_lm_head
         );
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::max_batch_size tests
-    // =========================================================================
-
     #[test]
     fn test_builder_max_batch_size() {
         let config = LoadConfigBuilder::new()
@@ -616,10 +528,6 @@ mod tests {
         assert_eq!(config.as_inner().max_batch_size, Some(16));
     }
 
-    // =========================================================================
-    // LoadConfigBuilder::max_sequence_length tests
-    // =========================================================================
-
     #[test]
     fn test_builder_max_sequence_length() {
         let config = LoadConfigBuilder::new()
@@ -656,11 +564,6 @@ mod tests {
         
         assert_eq!(config.as_inner().max_sequence_length, Some(4096));
     }
-
-    // =========================================================================
-    // LoadConfigBuilder::prefer_gguf tests
-    // =========================================================================
-
     #[test]
     fn test_builder_prefer_gguf_true() {
         let config = LoadConfigBuilder::new()
@@ -688,11 +591,6 @@ mod tests {
         
         assert!(!config.as_inner().use_gguf);
     }
-
-    // =========================================================================
-    // LoadConfigBuilder chaining tests
-    // =========================================================================
-
     #[test]
     fn test_builder_chaining_all_options() {
         let config = LoadConfigBuilder::new()
@@ -736,7 +634,6 @@ mod tests {
 
     #[test]
     fn test_builder_order_independence() {
-        // Order of builder calls shouldn't matter (except for overrides)
         let config1 = LoadConfigBuilder::new()
             .f16()
             .offload_embeddings(true)
@@ -762,10 +659,6 @@ mod tests {
             config2.as_inner().max_batch_size
         );
     }
-
-    // =========================================================================
-    // LoadConfigBuilder Debug and Clone tests
-    // =========================================================================
 
     #[test]
     fn test_builder_debug() {
@@ -801,22 +694,14 @@ mod tests {
         let builder = LoadConfigBuilder::new().f16();
         let cloned = builder.clone();
         
-        // Modify original through continued building
         let config1 = builder.bf16().build();
         let config2 = cloned.build();
         
-        // Clone should not be affected
         assert_eq!(config1.as_inner().target_dtype, Some(DType::BF16));
         assert_eq!(config2.as_inner().target_dtype, Some(DType::F16));
     }
-
-    // =========================================================================
-    // Realistic configuration tests
-    // =========================================================================
-
     #[test]
     fn test_config_for_small_gpu() {
-        // Config for running on GPU with limited VRAM
         let config = LoadConfigBuilder::new()
             .offload_embeddings(true)
             .offload_lm_head(true)
@@ -835,7 +720,6 @@ mod tests {
 
     #[test]
     fn test_config_for_cpu() {
-        // Config for CPU-only inference
         let config = LoadConfigBuilder::new()
             .f32()
             .max_batch_size(1)
@@ -843,12 +727,11 @@ mod tests {
         
         let inner = config.as_inner();
         assert_eq!(inner.target_dtype, Some(DType::F32));
-        assert!(!inner.offload_embeddings); // Not needed for CPU
+        assert!(!inner.offload_embeddings);
     }
 
     #[test]
     fn test_config_for_large_gpu() {
-        // Config for powerful GPU
         let config = LoadConfigBuilder::new()
             .bf16()
             .max_batch_size(32)
@@ -863,17 +746,12 @@ mod tests {
 
     #[test]
     fn test_config_prefer_gguf_quantized() {
-        // Config for using GGUF quantized models
         let config = LoadConfigBuilder::new()
             .prefer_gguf(true)
             .build();
         
         assert!(config.as_inner().use_gguf);
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
 
     #[test]
     fn test_builder_zero_batch_size() {
@@ -903,11 +781,6 @@ mod tests {
         assert_eq!(config.as_inner().max_batch_size, Some(usize::MAX));
         assert_eq!(config.as_inner().max_sequence_length, Some(usize::MAX));
     }
-
-    // =========================================================================
-    // Roundtrip tests
-    // =========================================================================
-
     #[test]
     fn test_roundtrip_load_config() {
         let original = LoadConfigBuilder::new()
@@ -916,7 +789,6 @@ mod tests {
             .max_batch_size(8)
             .build();
         
-        // Convert to inner and back
         let inner = original.into_inner();
         let restored = LoadConfig::from(inner);
         
@@ -932,20 +804,14 @@ mod tests {
             .prefer_gguf(true)
             .build();
         
-        // Create builder from config and build again
         let rebuilt = LoadConfigBuilder::from_config(original).build();
         
         assert_eq!(rebuilt.as_inner().target_dtype, Some(DType::BF16));
         assert!(rebuilt.as_inner().use_gguf);
     }
 
-    // =========================================================================
-    // Memory size tests
-    // =========================================================================
-
     #[test]
     fn test_load_config_size_reasonable() {
-        // LoadConfig should be reasonably sized
         let size = std::mem::size_of::<LoadConfig>();
         assert!(size < 256, "LoadConfig size {} is too large", size);
     }

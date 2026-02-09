@@ -212,7 +212,6 @@ fn as_any(&self) -> &dyn std::any::Any {
                         norm_weight: "decoder.block.{}.layer.1.layer_norm.weight".to_string(),
                         norm_bias: None,
                     }),
-                    // Note: Decoder FFN is usually layer 2
                     ffn: {
                         let mut ffn = build_ffn_layout("decoder");
                         ffn.up_weight = ffn.up_weight.replace("layer.1", "layer.2");

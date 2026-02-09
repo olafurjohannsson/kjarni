@@ -45,10 +45,6 @@ pub struct Summarizer {
 }
 
 impl Summarizer {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
     /// Create a Summarizer with default settings.
     pub async fn new(model: &str) -> SummarizerResult<Self> {
         SummarizerBuilder::new(model).build().await

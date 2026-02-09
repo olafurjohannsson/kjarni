@@ -87,7 +87,7 @@ impl DocumentLoader {
         let content = fs::read_to_string(path)?;
         eprintln!("Splitting file: {} (Size: {} bytes)", path.display(), content.len());
         let texts = self.splitter.split(&content);
-        eprintln!("  -> Generated {} chunks", texts.len()); // If you never see this, the splitter is infinite looping
+        eprintln!("  -> Generated {} chunks", texts.len());
         let total = texts.len();
 
         let chunks: Vec<Chunk> = texts

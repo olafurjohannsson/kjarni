@@ -71,15 +71,12 @@ impl ModelConfig for WhisperConfig {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
-            decoder_layers: Some(self.decoder_layers), // <-- FIX: was None
-            intermediate_size: self.decoder_ffn_dim,   // <-- Also fix this while we're here
+            decoder_layers: Some(self.decoder_layers),
+            intermediate_size: self.decoder_ffn_dim,
         }
     }
 
     fn layout(&self) -> ModelLayout {
-        // NOTE: Whisper Encoder doesn't have token embeddings.
-        // We point this to the decoder's matrix for shared vocab operations,
-        // but the Encoder Builder must know to ignore this for audio input.
         let shared = "model.decoder.embed_tokens.weight".to_string();
 
         ModelLayout {
@@ -87,13 +84,12 @@ impl ModelConfig for WhisperConfig {
             lm_head: shared.clone(),
 
             encoder: Some(EncoderLayout {
-                // Whisper Encoder uses Sinusoidal, computed on fly. No weight.
                 position_embedding: Some("model.encoder.embed_positions.weight".to_string()),
-    token_type_embedding: None,
-    embedding_norm_weight: None,  // No embedding norm before layers
-    embedding_norm_bias: None,
-    final_norm_weight: Some("model.encoder.layer_norm.weight".to_string()),  // Final LN
-    final_norm_bias: Some("model.encoder.layer_norm.bias".to_string()),
+                token_type_embedding: None,
+                embedding_norm_weight: None,
+                embedding_norm_bias: None,
+                final_norm_weight: Some("model.encoder.layer_norm.weight".to_string()),
+                final_norm_bias: Some("model.encoder.layer_norm.bias".to_string()),
                 layer: EncoderLayerLayout {
                     self_attn: AttentionLayout {
                         q_weight: "model.encoder.layers.{}.self_attn.q_proj.weight".to_string(),
@@ -129,10 +125,10 @@ impl ModelConfig for WhisperConfig {
                 // Whisper Decoder uses learned positions
                 position_embedding: Some("model.decoder.embed_positions.weight".to_string()),
                 token_type_embedding: None,
-                embedding_norm_weight: None,  // No embedding norm!
-    embedding_norm_bias: None,
-    final_norm_weight: Some("model.decoder.layer_norm.weight".to_string()),
-    final_norm_bias: Some("model.decoder.layer_norm.bias".to_string()),
+                embedding_norm_weight: None, // No embedding norm!
+                embedding_norm_bias: None,
+                final_norm_weight: Some("model.decoder.layer_norm.weight".to_string()),
+                final_norm_bias: Some("model.decoder.layer_norm.bias".to_string()),
                 layer: DecoderLayerLayout {
                     self_attn: AttentionLayout {
                         q_weight: "model.decoder.layers.{}.self_attn.q_proj.weight".to_string(),

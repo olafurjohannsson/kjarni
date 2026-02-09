@@ -17,7 +17,6 @@ use rayon::prelude::*;
 #[cfg(test)]
 mod tests;
 
-/// An enum to hold the word embeddings table in its native, memory-efficient format.
 #[derive(Clone)]
 pub enum EmbeddingData {
     F32(Arc<Array2<f32>>),
@@ -26,7 +25,6 @@ pub enum EmbeddingData {
 }
 
 impl EmbeddingData {
-    
     pub fn to_linear_layer(&self) -> LinearLayer {
         match self {
             EmbeddingData::F32(arc) => LinearLayer::from_arc_f32(arc.clone(), None),
@@ -34,7 +32,6 @@ impl EmbeddingData {
             EmbeddingData::Q8_0(arc) => LinearLayer::from_arc_q8_0(arc.clone(), None),
         }
     }
-
     pub fn dtype(&self) -> DType {
         match self {
             EmbeddingData::F32(_) => DType::F32,
@@ -42,11 +39,8 @@ impl EmbeddingData {
             EmbeddingData::Q8_0(_) => DType::Q8_0,
         }
     }
-    
 }
 
-/// A CPU-based embedding layer that handles word, position, and token type embeddings.
-/// This struct is now type-aware and avoids unnecessary upcasting of the word embedding table.
 pub struct Embeddings {
     pub word_embeddings: EmbeddingData,
     pub position_embeddings: Option<Array2<f32>>,
@@ -54,7 +48,6 @@ pub struct Embeddings {
 }
 
 impl Embeddings {
-    /// Creates a new `Embeddings` layer from pre-loaded components.
     pub fn new(
         word_embeddings: EmbeddingData,
         position_embeddings: Option<Array2<f32>>,
@@ -102,8 +95,6 @@ impl Embeddings {
                 log::info!("Loading embeddings as Native Q8_0 (Zero Copy)");
                 EmbeddingData::Q8_0(Arc::new(m))
             }
-
-            // === CASE 2: Quantize F32 -> Q8_0 (Best for Safetensors RAM Saving) ===
             (CpuTensor::F32(arr), DType::Q8_0) => {
                 log::info!("Quantizing F32 embeddings to Q8_0");
                 let w = arr.into_dimensionality::<ndarray::Ix2>()?;
@@ -111,8 +102,6 @@ impl Embeddings {
                 let shape = [w.shape()[0], w.shape()[1]];
                 EmbeddingData::Q8_0(Arc::new(QuantizedMatrix { blocks, shape }))
             }
-
-            // === CASE 3: Quantize BF16 -> Q8_0 ===
             (CpuTensor::BF16(arr), DType::Q8_0) => {
                 log::info!("Quantizing BF16 embeddings to Q8_0");
                 let w = arr.into_dimensionality::<ndarray::Ix2>()?;
@@ -121,18 +110,12 @@ impl Embeddings {
                 let shape = [w.shape()[0], w.shape()[1]];
                 EmbeddingData::Q8_0(Arc::new(QuantizedMatrix { blocks, shape }))
             }
-
-            // === CASE 4: Standard F32 ===
             (CpuTensor::F32(arr), DType::F32) => {
                 EmbeddingData::F32(Arc::new(arr.into_dimensionality()?))
             }
-
-            // === CASE 5: Standard BF16 ===
             (CpuTensor::BF16(arr), DType::BF16) => {
                 EmbeddingData::BF16(Arc::new(arr.into_dimensionality()?))
             }
-
-            // === CASE 6: Conversions (BF16 <-> F32) ===
             (CpuTensor::BF16(arr), DType::F32) => {
                 let w = arr
                     .into_dimensionality::<ndarray::Ix2>()?
@@ -145,9 +128,6 @@ impl Embeddings {
                     .mapv(bf16::from_f32);
                 EmbeddingData::BF16(Arc::new(w))
             }
-
-            // === CASE 7: Fallback (Q4_K/Q6_K -> F32) ===
-            // Until we implement specific gather kernels for Q4/Q6, we expand to F32.
             (t, _) => {
                 log::warn!("Implicitly dequantizing {:?} embeddings to F32", t.dtype());
                 EmbeddingData::F32(Arc::new(t.to_array2_f32()?))
@@ -226,24 +206,11 @@ impl Embeddings {
             let len = effective_end.saturating_sub(start_idx);
             if len > 0 {
                 let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);
-                // Shape [len, hidden] -> add batch axis to broadcast
                 let pos_broadcast = pos_slice.insert_axis(Axis(0)); // shape [1, len, hidden_size]
-
-                // Slice hidden and broadcast addition
                 hidden
                     .slice_mut(s![.., 0..len, ..])
                     .add_assign(&pos_broadcast);
             }
-            // if len > 0 {
-            //     let pos_slice = pos_emb.slice(s![start_idx..start_idx + len, ..]);
-            //     // Add to the corresponding part of hidden
-            //     // Note: If batch > 1, this needs broadcasting or iteration
-            //     // Assuming standard broadcasting works for shape [seq, hidden] vs [batch, seq, hidden]
-            //     for mut batch_slice in hidden.axis_iter_mut(Axis(0)) {
-            //         let mut seq_slice = batch_slice.slice_mut(s![0..len, ..]);
-            //         seq_slice += &pos_slice;
-            //     }
-            // }
         }
 
         if let Some(ref token_type_emb) = self.token_type_embeddings {
@@ -254,17 +221,9 @@ impl Embeddings {
                 hidden += &type_embeddings;
             }
         }
-
-        // if scale_embeddings {
-        //     let scale_factor = (hidden_size as f32).sqrt();
-        //     hidden *= scale_factor;
-        // }
-
         hidden
     }
 
-    /// Internal helper to perform the parallelized word embedding lookup.
-    /// This function is type-aware and handles the conversion from BF16 to F32.
     fn perform_word_lookup(&self, hidden: &mut Array3<f32>, input_ids: &Array2<u32>) {
         let vocab_size = self.vocab_size();
 
@@ -301,7 +260,6 @@ impl Embeddings {
                     });
             }
             EmbeddingData::Q8_0(matrix) => {
-                // Q8_0: 32 elements per block.
                 let blocks_per_row = matrix.shape[1] / 32;
 
                 hidden
@@ -335,7 +293,7 @@ impl Embeddings {
         }
     }
 
-    /// Internal helper to add token type embeddings.
+    /// add token type embeddings.
     fn add_token_type_embeddings(
         &self,
         hidden: &mut Array3<f32>,

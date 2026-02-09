@@ -216,7 +216,6 @@ mod tests {
     #[test]
     fn test_tokenize_filters_short() {
         let tokens = tokenize("I am a test");
-        // "I", "a" filtered out (< 2 chars)
         assert_eq!(tokens, vec!["am", "test"]);
     }
 
@@ -256,15 +255,9 @@ mod tests {
     #[test]
     fn test_bm25_index_with_documents() {
         let mut index = Bm25Index::new();
-
-        // Manually set up index state (simulating add_document)
         index.total_docs = 3;
         index.doc_lengths = vec![5, 3, 7];
         index.avg_doc_length = 5.0;
-
-        // Doc 0: "rust programming language"
-        // Doc 1: "python programming"
-        // Doc 2: "rust is fast and safe"
 
         index.doc_frequencies.insert("rust".to_string(), 2);
         index.doc_frequencies.insert("programming".to_string(), 2);
@@ -311,8 +304,6 @@ mod tests {
         index.doc_lengths = vec![10, 10];
         index.avg_doc_length = 10.0;
 
-        // Doc 0: term appears once
-        // Doc 1: term appears 3 times (should score higher)
         index.doc_frequencies.insert("test".to_string(), 2);
         index
             .inverted_index

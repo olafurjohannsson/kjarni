@@ -100,30 +100,7 @@ impl Dequantizable for BlockQ6_K {
 }
 
 
-// CpuTensor
-
-
 /// A generic, typed tensor for CPU computation.
-///
-/// This enum holds the primary representation of tensor data for the engine.
-/// It supports both standard floating-point formats and quantized formats.
-///
-/// # Ownership Semantics
-///
-/// - `to_*_f32()` methods consume `self` to avoid unnecessary copies
-/// - Use `clone()` first if you need to keep the original
-///
-/// # Example
-///
-/// ```ignore
-/// let tensor: CpuTensor = weights.get_typed_tensor("layer.weight")?;
-///
-/// // Check properties without consuming
-/// println!("Shape: {:?}, DType: {:?}", tensor.shape(), tensor.dtype());
-///
-/// // Convert (consumes tensor)
-/// let array = tensor.to_array2_f32()?;
-/// ```
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
 pub enum CpuTensor {
@@ -137,10 +114,6 @@ pub enum CpuTensor {
 }
 
 impl CpuTensor {
-    // =========================================================================
-    // Metadata Accessors (non-consuming)
-    // =========================================================================
-
     /// Returns the `DType` of the tensor.
     pub fn dtype(&self) -> DType {
         match self {
@@ -195,10 +168,6 @@ impl CpuTensor {
         }
     }
 
-    // =========================================================================
-    // Conversion Methods (consuming)
-    // =========================================================================
-
     /// Converts to a 1D f32 array, consuming self.
     ///
     /// Works for F32, F16, BF16. Fails for quantized matrix types.
@@ -226,8 +195,6 @@ impl CpuTensor {
     }
 
     /// Converts to a 2D f32 array, consuming self.
-    ///
-    /// Works for all types including quantized (will dequantize).
     pub fn to_array2_f32(self) -> Result<Array2<f32>> {
         let shape = self.shape().to_vec();
         if shape.len() < 2 {
@@ -254,8 +221,6 @@ impl CpuTensor {
     }
 
     /// Converts to a 3D f32 array, consuming self.
-    ///
-    /// Works for F32, F16, BF16. Fails for quantized matrix types.
     pub fn to_array3_f32(self) -> Result<Array3<f32>> {
         let shape = self.shape().to_vec();
         if shape.len() != 3 {
@@ -282,34 +247,26 @@ impl CpuTensor {
         }
     }
 
-    // =========================================================================
-    // Reference-Based Conversion (for when you need to keep original)
-    // =========================================================================
-
     /// Converts to a 1D f32 array without consuming self.
     ///
-    /// This clones the data internally. Prefer `to_array1_f32()` when possible.
+    /// This clones the data internally. Prefer `to_array1_f32()`
     pub fn as_array1_f32(&self) -> Result<Array1<f32>> {
         self.clone().to_array1_f32()
     }
 
     /// Converts to a 2D f32 array without consuming self.
     ///
-    /// This clones the data internally. Prefer `to_array2_f32()` when possible.
+    /// This clones the data internally. Prefer `to_array2_f32()`
     pub fn as_array2_f32(&self) -> Result<Array2<f32>> {
         self.clone().to_array2_f32()
     }
 
     /// Converts to a 3D f32 array without consuming self.
     ///
-    /// This clones the data internally. Prefer `to_array3_f32()` when possible.
+    /// This clones the data internally. Prefer `to_array3_f32()`
     pub fn as_array3_f32(&self) -> Result<Array3<f32>> {
         self.clone().to_array3_f32()
     }
-
-    // =========================================================================
-    // Raw Data Access
-    // =========================================================================
 
     /// Get the raw f32 data if this is an F32 tensor.
     pub fn as_f32_slice(&self) -> Option<&[f32]> {
@@ -337,17 +294,10 @@ impl CpuTensor {
 }
 
 
-// Tests
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::ArrayD;
-
-    // =========================================================================
-    // CpuTensor Metadata Tests
-    // =========================================================================
 
     #[test]
     fn test_cpu_tensor_f32_metadata() {
@@ -390,10 +340,6 @@ mod tests {
         assert!(!tensor.is_quantized());
     }
 
-    // =========================================================================
-    // CpuTensor F32 Conversion Tests
-    // =========================================================================
-
     #[test]
     fn test_f32_to_array1() {
         let arr = ArrayD::from_shape_vec(vec![4], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
@@ -427,10 +373,6 @@ mod tests {
         assert_eq!(result[[1, 2, 3]], 23.0);
     }
 
-    // =========================================================================
-    // CpuTensor F16/BF16 Conversion Tests
-    // =========================================================================
-
     #[test]
     fn test_f16_to_array1() {
         let arr = ArrayD::from_shape_vec(
@@ -441,7 +383,6 @@ mod tests {
 
         let result = tensor.to_array1_f32().unwrap();
         assert_eq!(result.shape(), &[3]);
-        // f16 has limited precision
         assert!((result[0] - 1.5).abs() < 0.01);
         assert!((result[1] - 2.5).abs() < 0.01);
         assert!((result[2] - 3.5).abs() < 0.01);
@@ -466,10 +407,6 @@ mod tests {
         assert!((result[[1, 1]] - 4.0).abs() < 0.01);
     }
 
-    // =========================================================================
-    // CpuTensor Error Cases
-    // =========================================================================
-
     #[test]
     fn test_array1_from_2d_flattens() {
         let arr = ArrayD::from_shape_vec(vec![2, 3], vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
@@ -489,28 +426,17 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("rank"));
     }
-
-    // =========================================================================
-    // Reference-Based Conversion Tests
-    // =========================================================================
-
     #[test]
     fn test_as_array_keeps_original() {
         let arr = ArrayD::from_shape_vec(vec![4], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
         let tensor = CpuTensor::F32(arr);
 
-        // Use reference-based method
         let result1 = tensor.as_array1_f32().unwrap();
         let result2 = tensor.as_array1_f32().unwrap(); // Can call again!
 
         assert_eq!(result1, result2);
-        assert_eq!(tensor.shape(), &[4]); // Original still valid
+        assert_eq!(tensor.shape(), &[4]);
     }
-
-    // =========================================================================
-    // Raw Slice Access Tests
-    // =========================================================================
-
     #[test]
     fn test_as_f32_slice() {
         let arr = ArrayD::from_shape_vec(vec![4], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
@@ -532,16 +458,8 @@ mod tests {
         assert!(tensor.as_f16_slice().is_some());
     }
 
-    // =========================================================================
-    // QuantizedMatrix Tests
-    // =========================================================================
-
-    // Note: Full quantization tests require actual block data which is complex to generate.
-    // These tests verify the structure and metadata.
-
     #[test]
     fn test_quantized_matrix_shape() {
-        // Create a minimal Q8_0 matrix (empty blocks, just testing structure)
         let matrix = QuantizedMatrix::<BlockQ8_0> {
             blocks: vec![],
             shape: [64, 128],
@@ -577,10 +495,6 @@ mod tests {
         let result = tensor.to_array3_f32();
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    // Dequantizable Trait Tests
-    // =========================================================================
 
     #[test]
     fn test_block_sizes() {

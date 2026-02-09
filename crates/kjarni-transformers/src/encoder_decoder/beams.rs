@@ -1,3 +1,5 @@
+//! Beam search, based on HF implementation, thanks HF guys this was extremely complicated to port
+//! 
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures::stream::Stream;
@@ -472,42 +474,6 @@ pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
         }
     }
 }
-
-// pub fn run_beam_search_stream<'a, B: EncoderDecoderGenerationBackend + 'a>(
-//     model: &'a dyn EncoderDecoderLanguageModel,
-//     backend: &'a B,
-//     input_text: &'a str,
-//     config: &'a GenerationConfig,
-// ) -> impl Stream<Item = Result<StreamedToken>> + 'a {
-//     try_stream! {
-//         let mut ctx = BeamContext::new(model, backend, input_text, config).await?;
-
-//         if ctx.num_beams > 1 {
-//             log::warn!("streaming beam search is unstable, tokens may change. use greedy for stability.");
-//         }
-
-//         for step in 0..config.max_length {
-//             let should_stop = beam_step(&mut ctx, step).await?;
-
-//             if should_stop {
-//                 break;
-//             }
-
-//             if let Some(best_beam) = ctx.beams.iter().find(|b| b.score != f32::NEG_INFINITY) {
-//                 let new_token = *best_beam.tokens.last().unwrap();
-
-//                 if new_token != ctx.eos_token_id && new_token != ctx.decoder_start_token_id {
-//                     let text = ctx.model.tokenizer().decode(&[new_token], true).unwrap_or_default();
-//                     yield StreamedToken {
-//                         text,
-//                         id: new_token,
-//                         token_type: TokenType::Generated,
-//                     };
-//                 }
-//             }
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -1477,27 +1443,16 @@ mod tests {
 
         beam_step(&mut ctx, 0).await.unwrap();
 
-        // Cache should have been incremented
         assert_eq!(ctx.cache.get_seq_length(), 1);
     }
-
-    // ========================================================================
-    //  FinishedHypotheses::is_done heuristic
-    // ========================================================================
 
     #[test]
     fn test_is_done_with_length_penalty() {
         let mut finished = FinishedHypotheses::new(1, 2.0, 0);
-
         finished.add(BeamHypothesis {
             tokens: vec![0; 5],
             score: -10.0, // normalized: -10 / 5^2 = -0.4
         });
-
-        // Best possible at cur_len=10: score / 10^2 = score / 100
-        // For is_done to be true: worst_score >= best_sum_logprobs / lp
-        // -0.4 >= best_sum / 100 => best_sum <= -40
-
         assert!(!finished.is_done(false, -30.0, 10)); // -30/100 = -0.3 > -0.4
         assert!(finished.is_done(false, -50.0, 10)); // -50/100 = -0.5 < -0.4
     }

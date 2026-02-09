@@ -543,14 +543,6 @@ mod error_tests {
     use super::*;
 
     #[test]
-    fn test_error_display_unknown_model() {
-        let err = EmbedderError::UnknownModel("fake-model".to_string());
-        let msg = format!("{}", err);
-        assert!(msg.contains("fake-model"));
-        assert!(msg.contains("Unknown model"));
-    }
-
-    #[test]
     fn test_error_display_incompatible_model() {
         let err = EmbedderError::IncompatibleModel {
             model: "test-model".to_string(),

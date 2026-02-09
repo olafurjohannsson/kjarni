@@ -924,21 +924,8 @@ mod index_reader_tests {
         assert!(filter.matches(&metadata));
     }
 
-    // ============================================================================
-    // LOCAL/GLOBAL ID CONVERSION TESTS
-    // ============================================================================
-
-    // Note: These would typically require creating an IndexReader with mock segments.
-    // Here we test the logic conceptually. In a real test, you'd create temporary
-    // index files or mock the Segment struct.
-
     #[test]
     fn test_local_to_global_concept() {
-        // Conceptual test for ID conversion logic
-        // Segment 0: 10 docs (IDs 0-9)
-        // Segment 1: 5 docs (IDs 10-14)
-        // Segment 2: 8 docs (IDs 15-22)
-
         fn local_to_global(segment_sizes: &[usize], segment_idx: usize, local_id: usize) -> usize {
             let offset: usize = segment_sizes[..segment_idx].iter().sum();
             offset + local_id

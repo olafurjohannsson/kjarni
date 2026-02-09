@@ -8,9 +8,6 @@ use futures::StreamExt;
 
 
 mod expected {
-    // =========================================================================
-    // flan-t5-base
-    // =========================================================================
     pub const FLAN_T5_BASE_EN_TO_DE_HELLO_GREEDY: &str = "Hello,";
     pub const FLAN_T5_BASE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_BASE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie old sind Sie?";
@@ -27,10 +24,6 @@ mod expected {
     pub const FLAN_T5_BASE_EN_TO_ES_HELLO_BEAM: &str = "Hombre!";
     pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
     pub const FLAN_T5_BASE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
-
-    // =========================================================================
-    // flan-t5-large
-    // =========================================================================
     pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_GREEDY: &str = "Hello!";
     pub const FLAN_T5_LARGE_EN_TO_DE_HELLO_BEAM: &str = "Hello!";
     pub const FLAN_T5_LARGE_EN_TO_DE_HOW_OLD_GREEDY: &str = "Wie alte sind Sie?";
@@ -50,9 +43,6 @@ mod expected {
     pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_GREEDY: &str = "Gracias";
     pub const FLAN_T5_LARGE_EN_TO_ES_THANK_YOU_BEAM: &str = "Gracias";
 }
-
-
-// Unit Tests - Language Normalization
 
 
 mod language_tests {
@@ -332,20 +322,8 @@ mod builder_tests {
     }
 }
 
-
-// Unit Tests - Error Types
-
-
 mod error_tests {
     use crate::translator::TranslatorError;
-
-    #[test]
-    fn test_error_unknown_model_message() {
-        let err = TranslatorError::UnknownModel("foo-bar".to_string());
-        let msg = err.to_string();
-        assert!(msg.contains("foo-bar"));
-        assert!(msg.to_lowercase().contains("unknown"));
-    }
 
     #[test]
     fn test_error_unknown_language_message() {

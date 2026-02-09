@@ -5,12 +5,6 @@ pub use crate::feedforward::FeedForward;
 use anyhow::Result;
 use ndarray::{Array2, Array3, Array4, ArrayView3};
 
-/// A generic transformer layer combining attention and feedforward.
-/// This universal struct can represent an encoder layer, a decoder layer,
-/// or an encoder-decoder's decoder layer.
-/// Unified decoder layer with cross-attention.
-///
-/// Supports both pre-norm (T5, Whisper) and post-norm (BART) architectures.
 pub struct CrossDecoderLayer {
     // Self-Attention Components
     pub self_attn: DecoderSelfAttention,
@@ -24,7 +18,6 @@ pub struct CrossDecoderLayer {
     pub feedforward: FeedForward,
     pub ffn_layer_norm: Normalization,
 
-    // Architecture flags
     pub pre_norm: bool,
 }
 
@@ -51,8 +44,6 @@ impl CrossDecoderLayer {
     }
 
     /// Pre-compute cross-attention K/V from encoder hidden states.
-    ///
-    /// Call once per generation, then reuse for all decode steps.
     pub fn precompute_cross_kv(
         &self,
         encoder_hidden_states: &Array3<f32>,
@@ -61,18 +52,6 @@ impl CrossDecoderLayer {
     }
 
     /// Full forward pass through the layer.
-    ///
-    /// # Arguments
-    /// * `hidden_states` - Input hidden states [batch, seq, hidden]
-    /// * `encoder_hidden_states` - Encoder output (used if cross_kv_cache is None)
-    /// * `self_mask` - Causal mask for self-attention
-    /// * `cross_mask` - Mask for cross-attention
-    /// * `past_kv` - Cached self-attention K/V from previous steps
-    /// * `cross_kv_cache` - Pre-computed cross-attention K/V
-    /// * `position_bias` - Optional relative position bias (T5)
-    ///
-    /// # Returns
-    /// (output_hidden_states, (new_self_k, new_self_v))
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -117,14 +96,12 @@ impl CrossDecoderLayer {
         past_kv: Option<(ArrayView3<f32>, ArrayView3<f32>)>,
         cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // 1. Self-Attention: attn -> add -> norm
         let residual = hidden_states.clone();
         let (attn_out, new_k, new_v) =
             self.self_attn
                 .forward(hidden_states, self_mask, past_kv, None)?;
         let hidden_states = self.self_attn_layer_norm.forward(&(residual + attn_out));
 
-        // 2. Cross-Attention: attn -> add -> norm
         let residual = hidden_states.clone();
         let cross_out = self.compute_cross_attention(
             &hidden_states,
@@ -133,16 +110,12 @@ impl CrossDecoderLayer {
             cross_kv_cache,
         )?;
         let hidden_states = self.cross_attn_layer_norm.forward(&(residual + cross_out));
-
-        // 3. FFN: ffn -> add -> norm
         let residual = hidden_states.clone();
         let ffn_out = self.feedforward.forward(&hidden_states)?;
         let hidden_states = self.ffn_layer_norm.forward(&(residual + ffn_out));
-
         Ok((hidden_states, (new_k, new_v)))
     }
 
-    /// Pre-norm forward (T5/Whisper style): norm -> sublayer -> add
     fn forward_prenorm(
         &self,
         hidden_states: &Array3<f32>,
@@ -153,16 +126,11 @@ impl CrossDecoderLayer {
         cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
         position_bias: Option<&Array4<f32>>,
     ) -> Result<(Array3<f32>, (Array3<f32>, Array3<f32>))> {
-        // 1. Self-Attention: norm -> attn -> add
         let normed = self.self_attn_layer_norm.forward(hidden_states);
         let (attn_out, new_k, new_v) =
             self.self_attn
                 .forward(&normed, self_mask, past_kv, position_bias)?;
         let hidden_states = hidden_states + &attn_out;
-
-        // println!("=== LAYER 0 AFTER SELF-ATTN ===");
-        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
-        // 2. Cross-Attention: norm -> attn -> add
         let normed = self.cross_attn_layer_norm.forward(&hidden_states);
         let cross_out = self.compute_cross_attention(
             &normed,
@@ -171,17 +139,9 @@ impl CrossDecoderLayer {
             cross_kv_cache,
         )?;
         let hidden_states = hidden_states + &cross_out;
-
-        // println!("=== LAYER 0 AFTER CROSS-ATTN ===");
-        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
-        // 3. FFN: norm -> ffn -> add
         let normed = self.ffn_layer_norm.forward(&hidden_states);
         let ffn_out = self.feedforward.forward(&normed)?;
         let hidden_states = hidden_states + &ffn_out;
-
-        // println!("=== LAYER 0 AFTER FFN ===");
-        // println!("[0,0,:10]: {:?}", hidden_states.slice(s![0, 0, ..10]));
-
         Ok((hidden_states, (new_k, new_v)))
     }
 
@@ -194,22 +154,17 @@ impl CrossDecoderLayer {
         cross_kv_cache: Option<&(Array4<f32>, Array4<f32>)>,
     ) -> Result<Array3<f32>> {
         if let Some((k_cache, v_cache)) = cross_kv_cache {
-            // Fast path: use pre-computed K/V
+            // use pre-computed K/V
             self.cross_attn
                 .forward(hidden_states, k_cache, v_cache, cross_mask)
         } else {
-            // Slow path: compute K/V on the fly
+            // compute K/V on the fly
             let (k, v) = self
                 .cross_attn
                 .precompute_encoder_kv(encoder_hidden_states)?;
             self.cross_attn.forward(hidden_states, &k, &v, cross_mask)
         }
     }
-
-    // =========================================================================
-    // Individual component access (for fine-grained control)
-    // =========================================================================
-
     pub fn self_attention(
         &self,
         hidden_states: &Array3<f32>,
@@ -281,7 +236,6 @@ mod cross_decoder_layer_tests {
     use anyhow::Result;
     use ndarray::{Array1, Array2, Array3};
 
-    /// Helper to create LinearLayer from weight and bias vecs
     fn load_linear(
         out_features: usize,
         in_features: usize,
@@ -293,13 +247,11 @@ mod cross_decoder_layer_tests {
         LinearLayer::new_f32(weight, Some(bias))
     }
 
-    /// Create deterministic cross decoder layer for testing
     fn create_test_cross_decoder_layer(pre_norm: bool) -> CrossDecoderLayer {
         let hidden_size = 4;
         let num_heads = 2;
         let intermediate_size = 8;
 
-        // === Self Attention Weights ===
         let layer_sa_q_weight: Vec<f32> = vec![
             0.010000, 0.020000, 0.030000, 0.040000, 0.050000, 0.060000, 0.070000, 0.080000,
             0.090000, 0.100000, 0.110000, 0.120000, 0.130000, 0.140000, 0.150000, 0.160000,
@@ -431,8 +383,6 @@ mod cross_decoder_layer_tests {
     #[test]
     fn test_cross_decoder_layer_postnorm_no_masks() -> Result<()> {
         let layer = create_test_cross_decoder_layer(false); // post-norm
-
-        // === TEST 1: Post-norm (BART), no masks ===
         let layer_decoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
         ];
@@ -454,7 +404,6 @@ mod cross_decoder_layer_tests {
             None, // position_bias
         )?;
 
-        // Golden output
         let layer_test1_output_postnorm: Vec<f32> = vec![
             -1.331635, -0.437212, 0.457212, 1.351635, -1.331635, -0.437212, 0.457212, 1.351634,
         ];
@@ -481,8 +430,6 @@ mod cross_decoder_layer_tests {
     #[test]
     fn test_cross_decoder_layer_prenorm_no_masks() -> Result<()> {
         let layer = create_test_cross_decoder_layer(true); // pre-norm
-
-        // === TEST 2: Pre-norm (T5), no masks ===
         let layer_decoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
         ];
@@ -490,7 +437,6 @@ mod cross_decoder_layer_tests {
             0.500000, 0.600000, 0.700000, 0.800000, 0.900000, 1.000000, 1.100000, 1.200000,
             1.300000, 1.400000, 1.500000, 1.600000,
         ];
-
         let decoder_hidden = Array3::from_shape_vec((1, 2, 4), layer_decoder_hidden)?;
         let encoder_hidden = Array3::from_shape_vec((1, 3, 4), layer_encoder_hidden)?;
 
@@ -503,8 +449,6 @@ mod cross_decoder_layer_tests {
             None,
             None,
         )?;
-
-        // Golden output
         let layer_test2_output_prenorm: Vec<f32> = vec![
             22.014660, 22.899734, 23.784811, 24.669884, 22.414780, 23.299860, 24.184940, 25.070023,
         ];
@@ -526,8 +470,6 @@ mod cross_decoder_layer_tests {
     #[test]
     fn test_cross_decoder_layer_postnorm_with_cross_mask() -> Result<()> {
         let layer = create_test_cross_decoder_layer(false); // post-norm
-
-        // === TEST 3: Post-norm with cross mask ===
         let layer_decoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
         ];
@@ -551,7 +493,6 @@ mod cross_decoder_layer_tests {
             None,
         )?;
 
-        // Golden output
         let layer_test3_output: Vec<f32> = vec![
             -1.331635, -0.437211, 0.457212, 1.351634, -1.331635, -0.437211, 0.457211, 1.351635,
         ];
@@ -576,8 +517,6 @@ mod cross_decoder_layer_tests {
     #[test]
     fn test_cross_decoder_layer_postnorm_with_precomputed_cross_kv() -> Result<()> {
         let layer = create_test_cross_decoder_layer(false); // post-norm
-
-        // === TEST 4: Post-norm with precomputed cross K/V ===
         let layer_decoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
         ];
@@ -627,8 +566,6 @@ mod cross_decoder_layer_tests {
     #[test]
     fn test_cross_decoder_layer_batched() -> Result<()> {
         let layer = create_test_cross_decoder_layer(false); // post-norm
-
-        // === TEST 5: Batched (batch=2), post-norm ===
         let layer_test5_decoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
             0.800000, 0.900000, 1.000000, 1.100000, 1.200000, 1.300000, 1.400000, 1.500000,
@@ -654,8 +591,6 @@ mod cross_decoder_layer_tests {
             None,
             None,
         )?;
-
-        // Golden output
         let layer_test5_output: Vec<f32> = vec![
             -1.331635, -0.437212, 0.457212, 1.351634, -1.331635, -0.437211, 0.457211, 1.351635,
             -1.331634, -0.437212, 0.457211, 1.351635, -1.331635, -0.437212, 0.457212, 1.351635,
@@ -679,7 +614,6 @@ mod cross_decoder_layer_tests {
     fn test_cross_decoder_layer_single_token_decode() -> Result<()> {
         let layer = create_test_cross_decoder_layer(false); // post-norm
 
-        // === TEST 6: Single token decode, post-norm ===
         let layer_test6_decoder_hidden: Vec<f32> = vec![0.100000, 0.200000, 0.300000, 0.400000];
         let layer_test6_encoder_hidden: Vec<f32> = vec![
             0.000000, 0.100000, 0.200000, 0.300000, 0.400000, 0.500000, 0.600000, 0.700000,
@@ -698,8 +632,6 @@ mod cross_decoder_layer_tests {
             None,
             None,
         )?;
-
-        // Golden output
         let layer_test6_output: Vec<f32> = vec![-1.331635, -0.437212, 0.457212, 1.351635];
         let golden_output = Array3::from_shape_vec((1, 1, 4), layer_test6_output)?;
 
@@ -712,18 +644,11 @@ mod cross_decoder_layer_tests {
             "Single token decode mismatch. Max diff: {}",
             max_diff
         );
-
-        // Verify self-attention K/V cache shapes for single token
-        // Should be [batch=1, seq=1, hidden=4] but stored in head format
-        println!("K cache shape: {:?}", new_k.shape());
-        println!("V cache shape: {:?}", new_v.shape());
-
         Ok(())
     }
 
     #[test]
     fn test_cross_decoder_layer_prenorm_vs_postnorm_differ() -> Result<()> {
-        // Verify that pre-norm and post-norm produce different outputs
         let layer_prenorm = create_test_cross_decoder_layer(true);
         let layer_postnorm = create_test_cross_decoder_layer(false);
 
@@ -772,7 +697,6 @@ mod cross_decoder_layer_tests {
 
     #[test]
     fn test_cross_decoder_layer_cross_mask_effect() -> Result<()> {
-        // Verify that cross-attention mask actually changes output
         let layer = create_test_cross_decoder_layer(false);
 
         let decoder_hidden: Vec<f32> = vec![
@@ -786,7 +710,6 @@ mod cross_decoder_layer_tests {
         let decoder_hidden = Array3::from_shape_vec((1, 2, 4), decoder_hidden)?;
         let encoder_hidden = Array3::from_shape_vec((1, 3, 4), encoder_hidden)?;
 
-        // Output without mask
         let (output_no_mask, _) = layer.forward(
             &decoder_hidden,
             &encoder_hidden,
@@ -797,7 +720,6 @@ mod cross_decoder_layer_tests {
             None,
         )?;
 
-        // Output with aggressive mask (only first encoder position visible)
         let mask = Array2::from_shape_vec((1, 3), vec![1.0, 0.0, 0.0])?;
         let (output_with_mask, _) = layer.forward(
             &decoder_hidden,
@@ -812,8 +734,6 @@ mod cross_decoder_layer_tests {
         let diff = (&output_no_mask - &output_with_mask).mapv(|x| x.abs());
         let max_diff = diff.fold(0.0f32, |a, &b| a.max(b));
 
-        println!("Cross mask effect - Output diff: {:.6}", max_diff);
-        // With LayerNorm, the diff might be small but should still be non-zero
         assert!(
             max_diff > 1e-7,
             "Cross mask should change output! Diff was only {}",

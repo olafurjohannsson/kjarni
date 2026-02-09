@@ -1,15 +1,8 @@
 //! Transcriber integration tests.
-//!
-//! These tests require model weights and are therefore ignored by default.
-//! Run with: `cargo test -p kjarni --test transcriber -- --ignored`
 
 #[cfg(test)]
 mod tests {
     use super::super::*;
-
-    // =========================================================================
-    // Unit tests (no model needed)
-    // =========================================================================
 
     #[test]
     fn test_task_display() {
@@ -57,11 +50,7 @@ mod tests {
         let p = TranscriptionProgress::loading_audio();
         assert_eq!(p.stage, TranscriptionStage::LoadingAudio);
     }
-
-    // =========================================================================
-    // Integration tests (require model weights)
-    // =========================================================================
-
+    
     #[tokio::test]
     #[ignore = "requires model weights"]
     async fn test_transcribe_file() {

@@ -170,16 +170,11 @@ pub fn list_models_by_group(group: &str) -> Vec<ModelEntry> {
 mod tests {
     use super::*;
 
-    // =========================================================================
-    // list_models tests
-    // =========================================================================
-
     #[test]
     fn test_list_models_returns_entries() {
         let models = list_models();
         assert!(!models.is_empty(), "Should return at least one model");
     }
-
     #[test]
     fn test_list_models_all_have_cli_names() {
         let models = list_models();
@@ -190,7 +185,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_all_have_descriptions() {
         let models = list_models();
@@ -202,7 +196,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_all_have_size() {
         let models = list_models();
@@ -212,7 +205,6 @@ mod tests {
                 "Model {} should have size info",
                 model.cli_name
             );
-            // Size should contain MB or GB
             assert!(
                 model.size.contains("MB") || model.size.contains("GB"),
                 "Model {} size should be in MB or GB: {}",
@@ -221,7 +213,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_all_have_params() {
         let models = list_models();
@@ -231,7 +222,6 @@ mod tests {
                 "Model {} should have params info",
                 model.cli_name
             );
-            // Params should contain M or B
             assert!(
                 model.params.contains('M') || model.params.contains('B'),
                 "Model {} params should be in M or B: {}",
@@ -240,13 +230,11 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_contains_known_models() {
         let models = list_models();
         let names: Vec<&str> = models.iter().map(|m| m.cli_name.as_str()).collect();
 
-        // Check for some known models
         assert!(
             names.contains(&"minilm-l6-v2"),
             "Should contain minilm-l6-v2"
@@ -256,7 +244,6 @@ mod tests {
             "Should contain distilbert-sentiment"
         );
     }
-
     #[test]
     fn test_list_models_unique_cli_names() {
         let models = list_models();
@@ -266,16 +253,10 @@ mod tests {
         names.dedup();
         assert_eq!(names.len(), original_len, "All CLI names should be unique");
     }
-
-    // =========================================================================
-    // list_models_by_architecture tests
-    // =========================================================================
-
     #[test]
     fn test_list_models_by_architecture_bert() {
         let models = list_models_by_architecture(ModelArchitecture::Bert);
         assert!(!models.is_empty(), "Should have BERT models");
-
         for model in &models {
             assert_eq!(
                 model.architecture,
@@ -284,11 +265,9 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_architecture_llama() {
         let models = list_models_by_architecture(ModelArchitecture::Llama);
-
         for model in &models {
             assert_eq!(
                 model.architecture,
@@ -297,11 +276,9 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_architecture_t5() {
         let models = list_models_by_architecture(ModelArchitecture::T5);
-
         for model in &models {
             assert_eq!(
                 model.architecture,
@@ -310,11 +287,9 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_architecture_bart() {
         let models = list_models_by_architecture(ModelArchitecture::Bart);
-
         for model in &models {
             assert_eq!(
                 model.architecture,
@@ -323,32 +298,21 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_architecture_filters_correctly() {
         let all_models = list_models();
         let bert_models = list_models_by_architecture(ModelArchitecture::Bert);
-
-        // Filtered list should be smaller or equal
         assert!(bert_models.len() <= all_models.len());
-
-        // Count manually
         let manual_count = all_models
             .iter()
             .filter(|m| m.architecture == ModelArchitecture::Bert)
             .count();
         assert_eq!(bert_models.len(), manual_count);
     }
-
-    // =========================================================================
-    // list_models_by_group tests
-    // =========================================================================
-
     #[test]
     fn test_list_models_by_group_embedding() {
         let models = list_models_by_group("Embedding");
         assert!(!models.is_empty(), "Should have embedding models");
-
         for model in &models {
             assert_eq!(
                 model.model_type.display_group(),
@@ -357,11 +321,9 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_group_classifier() {
         let models = list_models_by_group("Classifier");
-
         for model in &models {
             assert_eq!(
                 model.model_type.display_group(),
@@ -370,11 +332,9 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn test_list_models_by_group_llm() {
         let models = list_models_by_group("LLM (Decoder)");
-
         for model in &models {
             assert_eq!(
                 model.model_type.display_group(),
@@ -389,11 +349,6 @@ mod tests {
         let models = list_models_by_group("NonexistentGroup");
         assert!(models.is_empty(), "Unknown group should return empty list");
     }
-
-    // =========================================================================
-    // get_model_info tests
-    // =========================================================================
-
     #[test]
     fn test_get_model_info_valid_model() {
         let info = get_model_info("minilm-l6-v2").unwrap();
@@ -404,47 +359,37 @@ mod tests {
         assert!(!info.size.is_empty());
         assert!(!info.params.is_empty());
     }
-
     #[test]
     fn test_get_model_info_distilbert() {
         let info = get_model_info("distilbert-sentiment").unwrap();
-
         assert_eq!(info.cli_name, "distilbert-sentiment");
         assert_eq!(info.architecture, ModelArchitecture::Bert);
     }
-
     #[test]
     fn test_get_model_info_llama() {
         let info = get_model_info("llama3.2-1b-instruct").unwrap();
-
         assert_eq!(info.cli_name, "llama3.2-1b-instruct");
         assert_eq!(info.architecture, ModelArchitecture::Llama);
         assert!(info.has_gguf, "Llama models should have GGUF available");
     }
-
     #[test]
     fn test_get_model_info_unknown_model() {
         let result = get_model_info("nonexistent-model");
-
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unknown model"));
         assert!(err.contains("nonexistent-model"));
     }
-
     #[test]
     fn test_get_model_info_empty_name() {
         let result = get_model_info("");
         assert!(result.is_err());
     }
-
     #[test]
     fn test_get_model_info_case_insensitive() {
-        // CLI names are case-insensitive for user convenience
         let result_lower = get_model_info("minilm-l6-v2");
         let result_mixed = get_model_info("MiniLM-L6-V2");
         let result_upper = get_model_info("MINILM-L6-V2");
-
         assert!(result_lower.is_ok());
         assert!(
             result_mixed.is_ok(),
@@ -454,8 +399,6 @@ mod tests {
             result_upper.is_ok(),
             "Model lookup should be case-insensitive"
         );
-
-        // All should return the same model
         assert_eq!(
             result_lower.unwrap().cli_name,
             result_mixed.unwrap().cli_name
@@ -464,44 +407,29 @@ mod tests {
 
     #[test]
     fn test_validate_model_name_case_insensitive() {
-        // Model names are case-insensitive for user convenience
         assert!(validate_model_name("minilm-l6-v2"));
         assert!(validate_model_name("MiniLM-L6-V2"));
         assert!(validate_model_name("MINILM-L6-V2"));
-
-        // Invalid names should still fail
         assert!(!validate_model_name("nonexistent-model"));
         assert!(!validate_model_name(""));
     }
-
-    // =========================================================================
-    // validate_model_name tests
-    // =========================================================================
-
     #[test]
     fn test_validate_model_name_valid() {
         assert!(validate_model_name("minilm-l6-v2"));
         assert!(validate_model_name("distilbert-sentiment"));
         assert!(validate_model_name("llama3.2-1b-instruct"));
     }
-
     #[test]
     fn test_validate_model_name_invalid() {
         assert!(!validate_model_name("nonexistent-model"));
         assert!(!validate_model_name(""));
         assert!(!validate_model_name("random-string-123"));
     }
-
-    // =========================================================================
-    // all_model_names tests
-    // =========================================================================
-
     #[test]
     fn test_all_model_names_not_empty() {
         let names = all_model_names();
         assert!(!names.is_empty());
     }
-
     #[test]
     fn test_all_model_names_no_empty_strings() {
         let names = all_model_names();
@@ -539,16 +467,10 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // is_model_downloaded tests
-    // =========================================================================
-
     #[test]
     fn test_is_model_downloaded_valid_name() {
-        // Just test it doesn't error for valid names
         let result = is_model_downloaded("minilm-l6-v2");
         assert!(result.is_ok());
-        // The actual value depends on filesystem state
     }
 
     #[test]
@@ -564,14 +486,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // =========================================================================
-    // cache_dir tests
-    // =========================================================================
-
     #[test]
     fn test_cache_dir_returns_path() {
         let dir = cache_dir();
-        // Should return a non-empty path
         assert!(!dir.as_os_str().is_empty());
     }
 
@@ -589,30 +506,21 @@ mod tests {
     #[test]
     fn test_cache_dir_is_absolute_or_relative_to_home() {
         let dir = cache_dir();
-        // On most systems this will be an absolute path under home
-        // Just check it's not empty and looks reasonable
         assert!(
             dir.components().count() > 1,
             "Cache dir should have multiple components"
         );
     }
-
-    // =========================================================================
-    // model_path tests
-    // =========================================================================
-
     #[test]
     fn test_model_path_valid_model() {
         let path = model_path("minilm-l6-v2").unwrap();
 
-        // Should be under cache dir
         let cache = cache_dir();
         assert!(
             path.starts_with(&cache),
             "Model path should be under cache dir"
         );
 
-        // Should contain model identifier
         let path_str = path.to_string_lossy();
         assert!(
             path_str.contains("sentence-transformers") || path_str.contains("MiniLM"),
@@ -638,7 +546,6 @@ mod tests {
 
     #[test]
     fn test_model_path_consistent() {
-        // Same model should always return same path
         let path1 = model_path("minilm-l6-v2").unwrap();
         let path2 = model_path("minilm-l6-v2").unwrap();
 
@@ -649,7 +556,6 @@ mod tests {
     fn test_model_entry_debug() {
         let info = get_model_info("minilm-l6-v2").unwrap();
         let debug_str = format!("{:?}", info);
-
         assert!(debug_str.contains("minilm-l6-v2"));
         assert!(debug_str.contains("ModelEntry"));
     }
@@ -691,11 +597,6 @@ mod tests {
             );
         }
     }
-
-    // =========================================================================
-    // Integration-like tests
-    // =========================================================================
-
     #[test]
     fn test_all_listed_models_can_get_info() {
         let models = list_models();
@@ -760,14 +661,8 @@ mod tests {
             );
         }
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_model_with_dots_in_name() {
-        // Models like "llama3.2-1b" have dots
         let result = get_model_info("llama3.2-1b-instruct");
         assert!(result.is_ok());
     }
@@ -777,7 +672,6 @@ mod tests {
         let result = get_model_info("qwen2.5-0.5b-instruct");
         assert!(result.is_ok());
     }
-
     #[test]
     fn test_whitespace_in_model_name() {
         let result = get_model_info(" minilm-l6-v2 ");
@@ -786,7 +680,6 @@ mod tests {
             "Should not accept whitespace in model names"
         );
     }
-
     #[test]
     fn test_special_characters_in_model_name() {
         let result = get_model_info("model/with/slashes");
@@ -795,11 +688,6 @@ mod tests {
         let result = get_model_info("model:with:colons");
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    // Specific model tests
-    // =========================================================================
-
     #[test]
     fn test_minilm_model_details() {
         let info = get_model_info("minilm-l6-v2").unwrap();
@@ -808,7 +696,6 @@ mod tests {
         assert!(info.params.contains("22") || info.params.contains("M"));
         assert!(!info.has_gguf);
     }
-
     #[test]
     fn test_distilbart_model_details() {
         let info = get_model_info("distilbart-cnn").unwrap();
@@ -816,7 +703,6 @@ mod tests {
         assert_eq!(info.architecture, ModelArchitecture::Bart);
         assert!(!info.has_gguf);
     }
-
     #[test]
     fn test_flan_t5_model_details() {
         let info = get_model_info("flan-t5-base").unwrap();
@@ -828,32 +714,24 @@ mod tests {
     #[test]
     fn test_whisper_model_details() {
         let info = get_model_info("whisper-small").unwrap();
-
         assert_eq!(info.architecture, ModelArchitecture::Whisper);
     }
-
     #[test]
     fn test_phi_model_details() {
         let info = get_model_info("phi3.5-mini").unwrap();
-
         assert_eq!(info.architecture, ModelArchitecture::Phi3);
         assert!(info.has_gguf, "Phi models should have GGUF");
     }
-
     #[test]
     fn test_qwen_model_details() {
         let info = get_model_info("qwen2.5-0.5b-instruct").unwrap();
-
         assert_eq!(info.architecture, ModelArchitecture::Qwen2);
         assert!(info.has_gguf, "Qwen models should have GGUF");
     }
-
     #[test]
     fn test_cross_encoder_model_details() {
         let info = get_model_info("minilm-l6-v2-cross-encoder").unwrap();
-
         assert_eq!(info.architecture, ModelArchitecture::Bert);
-        // Cross-encoders are in Re-Ranker group
         assert_eq!(info.model_type.display_group(), "Re-Ranker");
     }
 }

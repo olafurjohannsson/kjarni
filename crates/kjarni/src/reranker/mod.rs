@@ -31,10 +31,6 @@ pub use model::Reranker;
 pub use presets::{RerankerPreset, RerankerTier};
 pub use types::{RerankOverrides, RerankResult, RerankerError, RerankerResult};
 
-// ============================================================================
-// Convenience Functions
-// ============================================================================
-
 /// Rerank documents by relevance to a query.
 ///
 /// Returns documents sorted by relevance score (highest first).

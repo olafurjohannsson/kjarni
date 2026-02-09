@@ -56,15 +56,7 @@
 //!     print!("{}", token?.text);
 //! }
 //! ```
-//!
-//! # Supported Models
-//!
-//! | Model | Best For | Size |
-//! |-------|----------|------|
-//! | `flan-t5-base` | General seq2seq, translation | 990 MB |
-//! | `flan-t5-large` | Higher quality | 3 GB |
-//! | `distilbart-cnn` | Fast summarization | 1 GB |
-//! | `bart-large-cnn` | Quality summarization | 1.6 GB |
+
 
 mod builder;
 mod model;
@@ -76,10 +68,6 @@ mod validation;
 pub use builder::Seq2SeqGeneratorBuilder;
 pub use model::Seq2SeqGenerator;
 pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
-
-// ============================================================================
-// Convenience Functions
-// ============================================================================
 
 /// Generate text with default settings.
 ///
@@ -153,10 +141,6 @@ pub fn is_seq2seq_model(model: &str) -> Seq2SeqResult<()> {
     validation::validate_for_seq2seq(model_type)?;
     Ok(())
 }
-
-
-
-// Compile-time Send + Sync verification
 
 
 #[cfg(test)]

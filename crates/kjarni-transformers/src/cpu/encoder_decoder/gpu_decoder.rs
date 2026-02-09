@@ -47,7 +47,7 @@ pub struct Seq2SeqGPUDecoder {
 }
 
 impl Seq2SeqGPUDecoder {
-    /// Create decoder from ModelConfig + Seq2SeqDecoderConfig.
+    /// Create decoder.
     pub fn new<C: ModelConfig>(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,

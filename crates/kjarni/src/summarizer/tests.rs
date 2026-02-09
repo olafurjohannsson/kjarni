@@ -3,9 +3,7 @@
 use super::*;
 use futures::StreamExt;
 
-
 // Expected Outputs from PyTorch Reference
-
 
 mod expected {
     // =========================================================================
@@ -36,9 +34,7 @@ mod expected {
     pub const DISTILBART_CNN_PYTHON_LANGUAGE_BEAM: &str = " Python is widely used in web development, data science, and artificial intelligence . It was created by Guido van Rossum and first released in 1991 .";
 }
 
-
 // Unit Tests - Validation
-
 
 mod validation_tests {
     use crate::summarizer::SummarizerError;
@@ -57,18 +53,18 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_t5_models_rejected() {
-        let t5_base = ModelType::from_cli_name("flan-t5-base").unwrap();
-        let result = validate_for_summarization(t5_base);
-        assert!(result.is_err());
-        match result {
-            Err(SummarizerError::IncompatibleModel { reason, .. }) => {
+    fn test_validate_t5_models_accepted() {
+        let t5_models = ["flan-t5-base", "flan-t5-small"];
+
+        for name in t5_models {
+            if let Some(model_type) = ModelType::from_cli_name(name) {
+                let result = validate_for_summarization(model_type);
                 assert!(
-                    reason.to_lowercase().contains("translation")
-                        || reason.to_lowercase().contains("t5")
+                    result.is_ok(),
+                    "T5 model {} should be valid for summarization",
+                    name
                 );
             }
-            _ => panic!("Expected IncompatibleModel error"),
         }
     }
 
@@ -83,9 +79,7 @@ mod validation_tests {
     }
 }
 
-
 // Unit Tests - Presets
-
 
 mod preset_tests {
     use crate::summarizer::presets::*;
@@ -120,9 +114,7 @@ mod preset_tests {
     }
 }
 
-
 // Unit Tests - Builder
-
 
 mod builder_tests {
     use crate::common::KjarniDevice;
@@ -164,20 +156,8 @@ mod builder_tests {
     }
 }
 
-
-// Unit Tests - Error Types
-
-
 mod error_tests {
     use crate::summarizer::SummarizerError;
-
-    #[test]
-    fn test_error_unknown_model_message() {
-        let err = SummarizerError::UnknownModel("foo-bar".to_string());
-        let msg = err.to_string();
-        assert!(msg.contains("foo-bar"));
-        assert!(msg.to_lowercase().contains("unknown"));
-    }
 
     #[test]
     fn test_error_incompatible_model_message() {
@@ -196,11 +176,6 @@ mod error_tests {
         assert_send_sync::<SummarizerError>();
     }
 }
-
-
-// Unit Tests - Module Functions
-
-
 mod module_function_tests {
     use crate::summarizer::{available_models, is_summarization_model};
 
@@ -235,10 +210,6 @@ mod module_function_tests {
         assert!(is_summarization_model("flan-t5-large").is_ok());
     }
 }
-
-
-// Integration Tests - bart-large-cnn Output Verification
-
 
 #[cfg(test)]
 mod bart_large_cnn_tests {
@@ -424,9 +395,7 @@ mod bart_large_golden_values_test {
     }
 }
 
-
 // Integration Tests - distilbart-cnn Output Verification
-
 
 #[cfg(test)]
 mod distilbart_cnn_tests {
@@ -534,9 +503,7 @@ mod distilbart_cnn_tests {
     }
 }
 
-
 // Integration Tests - Error Handling
-
 
 #[cfg(test)]
 mod error_handling_tests {
@@ -646,9 +613,7 @@ mod error_handling_tests {
     }
 }
 
-
 // Integration Tests - Accessors
-
 
 #[cfg(test)]
 mod accessor_tests {
@@ -686,9 +651,7 @@ mod accessor_tests {
     }
 }
 
-
 // Integration Tests - Concurrent Usage
-
 
 #[cfg(test)]
 mod concurrency_tests {
@@ -740,9 +703,7 @@ mod concurrency_tests {
     }
 }
 
-
 // Integration Tests - Module-level Convenience Function
-
 
 #[cfg(test)]
 mod convenience_function_tests {

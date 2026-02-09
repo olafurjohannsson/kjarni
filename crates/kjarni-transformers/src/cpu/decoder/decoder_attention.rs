@@ -1,8 +1,8 @@
 use crate::rope::RoPE;
 use crate::utils::MASK_VALUE;
-use crate::{cpu::decoder::GQAProjection, linear_layer::LinearLayer};
+use crate::{linear_layer::LinearLayer};
 use anyhow::Result;
-use ndarray::{Array2, Array3, Array4, ArrayViewMut3, s};
+use ndarray::{Array2, Array3, Array4, s};
 
 /// Self-attention for decoder-only transformer models.
 pub struct DecoderAttention {
@@ -98,14 +98,10 @@ impl DecoderAttention {
                 self.num_kv_heads,
                 position_offset,
             )?;
-
-            // Write rotated results back
             q_3d.assign(&q_rot);
             // Write K back into the cache
             k_cache.slice_mut(s![.., start_write.., ..]).assign(&k_rot);
         }
-
-        // Attention on the FULL Cache
         let q_heads = q_3d
             .into_shape_with_order((batch, seq_len, self.num_heads, self.head_dim))?
             .permuted_axes([0, 2, 1, 3])
@@ -114,8 +110,6 @@ impl DecoderAttention {
         let n_rep = self.num_heads / self.num_kv_heads;
 
         let mut scores = if is_decode {
-            // k_cache includes history AND the token we just wrote.
-            // Permute: [Batch, Total_Len, KV_Heads, Dim] -> [Batch, KV_Heads, Dim, Total_Len]
             let k_view = k_cache
                 .view()
                 .into_shape_with_order((batch, total_len, self.num_kv_heads, self.head_dim))?
@@ -138,8 +132,6 @@ impl DecoderAttention {
         self.apply_causal_mask(&mut scores, start_write);
 
         crate::activations::softmax_4d_inplace(&mut scores);
-
-        // 6. Context (Scores @ V)
         let context = if is_decode {
             let v_view = v_cache
                 .view()
@@ -639,7 +631,6 @@ mod decoder_attention_test {
         let mut k_cache = Array3::zeros((batch, total_len, kv_dim));
         let mut v_cache = Array3::zeros((batch, total_len, kv_dim));
 
-        // Write offset is total_len - seq_len = 4
         let output = attn
             .forward(
                 &hidden,
@@ -655,161 +646,3 @@ mod decoder_attention_test {
     }
 }
 
-
-
-// Test Utilities
-
-
-#[cfg(test)]
-mod test_utils {
-    use super::*;
-
-    /// Model configurations: (hidden_size, num_heads, num_kv_heads, head_dim)
-    pub struct AttentionConfig {
-        pub name: &'static str,
-        pub hidden_size: usize,
-        pub num_heads: usize,
-        pub num_kv_heads: usize,
-        pub head_dim: usize,
-    }
-
-    impl AttentionConfig {
-        pub fn new(name: &'static str, hidden_size: usize, num_heads: usize, num_kv_heads: usize) -> Self {
-            Self {
-                name,
-                hidden_size,
-                num_heads,
-                num_kv_heads,
-                head_dim: hidden_size / num_heads,
-            }
-        }
-
-        pub fn kv_dim(&self) -> usize {
-            self.num_kv_heads * self.head_dim
-        }
-
-        pub fn q_dim(&self) -> usize {
-            self.num_heads * self.head_dim
-        }
-    }
-
-    // Llama 3.2 1B: hidden=2048, heads=32, kv_heads=8
-    pub const LLAMA_1B: AttentionConfig = AttentionConfig {
-        name: "Llama-3.2-1B",
-        hidden_size: 2048,
-        num_heads: 32,
-        num_kv_heads: 8,
-        head_dim: 64, // 2048 / 32
-    };
-
-    // Llama 3.2 3B: hidden=3072, heads=24, kv_heads=8
-    pub const LLAMA_3B: AttentionConfig = AttentionConfig {
-        name: "Llama-3.2-3B",
-        hidden_size: 3072,
-        num_heads: 24,
-        num_kv_heads: 8,
-        head_dim: 128, // 3072 / 24
-    };
-
-    // Llama 3.1 8B: hidden=4096, heads=32, kv_heads=8
-    pub const LLAMA_8B: AttentionConfig = AttentionConfig {
-        name: "Llama-3.1-8B",
-        hidden_size: 4096,
-        num_heads: 32,
-        num_kv_heads: 8,
-        head_dim: 128, // 4096 / 32
-    };
-
-    // Small test config for fast unit tests
-    pub const SMALL_TEST: AttentionConfig = AttentionConfig {
-        name: "SmallTest",
-        hidden_size: 256,
-        num_heads: 8,
-        num_kv_heads: 4,
-        head_dim: 32, // 256 / 8
-    };
-
-    // MHA config (num_heads == num_kv_heads)
-    pub const MHA_TEST: AttentionConfig = AttentionConfig {
-        name: "MHA-Test",
-        hidden_size: 256,
-        num_heads: 8,
-        num_kv_heads: 8,
-        head_dim: 32,
-    };
-
-    /// Creates deterministic test weights for attention projections.
-    pub fn create_attention_weights(
-        config: &AttentionConfig,
-    ) -> (Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>) {
-        let hidden = config.hidden_size;
-        let q_dim = config.q_dim();
-        let kv_dim = config.kv_dim();
-
-        // Q: [q_dim, hidden_size] (transposed for matmul)
-        let q = Array2::from_shape_fn((q_dim, hidden), |(i, j)| {
-            let idx = (i * 17 + j * 13) % 1000;
-            (idx as f32 * 0.001 - 0.5) * 0.02
-        });
-
-        // K: [kv_dim, hidden_size]
-        let k = Array2::from_shape_fn((kv_dim, hidden), |(i, j)| {
-            let idx = (i * 19 + j * 11) % 1000;
-            (idx as f32 * 0.001 - 0.5) * 0.02
-        });
-
-        // V: [kv_dim, hidden_size]
-        let v = Array2::from_shape_fn((kv_dim, hidden), |(i, j)| {
-            let idx = (i * 23 + j * 7) % 1000;
-            (idx as f32 * 0.001 - 0.5) * 0.02
-        });
-
-        // O: [hidden_size, q_dim]
-        let o = Array2::from_shape_fn((hidden, q_dim), |(i, j)| {
-            let idx = (i * 29 + j * 3) % 1000;
-            (idx as f32 * 0.001 - 0.5) * 0.02
-        });
-
-        (q, k, v, o)
-    }
-
-    
-
-    /// Creates deterministic test input.
-    pub fn create_test_input(batch: usize, seq: usize, hidden: usize) -> Array3<f32> {
-        Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
-            let idx = (b * 1000 + s * 100 + h) % 1000;
-            (idx as f32 * 0.001 - 0.5) * 0.1
-        })
-    }
-
-    /// Creates zeroed KV cache.
-    pub fn create_kv_cache(
-        batch: usize,
-        total_len: usize,
-        kv_dim: usize,
-    ) -> (Array3<f32>, Array3<f32>) {
-        let k_cache = Array3::zeros((batch, total_len, kv_dim));
-        let v_cache = Array3::zeros((batch, total_len, kv_dim));
-        (k_cache, v_cache)
-    }
-
-    /// Creates attention mask (all ones = no masking).
-    pub fn create_attention_mask(batch: usize, total_len: usize) -> Array2<f32> {
-        Array2::ones((batch, total_len))
-    }
-
-    /// Computes max absolute difference between two arrays.
-    pub fn max_abs_diff(a: &Array3<f32>, b: &Array3<f32>) -> f32 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).abs())
-            .fold(0.0f32, |acc, x| acc.max(x))
-    }
-
-    /// Computes mean absolute difference.
-    pub fn mean_abs_diff(a: &Array3<f32>, b: &Array3<f32>) -> f32 {
-        let sum: f32 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum();
-        sum / a.len() as f32
-    }
-}

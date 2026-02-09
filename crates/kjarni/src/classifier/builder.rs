@@ -100,11 +100,7 @@ impl ClassifierBuilder {
         builder
     }
 
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
-
-    /// Run on CPU (default).
+    /// Run on CPU
     pub fn cpu(mut self) -> Self {
         self.device = KjarniDevice::Cpu;
         self
@@ -128,10 +124,6 @@ impl ClassifierBuilder {
         self.device = KjarniDevice::Gpu;
         self
     }
-
-    // =========================================================================
-    // Paths
-    // =========================================================================
 
     /// Set custom cache directory for registry models.
     pub fn cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
@@ -159,10 +151,6 @@ impl ClassifierBuilder {
         self.model_path = Some(path.into());
         self
     }
-
-    // =========================================================================
-    // Loading Configuration
-    // =========================================================================
 
     /// Set model loading configuration.
     pub fn load_config(mut self, config: LoadConfig) -> Self {
@@ -199,10 +187,6 @@ impl ClassifierBuilder {
         self
     }
 
-    // =========================================================================
-    // Download Policy
-    // =========================================================================
-
     /// Set download policy.
     pub fn download_policy(mut self, policy: DownloadPolicy) -> Self {
         self.download_policy = policy;
@@ -214,10 +198,6 @@ impl ClassifierBuilder {
         self.download_policy = DownloadPolicy::Never;
         self
     }
-
-    // =========================================================================
-    // Label Configuration
-    // =========================================================================
 
     /// Set custom labels for the model.
     ///
@@ -253,10 +233,6 @@ impl ClassifierBuilder {
         self
     }
 
-    // =========================================================================
-    // Classification Mode
-    // =========================================================================
-
     /// Set classification mode.
     pub fn mode(mut self, mode: ClassificationMode) -> Self {
         self.mode = mode;
@@ -276,10 +252,6 @@ impl ClassifierBuilder {
         self.mode = ClassificationMode::MultiLabel;
         self
     }
-
-    // =========================================================================
-    // Classification Defaults
-    // =========================================================================
 
     /// Set default top_k for results.
     pub fn top_k(mut self, k: usize) -> Self {
@@ -317,19 +289,11 @@ impl ClassifierBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
     /// Suppress non-error output.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Classifier.
     pub async fn build(self) -> ClassifierResult<Classifier> {

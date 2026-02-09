@@ -304,8 +304,6 @@ def test_search_with_source_filter(index_path: str):
     for src in list(sources)[:3]:
         print(f"    - {src}")
     
-    # Filter for specific pattern (files containing "python" or "rust")
-    # Note: This depends on your filter implementation
     filtered_results = searcher.search(
         index_path, 
         query, 

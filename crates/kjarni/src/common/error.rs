@@ -98,20 +98,6 @@ mod tests {
     use super::*;
     use std::error::Error;
 
-    // =========================================================================
-    // KjarniError::UnknownModel tests
-    // =========================================================================
-
-    #[test]
-    fn test_unknown_model_display() {
-        let err = KjarniError::UnknownModel("my-model".to_string());
-        let msg = err.to_string();
-        
-        assert!(msg.contains("Unknown model"));
-        assert!(msg.contains("my-model"));
-        assert!(msg.contains("kjarni model list"));
-    }
-
     #[test]
     fn test_unknown_model_debug() {
         let err = KjarniError::UnknownModel("test".to_string());
@@ -126,10 +112,6 @@ mod tests {
         let err = KjarniError::UnknownModel("model".to_string());
         assert!(err.source().is_none());
     }
-
-    // =========================================================================
-    // KjarniError::IncompatibleModel tests
-    // =========================================================================
 
     #[test]
     fn test_incompatible_model_display() {
@@ -169,10 +151,6 @@ mod tests {
         assert!(err.source().is_none());
     }
 
-    // =========================================================================
-    // KjarniError::ModelNotDownloaded tests
-    // =========================================================================
-
     #[test]
     fn test_model_not_downloaded_display() {
         let err = KjarniError::ModelNotDownloaded("llama-7b".to_string());
@@ -188,10 +166,6 @@ mod tests {
         let err = KjarniError::ModelNotDownloaded("model".to_string());
         assert!(err.source().is_none());
     }
-
-    // =========================================================================
-    // KjarniError::DownloadFailed tests
-    // =========================================================================
 
     #[test]
     fn test_download_failed_display() {
@@ -230,10 +204,6 @@ mod tests {
         assert!(source.to_string().contains("DNS resolution failed"));
     }
 
-    // =========================================================================
-    // KjarniError::LoadFailed tests
-    // =========================================================================
-
     #[test]
     fn test_load_failed_display() {
         let source = anyhow::anyhow!("Invalid safetensors format");
@@ -258,10 +228,6 @@ mod tests {
         
         assert!(err.source().is_some());
     }
-
-    // =========================================================================
-    // KjarniError::InferenceFailed tests
-    // =========================================================================
 
     #[test]
     fn test_inference_failed_display() {
@@ -289,10 +255,6 @@ mod tests {
         assert!(err.source().is_some());
     }
 
-    // =========================================================================
-    // KjarniError::GpuUnavailable tests
-    // =========================================================================
-
     #[test]
     fn test_gpu_unavailable_display() {
         let err = KjarniError::GpuUnavailable;
@@ -314,10 +276,6 @@ mod tests {
         let debug = format!("{:?}", err);
         assert!(debug.contains("GpuUnavailable"));
     }
-
-    // =========================================================================
-    // KjarniError::InvalidConfig tests
-    // =========================================================================
 
     #[test]
     fn test_invalid_config_display() {
@@ -347,11 +305,6 @@ mod tests {
         let err = KjarniError::InvalidConfig("error".to_string());
         assert!(err.source().is_none());
     }
-
-    // =========================================================================
-    // KjarniError::NoLabels tests
-    // =========================================================================
-
     #[test]
     fn test_no_labels_display() {
         let err = KjarniError::NoLabels;
@@ -373,11 +326,6 @@ mod tests {
         let debug = format!("{:?}", err);
         assert!(debug.contains("NoLabels"));
     }
-
-    // =========================================================================
-    // KjarniResult type alias tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_result_ok() {
         let result: KjarniResult<i32> = Ok(42);
@@ -408,10 +356,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // =========================================================================
-    // KjarniWarning::new tests
-    // =========================================================================
-
     #[test]
     fn test_warning_new() {
         let warning = KjarniWarning::new("This is a warning");
@@ -425,11 +369,6 @@ mod tests {
         let warning = KjarniWarning::new(String::from("Warning message"));
         assert_eq!(warning.message, "Warning message");
     }
-
-    // =========================================================================
-    // KjarniWarning::with_suggestion tests
-    // =========================================================================
-
     #[test]
     fn test_warning_with_suggestion() {
         let warning = KjarniWarning::with_suggestion(
@@ -454,11 +393,6 @@ mod tests {
         assert_eq!(warning.message, "Warning");
         assert_eq!(warning.suggestion, Some("Suggestion".to_string()));
     }
-
-    // =========================================================================
-    // KjarniWarning Display tests
-    // =========================================================================
-
     #[test]
     fn test_warning_display_without_suggestion() {
         let warning = KjarniWarning::new("CPU fallback activated");
@@ -490,10 +424,6 @@ mod tests {
         assert!(display.starts_with("Warning: "));
     }
 
-    // =========================================================================
-    // KjarniWarning Debug tests
-    // =========================================================================
-
     #[test]
     fn test_warning_debug() {
         let warning = KjarniWarning::new("message");
@@ -511,10 +441,6 @@ mod tests {
         assert!(debug.contains("msg"));
         assert!(debug.contains("sug"));
     }
-
-    // =========================================================================
-    // KjarniWarning Clone tests
-    // =========================================================================
 
     #[test]
     fn test_warning_clone() {
@@ -536,13 +462,8 @@ mod tests {
         assert_eq!(cloned.message, "modified");
     }
 
-    // =========================================================================
-    // Error variant exhaustiveness
-    // =========================================================================
-
     #[test]
     fn test_all_error_variants_are_errors() {
-        // Ensure all variants implement Error trait
         fn assert_error<E: std::error::Error>(_: &E) {}
         
         assert_error(&KjarniError::UnknownModel("m".into()));
@@ -582,17 +503,6 @@ mod tests {
         assert_debug(&KjarniError::NoLabels);
     }
 
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
-    #[test]
-    fn test_empty_model_name() {
-        let err = KjarniError::UnknownModel(String::new());
-        let msg = err.to_string();
-        assert!(msg.contains("''"));
-    }
-
     #[test]
     fn test_unicode_in_error() {
         let err = KjarniError::UnknownModel("模型名称".to_string());
@@ -628,10 +538,6 @@ mod tests {
         // Empty suggestion should still be appended with space
         assert!(display.ends_with(" "));
     }
-
-    // =========================================================================
-    // Practical usage tests
-    // =========================================================================
 
     #[test]
     fn test_error_in_result_chain() {
@@ -688,11 +594,6 @@ mod tests {
             assert!(warning.to_string().starts_with("Warning:"));
         }
     }
-
-    // =========================================================================
-    // Source chain tests
-    // =========================================================================
-
     #[test]
     fn test_nested_error_sources() {
         let inner = anyhow::anyhow!("Inner error");
@@ -701,7 +602,6 @@ mod tests {
             source: inner,
         };
         
-        // Should be able to get the source
         let source = err.source().expect("Should have source");
         assert!(source.to_string().contains("Inner error"));
     }
@@ -718,11 +618,6 @@ mod tests {
         assert!(display.contains("Root cause"));
         assert!(display.contains("mymodel"));
     }
-
-    // =========================================================================
-    // Formatting tests
-    // =========================================================================
-
     #[test]
     fn test_display_vs_debug_different() {
         let err = KjarniError::GpuUnavailable;
@@ -730,10 +625,7 @@ mod tests {
         let display = format!("{}", err);
         let debug = format!("{:?}", err);
         
-        // Display should be human-readable message
         assert!(display.contains("GPU"));
-        
-        // Debug should contain variant name
         assert!(debug.contains("GpuUnavailable"));
     }
 

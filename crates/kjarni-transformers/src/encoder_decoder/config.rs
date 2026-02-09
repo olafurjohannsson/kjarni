@@ -53,31 +53,19 @@ fn default_num_beams() -> usize { 4 }
 /// Position encoding strategy for seq2seq models.
 #[derive(Debug, Clone)]
 pub enum PositionEncodingType {
-    /// Learned absolute positions (BART, GPT)
     Learned { offset: usize },
-    /// Relative position bias in attention (T5)
     RelativeBias { num_buckets: usize, max_distance: usize },
-    /// Sinusoidal positions (Whisper, original Transformer)
     Sinusoidal,
-    /// No position encoding (handled elsewhere, e.g., RoPE)
     None,
 }
-
-/// Extended configuration for Seq2Seq encoder.
-///
-/// Supplements `ModelConfig` with seq2seq-specific settings.
 #[derive(Debug, Clone)]
 pub struct Seq2SeqEncoderConfig {
-    /// How positions are encoded
     pub position_encoding: PositionEncodingType,
-    /// Apply layer norm after embedding lookup (BART, Whisper)
-    pub normalize_embeddings: bool, // TODO this possibly comes from config.json, look at T5, WHisper, BART
-    /// Apply final layer norm after all layers (T5, Whisper)
+    pub normalize_embeddings: bool,
     pub final_layer_norm: bool,
 }
 
 impl Seq2SeqEncoderConfig {
-    /// BART-style configuration
     pub fn bart() -> Self {
         Self {
             position_encoding: PositionEncodingType::Learned { offset: 2 },
@@ -85,8 +73,6 @@ impl Seq2SeqEncoderConfig {
             final_layer_norm: false,
         }
     }
-
-    /// T5-style configuration
     pub fn t5() -> Self {
         Self {
             position_encoding: PositionEncodingType::RelativeBias {
@@ -97,8 +83,6 @@ impl Seq2SeqEncoderConfig {
             final_layer_norm: true,
         }
     }
-
-    /// Whisper-style configuration
     pub fn whisper() -> Self {
         Self {
             position_encoding: PositionEncodingType::None,
@@ -109,23 +93,15 @@ impl Seq2SeqEncoderConfig {
 }
 
 
-/// Extended configuration for Seq2Seq decoder.
-///
-/// Supplements `ModelConfig` with seq2seq decoder-specific settings.
 #[derive(Debug, Clone)]
 pub struct Seq2SeqDecoderConfig {
-    /// How positions are encoded
     pub position_encoding: PositionEncodingType,
-    /// Apply layer norm after embedding lookup
     pub normalize_embeddings: bool,
-    /// Apply final layer norm after all layers
     pub final_layer_norm: bool,
-    /// Use pre-norm (T5, Whisper) vs post-norm (BART)
     pub pre_norm: bool,
 }
 
 impl Seq2SeqDecoderConfig {
-    /// BART-style configuration
     pub fn bart() -> Self {
         Self {
             position_encoding: PositionEncodingType::Learned { offset: 2 },
@@ -134,8 +110,6 @@ impl Seq2SeqDecoderConfig {
             pre_norm: false,
         }
     }
-
-    /// T5-style configuration
     pub fn t5() -> Self {
         Self {
             position_encoding: PositionEncodingType::RelativeBias {
@@ -147,8 +121,6 @@ impl Seq2SeqDecoderConfig {
             pre_norm: true,
         }
     }
-
-    /// Whisper-style configuration
     pub fn whisper() -> Self {
         Self {
             position_encoding: PositionEncodingType::Learned { offset: 0 },
@@ -164,10 +136,6 @@ impl Seq2SeqDecoderConfig {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    // ========================================================================
-    //  TaskParams Parsing Tests
-    // ========================================================================
 
     #[test]
     fn test_parse_task_specific_params() {
@@ -185,8 +153,6 @@ mod tests {
         });
 
         let params: TaskSpecificParams = serde_json::from_value(json).unwrap();
-
-        // 1. Check Summarization
         let sum = params.summarization().unwrap();
         assert!(sum.early_stopping);
         assert_eq!(sum.max_length, 128);
@@ -194,8 +160,6 @@ mod tests {
         // Defaults
         assert_eq!(sum.length_penalty, 2.0); // default_length_penalty
         assert_eq!(sum.num_beams, 4);        // default_num_beams
-
-        // 2. Check Translation
         let trans = params.translation_en_to_de.as_ref().unwrap();
         assert!(!trans.early_stopping);
         assert_eq!(trans.prefix, "translate English to German: ");
@@ -216,11 +180,6 @@ mod tests {
         assert_eq!(sum.no_repeat_ngram_size, 3); // default fn
         assert!(sum.prefix.is_none()); // Option default
     }
-
-    // ========================================================================
-    //  Architecture Config Tests
-    // ========================================================================
-
     #[test]
     fn test_encoder_configs() {
         // BART

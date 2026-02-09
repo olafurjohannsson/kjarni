@@ -33,10 +33,6 @@ pub use model::Embedder;
 pub use presets::{EmbedderPreset, EmbedderTier};
 pub use types::{EmbeddingOverrides, EmbedderError, EmbedderResult};
 
-// ============================================================================
-// Convenience Functions
-// ============================================================================
-
 /// Embed a single text using the specified model.
 ///
 /// # Example

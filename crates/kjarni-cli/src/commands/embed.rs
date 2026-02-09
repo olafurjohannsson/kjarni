@@ -122,10 +122,6 @@ fn format_batch(texts: &[&str], embeddings: &[Vec<f32>], format: &str) -> Result
 mod tests {
     use super::*;
 
-    // =========================================================================
-    // format_single tests
-    // =========================================================================
-
     #[test]
     fn test_format_single_json() {
         let text = "hello world";
@@ -178,11 +174,6 @@ mod tests {
         assert_eq!(parsed["dim"], 0);
         assert!(parsed["embedding"].as_array().unwrap().is_empty());
     }
-
-    // =========================================================================
-    // format_batch tests
-    // =========================================================================
-
     #[test]
     fn test_format_batch_json() {
         let texts = vec!["hello", "world"];

@@ -36,7 +36,6 @@ fn calculate_index_size(path: &str) -> Result<u64> {
 }
 
 impl Indexer {
-    /// Create with builder pattern
     pub fn builder(model: &str) -> IndexerBuilder {
         IndexerBuilder::new(model)
     }
@@ -59,7 +58,6 @@ impl Indexer {
             .await
             .map_err(IndexerError::EmbedderError)?;
 
-        // Build loader config
         let splitter_config = SplitterConfig {
             chunk_size: builder.chunk_size,
             chunk_overlap: builder.chunk_overlap,
@@ -133,11 +131,7 @@ impl Indexer {
         std::fs::remove_dir_all(index_path).map_err(|e| IndexerError::IndexingFailed(e.into()))
     }
 
-    // =========================================================================
-    // PROGRESS HELPER
-    // =========================================================================
-
-    /// Report progress using the stored callback (if any)
+    /// Report progress 
     fn report_stored_progress(
         &self,
         stage: ProgressStage,
@@ -155,10 +149,6 @@ impl Indexer {
             callback(&progress, msg); // Just call it - Fn doesn't need &mut
         }
     }
-
-    // =========================================================================
-    // CREATE METHODS
-    // =========================================================================
 
     /// Create a new index from files/directories
     pub async fn create(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<IndexStats> {
@@ -470,10 +460,6 @@ impl Indexer {
         })
     }
 
-    // =========================================================================
-    // ADD METHODS
-    // =========================================================================
-
     /// Add documents to existing index
     pub async fn add(&self, index_path: &str, inputs: &[&str]) -> IndexerResult<usize> {
         self.add_internal(index_path, inputs).await
@@ -489,11 +475,11 @@ impl Indexer {
             return Err(IndexerError::IndexNotFound(index_path.to_string()));
         }
 
-        // Open existing index for appending
+        // Open existing inde
         let mut writer =
             IndexWriter::open_existing(index_path).map_err(IndexerError::IndexingFailed)?;
 
-        // Validate dimension matches
+        // Validate dimension
         if writer.dimension() != self.embedder.dimension() {
             return Err(IndexerError::DimensionMismatch {
                 index_dim: writer.dimension(),
@@ -501,7 +487,7 @@ impl Indexer {
             });
         }
 
-        // Collect files
+        // Collect
         self.report_stored_progress(ProgressStage::Scanning, 0, 0, Some("Discovering files..."));
         let files = self.collect_files(inputs)?;
         let total_files = files.len();
@@ -582,7 +568,7 @@ impl Indexer {
         Ok(total_docs)
     }
 
-    /// Add with callback support (for FFI)
+    /// callback support (for FFI)
     pub async fn add_with_callback<F, C>(
         &self,
         index_path: &str,
@@ -617,14 +603,14 @@ impl Indexer {
             return Err(IndexerError::IndexNotFound(index_path.to_string()));
         }
 
-        // Helper to report progress
+        // report progress
         let report = |stage, current, total, msg: Option<&str>| {
             if let Some(ref cb) = on_progress {
                 cb(stage, current, total, msg);
             }
         };
 
-        // Helper to check cancellation
+        // check cancellation
         let check_cancelled = || is_cancelled.as_ref().map(|f| f()).unwrap_or(false);
 
         // Open existing index for appending
@@ -694,7 +680,6 @@ impl Indexer {
             }
         }
 
-        // Flush remaining
         if !batch_texts.is_empty() {
             report(ProgressStage::Embedding, total_docs, 0, None);
             let added = self
@@ -714,10 +699,6 @@ impl Indexer {
 
         Ok(total_docs)
     }
-
-    // =========================================================================
-    // INTERNAL HELPERS
-    // =========================================================================
 
     async fn flush_batch(
         &self,
@@ -773,7 +754,6 @@ impl Indexer {
                         continue;
                     }
 
-                    // Skip hidden files
                     if !self.loader_config.include_hidden {
                         if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                             if name.starts_with('.') {
@@ -782,7 +762,6 @@ impl Indexer {
                         }
                     }
 
-                    // Check exclude patterns
                     let path_str = entry_path.to_string_lossy();
                     let excluded = self
                         .loader_config
@@ -793,7 +772,6 @@ impl Indexer {
                         continue;
                     }
 
-                    // Check file size
                     if let Some(max_size) = self.loader_config.max_file_size {
                         if let Ok(metadata) = entry_path.metadata() {
                             if metadata.len() as usize > max_size {
@@ -829,17 +807,12 @@ impl Indexer {
             None => false,
         }
     }
-
     fn is_cancelled(&self) -> bool {
         self.cancel_token
             .as_ref()
             .map(|t| *t.borrow())
             .unwrap_or(false)
     }
-
-    // =========================================================================
-    // ACCESSORS
-    // =========================================================================
 
     pub fn model_name(&self) -> &str {
         self.embedder.model_name()
@@ -861,7 +834,6 @@ impl Indexer {
         self.quiet
     }
 
-    /// Check if a progress callback is configured
     pub fn has_progress_callback(&self) -> bool {
         self.progress_callback.is_some()
     }
@@ -876,10 +848,6 @@ mod indexer_tests {
     use tempfile::TempDir;
 
     use crate::indexer::{IndexInfo, IndexStats, IndexerBuilder, IndexerError};
-
-    // ============================================================================
-    // INDEX STATS TESTS
-    // ============================================================================
 
     #[test]
     fn test_index_stats_construction() {
@@ -955,10 +923,6 @@ mod indexer_tests {
         assert_eq!(stats.elapsed_ms, 0);
     }
 
-    // ============================================================================
-    // INDEX INFO TESTS
-    // ============================================================================
-
     #[test]
     fn test_index_info_construction() {
         let info = IndexInfo {
@@ -1032,10 +996,6 @@ mod indexer_tests {
         assert!(debug.contains("42"));
     }
 
-    // ============================================================================
-    // INDEXER ERROR TESTS
-    // ============================================================================
-
     #[test]
     fn test_error_no_inputs() {
         let err = IndexerError::NoInputs;
@@ -1057,7 +1017,6 @@ mod indexer_tests {
     fn test_error_index_exists() {
         let err = IndexerError::IndexExists("/existing/index".to_string());
         let msg = format!("{}", err);
-
         assert!(msg.contains("already exists"));
         assert!(msg.contains("/existing/index"));
         assert!(msg.contains("force=true"));
@@ -1067,7 +1026,6 @@ mod indexer_tests {
     fn test_error_index_not_found() {
         let err = IndexerError::IndexNotFound("/missing/index".to_string());
         let msg = format!("{}", err);
-
         assert!(msg.contains("not found"));
         assert!(msg.contains("/missing/index"));
     }
@@ -1079,7 +1037,6 @@ mod indexer_tests {
             model_dim: 768,
         };
         let msg = format!("{}", err);
-
         assert!(msg.contains("Dimension mismatch"));
         assert!(msg.contains("384"));
         assert!(msg.contains("768"));
@@ -1089,7 +1046,6 @@ mod indexer_tests {
     fn test_error_cancelled() {
         let err = IndexerError::Cancelled;
         let msg = format!("{}", err);
-
         assert!(msg.contains("cancelled"));
     }
 
@@ -1097,14 +1053,8 @@ mod indexer_tests {
     fn test_error_debug() {
         let err = IndexerError::NoInputs;
         let debug = format!("{:?}", err);
-
         assert!(debug.contains("NoInputs"));
     }
-
-    // ============================================================================
-    // INDEXER BUILDER TESTS
-    // ============================================================================
-
     #[test]
     fn test_builder_new() {
         let builder = IndexerBuilder::new("minilm-l6-v2");
@@ -1127,14 +1077,12 @@ mod indexer_tests {
     #[test]
     fn test_builder_cpu() {
         let builder = IndexerBuilder::new("model").cpu();
-
         assert!(matches!(builder.device, kjarni_transformers::Device::Cpu));
     }
 
     #[test]
     fn test_builder_gpu() {
         let builder = IndexerBuilder::new("model").gpu();
-
         assert!(matches!(builder.device, kjarni_transformers::Device::Wgpu));
     }
 
@@ -1152,7 +1100,6 @@ mod indexer_tests {
             kjarni_transformers::Device::Cpu
         ));
 
-        // Unknown defaults to CPU
         let builder_unknown = IndexerBuilder::new("model").device("unknown");
         assert!(matches!(
             builder_unknown.device,
@@ -1171,51 +1118,42 @@ mod indexer_tests {
     fn test_builder_cache_dir_pathbuf() {
         let path = PathBuf::from("/another/cache");
         let builder = IndexerBuilder::new("model").cache_dir(path.clone());
-
         assert_eq!(builder.cache_dir, Some(path));
     }
 
     #[test]
     fn test_builder_chunk_size() {
         let builder = IndexerBuilder::new("model").chunk_size(1000);
-
         assert_eq!(builder.chunk_size, 1000);
     }
 
     #[test]
     fn test_builder_chunk_overlap() {
         let builder = IndexerBuilder::new("model").chunk_overlap(100);
-
         assert_eq!(builder.chunk_overlap, 100);
     }
 
     #[test]
     fn test_builder_extension_single() {
         let builder = IndexerBuilder::new("model").extension("txt");
-
         assert_eq!(builder.extensions, vec!["txt"]);
     }
 
     #[test]
     fn test_builder_extension_with_dot() {
         let builder = IndexerBuilder::new("model").extension(".txt");
-
-        // Should strip leading dot
         assert_eq!(builder.extensions, vec!["txt"]);
     }
 
     #[test]
     fn test_builder_extension_uppercase() {
         let builder = IndexerBuilder::new("model").extension("TXT");
-
-        // Should lowercase
         assert_eq!(builder.extensions, vec!["txt"]);
     }
 
     #[test]
     fn test_builder_extensions_multiple() {
         let builder = IndexerBuilder::new("model").extensions(&["txt", "md", "rs"]);
-
         assert_eq!(builder.extensions, vec!["txt", "md", "rs"]);
     }
 
@@ -1225,7 +1163,6 @@ mod indexer_tests {
             .extension("txt")
             .extension("md")
             .extension("rs");
-
         assert_eq!(builder.extensions, vec!["txt", "md", "rs"]);
     }
 
@@ -1234,7 +1171,6 @@ mod indexer_tests {
         let builder = IndexerBuilder::new("model")
             .exclude("*.log")
             .exclude("temp/*");
-
         assert_eq!(builder.exclude_patterns.len(), 2);
         assert!(builder.exclude_patterns.contains(&"*.log".to_string()));
         assert!(builder.exclude_patterns.contains(&"temp/*".to_string()));
@@ -1244,7 +1180,6 @@ mod indexer_tests {
     fn test_builder_recursive() {
         let builder_true = IndexerBuilder::new("model").recursive(true);
         assert!(builder_true.recursive);
-
         let builder_false = IndexerBuilder::new("model").recursive(false);
         assert!(!builder_false.recursive);
     }
@@ -1253,7 +1188,6 @@ mod indexer_tests {
     fn test_builder_include_hidden() {
         let builder_true = IndexerBuilder::new("model").include_hidden(true);
         assert!(builder_true.include_hidden);
-
         let builder_false = IndexerBuilder::new("model").include_hidden(false);
         assert!(!builder_false.include_hidden);
     }
@@ -1261,21 +1195,18 @@ mod indexer_tests {
     #[test]
     fn test_builder_max_file_size() {
         let builder = IndexerBuilder::new("model").max_file_size(5 * 1024 * 1024);
-
         assert_eq!(builder.max_file_size, Some(5 * 1024 * 1024));
     }
 
     #[test]
     fn test_builder_max_docs_per_segment() {
         let builder = IndexerBuilder::new("model").max_docs_per_segment(5000);
-
         assert_eq!(builder.max_docs_per_segment, 5000);
     }
 
     #[test]
     fn test_builder_batch_size() {
         let builder = IndexerBuilder::new("model").batch_size(64);
-
         assert_eq!(builder.batch_size, 64);
     }
 
@@ -1334,11 +1265,6 @@ mod indexer_tests {
         assert!(builder.quiet);
     }
 
-    // ============================================================================
-    // FILE COLLECTION HELPER TESTS
-    // ============================================================================
-
-    /// Helper to create test files in a temp directory
     fn create_test_files(dir: &TempDir) -> Vec<PathBuf> {
         let x = "x".repeat(1000);
         let files = vec![
@@ -1376,7 +1302,6 @@ mod indexer_tests {
         let dir = TempDir::new().unwrap();
         create_test_files(&dir);
 
-        // Test extension matching logic (simulating is_supported_file)
         let extensions = vec!["txt".to_string()];
 
         let is_supported = |path: &std::path::Path| -> bool {
@@ -1427,7 +1352,6 @@ mod indexer_tests {
     fn test_file_size_filtering() {
         let dir = TempDir::new().unwrap();
 
-        // Create a file with known size
         let file_path = dir.path().join("test.txt");
         let content = "x".repeat(500);
         File::create(&file_path)
@@ -1440,19 +1364,17 @@ mod indexer_tests {
 
         assert_eq!(file_size, 500);
 
-        // Test size limit logic
         let max_size_small = 100;
         let max_size_large = 1000;
 
-        assert!(file_size > max_size_small); // Would be excluded
-        assert!(file_size <= max_size_large); // Would be included
+        assert!(file_size > max_size_small); 
+        assert!(file_size <= max_size_large); 
     }
 
     #[test]
     fn test_recursive_directory_walk() {
         let dir = TempDir::new().unwrap();
 
-        // Create nested structure
         let level1 = dir.path().join("level1");
         let level2 = level1.join("level2");
         let level3 = level2.join("level3");
@@ -1476,7 +1398,6 @@ mod indexer_tests {
             .write_all(b"l3")
             .unwrap();
 
-        // Count files with recursive walk
         let mut count_recursive = 0;
         for entry in walkdir::WalkDir::new(dir.path())
             .into_iter()
@@ -1487,7 +1408,6 @@ mod indexer_tests {
             }
         }
 
-        // Count files with max_depth=1
         let mut count_shallow = 0;
         for entry in walkdir::WalkDir::new(dir.path())
             .max_depth(1)
@@ -1499,13 +1419,9 @@ mod indexer_tests {
             }
         }
 
-        assert_eq!(count_recursive, 4); // All 4 files
-        assert_eq!(count_shallow, 1); // Only root.txt
+        assert_eq!(count_recursive, 4); 
+        assert_eq!(count_shallow, 1); 
     }
-
-    // ============================================================================
-    // EDGE CASES
-    // ============================================================================
 
     #[test]
     fn test_builder_empty_model_name() {
@@ -1552,10 +1468,6 @@ mod indexer_tests {
         assert!(builder.exclude_patterns.is_empty());
     }
 
-    // ============================================================================
-    // ERROR CONVERSION TESTS
-    // ============================================================================
-
     #[test]
     fn test_error_from_anyhow() {
         let anyhow_err = anyhow::anyhow!("Something went wrong");
@@ -1565,15 +1477,7 @@ mod indexer_tests {
         assert!(msg.contains("Something went wrong"));
     }
 
-    // ============================================================================
-    // INTEGRATION TEST STUBS
-    // ============================================================================
-
-    // These tests require actual model loading and would be run separately
-    // with appropriate setup (model files, etc.)
-
     #[tokio::test]
-    
     async fn test_indexer_create_basic() {
         use crate::Indexer;
 
@@ -1620,7 +1524,6 @@ mod indexer_tests {
         let dir = TempDir::new().unwrap();
         let index_path = dir.path().join("test_index");
 
-        // Create a simple index first
         let docs_dir = dir.path().join("docs");
         fs::create_dir(&docs_dir).unwrap();
         File::create(docs_dir.join("doc.txt"))
@@ -1640,37 +1543,26 @@ mod indexer_tests {
             .await
             .unwrap();
 
-        // Test info
         let info = Indexer::info(index_path.to_str().unwrap()).expect("Failed to get info");
-
         assert!(info.document_count > 0);
         assert_eq!(info.dimension, 384); // MiniLM dimension
     }
 
     #[tokio::test]
-    
     async fn test_indexer_delete() {
         use crate::Indexer;
-
         let dir = TempDir::new().unwrap();
         let index_path = dir.path().join("test_index");
-
-        // Create index directory manually
         fs::create_dir(&index_path).unwrap();
         assert!(index_path.exists());
-
-        // Delete it
         Indexer::delete(index_path.to_str().unwrap()).expect("Failed to delete");
-
         assert!(!index_path.exists());
     }
 
     #[test]
     fn test_indexer_delete_not_found() {
         use crate::Indexer;
-
         let result = Indexer::delete("/nonexistent/index/path");
-
         assert!(result.is_err());
         match result.unwrap_err() {
             IndexerError::IndexNotFound(path) => {
@@ -1683,9 +1575,7 @@ mod indexer_tests {
     #[test]
     fn test_indexer_info_not_found() {
         use crate::Indexer;
-
         let result = Indexer::info("/nonexistent/index/path");
-
         assert!(result.is_err());
         match result.unwrap_err() {
             IndexerError::IndexNotFound(path) => {
@@ -1696,14 +1586,12 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    
     async fn test_indexer_add_to_existing() {
         use crate::Indexer;
 
         let dir = TempDir::new().unwrap();
         let index_path = dir.path().join("test_index");
 
-        // Create initial index
         let docs_dir = dir.path().join("docs");
         fs::create_dir(&docs_dir).unwrap();
         File::create(docs_dir.join("doc1.txt"))
@@ -1723,7 +1611,6 @@ mod indexer_tests {
             .await
             .unwrap();
 
-        // Add more documents
         let more_docs = dir.path().join("more_docs");
         fs::create_dir(&more_docs).unwrap();
         File::create(more_docs.join("doc2.txt"))
@@ -1740,7 +1627,6 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    
     async fn test_indexer_force_overwrite() {
         use crate::Indexer;
 
@@ -1761,25 +1647,22 @@ mod indexer_tests {
             .await
             .unwrap();
 
-        // Create initial index
         indexer
             .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
 
-        // Try to create again without force - should fail
         let result = indexer
             .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await;
 
         assert!(matches!(result, Err(IndexerError::IndexExists(_))));
 
-        // Create with force - should succeed
         let result = indexer
             .create_with_options(
                 index_path.to_str().unwrap(),
                 &[docs_dir.to_str().unwrap()],
-                true, // force
+                true, 
             )
             .await;
 
@@ -1787,7 +1670,6 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    
     async fn test_indexer_dimension_mismatch() {
         use crate::Indexer;
 
@@ -1801,7 +1683,6 @@ mod indexer_tests {
             .write_all(b"Content")
             .unwrap();
 
-        // Create index with one model (384 dim)
         let indexer1 = Indexer::builder("minilm-l6-v2")
             .cpu()
             .quiet(true)
@@ -1813,29 +1694,9 @@ mod indexer_tests {
             .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await
             .unwrap();
-
-        // Try to add with different model (768 dim) - should fail
-        // Note: This requires having a 768-dim model available
-        // let indexer2 = Indexer::builder("bert-base")
-        //     .cpu()
-        //     .quiet(true)
-        //     .build()
-        //     .await
-        //     .unwrap();
-        //
-        // let result = indexer2
-        //     .add(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
-        //     .await;
-        //
-        // assert!(matches!(result, Err(IndexerError::DimensionMismatch { .. })));
     }
 
-    // ============================================================================
-    // PROGRESS CALLBACK TESTS
-    // ============================================================================
-
     #[tokio::test]
-    
     async fn test_indexer_with_progress_callback() {
         use crate::Indexer;
         use std::sync::Arc;
@@ -1866,7 +1727,6 @@ mod indexer_tests {
             .await
             .unwrap();
 
-        // Verify the callback was configured
         assert!(indexer.has_progress_callback());
 
         indexer
@@ -1874,7 +1734,6 @@ mod indexer_tests {
             .await
             .unwrap();
 
-        // Should have received multiple progress callbacks
         let count = progress_count.load(Ordering::SeqCst);
         println!("Progress callback invoked {} times", count);
         assert!(
@@ -1884,7 +1743,6 @@ mod indexer_tests {
     }
 
     #[tokio::test]
-    
     async fn test_indexer_without_progress_callback() {
         use crate::Indexer;
 
@@ -1904,11 +1762,8 @@ mod indexer_tests {
             .build()
             .await
             .unwrap();
-
-        // Verify no callback configured
         assert!(!indexer.has_progress_callback());
 
-        // Should still work without callback
         let result = indexer
             .create(index_path.to_str().unwrap(), &[docs_dir.to_str().unwrap()])
             .await;

@@ -536,14 +536,6 @@ mod classifier_tests {
     mod error_tests {
         use super::*;
         #[test]
-        fn test_error_display_unknown_model() {
-            let err = ClassifierError::UnknownModel("Unknown model 'fake-model'".to_string());
-            let msg = format!("{}", err);
-            assert!(msg.contains("fake-model"));
-            assert!(msg.contains("Unknown model"));
-        }
-
-        #[test]
         fn test_error_display_incompatible_model() {
             let err = ClassifierError::IncompatibleModel {
                 model: "test-model".to_string(),

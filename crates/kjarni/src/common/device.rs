@@ -110,10 +110,6 @@ mod tests {
         assert_eq!(auto.resolve().resolve(), KjarniDevice::Cpu);
     }
 
-    // =========================================================================
-    // KjarniDevice - to_device tests
-    // =========================================================================
-
     #[test]
     fn test_to_device_cpu() {
         let device = KjarniDevice::Cpu;
@@ -128,14 +124,9 @@ mod tests {
 
     #[test]
     fn test_to_device_auto() {
-        // Auto currently resolves to Cpu
         let device = KjarniDevice::Auto;
         assert_eq!(device.to_device(), Device::Cpu);
     }
-
-    // =========================================================================
-    // KjarniDevice - is_cpu tests
-    // =========================================================================
 
     #[test]
     fn test_is_cpu_for_cpu() {
@@ -153,10 +144,6 @@ mod tests {
         assert!(KjarniDevice::Auto.is_cpu());
     }
 
-    // =========================================================================
-    // KjarniDevice - is_gpu tests
-    // =========================================================================
-
     #[test]
     fn test_is_gpu_for_cpu() {
         assert!(!KjarniDevice::Cpu.is_gpu());
@@ -169,20 +156,14 @@ mod tests {
 
     #[test]
     fn test_is_gpu_for_auto() {
-        // Auto resolves to Cpu currently, so is_gpu is false
         assert!(!KjarniDevice::Auto.is_gpu());
     }
-
-    // =========================================================================
-    // KjarniDevice - is_cpu and is_gpu are mutually exclusive
-    // =========================================================================
 
     #[test]
     fn test_is_cpu_and_is_gpu_mutually_exclusive() {
         let devices = [KjarniDevice::Cpu, KjarniDevice::Gpu, KjarniDevice::Auto];
 
         for device in devices {
-            // A device should be either CPU or GPU after resolution, not both
             let resolved = device.resolve();
             if resolved == KjarniDevice::Cpu {
                 assert!(device.is_cpu());
@@ -193,11 +174,6 @@ mod tests {
             }
         }
     }
-
-    // =========================================================================
-    // KjarniDevice - From trait tests
-    // =========================================================================
-
     #[test]
     fn test_from_kjarni_device_cpu() {
         let device: Device = KjarniDevice::Cpu.into();
@@ -213,7 +189,7 @@ mod tests {
     #[test]
     fn test_from_kjarni_device_auto() {
         let device: Device = KjarniDevice::Auto.into();
-        assert_eq!(device, Device::Cpu); // Auto currently resolves to Cpu
+        assert_eq!(device, Device::Cpu);
     }
 
     #[test]
@@ -222,11 +198,6 @@ mod tests {
         assert_eq!(Device::from(KjarniDevice::Gpu), Device::Wgpu);
         assert_eq!(Device::from(KjarniDevice::Auto), Device::Cpu);
     }
-
-    // =========================================================================
-    // KjarniDevice - Debug trait tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_debug_cpu() {
         let debug_str = format!("{:?}", KjarniDevice::Cpu);
@@ -244,11 +215,6 @@ mod tests {
         let debug_str = format!("{:?}", KjarniDevice::Auto);
         assert_eq!(debug_str, "Auto");
     }
-
-    // =========================================================================
-    // KjarniDevice - Clone trait tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_clone() {
         let cpu = KjarniDevice::Cpu;
@@ -264,23 +230,13 @@ mod tests {
         assert_eq!(auto, auto_clone);
     }
 
-    // =========================================================================
-    // KjarniDevice - Copy trait tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_copy() {
         let device = KjarniDevice::Gpu;
         let copied = device; // Copy, not move
         assert_eq!(device, copied);
-        // Can still use device after "copy"
         assert_eq!(device, KjarniDevice::Gpu);
     }
-
-    // =========================================================================
-    // KjarniDevice - PartialEq trait tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_equality() {
         assert_eq!(KjarniDevice::Cpu, KjarniDevice::Cpu);
@@ -294,21 +250,11 @@ mod tests {
         assert_ne!(KjarniDevice::Cpu, KjarniDevice::Auto);
         assert_ne!(KjarniDevice::Gpu, KjarniDevice::Auto);
     }
-
-    // =========================================================================
-    // DownloadPolicy - Default trait tests
-    // =========================================================================
-
     #[test]
     fn test_download_policy_default_is_if_missing() {
         let policy = DownloadPolicy::default();
         assert_eq!(policy, DownloadPolicy::IfMissing);
     }
-
-    // =========================================================================
-    // DownloadPolicy - Debug trait tests
-    // =========================================================================
-
     #[test]
     fn test_download_policy_debug_if_missing() {
         let debug_str = format!("{:?}", DownloadPolicy::IfMissing);
@@ -326,11 +272,6 @@ mod tests {
         let debug_str = format!("{:?}", DownloadPolicy::Eager);
         assert_eq!(debug_str, "Eager");
     }
-
-    // =========================================================================
-    // DownloadPolicy - Clone trait tests
-    // =========================================================================
-
     #[test]
     fn test_download_policy_clone() {
         let if_missing = DownloadPolicy::IfMissing;
@@ -342,24 +283,13 @@ mod tests {
         let eager = DownloadPolicy::Eager;
         assert_eq!(eager, eager.clone());
     }
-
-    // =========================================================================
-    // DownloadPolicy - Copy trait tests
-    // =========================================================================
-
     #[test]
     fn test_download_policy_copy() {
         let policy = DownloadPolicy::Never;
-        let copied = policy; // Copy, not move
+        let copied = policy;
         assert_eq!(policy, copied);
-        // Can still use policy after "copy"
         assert_eq!(policy, DownloadPolicy::Never);
     }
-
-    // =========================================================================
-    // DownloadPolicy - PartialEq trait tests
-    // =========================================================================
-
     #[test]
     fn test_download_policy_equality() {
         assert_eq!(DownloadPolicy::IfMissing, DownloadPolicy::IfMissing);
@@ -373,14 +303,8 @@ mod tests {
         assert_ne!(DownloadPolicy::IfMissing, DownloadPolicy::Eager);
         assert_ne!(DownloadPolicy::Never, DownloadPolicy::Eager);
     }
-
-    // =========================================================================
-    // DownloadPolicy - all variants
-    // =========================================================================
-
     #[test]
     fn test_download_policy_all_variants() {
-        // Ensure all variants are distinct
         let variants = [
             DownloadPolicy::IfMissing,
             DownloadPolicy::Never,
@@ -397,20 +321,13 @@ mod tests {
             }
         }
     }
-
-    // =========================================================================
-    // KjarniDevice - all variants
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_all_variants() {
-        // Ensure all variants are distinct
         let variants = [
             KjarniDevice::Cpu,
             KjarniDevice::Gpu,
             KjarniDevice::Auto,
         ];
-
         for (i, v1) in variants.iter().enumerate() {
             for (j, v2) in variants.iter().enumerate() {
                 if i == j {
@@ -421,14 +338,8 @@ mod tests {
             }
         }
     }
-
-    // =========================================================================
-    // Integration-style tests
-    // =========================================================================
-
     #[test]
     fn test_device_workflow() {
-        // Simulate typical usage pattern
         let user_wants_gpu = true;
         
         let device = if user_wants_gpu {
@@ -446,35 +357,23 @@ mod tests {
 
     #[test]
     fn test_auto_device_workflow() {
-        // Auto should be safe to use as a default
         let device = KjarniDevice::Auto;
-        
-        // Should always resolve to something concrete
         let resolved = device.resolve();
         assert!(resolved == KjarniDevice::Cpu || resolved == KjarniDevice::Gpu);
-        
-        // Should always produce a valid low-level device
         let low_level: Device = device.into();
         assert!(low_level == Device::Cpu || low_level == Device::Wgpu);
     }
 
     #[test]
     fn test_device_consistency() {
-        // to_device and From should give the same result
         for device in [KjarniDevice::Cpu, KjarniDevice::Gpu, KjarniDevice::Auto] {
             let via_method = device.to_device();
             let via_from: Device = device.into();
             assert_eq!(via_method, via_from);
         }
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_multiple_resolves() {
-        // Resolving multiple times shouldn't change behavior
         let auto = KjarniDevice::Auto;
         let r1 = auto.resolve();
         let r2 = r1.resolve();
@@ -486,27 +385,19 @@ mod tests {
 
     #[test]
     fn test_is_methods_after_resolve() {
-        // is_cpu/is_gpu should work the same before and after resolve
         let auto = KjarniDevice::Auto;
         let resolved = auto.resolve();
         
         assert_eq!(auto.is_cpu(), resolved.is_cpu());
         assert_eq!(auto.is_gpu(), resolved.is_gpu());
     }
-
-    // =========================================================================
-    // Size and memory tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_size() {
-        // Enum with 3 variants should be small
         assert!(std::mem::size_of::<KjarniDevice>() <= 1);
     }
 
     #[test]
     fn test_download_policy_size() {
-        // Enum with 3 variants should be small
         assert!(std::mem::size_of::<DownloadPolicy>() <= 1);
     }
 }

@@ -85,17 +85,11 @@ pub async fn ensure_model_downloaded(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    // =========================================================================
-    // default_cache_dir tests
-    // =========================================================================
-
     #[test]
     fn test_default_cache_dir_not_empty() {
         let dir = default_cache_dir();
         assert!(!dir.as_os_str().is_empty());
     }
-
     #[test]
     fn test_default_cache_dir_ends_with_kjarni() {
         let dir = default_cache_dir();
@@ -105,7 +99,6 @@ mod tests {
             dir
         );
     }
-
     #[test]
     fn test_default_cache_dir_has_parent() {
         let dir = default_cache_dir();
@@ -117,19 +110,12 @@ mod tests {
         let dir = default_cache_dir();
         assert!(dir.is_absolute(), "Cache dir should be an absolute path");
     }
-
     #[test]
     fn test_default_cache_dir_consistent() {
-        // Calling twice should return the same path
         let dir1 = default_cache_dir();
         let dir2 = default_cache_dir();
         assert_eq!(dir1, dir2);
     }
-
-    // =========================================================================
-    // resolve_cache_dir tests
-    // =========================================================================
-
     #[test]
     fn test_resolve_cache_dir_none_uses_default() {
         let resolved = resolve_cache_dir(None);
@@ -150,80 +136,56 @@ mod tests {
         let resolved = resolve_cache_dir(Some(relative));
         assert_eq!(resolved, PathBuf::from("./local/cache"));
     }
-
     #[test]
     fn test_resolve_cache_dir_with_tempdir() {
         let temp = TempDir::new().unwrap();
         let resolved = resolve_cache_dir(Some(temp.path()));
         assert_eq!(resolved, temp.path().to_path_buf());
     }
-
-    // =========================================================================
-    // DownloadAction enum tests
-    // =========================================================================
-
     #[test]
     fn test_download_action_debug() {
         assert_eq!(format!("{:?}", DownloadAction::Ready), "Ready");
         assert_eq!(format!("{:?}", DownloadAction::Download), "Download");
         assert_eq!(format!("{:?}", DownloadAction::Error), "Error");
     }
-
     #[test]
     fn test_download_action_clone() {
         let action = DownloadAction::Ready;
         assert_eq!(action, action.clone());
     }
-
     #[test]
     fn test_download_action_copy() {
         let action = DownloadAction::Download;
         let copied = action;
         assert_eq!(action, copied);
     }
-
     #[test]
     fn test_download_action_equality() {
         assert_eq!(DownloadAction::Ready, DownloadAction::Ready);
         assert_eq!(DownloadAction::Download, DownloadAction::Download);
         assert_eq!(DownloadAction::Error, DownloadAction::Error);
     }
-
     #[test]
     fn test_download_action_inequality() {
         assert_ne!(DownloadAction::Ready, DownloadAction::Download);
         assert_ne!(DownloadAction::Ready, DownloadAction::Error);
         assert_ne!(DownloadAction::Download, DownloadAction::Error);
     }
-
-    // =========================================================================
-    // determine_download_action tests - downloaded cases
-    // =========================================================================
-
     #[test]
     fn test_determine_action_downloaded_never() {
         let action = determine_download_action(true, DownloadPolicy::Never);
         assert_eq!(action, DownloadAction::Ready);
     }
-
     #[test]
     fn test_determine_action_downloaded_if_missing() {
         let action = determine_download_action(true, DownloadPolicy::IfMissing);
         assert_eq!(action, DownloadAction::Ready);
     }
-
     #[test]
     fn test_determine_action_downloaded_eager() {
-        // Currently Eager with downloaded model returns Ready
-        // (TODO: will check for updates in the future)
         let action = determine_download_action(true, DownloadPolicy::Eager);
         assert_eq!(action, DownloadAction::Ready);
     }
-
-    // =========================================================================
-    // determine_download_action tests - not downloaded cases
-    // =========================================================================
-
     #[test]
     fn test_determine_action_not_downloaded_never() {
         let action = determine_download_action(false, DownloadPolicy::Never);
@@ -241,16 +203,9 @@ mod tests {
         let action = determine_download_action(false, DownloadPolicy::Eager);
         assert_eq!(action, DownloadAction::Download);
     }
-
-    // =========================================================================
-    // determine_download_action - exhaustive matrix test
-    // =========================================================================
-
     #[test]
     fn test_determine_action_all_combinations() {
-        // Test all combinations of (is_downloaded, policy) -> action
         let test_cases = [
-            // (is_downloaded, policy, expected_action)
             (true, DownloadPolicy::Never, DownloadAction::Ready),
             (true, DownloadPolicy::IfMissing, DownloadAction::Ready),
             (true, DownloadPolicy::Eager, DownloadAction::Ready),
@@ -268,14 +223,8 @@ mod tests {
             );
         }
     }
-
-    // =========================================================================
-    // Policy behavior documentation tests
-    // =========================================================================
-
     #[test]
     fn test_never_policy_never_downloads() {
-        // Never policy should never result in Download action
         assert_ne!(
             determine_download_action(true, DownloadPolicy::Never),
             DownloadAction::Download
@@ -301,7 +250,6 @@ mod tests {
 
     #[test]
     fn test_eager_downloads_when_missing() {
-        // Eager should at least download when missing
         assert_eq!(
             determine_download_action(false, DownloadPolicy::Eager),
             DownloadAction::Download
@@ -310,7 +258,6 @@ mod tests {
 
     #[test]
     fn test_downloaded_model_never_errors() {
-        // If model is downloaded, no policy should result in an error
         for policy in [
             DownloadPolicy::Never,
             DownloadPolicy::IfMissing,
@@ -328,7 +275,6 @@ mod tests {
 
     #[test]
     fn test_only_never_policy_can_error() {
-        // Only Never policy should result in Error
         let error_policies: Vec<_> = [
             DownloadPolicy::Never,
             DownloadPolicy::IfMissing,
@@ -341,21 +287,12 @@ mod tests {
         assert_eq!(error_policies.len(), 1);
         assert_eq!(*error_policies[0], DownloadPolicy::Never);
     }
-
-    // =========================================================================
-    // Integration tests with real ModelType (no network)
-    // =========================================================================
-
     #[test]
     fn test_model_dir_under_cache_dir() {
         let temp = TempDir::new().unwrap();
         let cache_dir = resolve_cache_dir(Some(temp.path()));
-        
-        // Get a model type
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
         let model_dir = model_type.cache_dir(&cache_dir);
-        
-        // Model dir should be under cache dir
         assert!(
             model_dir.starts_with(&cache_dir),
             "Model dir {:?} should be under cache dir {:?}",
@@ -386,22 +323,16 @@ mod tests {
         // In an empty temp directory, model should not be downloaded
         assert!(!model_type.is_downloaded(temp.path()));
     }
-
-    // =========================================================================
-    // Async tests (require tokio runtime)
-    // =========================================================================
-
     #[tokio::test]
     async fn test_ensure_model_not_downloaded_never_policy() {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
-        
-        // With Never policy and model not downloaded, should error
+    
         let result = ensure_model_downloaded(
             model_type,
             Some(temp.path()),
             DownloadPolicy::Never,
-            true, // quiet
+            true,
         ).await;
         
         assert!(result.is_err());
@@ -417,37 +348,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_ensure_model_returns_correct_path() {
-        // This test only verifies the path computation, not actual download
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("minilm-l6-v2").unwrap();
         
-        // Create the model directory to simulate it being downloaded
         let expected_dir = model_type.cache_dir(temp.path());
         std::fs::create_dir_all(&expected_dir).unwrap();
         
-        // Create marker files to make is_downloaded return true
-        // (This depends on how is_downloaded is implemented)
         std::fs::write(expected_dir.join("config.json"), "{}").unwrap();
         std::fs::write(expected_dir.join("model.safetensors"), "").unwrap();
         std::fs::write(expected_dir.join("tokenizer.json"), "{}").unwrap();
         
-        // Now ensure_model_downloaded should succeed without downloading
         let result = ensure_model_downloaded(
             model_type,
             Some(temp.path()),
             DownloadPolicy::Never,
             true,
         ).await;
-        
-        // If model appears downloaded, should return the path
-        // If not (marker files not sufficient), should error
-        // Either way, test documents the behavior
         match result {
             Ok(path) => {
                 assert!(path.starts_with(temp.path()));
             }
             Err(KjarniError::ModelNotDownloaded(_)) => {
-                // Model check is more sophisticated, that's fine
             }
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
@@ -458,7 +379,6 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let model_type = ModelType::from_cli_name("distilbert-sentiment").unwrap();
         
-        // With custom cache dir, model won't be there
         let result = ensure_model_downloaded(
             model_type,
             Some(temp.path()),
@@ -466,14 +386,8 @@ mod tests {
             true,
         ).await;
         
-        // Should fail because model isn't downloaded
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_resolve_cache_dir_empty_path() {
         let empty = Path::new("");
@@ -502,16 +416,10 @@ mod tests {
         assert_eq!(resolved, PathBuf::from("/путь/キャッシュ"));
     }
 
-    // =========================================================================
-    // Documentation tests (verify documented behavior)
-    // =========================================================================
-
     #[test]
     fn test_if_missing_is_default_behavior() {
-        // IfMissing should be the default policy
         assert_eq!(DownloadPolicy::default(), DownloadPolicy::IfMissing);
         
-        // Default behavior: download if missing, don't if present
         assert_eq!(
             determine_download_action(false, DownloadPolicy::default()),
             DownloadAction::Download
@@ -524,22 +432,14 @@ mod tests {
 
     #[test]
     fn test_never_policy_for_offline_use() {
-        // Never policy is for offline use - should never try to download
         let action_present = determine_download_action(true, DownloadPolicy::Never);
         let action_missing = determine_download_action(false, DownloadPolicy::Never);
         
-        // Should either use existing or error, never download
         assert!(action_present == DownloadAction::Ready);
         assert!(action_missing == DownloadAction::Error);
     }
-
-    // =========================================================================
-    // Consistency tests
-    // =========================================================================
-
     #[test]
     fn test_action_determinism() {
-        // Same inputs should always produce same outputs
         for _ in 0..10 {
             assert_eq!(
                 determine_download_action(true, DownloadPolicy::IfMissing),
@@ -554,7 +454,6 @@ mod tests {
 
     #[test]
     fn test_cache_dir_determinism() {
-        // Same inputs should always produce same outputs
         let custom = Path::new("/test/path");
         for _ in 0..10 {
             assert_eq!(resolve_cache_dir(Some(custom)), PathBuf::from("/test/path"));

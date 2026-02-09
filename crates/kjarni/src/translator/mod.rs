@@ -56,10 +56,6 @@ pub use model::Translator;
 pub use presets::{TranslatorPreset, TranslatorTier};
 pub use types::{TranslatorError, TranslatorResult};
 
-// ============================================================================
-// Convenience Functions
-// ============================================================================
-
 /// Translate text with explicit languages.
 ///
 /// # Example
