@@ -4,8 +4,8 @@
 
 mod gguf_conversion;
 mod gguf_loader;
-mod model_weights;
 mod mmap_cache;
+mod model_weights;
 mod safetensors_loader;
 
 use std::any::Any;
@@ -16,8 +16,8 @@ use crate::tensor::raw_tensor::TensorView;
 
 pub use gguf_conversion::{cast_or_copy, raw_to_typed_gguf};
 pub use gguf_loader::{GgufHfMapper, GgufLoader};
-pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
 pub use mmap_cache::{clear_mmap_cache, mmap_cache_stats};
+pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
 pub use safetensors_loader::SafeTensorsLoader;
 
 /// Trait for loading model weights from various file formats.
@@ -60,8 +60,6 @@ pub trait WeightLoader: Send + Sync {
 #[cfg(test)]
 mod tests;
 
-
-
 #[cfg(test)]
 mod more_tests {
     use super::*;
@@ -69,7 +67,6 @@ mod more_tests {
     use std::collections::HashMap;
     use std::path::Path;
     use tempfile::TempDir;
-    
 
     // ========================================================================
     // Mock WeightLoader for testing trait defaults
@@ -105,7 +102,8 @@ mod more_tests {
         }
 
         fn with_string_meta(mut self, key: &str, value: &str) -> Self {
-            self.metadata_strings.insert(key.to_string(), value.to_string());
+            self.metadata_strings
+                .insert(key.to_string(), value.to_string());
             self.has_meta = true;
             self
         }
@@ -177,7 +175,7 @@ mod more_tests {
     #[test]
     fn test_weight_loader_get_raw_missing() {
         let loader = MockWeightLoader::new();
-        
+
         let result = loader.get_raw("missing_tensor");
         assert!(result.is_err());
     }
@@ -241,12 +239,11 @@ mod more_tests {
 
     #[test]
     fn test_weight_loader_as_any_downcast() {
-        let loader = MockWeightLoader::new()
-            .with_tensor("test", vec![1.0]);
+        let loader = MockWeightLoader::new().with_tensor("test", vec![1.0]);
 
         let any_ref = loader.as_any();
         let downcast = any_ref.downcast_ref::<MockWeightLoader>();
-        
+
         assert!(downcast.is_some());
         assert!(downcast.unwrap().contains("test"));
     }
@@ -257,7 +254,7 @@ mod more_tests {
 
         let any_ref = loader.as_any();
         let wrong_downcast = any_ref.downcast_ref::<String>();
-        
+
         assert!(wrong_downcast.is_none());
     }
 
@@ -270,7 +267,7 @@ mod more_tests {
         // Test that placeholder resolution works
         let template = "model.layers.{}.self_attn.q_proj.weight";
         let resolved = template.replace("{}", "5");
-        
+
         assert_eq!(resolved, "model.layers.5.self_attn.q_proj.weight");
     }
 
@@ -278,9 +275,12 @@ mod more_tests {
     // ModelWeights tests (with real safetensors files)
     // ========================================================================
 
-    fn create_test_safetensors(dir: &Path, tensors: Vec<(&str, Vec<f32>, Vec<usize>)>) -> Result<()> {
-        use safetensors::tensor::TensorView as SafeTensorView;
+    fn create_test_safetensors(
+        dir: &Path,
+        tensors: Vec<(&str, Vec<f32>, Vec<usize>)>,
+    ) -> Result<()> {
         use safetensors::Dtype;
+        use safetensors::tensor::TensorView as SafeTensorView;
         use std::collections::HashMap;
         use std::fs::File;
         use std::io::Write;
@@ -301,13 +301,14 @@ mod more_tests {
             .map(|(name, (start, end, shape))| {
                 (
                     name.as_str(),
-                    SafeTensorView::new(Dtype::F32, shape.clone(), &data_storage[*start..*end]).unwrap(),
+                    SafeTensorView::new(Dtype::F32, shape.clone(), &data_storage[*start..*end])
+                        .unwrap(),
                 )
             })
             .collect();
 
         let serialized = safetensors::serialize(views, &None)?;
-        
+
         let mut file = File::create(dir.join("model.safetensors"))?;
         file.write_all(&serialized)?;
 
@@ -330,7 +331,7 @@ mod more_tests {
         )?;
 
         let weights = ModelWeights::new(dir.path())?;
-        
+
         assert!(weights.contains("layer.0.weight"));
         assert!(weights.contains("layer.0.bias"));
         assert!(!weights.contains("nonexistent"));
@@ -432,10 +433,26 @@ mod more_tests {
         create_test_safetensors(
             dir.path(),
             vec![
-                ("embed.weight", (0..768).map(|x| x as f32 * 0.01).collect(), vec![256, 3]),
-                ("layer.0.attn.q.weight", (0..64).map(|x| x as f32).collect(), vec![8, 8]),
-                ("layer.0.attn.k.weight", (0..64).map(|x| -x as f32).collect(), vec![8, 8]),
-                ("layer.0.attn.v.weight", (0..64).map(|x| x as f32 * 0.5).collect(), vec![8, 8]),
+                (
+                    "embed.weight",
+                    (0..768).map(|x| x as f32 * 0.01).collect(),
+                    vec![256, 3],
+                ),
+                (
+                    "layer.0.attn.q.weight",
+                    (0..64).map(|x| x as f32).collect(),
+                    vec![8, 8],
+                ),
+                (
+                    "layer.0.attn.k.weight",
+                    (0..64).map(|x| -x as f32).collect(),
+                    vec![8, 8],
+                ),
+                (
+                    "layer.0.attn.v.weight",
+                    (0..64).map(|x| x as f32 * 0.5).collect(),
+                    vec![8, 8],
+                ),
                 ("layer.0.norm.weight", vec![1.0; 8], vec![8]),
                 ("layer.0.norm.bias", vec![0.0; 8], vec![8]),
             ],
@@ -459,7 +476,6 @@ mod more_tests {
         Ok(())
     }
 
-
     // ========================================================================
     // cast_or_copy tests
     // ========================================================================
@@ -468,20 +484,19 @@ mod more_tests {
     fn test_cast_or_copy_f32_to_f32() {
         let data: Vec<f32> = vec![1.0, 2.0, 3.0];
         let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
-        
+
         let result = cast_or_copy::<f32>(&bytes);
-        
+
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], 1.0);
         assert_eq!(result[2], 3.0);
     }
 
-
     #[test]
     fn test_clear_mmap_cache() {
         // Should not panic
         clear_mmap_cache();
-        
+
         // Verify cache is empty after clear
         let stats = mmap_cache_stats();
         // Stats format may vary, just ensure no panic
@@ -495,13 +510,10 @@ mod more_tests {
     #[test]
     fn test_safetensors_loader_new() -> Result<()> {
         let dir = TempDir::new()?;
-        create_test_safetensors(
-            dir.path(),
-            vec![("test", vec![1.0, 2.0], vec![2])],
-        )?;
+        create_test_safetensors(dir.path(), vec![("test", vec![1.0, 2.0], vec![2])])?;
 
         let loader = SafeTensorsLoader::new(dir.path())?;
-        
+
         assert!(loader.contains("test"));
         assert!(!loader.contains("nonexistent"));
 
@@ -511,13 +523,10 @@ mod more_tests {
     #[test]
     fn test_safetensors_loader_no_metadata() -> Result<()> {
         let dir = TempDir::new()?;
-        create_test_safetensors(
-            dir.path(),
-            vec![("test", vec![1.0], vec![1])],
-        )?;
+        create_test_safetensors(dir.path(), vec![("test", vec![1.0], vec![1])])?;
 
         let loader = SafeTensorsLoader::new(dir.path())?;
-        
+
         // SafeTensors doesn't have GGUF-style metadata
         assert!(!loader.has_metadata());
         assert_eq!(loader.get_string("any"), None);
@@ -530,14 +539,11 @@ mod more_tests {
     #[test]
     fn test_safetensors_loader_as_any() -> Result<()> {
         let dir = TempDir::new()?;
-        create_test_safetensors(
-            dir.path(),
-            vec![("test", vec![1.0], vec![1])],
-        )?;
+        create_test_safetensors(dir.path(), vec![("test", vec![1.0], vec![1])])?;
 
         let loader = SafeTensorsLoader::new(dir.path())?;
         let any_ref = loader.as_any();
-        
+
         assert!(any_ref.downcast_ref::<SafeTensorsLoader>().is_some());
 
         Ok(())
@@ -546,60 +552,73 @@ mod more_tests {
     #[test]
     fn test_safetensors_loader_multiple_files() -> Result<()> {
         let dir = TempDir::new()?;
-        
+
         // Create first safetensors file
         {
-            use safetensors::tensor::TensorView as SafeTensorView;
             use safetensors::Dtype;
+            use safetensors::tensor::TensorView as SafeTensorView;
             use std::fs::File;
             use std::io::Write;
 
-            let data1: Vec<u8> = vec![1.0f32, 2.0].iter().flat_map(|f| f.to_le_bytes()).collect();
+            let data1: Vec<u8> = vec![1.0f32, 2.0]
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .collect();
             let view1 = SafeTensorView::new(Dtype::F32, vec![2], &data1).unwrap();
             let serialized = safetensors::serialize(vec![("tensor1", view1)], &None)?;
+
             let mut file = File::create(dir.path().join("model-00001-of-00002.safetensors"))?;
             file.write_all(&serialized)?;
         }
-        
+
         // Create second safetensors file
         {
-            use safetensors::tensor::TensorView as SafeTensorView;
             use safetensors::Dtype;
+            use safetensors::tensor::TensorView as SafeTensorView;
             use std::fs::File;
             use std::io::Write;
 
-            let data2: Vec<u8> = vec![3.0f32, 4.0].iter().flat_map(|f| f.to_le_bytes()).collect();
+            let data2: Vec<u8> = vec![3.0f32, 4.0]
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .collect();
             let view2 = SafeTensorView::new(Dtype::F32, vec![2], &data2).unwrap();
             let serialized = safetensors::serialize(vec![("tensor2", view2)], &None)?;
+
             let mut file = File::create(dir.path().join("model-00002-of-00002.safetensors"))?;
             file.write_all(&serialized)?;
         }
+
+        // Create index file that HuggingFace uses for sharded models
+        let index = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "tensor1": "model-00001-of-00002.safetensors",
+                "tensor2": "model-00002-of-00002.safetensors"
+            }
+        });
+        std::fs::write(
+            dir.path().join("model.safetensors.index.json"),
+            serde_json::to_string(&index)?,
+        )?;
 
         // Create config
         std::fs::write(dir.path().join("config.json"), r#"{}"#)?;
 
         let loader = SafeTensorsLoader::new(dir.path())?;
-        
         assert!(loader.contains("tensor1"));
         assert!(loader.contains("tensor2"));
 
         Ok(())
     }
 
-    // ========================================================================
-    // Edge cases and error handling
-    // ========================================================================
-
     #[test]
     fn test_model_weights_empty_tensor_name() -> Result<()> {
         let dir = TempDir::new()?;
-        create_test_safetensors(
-            dir.path(),
-            vec![("", vec![1.0], vec![1])],
-        )?;
+        create_test_safetensors(dir.path(), vec![("", vec![1.0], vec![1])])?;
 
         let weights = ModelWeights::new(dir.path())?;
-        
+
         assert!(weights.contains(""));
 
         Ok(())
@@ -617,7 +636,7 @@ mod more_tests {
         )?;
 
         let weights = ModelWeights::new(dir.path())?;
-        
+
         assert!(weights.contains("layer.0.self_attn.q_proj.weight"));
         assert!(weights.contains("model/encoder/layer_0/attention"));
 
@@ -627,7 +646,7 @@ mod more_tests {
     #[test]
     fn test_model_weights_large_tensor() -> Result<()> {
         let dir = TempDir::new()?;
-        
+
         // Create a larger tensor (1MB of f32 = 256K elements)
         let large_data: Vec<f32> = (0..262144).map(|x| x as f32 * 0.001).collect();
         create_test_safetensors(
@@ -649,18 +668,16 @@ mod more_tests {
     fn test_weight_loader_trait_object_safety() {
         // Verify WeightLoader can be used as trait object
         fn accepts_loader(_loader: &dyn WeightLoader) {}
-        
+
         let loader = MockWeightLoader::new();
         accepts_loader(&loader);
     }
 
     #[test]
     fn test_weight_loader_boxed() {
-        let loader: Box<dyn WeightLoader> = Box::new(
-            MockWeightLoader::new()
-                .with_tensor("test", vec![1.0])
-        );
-        
+        let loader: Box<dyn WeightLoader> =
+            Box::new(MockWeightLoader::new().with_tensor("test", vec![1.0]));
+
         assert!(loader.contains("test"));
         assert!(!loader.has_metadata());
     }
@@ -690,7 +707,7 @@ mod more_tests {
         )?;
 
         let weights = Arc::new(ModelWeights::new(dir.path())?);
-        
+
         let handles: Vec<_> = (0..4)
             .map(|i| {
                 let w = Arc::clone(&weights);

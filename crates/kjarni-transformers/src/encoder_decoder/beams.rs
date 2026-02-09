@@ -1,5 +1,5 @@
 //! Beam search, based on HF implementation, thanks HF guys this was extremely complicated to port
-//! 
+//!
 use anyhow::{Result, anyhow};
 use async_stream::try_stream;
 use futures::stream::Stream;
@@ -485,12 +485,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        Device, LanguageModel, WgpuContext,
-        cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel},
-        encoder_decoder::traits::{
+        Device, LanguageModel, WgpuContext, common::BeamSearchParams, cpu::encoder::{CpuEncoderOps, GpuEncoderOps, traits::EncoderLanguageModel}, encoder_decoder::traits::{
             CpuEncoderDecoderOps, EncoderDecoderGenerationBackend, GpuEncoderDecoderOps,
-        },
-        traits::InferenceModel,
+        }, traits::InferenceModel
     };
 
     #[test]
@@ -1281,7 +1278,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_beam_step_min_length_blocks_eos() {
-        let num_beams = 1;
+        let num_beams = 2; // Need at least 2 for beam search to work properly
         let model = MockModel {
             vocab: 10,
             eos: 1,
@@ -1290,19 +1287,30 @@ mod tests {
         let backend = MockBackendReturnsEos;
 
         let mut config = GenerationConfig::default();
-        config.min_length = 10; // EOS should be blocked until length >= 10
+        config.min_length = 10;
+        config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
+            num_beams,
+            ..Default::default()
+        });
 
-        let beams = vec![BeamHypothesis {
-            tokens: vec![0],
-            score: 0.0,
-        }];
+        // Create beams matching num_beams
+        let beams = vec![
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+            BeamHypothesis {
+                tokens: vec![0],
+                score: 0.0,
+            },
+        ];
 
         let mut ctx = BeamContext {
             model: &model,
             backend: &backend,
             config: &config,
             cache: Box::new(MockCache { len: 0 }),
-            current_tokens_tensor: Array2::zeros((1, 1)),
+            current_tokens_tensor: Array2::zeros((num_beams, 1)), // Match batch size
             encoder_state: Array2::zeros((1, 1)),
             beams,
             finished: FinishedHypotheses::new(num_beams, 1.0, 0),
@@ -1316,9 +1324,11 @@ mod tests {
 
         beam_step(&mut ctx, 0).await.unwrap();
 
-        // EOS should have been blocked, so should pick a different token
-        let last_token = ctx.beams[0].tokens.last().unwrap();
-        assert_ne!(*last_token, 1); // Should not be EOS
+        // All beams should have blocked EOS
+        for beam in &ctx.beams {
+            let last_token = beam.tokens.last().unwrap();
+            assert_ne!(*last_token, 1, "EOS should be blocked before min_length");
+        }
     }
 
     struct MockBackendWithLogits {

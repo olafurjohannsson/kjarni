@@ -232,6 +232,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
+    use ndarray::Array4;
     use tokenizers::Tokenizer;
 
     use super::*;
@@ -435,16 +436,26 @@ mod tests {
     fn test_any_backend_reorder_cache_cpu() {
         let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
 
-        let mut cache = crate::cache::CpuBeamKVCache::new(2, 4, 128, 64);
-        let indices = vec![1, 0, 2, 3];
+        // Create cache with actual data
+        let num_layers = 2;
+        let num_heads = 4;
+        let max_seq = 128;
+        let head_dim = 64;
+        let batch_size = 4;
 
+        let mut cache = crate::cache::CpuBeamKVCache::new(num_layers, num_heads, max_seq, head_dim);
+
+        // Populate cache with dummy data for each layer
+        for layer in 0..num_layers {
+            let k = Array3::<f32>::zeros((batch_size, num_heads, head_dim)); // seq_len=1
+            let v = Array3::<f32>::zeros((batch_size, num_heads, head_dim));
+            let _ = cache.update(layer, &k, &v);
+        }
+
+        let indices = vec![1, 0, 2, 3]; // Reorder batch dimension
         let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
     }
-
-    // ========================================================================
-    //  EncoderDecoderGenerator Tests
-    // ========================================================================
 
     #[test]
     fn test_generator_debug() {

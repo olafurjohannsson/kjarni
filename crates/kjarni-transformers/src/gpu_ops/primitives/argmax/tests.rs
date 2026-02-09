@@ -435,37 +435,35 @@ async fn test_argmax_matches_cpu_random_large() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
 
-    // Larger deterministic "random" values
-    let logits_vec: Vec<f32> = (0..10000)
-        .map(|i| ((i * 17 + 31) % 1000) as f32 / 10.0 - 50.0)
+    // Use values with a UNIQUE maximum
+    let mut logits_vec: Vec<f32> = (0..10000)
+        .map(|i| ((i * 17 + 31) % 997) as f32 / 10.0 - 50.0) // Prime modulo avoids repeats
         .collect();
+    
+    // Ensure unique max at known position
+    let expected_idx = 7777;
+    logits_vec[expected_idx] = 1000.0; // Guaranteed unique max
 
     let expected = cpu_argmax(&logits_vec);
+    assert_eq!(expected, expected_idx as u32); // Sanity check
 
     let logits = Array2::from_shape_vec((1, 10000), logits_vec)?;
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);
-
+    
     let mut encoder = context.device.create_command_encoder(&Default::default());
     kernel.encode(&mut encoder, &gpu_logits, &output_buffer);
     context.queue.submit(std::iter::once(encoder.finish()));
-
+    
     let result = read_output_index(&context, &output_buffer).await;
     assert_eq!(result, expected);
-
     Ok(())
 }
-
-// ========================================================================
-//  Typical LLM Logits Distribution Tests
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_softmax_like_distribution() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
 
-    // Simulate softmax-like distribution with one clear winner
     let vocab_size = 1000;
     let winner_idx = 777;
 
