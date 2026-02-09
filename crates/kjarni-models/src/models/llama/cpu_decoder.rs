@@ -6,7 +6,7 @@ use anyhow::Result;
 use ndarray::{Array2, Array3};
 
 use kjarni_transformers::{
-    WgpuContext, activations::Activation, cache::CpuKVCache, cpu::decoder::DecoderAttentionNew, decoder::prelude::*, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelLayout, ModelMetadata}, weights::ModelWeights
+    WgpuContext, activations::Activation, cache::CpuKVCache, decoder::prelude::*, normalization::RMSNorm, pipeline::CpuLayerFactory, rope::RoPE, tensor::DType, traits::{Cache, Device, InferenceModel, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 pub struct LlamaCpuDecoder {

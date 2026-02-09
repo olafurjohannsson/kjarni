@@ -435,7 +435,6 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
 // Integration Tests with Real Weights (Optional)
 // ============================================================================
 
-use super::*;
 use crate::weights::ModelWeights;
 use std::path::PathBuf;
 

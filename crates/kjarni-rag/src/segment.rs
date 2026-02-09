@@ -1,4 +1,3 @@
-//! Single segment of the index
 
 use anyhow::{anyhow, Result};
 use memmap2::Mmap;
@@ -9,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Bm25Index;
 
-/// Segment metadata stored as JSON
+/// Segment metadata JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SegmentMeta {
     pub id: u64,
@@ -19,12 +18,11 @@ pub struct SegmentMeta {
     pub total_bytes: u64,
 }
 
-/// In-memory segment builder (accumulates until flush)
+/// In-memory segment builder
 pub struct SegmentBuilder {
     pub dimension: usize,
     pub max_docs: usize,
     
-    // Streaming writes - vectors go directly to temp file
     vectors_writer: BufWriter<File>,
     vectors_path: PathBuf,
     
@@ -34,10 +32,10 @@ pub struct SegmentBuilder {
     doc_offsets: Vec<u64>,
     current_offset: u64,
     
-    // BM25 index (kept in memory, serialized on flush)
+    // In memory BM25
     bm25: Bm25Index,
     
-    // Metadata stored separately
+    // Meta
     metadata_writer: BufWriter<File>,
     metadata_path: PathBuf,
     
@@ -45,6 +43,7 @@ pub struct SegmentBuilder {
 }
 
 impl SegmentBuilder {
+    
     /// Create a new segment builder that streams to temp files
     pub fn new(temp_dir: &Path, dimension: usize, max_docs: usize) -> Result<Self> {
         fs::create_dir_all(temp_dir)?;
@@ -101,24 +100,22 @@ impl SegmentBuilder {
         
         let doc_id = self.doc_count;
         
-        // 1. Write embedding to vectors file (raw f32 bytes)
+        // Write raw f32 bytes embedding to vectors file
         for &val in embedding {
             self.vectors_writer.write_all(&val.to_le_bytes())?;
         }
         
-        // 2. Write document text with newline delimiter
         self.doc_offsets.push(self.current_offset);
         let text_bytes = text.as_bytes();
         self.docs_writer.write_all(text_bytes)?;
         self.docs_writer.write_all(b"\n")?;
         self.current_offset += text_bytes.len() as u64 + 1;
         
-        // 3. Write metadata as JSON line
         let meta_json = serde_json::to_string(&metadata.unwrap_or(&std::collections::HashMap::new()))?;
         self.metadata_writer.write_all(meta_json.as_bytes())?;
         self.metadata_writer.write_all(b"\n")?;
         
-        // 4. Add to BM25 index (in memory)
+        // add to bm25 idx
         self.bm25.add_document(doc_id, text);
         
         self.doc_count += 1;
@@ -252,8 +249,7 @@ impl Segment {
             return None;
         }
         
-        // SAFETY: We're reinterpreting bytes as f32, assuming correct alignment
-        // and that the data was written as little-endian f32
+        // the assumption that data was written as little-endian f32
         let bytes = &self.vectors_mmap[start..end];
         let floats = unsafe {
             std::slice::from_raw_parts(

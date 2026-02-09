@@ -1,47 +1,7 @@
-//! Pre-allocated buffers for encoder computations.
-//!
-//! These buffers eliminate allocation overhead in the hot path by reusing
-//! memory across forward passes.
-
 use ndarray::{Array2, Array4};
 
 /// Pre-allocated buffers for encoder layer computations.
-///
-/// Allocated once and reused across all layers and forward passes.
-/// Eliminates allocation overhead in the hot path.
-///
-/// # Memory Layout
-///
-/// | Buffer | Shape | Usage |
-/// |--------|-------|-------|
-/// | q, k, v | [max_tokens, hidden] | QKV projection outputs |
-/// | qkv_scratch | [max_tokens, 3*hidden] | Fused QKV intermediate (optional) |
-/// | attn_scores | [max_batch, num_heads, max_seq, max_seq] | Attention scores & probs |
-/// | attn_context | [max_batch, num_heads, max_seq, head_dim] | Attention context |
-/// | attn_output | [max_tokens, hidden] | Attention output |
-/// | ffn_intermediate | [max_tokens, intermediate_dim] | FFN hidden activations |
-/// | ffn_output | [max_tokens, hidden] | FFN output |
-///
-/// # Example
-///
-/// ```ignore
-/// let mut buffers = EncoderBuffers::new(
-///     32,    // max_batch
-///     128,   // max_seq
-///     768,   // hidden
-///     12,    // num_heads
-///     3072,  // intermediate_dim
-///     false, // use_fused_qkv (hidden > 512)
-/// );
-///
-/// // Use in forward pass
-/// encoder_layer.forward_noalloc(hidden, mask, &mut buffers)?;
-/// ```
 pub struct EncoderBuffers {
-    // =========================================================================
-    // QKV Projection Outputs
-    // =========================================================================
-    
     /// Q projection output [max_tokens, hidden]
     pub q: Array2<f32>,
     /// K projection output [max_tokens, hidden]
@@ -51,23 +11,8 @@ pub struct EncoderBuffers {
     /// Scratch buffer for fused QKV intermediate [max_tokens, 3*hidden]
     /// Only allocated if use_fused_qkv=true at construction
     pub qkv_scratch: Option<Array2<f32>>,
-
-    // =========================================================================
-    // Attention Intermediates
-    // =========================================================================
-    
-    /// Attention scores [max_batch, num_heads, max_seq, max_seq]
-    /// Also used for attention probabilities after in-place softmax
     pub attn_scores: Array4<f32>,
-    
-    /// Attention context [max_batch, num_heads, max_seq, head_dim]
     pub attn_context: Array4<f32>,
-
-    // =========================================================================
-    // Layer Outputs
-    // =========================================================================
-    
-    /// Attention output [max_tokens, hidden]
     pub attn_output: Array2<f32>,
 
     /// FFN intermediate activations [max_tokens, intermediate_dim]
@@ -81,10 +26,6 @@ pub struct EncoderBuffers {
 
     /// Scratch buffer for merged heads [max_tokens, hidden]
     pub merge_scratch: Array2<f32>,
-
-    // =========================================================================
-    // Configuration (stored for validation and resizing)
-    // =========================================================================
     
     max_batch: usize,
     max_seq: usize,
@@ -97,29 +38,6 @@ pub struct EncoderBuffers {
 
 impl EncoderBuffers {
     /// Creates new encoder buffers.
-    ///
-    /// # Arguments
-    ///
-    /// * `max_batch` - Maximum batch size
-    /// * `max_seq` - Maximum sequence length
-    /// * `hidden` - Hidden dimension
-    /// * `num_heads` - Number of attention heads
-    /// * `intermediate_dim` - FFN intermediate dimension
-    /// * `use_fused_qkv` - Whether to allocate scratch for fused QKV projection
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // For BERT-base with batch=32, seq=128
-    /// let buffers = EncoderBuffers::new(
-    ///     32,    // max_batch
-    ///     128,   // max_seq
-    ///     768,   // hidden
-    ///     12,    // num_heads
-    ///     3072,  // intermediate_dim
-    ///     false, // separate QKV (hidden > 512)
-    /// );
-    /// ```
     pub fn new(
         max_batch: usize,
         max_seq: usize,
@@ -164,9 +82,6 @@ impl EncoderBuffers {
         }
     }
 
-    /// Creates buffers with automatic fused/separate selection based on hidden size.
-    ///
-    /// Uses fused QKV for hidden <= 512, separate for larger models.
     pub fn new_auto(
         max_batch: usize,
         max_seq: usize,
@@ -179,15 +94,6 @@ impl EncoderBuffers {
     }
 
     /// Ensures buffers have capacity for the given dimensions.
-    ///
-    /// # Behavior
-    ///
-    /// - **Debug mode**: Panics if capacity exceeded (catches bugs during development)
-    /// - **Release mode**: Logs warning and resizes buffers
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if batch > max_batch or seq > max_seq.
     pub fn ensure_capacity(&mut self, batch: usize, seq: usize) {
         if batch > self.max_batch || seq > self.max_seq {
             #[cfg(debug_assertions)]
@@ -216,9 +122,6 @@ impl EncoderBuffers {
     }
 
     /// Ensures buffers have capacity for the given token count.
-    ///
-    /// This is a convenience method when you only have the flattened token count.
-    /// Assumes batch=1 and seq=tokens for capacity check.
     pub fn ensure_capacity_tokens(&mut self, tokens: usize) {
         let max_tokens = self.max_batch * self.max_seq;
         if tokens > max_tokens {
@@ -238,10 +141,6 @@ impl EncoderBuffers {
     }
 
     /// Validates that buffer dimensions match expected model configuration.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if dimensions don't match.
     #[inline]
     pub fn validate_dimensions(
         &self,

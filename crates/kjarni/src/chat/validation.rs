@@ -50,10 +50,6 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
     let info = model_type.info();
     let cli_name = model_type.cli_name();
 
-    // ==========================================================================
-    // Step 1: Check architecture compatibility (hard errors)
-    // ==========================================================================
-
     match info.architecture {
         // Decoders can generate text - these are valid for chat
         ModelArchitecture::Llama
@@ -99,10 +95,6 @@ pub fn validate_for_chat(model_type: ModelType) -> ChatResult<ValidationResult> 
             });
         }
     }
-
-    // ==========================================================================
-    // Step 2: Check task compatibility (warnings for suboptimal)
-    // ==========================================================================
 
     match info.task {
         // Ideal: Model is designed for chat or reasoning

@@ -72,19 +72,11 @@ pub enum DownloadPolicy {
 mod tests {
     use super::*;
 
-    // =========================================================================
-    // KjarniDevice - Default trait tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_device_default_is_cpu() {
         let device = KjarniDevice::default();
         assert_eq!(device, KjarniDevice::Cpu);
     }
-
-    // =========================================================================
-    // KjarniDevice - resolve tests
-    // =========================================================================
 
     #[test]
     fn test_resolve_cpu_returns_cpu() {

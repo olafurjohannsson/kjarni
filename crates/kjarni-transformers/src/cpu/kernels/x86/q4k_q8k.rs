@@ -69,11 +69,9 @@ pub unsafe fn vec_dot_q4k_q8k_avx2(
 
                 let s1 = hsum_i32_8(sum1);
                 let s2 = hsum_i32_8(sum2);
-                // --- Accumulate with Scales ---
                 sum_qs += s1 * (sc1 as i32);
                 sum_qs += s2 * (sc2 as i32);
 
-                // --- Accumulate Mins ---
                 let isum1 = q.bsums[is * 2] as i32 + q.bsums[is * 2 + 1] as i32;
                 sum_mins += isum1 * (m1 as i32);
 

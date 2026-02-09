@@ -39,9 +39,9 @@ use super::builder::TranscriberBuilder;
 use super::types::*;
 use super::validation;
 
-// =============================================================================
+
 // Transcriber
-// =============================================================================
+
 
 /// High-level Whisper transcriber.
 ///
@@ -393,9 +393,9 @@ impl Transcriber {
     }
 }
 
-// =============================================================================
+
 // Simple Linear Resampling
-// =============================================================================
+
 
 /// Resample audio via linear interpolation.
 ///

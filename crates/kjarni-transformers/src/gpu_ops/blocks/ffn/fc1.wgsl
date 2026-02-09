@@ -1,60 +1,6 @@
 //! First feedforward layer (FC1) with configurable activation function.
-//!
-//! Computes output = activation(input @ W^T + bias), expanding from hidden_size to intermediate_size.
-//!
-//! # Algorithm
-//!
-//! For each output element [m, n]:
-//! 1. Compute linear: val = sum(input[m, i] * W[n, i]) + bias[n]
-//!    *Uses FMA (Fused Multiply-Add) for higher precision than standard dot product.*
-//! 2. Apply activation: output[m, n] = activation(val)
 
-//! # Activation Functions
-//!
-//! Supports five activation types via pipeline constant `COMPUTE_ACT_TYPE`:
-//!
-//! **GELU (0)**: Gaussian Error Linear Unit (default)
-//! - Formula: 0.5 * x * (1 + erf(x / sqrt(2)))
-//! - Smoother than ReLU, better gradients
-//!
-//! **GELU_NEW (1)**: Tanh approximation of GELU
-//! - Formula: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-//! - Faster than standard GELU (avoids erf)
-//!
-//! **ReLU (2)**: Rectified Linear Unit
-//! - Formula: max(0, x)
-//!
-//! **SiLU (3)**: Sigmoid Linear Unit (Swish)
-//! - Formula: x * sigmoid(x) = x / (1 + exp(-x))
-//!
-//! **Tanh (4)**: Hyperbolic Tangent
-//! - Formula: tanh(x)
-//! - Classic activation, output range [-1, 1]
-//!
-//! # Memory Layout
-//!
-//! **Weight is transposed** to [N, K] for coalesced reads:
-//! - Each thread reads a contiguous row for one output dimension
-//!
-//! # TODO / Improvements
-//!
-//! - Add BF16 weight support
-//! - fusing with layer norm (like fused SwiGLU)
-//! - Profile whether vec4 loads actually help
-//!
-//! # Limitations
-//!
-//! - Only supports F32 (no BF16 or quantized weights)
-//! - Assumes K is divisible by 4 for vectorization (remainder handled separately)
-//! - Workgroup size 512 may be too large for some GPUs (consider 256)
-//!
-//! # See Also
-//!
-//! - [`fc2.wgsl`] — Second FFN layer (projection back to hidden_size)
-//! - [`swiglu.wgsl`] — SwiGLU activation for decoder architectures
-//! - [GELU paper](https://arxiv.org/abs/1606.08415) — Original GELU publication
 
-/// Uniform parameters for FC1 operation.
 struct FfnUniforms {
     /// Number of input rows (batch * seq_len).
     m: u32,
@@ -77,13 +23,11 @@ struct FfnUniforms {
 @id(0) override COMPUTE_ACT_TYPE: u32 = 0;
 
 @group(0) @binding(0) var<uniform> info: FfnUniforms;
-// Weight is transposed to [N, K] for coalesced memory access
 @group(0) @binding(1) var<storage, read> fc1_weight: array<f32>;
 @group(0) @binding(2) var<storage, read> fc1_bias: array<f32>;
 @group(0) @binding(3) var<storage, read> input: array<f32>;
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
-// --- Constants (Module Scope for Performance) ---
 
 // For GeluNew
 const SQRT_2_OVER_PI: f32 = 0.7978845608;
@@ -98,7 +42,7 @@ const A4: f32 = -1.453152027;
 const A5: f32 =  1.061405429;
 const P: f32  =  0.3275911;
 
-// --- Activation Functions ---
+
 
 // GELU (tanh approximation)
 fn gelu_new(x: f32) -> f32 {
@@ -180,7 +124,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     sum = sum + fc1_bias[col];
 
-    // The driver will DELETE the branches that don't match the constant value.
     if (COMPUTE_ACT_TYPE == 0u) {
         output[idx] = gelu(sum);
     } else if (COMPUTE_ACT_TYPE == 1u) {

@@ -1,6 +1,3 @@
-// =============================================================================
-// kjarni/src/generator/presets.rs
-// =============================================================================
 
 //! Generator presets for common use cases.
 
@@ -27,9 +24,9 @@ pub struct GeneratorPreset {
     pub description: &'static str,
 }
 
-// =============================================================================
+
 // V1 Presets
-// =============================================================================
+
 
 /// Fast text generation - smallest model, quick responses.
 pub const GENERATOR_FAST_V1: GeneratorPreset = GeneratorPreset {
@@ -100,9 +97,9 @@ pub const ALL_V1_PRESETS: &[&GeneratorPreset] = &[
     &GENERATOR_CODE_V1,
 ];
 
-// =============================================================================
+
 // Legacy Presets (for backward compatibility)
-// =============================================================================
+
 
 impl GeneratorPreset {
     /// GPT-2 for text completion.
@@ -142,9 +139,9 @@ impl GeneratorPreset {
     };
 }
 
-// =============================================================================
+
 // Tier-based Selection
-// =============================================================================
+
 
 /// Generator quality tiers for easy selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -174,9 +171,9 @@ impl GeneratorTier {
     }
 }
 
-// =============================================================================
+
 // Preset Lookup
-// =============================================================================
+
 
 /// Find a preset by name (case-insensitive).
 pub fn find_preset(name: &str) -> Option<&'static GeneratorPreset> {
@@ -193,9 +190,9 @@ pub fn list_presets() -> Vec<&'static str> {
     ALL_V1_PRESETS.iter().map(|p| p.name).collect()
 }
 
-// =============================================================================
+
 // Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {

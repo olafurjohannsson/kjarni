@@ -12,20 +12,7 @@
 //! let s = Summarizer::new("distilbart-cnn").await?;
 //! let summary = s.summarize(&article).await?;
 //!
-//! // With length control
-//! let s = Summarizer::builder("bart-large-cnn")
-//!     .short()  // 30-60 tokens
-//!     .build()
-//!     .await?;
 //! ```
-//!
-//! # Length Presets
-//!
-//! | Preset | Tokens | Use Case |
-//! |--------|--------|----------|
-//! | `.short()` | 30-60 | Headlines, TL;DR |
-//! | `.medium()` | 50-150 | Paragraph summary |
-//! | `.long()` | 100-300 | Detailed summary |
 //!
 //! # Streaming
 //!
@@ -38,19 +25,10 @@
 //! }
 //! ```
 //!
-//! # Model Selection
-//!
-//! | Model | Best For | Speed |
-//! |-------|----------|-------|
-//! | `distilbart-cnn` | News/articles | Fast |
-//! | `bart-large-cnn` | High quality | Slower |
-//! | `flan-t5-base` | Flexible | Medium |
-
 mod builder;
 mod model;
 pub mod presets;
-#[cfg(test)]
-mod tests;
+
 mod types;
 mod validation;
 
@@ -60,10 +38,6 @@ pub use presets::{SummarizerPreset, SummarizerTier};
 pub use types::{SummarizerError, SummarizerResult};
 pub use validation::{get_summarization_models, recommended_summarization_models, validate_for_summarization};
 use kjarni_transformers::models::ModelType;
-
-// ============================================================================
-// Convenience Functions
-// ============================================================================
 
 /// Summarize text with default settings.
 ///
@@ -142,3 +116,6 @@ pub fn is_summarization_model(model: &str) -> SummarizerResult<()> {
         .ok_or_else(|| SummarizerError::UnknownModel(model.to_string()))?;
     validation::validate_for_summarization(model_type)
 }
+
+#[cfg(test)]
+mod tests;

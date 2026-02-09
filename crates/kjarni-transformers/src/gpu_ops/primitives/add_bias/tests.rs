@@ -1,4 +1,3 @@
-use std::sync::Arc;
 
 use anyhow::Result;
 use ndarray::{Array, Array2};

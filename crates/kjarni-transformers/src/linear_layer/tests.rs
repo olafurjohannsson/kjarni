@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use approx::{assert_abs_diff_eq, assert_relative_eq};
+use approx::assert_abs_diff_eq;
 use half::bf16;
 use ndarray::{Array1, Array2, arr1, arr2};
 
 use crate::{
     linear_layer::{F32MatmulStrategy, LinearData, LinearLayer},
-    tensor::{DType, QuantizedMatrix},
+    tensor::DType,
     WgpuContext,
 };
 
-// =============================================================================
+
 // Helper Functions
-// =============================================================================
+
 
 fn create_f32_layer() -> LinearLayer {
     let weights = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
@@ -55,9 +55,9 @@ fn make_input(batch: usize, inp: usize) -> Array2<f32> {
     })
 }
 
-// =============================================================================
+
 // Original Tests
-// =============================================================================
+
 
 #[test]
 fn test_matmul_f32_basic() {
@@ -202,9 +202,9 @@ fn test_shape_metadata() {
     assert_eq!(layer.shape(), [10, 20]);
 }
 
-// =============================================================================
+
 // LinearData::dtype() Tests
-// =============================================================================
+
 
 #[test]
 fn test_linear_data_dtype_f32() {
@@ -230,9 +230,9 @@ fn test_linear_data_dtype_q8_0() {
     assert_eq!(layer.dtype(), DType::Q8_0);
 }
 
-// =============================================================================
+
 // LinearLayer::new() Tests
-// =============================================================================
+
 
 #[test]
 fn test_new_f32() {
@@ -256,9 +256,9 @@ fn test_new_quantized_panics() {
     let _ = LinearLayer::new(128, 64, DType::Q8_0);
 }
 
-// =============================================================================
+
 // matmul_noalloc() Tests
-// =============================================================================
+
 
 #[test]
 fn test_matmul_noalloc_f32_small_batch() {
@@ -331,9 +331,9 @@ fn test_matmul_noalloc_faer_fallback() {
     assert!(output.iter().any(|&x| x != 0.0));
 }
 
-// =============================================================================
+
 // matmul() Strategy Tests
-// =============================================================================
+
 
 #[test]
 fn test_matmul_f32_decode_path() {
@@ -420,9 +420,9 @@ fn test_matmul_f16_panics() {
     let _ = layer.matmul(&input.view());
 }
 
-// =============================================================================
+
 // weights_view() / weights_slice() Tests
-// =============================================================================
+
 
 #[test]
 fn test_weights_view_f32() {
@@ -466,9 +466,9 @@ fn test_weights_slice_bf16_returns_none_for_f32() {
     assert!(layer.weights_slice_bf16().is_none());
 }
 
-// =============================================================================
+
 // to_quantized() Tests
-// =============================================================================
+
 
 #[test]
 fn test_to_quantized_f32_to_q8_0() {
@@ -514,9 +514,9 @@ fn test_to_quantized_q8_0_to_q8_0_fails() {
     assert!(result.is_err());
 }
 
-// =============================================================================
+
 // Dimension Tests with Different Strategies
-// =============================================================================
+
 
 #[test]
 fn test_out_features_faer_strategy() {
@@ -565,9 +565,9 @@ fn test_has_bias() {
     assert!(with_bias.has_bias());
 }
 
-// =============================================================================
+
 // From Implementations
-// =============================================================================
+
 
 #[test]
 fn test_from_f32_array() {
@@ -607,9 +607,9 @@ fn test_from_bf16_array_with_bias() {
     assert!(layer.has_bias());
 }
 
-// =============================================================================
+
 // Arc Constructors
-// =============================================================================
+
 
 #[test]
 fn test_from_arc_f32() {
@@ -648,9 +648,9 @@ fn test_from_arc_q8_0() {
     assert_eq!(layer.dtype(), DType::Q8_0);
 }
 
-// =============================================================================
+
 // Quantized Matmul Accuracy Tests
-// =============================================================================
+
 
 #[test]
 fn test_q8_0_matmul_accuracy() {
@@ -678,9 +678,9 @@ fn test_q8_0_matmul_accuracy() {
     );
 }
 
-// =============================================================================
+
 // Clone Test
-// =============================================================================
+
 
 #[test]
 fn test_linear_layer_clone() {
@@ -692,9 +692,9 @@ fn test_linear_layer_clone() {
     assert_eq!(layer.has_bias(), cloned.has_bias());
 }
 
-// =============================================================================
+
 // GPU Tests
-// =============================================================================
+
 
 pub async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()

@@ -47,31 +47,6 @@ impl SummarizerBuilder {
     }
 
     // =========================================================================
-    // Length Presets
-    // =========================================================================
-
-    /// Short summaries (30-60 tokens).
-    pub fn short(mut self) -> Self {
-        self.overrides.min_length = Some(30);
-        self.overrides.max_length = Some(60);
-        self
-    }
-
-    /// Medium summaries (50-150 tokens).
-    pub fn medium(mut self) -> Self {
-        self.overrides.min_length = Some(50);
-        self.overrides.max_length = Some(150);
-        self
-    }
-
-    /// Long summaries (100-300 tokens).
-    pub fn long(mut self) -> Self {
-        self.overrides.min_length = Some(100);
-        self.overrides.max_length = Some(300);
-        self
-    }
-
-    // =========================================================================
     // Length Control
     // =========================================================================
 

@@ -57,7 +57,7 @@ impl ChatTemplate for ChatMLTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Conversation, Message, Role};
+    use crate::Conversation;
 
     #[test]
     fn chatml_empty_conversation() {
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn chatml_system_message_only() {
         let template = ChatMLTemplate::new();
-        let mut convo = Conversation::with_system("System only message");
+        let convo = Conversation::with_system("System only message");
 
         let prompt = template.apply(&convo);
         assert!(prompt.starts_with("<|im_start|>system\n"));

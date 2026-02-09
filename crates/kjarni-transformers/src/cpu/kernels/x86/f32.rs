@@ -22,7 +22,7 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
     b_ptr: *const f32,       // Weight buffer (3 rows)
     k: usize,                // Hidden dim
     bias_ptr: *const f32,    // Optional bias pointer (len 3)
-) {
+) { unsafe {
     // 12 Accumulators: [Row 0..3] x [Col 0..2]
     // Always initialize to zero - bias is added AFTER horizontal sum
     let zero = _mm256_setzero_ps();
@@ -139,7 +139,7 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
     *dst3 = r30;
     *dst3.add(1) = r31;
     *dst3.add(2) = r32;
-}
+}}
 
 /// Computes a vector-matrix multiplication (vec @ mat) for F32 weights using AVX2/FMA.
 ///

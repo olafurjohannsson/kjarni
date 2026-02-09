@@ -49,7 +49,6 @@ use crate::gpu::{GpuTensor, Kernel};
 use crate::tensor::DType;
 use crate::WgpuContext;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use wgpu::{BindGroupLayout, Buffer, CommandEncoder, ComputePipeline};
 
 /// Uniform parameters passed to matmul shaders.
@@ -146,22 +145,6 @@ impl GpuMatMul {
 
 impl Kernel for GpuMatMul {
     /// Encodes matrix multiplication operation to command encoder.
-    ///
-    /// Automatically selects the appropriate pipeline based on weight dtype
-    /// and input dimensions.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - Command encoder to record operations.
-    /// * `inputs` - Slice containing `[A, B]` where A is activation, B is weight.
-    /// * `output` - Output tensor of shape `[M, N]`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if:
-    /// - Input tensors are not 2D.
-    /// - Dimensions are incompatible for matrix multiplication.
-    /// - Weight dtype is unsupported (only F32 and BF16 supported).
     fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
         let a = inputs[0];
         let b = inputs[1];
@@ -169,7 +152,6 @@ impl Kernel for GpuMatMul {
         assert_eq!(a.rank(), 2, "Input A must be a 2D tensor");
         assert_eq!(b.rank(), 2, "Input B must be a 2D tensor");
 
-        // --- PIPELINE SELECTION & VALIDATION ---
         let (pipeline, m, k, n) = match b.dtype() {
             DType::F32 => {
                 // Standard MatMul Logic: [M, K] @ [K, N] -> [M, N]
@@ -180,8 +162,6 @@ impl Kernel for GpuMatMul {
                 (&self.pipeline_f32, m, k, n)
             }
             DType::BF16 => {
-                // Implicit Transpose Logic: [M, K] @ [N, K] -> [M, N]
-                // B is physically [N, K] (Transposed in VRAM), logical is [K, N]
                 assert_eq!(
                     a.shape()[1],
                     b.shape()[1],
@@ -189,13 +169,11 @@ impl Kernel for GpuMatMul {
                 );
                 let m = a.shape()[0] as u32;
                 let k = a.shape()[1] as u32;
-                let n = b.shape()[0] as u32; // Note: N comes from dimension 0 here!
+                let n = b.shape()[0] as u32;
 
                 if m == 1 {
-                    // FAST PATH: GEMV
                     (&self.pipeline_gemv_bf16, m, k, n)
                 } else {
-                    // SLOW PATH: Tiled MatMul (Prefill phase)
                     (&self.pipeline_bf16, m, k, n)
                 }
             }
@@ -212,7 +190,7 @@ impl Kernel for GpuMatMul {
         run_internal_matmul(
             &self.context,
             encoder,
-            pipeline, // Pass selected pipeline
+            pipeline,
             &self.bind_group_layout,
             &self.uniform_buffer,
             a.buffer(),
@@ -224,8 +202,6 @@ impl Kernel for GpuMatMul {
         );
     }
 }
-
-// --- Helpers ---
 
 fn create_bind_group_layout(device: &wgpu::Device) -> BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

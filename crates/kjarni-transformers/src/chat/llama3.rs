@@ -420,10 +420,6 @@ mod tests {
         assert!(stops.contains(&"<|end_of_text|>".to_string()));
     }
 
-    // ----------------------------
-    // Llama 2 Chat Template Tests
-    // ----------------------------
-
     #[test]
     fn llama2_empty_conversation() {
         let template = Llama2ChatTemplate::new();

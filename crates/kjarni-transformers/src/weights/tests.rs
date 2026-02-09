@@ -2,8 +2,8 @@
 mod tests {
     use std::path::Path;
 
-    use crate::tensor::DType;
-    use crate::weights::{gguf_loader::GgufLoader, ModelWeights, SafeTensorsLoader, WeightLoader};
+    
+    use crate::weights::{gguf_loader::GgufLoader, ModelWeights, WeightLoader};
 
     const SAFETENSORS_PATH: &str = "/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B";
     const GGUF_PATH: &str = "/home/olafurj/.cache/kjarni/llama-3.2-1b-instruct-q4_k_m/Llama-3.2-1B-Instruct-Q4_K_M.gguf";

@@ -11,10 +11,7 @@ use std::{any::Any, sync::Arc};
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqEncoderConfig};
 use crate::{
     Embeddings, Normalization, WgpuContext,
-    cpu::{
-        decoder::DecoderLayer,
-        encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
-    },
+    cpu::encoder::{CpuEncoderOps, encoder_layer::EncoderLayer, prelude::*},
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::Seq2SeqFactory,
     traits::{
@@ -30,9 +27,9 @@ use crate::{
     traits::CpuTransformerCore,
 };
 
-// =============================================================================
+
 // Encoder Output
-// =============================================================================
+
 
 /// Output from the Seq2Seq encoder.
 #[derive(Debug)]
@@ -45,9 +42,9 @@ pub struct EncoderOutput {
     pub attentions: Option<Vec<Array4<f32>>>,
 }
 
-// =============================================================================
+
 // Seq2Seq Encoder (CPU)
-// =============================================================================
+
 
 /// Unified transformer encoder for seq2seq models.
 ///
@@ -411,9 +408,9 @@ impl Seq2SeqCPUEncoder {
     }
 }
 
-// =============================================================================
+
 // Position Encoding Implementations
-// =============================================================================
+
 
 /// Runtime position encoding implementation.
 pub enum PositionEncoding {
@@ -452,9 +449,9 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
     embeddings
 }
 
-// =============================================================================
+
 // Trait Implementations
-// =============================================================================
+
 
 impl InferenceModel for Seq2SeqCPUEncoder {
     fn device(&self) -> Device {
@@ -550,7 +547,7 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
 mod seq2seq_encoder_tests {
     use super::*;
     use crate::activations::Activation;
-    use crate::models::base::{ModelInput, ModelLoadConfig};
+    use crate::models::base::ModelLoadConfig;
     use crate::traits::{
         AttentionLayout, EncoderLayerLayout, EncoderLayout, FeedForwardLayout, ModelConfig,
         ModelLayout, ModelMetadata, NormalizationStrategy,
@@ -681,8 +678,6 @@ mod seq2seq_encoder_tests {
 
         Ok((weights, dir))
     }
-
-    // --- Data Generators (Updated keys to include .weight) ---
 
     fn get_bart_golden_data() -> (HashMap<String, Vec<f32>>, HashMap<String, Vec<usize>>) {
         let mut w = HashMap::new();

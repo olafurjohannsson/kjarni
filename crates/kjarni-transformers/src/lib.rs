@@ -47,7 +47,7 @@ pub mod attention {
 }
 
 pub use audio::{
-    AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig, create_silence,
+    AudioConvFrontend, AudioData, AudioLoaderConfig, AudioPipeline, MelConfig,
     create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 

@@ -5,12 +5,11 @@ use kjarni_transformers::encoder_decoder::EncoderDecoderGenerator;
 use kjarni_transformers::WgpuContext;
 use kjarni_transformers::{Device, ModelType};
 use std::sync::Arc;
-use futures::{StreamExt, TryStreamExt, pin_mut};
+use futures::{TryStreamExt, pin_mut};
 
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
-use anyhow::anyhow;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,7 +19,6 @@ type safety, and concurrency. It enforces memory safety—meaning that all refer
 using a garbage collector. To simultaneously enforce memory safety and prevent data races, its 'borrow checker' \
 tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages \
 like C++, Haskell, and Erlang.";
-    // --- 1. SETUP ---
     log::info!("Loading models for CPU and GPU...");
     let ctx = get_test_context().await;
     let model_type = ModelType::BartLargeCnn;
@@ -45,7 +43,7 @@ like C++, Haskell, and Erlang.";
         }),
         speculation: None,
     };
-    let mut cpu_generation_config = cpu_generator.model.get_default_generation_config();
+    let cpu_generation_config = cpu_generator.model.get_default_generation_config();
     // cpu_generation_config.max_new_tokens = Some(100);
 
     let t = cpu_generator.generate(&article, Some(&config)).await?;

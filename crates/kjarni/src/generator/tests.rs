@@ -4,9 +4,9 @@ use super::*;
 use crate::generation::GenerationOverrides;
 use crate::generator::{available_models, is_generator_model};
 
-// =============================================================================
+
 // Unit Tests - Types
-// =============================================================================
+
 
 mod types_tests {
     use super::*;
@@ -66,12 +66,12 @@ mod types_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Validation
-// =============================================================================
+
 
 mod validation_tests {
-    use super::*;
+    
     use crate::generator::validation::*;
     use kjarni_transformers::models::ModelType;
 
@@ -127,12 +127,12 @@ mod validation_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Presets
-// =============================================================================
+
 
 mod preset_tests {
-    use super::*;
+    
     use crate::generator::presets::*;
 
     #[test]
@@ -235,9 +235,9 @@ mod preset_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Builder
-// =============================================================================
+
 
 mod builder_tests {
     use super::*;
@@ -311,9 +311,9 @@ mod builder_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Module Functions
-// =============================================================================
+
 
 mod module_function_tests {
     use super::*;
@@ -351,9 +351,9 @@ mod module_function_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests (require model download)
-// =============================================================================
+
 
 #[cfg(test)]
 mod integration_tests {
@@ -638,7 +638,6 @@ mod integration_tests {
         }
         let streamed: String = tokens.iter().map(|t| t.text.as_str()).collect();
 
-        // With greedy, these should match
         assert_eq!(
             direct, streamed,
             "Streaming and direct should match with greedy"
@@ -672,10 +671,6 @@ mod integration_tests {
         assert!(!full.is_empty());
     }
 
-    // =========================================================================
-    // Error Handling Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_unknown_model_error() {
         let result = Generator::new("not-a-real-model").await;
@@ -684,7 +679,6 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_offline_mode_not_downloaded() {
-        // Try to load a model that definitely isn't downloaded
         let result = Generator::builder("nonexistent-model-xyz")
             .offline()
             .cpu()
@@ -694,10 +688,6 @@ mod integration_tests {
 
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    // Accessor Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_generator_accessors() {
@@ -721,10 +711,6 @@ mod integration_tests {
         assert!(r#gen.context_size() > 0);
         assert!(r#gen.vocab_size() > 0);
     }
-
-    // =========================================================================
-    // Batch Generation Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_sequential_generation() {
@@ -754,10 +740,6 @@ mod integration_tests {
             assert!(!output.is_empty(), "Output {} should not be empty", i);
         }
     }
-
-    // =========================================================================
-    // Concurrent Generation Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_concurrent_generation() {
@@ -798,10 +780,6 @@ mod integration_tests {
         }
     }
 
-    // =========================================================================
-    // Convenience Function Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_module_generate_function() {
         if !model_available("qwen2.5-0.5b-instruct") {
@@ -815,14 +793,9 @@ mod integration_tests {
         assert!(!output.is_empty());
     }
 
-    // =========================================================================
-    // Thread Safety Tests
-    // =========================================================================
-
     #[test]
     fn test_generator_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        // This compiles only if Generator is Send + Sync
         assert_send_sync::<Generator>();
     }
 }

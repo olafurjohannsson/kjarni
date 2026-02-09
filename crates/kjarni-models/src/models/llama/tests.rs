@@ -8,11 +8,11 @@
 use crate::models::llama::config::LlamaConfig;
 use crate::models::llama::model::LlamaModel;
 use anyhow::Result;
-use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
+use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
-use kjarni_transformers::models::{LanguageModel, ModelType};
+use kjarni_transformers::models::LanguageModel;
 use kjarni_transformers::prelude::*;
-use std::path::{self, Path};
+use std::path::Path;
 use std::sync::Arc;
 
 /// Helper function to load the Llama model for testing.

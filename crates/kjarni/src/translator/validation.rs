@@ -1,6 +1,6 @@
 //! Model validation for translation.
 
-use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
+use kjarni_transformers::models::{ModelArchitecture, ModelType};
 
 use super::types::{TranslatorError, TranslatorResult};
 

@@ -17,7 +17,7 @@ use crate::cpu::normalization::RMSNorm;
 use crate::rope::RoPE;
 use crate::traits::{CpuTransformerCore, Device, InferenceModel, ModelLayout, ModelMetadata, NormalizationStrategy};
 use crate::weights::ModelWeights;
-use crate::{Embeddings, FeedForward, cpu::normalization::LayerNorm};
+use crate::{FeedForward, cpu::normalization::LayerNorm};
 
 pub struct CpuTransformerEncoder {
     embeddings_layer_norm: LayerNorm,
@@ -146,8 +146,6 @@ impl CpuTransformerEncoder {
                 out_proj.clone(),
             );
 
-            // --- FEED FORWARD LOADING ---
-
             let up_proj = LinearLayer::builder(weights, &name(&encoder_layout.layer.ffn.up_weight))
                 .with_optional_bias(resolve_bias(&encoder_layout.layer.ffn.up_bias).as_deref())
                 .with_target_dtype(dtype)
@@ -163,7 +161,6 @@ impl CpuTransformerEncoder {
                     .with_f32_strategy(Some(f32_strategy))
                     .build()?;
 
-            // Handle Gate (Optional, for SwiGLU models like Nomic)
             let gate_proj = if let Some(gate_name) = &encoder_layout.layer.ffn.gate_weight {
                 Some(
                     LinearLayer::builder(weights, &name(gate_name))
@@ -184,15 +181,12 @@ impl CpuTransformerEncoder {
                     Activation::SilU,
                 ))
             } else {
-                // If no Gate, it's Standard (BERT/MiniLM/DistilBERT)
                 FeedForward::StandardNew(crate::feedforward::StdFeedForwardNew::new(
                     up_proj.clone(),   // FC1
                     down_proj.clone(), // FC2
                     meta.activation,   // Gelu/Relu
                 ))
             };
-
-            // --- NORMALIZATION ---
 
             let attn_norm_w = name(&encoder_layout.layer.self_attn.norm_weight);
             let attn_norm_b = resolve_bias(&encoder_layout.layer.self_attn.norm_bias);
@@ -201,7 +195,7 @@ impl CpuTransformerEncoder {
                 if meta.normalization_strategy == NormalizationStrategy::LayerNorm {
                     Normalization::LayerNorm(LayerNorm::new(
                         weights.get_array1(&attn_norm_w)?,
-                        weights.get_array1(&attn_norm_b.unwrap())?, // LayerNorm usually requires bias
+                        weights.get_array1(&attn_norm_b.unwrap())?, 
                         meta.norm_eps,
                     ))
                 } else {
@@ -286,12 +280,6 @@ impl CpuTransformerEncoder {
     }
 
     /// Full forward pass with external buffer (caller owns buffers).
-    ///
-    /// This is the recommended API for hot paths where you reuse buffers.
-    ///
-    /// # Note
-    ///
-    /// Still allocates: embeddings, layer norm, RoPE, 4D attention matmuls.
     pub fn forward_noalloc(
         &self,
         input_ids: &Array2<u32>,
@@ -302,8 +290,6 @@ impl CpuTransformerEncoder {
         unimplemented!()
     }
 
-    /// Creates appropriately sized buffers for this encoder.
-    ///
     /// Call once and reuse across forward passes.
     pub fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
         EncoderBuffers::new_auto(

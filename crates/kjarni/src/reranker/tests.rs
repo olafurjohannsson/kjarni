@@ -2,9 +2,9 @@
 
 use super::*;
 
-// =============================================================================
+
 // Unit Tests
-// =============================================================================
+
 
 #[test]
 fn test_rerank_overrides_default() {
@@ -118,9 +118,9 @@ fn test_reranker_tier_default() {
     assert_eq!(default, RerankerTier::Balanced);
 }
 
-// =============================================================================
+
 // Integration Tests (require model download)
-// =============================================================================
+
 
 #[cfg(feature = "integration_tests")]
 mod integration {

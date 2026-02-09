@@ -47,7 +47,6 @@ pub struct BertConfig {
     #[serde(default)]
     pub type_vocab_size: usize,
 
-    // --- Nomic Specifics ---
     pub model_type: Option<String>, // "bert" or "nomic_bert"
 
     #[serde(alias = "rotary_emb_fraction")]

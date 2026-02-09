@@ -96,24 +96,6 @@ impl SplitterConfig {
         }
     }
 
-    /// Create config optimized for code splitting
-    pub fn for_code() -> Self {
-        Self {
-            chunk_size: 500,
-            chunk_overlap: 50,
-            separator: "\n".to_string(),
-        }
-    }
-
-    /// Create config optimized for markdown documents
-    pub fn for_markdown() -> Self {
-        Self {
-            chunk_size: 1500,
-            chunk_overlap: 150,
-            separator: "\n\n".to_string(),
-        }
-    }
-
     /// Validate the configuration
     ///
     /// Returns an error message if the config is invalid.
@@ -168,16 +150,6 @@ impl TextSplitter {
     /// Default: 1000 char chunks with 200 char overlap, splitting on paragraphs.
     pub fn with_defaults() -> Self {
         Self::new(SplitterConfig::default())
-    }
-
-    /// Create a text splitter optimized for code
-    pub fn for_code() -> Self {
-        Self::new(SplitterConfig::for_code())
-    }
-
-    /// Create a text splitter optimized for markdown
-    pub fn for_markdown() -> Self {
-        Self::new(SplitterConfig::for_markdown())
     }
 
     /// Get a reference to the current configuration
@@ -423,24 +395,6 @@ mod tests {
     }
 
     #[test]
-    fn test_config_for_code() {
-        let config = SplitterConfig::for_code();
-
-        assert_eq!(config.chunk_size, 500);
-        assert_eq!(config.chunk_overlap, 50);
-        assert_eq!(config.separator, "\n");
-    }
-
-    #[test]
-    fn test_config_for_markdown() {
-        let config = SplitterConfig::for_markdown();
-
-        assert_eq!(config.chunk_size, 1500);
-        assert_eq!(config.chunk_overlap, 150);
-        assert_eq!(config.separator, "\n\n");
-    }
-
-    #[test]
     fn test_config_validate_valid() {
         let config = SplitterConfig::default();
         assert!(config.validate().is_ok());
@@ -482,27 +436,11 @@ mod tests {
         assert_eq!(config.chunk_overlap, cloned.chunk_overlap);
         assert_eq!(config.separator, cloned.separator);
     }
-
-    // ============================================================================
-    // TEXT SPLITTER BASIC TESTS
-    // ============================================================================
-
+    
     #[test]
     fn test_splitter_with_defaults() {
         let splitter = TextSplitter::with_defaults();
         assert_eq!(splitter.config().chunk_size, 1000);
-    }
-
-    #[test]
-    fn test_splitter_for_code() {
-        let splitter = TextSplitter::for_code();
-        assert_eq!(splitter.config().chunk_size, 500);
-    }
-
-    #[test]
-    fn test_splitter_for_markdown() {
-        let splitter = TextSplitter::for_markdown();
-        assert_eq!(splitter.config().chunk_size, 1500);
     }
 
     #[test]

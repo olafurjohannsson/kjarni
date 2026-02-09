@@ -7,12 +7,10 @@ use super::GpuPermute; // Assuming GpuPermute is in the parent `mod.rs`
 use crate::gpu::{DType, GpuTensor};
 use anyhow::Result;
 use common::{read_gpu_tensor_to_vec};
-use ndarray::{Array, Array2, Array4, Axis};
+use ndarray::{Array, Array2, Array4};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 use common::get_test_context;
-use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 
 // Generic helper to compare arrays of any dimension

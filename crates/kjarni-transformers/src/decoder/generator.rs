@@ -413,10 +413,10 @@ pub async fn generate_tokens(
 mod tests {
     use super::*;
     use crate::cache::Cache;
-    use crate::traits::InferenceModel;
+    
     use std::any::Any;
     use std::collections::HashSet;
-    use tokenizers::Tokenizer;
+    
 
  
     #[test]

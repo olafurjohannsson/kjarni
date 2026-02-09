@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
 use serde_json::json;
 

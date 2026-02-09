@@ -1,4 +1,3 @@
-use std::sync::Arc;
 
 use kjarni_models::SentenceEncoder;
 use kjarni_transformers::models::ModelType;

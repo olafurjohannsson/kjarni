@@ -155,9 +155,9 @@ pub fn is_seq2seq_model(model: &str) -> Seq2SeqResult<()> {
 }
 
 
-// =============================================================================
+
 // Compile-time Send + Sync verification
-// =============================================================================
+
 
 #[cfg(test)]
 mod send_sync_tests {

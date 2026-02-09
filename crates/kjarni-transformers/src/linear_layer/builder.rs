@@ -369,9 +369,9 @@ impl<'a> LinearLayerBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safetensors::serialize;
-    use safetensors::tensor::{Dtype, TensorView};
-    use std::io::Write;
+    
+    
+    
 
     // Helper to create a temporary safetensors file with dummy weights
     fn create_dummy_weights_file() -> (tempfile::TempDir, ModelWeights) {

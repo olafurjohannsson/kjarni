@@ -3,7 +3,7 @@ use crate::cache::Cache;
 use crate::encoder_decoder::traits::{
     EncoderDecoderGenerationBackend, EncoderDecoderLanguageModel,
 };
-use crate::encoder_decoder::traits::{GpuCrossAttentionKVCache, GpuCrossDecoderOutput};
+use crate::encoder_decoder::traits::GpuCrossAttentionKVCache;
 use crate::gpu::cache::GpuBeamKVCache;
 use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::models::base::ModelInput;
@@ -61,7 +61,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             .ok_or_else(|| anyhow!("Model does not support GPU execution"))?;
 
         let pool = self.context.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
 
         let encoder_hidden_states = {
@@ -136,7 +136,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
 
         // 3. Prepare for GPU execution
         let pool = self.context.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);
         let (encoder_cmd, pool_ref) = frame.resources();
 
@@ -241,7 +241,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{Array1, Array2, Array4};
+    use ndarray::Array2;
 
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new()

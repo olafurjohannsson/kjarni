@@ -1,6 +1,4 @@
 //! Chat conversation types and templates
-//!
-//! Provides the core abstractions for multi-turn conversations with LLMs.
 
 use std::fmt;
 

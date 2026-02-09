@@ -1,26 +1,13 @@
 //! Tests for the classifier module.
-//!
-//! Run all tests: `cargo test --package kjarni classifier`
-//! Run integration tests (requires model): `cargo test --package kjarni classifier -- --ignored`
-
 use super::*;
 use crate::classifier::{
     ClassificationMode, ClassificationOverrides, Classifier, ClassifierError,
-    presets::{
-        ClassificationTask, EMOTION_DETAILED_V1, EMOTION_V1, SENTIMENT_3CLASS_V1,
-        SENTIMENT_5STAR_V1, SENTIMENT_BINARY_V1, TOXICITY_V1,
-    },
 };
-use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig};
+use crate::common::{DownloadPolicy, KjarniDevice};
 
-// =============================================================================
 // PyTorch Reference Constants
-// =============================================================================
 
 mod expected {
-    // =========================================================================
-    // Test Inputs
-    // =========================================================================
     pub const INPUT_POSITIVE: &str = "I absolutely love this, it's amazing!";
     pub const INPUT_NEGATIVE: &str = "This is terrible, I hate it so much.";
     pub const INPUT_NEUTRAL: &str = "The meeting is scheduled for Tuesday.";
@@ -31,10 +18,6 @@ mod expected {
     pub const INPUT_NON_TOXIC: &str = "Thank you for your help today.";
     pub const INPUT_HAPPY: &str = "I am so happy and excited for the weekend!";
     pub const INPUT_SAD: &str = "That was a truly disappointing and sad experience.";
-
-    // =========================================================================
-    // distilbert-sentiment (2 labels: NEGATIVE, POSITIVE)
-    // =========================================================================
     pub const DISTILBERT_SENTIMENT_POSITIVE_LABEL: &str = "POSITIVE";
     pub const DISTILBERT_SENTIMENT_POSITIVE_SCORE: f32 = 0.99987566;
     pub const DISTILBERT_SENTIMENT_POSITIVE_LABEL_INDEX: usize = 1;
@@ -47,10 +30,6 @@ mod expected {
     pub const DISTILBERT_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00012436, 0.99987566];
     pub const DISTILBERT_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.99950767, 0.00049234];
     pub const DISTILBERT_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01445730, 0.98554265];
-
-    // =========================================================================
-    // roberta-sentiment (3 labels: negative, neutral, positive)
-    // =========================================================================
     pub const ROBERTA_SENTIMENT_POSITIVE_LABEL: &str = "positive";
     pub const ROBERTA_SENTIMENT_POSITIVE_SCORE: f32 = 0.98318094;
     pub const ROBERTA_SENTIMENT_POSITIVE_LABEL_INDEX: usize = 2;
@@ -63,10 +42,6 @@ mod expected {
     pub const ROBERTA_SENTIMENT_POSITIVE_SCORES: &[f32] = &[0.00723555, 0.00958345, 0.98318094];
     pub const ROBERTA_SENTIMENT_NEGATIVE_SCORES: &[f32] = &[0.94799244, 0.04338233, 0.00862524];
     pub const ROBERTA_SENTIMENT_NEUTRAL_SCORES: &[f32] = &[0.01340395, 0.92984450, 0.05675153];
-
-    // =========================================================================
-    // bert-sentiment-multilingual (5 labels: 1-5 stars)
-    // =========================================================================
     pub const BERT_MULTILINGUAL_POSITIVE_LABEL: &str = "5 stars";
     pub const BERT_MULTILINGUAL_POSITIVE_SCORE: f32 = 0.96888399;
     pub const BERT_MULTILINGUAL_POSITIVE_LABEL_INDEX: usize = 4;
@@ -82,10 +57,6 @@ mod expected {
     pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL: &str = "5 stars";
     pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_SCORE: f32 = 0.93122756;
     pub const BERT_MULTILINGUAL_SPANISH_POSITIVE_LABEL_INDEX: usize = 4;
-
-    // =========================================================================
-    // distilroberta-emotion (7 labels: anger, disgust, fear, joy, neutral, sadness, surprise)
-    // =========================================================================
     pub const DISTILROBERTA_EMOTION_POSITIVE_LABEL: &str = "joy";
     pub const DISTILROBERTA_EMOTION_POSITIVE_SCORE: f32 = 0.86246377;
     pub const DISTILROBERTA_EMOTION_POSITIVE_LABEL_INDEX: usize = 3;
@@ -117,9 +88,6 @@ mod expected {
         0.01819254, 0.00930141, 0.04236472, 0.10131434, 0.73899311, 0.03730628, 0.05252752,
     ];
 
-    // =========================================================================
-    // roberta-emotions (28 labels, multi-label)
-    // =========================================================================
     pub const ROBERTA_EMOTIONS_POSITIVE_LABEL: &str = "love";
     pub const ROBERTA_EMOTIONS_POSITIVE_SCORE: f32 = 0.87999564;
     pub const ROBERTA_EMOTIONS_POSITIVE_LABEL_INDEX: usize = 18;
@@ -135,10 +103,6 @@ mod expected {
     pub const ROBERTA_EMOTIONS_NEUTRAL_LABEL: &str = "neutral";
     pub const ROBERTA_EMOTIONS_NEUTRAL_SCORE: f32 = 0.94425792;
     pub const ROBERTA_EMOTIONS_NEUTRAL_LABEL_INDEX: usize = 27;
-
-    // =========================================================================
-    // toxic-bert (6 labels, multi-label)
-    // =========================================================================
     pub const TOXIC_BERT_TOXIC_LABEL: &str = "toxic";
     pub const TOXIC_BERT_TOXIC_SCORE: f32 = 0.99004936;
     pub const TOXIC_BERT_TOXIC_LABEL_INDEX: usize = 0;
@@ -149,10 +113,6 @@ mod expected {
     pub const TOXIC_BERT_POSITIVE_SCORE: f32 = 0.00057647;
     pub const TOXIC_BERT_POSITIVE_LABEL_INDEX: usize = 0;
 }
-
-// =============================================================================
-// Type Tests
-// =============================================================================
 
 mod classifier_tests {
     use super::*;
@@ -245,9 +205,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Builder Tests
-    // =============================================================================
+    
 
     mod builder_tests {
         use super::*;
@@ -372,10 +332,6 @@ mod classifier_tests {
             assert_eq!(config.inner.max_batch_size, Some(32));
         }
     }
-
-    // =============================================================================
-    // Preset Tests
-    // =============================================================================
 
     mod preset_tests {
         use crate::classifier::presets::{EmotionTier, SentimentTier, find_preset};
@@ -505,9 +461,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Validation Tests
-    // =============================================================================
+    
 
     mod validation_tests {
         use super::*;
@@ -573,16 +529,15 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Error Tests
-    // =============================================================================
+    
 
     mod error_tests {
         use super::*;
-
         #[test]
         fn test_error_display_unknown_model() {
-            let err = ClassifierError::UnknownModel("fake-model".to_string());
+            let err = ClassifierError::UnknownModel("Unknown model 'fake-model'".to_string());
             let msg = format!("{}", err);
             assert!(msg.contains("fake-model"));
             assert!(msg.contains("Unknown model"));
@@ -617,7 +572,6 @@ mod classifier_tests {
 
     mod classifier_golden_values_test {
         use crate::Classifier;
-
 
         fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
             assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
@@ -727,9 +681,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Convenience Function Tests
-    // =============================================================================
+    
 
     mod convenience_tests {
         use super::*;
@@ -747,9 +701,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Test Utilities
-    // =============================================================================
+    
 
     const TEST_TEXT_POSITIVE: &str = "I absolutely love this, it's amazing!";
     const TEST_TEXT_NEGATIVE: &str = "This is terrible, I hate it so much.";
@@ -773,9 +727,9 @@ mod classifier_tests {
         (a - b).abs() < eps
     }
 
-    // =============================================================================
+    
     // distilbert-sentiment Integration Tests
-    // =============================================================================
+    
 
     mod distilbert_sentiment_tests {
         use super::*;
@@ -911,9 +865,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // roberta-sentiment Integration Tests
-    // =============================================================================
+    
 
     mod roberta_sentiment_tests {
         use super::*;
@@ -1030,9 +984,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // bert-sentiment-multilingual Integration Tests
-    // =============================================================================
+    
 
     mod bert_multilingual_tests {
         use super::*;
@@ -1249,9 +1203,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // distilroberta-emotion Integration Tests
-    // =============================================================================
+    
 
     mod distilroberta_emotion_tests {
         use super::*;
@@ -1451,9 +1405,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // roberta-emotions (Multi-Label) Integration Tests
-    // =============================================================================
+    
 
     mod roberta_emotions_tests {
         use super::*;
@@ -1597,9 +1551,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // toxic-bert (Multi-Label) Integration Tests
-    // =============================================================================
+    
 
     mod toxic_bert_tests {
         use super::*;
@@ -1700,9 +1654,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Batch Classification Tests
-    // =============================================================================
+    
 
     mod batch_tests {
         use kjarni_transformers::LanguageModel;
@@ -1904,9 +1858,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Error Handling Tests
-    // =============================================================================
+    
 
     mod error_handling_tests {
         use super::*;
@@ -1969,9 +1923,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // GPU Parity Tests
-    // =============================================================================
+    
 
     mod gpu_tests {
         use super::*;
@@ -2027,9 +1981,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // F16 Precision Tests
-    // =============================================================================
+    
 
     mod f16_tests {
         use super::*;
@@ -2065,9 +2019,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Accessor Tests
-    // =============================================================================
+    
 
     mod accessor_tests {
         use super::*;
@@ -2121,9 +2075,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Convenience Function Tests
-    // =============================================================================
+    
 
     mod convenience_function_tests {
         use super::*;
@@ -2138,9 +2092,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Override Tests
-    // =============================================================================
+    
 
     mod override_tests {
         use super::*;
@@ -2187,9 +2141,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Custom Labels Tests
-    // =============================================================================
+    
 
     mod custom_labels_tests {
         use super::*;
@@ -2220,9 +2174,9 @@ mod classifier_tests {
         }
     }
 
-    // =============================================================================
+    
     // Loading Tests
-    // =============================================================================
+    
 
     mod loading_tests {
         use super::*;

@@ -35,9 +35,9 @@ pub fn dequantize_q4_k_block(b: &BlockQ4_K, out: &mut [f32]) {
     }
 }
 
-// =============================================================================
+
 // Q8_0 Dequantization
-// =============================================================================
+
 
 /// Dequantize a Q8_0 block to 32 f32 values.
 pub fn dequantize_q8_0_block(block: &BlockQ8_0, output: &mut [f32]) {
@@ -47,9 +47,9 @@ pub fn dequantize_q8_0_block(block: &BlockQ8_0, output: &mut [f32]) {
     }
 }
 
-// =============================================================================
+
 // Q6_K Dequantization
-// =============================================================================
+
 //
 // Q6_K block structure (256 values):
 // - ql: 128 bytes (lower 4 bits of each 6-bit value)
@@ -137,9 +137,9 @@ pub fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
     }
 }
 
-// =============================================================================
+
 // Unit Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_q4k_dequantize_not_all_zeros() {
         // Create a test block with known non-zero values
-        let mut block = BlockQ4_K {
+        let block = BlockQ4_K {
             d: half::f16::from_f32(1.0),
             dmin: half::f16::from_f32(0.0),
             scales: [63, 63, 63, 63, 63, 63, 63, 63, 0xFF, 0xFF, 0xFF, 0xFF],

@@ -21,12 +21,11 @@ fn num_elements(shape: vec4<u32>) -> u32 {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let out_idx = global_id.x;
     
-    // Each thread handles one element of the OUTPUT tensor
     if (out_idx >= num_elements(uniforms.out_shape)) {
         return;
     }
 
-    // --- Calculate the 4D coordinate corresponding to this output index ---
+    // Calculate the 4D coordinate
     var out_coords: vec4<u32>;
     var temp_idx = out_idx;
     out_coords[0] = temp_idx / uniforms.out_strides[0];
@@ -36,15 +35,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     out_coords[2] = temp_idx / uniforms.out_strides[2];
     out_coords[3] = temp_idx % uniforms.out_strides[2]; // Equivalent to temp_idx / strides[3] where strides[3] is 1
 
-    // --- "Un-permute" the coords to find the source coordinate ---
     var in_coords: vec4<u32>;
     in_coords[uniforms.perm[0]] = out_coords[0];
     in_coords[uniforms.perm[1]] = out_coords[1];
     in_coords[uniforms.perm[2]] = out_coords[2];
     in_coords[uniforms.perm[3]] = out_coords[3];
     
-    // --- Calculate the source index from the source coordinates ---
-    // We assume the INPUT tensor is contiguous (standard strides)
+    // assume the tensor is contiguous
     let in_idx = in_coords[0] * (uniforms.out_shape[uniforms.perm[1]] * uniforms.out_shape[uniforms.perm[2]] * uniforms.out_shape[uniforms.perm[3]]) +
                  in_coords[1] * (uniforms.out_shape[uniforms.perm[2]] * uniforms.out_shape[uniforms.perm[3]]) +
                  in_coords[2] * (uniforms.out_shape[uniforms.perm[3]]) +

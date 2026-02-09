@@ -7,7 +7,7 @@ static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static PEAK_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for TracingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 { unsafe {
         let ret = System.alloc(layout);
         if !ret.is_null() {
             let prev = ALLOCATED_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
@@ -31,12 +31,12 @@ unsafe impl GlobalAlloc for TracingAllocator {
             }
         }
         ret
-    }
+    }}
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) { unsafe {
         System.dealloc(ptr, layout);
         ALLOCATED_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
-    }
+    }}
 }
 
 pub fn get_current_ram_usage_mb() -> f64 {

@@ -73,12 +73,8 @@ pub struct GenerationConfig {
     pub no_repeat_ngram_size: usize,
     pub add_bos_token: bool,
     pub strategy: DecodingStrategy,
-    /// Enable speculative decoding for this generation.
-    /// Requires draft model to be loaded via `generator.load_draft_model()`.
-    /// Set to None to use normal autoregressive decoding.
     pub speculation: Option<SpeculationParams>,
 }
-/// A sensible default for decoder-only models (like GPT-2 or Llama).
 impl Default for GenerationConfig {
     fn default() -> Self {
         Self {
@@ -99,14 +95,13 @@ impl Default for GenerationConfig {
     }
 }
 
-/// Parameters for speculative decoding (per-call settings).
 #[derive(Clone, Debug)]
 pub struct SpeculationParams {
-    /// Number of tokens to speculate per iteration (default: 4).
+    /// Number of tokens to speculate per iteration
     pub num_tokens: usize,
     
     /// Use probability-based acceptance to preserve exact target distribution.
-    /// If false, uses greedy acceptance (faster but slightly different distribution).
+    /// If false, uses greedy acceptance
     pub probabilistic: bool,
 }
 

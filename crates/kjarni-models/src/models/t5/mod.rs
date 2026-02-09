@@ -59,7 +59,7 @@ impl T5Task {
 mod t5_generation_test {
     use crate::models::t5::model::T5Model;
 
-    use super::*;
+    
     use anyhow::Result;
     use kjarni_transformers::{Device, ModelType, encoder_decoder::EncoderDecoderGenerator};
 

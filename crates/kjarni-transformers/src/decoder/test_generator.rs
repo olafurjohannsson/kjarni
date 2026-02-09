@@ -2,7 +2,7 @@ use crate::activations::Activation;
 use crate::cache::Cache;
 use crate::common::{CancellationToken, GenerationConfig, StreamedToken, TokenType};
 use crate::decoder::prelude::*;
-use crate::models::base::{AutoregressiveLoop, ModelInput};
+use crate::models::base::AutoregressiveLoop;
 use crate::traits::{
     AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, InferenceModel,
     ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,

@@ -11,7 +11,7 @@ use log::{debug, info};
 use tokio::sync::mpsc;
 
 use kjarni_transformers::WgpuContext;
-use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
+use kjarni_transformers::common::GenerationConfig;
 use kjarni_transformers::encoder_decoder::{EncoderDecoderGenerator, EncoderDecoderLanguageModel};
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::models::{ModelArchitecture, ModelType};

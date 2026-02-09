@@ -3,7 +3,7 @@ use crate::WgpuContext;
 use crate::gpu::{DType, GpuTensor};
 use crate::utils::linear_algebra::{matmul_3d_2d, matmul_4d};
 use anyhow::Result;
-use ndarray::{Array, Array2, Array3, Array4};
+use ndarray::{Array, Array3};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use std::sync::Arc;

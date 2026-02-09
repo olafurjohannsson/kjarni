@@ -2,7 +2,7 @@
 
 
 mod bart_tests_config {
-    use std::sync::Arc;
+    
 
     // BartModel architectural and config tests
 // Verifies config.json + generation_config.json are parsed correctly

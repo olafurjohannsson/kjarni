@@ -1,7 +1,3 @@
-// =============================================================================
-// kjarni/src/seq2seq/tests.rs (or in mod.rs under #[cfg(test)])
-// =============================================================================
-
 #[cfg(test)]
 mod seq2seq_tests {
     use crate::seq2seq::{Seq2SeqError, generate};
@@ -9,13 +5,10 @@ mod seq2seq_tests {
         Seq2SeqGenerator, Seq2SeqOverrides, available_models, is_seq2seq_model,
     };
 
-    use super::*;
+    
 
     #[tokio::test]
     async fn test_t5_full_workflow() {
-        // This test requires flan-t5-base to be downloaded
-        // Run manually with: cargo test test_t5_full_workflow --ignored
-
         let r#gen = Seq2SeqGenerator::new("flan-t5-base").await.unwrap();
 
         // Translation
@@ -36,10 +29,6 @@ mod seq2seq_tests {
 
         assert!(!summary.is_empty());
     }
-
-    // =========================================================================
-    // Unit Tests (no model required)
-    // =========================================================================
 
     #[test]
     fn test_overrides_default() {

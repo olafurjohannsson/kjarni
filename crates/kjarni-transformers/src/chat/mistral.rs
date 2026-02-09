@@ -85,7 +85,7 @@ impl ChatTemplate for MistralChatTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Conversation, Message, Role};
+    use crate::{Conversation, Message};
 
     #[test]
     fn mistral_empty_conversation() {

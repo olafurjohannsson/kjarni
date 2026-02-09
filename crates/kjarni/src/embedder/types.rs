@@ -1,6 +1,5 @@
 //! Types for the embedder module.
 
-use std::fmt;
 use kjarni_transformers::PoolingStrategy;
 use thiserror::Error;
 

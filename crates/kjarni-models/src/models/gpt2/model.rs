@@ -367,7 +367,7 @@ mod tests {
     use super::*;
 
     use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
-    use kjarni_transformers::decoder::prelude::*;
+    
     use kjarni_transformers::prelude::LanguageModel;
 
     /// Helper function to load the DistilGPT2 model for testing.

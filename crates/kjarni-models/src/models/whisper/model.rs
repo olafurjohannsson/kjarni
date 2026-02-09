@@ -16,7 +16,6 @@ use kjarni_transformers::{
     cache::{Cache, CpuBeamKVCache},
     common::{
         DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults,
-        ModelGenerationDefaults,
     },
     cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
@@ -25,13 +24,10 @@ use kjarni_transformers::{
             cpu_encoder::{Seq2SeqCPUEncoder, Seq2SeqEncoderConfig},
         },
     },
-    encoder_decoder::{
-        config::{Seq2SeqDecoderConfig as DecoderCfg, Seq2SeqEncoderConfig as EncoderCfg},
-        traits::{
+    encoder_decoder::traits::{
             CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
             GpuEncoderDecoderOps,
         },
-    },
     gpu::{GpuTensor, GpuTensorPool},
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
@@ -39,9 +35,9 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
-// =============================================================================
+
 // WhisperModel
-// =============================================================================
+
 
 pub struct WhisperModel {
     tokenizer: Tokenizer,
@@ -152,23 +148,13 @@ impl WhisperModel {
         })
     }
 
-    // =========================================================================
-    // Audio Processing
-    // =========================================================================
-
     /// Returns the expected mel spectrogram configuration.
-    ///
-    /// Use this to ensure your mel spectrograms match what the model expects.
     pub fn expected_mel_config(&self) -> MelConfig {
         MelConfig {
             n_mels: self.config.num_mel_bins,
             ..MelConfig::whisper()
         }
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     pub fn config(&self) -> &WhisperConfig {
         &self.config
@@ -182,10 +168,6 @@ impl WhisperModel {
         self.config.layout()
     }
 
-    // =========================================================================
-    // Supported Models
-    // =========================================================================
-
     pub const SUPPORTED_MODELS: &'static [ModelType] = &[
         // ModelType::WhisperTiny,
         // ModelType::WhisperBase,
@@ -196,10 +178,6 @@ impl WhisperModel {
         ModelType::WhisperLargeV3,
     ];
 }
-
-// =============================================================================
-// EncoderDecoderModelFactory Implementation
-// =============================================================================
 
 impl EncoderDecoderModelFactory for WhisperModel {
     type Config = WhisperConfig;
@@ -229,7 +207,6 @@ impl EncoderDecoderModelFactory for WhisperModel {
         let gpu_dec = None;
 
         if device.is_cpu() || load_config.offload_embeddings {
-            // Whisper Encoder (uses ::whisper() config)
             let enc_config = Seq2SeqEncoderConfig::whisper();
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
                 weights,
@@ -238,7 +215,6 @@ impl EncoderDecoderModelFactory for WhisperModel {
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
 
-            // Whisper Decoder (uses ::whisper() config)
             let dec_config = Seq2SeqDecoderConfig::whisper();
             cpu_dec = Some(Box::new(Seq2SeqCPUDecoder::new(
                 weights,
@@ -260,8 +236,6 @@ impl EncoderDecoderModelFactory for WhisperModel {
         _: Option<HFGenerationDefaults>,
         generation_config: HFGenerationConfig,
     ) -> Self {
-        // NOTE: This won't work correctly because we can't load AudioConvFrontend here.
-        // Use from_registry() or from_pretrained() instead.
         panic!(
             "WhisperModel::new_from_pipeline is not supported. \
              Use WhisperModel::from_registry() or from_pretrained() instead."
@@ -269,9 +243,9 @@ impl EncoderDecoderModelFactory for WhisperModel {
     }
 }
 
-// =============================================================================
+
 // Trait Implementations
-// =============================================================================
+
 
 impl InferenceModel for WhisperModel {
     fn device(&self) -> Device {
@@ -552,9 +526,9 @@ impl EncoderDecoderLanguageModel for WhisperModel {
     }
 }
 
-// =============================================================================
+
 // Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {

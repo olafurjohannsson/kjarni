@@ -142,9 +142,6 @@ impl GpuLinearLayer {
         let is_bf16 = weights.dtype() == DType::BF16;
         let is_gemv = m == 1;
 
-        // --- HEURISTIC SELECTION ---
-        // For lm_head (N > 32000), standard GEMV is slow because of uncoalesced reads.
-        // We use the "Wide" kernel which assigns a full workgroup to one output row.
         let use_wide_kernel = is_gemv && is_bf16 && n >= 128;
 
         let pipeline = if use_wide_kernel {

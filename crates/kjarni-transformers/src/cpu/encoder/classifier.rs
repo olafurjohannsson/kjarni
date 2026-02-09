@@ -1,8 +1,4 @@
 //! Concrete classification heads for encoder models.
-//!
-//! These components take the final hidden states from an encoder and project them
-//! into task-specific outputs, such as sequence-level logits (for sentiment analysis)
-//! or token-level logits (for NER).
 
 use crate::gpu_ops::primitives::add::GpuAdd;
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
@@ -14,10 +10,6 @@ use crate::weights::ModelWeights;
 use crate::{PoolingStrategy, last_token_pool};
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3, s};
-
-// ============================================================================
-//  CPU Sequence Classification Head
-// ============================================================================
 
 /// Layout for sequence classification head.
 #[derive(Debug, Clone)]
@@ -42,11 +34,6 @@ pub enum HeadActivation {
 }
 
 /// CPU classification head supporting multiple architectures.
-///
-/// Supports:
-/// - BERT/RoBERTa: pooler (Tanh) → classifier  
-/// - DistilBERT: pre_classifier (ReLU) → classifier
-/// - Simple: classifier only
 pub struct CpuSequenceClassificationHead {
     /// Pooler layer (BERT-style, uses Tanh)
     pooler: Option<LinearLayer>,
@@ -63,10 +50,6 @@ pub struct CpuSequenceClassificationHead {
 
 impl CpuSequenceClassificationHead {
     /// Create a new classification head.
-    ///
-    /// # Arguments
-    /// * `pooler` - Optional pooler layer (BERT-style)
-    /// * `classifier` - Final classification layer
     pub fn new(pooler: Option<LinearLayer>, classifier: LinearLayer) -> Result<Self> {
         Self::with_config(
             pooler,
@@ -117,23 +100,16 @@ impl CpuSequenceClassificationHead {
         })
     }
 
-    /// Create from model weights with auto-detection.
     pub fn from_weights(
         weights: &ModelWeights,
         load_config: &ModelLoadConfig,
         labels: Option<Vec<String>>,
     ) -> Result<Self> {
         let pooling_strategy = if weights.config_json().contains("\"model_type\": \"bart\"") {
-            // BART for classification uses the EOS token, which is the last token.
             PoolingStrategy::LastToken
         } else {
-            // BERT, RoBERTa, DistilBERT, etc., all default to using the CLS token.
             PoolingStrategy::Cls
         };
-        // println!("Pooling {:?}", pooling_strategy);
-
-        // Case 1: BART-style head (for Zero-Shot NLI)
-        // Checks for "classification_head.dense.weight"
         if weights.contains("classification_head.dense.weight") {
             let pre_classifier = LinearLayer::builder(weights, "classification_head.dense.weight")
                 .with_optional_bias(Some("classification_head.dense.bias"))
@@ -143,7 +119,6 @@ impl CpuSequenceClassificationHead {
                 .with_optional_bias(Some("classification_head.out_proj.bias"))
                 .with_target_dtype(load_config.target_dtype)
                 .build()?;
-            // BART's head uses a Tanh activation between layers
             return Self::with_config(
                 None,
                 Some(pre_classifier),
@@ -154,8 +129,6 @@ impl CpuSequenceClassificationHead {
             );
         }
 
-        // Case 2: RoBERTa-style sequence classification head
-        // Checks for "classifier.dense.weight"
         if weights.contains("classifier.dense.weight") {
             let pre_classifier = LinearLayer::builder(weights, "classifier.dense.weight")
                 .with_optional_bias(Some("classifier.dense.bias"))
@@ -175,14 +148,11 @@ impl CpuSequenceClassificationHead {
             );
         }
 
-        // Case 3: DistilBERT-style head
-        // Checks for "pre_classifier.weight"
         if weights.contains("pre_classifier.weight") {
             let pre_classifier = LinearLayer::builder(weights, "pre_classifier.weight")
                 .with_optional_bias(Some("pre_classifier.bias"))
                 .with_target_dtype(load_config.target_dtype)
                 .build()?;
-            // The final layer is named "classifier.weight"
             let classifier = LinearLayer::builder(weights, "classifier.weight")
                 .with_optional_bias(Some("classifier.bias"))
                 .with_target_dtype(load_config.target_dtype)
@@ -197,8 +167,6 @@ impl CpuSequenceClassificationHead {
             );
         }
 
-        // Case 4: Standard BERT-style head (with a pooler)
-        // Checks for "bert.pooler.dense.weight"
         if weights.contains("bert.pooler.dense.weight") {
             let pooler = LinearLayer::builder(weights, "bert.pooler.dense.weight")
                 .with_optional_bias(Some("bert.pooler.dense.bias"))
@@ -218,7 +186,6 @@ impl CpuSequenceClassificationHead {
             );
         }
 
-        // Fallback Case: A simple, single-layer head named "classifier.weight"
         if weights.contains("classifier.weight") {
             let classifier = LinearLayer::builder(weights, "classifier.weight")
                 .with_optional_bias(Some("classifier.bias"))
@@ -234,31 +201,21 @@ impl CpuSequenceClassificationHead {
             );
         }
 
-        // If none of the known structures are found, return an error.
         Err(anyhow!(
             "Could not auto-detect a valid classification head structure from the model weights. Checked for 'classification_head.dense', 'classifier.dense', 'pre_classifier', 'bert.pooler', and 'classifier' weights."
         ))
     }
 
     /// Forward pass: hidden_states → logits.
-    ///
-    /// # Arguments
-    /// * `encoder_hidden_states`: Shape `[batch, seq_len, hidden_size]`
-    ///
-    /// # Returns
-    /// * Logits with shape `[batch, num_classes]`
     pub fn forward(
         &self,
         encoder_hidden_states: &Array3<f32>,
-        // The mask is now required for robust pooling.
         attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array2<f32>> {
         let (batch, seq_len, _hidden_size) = encoder_hidden_states.dim();
         if batch == 0 || seq_len == 0 {
             return Ok(Array2::<f32>::zeros((batch, self.num_classes())));
         }
-        // ========================================================================
-        // 1. POOLING
         let sequence_embedding = match self.pooling_strategy {
             PoolingStrategy::Cls => encoder_hidden_states.slice(s![.., 0, ..]).to_owned(),
             PoolingStrategy::LastToken => {
@@ -283,8 +240,6 @@ impl CpuSequenceClassificationHead {
         };
 
 
-        // ========================================================================
-        // PRE-CLASSIFIER (DENSE LAYER) + ACTIVATION
         let features = if let Some(ref pooler) = self.pooler {
             let mut pooled = pooler.matmul(&sequence_embedding.view());
             self.apply_activation_inplace(&mut pooled);
@@ -294,7 +249,6 @@ impl CpuSequenceClassificationHead {
             self.apply_activation_inplace(&mut pre_out);
             pre_out
         } else {
-            // This is for simple heads with no intermediate layer.
             sequence_embedding
         };
 
@@ -324,13 +278,6 @@ impl CpuSequenceClassificationHead {
     }
 }
 
-// ============================================================================
-//  GPU Sequence Classification Head
-// ============================================================================
-
-/// A GPU-accelerated head for sequence classification tasks.
-///
-/// Mirrors the logic of `CpuSequenceClassificationHead` using GPU kernels.
 /// A GPU-accelerated head for sequence classification tasks.
 pub struct GpuSequenceClassificationHead {
     // Kernels for operations
@@ -338,9 +285,6 @@ pub struct GpuSequenceClassificationHead {
     linear: GpuLinearLayer,
     add_bias: GpuAdd,
     tanh: GpuTanh,
-    // For many models, omitting it from the pooler might have a minor impact.
-
-    // Weights on GPU
     pooler_weight: Option<GpuTensor>,
     pooler_bias: Option<GpuTensor>,
     classifier_weight: GpuTensor,
@@ -450,7 +394,6 @@ mod classification_head_tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    // --- Helper to create weights ---
     fn create_test_weights(
         weights_map: HashMap<String, Vec<f32>>,
         shapes: HashMap<String, Vec<usize>>,

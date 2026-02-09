@@ -1,4 +1,3 @@
-// kjarni/src/config/loader.rs
 
 use std::path::{Path, PathBuf};
 use anyhow::Result;

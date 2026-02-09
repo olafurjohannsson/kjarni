@@ -2,7 +2,6 @@ use anyhow::Result;
 
 use kjarni_transformers::{
     WgpuContext,
-    common::DecodingStrategy,
     cpu::encoder::{CpuEncoderOps, traits::EncoderLanguageModel},
     encoder_decoder::{
         CpuBackend, CpuSeq2SeqState, EncoderDecoderGenerator,
@@ -16,15 +15,13 @@ use kjarni_models::models::bart::model::BartModel;
 use kjarni_transformers::Device;
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
 use kjarni_transformers::models::base::LanguageModel;
-use ndarray::{ArrayViewD, IxDyn};
+use ndarray::ArrayViewD;
 use std::sync::Arc;
 async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
 use anyhow::anyhow;
 
-use std::io;
-use std::io::Write;
 
 fn assert_all_close(a: &ArrayViewD<f32>, b: &ArrayViewD<f32>, rtol: f32, atol: f32, context: &str) {
     if a.shape() != b.shape() {
@@ -293,7 +290,7 @@ async fn main() -> Result<()> {
     // GPU decoder embeddings
     {
         let pool = ctx.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 
@@ -327,7 +324,7 @@ async fn main() -> Result<()> {
 
     {
         let pool = ctx.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (enc, pool_ref) = frame.resources();
 

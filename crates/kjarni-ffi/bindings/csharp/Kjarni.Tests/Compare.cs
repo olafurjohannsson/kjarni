@@ -8,10 +8,6 @@ namespace Kjarni.Tests
 {
     public static class EmbedderBenchmark
     {
-        // -------------------------------------------------
-        // TEST DATA (100+ non-trivial sentences)
-        // -------------------------------------------------
-        
         static readonly string[] Topics = {
             "machine learning", "air traffic control", "distributed systems",
             "natural language processing", "computer graphics",
@@ -47,10 +43,6 @@ namespace Kjarni.Tests
             return sentences;
         }
 
-        // -------------------------------------------------
-        // BENCHMARK SETTINGS
-        // -------------------------------------------------
-        
         const int Runs = 10;
         const int SentenceCount = 120;
 
@@ -85,12 +77,6 @@ namespace Kjarni.Tests
             Console.WriteLine($"Sample: \"{sentences[0]}\"");
             Console.WriteLine();
 
-            // -------------------------------------------------
-            // KJARNI EMBEDDER
-            // -------------------------------------------------
-
-            Console.WriteLine("--- Kjarni Embedder (batch) ---");
-            
             using var embedder = new Embedder(
                 model: "minilm-l6-v2",
                 device: "cpu",
@@ -114,9 +100,6 @@ namespace Kjarni.Tests
             var similarity = embedder.Similarity("cat", "dog");
             Console.WriteLine($"Kjarni similarity(cat, dog): {similarity:F6}");
 
-            // -------------------------------------------------
-            // RESULTS
-            // -------------------------------------------------
 
             Console.WriteLine();
             Console.WriteLine($"--- Benchmark Results ({Runs} runs, batch size = {SentenceCount}) ---");

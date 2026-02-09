@@ -1,7 +1,3 @@
-// =============================================================================
-// kjarni/src/chat/builder.rs
-// =============================================================================
-
 //! Builder pattern for Chat configuration.
 
 use std::path::PathBuf;
@@ -94,10 +90,6 @@ impl ChatBuilder {
         builder
     }
 
-    // =========================================================================
-    // Chat-Specific
-    // =========================================================================
-
     /// Set the system prompt.
     pub fn system(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
@@ -119,10 +111,6 @@ impl ChatBuilder {
     pub fn reasoning(self) -> Self {
         self.mode(ChatMode::Reasoning)
     }
-
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
 
     /// Set the device for inference.
     pub fn device(mut self, device: KjarniDevice) -> Self {
@@ -146,10 +134,6 @@ impl ChatBuilder {
         self.device = KjarniDevice::Gpu;
         self
     }
-
-    // =========================================================================
-    // Generation Parameters
-    // =========================================================================
 
     /// Set the sampling temperature.
     pub fn temperature(mut self, temp: f32) -> Self {
@@ -193,10 +177,6 @@ impl ChatBuilder {
         self
     }
 
-    // =========================================================================
-    // Model Loading Configuration
-    // =========================================================================
-
     /// Configure model loading options.
     pub fn with_load_config<F>(mut self, f: F) -> Self
     where
@@ -224,10 +204,6 @@ impl ChatBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
     /// Suppress informational output.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
@@ -239,10 +215,6 @@ impl ChatBuilder {
         self.allow_suboptimal = true;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Chat instance.
     pub async fn build(self) -> ChatResult<Chat> {

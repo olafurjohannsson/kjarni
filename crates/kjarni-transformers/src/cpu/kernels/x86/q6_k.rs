@@ -100,7 +100,7 @@ pub unsafe fn matmul_vec_q6_k_avx2(
                         let sc7 = get_scale_vec(7);
 
                         //  Dot Product
-                        let mut dot_stream = |q_i8: __m256i,
+                        let dot_stream = |q_i8: __m256i,
                                               s_a: __m256,
                                               s_b: __m256,
                                               a_off: usize,

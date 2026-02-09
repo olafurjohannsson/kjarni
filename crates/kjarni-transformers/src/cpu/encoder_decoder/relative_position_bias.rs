@@ -137,11 +137,11 @@ impl T5RelativePositionBias {
 
 #[cfg(test)]
 mod t5_bias_tests {
-    use super::*;
+    
     use crate::cpu::encoder_decoder::relative_position_bias::T5RelativePositionBias;
     use crate::weights::ModelWeights;
     use anyhow::Result;
-    use ndarray::{Array2, Array4};
+    use ndarray::Array4;
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
     use tempfile::NamedTempFile;

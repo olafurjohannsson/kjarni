@@ -13,7 +13,6 @@ use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::sync::Arc;
 
-// --- Helper Deserializers (Standard) ---
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: Deserializer<'de>,
@@ -52,7 +51,6 @@ where
     deserializer.deserialize_any(TokenIdsVisitor)
 }
 
-// --- Defaults ---
 fn default_rms_norm_eps() -> f32 { 1e-5 }
 fn default_hidden_act() -> String { "silu".to_string() }
 fn default_true() -> bool { true }

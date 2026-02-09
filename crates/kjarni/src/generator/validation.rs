@@ -1,6 +1,6 @@
 //! Model validation for text generation.
 
-use kjarni_transformers::models::{ModelArchitecture, ModelTask, ModelType};
+use kjarni_transformers::models::{ModelArchitecture, ModelType};
 
 use super::types::{GeneratorError, GeneratorResult};
 

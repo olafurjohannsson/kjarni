@@ -139,7 +139,7 @@ pub unsafe fn rotate_4d_avx2(
     head_dim: usize,
     cache_stride: usize,  // = head_dim (row stride in cache)
     position_offset: usize,
-) {
+) { unsafe {
     let _half_dim = head_dim / 2;
 
     // x is [batch, heads, seq, head_dim] in row-major
@@ -166,7 +166,7 @@ pub unsafe fn rotate_4d_avx2(
             }
         }
     }
-}
+}}
 
 /// Scalar fallback for non-AVX2 systems or testing.
 pub fn rotate_half_scalar(x: &mut [f32], cos: &[f32], sin: &[f32]) {
@@ -199,9 +199,9 @@ pub fn rotate_half(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     rotate_half_scalar(x, cos, sin);
 }
 
-// =============================================================================
+
 // Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {

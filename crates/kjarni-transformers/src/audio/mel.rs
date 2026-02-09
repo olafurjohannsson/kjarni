@@ -1,20 +1,8 @@
-//! Audio preprocessing frontend for speech models (Whisper).
-//!
-//! This module handles all audio-specific processing:
-//! - Mel spectrogram computation
-//! - Convolutional frontend
-//! - Position encoding for audio
-//!
-//! The output is hidden states that can be fed into any Seq2SeqEncoder.
+//! Audio preprocessing frontend
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, s};
-
 use crate::weights::ModelWeights;
-
-// =============================================================================
-// Mel Spectrogram
-// =============================================================================
 
 /// Configuration for mel spectrogram computation.
 #[derive(Debug, Clone)]
@@ -53,7 +41,6 @@ impl Default for MelConfig {
     }
 }
 impl MelConfig {
-    /// Config matching Whisper's exact implementation
     pub fn whisper() -> Self {
         Self {
             sample_rate: 16000,
@@ -64,7 +51,7 @@ impl MelConfig {
             whisper_normalize: true,
             center: true,
             power: true,
-            fmax: Some(8000.0), // Whisper uses 8000 Hz max
+            fmax: Some(8000.0), // 8000 Hz max
             fmin: 0.0,
         }
     }
@@ -73,7 +60,6 @@ impl MelConfig {
 pub fn compute_mel_spectrogram(audio: &[f32], config: &MelConfig) -> Result<Array2<f32>> {
     let fmax = config.fmax.unwrap_or(config.sample_rate as f32 / 2.0);
 
-    // Optionally pad for centered STFT
     let audio_processed: Vec<f32> = if config.center {
         pad_reflect(audio, config.n_fft / 2)
     } else {
@@ -81,9 +67,6 @@ pub fn compute_mel_spectrogram(audio: &[f32], config: &MelConfig) -> Result<Arra
     };
 
     let n_samples = audio_processed.len();
-    // let n_frames = 1 + (n_samples - config.n_fft) / config.hop_length;
-    // let n_frames = (n_samples - config.n_fft) / config.hop_length + 1;
-    // Or for exact Whisper behavior (fixed 3000 frames for 30s):
     let n_frames = if config.whisper_normalize {
         3000
     } else {
@@ -175,53 +158,7 @@ fn pad_reflect(audio: &[f32], pad_len: usize) -> Vec<f32> {
     padded
 }
 
-/// Create mel filterbank matrix.
-fn create_mel_filterbank(config: &MelConfig) -> Result<Array2<f32>> {
-    let n_fft_bins = config.n_fft / 2 + 1;
-    let mut filters = Array2::<f32>::zeros((config.n_mels, n_fft_bins));
-
-    // Convert Hz to Mel scale
-    let hz_to_mel = |hz: f32| 2595.0 * (1.0 + hz / 700.0).log10();
-    let mel_to_hz = |mel: f32| 700.0 * (10.0_f32.powf(mel / 2595.0) - 1.0);
-
-    let mel_low = hz_to_mel(0.0);
-    let mel_high = hz_to_mel(config.sample_rate as f32 / 2.0);
-
-    // Create mel points
-    let mel_points: Vec<f32> = (0..=config.n_mels + 1)
-        .map(|i| mel_low + (mel_high - mel_low) * (i as f32) / (config.n_mels + 1) as f32)
-        .collect();
-
-    // Convert back to Hz and then to FFT bins
-    let hz_points: Vec<f32> = mel_points.iter().map(|&m| mel_to_hz(m)).collect();
-    let bin_points: Vec<usize> = hz_points
-        .iter()
-        .map(|&hz| ((config.n_fft as f32 + 1.0) * hz / config.sample_rate as f32) as usize)
-        .collect();
-
-    // Create triangular filters
-    for m in 0..config.n_mels {
-        let left = bin_points[m];
-        let center = bin_points[m + 1];
-        let right = bin_points[m + 2];
-
-        for k in left..center {
-            if k < n_fft_bins {
-                filters[[m, k]] = (k - left) as f32 / (center - left).max(1) as f32;
-            }
-        }
-
-        for k in center..right {
-            if k < n_fft_bins {
-                filters[[m, k]] = (right - k) as f32 / (right - center).max(1) as f32;
-            }
-        }
-    }
-
-    Ok(filters)
-}
-
-/// Create mel filterbank matching librosa/HuggingFace exactly.
+/// Create mel filterbank matching librosa/HuggingFace impl
 /// Uses Slaney mel scale and Slaney normalization.
 pub fn create_mel_filterbank_librosa(
     sample_rate: u32,
@@ -233,7 +170,6 @@ pub fn create_mel_filterbank_librosa(
     let n_fft_bins = n_fft / 2 + 1;
     let sr = sample_rate as f32;
 
-    // Slaney mel scale (NOT HTK!) - this is what librosa uses by default
     let f_sp = 200.0 / 3.0; // ~66.67
     let min_log_hz = 1000.0;
     let min_log_mel = min_log_hz / f_sp; // 15.0
@@ -325,18 +261,7 @@ fn compute_fft_magnitude(samples: &[f32]) -> Result<Vec<f32>> {
     Ok(magnitudes)
 }
 
-// =============================================================================
-// Convolutional Frontend
-// =============================================================================
-
 /// Whisper's convolutional frontend that converts mel spectrograms to hidden states.
-///
-/// Architecture:
-/// - Conv1D(n_mels, hidden_size, kernel=3, stride=1, padding=1) + GELU
-/// - Conv1D(hidden_size, hidden_size, kernel=3, stride=2, padding=1) + GELU
-///
-/// Input: [batch, n_mels, time]
-/// Output: [batch, time/2, hidden_size]
 pub struct AudioConvFrontend {
     conv1_weight: Array3<f32>, // [out_ch, in_ch, kernel]
     conv1_bias: Array1<f32>,
@@ -346,6 +271,7 @@ pub struct AudioConvFrontend {
 }
 
 impl AudioConvFrontend {
+    
     /// Load from weights.
     pub fn from_weights(
         weights: &ModelWeights,
@@ -357,7 +283,6 @@ impl AudioConvFrontend {
         let conv2_weight = weights.get_array3(&format!("{}.conv2.weight", prefix))?;
         let conv2_bias = weights.get_array1(&format!("{}.conv2.bias", prefix))?;
 
-        // Try to load learned positions, fallback to sinusoidal
         let position_embeddings = weights
             .get_array2(&format!("{}.embed_positions.weight", prefix))
             .unwrap_or_else(|_| {
@@ -375,12 +300,6 @@ impl AudioConvFrontend {
     }
 
     /// Process mel spectrogram to hidden states.
-    ///
-    /// # Arguments
-    /// * `mel` - Mel spectrogram [batch, n_mels, time]
-    ///
-    /// # Returns
-    /// Hidden states [batch, time/2, hidden_size] ready for transformer encoder
     pub fn forward(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
         // Conv1: kernel=3, stride=1, padding=1
         let x = self.conv1d(mel, &self.conv1_weight, &self.conv1_bias, 1, 1)?;
@@ -425,7 +344,7 @@ impl AudioConvFrontend {
         let out_time = (in_time + 2 * padding - kernel_size) / stride + 1;
         let mut output = Array3::<f32>::zeros((batch, out_channels, out_time));
 
-        // TODO: Replace with optimized SIMD kernel
+        // TODO: replace with SIMD
         for b in 0..batch {
             for oc in 0..out_channels {
                 for t in 0..out_time {
@@ -451,7 +370,7 @@ impl AudioConvFrontend {
     }
 }
 
-/// GELU activation for 3D arrays.
+/// GELU activation for 3D arrays. TODO: use activateion crate
 fn gelu_3d(x: &Array3<f32>) -> Array3<f32> {
     x.mapv(|v| v * 0.5 * (1.0 + (v * 0.7978845608 * (1.0 + 0.044715 * v * v)).tanh()))
 }
@@ -471,13 +390,6 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
     embeddings
 }
 
-// =============================================================================
-// High-Level Audio Pipeline
-// =============================================================================
-
-/// Complete audio processing pipeline for Whisper-style models.
-///
-/// Combines mel spectrogram computation and convolutional frontend.
 pub struct AudioPipeline {
     mel_config: MelConfig,
     frontend: AudioConvFrontend,
@@ -499,20 +411,13 @@ impl AudioPipeline {
     }
 
     /// Process raw audio to hidden states.
-    ///
-    /// # Arguments
-    /// * `audio` - Raw audio samples [n_samples] or [batch, n_samples]
-    ///
-    /// # Returns
-    /// Hidden states ready for Seq2SeqEncoder
     pub fn process(&self, audio: &[f32]) -> Result<Array3<f32>> {
-        // 1. Compute mel spectrogram
         let mel = compute_mel_spectrogram(audio, &self.mel_config)?;
 
-        // 2. Add batch dimension: [n_mels, time] -> [1, n_mels, time]
+        // Add batch dimension: [n_mels, time] -> [1, n_mels, time]
         let mel_batch = mel.insert_axis(ndarray::Axis(0));
 
-        // 3. Run through conv frontend
+        // Run through conv frontend
         self.frontend.forward(&mel_batch)
     }
 
@@ -525,7 +430,6 @@ impl AudioPipeline {
             .collect::<Result<Vec<_>>>()?;
 
         // Stack into batch (assumes same length - pad if needed)
-        // For now, simple concatenation along batch axis
         let batch_size = hidden_states.len();
         if batch_size == 0 {
             return Err(anyhow!("Empty audio batch"));
@@ -554,7 +458,6 @@ mod audio_frontend_tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    // Helper to create temporary .safetensors model directory
     fn create_model_weights(
         weights_map: HashMap<String, Vec<f32>>,
         shapes: HashMap<String, Vec<usize>>,
@@ -584,11 +487,6 @@ mod audio_frontend_tests {
         Ok((weights, dir))
     }
 
-    // ==========================================
-    // GOLDEN VALUES
-    // ==========================================
-
-    // conv1_weight Shape: [8, 4, 3]
     fn get_conv1_weight_data() -> Vec<f32> {
         vec![
             0.087017, 0.096910, 0.058030, 0.054364, 0.056184, -0.060715, -0.030015, 0.043221,
@@ -2196,9 +2094,6 @@ mod audio_frontend_tests {
         w.insert("model.conv2.bias".into(), get_conv2_bias_data());
         s.insert("model.conv2.bias".into(), vec![8]);
 
-        // Note: You must provide the full vector for this to match shape [1500, 8]
-        // If you only paste the short snippet, change shape to match the snippet length!
-        // Assuming you pasted the full block:
         let pos_data = get_pos_embed_data();
         let pos_len = pos_data.len() / 8; // Should be 1500
         w.insert("model.embed_positions.weight".into(), pos_data);
@@ -2206,17 +2101,13 @@ mod audio_frontend_tests {
 
         let (weights, _tmp) = create_model_weights(w, s)?;
 
-        // 2. Initialize Frontend
         let frontend = AudioConvFrontend::from_weights(&weights, "model", 1500)?;
 
-        // 3. Prepare Input
         let input_data = get_mel_input_data();
         let input = Array3::from_shape_vec((1, 4, 10), input_data)?;
 
-        // 4. Run
         let output = frontend.forward(&input)?;
 
-        // 5. Validation
         let golden_data = get_frontend_output_data();
         let golden = Array3::from_shape_vec((1, 5, 8), golden_data)?;
 
@@ -2225,7 +2116,6 @@ mod audio_frontend_tests {
 
         println!("Conv Frontend Max Diff: {}", max_diff);
 
-        // Relax tolerance slightly for GELU/Conv float ops differences
         assert!(max_diff < 1e-4, "Frontend output mismatch");
 
         Ok(())
@@ -2248,7 +2138,6 @@ mod audio_frontend_tests {
     fn test_hann_window() {
         let window = hann_window(400);
         assert_eq!(window.len(), 400);
-        // Hann window should be near 0 at edges
         assert!(window[0].abs() < 1e-6);
     }
 }

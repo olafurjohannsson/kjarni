@@ -180,7 +180,6 @@ impl GpuTransformerEncoder {
             let self_attn_weights =
                 GpuAttentionWeights::new(q_t, q_b, k_t, k_b, v_t, v_b, o_t, o_b)?;
 
-            // --- FFN LOADING (Standard vs SwiGLU) ---
             let up_name = name(&encoder_layout.layer.ffn.up_weight);
             let down_name = name(&encoder_layout.layer.ffn.down_weight);
             let gate_name = encoder_layout
@@ -190,7 +189,6 @@ impl GpuTransformerEncoder {
                 .as_ref()
                 .map(|s| name(s));
 
-            // Helper for transposition
             let load_transposed = |n: &str| -> Result<ndarray::Array2<f32>> {
                 let arr = weights.get_array2(n)?;
                 if meta.transpose_ffn_weights {
@@ -204,67 +202,30 @@ impl GpuTransformerEncoder {
 
             // Construct the specific weights struct first
             let ff_weights_enum = if is_fused_swiglu {
-                // Fused SwiGLU (Nomic GGUF/SafeTensors fused)
                 let fused_w = load_transposed(&up_name)?;
                 let half_dim = fused_w.shape()[0] / 2;
                 let gate_w = fused_w.slice(s![0..half_dim, ..]).to_owned();
                 let up_w = fused_w.slice(s![half_dim.., ..]).to_owned();
                 let down_w = load_transposed(&down_name)?;
-
-                // Biases (Nomic has none, but handled if present)
-                // let (gate_b, up_b) =
-                //     if let Some(b_name) = resolve_bias(&encoder_layout.layer.ffn.up_bias) {
-                //         let fused_b = weights.get_array1(&b_name)?;
-                //         (
-                //             Some(fused_b.slice(s![0..half_dim]).to_owned()),
-                //             Some(fused_b.slice(s![half_dim..]).to_owned()),
-                //         )
-                //     } else {
-                //         (None, None)
-                //     };
-
-                // let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
-                //     .map(|s| weights.get_array1(&s))
-                //     .transpose()?;
-
                 let swiglu_weights = GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,
-                    // gate_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                     GpuTensor::from_ndarray(&context, &up_w)?,
-                    // up_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                     GpuTensor::from_ndarray(&context, &down_w)?,
-                    // down_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                 )?;
                 crate::gpu_ops::blocks::GpuFeedForwardWeights::SwiGLU(swiglu_weights)
             } else if let Some(g_name) = gate_name {
-                // Separate SwiGLU (Llama style)
                 let up_w = load_transposed(&up_name)?;
                 let gate_w = load_transposed(&g_name)?;
                 let down_w = load_transposed(&down_name)?;
 
-                // Assuming Nomic/Llama naming conventions
-                let up_b = resolve_bias(&encoder_layout.layer.ffn.up_bias)
-                    .map(|s| weights.get_array1(&s))
-                    .transpose()?;
-                let down_b = resolve_bias(&encoder_layout.layer.ffn.down_bias)
-                    .map(|s| weights.get_array1(&s))
-                    .transpose()?;
-                // let gate_b = None; // Usually implicit or shared?
-
                 let swiglu_weights = crate::gpu_ops::blocks::ffn_swiglu::GpuSwiGLUFFNWeights::new(
                     GpuTensor::from_ndarray(&context, &gate_w)?,
-                    // gate_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                     GpuTensor::from_ndarray(&context, &up_w)?,
-                    // up_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                     GpuTensor::from_ndarray(&context, &down_w)?,
-                    // down_b.map(|b| GpuTensor::from_ndarray(&context, &b)).transpose()?,
                 )?;
                 crate::gpu_ops::blocks::GpuFeedForwardWeights::SwiGLU(swiglu_weights)
             } else {
-                // Standard FeedForward (MiniLM/BERT)
-                // let up_w = load_transposed(&up_name)?;
                 let up_w = weights.get_array2(&up_name)?;
-                // let down_w = load_transposed(&down_name)?;
                 let down_w = weights.get_array2(&down_name)?;
 
                 let up_b = resolve_bias(&encoder_layout.layer.ffn.up_bias)
@@ -288,7 +249,6 @@ impl GpuTransformerEncoder {
                 crate::gpu_ops::blocks::GpuFeedForwardWeights::Standard(std_weights)
             };
 
-            // --- LAYER NORMS (Enum Based) ---
             let build_norm = |w: String, b: Option<String>| -> Result<GpuNormalizationWeights> {
                 match meta.normalization_strategy {
                     NormalizationStrategy::LayerNorm => Ok(GpuNormalizationWeights::LayerNorm(
@@ -323,12 +283,11 @@ impl GpuTransformerEncoder {
                 resolve_bias(&encoder_layout.layer.ffn.norm_bias),
             )?;
 
-            // 6. Build Layer
             layers.push(GpuEncoderLayer::new(
                 &context,
                 self_attn_weights,
                 self_attn_ln_weights,
-                ff_weights_enum, // Pass the Enum
+                ff_weights_enum,
                 ffn_ln_weights,
                 meta.activation,
                 &meta,
@@ -388,11 +347,8 @@ impl GpuEncoder for GpuTransformerEncoder {
         input: ModelInput<'_>,
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor> {
-        // This logic is taken directly from your old `forward` method.
         let hidden_states = self.embed(cmd_encoder, pool, input, token_type_ids)?;
 
-        // This logic correctly handles post-norm models like BERT/BART.
-        // For a pre-norm model, this would just return `hidden_states`.
         if !self.metadata.is_prenorm {
             let ln_output = pool.get(hidden_states.shape().to_vec());
             self.embedding_layer_norm.encode(
@@ -416,7 +372,6 @@ impl GpuEncoder for GpuTransformerEncoder {
         start_layer: usize,
         end_layer: usize,
     ) -> Result<GpuTensor> {
-        // This logic is also taken directly from your old `forward` method.
         let mut current_states = hidden_states.clone();
         for layer in &self.layers[start_layer..end_layer] {
             current_states = layer.forward(

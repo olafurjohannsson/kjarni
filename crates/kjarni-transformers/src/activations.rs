@@ -1,13 +1,10 @@
 //! Activation functions and softmax operations.
-//!
-//! Provides scalar and array-based activation functions with automatic
-//! parallel execution for large arrays (threshold: 16,384 elements).
 
 use std::str::FromStr;
 
 use libm::{erff, expf, tanhf};
 use ndarray::{
-    Array1, Array2, Array3, Array4, ArrayBase, ArrayViewMut2, Axis, DataMut, s,
+    Array1, Array2, Array3, Array4, ArrayBase, ArrayViewMut2, DataMut, s,
     parallel::prelude::*,
 };
 use serde::{Deserialize, Serialize};

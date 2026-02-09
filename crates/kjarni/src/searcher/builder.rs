@@ -1,6 +1,4 @@
 use std::path::PathBuf;
-
-// kjarni/src/searcher/builder.rs
 use kjarni_rag::SearchMode;
 use kjarni_rag::ProgressCallback;
 use kjarni_transformers::Device;

@@ -3,23 +3,13 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use async_trait::async_trait;
-use ndarray::{Array2, Array3};
 
-use kjarni_transformers::activations::Activation;
-use kjarni_transformers::cache::{Cache, CpuBeamKVCache};
-use kjarni_transformers::cpu::encoder_decoder::{CrossDecoderLayer, DecoderCrossAttention};
-use kjarni_transformers::encoder_decoder::DecoderSelfAttention;
-use kjarni_transformers::encoder_decoder::traits::{
-    CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput,
-};
-use kjarni_transformers::feedforward::{FeedForward, LegacyFeedForward};
+use kjarni_transformers::encoder_decoder::traits::CpuCrossDecoder;
 use kjarni_transformers::linear_layer::LinearLayer;
 use kjarni_transformers::models::base::ModelLoadConfig;
-use kjarni_transformers::normalization::LayerNorm;
-use kjarni_transformers::traits::{Device, InferenceModel, ModelConfig, ModelMetadata};
+use kjarni_transformers::traits::{ModelConfig, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
-use kjarni_transformers::{Embeddings, Normalization};
+use kjarni_transformers::Embeddings;
 
 use crate::models::bart::config::BartConfig;
 

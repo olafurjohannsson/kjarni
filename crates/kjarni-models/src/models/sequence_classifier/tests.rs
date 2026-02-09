@@ -6,7 +6,7 @@ use kjarni_transformers::traits::Device;
 use tokio;
 
 mod cross_encoder_tests {
-    use crate::SequenceClassifier;
+    
 
     use super::*;
     #[tokio::test]

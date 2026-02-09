@@ -2,15 +2,15 @@
 mod sentence_encoder_loading_tests {
     use crate::SentenceEncoder;
 
-    use super::*;
+    
     use anyhow::Result;
     use kjarni_transformers::models::ModelType;
     use kjarni_transformers::traits::Device;
     use kjarni_transformers::{LanguageModel, WgpuContext};
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::Write;
+    
+    
     use tempfile::TempDir;
 
     fn create_dummy_bert_files() -> Result<TempDir> {
@@ -65,8 +65,6 @@ mod sentence_encoder_loading_tests {
             TensorView::new(Dtype::F32, shape_bias.clone(), &bytes_bias)?,
         );
 
-        // --- Layer 0 ---
-        // Self Attention
         tensors.insert(
             "encoder.layer.0.attention.self.query.weight".to_string(),
             TensorView::new(Dtype::F32, shape_layer.clone(), &bytes_layer)?,

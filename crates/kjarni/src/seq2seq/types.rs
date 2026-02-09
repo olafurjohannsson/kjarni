@@ -2,9 +2,9 @@
 
 use thiserror::Error;
 
-// =============================================================================
+
 // Errors
-// =============================================================================
+
 
 /// Errors that can occur during seq2seq generation.
 #[derive(Debug, Error)]
@@ -53,9 +53,9 @@ pub enum Seq2SeqError {
 /// Result type for seq2seq operations.
 pub type Seq2SeqResult<T> = Result<T, Seq2SeqError>;
 
-// =============================================================================
+
 // Generated Token
-// =============================================================================
+
 
 /// A single token from streaming generation.
 #[derive(Debug, Clone)]
@@ -70,9 +70,9 @@ pub struct Seq2SeqToken {
     pub is_special: bool,
 }
 
-// =============================================================================
+
 // Overrides
-// =============================================================================
+
 
 /// User-specified overrides for seq2seq generation.
 ///

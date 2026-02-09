@@ -37,14 +37,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let s_out = uniforms.offset + s_idx_new;
 
-    // FIXED: K cache layout is now [B, H, S_total, D] to match V cache
     let k_out_idx = b_idx * (uniforms.h * uniforms.s_total * uniforms.d) +
                     h_idx * (uniforms.s_total * uniforms.d) +
                     s_out * uniforms.d +
                     d_idx;
     k_cache_out[k_out_idx] = k_val;
 
-    // V cache layout: [B, H, S_total, D] (already correct)
     let v_out_idx = b_idx * (uniforms.h * uniforms.s_total * uniforms.d) +
                     h_idx * (uniforms.s_total * uniforms.d) +
                     s_out * uniforms.d +

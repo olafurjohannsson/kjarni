@@ -4,7 +4,7 @@ use super::*;
 mod tests {
     use super::*;
 
-    use ndarray::{s, Array3, Array4};
+    use ndarray::{Array3, Array4};
 
     fn assert_tensors_approx_equal(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
         assert_eq!(a.shape(), b.shape(), "tensor shapes do not match");

@@ -540,7 +540,7 @@ mod tests {
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask)?;
 
         let pool = ctx.get_inference_pool();
-        let mut pool_guard = pool.lock().await;
+        let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
         let (encoder_cmd, pool_ref) = frame.resources();
 

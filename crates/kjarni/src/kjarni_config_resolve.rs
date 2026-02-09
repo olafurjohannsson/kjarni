@@ -1,9 +1,7 @@
-// kjarni/src/config/resolve.rs
-
 use kjarni_transformers::{models::base::ModelLoadConfig, tensor::DType};
 
 use crate::generation::{GenerationOverrides};
-use crate::kjarni_config::{KjarniConfig, GenerationParams, ModelOverride};
+use crate::kjarni_config::{KjarniConfig, GenerationParams};
 
 impl KjarniConfig {
     /// Get generation overrides for a specific model and task.

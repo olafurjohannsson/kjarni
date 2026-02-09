@@ -1,13 +1,11 @@
 //! Linear algebra operations for transformers
-//! Universal implementation.
-//! Uses "Kernel Hoisting" (Merging math into the chunk loop) to avoid inlining barriers.
 
 use faer::Parallelism;
 use ndarray::{Array2, Array3, Array4, ArrayView2, ArrayView4, Axis, Zip};
 use rayon::prelude::*;
 const MASK_VALUE: f32 = -1e9;
 
-// Redefine to fix cursor logic clearly
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[target_feature(enable = "fma")]
@@ -91,7 +89,6 @@ unsafe fn compute_chunk_avx2_clean(
     }
 }
 
-/// 2. ARM NEON CHUNK KERNEL
 #[cfg(target_arch = "aarch64")]
 unsafe fn compute_chunk_neon(
     out_chunk: &mut [f32],
@@ -154,7 +151,6 @@ unsafe fn compute_chunk_neon(
     }
 }
 
-/// 3. FALLBACK CHUNK KERNEL
 unsafe fn compute_chunk_fallback(
     out_chunk: &mut [f32],
     a_ptr_base: *const f32,
@@ -179,9 +175,7 @@ unsafe fn compute_chunk_fallback(
     }
 }
 
-// =========================================================================
-//  SECTION 2: DISPATCHER
-// =========================================================================
+
 
 pub fn matmul_dequant_q4_k(_a: &ArrayView2<f32>, _b_weights: &Array3<u8>) -> Array2<f32> {
     unimplemented!("Q4_K matmul not implemented yet");
@@ -205,7 +199,6 @@ pub fn matmul_2d_mixed_bf16_new(
 
     let c_ptr_head = c.as_mut_ptr();
 
-    // Check Hardware ONCE
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     let use_avx2 = is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma");
 
@@ -213,9 +206,8 @@ pub fn matmul_2d_mixed_bf16_new(
         let output_slice = unsafe { std::slice::from_raw_parts_mut(c_ptr_head, n) };
         let num_threads = rayon::current_num_threads();
 
-        // FIX: Threshold on total work, not just n
         let total_work = n * k;
-        let min_work_per_thread = 32 * 1024; // ~32K ops minimum per thread
+        let min_work_per_thread = 32 * 1024; // 32K ops minimum per thread
         let min_parallel_work = num_threads * min_work_per_thread;
 
         if total_work >= min_parallel_work && n >= num_threads {
@@ -266,8 +258,7 @@ pub fn matmul_2d_mixed_bf16_new(
                 compute_chunk_fallback(output_slice, a_ptr, b_curr, k);
             }
         }
-    } else {
-        // --- BATCH > 1 ---
+    } else { // batch > 1
         let c_addr = c_ptr_head as usize;
         (0..m).into_par_iter().for_each(|i| unsafe {
             let a_ptr = a_addr as *const f32;
@@ -370,7 +361,7 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
             }
         }
     } else {
-        // --- BATCH > 1 ---
+        // batch 
         let c_addr = c_ptr_head as usize;
         (0..m).into_par_iter().for_each(|i| unsafe {
             let a_ptr = a_addr as *const f32;
@@ -399,8 +390,6 @@ pub fn matmul_2d_mixed_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<u16>) ->
     c
 }
 
-/// F32 matmul - weights stored [out, in], same as BF16
-/// Computes: input @ weights.T  (but weights are already transposed in storage)
 pub fn matmul_2d_f32_notranspose(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
     let (n, k2) = b_weights.dim(); // [out, in] = [n, k]
@@ -641,9 +630,6 @@ unsafe fn compute_chunk_fallback_f32(
     }
 }
 
-// =========================================================================
-//  SECTION 3: STANDARD HELPERS (Unchanged)
-// =========================================================================
 
 #[inline]
 pub fn matmul_2d(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
@@ -705,9 +691,6 @@ pub fn matmul_3d_2d(a: &Array3<f32>, b: &Array2<f32>) -> Array3<f32> {
 }
 
 /// Performs matmul for a 3D input and a 2D weight matrix in [Out, In] layout.
-///
-/// This is the CPU equivalent of the optimized GPU kernels.
-/// `a` has shape [Batch, Seq, In], `b_transposed` has shape [Out, In].
 #[inline]
 pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> Array3<f32> {
     let (batch, m, k) = a.dim();
@@ -715,8 +698,6 @@ pub fn matmul_3d_2d_transposed(a: &Array3<f32>, b_transposed: &Array2<f32>) -> A
     assert_eq!(k, k2, "Matmul inner dimensions do not match");
 
     let a_flat = a.view().into_shape_with_order((batch * m, k)).unwrap();
-
-    // We use the existing matmul_2d_transposed which correctly handles the layout
     let c_flat = matmul_2d_transposed(&a_flat.view(), &b_transposed.view());
 
     c_flat.into_shape_with_order((batch, m, n)).unwrap()
@@ -727,27 +708,18 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     let (batch, heads, seq1, dim) = a.dim();
     let seq2 = b.shape()[3];
     
-    // 1. Initialize output
     let mut output = Array4::<f32>::zeros((batch, heads, seq1, seq2));
 
-    // 2. Parallelize over BATCH only.
-    // This creates 120 tasks. Each task handles 12 heads sequentially.
-    // This avoids the "IncompatibleLayout" crash because we don't reshape the whole array.
     Zip::from(output.outer_iter_mut())
         .and(a.outer_iter())
         .and(b.outer_iter())
         .par_for_each(|mut out_b, a_b, b_b| {
             
-            // Iterate over HEADS (Sequential per thread)
             Zip::from(out_b.outer_iter_mut())
                 .and(a_b.outer_iter())
                 .and(b_b.outer_iter())
                 .for_each(|mut out_h, a_h, b_h| {
                     
-                    // 3. Handle Memory Layout Gracefully
-                    // as_standard_layout() is effectively free if the data is already contiguous.
-                    // If the data is strided (permuted), it creates a small temporary copy
-                    // which is required for Faer anyway.
                     let a_s = a_h.as_standard_layout();
                     let b_s = b_h.as_standard_layout();
                     let o_s = out_h.as_slice_mut().expect("Output buffer must be contiguous");
@@ -766,12 +738,7 @@ pub fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
     output
 }
 
-/// Batched matrix multiply: A @ B -> Out (no allocation)
-/// 
-/// Shapes:
-/// - a: [batch, heads, seq1, dim]
-/// - b: [batch, heads, dim, seq2]
-/// - out: [batch, heads, seq1, seq2] (pre-allocated)
+
 #[inline]
 pub fn matmul_4d_noalloc(
     a: &Array4<f32>,
@@ -783,12 +750,10 @@ pub fn matmul_4d_noalloc(
 
     debug_assert_eq!(out.dim(), (batch, heads, seq1, seq2), "Output shape mismatch");
 
-    // Parallelize over BATCH only
     Zip::from(out.outer_iter_mut())
         .and(a.outer_iter())
         .and(b.outer_iter())
         .par_for_each(|mut out_b, a_b, b_b| {
-            // Iterate over HEADS (sequential per thread)
             Zip::from(out_b.outer_iter_mut())
                 .and(a_b.outer_iter())
                 .and(b_b.outer_iter())
@@ -809,36 +774,6 @@ pub fn matmul_4d_noalloc(
         });
 }
 
-#[inline]
-pub fn matmul_4d_old(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
-    let (batch, heads, seq1, dim) = a.dim();
-    let seq2 = b.shape()[3];
-    let mut output = Array4::<f32>::zeros((batch, heads, seq1, seq2));
-
-    Zip::from(output.outer_iter_mut())
-        .and(a.outer_iter())
-        .and(b.outer_iter())
-        .par_for_each(|mut out_b, a_b, b_b| {
-            Zip::from(out_b.outer_iter_mut())
-                .and(a_b.outer_iter())
-                .and(b_b.outer_iter())
-                .for_each(|mut out_h, a_h, b_h| {
-                    let a_s = a_h.as_standard_layout();
-                    let b_s = b_h.as_standard_layout();
-                    let o_sl = out_h.as_slice_mut().unwrap();
-
-                    faer::linalg::matmul::matmul(
-                        faer::mat::from_row_major_slice_mut(o_sl, seq1, seq2),
-                        faer::mat::from_row_major_slice(a_s.as_slice().unwrap(), seq1, dim),
-                        faer::mat::from_row_major_slice(b_s.as_slice().unwrap(), dim, seq2),
-                        None,
-                        1.0,
-                        Parallelism::Rayon(0),
-                    );
-                });
-        });
-    output
-}
 
 pub fn matmul_4d_decode_gqa(
     q: &Array4<f32>,
@@ -1021,7 +956,7 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{Array1, Array2, Array3, Array4};
+    use ndarray::{Array2, Array3, Array4};
 
     fn assert_close(a: &[f32], b: &[f32], tol: f32, msg: &str) {
         assert_eq!(a.len(), b.len(), "{}: length mismatch", msg);
@@ -1446,22 +1381,6 @@ mod tests {
         let scores = matmul_4d(&q, &k_t);
 
         assert_eq!(scores.dim(), (batch, heads, seq, seq));
-    }
-
-    #[test]
-    fn test_matmul_4d_matches_old() {
-        let a = Array4::from_shape_fn((2, 4, 8, 16), |(b, h, i, j)| ((b + h + i + j) % 10) as f32);
-        let b = Array4::from_shape_fn((2, 4, 16, 8), |(b, h, i, j)| ((b * h + i * j) % 7) as f32);
-
-        let result_new = matmul_4d(&a, &b);
-        let result_old = matmul_4d_old(&a, &b);
-
-        assert_close(
-            result_new.as_slice().unwrap(),
-            result_old.as_slice().unwrap(),
-            1e-5,
-            "matmul_4d vs matmul_4d_old",
-        );
     }
 
     // ========================================================================

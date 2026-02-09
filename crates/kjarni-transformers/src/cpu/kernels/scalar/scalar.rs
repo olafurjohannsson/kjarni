@@ -154,29 +154,6 @@ pub fn matmul_vec_q8_0_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
 }
 
 /// Computes vector-matrix product for F32 input and Q4_K quantized weights.
-///
-/// Performs `out[i] = dot(a, dequant(b_blocks[i]))` for each output element.
-/// Q4_K is a 4-bit K-quant format with 256 elements per block. Weights are
-/// fully dequantized into a temporary buffer before computing the dot product.
-///
-/// # Arguments
-///
-/// * `out_chunk` - Output slice to write results into.
-/// * `a` - Input vector of length `k`.
-/// * `b_blocks` - Q4_K blocks containing quantized weights.
-/// * `k` - Number of input features (must be a multiple of 256).
-///
-/// # Q4_K Format
-///
-/// Each Q4_K block contains 256 4-bit quantized values with multiple scale
-/// factors for improved accuracy. See [`crate::kernels::dequantize::dequantize_q4_k_block`]
-/// for the dequantization algorithm.
-///
-/// # Performance
-///
-/// This implementation fully dequantizes each block before the dot product,
-/// which is simpler but slower than the integer-only approach used in
-/// [`vec_dot_q4k_q8k_scalar`].
 pub fn matmul_vec_q4_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[BlockQ4_K], k: usize) {
     let blocks_per_row = k / QK_K;
 
@@ -204,28 +181,6 @@ pub fn matmul_vec_q4_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
 }
 
 /// Computes vector-matrix product for F32 input and Q6_K quantized weights.
-///
-/// Performs `out[i] = dot(a, dequant(b_blocks[i]))` for each output element.
-/// Q6_K is a 6-bit K-quant format with 256 elements per block. Weights are
-/// fully dequantized into a temporary buffer before computing the dot product.
-///
-/// # Arguments
-///
-/// * `out_chunk` - Output slice to write results into.
-/// * `a` - Input vector of length `k`.
-/// * `b_blocks` - Q6_K blocks containing quantized weights.
-/// * `k` - Number of input features (must be a multiple of 256).
-///
-/// # Q6_K Format
-///
-/// Each Q6_K block contains 256 6-bit quantized values. The 6-bit values are
-/// stored as 4-bit low parts (`ql`) and 2-bit high parts (`qh`), requiring
-/// bit manipulation to reconstruct. See [`crate::kernels::dequantize::dequantize_q6_k_block`]
-/// for the dequantization algorithm.
-///
-/// # See Also
-///
-/// - [`vec_dot_q6k_q8k_scalar`] — Integer-only dot product for Q6_K × Q8_K.
 pub fn matmul_vec_q6_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[BlockQ6_K], k: usize) {
     let blocks_per_row = k / QK_K;
 
@@ -253,39 +208,6 @@ pub fn matmul_vec_q6_k_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[Bloc
 }
 
 /// Computes dot product of Q4_K weights and Q8_K quantized input.
-///
-/// This function computes the dot product directly in the quantized domain
-/// using integer arithmetic, avoiding explicit dequantization. This is more
-/// efficient than dequantizing to F32 first.
-///
-/// # Arguments
-///
-/// * `n` - Total number of elements (must be a multiple of 256).
-/// * `w_blocks` - Q4_K weight blocks.
-/// * `q_blocks` - Q8_K quantized input blocks (from [`crate::kernels::quantize::quantize_row_q8_k`]).
-///
-/// # Returns
-///
-/// The dot product as F32.
-///
-/// # Algorithm
-///
-/// Q4_K stores values as: `value = d * scale * q - dmin * min`
-///
-/// The dot product is computed as:
-/// ```text
-/// dot = Σ (d * scale_i * q_w_i * q_i_i * q.d) - (dmin * min_i * bsum_i * q.d)
-/// ```
-///
-/// Where:
-/// - `q_w_i` is the 4-bit weight quantized value
-/// - `q_i_i` is the 8-bit input quantized value
-/// - `scale_i`, `min_i` are per-sub-block scale/min factors
-/// - `bsum_i` is the pre-computed sum of input values in the sub-block
-///
-/// # See Also
-///
-/// - [`matmul_vec_q4_k_scalar`] — Alternative that dequantizes weights to F32.
 pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[BlockQ8_K]) -> f32 {
     let num_blocks = n / QK_K;
     let mut sumf = 0.0f32;
@@ -304,16 +226,12 @@ pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[Bloc
         let mut is = 0; // Sub-block scale index
         let mut q_idx = 0; // Weight byte index
 
-        // Process 4 groups of 2 sub-blocks each (8 sub-blocks total, 32 elements each)
         for _j in 0..4 {
-            // Get scale and min for two consecutive sub-blocks
             let (sc1, m1) = get_scale_min_k4(is, &w.scales);
             let (sc2, m2) = get_scale_min_k4(is + 1, &w.scales);
 
-            // Input offset: is goes 0,2,4,6; each step = 32 elements
             let q_offset = is * 32;
 
-            // --- Sub-block 1: lower 4 bits ---
             let mut sum_q1 = 0i32;
             for l in 0..32 {
                 let w_q = (w.qs[q_idx + l] & 0xF) as i32;
@@ -322,11 +240,9 @@ pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[Bloc
             }
             sum_qs += sum_q1 * (sc1 as i32);
 
-            // Use pre-computed bsums for min correction
             let isum1 = q.bsums[is * 2] as i32 + q.bsums[is * 2 + 1] as i32;
             sum_mins += isum1 * (m1 as i32);
 
-            // --- Sub-block 2: upper 4 bits ---
             let mut sum_q2 = 0i32;
             for l in 0..32 {
                 let w_q = (w.qs[q_idx + l] >> 4) as i32;
@@ -342,7 +258,6 @@ pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[Bloc
             is += 2;
         }
 
-        // Final accumulation: apply block scales
         sumf += q.d * d * (sum_qs as f32) - q.d * dmin * (sum_mins as f32);
     }
 
@@ -350,39 +265,6 @@ pub fn vec_dot_q4k_q8k_scalar(n: usize, w_blocks: &[BlockQ4_K], q_blocks: &[Bloc
 }
 
 /// Computes dot product of Q6_K weights and Q8_K quantized input.
-///
-/// This function computes the dot product directly in the quantized domain
-/// using integer arithmetic. Q6_K stores 6-bit values split across `ql` (low 4 bits)
-/// and `qh` (high 2 bits), which are reconstructed on-the-fly.
-///
-/// # Arguments
-///
-/// * `n` - Total number of elements (must be a multiple of 256).
-/// * `w_blocks` - Q6_K weight blocks.
-/// * `q_blocks` - Q8_K quantized input blocks.
-///
-/// # Returns
-///
-/// The dot product as F32.
-///
-/// # Algorithm
-///
-/// Q6_K stores values as: `value = d * scale * (q - 32)`
-///
-/// The 6-bit quantized value is reconstructed from:
-/// - Low 4 bits from `ql`
-/// - High 2 bits from `qh` (packed, 4 values share one byte)
-///
-/// The dot product computation:
-/// ```text
-/// dot = d * q.d * Σ scale_i * (q_w_i * q_i_i - 32 * q_i_i)
-/// ```
-///
-/// The `-32` offset is the Q6_K zero-point.
-///
-/// # See Also
-///
-/// - [`matmul_vec_q6_k_scalar`] — Alternative that dequantizes weights to F32.
 pub fn vec_dot_q6k_q8k_scalar(n: usize, w_blocks: &[BlockQ6_K], q_blocks: &[BlockQ8_K]) -> f32 {
     let num_blocks = n / QK_K;
     let mut sumf = 0.0f32;
@@ -452,17 +334,8 @@ mod matmul_scalar_tests {
     use super::*;
     use rand::{Rng, SeedableRng, rngs::StdRng};
     use half::f16;
-    // Import your official implementations
     use crate::cpu::kernels::quantize::quantize_row_q8_k;
-    use crate::cpu::kernels::dequantize::{
-        dequantize_q8_0_block, 
-        dequantize_q4_k_block, 
-        dequantize_q6_k_block
-    };
-
-    // =======================================================================
-    //  Test Helpers
-    // =======================================================================
+    use crate::cpu::kernels::dequantize::dequantize_q8_0_block;
 
     const TEST_K: usize = 256; 
     const TEST_ROWS: usize = 4; 
@@ -481,9 +354,6 @@ mod matmul_scalar_tests {
             (bits >> 16) as u16
         }).collect()
     }
-
-    // --- Helpers to generate random BLOCKS (since we don't have quantize *to* these formats) ---
-
     fn random_q8_0_blocks(rng: &mut StdRng, count: usize) -> Vec<BlockQ8_0> {
         (0..count).map(|_| {
             let mut qs = [0i8; 32];
@@ -529,10 +399,6 @@ mod matmul_scalar_tests {
         }).collect()
     }
 
-    // =======================================================================
-    //  Parity & Consistency Tests
-    // =======================================================================
-
     #[test]
     fn test_parity_f32_vs_bf16() {
         let mut rng = get_rng();
@@ -562,11 +428,7 @@ mod matmul_scalar_tests {
         
         let input = random_f32_vec(&mut rng, k);
 
-        // 1. Generate random Q8_0 blocks
         let blocks_q8 = random_q8_0_blocks(&mut rng, TEST_ROWS * (k / 32));
-
-        // 2. Create Reference F32 weights by DEQUANTIZING the blocks
-        // This ensures ground truth matches the block data exactly.
         let mut weights_f32_ref = vec![0.0f32; TEST_ROWS * k];
         for (i, block) in blocks_q8.iter().enumerate() {
             dequantize_q8_0_block(block, &mut weights_f32_ref[i*32..(i+1)*32]);
@@ -575,10 +437,8 @@ mod matmul_scalar_tests {
         let mut out_f32 = vec![0.0; TEST_ROWS];
         let mut out_q8 = vec![0.0; TEST_ROWS];
 
-        // 3. Run Reference F32 Kernel
         matmul_vec_f32_scalar(&mut out_f32, &input, &weights_f32_ref, k);
 
-        // 4. Run Q8_0 Kernel
         matmul_vec_q8_0_scalar(&mut out_q8, &input, &blocks_q8, k);
 
         // 5. Compare
@@ -600,24 +460,16 @@ mod matmul_scalar_tests {
         
         let input = random_f32_vec(&mut rng, k);
         let weight_blocks = random_q4k_blocks(&mut rng, 1);
-
-        // 1. Float Path: Standard kernel (dequantizes W to F32, dots with Input F32)
-        // We trust this kernel because we validated it against ground truth in other tests.
         let mut out_float = [0.0f32; 1];
         matmul_vec_q4_k_scalar(&mut out_float, &input, &weight_blocks, k);
-
-        // 2. Integer Path: K-Quant specific kernel (W Q4_K * Input Q8_K)
-        // Use the OFFICIAL quantizer to prepare the input
         let input_q8k = quantize_row_q8_k(&input);
         
         let val_int = vec_dot_q4k_q8k_scalar(k, &weight_blocks, &input_q8k);
 
-        // 3. Compare
         let diff = (out_float[0] - val_int).abs();
         let magnitude = out_float[0].abs().max(1.0);
         let rel_err = diff / magnitude;
         
-        // 2% tolerance for Q8_K input quantization noise
         assert!(rel_err < 0.02, "Q4K Float {} vs Int {} (Diff: {}, Rel: {})", out_float[0], val_int, diff, rel_err);
     }
 
@@ -628,18 +480,11 @@ mod matmul_scalar_tests {
         
         let input = random_f32_vec(&mut rng, k);
         let weight_blocks = random_q6k_blocks(&mut rng, 1);
-
-        // 1. Float Path
         let mut out_float = [0.0f32; 1];
         matmul_vec_q6_k_scalar(&mut out_float, &input, &weight_blocks, k);
-
-        // 2. Integer Path
-        // Use the OFFICIAL quantizer
         let input_q8k = quantize_row_q8_k(&input);
 
         let val_int = vec_dot_q6k_q8k_scalar(k, &weight_blocks, &input_q8k);
-
-        // 3. Compare
         let diff = (out_float[0] - val_int).abs();
         let magnitude = out_float[0].abs().max(1.0);
         let rel_err = diff / magnitude;
@@ -647,27 +492,18 @@ mod matmul_scalar_tests {
         assert!(rel_err < 0.02, "Q6K Float {} vs Int {} (Diff: {}, Rel: {})", out_float[0], val_int, diff, rel_err);
     }
 
-    // =======================================================================
-    //  Edge Case Tests
-    // =======================================================================
-
     #[test]
     fn test_q8_0_empty_or_zero() {
         let k = 32;
         let a = vec![1.0; k];
         let mut b = BlockQ8_0 { d: f16::from_f32(1.0), qs: [0; 32] };
         let mut out = [0.0];
-
-        // Test explicit zero
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 0.0);
-
-        // Test explicit 1.0 * 1.0
         b.qs.fill(1);
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 32.0);
-        
-        // Test scale
+    
         b.d = f16::from_f32(0.5);
         matmul_vec_q8_0_scalar(&mut out, &a, &[b], k);
         assert_eq!(out[0], 16.0);
@@ -677,15 +513,14 @@ mod matmul_scalar_tests {
     fn test_bf16_decoding_logic() {
         let a = vec![1.0, 2.0, 1.0];
         let b_rows = vec![
-            0x3F80, // 1.0
-            0x3F00, // 0.5
-            0xC000, // -2.0
+            0x3F80, 
+            0x3F00, 
+            0xC000, 
         ];
         
         let mut out = [0.0];
         matmul_vec_bf16_scalar(&mut out, &a, &b_rows, 3);
         
-        // dot = 1*1 + 2*0.5 + 1*-2 = 1 + 1 - 2 = 0
         assert_eq!(out[0], 0.0);
     }
 }

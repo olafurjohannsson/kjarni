@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use kjarni_transformers::audio::{
-    load_audio, AudioLoaderConfig, MelConfig, compute_mel_spectrogram, create_sine_wave,
+    load_audio, AudioLoaderConfig, MelConfig, compute_mel_spectrogram,
     create_mel_filterbank_librosa
 };
 use ndarray::Array2;

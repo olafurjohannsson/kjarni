@@ -12,8 +12,6 @@ use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::sync::Arc;
 
-// --- Helper Deserializers (Same as Llama) ---
-
 fn deserialize_token_id<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: Deserializer<'de>,
@@ -71,11 +69,10 @@ where
     deserializer.deserialize_any(TokenIdsVisitor)
 }
 
-// --- Defaults ---
-fn default_rms_norm_eps() -> f32 { 1e-6 } // Qwen usually uses 1e-6, Llama 1e-5
-fn default_rope_theta() -> f32 { 1000000.0 } // Qwen 2.5 uses 1M theta
+fn default_rms_norm_eps() -> f32 { 1e-6 } 
+fn default_rope_theta() -> f32 { 1000000.0 } 
 fn default_hidden_act() -> String { "silu".to_string() }
-fn default_tie_word_embeddings() -> bool { false } // Qwen often untied
+fn default_tie_word_embeddings() -> bool { false }
 fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Deserialize)]

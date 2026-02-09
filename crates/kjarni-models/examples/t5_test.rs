@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     print!("Result: ");
     io::stdout().flush()?;
 
-    let mut stream = generator.generate_stream(input_text, None);
+    let stream = generator.generate_stream(input_text, None);
 
     pin_mut!(stream);
     while let Some(token) = TryStreamExt::try_next(&mut stream).await? {

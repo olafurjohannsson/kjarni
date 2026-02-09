@@ -69,7 +69,7 @@ mod more_tests {
     use std::collections::HashMap;
     use std::path::Path;
     use tempfile::TempDir;
-    use ndarray::Array2;
+    
 
     // ========================================================================
     // Mock WeightLoader for testing trait defaults

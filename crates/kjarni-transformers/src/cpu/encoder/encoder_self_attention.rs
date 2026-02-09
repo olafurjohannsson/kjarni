@@ -7,9 +7,7 @@ use anyhow::Result;
 use ndarray::{Array2, Array3, ArrayView4, Zip, s};
 
 pub struct EncoderSelfAttention {
-    /// Unified QKV projection (handles fused vs separate internally)
     pub qkv_proj: QKVProjection,
-    /// Output projection layer.
     pub out_proj: LinearLayer,
 
     /// Number of attention heads.
@@ -24,18 +22,6 @@ pub struct EncoderSelfAttention {
 
 impl EncoderSelfAttention {
     /// Creates a new encoder self-attention module.
-    ///
-    /// Internally constructs a QKVProjection with automatic strategy selection
-    /// (fused for hidden <= 512, separate for larger).
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden_size` - The model's hidden dimension.
-    /// * `num_heads` - Number of attention heads.
-    /// * `q` - Query projection weights.
-    /// * `k` - Key projection weights.
-    /// * `v` - Value projection weights.
-    /// * `o` - Output projection weights.
     pub fn new(
         hidden_size: usize,
         num_heads: usize,
@@ -72,9 +58,6 @@ impl EncoderSelfAttention {
     }
 
     /// Performs the forward pass of encoder self-attention.
-    ///
-    /// This is the allocating version for backward compatibility.
-    /// For hot paths, use `forward_noalloc`.
     pub fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -248,7 +231,7 @@ impl EncoderSelfAttention {
             (q_heads, k_heads_t, v_heads)
         };
 
-        // 6. Compute attention scores: Q @ K^T (writes directly to buffer)
+        // Compute attention scores: Q @ K^T 
         matmul_4d_into(
             &q_heads.view(),
             &k_heads_t.view(),
@@ -257,7 +240,7 @@ impl EncoderSelfAttention {
                 .slice_mut(s![..batch, .., ..seq_len, ..seq_len]),
         );
 
-        // 7. Scale in-place
+        // Scale in-place
         if self.scale_qk {
             buffers
                 .attn_scores
@@ -265,7 +248,7 @@ impl EncoderSelfAttention {
                 .mapv_inplace(|x| x * self.scale_factor);
         }
 
-        // 8. Add position bias if provided
+        //Add position bias if provided
         if let Some(bias) = position_bias {
             let bias_slice = bias.slice(s![.., .., ..seq_len, ..seq_len]);
             buffers
@@ -274,7 +257,7 @@ impl EncoderSelfAttention {
                 .zip_mut_with(&bias_slice, |s, &b| *s += b);
         }
 
-        // 9. Apply padding mask in-place
+        // Apply padding mask in-place
         Self::apply_padding_mask_inplace(
             &mut buffers
                 .attn_scores
@@ -282,7 +265,7 @@ impl EncoderSelfAttention {
             attention_mask,
         );
 
-        // 10. Softmax in-place
+        // Softmax in-place
         crate::activations::softmax_4d_view_inplace(&mut buffers.attn_scores.slice_mut(s![
             ..batch,
             ..,
@@ -290,7 +273,7 @@ impl EncoderSelfAttention {
             ..seq_len
         ]));
 
-        // 11. Compute context: Scores @ V (writes directly to buffer)
+        // Compute context: Scores @ V 
         matmul_4d_into(
             &buffers
                 .attn_scores
@@ -301,7 +284,7 @@ impl EncoderSelfAttention {
                 .slice_mut(s![..batch, .., ..seq_len, ..self.head_dim]),
         );
 
-        // 12. Merge heads: [batch, heads, seq, head_dim] -> [tokens, hidden] (no-alloc)
+        // Merge heads: [batch, heads, seq, head_dim] -> [tokens, hidden] (no-alloc)
         let context_slice = buffers
             .attn_context
             .slice(s![..batch, .., ..seq_len, ..self.head_dim]);
@@ -314,7 +297,7 @@ impl EncoderSelfAttention {
             self.head_dim,
         );
 
-        // 13. Output projection (no-alloc) -> writes to buffers.attn_output
+        // Output projection (no-alloc) -> writes to buffers.attn_output
         self.out_proj.matmul_noalloc(
             &buffers.merge_scratch.slice(s![..tokens, ..]),
             &mut buffers.attn_output,
@@ -342,9 +325,7 @@ impl EncoderSelfAttention {
     }
 }
 
-/// Batched matmul using faer, writing to pre-allocated output buffer.
-///
-/// Handles strided output (when buffer is sliced) with per-batch scratch.
+/// Batched matmul 
 #[inline]
 pub fn matmul_4d_into(
     a: &ArrayView4<f32>,

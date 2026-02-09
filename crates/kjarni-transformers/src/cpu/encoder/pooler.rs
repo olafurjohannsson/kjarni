@@ -8,14 +8,6 @@ use ndarray::{Array2, Array3};
 /// CPU pooling head - reduces sequence to single vector.
 pub trait CpuPooler: Send + Sync {
     /// Pool hidden states to a single vector per batch item.
-    ///
-    /// # Arguments
-    /// * `hidden_states` - `[batch_size, seq_len, hidden_size]`
-    /// * `attention_mask` - `[batch_size, seq_len]` (for mean pooling)
-    /// * `strategy` - Pooling strategy to use
-    ///
-    /// # Returns
-    /// Pooled output `[batch_size, hidden_size]`
     fn pool(
         &self,
         hidden_states: &Array3<f32>,
@@ -36,10 +28,6 @@ pub trait GpuPooler: Send + Sync {
         strategy: &PoolingStrategy,
     ) -> Result<GpuTensor>;
 }
-
-// ============================================================================
-// IMPLEMENTATIONS
-// ============================================================================
 
 /// Standard CPU pooler implementation.
 pub struct StandardCpuPooler;

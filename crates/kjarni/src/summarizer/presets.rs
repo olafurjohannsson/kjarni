@@ -12,9 +12,9 @@ pub struct SummarizerPreset {
     pub description: &'static str,
 }
 
-// =============================================================================
+
 // V1 Presets
-// =============================================================================
+
 
 /// Fast summarization with DistilBART.
 pub const SUMMARIZER_FAST_V1: SummarizerPreset = SummarizerPreset {
@@ -67,9 +67,9 @@ pub fn find_preset(name: &str) -> Option<&'static SummarizerPreset> {
         .copied()
 }
 
-// =============================================================================
+
 // Tiers
-// =============================================================================
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummarizerTier {

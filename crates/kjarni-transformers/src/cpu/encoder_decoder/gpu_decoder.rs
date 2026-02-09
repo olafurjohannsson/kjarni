@@ -22,43 +22,26 @@ use crate::{
         GpuFeedForward, GpuFeedForwardStd, GpuFeedForwardWeights, GpuFeedForwardWeightsStd,
         attention::GpuAttentionWeights, layers::GpuCrossDecoderLayer,
     },
-    models::base::{ModelInput, ModelLoadConfig},
+    models::base::ModelLoadConfig,
     tensor::DType,
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
 
-// =============================================================================
-// Seq2Seq GPU Decoder
-// =============================================================================
-
 /// Unified transformer decoder for seq2seq models on GPU.
-///
-/// Supports BART, T5, Whisper, mBART, and similar architectures.
-/// Does NOT own embeddings - use via `GpuDecoderOps` which provides embeddings.
-///
-/// # Architecture Support
-/// - **BART**: post-norm, embed_norm=true, final_norm=false
-/// - **T5**: pre-norm, embed_norm=false, final_norm=true, relative position bias
-/// - **Whisper**: pre-norm, embed_norm=true, final_norm=true, sinusoidal positions
 pub struct Seq2SeqGPUDecoder {
     context: Arc<WgpuContext>,
 
-    // --- Embedding LayerNorm (applied after embed lookup, before layers) ---
     embed_layer_norm: Option<GpuNormalization>,
     embed_ln_weights: Option<GpuNormalizationWeights>,
 
-    // --- Transformer Decoder Layers ---
     layers: Vec<GpuCrossDecoderLayer>,
 
-    // --- Final LayerNorm (T5, Whisper have this; BART doesn't) ---
     final_layer_norm: Option<GpuNormalization>,
     final_ln_weights: Option<GpuNormalizationWeights>,
 
-    // --- Architecture flags ---
     pre_norm: bool,
 
-    // --- Metadata ---
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
 }
@@ -93,18 +76,14 @@ impl Seq2SeqGPUDecoder {
             decoder_config.final_layer_norm
         );
 
-        // ====================================================================
-        // 1. EMBEDDING LAYER NORM (optional)
-        // ====================================================================
+        // embed layer nrom
         let (embed_layer_norm, embed_ln_weights) = if decoder_config.normalize_embeddings {
             Self::build_embed_norm(context, weights, decoder_layout, &meta, target_dt)?
         } else {
             (None, None)
         };
 
-        // ====================================================================
-        // 2. TRANSFORMER DECODER LAYERS
-        // ====================================================================
+        // transformer decoder layers
         let layers = Self::build_layers(
             context,
             weights,
@@ -114,16 +93,14 @@ impl Seq2SeqGPUDecoder {
             &load_config,
         )?;
 
-        // ====================================================================
-        // 3. FINAL LAYER NORM (optional)
-        // ====================================================================
+        // optional final norm
         let (final_layer_norm, final_ln_weights) = if decoder_config.final_layer_norm {
             Self::build_final_norm(context, weights, decoder_layout, &meta, target_dt)?
         } else {
             (None, None)
         };
 
-        log::info!(
+        log::debug!(
             "Seq2SeqGpuDecoder built: {} layers, embed_norm={}, final_norm={}",
             layers.len(),
             embed_layer_norm.is_some(),
@@ -142,10 +119,6 @@ impl Seq2SeqGPUDecoder {
             layout,
         })
     }
-
-    // ========================================================================
-    // BUILD HELPERS
-    // ========================================================================
 
     fn build_embed_norm(
         context: &Arc<WgpuContext>,
@@ -178,7 +151,6 @@ impl Seq2SeqGPUDecoder {
             )?);
             Ok((Some(norm), Some(weights_gpu)))
         } else if let Some(w_key) = &decoder_layout.embedding_norm_weight {
-            // RMSNorm style (no bias)
             log::debug!("Loading decoder embedding RMSNorm: {}", w_key);
             let norm = GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
             let weights_gpu = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
@@ -233,7 +205,6 @@ impl Seq2SeqGPUDecoder {
                     )?,
                 )?)
             } else {
-                // RMSNorm (T5 style) - no bias
                 GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                     GpuTensor::from_model_weights(
                         context,
@@ -648,7 +619,7 @@ mod seq2seq_gpu_decoder_tests {
         ModelLayout, ModelMetadata, NormalizationStrategy,
     };
     use crate::weights::ModelWeights;
-    use ndarray::{Array2, Array3};
+    use ndarray::Array3;
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
     use tempfile::TempDir;

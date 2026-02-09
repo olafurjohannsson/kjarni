@@ -321,7 +321,7 @@ mod encoder_layer_tests {
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer;
     use crate::cpu::normalization::LayerNorm;
-    use crate::pipeline::CpuLayerFactory;
+    
     use crate::{activations::Activation, feedforward::LegacyFeedForward};
     use ndarray::{Array1, Array2, Array3, Array4};
     fn create_deterministic_layer(
@@ -395,7 +395,7 @@ mod encoder_layer_tests {
             1e-5,
         ));
 
-        let mut layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2);
+        let layer = EncoderLayer::new(self_attn, ln1, feedforward, ln2);
 
         layer
     }

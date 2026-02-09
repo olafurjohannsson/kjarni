@@ -2,7 +2,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use ndarray::{Array2, Array3, Array4, s};
+use ndarray::{Array2, Array3, Array4};
 use std::sync::Arc;
 
 pub use crate::encoder_decoder::config::{PositionEncodingType, Seq2SeqDecoderConfig};
@@ -23,11 +23,6 @@ use crate::{
     weights::ModelWeights,
 };
 
-// =============================================================================
-// Decoder Output
-// =============================================================================
-
-/// Output from the Seq2Seq decoder (for internal use, separate from trait output).
 #[derive(Debug)]
 pub struct DecoderOutput {
     /// Hidden states from the final layer. Shape: [batch, seq, hidden]
@@ -36,35 +31,7 @@ pub struct DecoderOutput {
     pub new_self_attn_kv: Vec<(Array3<f32>, Array3<f32>)>,
 }
 
-// =============================================================================
-// Seq2Seq Decoder (CPU)
-// =============================================================================
-
 /// Unified transformer decoder for seq2seq models.
-///
-/// Supports BART, T5, Whisper, mBART, and similar architectures.
-/// Configuration is driven by `ModelConfig` and `Seq2SeqDecoderConfig`.
-///
-/// # Example
-///
-/// ```ignore
-/// // From a BartConfig
-/// let decoder = Seq2SeqCPUDecoder::new(
-///     &weights,
-///     &bart_config,
-///     Seq2SeqDecoderConfig::bart(),
-///     load_config,
-/// )?;
-///
-/// // Forward with pre-computed cross-attention cache
-/// let cross_kv = decoder.precompute_cross_attention_kv(&encoder_output)?;
-/// let output = decoder.forward(
-///     input_ids,
-///     &encoder_hidden_states,
-///     Some(&cross_kv),
-///     cache,
-/// )?;
-/// ```
 pub struct Seq2SeqCPUDecoder {
     /// Token embeddings
     embeddings: Embeddings,
@@ -93,12 +60,6 @@ pub struct Seq2SeqCPUDecoder {
 
 impl Seq2SeqCPUDecoder {
     /// Create decoder from ModelConfig.
-    ///
-    /// # Arguments
-    /// * `weights` - Model weights
-    /// * `config` - Model configuration implementing `ModelConfig`
-    /// * `decoder_config` - Seq2Seq-specific decoder configuration
-    /// * `load_config` - Weight loading options
     pub fn new<C: ModelConfig>(
         weights: &ModelWeights,
         config: &C,
@@ -115,20 +76,20 @@ impl Seq2SeqCPUDecoder {
 
         let factory = Seq2SeqFactory::new(weights).with_load_config(&load_config);
 
-        // 1. Build embeddings
+        // Build embeddings
         let embeddings: Embeddings = factory.build_embeddings(
             &layout.token_embedding,
             decoder_layout.position_embedding.as_deref(),
         )?;
 
-        // 2. Build embedding normalization
+        // Build embedding normalization
         let embed_norm = if decoder_config.normalize_embeddings {
             Self::build_embed_norm(&factory, decoder_layout, &meta)?
         } else {
             None
         };
 
-        // 3. Build transformer layers
+        // transformer layers
         let layers: Vec<CrossDecoderLayer> = (0..meta
             .decoder_layers
             .expect("Invalid cross decoder layers"))
@@ -142,7 +103,7 @@ impl Seq2SeqCPUDecoder {
             None
         };
 
-        // 5. Build position encoding
+        //  position encoding
         let position_encoding = Self::build_position_encoding(
             weights,
             &decoder_config.position_encoding,
@@ -249,21 +210,8 @@ impl Seq2SeqCPUDecoder {
             PositionEncodingType::None => Ok(PositionEncoding::None),
         }
     }
-
-    // =========================================================================
-    // Forward Pass
-    // =========================================================================
-
-    /// Full forward pass for decoder.
-    ///
-    /// # Arguments
-    /// * `input_ids` - Decoder input token IDs [batch, seq]
-    /// * `encoder_hidden_states` - Encoder output [batch, enc_seq, hidden]
-    /// * `attention_mask` - Decoder self-attention mask
-    /// * `cross_attention_mask` - Encoder-decoder attention mask
-    /// * `cache` - Self-attention KV cache (updated in-place)
-    /// * `cross_kv_cache` - Pre-computed cross-attention KV (optional)
-    /// * `position_offset` - Position offset for autoregressive decoding
+    
+    
     pub fn forward(
         &self,
         input_ids: &Array2<u32>,
@@ -274,38 +222,14 @@ impl Seq2SeqCPUDecoder {
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
         position_offset: usize,
     ) -> Result<DecoderOutput> {
-        // println!("\n[DECODER DEBUG] Number of layers: {}", self.layers.len());
-        // println!("[DECODER DEBUG] Input shape: {:?}", input_ids.dim());
-        // println!(
-        //     "[DECODER DEBUG] Encoder hidden shape: {:?}",
-        //     encoder_hidden_states.dim()
-        // );
-
-        // 1. Embeddings
         let mut hidden = self.embed(input_ids, position_offset);
-        // if position_offset == 0 {
-        //     println!("\n--- RUST DECODER DEBUG ---");
-        //     // Slice the first 5 values of the embedding (before norm/pos)
-        //     println!(
-        //         "[2] Scaled Word Embedding (first 5): {:?}",
-        //         hidden.slice(s![0, 0, ..5])
-        //     );
-        // }
-        // 2. Apply position encoding (for sinusoidal - learned handled in embed)
         hidden = self.apply_position_encoding(hidden, position_offset)?;
-
-        // 3. Embedding normalization
         if let Some(norm) = &self.embed_norm {
             hidden = norm.forward(&hidden);
         }
 
-        // 4. Compute position bias (T5)
         let position_bias = self.compute_position_bias(&hidden, position_offset)?;
-
-        // 5. Get CPU cache if available
         let cpu_cache = cache.and_then(|c| c.as_any().downcast_ref::<CpuBeamKVCache>());
-
-        // 6. Transformer layers
         let mut new_self_attn_kvs = Vec::with_capacity(self.layers.len());
 
         for (i, layer) in self.layers.iter().enumerate() {
@@ -315,7 +239,6 @@ impl Seq2SeqCPUDecoder {
 
             // Get cross-attention K/V for this layer
             let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
-            let pre_mean = hidden.mean().unwrap_or(0.0);
             let (new_hidden, new_kv) = layer.forward(
                 &hidden,
                 encoder_hidden_states,
@@ -327,34 +250,18 @@ impl Seq2SeqCPUDecoder {
             )?;
             let post_mean = hidden.mean().unwrap_or(0.0);
             hidden = new_hidden;
-            // println!(
-            //     "[DECODER DEBUG] Layer {} | Pre-mean: {:.6} -> Post-mean: {:.6}",
-            //     i, pre_mean, post_mean
-            // );
             new_self_attn_kvs.push(new_kv);
         }
 
-        // 7. Final layer normalization
         if let Some(norm) = &self.final_norm {
             hidden = norm.forward(&hidden);
         }
-        // if position_offset == 0 {
-        //     println!(
-        //         "[4] Decoder Initial State (Pre-Layer 0) (first 10): {:?}",
-        //         hidden.slice(s![0, 0, ..10])
-        //     );
-        // }
         Ok(DecoderOutput {
             last_hidden_state: hidden,
             new_self_attn_kv: new_self_attn_kvs,
         })
     }
 
-    // =========================================================================
-    // Helper Methods
-    // =========================================================================
-
-    /// Embed input tokens.
     fn embed(&self, input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
         self.embeddings.forward(
             input_ids,
@@ -404,15 +311,13 @@ impl Seq2SeqCPUDecoder {
     fn compute_position_bias(
         &self,
         hidden: &Array3<f32>,
-        position_offset: usize, // Add this parameter
+        position_offset: usize,
     ) -> Result<Option<Array4<f32>>> {
         match &self.position_encoding {
             PositionEncoding::RelativeBias { bias } => {
                 let query_len = hidden.dim().1;
                 // Key length is the total history plus the current tokens
                 let key_len = position_offset + query_len;
-
-                // We need a version of compute that understands the query starts at position_offset
                 Ok(Some(bias.compute_with_offset(
                     query_len,
                     key_len,
@@ -423,34 +328,26 @@ impl Seq2SeqCPUDecoder {
         }
     }
 
-    /// Number of decoder layers.
     pub fn num_layers(&self) -> usize {
         self.layers.len()
     }
-
-    /// Hidden size.
     pub fn hidden_size(&self) -> usize {
         self.meta.hidden_size
     }
-
-    /// Access to layers (for pre-computing cross-attention).
     pub fn layers(&self) -> &[CrossDecoderLayer] {
         &self.layers
     }
 }
 
-// =============================================================================
-// Position Encoding Implementations (same as encoder, could be shared)
-// =============================================================================
 
 /// Runtime position encoding implementation.
 pub enum PositionEncoding {
-    /// Learned absolute positions (BART, Whisper)
+    /// Learned absolute positions
     Learned {
         embeddings: Array2<f32>,
         offset: usize,
     },
-    /// Relative position bias (T5)
+    /// Relative position bias
     RelativeBias { bias: T5RelativePositionBias },
     /// Sinusoidal positions
     Sinusoidal { cache: Array2<f32> },
@@ -472,12 +369,6 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
 
     embeddings
 }
-
-impl Seq2SeqCPUDecoder {}
-
-// =============================================================================
-// Trait Implementations
-// =============================================================================
 
 impl InferenceModel for Seq2SeqCPUDecoder {
     fn device(&self) -> Device {
@@ -523,24 +414,13 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         &self,
         decoder_input_ids: &Array2<u32>,
         encoder_hidden_states: &Array3<f32>,
-        decoder_padding_mask: Option<&Array2<f32>>, // Padding in the decoder
-        encoder_padding_mask: Option<&Array2<f32>>, // Padding in the encoder (NEW)
+        decoder_padding_mask: Option<&Array2<f32>>, 
+        encoder_padding_mask: Option<&Array2<f32>>, 
         cache: Option<&mut dyn Cache>,
         cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
     ) -> Result<CpuCrossDecoderOutput> {
-        // 1. Calculate offset
         let position_offset = cache.as_ref().map_or(0, |c| c.get_seq_length());
-
-        // 2. Embed
         let hidden = self.embed_and_normalize(decoder_input_ids, position_offset)?;
-        log::info!(
-            "Decoder embedded [0,0,:10]: {:?}",
-            hidden.slice(ndarray::s![0, 0, ..10])
-        );
-        log::info!(
-            "Decoder embedded [0,-1,:10]: {:?}",
-            hidden.slice(ndarray::s![0, -1_i32, ..10])
-        );
         self.forward_layers(
             &hidden,
             encoder_hidden_states,
@@ -607,23 +487,20 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
         let seq_len = hidden_states.dim().1;
         let total_len = position_offset + seq_len;
 
-        // 1. Create the Causal Mask [seq_len, total_len]
         let causal_mask = crate::utils::masks::create_causal_mask(seq_len, total_len);
 
-        // 2. Combine with Decoder Padding Mask (Self-Attention Mask)
+        // Combine with Decoder Padding Mask (Self-Attention Mask)
         let self_attn_mask = match decoder_padding_mask {
             Some(pad) => {
-                // If pad is [batch, total_len], we broadcast and multiply
-                // This ensures we are causal AND ignoring padding
                 Some(combine_masks(&causal_mask, pad))
             }
             None => Some(causal_mask),
         };
 
-        // 3. Encoder Padding Mask is used for Cross-Attention
+        // Encoder Padding Mask is used for Cross-Attention
         let cross_attn_mask = encoder_padding_mask;
 
-        // 4. Compute T5 Position Bias (Using query_offset fix)
+        // Compute T5 Position Bias (Using query_offset fix)
         let position_bias = self.compute_position_bias(hidden_states, position_offset)?;
 
         let mut hidden = hidden_states.clone();
@@ -635,7 +512,6 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
             let past_kv_views = past_kv.as_ref().map(|(k, v)| (k.view(), v.view()));
             let cross_kv_for_layer = cross_kv_cache.and_then(|c| c.0.get(i));
 
-            // 5. Pass DIFFERENT masks to the layer
             let (new_hidden, new_kv) = layer.forward(
                 &hidden,
                 encoder_hidden_states,
@@ -663,7 +539,6 @@ impl CpuCrossDecoder for Seq2SeqCPUDecoder {
     }
 }
 fn combine_masks(a: &Array2<f32>, b: &Array2<f32>) -> Array2<f32> {
-    // Standard element-wise multiplication works for 1.0/0.0 masks
     a * b
 }
 
@@ -672,7 +547,7 @@ mod seq2seq_decoder_tests {
     use super::*;
     use crate::activations::Activation;
     use crate::cache::CpuBeamKVCache;
-    use crate::encoder_decoder::traits::CpuCrossDecoder; // Import trait for forward2
+    use crate::encoder_decoder::traits::CpuCrossDecoder; 
     use crate::models::base::ModelLoadConfig;
     use crate::traits::{
         AttentionLayout, DecoderLayerLayout, DecoderLayout, FeedForwardLayout, ModelConfig,
@@ -684,10 +559,6 @@ mod seq2seq_decoder_tests {
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
     use tempfile::TempDir;
-
-    // =========================================================================
-    //  1. Mock Configuration & Layout
-    // =========================================================================
 
     #[derive(Debug, Clone)]
     struct MockConfig {

@@ -279,7 +279,7 @@ mod cross_decoder_layer_tests {
         cpu::normalization::{LayerNorm, Normalization},
     };
     use anyhow::Result;
-    use ndarray::{Array1, Array2, Array3, Array4, s};
+    use ndarray::{Array1, Array2, Array3};
 
     /// Helper to create LinearLayer from weight and bias vecs
     fn load_linear(

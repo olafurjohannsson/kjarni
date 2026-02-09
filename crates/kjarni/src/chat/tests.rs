@@ -1,14 +1,13 @@
 //! Comprehensive tests for the Chat module.
 
 use super::*;
-use crate::generation::GenerationOverrides;
 
-// =============================================================================
+
 // Unit Tests - Types
-// =============================================================================
+
 
 mod types_tests {
-    use super::*;
+    
     use crate::chat::types::*;
 
     #[test]
@@ -151,9 +150,9 @@ mod types_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Presets
-// =============================================================================
+
 
 mod preset_tests {
     use super::*;
@@ -176,7 +175,9 @@ mod preset_tests {
     #[test]
     fn test_preset_quality() {
         assert!(!ChatPreset::QUALITY.model.is_empty());
-        assert!(ChatPreset::QUALITY.max_tokens.unwrap() >= ChatPreset::BALANCED.max_tokens.unwrap());
+        assert!(
+            ChatPreset::QUALITY.max_tokens.unwrap() >= ChatPreset::BALANCED.max_tokens.unwrap()
+        );
     }
 
     #[test]
@@ -184,13 +185,6 @@ mod preset_tests {
         assert!(matches!(ChatPreset::CREATIVE.mode, ChatMode::Creative));
         assert!(ChatPreset::CREATIVE.temperature.unwrap() > 0.8);
         assert!(ChatPreset::CREATIVE.system_prompt.is_some());
-    }
-
-    #[test]
-    fn test_preset_coding() {
-        assert!(matches!(ChatPreset::CODING.mode, ChatMode::Reasoning));
-        assert!(ChatPreset::CODING.temperature.unwrap() < 0.5);
-        assert!(ChatPreset::CODING.system_prompt.is_some());
     }
 
     #[test]
@@ -202,7 +196,10 @@ mod preset_tests {
     #[test]
     fn test_tier_resolution() {
         assert_eq!(ChatTier::Fast.preset().model, ChatPreset::FAST.model);
-        assert_eq!(ChatTier::Balanced.preset().model, ChatPreset::BALANCED.model);
+        assert_eq!(
+            ChatTier::Balanced.preset().model,
+            ChatPreset::BALANCED.model
+        );
         assert_eq!(ChatTier::Quality.preset().model, ChatPreset::QUALITY.model);
     }
 
@@ -223,12 +220,12 @@ mod preset_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Validation
-// =============================================================================
+
 
 mod validation_tests {
-    use super::*;
+    
     use crate::chat::validation::*;
     use kjarni_transformers::models::ModelType;
 
@@ -253,7 +250,11 @@ mod validation_tests {
         for name in encoder_models {
             if let Some(model_type) = ModelType::from_cli_name(name) {
                 let result = validate_for_chat(model_type);
-                assert!(result.is_err(), "Encoder {} should fail chat validation", name);
+                assert!(
+                    result.is_err(),
+                    "Encoder {} should fail chat validation",
+                    name
+                );
             }
         }
     }
@@ -265,7 +266,11 @@ mod validation_tests {
         for name in seq2seq_models {
             if let Some(model_type) = ModelType::from_cli_name(name) {
                 let result = validate_for_chat(model_type);
-                assert!(result.is_err(), "Seq2seq {} should fail chat validation", name);
+                assert!(
+                    result.is_err(),
+                    "Seq2seq {} should fail chat validation",
+                    name
+                );
             }
         }
     }
@@ -277,7 +282,10 @@ mod validation_tests {
             let result = validate_for_chat(model_type);
             if let Ok(validation) = result {
                 assert!(validation.is_valid);
-                assert!(!validation.warnings.is_empty(), "Base model should have warning");
+                assert!(
+                    !validation.warnings.is_empty(),
+                    "Base model should have warning"
+                );
             }
         }
     }
@@ -301,13 +309,17 @@ mod validation_tests {
     fn test_suggest_chat_models() {
         let suggestions = suggest_chat_models();
         assert!(!suggestions.is_empty());
-        assert!(suggestions.iter().any(|m| m.contains("llama") || m.contains("qwen")));
+        assert!(
+            suggestions
+                .iter()
+                .any(|m| m.contains("llama") || m.contains("qwen"))
+        );
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Builder
-// =============================================================================
+
 
 mod builder_tests {
     use super::*;
@@ -324,19 +336,16 @@ mod builder_tests {
 
     #[test]
     fn test_builder_system_prompt() {
-        let builder = ChatBuilder::new("qwen2.5-0.5b-instruct")
-            .system("You are helpful");
+        let builder = ChatBuilder::new("qwen2.5-0.5b-instruct").system("You are helpful");
         assert_eq!(builder.system_prompt, Some("You are helpful".to_string()));
     }
 
     #[test]
     fn test_builder_mode() {
-        let creative = ChatBuilder::new("qwen2.5-0.5b-instruct")
-            .mode(ChatMode::Creative);
+        let creative = ChatBuilder::new("qwen2.5-0.5b-instruct").mode(ChatMode::Creative);
         assert!(matches!(creative.mode, ChatMode::Creative));
 
-        let reasoning = ChatBuilder::new("qwen2.5-0.5b-instruct")
-            .mode(ChatMode::Reasoning);
+        let reasoning = ChatBuilder::new("qwen2.5-0.5b-instruct").mode(ChatMode::Reasoning);
         assert!(matches!(reasoning.mode, ChatMode::Reasoning));
     }
 
@@ -388,9 +397,9 @@ mod builder_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests (require model download)
-// =============================================================================
+
 
 #[cfg(test)]
 mod integration_tests {
@@ -404,9 +413,6 @@ mod integration_tests {
             .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Basic Chat Tests with Assertions
-    // =========================================================================
 
     #[tokio::test]
     async fn test_basic_chat() {
@@ -426,8 +432,11 @@ mod integration_tests {
         let response = chat.send("Hello!").await.expect("Send failed");
 
         assert!(!response.is_empty(), "Response should not be empty");
-        assert!(response.chars().any(|c| c.is_alphabetic()),
-            "Response should contain letters: {}", response);
+        assert!(
+            response.chars().any(|c| c.is_alphabetic()),
+            "Response should contain letters: {}",
+            response
+        );
     }
 
     #[tokio::test]
@@ -452,9 +461,12 @@ mod integration_tests {
         let response_lower = response.to_lowercase();
         let mentions_four = response_lower.contains("4") || response_lower.contains("four");
         let has_text = response.chars().filter(|c| c.is_alphabetic()).count() > 3;
-        
-        assert!(mentions_four || has_text,
-            "Response should mention 4 or contain meaningful text: {}", response);
+
+        assert!(
+            mentions_four || has_text,
+            "Response should mention 4 or contain meaningful text: {}",
+            response
+        );
     }
 
     // =========================================================================
@@ -477,7 +489,10 @@ mod integration_tests {
             .await
             .unwrap();
 
-        assert_eq!(chat.system_prompt(), Some("You are a helpful assistant. Always be concise."));
+        assert_eq!(
+            chat.system_prompt(),
+            Some("You are a helpful assistant. Always be concise.")
+        );
 
         let response = chat.send("Hi").await.unwrap();
         assert!(!response.is_empty());
@@ -531,7 +546,11 @@ mod integration_tests {
             assert_eq!(chat.mode(), mode);
 
             let response = chat.send("Hi").await.unwrap();
-            assert!(!response.is_empty(), "Mode {:?} should produce output", mode);
+            assert!(
+                !response.is_empty(),
+                "Mode {:?} should produce output",
+                mode
+            );
         }
     }
 
@@ -560,20 +579,26 @@ mod integration_tests {
 
         let r1 = convo.send("My name is Alice").await.unwrap();
         assert!(!r1.is_empty());
-        
+
         // History should have user + assistant
         let history_len = convo.len();
-        assert!(history_len >= 2, "Should have at least user + assistant messages");
+        assert!(
+            history_len >= 2,
+            "Should have at least user + assistant messages"
+        );
 
         let r2 = convo.send("What is my name?").await.unwrap();
         assert!(!r2.is_empty());
-        
+
         // History should grow
-        assert!(convo.len() > history_len, "History should grow after second message");
+        assert!(
+            convo.len() > history_len,
+            "History should grow after second message"
+        );
     }
 
     #[tokio::test]
-    async fn test_conversation_remembers_context() {
+    async fn test_conversation_accumulates_history() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
             return;
@@ -589,24 +614,25 @@ mod integration_tests {
 
         let mut convo = chat.conversation();
 
-        // First message: establish a unique name
-        let r1 = convo.send("My name is Xylophone7492. Remember that.").await.unwrap();
-        assert!(!r1.is_empty());
+        assert!(convo.is_empty());
 
-        // Second message: ask about the name
-        let r2 = convo.send("What is my name?").await.unwrap();
-        
-        // The model should remember the name (though small models may fail)
-        // At minimum, verify we got a response
-        assert!(!r2.is_empty());
-        
-        // Check if response contains the unique name (not always guaranteed with small models)
-        let mentions_name = r2.contains("Xylophone") || r2.contains("7492");
-        if mentions_name {
-            println!("Model successfully remembered name");
-        } else {
-            println!("Note: Small model did not recall exact name (expected). Response: '{}'", r2);
-        }
+        let _ = convo.send("My name is Xylophone7492.").await.unwrap();
+
+        assert_eq!(convo.len(), 2);
+        let msgs = convo.history().messages();
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[0].content, "My name is Xylophone7492.");
+        assert_eq!(msgs[1].role, Role::Assistant);
+        assert!(!msgs[1].content.is_empty());
+
+        let _ = convo.send("What is my name?").await.unwrap();
+
+        assert_eq!(convo.len(), 4);
+        let msgs = convo.history().messages();
+        assert_eq!(msgs[2].role, Role::User);
+        assert_eq!(msgs[2].content, "What is my name?");
+        assert_eq!(msgs[3].role, Role::Assistant);
+        assert!(!msgs[3].content.is_empty());
     }
 
     #[tokio::test]
@@ -632,15 +658,14 @@ mod integration_tests {
         assert!(convo.len() > initial_len);
 
         convo.clear(true); // Keep system
-        assert!(convo.len() <= 1, "Should only have system prompt after clear");
+        assert!(
+            convo.len() <= 1,
+            "Should only have system prompt after clear"
+        );
 
         convo.clear(false); // Clear all
         assert!(convo.is_empty(), "Should be empty after full clear");
     }
-
-    // =========================================================================
-    // Send with History Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_send_with_history() {
@@ -661,13 +686,12 @@ mod integration_tests {
         history.push_user("I like pizza");
         history.push_assistant("That's great! Pizza is delicious.");
 
-        let response = chat.send_with_history(&history, "What food do I like?").await.unwrap();
+        let response = chat
+            .send_with_history(&history, "What food do I like?")
+            .await
+            .unwrap();
         assert!(!response.is_empty());
     }
-
-    // =========================================================================
-    // Streaming Tests with Assertions
-    // =========================================================================
 
     #[tokio::test]
     async fn test_streaming_chat() {
@@ -729,10 +753,6 @@ mod integration_tests {
         assert!(convo.len() >= 2, "Should have user + assistant messages");
     }
 
-    // =========================================================================
-    // Error Handling Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_unknown_model_error() {
         let result = Chat::new("not-a-real-model").await;
@@ -741,14 +761,12 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_incompatible_model_encoder() {
-        // Encoder models should fail
         let result = Chat::new("minilm-l6-v2").await;
         assert!(matches!(result, Err(ChatError::IncompatibleModel { .. })));
     }
 
     #[tokio::test]
     async fn test_incompatible_model_seq2seq() {
-        // Seq2seq models should fail
         let result = Chat::new("flan-t5-base").await;
         assert!(matches!(result, Err(ChatError::IncompatibleModel { .. })));
     }
@@ -776,13 +794,12 @@ mod integration_tests {
         assert_eq!(chat.model_name(), "qwen2.5-0.5b-instruct");
         assert_eq!(chat.system_prompt(), Some("Test system"));
         assert!(matches!(chat.mode(), ChatMode::Creative));
-        assert!(matches!(chat.device(), kjarni_transformers::traits::Device::Cpu));
+        assert!(matches!(
+            chat.device(),
+            kjarni_transformers::traits::Device::Cpu
+        ));
         assert!(chat.context_size() > 0);
     }
-
-    // =========================================================================
-    // Concurrent Chat Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_concurrent_chat() {
@@ -815,7 +832,11 @@ mod integration_tests {
         for (i, handle) in handles.into_iter().enumerate() {
             let result = handle.await.expect("Task panicked");
             let response = result.expect("Chat failed");
-            assert!(!response.is_empty(), "Concurrent response {} should not be empty", i);
+            assert!(
+                !response.is_empty(),
+                "Concurrent response {} should not be empty",
+                i
+            );
         }
     }
 
@@ -952,19 +973,6 @@ mod chat_tests {
     }
 
     #[test]
-    fn test_preset_coding() {
-        let preset = ChatPreset::CODING;
-        assert_eq!(preset.mode, ChatMode::Reasoning);
-        assert!(
-            preset
-                .system_prompt
-                .unwrap()
-                .to_lowercase()
-                .contains("coding")
-        );
-    }
-
-    #[test]
     fn test_tier_fast() {
         assert_eq!(ChatTier::Fast.resolve().model, ChatPreset::FAST.model);
     }
@@ -1007,10 +1015,6 @@ mod integration_tests2 {
             .expect("Failed to load test model")
     }
 
-    // -------------------------------------------------------------------------
-    // Basic Conversation
-    // -------------------------------------------------------------------------
-
     #[tokio::test]
     async fn test_send_single_message() {
         let chat = load_test_model().await;
@@ -1051,10 +1055,6 @@ mod integration_tests2 {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // System Prompt
-    // -------------------------------------------------------------------------
-
     #[tokio::test]
     async fn test_conversation_with_system_prompt() {
         let chat = load_test_model().await;
@@ -1094,10 +1094,6 @@ mod integration_tests2 {
             );
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Streaming
-    // -------------------------------------------------------------------------
 
     #[tokio::test]
     async fn test_streaming_returns_tokens() {
@@ -1146,10 +1142,6 @@ mod integration_tests2 {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // History Management
-    // -------------------------------------------------------------------------
-
     #[tokio::test]
     async fn test_clear_history_keeps_system() {
         let chat = load_test_model().await;
@@ -1182,10 +1174,6 @@ mod integration_tests2 {
         assert_eq!(convo.len(), 2); // Fresh start
     }
 
-    // -------------------------------------------------------------------------
-    // Builder Overrides
-    // -------------------------------------------------------------------------
-
     #[tokio::test]
     async fn test_builder_temperature_override() {
         let chat = Chat::builder(ChatPreset::FAST.model)
@@ -1214,10 +1202,6 @@ mod integration_tests2 {
         // Response should be truncated (though exact token count is hard to verify)
         assert!(!response.is_empty());
     }
-
-    // -------------------------------------------------------------------------
-    // Manual History Management
-    // -------------------------------------------------------------------------
 
     #[tokio::test]
     async fn test_push_user_and_assistant_manually() {

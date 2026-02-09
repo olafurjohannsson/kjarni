@@ -22,10 +22,7 @@ fn unpack_bf16(packed: u32) -> vec2<f32> {
     return vec2<f32>(x, y);
 }
 
-// ------------------------------------------------------------------
-// KERNEL 1: Wide GEMV (BF16) - Optimized for Large N (lm_head)
-// Dispatch: (N, 1, 1) -> One Workgroup (256 threads) per Output Neuron
-// ------------------------------------------------------------------
+// Wide GEMV (BF16)
 @compute @workgroup_size(256)
 fn gemv_bf16_wide(
     @builtin(workgroup_id) wg_id: vec3<u32>,
@@ -37,11 +34,6 @@ fn gemv_bf16_wide(
     let tid = local_id.x;
 
     if (n >= info.N) { return; }
-
-    // 1. Collaborative Dot Product
-    // The warp reads contiguous blocks of Input and Weights.
-    // Thread 0 reads W[n, 0..1], Thread 1 reads W[n, 2..3]...
-    // This creates perfectly coalesced 128-byte transactions.
     
     let k_pairs = info.K / 2u;
     let weight_base = n * k_pairs;
@@ -60,7 +52,7 @@ fn gemv_bf16_wide(
     wg_sum[tid] = partial_sum;
     workgroupBarrier();
 
-    // 2. Tree Reduction in Shared Memory
+    // Tree Reduction
     for (var s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             wg_sum[tid] += wg_sum[tid + s];
@@ -73,10 +65,7 @@ fn gemv_bf16_wide(
     }
 }
 
-// ------------------------------------------------------------------
-// KERNEL 2: Standard GEMV (BF16) - 1 Thread per Output
-// Good for small N (e.g. QKV projections) where launching 128k blocks is bad.
-// ------------------------------------------------------------------
+// Standard GEMV (BF16) - 1 Thread per Output
 @compute @workgroup_size(256)
 fn gemv_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     let n = id.x;
@@ -86,7 +75,6 @@ fn gemv_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     let k_pairs = info.K / 2u;
     let weight_offset = n * k_pairs;
 
-    // Manual unroll x4 for instruction-level parallelism
     // Process 4 pairs (8 floats) per iteration
     var k = 0u;
     for (; k + 3u < k_pairs; k += 4u) {
@@ -120,10 +108,7 @@ fn gemv_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     Output[n] = sum.x + sum.y + sum.z + sum.w + tail_sum;
 }
 
-// ------------------------------------------------------------------
-// KERNEL 3: BMM (BF16) - 2D Tiled
-// Used for Prefill (M > 1).
-// ------------------------------------------------------------------
+// BMM (BF16) - 2D Tiled
 @compute @workgroup_size(16, 16)
 fn bmm_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     let n = id.x;
@@ -145,9 +130,7 @@ fn bmm_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     Output[m * info.N + n] = sum;
 }
 
-// ------------------------------------------------------------------
-// KERNEL 4: GEMV (F32)
-// ------------------------------------------------------------------
+// GEMV (F32)
 @compute @workgroup_size(256)
 fn gemv_f32(@builtin(global_invocation_id) id: vec3<u32>) {
     let n = id.x;
@@ -162,9 +145,7 @@ fn gemv_f32(@builtin(global_invocation_id) id: vec3<u32>) {
     Output[n] = sum;
 }
 
-// ------------------------------------------------------------------
-// KERNEL 5: BMM (F32)
-// ------------------------------------------------------------------
+// BMM (F32)
 @compute @workgroup_size(16, 16)
 fn bmm_f32(@builtin(global_invocation_id) id: vec3<u32>) {
     let n = id.x;

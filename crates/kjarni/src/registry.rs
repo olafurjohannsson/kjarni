@@ -645,10 +645,6 @@ mod tests {
         assert_eq!(path1, path2, "Same model should return consistent path");
     }
 
-    // =========================================================================
-    // ModelEntry struct tests
-    // =========================================================================
-
     #[test]
     fn test_model_entry_debug() {
         let info = get_model_info("minilm-l6-v2").unwrap();
@@ -668,10 +664,6 @@ mod tests {
         assert_eq!(info.size, cloned.size);
         assert_eq!(info.params, cloned.params);
     }
-
-    // =========================================================================
-    // has_gguf field tests
-    // =========================================================================
 
     #[test]
     fn test_llm_models_have_gguf() {

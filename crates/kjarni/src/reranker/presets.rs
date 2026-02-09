@@ -24,9 +24,9 @@ pub struct RerankerPreset {
     pub description: &'static str,
 }
 
-// =============================================================================
+
 // V1 Presets
-// =============================================================================
+
 
 /// MiniLM cross-encoder - small and fast.
 pub const RERANKER_MINILM_V1: RerankerPreset = RerankerPreset {

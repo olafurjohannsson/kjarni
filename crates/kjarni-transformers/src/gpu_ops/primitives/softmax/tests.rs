@@ -214,7 +214,7 @@ async fn test_softmax_with_scaling() -> Result<()> {
     let scale = 0.125; // Typical 1/sqrt(64)
 
     // 1. Create data
-    let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
+    let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
 
     // 2. Execute GPU

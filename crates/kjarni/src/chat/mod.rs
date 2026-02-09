@@ -76,14 +76,9 @@ mod validation;
 pub use crate::common::DownloadPolicy;
 pub use builder::ChatBuilder;
 pub use conversation::ChatConversation;
-use kjarni_transformers::{ModelArchitecture, ModelType, models::ModelTask};
 pub use model::Chat;
 pub use presets::{ChatPreset, ChatTier};
 pub use types::{ChatDevice, ChatError, ChatMode, ChatResult, ChatWarning, History, Message, Role};
-
-// ============================================================================
-// Convenience Functions
-// ============================================================================
 
 /// Send a single message and get a response.
 ///

@@ -14,7 +14,7 @@ use crate::{
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, s};
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 /// Cached draft model context for speculative decoding.
 pub struct DraftModelContext {
@@ -55,7 +55,6 @@ pub async fn run_speculative_generation_loop(
         return Err(anyhow!("Empty prompt"));
     }
 
-    // --- Setup ---
     let max_len = config
         .max_new_tokens
         .map(|n| prompt_len + n)
@@ -80,7 +79,6 @@ pub async fn run_speculative_generation_loop(
     let mut all_tokens = input_tokens.clone();
     let mut stats = GenerationStats::new();
 
-    // --- Prefill both models ---
     stats.start_prefill(prompt_len);
 
     let tokens_array = Array2::from_shape_vec((1, prompt_len), input_tokens.clone())?;
@@ -95,7 +93,6 @@ pub async fn run_speculative_generation_loop(
 
     stats.end_prefill();
 
-    // --- Emit prompt tokens ---
     let tokenizer = target.tokenizer();
     for &token_id in &input_tokens {
         if Some(token_id) == target.bos_token_id() {
@@ -127,7 +124,6 @@ pub async fn run_speculative_generation_loop(
         }
     }
 
-    // --- Speculative decode loop ---
     let stop_tokens = target.stop_token_ids();
     let mut draft_token_tensor = draft_backend.new_decode_token()?;
 
@@ -140,9 +136,6 @@ pub async fn run_speculative_generation_loop(
             }
         }
 
-        // =============================================================
-        // Step 1: Draft generates N tokens
-        // =============================================================
         let mut draft_tokens: Vec<u32> = Vec::with_capacity(num_speculative);
         let mut draft_probs: Vec<Array1<f32>> = Vec::with_capacity(num_speculative);
 
@@ -257,9 +250,9 @@ pub async fn run_speculative_generation_loop(
     Ok(())
 }
 
-// =============================================================================
+
 // Verification
-// =============================================================================
+
 
 /// Runs target model on draft tokens, returns logits for all positions.
 fn verify_batch(
@@ -286,9 +279,9 @@ fn verify_batch(
     Ok(logits_3d.into_shape_with_order((num_tokens, vocab_size))?)
 }
 
-// =============================================================================
+
 // Acceptance Strategies
-// =============================================================================
+
 
 /// Greedy acceptance: accept while target argmax matches draft.
 fn accept_greedy(draft_tokens: &[u32], verify_logits: &Array2<f32>) -> (Vec<u32>, Array1<f32>) {
@@ -378,9 +371,9 @@ fn compute_residual(target: &Array1<f32>, draft: &Array1<f32>) -> Array1<f32> {
         target.clone()
     }
 }
-// =============================================================================
+
 // Sampling Utilities
-// =============================================================================
+
 
 #[inline]
 fn softmax(logits: &Array1<f32>) -> Array1<f32> {
@@ -406,9 +399,9 @@ fn sample_from_distribution(probs: &Array1<f32>) -> u32 {
     (probs.len() - 1) as u32
 }
 
-// =============================================================================
+
 // Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {

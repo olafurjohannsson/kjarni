@@ -32,7 +32,6 @@ impl GpuUnreshape {
     }
 
     pub fn encode(&self, encoder: &mut CommandEncoder, input: &GpuTensor, output: &GpuTensor) {
-        // --- Assertions for correctness ---
         assert_eq!(
             input.rank(),
             4,

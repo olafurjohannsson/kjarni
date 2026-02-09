@@ -163,7 +163,7 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
     let cpu_output = cpu_embed.forward(&input_ids_cpu, None, 0, false);
 
     let pool = ctx.get_inference_pool();
-    let mut pool_guard = pool.lock().await;
+    let pool_guard = pool.lock().await;
     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
     let (encoder, pool_ref) = frame.resources();
 
@@ -225,7 +225,7 @@ async fn test_word_plus_position_embeddings() -> Result<()> {
     let cpu_output = cpu_embed.forward(&input_ids_cpu, None, 0, false);
 
     let pool = ctx.get_inference_pool();
-    let mut pool_guard = pool.lock().await;
+    let pool_guard = pool.lock().await;
     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
     let (encoder, pool_ref) = frame.resources();
 
@@ -294,7 +294,7 @@ async fn test_embeddings_with_position_offset() -> Result<()> {
     let cpu_output = cpu_embed.forward(&input_ids_cpu, None, position_offset, false);
 
     let pool = ctx.get_inference_pool();
-    let mut pool_guard = pool.lock().await;
+    let pool_guard = pool.lock().await;
     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
     let (encoder, pool_ref) = frame.resources();
 
@@ -363,7 +363,7 @@ async fn test_embeddings_with_scaling() -> Result<()> {
     let cpu_output = cpu_embed.forward(&input_ids_cpu, None, 0, true);
 
     let pool = ctx.get_inference_pool();
-    let mut pool_guard = pool.lock().await;
+    let pool_guard = pool.lock().await;
     let mut frame = GpuFrameContext::new(&ctx, pool_guard);
     let (encoder, pool_ref) = frame.resources();
 

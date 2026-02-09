@@ -223,7 +223,6 @@ fn convert_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
 }
 
 /// Resample audio to target sample rate using linear interpolation
-/// For production, use rubato crate for higher quality
 fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     if from_rate == to_rate {
         return Ok(samples.to_vec());
@@ -289,7 +288,6 @@ fn pad_or_truncate(samples: &[f32], target_len: usize) -> Vec<f32> {
     }
 }
 
-/// Normalize samples to [-1, 1] range
 fn normalize_samples(samples: &[f32]) -> Vec<f32> {
     let max_abs = samples
         .iter()
@@ -303,23 +301,12 @@ fn normalize_samples(samples: &[f32]) -> Vec<f32> {
     }
 }
 
-// =============================================================================
-// Utility functions
-// =============================================================================
-
-/// Load audio and prepare for Whisper
 pub fn load_audio_for_whisper<P: AsRef<Path>>(path: P) -> Result<Vec<f32>> {
     let config = AudioLoaderConfig::for_whisper();
     let audio = load_audio(path, &config)?;
     Ok(audio.samples)
 }
 
-/// Create silent audio of given duration (useful for testing)
-pub fn create_silence(duration_secs: f32, sample_rate: u32) -> Vec<f32> {
-    vec![0.0; (duration_secs * sample_rate as f32) as usize]
-}
-
-/// Create a simple sine wave (useful for testing)
 pub fn create_sine_wave(frequency: f32, duration_secs: f32, sample_rate: u32) -> Vec<f32> {
     let num_samples = (duration_secs * sample_rate as f32) as usize;
     (0..num_samples)
@@ -330,17 +317,12 @@ pub fn create_sine_wave(frequency: f32, duration_secs: f32, sample_rate: u32) ->
         .collect()
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
     
     #[test]
     fn test_convert_to_mono() {
-        // Stereo: [L1, R1, L2, R2]
         let stereo = vec![1.0, 0.0, 0.5, 0.5, 0.0, 1.0];
         let mono = convert_to_mono(&stereo, 2);
         assert_eq!(mono, vec![0.5, 0.5, 0.5]);
@@ -350,11 +332,8 @@ mod tests {
     fn test_pad_or_truncate() {
         let samples = vec![1.0, 2.0, 3.0];
         
-        // Truncate
         let truncated = pad_or_truncate(&samples, 2);
         assert_eq!(truncated, vec![1.0, 2.0]);
-        
-        // Pad
         let padded = pad_or_truncate(&samples, 5);
         assert_eq!(padded, vec![1.0, 2.0, 3.0, 0.0, 0.0]);
     }
@@ -363,7 +342,7 @@ mod tests {
     fn test_normalize() {
         let samples = vec![0.5, -1.0, 0.25];
         let normalized = normalize_samples(&samples);
-        assert_eq!(normalized, vec![0.5, -1.0, 0.25]); // Already normalized
+        assert_eq!(normalized, vec![0.5, -1.0, 0.25]);
         
         let samples = vec![0.25, -0.5, 0.125];
         let normalized = normalize_samples(&samples);
@@ -374,14 +353,11 @@ mod tests {
     fn test_create_sine_wave() {
         let wave = create_sine_wave(440.0, 0.01, 16000);
         assert_eq!(wave.len(), 160);
-        
-        // First sample should be ~0
         assert!(wave[0].abs() < 0.01);
     }
     
     #[test]
     fn test_resample() {
-        // Simple 2x downsampling
         let samples: Vec<f32> = (0..100).map(|i| i as f32).collect();
         let resampled = resample(&samples, 1000, 500).unwrap();
         assert_eq!(resampled.len(), 50);

@@ -54,11 +54,9 @@ fn test_swiglu_golden() -> Result<()> {
     .unwrap();
 
     let ffn = SwiGluFeedForward::new(gate_weight, up_weight, down_weight, Activation::SilU);
-    // batch sizem 1, seq len 1, hidden size 2
     let input = Array3::from_shape_vec((1, 1, hidden_size), vec![1.0, 2.0]).unwrap();
     let output = ffn.forward(&input)?;
 
-    // Expected output calculated manually or from a reference implementation
     let golden1 = vec![0.7073586, 2.3513398];
 
     let expected_output = Array3::from_shape_vec((1, 1, hidden_size), golden1).unwrap();
@@ -67,7 +65,6 @@ fn test_swiglu_golden() -> Result<()> {
         assert!((o - e).abs() < 1e-4, "Expected {}, got {}", e, o);
     }
 
-    // --- Different batch size (batch = 2, seq_len = 1) ---
     let input_batch = Array3::from_shape_vec(
         (2, 1, hidden_size),
         vec![
@@ -93,7 +90,6 @@ fn test_swiglu_golden() -> Result<()> {
         assert!((o - e).abs() < 1e-4, "Expected {}, got {}", e, o);
     }
 
-    // --- Different sequence length (batch = 1, seq_len = 3) ---
     let input_seq = Array3::from_shape_vec(
         (1, 3, hidden_size),
         vec![
@@ -106,7 +102,6 @@ fn test_swiglu_golden() -> Result<()> {
 
     let output_seq = ffn.forward(&input_seq)?;
 
-    // placeholder golden values
     let expected_seq = Array3::from_shape_vec(
         (1, 3, hidden_size),
         vec![
@@ -129,10 +124,6 @@ fn test_swiglu_ffn_shapes() -> Result<()> {
     let intermediate_size = 256;
     let batch_size = 2;
     let seq_len = 10;
-
-    // LinearLayer convention: [out_features, in_features]
-    // gate/up: hidden → intermediate, so [intermediate, hidden]
-    // down: intermediate → hidden, so [hidden, intermediate]
     let gate_weight: Array2<f32> = Array2::zeros((intermediate_size, hidden_size));  // [256, 64]
     let up_weight: Array2<f32> = Array2::zeros((intermediate_size, hidden_size));    // [256, 64]
     let down_weight: Array2<f32> = Array2::zeros((hidden_size, intermediate_size));  // [64, 256]
@@ -148,16 +139,11 @@ fn test_swiglu_ffn_shapes() -> Result<()> {
 
 #[test]
 fn test_swiglu_ffn_basic() -> Result<()> {
-    // Simple test with small dimensions
     let hidden_size = 4;
     let intermediate_size = 8;
-
-    // Identity-like weights for testing
     let mut gate_weight = Array2::zeros((intermediate_size, hidden_size)); // (8, 4)
     let mut up_weight = Array2::zeros((intermediate_size, hidden_size)); // (8, 4)  
     let mut down_weight = Array2::zeros((hidden_size, intermediate_size)); // (4, 8)
-
-    // Set some non-zero values
     for i in 0..hidden_size.min(intermediate_size) {
         gate_weight[[i, i]] = 1.0;
         up_weight[[i, i]] = 1.0;
@@ -169,7 +155,6 @@ fn test_swiglu_ffn_basic() -> Result<()> {
     let input = Array3::ones((1, 1, hidden_size));
     let output = ffn.forward(&input)?;
 
-    // Output should be finite and reasonable
     assert!(output.iter().all(|&x| x.is_finite()));
     assert_eq!(output.shape(), &[1, 1, hidden_size]);
     Ok(())
@@ -178,18 +163,14 @@ fn test_swiglu_ffn_basic() -> Result<()> {
 
 #[test]
 fn test_swiglu_vs_standard_ffn() -> Result<()> {
-    let hidden_size = 2;
-    let intermediate_size = 4;
 
-    // [out_features, in_features]
-    // gate: [intermediate, hidden] = [4, 2]
     let gate_weight = Array2::from_shape_vec(
         (4, 2),
         vec![
-            1.0, 0.0,  // output 0 weights
-            0.0, 1.0,  // output 1 weights
-            0.0, 0.0,  // output 2 weights
-            0.0, 0.0,  // output 3 weights
+            1.0, 0.0,
+            0.0, 1.0,
+            0.0, 0.0,
+            0.0, 0.0,
         ],
     ).unwrap();
 
@@ -197,10 +178,10 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
     let up_weight = Array2::from_shape_vec(
         (4, 2),
         vec![
-            0.0, 0.0,  // output 0 weights
-            0.0, 0.0,  // output 1 weights
-            1.0, 0.0,  // output 2 weights
-            0.0, 1.0,  // output 3 weights
+            0.0, 0.0,  
+            0.0, 0.0,  
+            1.0, 0.0,  
+            0.0, 1.0,  
         ],
     ).unwrap();
 
@@ -208,8 +189,8 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
     let down_weight = Array2::from_shape_vec(
         (2, 4),
         vec![
-            1.0, 0.0, 1.0, 0.0,  // output 0 weights
-            0.0, 1.0, 0.0, 1.0,  // output 1 weights
+            1.0, 0.0, 1.0, 0.0,  
+            0.0, 1.0, 0.0, 1.0,  
         ],
     ).unwrap();
 
@@ -217,13 +198,6 @@ fn test_swiglu_vs_standard_ffn() -> Result<()> {
 
     let input = Array3::from_shape_vec((1, 1, 2), vec![1.0, 2.0]).unwrap();
     let output = ffn.forward(&input)?;
-
-    // With input [1, 2]:
-    // gate_out = [1*1 + 2*0, 1*0 + 2*1, 0, 0] = [1, 2, 0, 0]
-    // up_out   = [0, 0, 1*1 + 2*0, 1*0 + 2*1] = [0, 0, 1, 2]
-    // silu(gate) * up = [silu(1)*0, silu(2)*0, silu(0)*1, silu(0)*2]
-    //                 = [0, 0, 0, 0]
-    // down_out = [0, 0]
 
     assert_eq!(output.shape(), &[1, 1, 2]);
     assert!(output.iter().all(|&x| x.abs() < 1e-6), "Expected zeros, got {:?}", output);

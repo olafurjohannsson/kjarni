@@ -5,7 +5,7 @@ use log::debug;
 use ndarray::{Array1, Array2, Array3, s};
 
 use kjarni_transformers::{
-    Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::{LegacyFeedForward, StdFeedForward}, linear_layer::LinearLayer, models::base::ModelInput, normalization::LayerNorm, tensor::DType, traits::{InferenceModel, ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
+    Embeddings, FeedForward, MultiHeadAttention, Normalization, cache::{Cache, CpuKVCache}, decoder::prelude::*, feedforward::LegacyFeedForward, normalization::LayerNorm, traits::{ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights
 };
 
 use crate::models::gpt2::config::Gpt2Config;
@@ -291,7 +291,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
         position_offset: usize,
-        mut cache: Option<&mut dyn Cache>,
+        cache: Option<&mut dyn Cache>,
         start_layer: usize,
         end_layer: usize,
     ) -> Result<Array3<f32>> {
@@ -299,7 +299,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
         let seq_len = hidden.shape()[1];
 
         //  Downcast Cache
-        let mut cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
+        let cpu_cache_opt = cache.and_then(|c| c.as_any_mut().downcast_mut::<CpuKVCache>());
 
         // Temp storage for new KV
         let mut new_key_values = Vec::with_capacity(end_layer - start_layer);

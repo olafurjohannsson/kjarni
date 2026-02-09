@@ -32,9 +32,9 @@ pub(crate) fn get_runtime() -> &'static Runtime {
     })
 }
 
-// =============================================================================
+
 // Global Functions
-// =============================================================================
+
 
 /// Initialize the Kjarni runtime. Optional - auto-initialized on first use.
 #[unsafe(no_mangle)]
@@ -68,9 +68,9 @@ pub extern "C" fn kjarni_version() -> *const std::ffi::c_char {
     VERSION.as_ptr() as *const std::ffi::c_char
 }
 
-// =============================================================================
+
 // Memory Management - Common Types
-// =============================================================================
+
 
 /// Float array returned by FFI functions. Caller must free with kjarni_float_array_free.
 #[repr(C)]
@@ -203,9 +203,9 @@ pub unsafe extern "C" fn kjarni_cosine_similarity(
     cosine_similarity(a, b)
 }
 
-// =============================================================================
+
 // Unit Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod ffi_bridge_tests {

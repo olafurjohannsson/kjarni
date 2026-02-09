@@ -29,9 +29,9 @@ use super::configs::{BertConfig, DistilBertConfig};
 use crate::MpnetConfig;
 use crate::models::sequence_classifier::configs::RobertaConfig;
 
-// =============================================================================
+
 // Sentence Encoder
-// =============================================================================
+
 
 /// Sentence encoder for semantic similarity tasks.
 ///
@@ -116,9 +116,9 @@ impl EncoderModelFactory for SentenceEncoder {
     }
 }
 
-// =============================================================================
+
 // Public API
-// =============================================================================
+
 
 impl SentenceEncoder {
     /// Create encoder from HuggingFace model registry.
@@ -314,9 +314,9 @@ impl SentenceEncoder {
     }
 }
 
-// =============================================================================
+
 // Trait Implementations
-// =============================================================================
+
 
 impl LanguageModel for SentenceEncoder {
     fn vocab_size(&self) -> usize {

@@ -43,7 +43,7 @@ mod loaded_rope {
     use crate::gpu::GpuTensor;
     use crate::traits::ModelMetadata;
     use anyhow::Result;
-    use ndarray::{Array3, Array4};
+    use ndarray::Array4;
     use std::sync::Arc;
 
     // =========================================================================

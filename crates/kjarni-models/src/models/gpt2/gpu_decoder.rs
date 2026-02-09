@@ -341,7 +341,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
         let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
         // 2. Layers
-        let mut hidden = self.forward_layers(
+        let hidden = self.forward_layers(
             encoder,
             pool,
             &hidden,

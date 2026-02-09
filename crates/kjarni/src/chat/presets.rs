@@ -1,8 +1,4 @@
-// =============================================================================
-// kjarni/src/chat/presets.rs
-// =============================================================================
-
-//! Chat presets for common use cases.
+//! Chat presets
 
 use super::types::ChatMode;
 use crate::common::KjarniDevice;
@@ -69,17 +65,6 @@ impl ChatPreset {
         temperature: Some(0.9),
         max_tokens: Some(1024),
         description: "Higher temperature for creative tasks.",
-    };
-
-    /// Optimized for coding assistance.
-    pub const CODING: ChatPreset = ChatPreset {
-        model: "qwen2.5-1.5b-instruct",
-        recommended_device: KjarniDevice::Cpu,
-        mode: ChatMode::Reasoning,
-        system_prompt: Some("You are a coding assistant. Write clean, well-documented code."),
-        temperature: Some(0.3),
-        max_tokens: Some(2048),
-        description: "Lower temperature for precise code generation.",
     };
 
     /// Optimized for reasoning and analysis.

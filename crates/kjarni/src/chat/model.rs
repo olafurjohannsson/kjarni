@@ -65,13 +65,7 @@ pub struct Chat {
 }
 
 impl Chat {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
     /// Create a Chat with default settings.
-    ///
-    /// Uses CPU, downloads model if needed.
     pub async fn new(model: &str) -> ChatResult<Self> {
         ChatBuilder::new(model).build().await
     }
@@ -167,10 +161,6 @@ impl Chat {
         })
     }
 
-    // =========================================================================
-    // Chat Template Access
-    // =========================================================================
-
     /// Get the chat template from the model.
     fn chat_template(&self) -> &dyn ChatTemplate {
         self.generator
@@ -184,10 +174,6 @@ impl Chat {
     pub(crate) fn format_prompt(&self, conversation: &Conversation) -> String {
         self.chat_template().apply(conversation)
     }
-
-    // =========================================================================
-    // Conversation Building
-    // =========================================================================
 
     /// Create a Conversation with the configured system prompt.
     fn create_conversation(&self) -> Conversation {
@@ -239,10 +225,6 @@ impl Chat {
         conversation
     }
 
-    // =========================================================================
-    // Stateless Sending
-    // =========================================================================
-
     /// Send a message and get a response.
     ///
     /// This is stateless - no conversation history is maintained.
@@ -287,10 +269,6 @@ impl Chat {
         let prompt = self.format_prompt(&conversation);
         self.generate(&prompt, overrides).await
     }
-
-    // =========================================================================
-    // Streaming
-    // =========================================================================
 
     /// Stream a response token by token.
     ///
@@ -346,25 +324,9 @@ impl Chat {
         self.generate_stream(prompt, overrides).await
     }
 
-    // =========================================================================
-    // Stateful Conversation
-    // =========================================================================
-
     /// Create a stateful conversation.
     ///
     /// The conversation maintains history automatically.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut convo = chat.conversation();
-    /// convo.send("Hello!").await?;
-    /// convo.send("Tell me about Rust.").await?;
-    ///
-    /// for msg in convo.history() {
-    ///     println!("{}: {}", msg.role, msg.content);
-    /// }
-    /// ```
     pub fn conversation(&self) -> ChatConversation<'_> {
         ChatConversation::new(self)
     }
@@ -373,10 +335,6 @@ impl Chat {
     pub fn conversation_with_system(&self, system: impl Into<String>) -> ChatConversation<'_> {
         ChatConversation::with_system(self, system.into())
     }
-
-    // =========================================================================
-    // Internal Generation
-    // =========================================================================
 
     /// Generate using the inner generator.
     pub(crate) async fn generate(
@@ -425,10 +383,6 @@ impl Chat {
         Ok(Box::pin(mapped))
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
     /// Get the model type.
     pub fn model_type(&self) -> ModelType {
         self.model_type
@@ -466,10 +420,6 @@ impl Chat {
         &self.generator
     }
 }
-
-// =============================================================================
-// Convenience Functions
-// =============================================================================
 
 /// Send a single message with default settings.
 ///

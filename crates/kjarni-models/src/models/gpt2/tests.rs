@@ -6,7 +6,6 @@
 //! The actual text generation is handled by the generic `Generator` struct,
 //! which can operate on any model that implements the `DecoderLanguageModel` trait.
 
-use super::*;
 use anyhow::Result;
 use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;

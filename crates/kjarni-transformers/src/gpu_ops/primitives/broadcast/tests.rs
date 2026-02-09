@@ -4,13 +4,13 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::gpu::DType;
     use crate::gpu_ops::primitives::broadcast::BroadcastUniforms;
     use crate::{gpu::GpuTensor, gpu_ops::primitives::broadcast::GpuBroadcast};
     use crate::WgpuContext;
     use anyhow::Result;
-    use ndarray::{Array2, Array3};
+    use ndarray::Array3;
     use std::sync::Arc;
 
     async fn get_test_context() -> Arc<WgpuContext> {

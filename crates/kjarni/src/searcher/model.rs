@@ -1,9 +1,8 @@
-// kjarni/src/searcher/model.rs
 
 use crate::reranker::Reranker;
 use crate::searcher::{SearchOptions, SearcherError, SearcherResult};
 use crate::{embedder::Embedder, searcher::SearcherBuilder};
-use kjarni_rag::{IndexReader, MetadataFilter, SearchMode, SearchResult};
+use kjarni_rag::{IndexReader, SearchMode, SearchResult};
 use kjarni_transformers::Device;
 
 pub struct Searcher {

@@ -1,19 +1,5 @@
-// =============================================================================
-// kjarni/src/generator/mod.rs
-// =============================================================================
 
 //! Raw text generator for decoder language models.
-//!
-//! The Generator provides direct access to language model text generation
-//! without chat formatting, system prompts, or conversation history.
-//!
-//! Use `Generator` for:
-//! - Text completion (GPT-2 style)
-//! - Custom prompt formats
-//! - Base models without instruction tuning
-//! - Maximum control over generation
-//!
-//! For conversational AI with chat templates, use `Chat` instead.
 
 mod builder;
 mod model;
@@ -26,10 +12,6 @@ use kjarni_transformers::ModelType;
 pub use model::Generator;
 pub use types::*;
 
-
-// ============================================================================
-// Convenience Functions
-// ============================================================================
 
 /// Generate text with default settings.
 pub async fn generate(model: &str, prompt: &str) -> GeneratorResult<String> {

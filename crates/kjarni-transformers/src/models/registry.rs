@@ -1169,9 +1169,9 @@ impl ModelType {
     }
 }
 
-// =============================================================================
+
 // Download Utilities
-// =============================================================================
+
 
 /// Downloads all required files for a model to the specified directory.
 ///
@@ -1332,9 +1332,9 @@ async fn download_sharded_weights(model_dir: &Path, index_url: &str, quiet: bool
     Ok(())
 }
 
-// =============================================================================
+
 // Utility Functions
-// =============================================================================
+
 
 /// Returns the default cache directory for Kjarni models.
 ///

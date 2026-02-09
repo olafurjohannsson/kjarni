@@ -16,9 +16,9 @@ use crate::execution::ExecutionPlan;
 use crate::traits::Device;
 use crate::WgpuContext;
 
-// =============================================================================
+
 // Pipeline Configuration
-// =============================================================================
+
 
 /// Configuration for the encoder pipeline.
 #[derive(Debug, Clone)]
@@ -34,9 +34,9 @@ pub struct EncoderPipelineConfig {
     pub num_labels: Option<usize>,
 }
 
-// =============================================================================
+
 // Encoder Pipeline
-// =============================================================================
+
 
 /// A container that holds all components needed for encoder inference.
 ///

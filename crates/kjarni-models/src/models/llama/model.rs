@@ -32,9 +32,9 @@
 //! model.pipeline_mut().set_plan(ExecutionPlan::gpu_offload_head())?;
 //! ```
 
-// =============================================================================
+
 // Imports
-// =============================================================================
+
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,7 +42,6 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::ChatTemplate;
-use kjarni_transformers::chat::llama3::Llama3ChatTemplate;
 use kjarni_transformers::common::{
     DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams,
 };
@@ -78,9 +77,9 @@ use kjarni_transformers::{
     weights::ModelWeights,
 };
 
-// =============================================================================
+
 // Model Definition
-// =============================================================================
+
 
 /// A model container for LLaMA and its variants (Llama 2, Llama 3, Code Llama, etc.).
 ///
@@ -114,9 +113,9 @@ pub struct LlamaModel {
     generation_defaults: Option<HFGenerationDefaults>,
 }
 
-// =============================================================================
+
 // Model Loading
-// =============================================================================
+
 
 impl DecoderModelFactory for LlamaModel {
     type Config = LlamaConfig;
@@ -213,9 +212,9 @@ impl LlamaModel {
     }
 }
 
-// =============================================================================
+
 // Public Accessors
-// =============================================================================
+
 
 impl LlamaModel {
     /// Returns a reference to the model configuration.
@@ -248,10 +247,6 @@ impl LlamaModel {
     }
 }
 
-// =============================================================================
-// InferenceModel Implementation
-// =============================================================================
-
 impl InferenceModel for LlamaModel {
     fn device(&self) -> Device {
         // self.device
@@ -268,9 +263,6 @@ impl InferenceModel for LlamaModel {
     }
 }
 
-// =============================================================================
-// LanguageModel Implementation
-// =============================================================================
 
 impl LanguageModel for LlamaModel {
     // TODO: extract to builder
@@ -370,9 +362,9 @@ impl LanguageModel for LlamaModel {
     }
 }
 
-// =============================================================================
+
 // CpuDecoderOps Implementation
-// =============================================================================
+
 
 impl CpuDecoderOps for LlamaModel {
     fn decoder(&self) -> &dyn CpuDecoder {
@@ -402,9 +394,9 @@ impl CpuDecoderOps for LlamaModel {
     }
 }
 
-// =============================================================================
+
 // GpuDecoderOps Implementation
-// =============================================================================
+
 
 impl GpuDecoderOps for LlamaModel {
     fn decoder(&self) -> &dyn GpuDecoder {
@@ -452,9 +444,9 @@ impl GpuDecoderOps for LlamaModel {
     }
 }
 
-// =============================================================================
+
 // DecoderLanguageModel Implementation
-// =============================================================================
+
 
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {

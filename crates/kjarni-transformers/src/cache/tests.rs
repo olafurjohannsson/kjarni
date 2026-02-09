@@ -398,7 +398,7 @@ mod cache_tests {
         let head_dim = 32;
         let capacity = 16;
 
-        let mut cache =
+        let cache =
             GpuKVCache::new(&context, num_layers, batch_size, num_heads, head_dim, capacity)?;
 
         let new_seq_len = 3;

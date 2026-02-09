@@ -11,9 +11,9 @@ use super::types::{
 };
 use super::validation;
 
-// =============================================================================
+
 // Builder
-// =============================================================================
+
 
 /// Constructs a [`Transcriber`] with the desired settings.
 ///
@@ -175,9 +175,9 @@ impl TranscriberBuilder {
     }
 }
 
-// =============================================================================
+
 // Model Resolution
-// =============================================================================
+
 
 /// Map a user-facing model identifier to a [`ModelType`].
 fn resolve_model_type(id: &str) -> Option<ModelType> {

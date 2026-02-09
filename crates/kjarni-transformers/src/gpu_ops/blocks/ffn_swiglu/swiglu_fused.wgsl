@@ -1,72 +1,4 @@
 //! Fused SwiGLU: combines matmul and activation into a single kernel.
-//!
-//! Computes output = silu(input @ W_gate^T) ⊙ (input @ W_up^T) in one pass.
-//! Avoids materializing intermediate gate and up projections, saving 2 memory passes.
-//!
-//! # Algorithm
-//!
-//! For each output element [m, n]:
-//! 1. Compute gate_val = dot(input[m, :], W_gate[n, :])
-//! 2. Compute up_val = dot(input[m, :], W_up[n, :])
-//! 3. Apply SwiGLU: output[m, n] = silu(gate_val) * up_val
-//!
-//! # Performance
-//!
-//! - **GEMV (M=1)**: ~0.15ms for [1, 4096] @ [14336, 4096] on RTX 3090
-//! - **BMM (M>1)**: ~2.5ms for [128, 4096] @ [14336, 4096] on RTX 3090
-//! - **Memory savings**: Eliminates 2 intermediate tensors (gate and up)
-//! - **Compute**: Twice the FLOPS of single matmul (computes two dot products)
-//!
-//! # Kernel Variants
-//!
-//! **GEMV (M=1)**: Optimized for decode phase
-//! - Uses workgroup-level reduction with shared memory
-//! - Each workgroup computes one output element
-//! - Coalesced weight reads, broadcast input reads
-//!
-//! **BMM (M>1)**: General batch matmul for prefill
-//! - Each thread computes one output element independently
-//! - Naive global reads (compute bound anyway)
-//!
-//! **BF16**: Packed BF16 weights for 2x memory bandwidth
-//! **F32**: Full precision for maximum accuracy
-//!
-//! # Shared Memory Usage
-//!
-//! - **sh_input**: 8192 floats (32KB) - Caches input for GEMV
-//! - **wg_sum_gate/up**: 256 floats each - Reduction buffers
-//! - **Total**: ~36KB per workgroup
-//!
-//! # TODO / Improvements
-//!
-//! - Reduce shared memory to 16KB for compatibility with more GPUs
-//! - Add double buffering for GEMV (overlap compute with next input load)
-//! - Profile whether fused kernel is actually faster than separate matmul+activation
-//! - Add vec4 loads for better input bandwidth in BMM variant
-//! - Consider Tensor Core variant for mixed precision (BF16 accumulation)
-//!
-//! # Limitations
-//!
-//! - Shared memory size limits max hidden_size to 8192 for F32 variant
-//! - BF16 variant assumes K is even (K % 2 == 0)
-//! - No bias support (biases must be added separately if needed)
-//! - BMM uses naive global reads (could benefit from tiling for very large M)
-//!
-//! # When to Use
-//!
-//! **Use fused kernel when**:
-//! - Memory bandwidth is the bottleneck (typical for decode)
-//! - Intermediate tensors don't need to be saved
-//!
-//! **Use separate kernels when**:
-//! - Need to inspect gate/up values for debugging
-//! - Using quantized weights (separate matmul handles this better)
-//!
-//! # See Also
-//!
-//! - [`swiglu.wgsl`] — Element-wise SwiGLU (for use after separate matmuls)
-//! - [`matmul_bf16.wgsl`] — Separate matmul kernels
-//! - [Megatron-LM paper](https://arxiv.org/abs/1909.08053) — Tensor parallelism with GLU
 
 /// Uniform parameters for fused SwiGLU operation.
 struct Info {
@@ -113,14 +45,7 @@ fn silu(x: f32) -> f32 {
     return x / (1.0 + exp(-x));
 }
 
-// ========================================================================
-// BF16 KERNELS
-// ========================================================================
-
-// --------------------------------------------------------------------------
 // WIDE Fused GEMV (BF16)
-// Dispatch: (N, 1, 1) -> 1 Workgroup per Output Neuron
-// --------------------------------------------------------------------------
 @compute @workgroup_size(256)
 fn fused_gemv_bf16(
     @builtin(workgroup_id) wg_id: vec3<u32>,
@@ -208,10 +133,6 @@ fn fused_bmm_bf16(@builtin(global_invocation_id) id: vec3<u32>) {
     output[m * info.N + n] = silu(gate_sum) * up_sum;
 }
 
-// ========================================================================
-// F32 KERNELS
-// ========================================================================
-
 @compute @workgroup_size(256)
 fn fused_gemv_f32(
     @builtin(global_invocation_id) global_id: vec3<u32>,
@@ -220,7 +141,7 @@ fn fused_gemv_f32(
     let tid = local_id.x;
     let n = global_id.x;
 
-    // 1. Collaborative Load
+    // Collaborative Load
     let num_tiles = (info.K + 255u) / 256u;
     for (var i = 0u; i < num_tiles; i = i + 1u) {
         let load_idx = i * 256u + tid;
@@ -238,7 +159,7 @@ fn fused_gemv_f32(
     
     let weight_offset = n * info.K;
     
-    // 2. Compute
+    // Compute
     for (var k = 0u; k < info.K; k = k + 1u) {
         let val = sh_input[k];
         gate_sum += val * gate_w_f32[weight_offset + k];

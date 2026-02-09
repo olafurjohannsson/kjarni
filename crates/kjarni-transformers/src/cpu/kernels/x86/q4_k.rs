@@ -4,9 +4,6 @@ use crate::cpu::kernels::{
 };
 use std::arch::x86_64::*;
 
-/// 1. Completely unrolled the inner loop (was `for _ in 0..4`).
-/// 2. Uses 4 distinct accumulators (acc0..acc3) to allow simultaneous execution.
-/// 3. Maintains the exact logic of your original code but parallelizes the math.
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn matmul_vec_q4_k_avx2(
     out_chunk: &mut [f32],
@@ -32,7 +29,7 @@ pub unsafe fn matmul_vec_q4_k_avx2(
                 let dmin_vec = _mm256_set1_ps(block.dmin.to_f32());
                 let qs_ptr = block.qs.as_ptr();
 
-                // --- PART 0 (Bytes 0-31, Weights 0-63) ---
+                // PART 0 (Bytes 0-31, Weights 0-63) ---
                 {
                     let (sc1, m1) = get_scale_min_k4(0, &block.scales);
                     let (sc2, m2) = get_scale_min_k4(1, &block.scales);
@@ -115,7 +112,7 @@ pub unsafe fn matmul_vec_q4_k_avx2(
                     );
                 }
 
-                // --- PART 1 (Bytes 32-63, Weights 64-127) ---
+                // PART 1 (Bytes 32-63, Weights 64-127) ---
                 {
                     let (sc1, m1) = get_scale_min_k4(2, &block.scales);
                     let (sc2, m2) = get_scale_min_k4(3, &block.scales);
@@ -200,7 +197,6 @@ pub unsafe fn matmul_vec_q4_k_avx2(
                     );
                 }
 
-                // --- PART 2 (Bytes 64-95, Weights 128-191) ---
                 {
                     let (sc1, m1) = get_scale_min_k4(4, &block.scales);
                     let (sc2, m2) = get_scale_min_k4(5, &block.scales);
@@ -285,7 +281,6 @@ pub unsafe fn matmul_vec_q4_k_avx2(
                     );
                 }
 
-                // --- PART 3 (Bytes 96-127, Weights 192-255) ---
                 {
                     let (sc1, m1) = get_scale_min_k4(6, &block.scales);
                     let (sc2, m2) = get_scale_min_k4(7, &block.scales);

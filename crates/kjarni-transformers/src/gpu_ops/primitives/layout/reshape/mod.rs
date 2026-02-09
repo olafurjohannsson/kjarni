@@ -42,7 +42,6 @@ impl GpuReshape {
         output: &GpuTensor,
         transpose_k: bool,
     ) {
-        // --- Assertions for correctness ---
         assert_eq!(input.rank(), 3, "Reshape input must be rank 3 [B, S, H]");
         assert_eq!(
             output.rank(),

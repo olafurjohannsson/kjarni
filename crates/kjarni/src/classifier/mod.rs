@@ -42,13 +42,7 @@ pub use types::{
     ClassificationOverrides, ClassificationMode, ClassificationResult, ClassifierError, ClassifierResult,
 };
 
-// ============================================================================
-// Convenience Functions
-// ============================================================================
-
 /// Classify a single text using the specified model.
-///
-/// This is the simplest API - downloads model if needed, classifies, returns result.
 ///
 /// # Example
 ///

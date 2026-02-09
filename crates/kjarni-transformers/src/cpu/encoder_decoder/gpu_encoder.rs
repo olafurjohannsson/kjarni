@@ -28,55 +28,23 @@ use crate::{
     weights::ModelWeights,
 };
 
-// =============================================================================
-// Seq2Seq GPU Encoder
-// =============================================================================
-
 /// Unified transformer encoder for seq2seq models on GPU.
-///
-/// Supports BART, T5, Whisper, mBART, and similar architectures.
-/// Does NOT own embeddings - use via `GpuEncoderOps` which provides embeddings.
-///
-/// # Architecture Support
-/// - **BART**: post-norm, embed_norm=true, final_norm=false
-/// - **T5**: pre-norm, embed_norm=false, final_norm=true, relative position bias
-/// - **Whisper**: pre-norm, embed_norm=true, final_norm=true, sinusoidal positions
-///
-/// # Example
-///
-/// ```ignore
-/// // Create encoder (embeddings handled separately by pipeline)
-/// let encoder = Seq2SeqGpuEncoder::new(
-///     &context,
-///     &weights,
-///     &bart_config,
-///     Seq2SeqEncoderConfig::bart(),
-///     load_config,
-/// )?;
-///
-/// // Forward pass (embeddings provided by GpuEncoderOps)
-/// let output = encoder.forward(&mut cmd, &mut pool, &hidden_states, &mask)?;
-/// ```
 pub struct Seq2SeqGPUEncoder {
     context: Arc<WgpuContext>,
 
-    // --- Embedding LayerNorm (applied after embed lookup, before layers) ---
     embed_layer_norm: Option<GpuNormalization>,
     embed_ln_weights: Option<GpuNormalizationWeights>,
 
-    // --- Transformer Layers ---
     layers: Vec<GpuEncoderLayer>,
 
-    // --- Final LayerNorm (T5, Whisper have this; BART doesn't) ---
     final_layer_norm: Option<GpuNormalization>,
     final_ln_weights: Option<GpuNormalizationWeights>,
 
-    // --- Architecture flags ---
+    
     pre_norm: bool,
 
-    sinusoidal_cache: Option<Array2<f32>>,
+    sinusoidal_cache: Option<Array2<f32>>, // cpu cache
 
-    // --- Metadata ---
     pub meta: ModelMetadata,
     pub layout: ModelLayout,
 }
@@ -114,9 +82,6 @@ impl Seq2SeqGPUEncoder {
             encoder_config.final_layer_norm
         );
 
-        // ====================================================================
-        // 1. EMBEDDING LAYER NORM (optional - BART/Whisper have this, T5 doesn't)
-        // ====================================================================
         let (embed_layer_norm, embed_ln_weights) = if encoder_config.normalize_embeddings {
             if let (Some(w_key), Some(b_key)) = (
                 &encoder_layout.embedding_norm_weight,
@@ -142,7 +107,6 @@ impl Seq2SeqGPUEncoder {
                 let norm = GpuNormalization::LayerNorm(GpuLayerNorm::new(context, meta.norm_eps));
                 (Some(norm), Some(weights_gpu))
             } else if let Some(w_key) = &encoder_layout.embedding_norm_weight {
-                // RMSNorm style (no bias)
                 log::debug!("Loading embedding RMSNorm: {}", w_key);
                 let weights_gpu = GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                     GpuTensor::from_model_weights(
@@ -169,14 +133,10 @@ impl Seq2SeqGPUEncoder {
             (None, None)
         };
 
-        // ====================================================================
-        // 2. TRANSFORMER LAYERS
-        // ====================================================================
+        // transformer layers
         let layers = Self::build_layers(context, weights, &meta, &layout, &load_config)?;
 
-        // ====================================================================
-        // 3. FINAL LAYER NORM (optional - T5/Whisper have this, BART doesn't)
-        // ====================================================================
+        // optional final norm
         let (final_layer_norm, final_ln_weights) = if encoder_config.final_layer_norm {
             if let Some(w_key) = &encoder_layout.final_norm_weight {
                 let b_key = encoder_layout.final_norm_bias.as_deref();
@@ -184,7 +144,6 @@ impl Seq2SeqGPUEncoder {
                 log::debug!("Loading final LayerNorm: {} / {:?}", w_key, b_key);
 
                 let weights_gpu = if let Some(b) = b_key {
-                    // LayerNorm with bias
                     GpuNormalizationWeights::LayerNorm(GpuLayerNormWeights::new(
                         GpuTensor::from_model_weights(
                             context,
@@ -237,7 +196,7 @@ impl Seq2SeqGPUEncoder {
             _ => None,
         };
 
-        log::info!(
+        log::debug!(
             "Seq2SeqGpuEncoder built: {} layers, embed_norm={}, final_norm={}",
             layers.len(),
             embed_layer_norm.is_some(),
@@ -258,10 +217,6 @@ impl Seq2SeqGPUEncoder {
         })
     }
 
-    // ========================================================================
-    // LAYER CONSTRUCTION
-    // ========================================================================
-
     fn build_layers(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
@@ -278,11 +233,8 @@ impl Seq2SeqGPUEncoder {
         let mut layers = Vec::with_capacity(meta.num_layers);
 
         for i in 0..meta.num_layers {
-            log::trace!("Building encoder layer {}", i);
+            log::debug!("Building encoder layer {}", i);
 
-            // ================================================================
-            // SELF-ATTENTION WEIGHTS
-            // ================================================================
             let self_attn_weights = GpuAttentionWeights::from_encoder_self_attn_layout(
                 context,
                 weights,
@@ -291,10 +243,6 @@ impl Seq2SeqGPUEncoder {
                 target_dt,
                 meta.hidden_size,
             )?;
-
-            // ================================================================
-            // SELF-ATTENTION LAYER NORM
-            // ================================================================
             let sa_norm_w = encoder_layout
                 .layer
                 .self_attn
@@ -328,9 +276,6 @@ impl Seq2SeqGPUEncoder {
                 )?)
             };
 
-            // ================================================================
-            // FEED-FORWARD WEIGHTS
-            // ================================================================
             let fc1_w_key = encoder_layout
                 .layer
                 .ffn
@@ -642,7 +587,7 @@ mod seq2seq_gpu_encoder_tests {
     use crate::activations::Activation;
     use crate::cpu::encoder::CpuEncoder;
     use crate::gpu::GpuFrameContext;
-    use crate::models::base::{ModelInput, ModelLoadConfig};
+    use crate::models::base::ModelLoadConfig;
     use crate::traits::{
         AttentionLayout, CpuTransformerCore, EncoderLayerLayout, EncoderLayout, FeedForwardLayout,
         ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy,
@@ -1015,10 +960,6 @@ mod seq2seq_gpu_encoder_tests {
         (w, s)
     }
 
-    // ========================================================================
-    // GPU TESTS - Mirror CPU tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_gpu_scenario_a_bart_postnorm() -> Result<()> {
         let ctx = get_test_context().await;
@@ -1057,9 +998,6 @@ mod seq2seq_gpu_encoder_tests {
         );
         assert_eq!(encoder.num_layers(), 1);
         assert_eq!(encoder.hidden_size(), 4);
-
-        // Input hidden states (simulating output from embeddings)
-        // In real usage, embeddings would be provided by GpuEncoderOps
         let input_hidden = Array3::from_shape_vec(
             (1, 3, 4),
             vec![
@@ -1070,27 +1008,19 @@ mod seq2seq_gpu_encoder_tests {
         )?;
         let mask = Array2::from_elem((1, 3), 1.0);
 
-        // Upload to GPU
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input_hidden)?;
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask)?;
 
-        // Run GPU forward
         let gpu_output = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&ctx, pool_guard);
             let (cmd_enc, pool_ref) = frame.resources();
-
-            // Apply embed norm first
             let normed = encoder.embed_norm(cmd_enc, pool_ref, &input_gpu)?;
-
-            // Then forward through layers
             let output = encoder.forward2(cmd_enc, pool_ref, &normed, &mask_gpu)?;
             frame.finish();
             output.last_hidden_state.to_ndarray_3d::<f32>().await?
         };
-
-        // Expected output (from CPU golden test)
         let golden_data = vec![
             -1.331634, -0.437211, 0.457210, 1.351635, -1.331635, -0.437211, 0.457214, 1.351632,
             -1.331633, -0.437213, 0.457211, 1.351635,

@@ -21,9 +21,9 @@ pub struct TranslatorPreset {
     pub description: &'static str,
 }
 
-// =============================================================================
+
 // V1 Presets
-// =============================================================================
+
 
 /// Fast translation with FLAN-T5 Base.
 pub const TRANSLATION_FAST_V1: TranslatorPreset = TranslatorPreset {
@@ -67,9 +67,9 @@ pub fn find_preset(name: &str) -> Option<&'static TranslatorPreset> {
         .copied()
 }
 
-// =============================================================================
+
 // Tiers
-// =============================================================================
+
 
 /// Tier-based preset selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

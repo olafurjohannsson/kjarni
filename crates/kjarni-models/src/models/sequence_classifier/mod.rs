@@ -37,9 +37,9 @@ mod tests;
 use crate::models::sequence_classifier::configs::RobertaConfig;
 use crate::{BertConfig, DistilBertConfig};
 
-// =============================================================================
+
 // Sequence Classifier
-// =============================================================================
+
 
 /// A generic sequence classifier for encoder-only models.
 ///
@@ -56,9 +56,9 @@ pub struct SequenceClassifier {
     labels: Option<Vec<String>>,
 }
 
-// =============================================================================
+
 // EncoderModelFactory Implementation
-// =============================================================================
+
 
 impl EncoderModelFactory for SequenceClassifier {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
@@ -163,9 +163,9 @@ impl EncoderModelFactory for SequenceClassifier {
     }
 }
 
-// =============================================================================
+
 // Public API
-// =============================================================================
+
 
 impl SequenceClassifier {
     pub fn config(&self) -> &dyn ModelConfig {
@@ -452,9 +452,9 @@ impl SequenceClassifier {
     }
 }
 
-// =============================================================================
+
 // Classification Result
-// =============================================================================
+
 
 /// Result of a classification.
 #[derive(Debug, Clone)]
@@ -464,9 +464,9 @@ pub struct ClassificationResult {
     pub index: usize,
 }
 
-// =============================================================================
+
 // Trait Implementations
-// =============================================================================
+
 
 impl LanguageModel for SequenceClassifier {
     fn vocab_size(&self) -> usize {

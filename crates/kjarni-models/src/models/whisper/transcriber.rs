@@ -88,9 +88,9 @@ pub struct WhisperChunkResult {
     pub text: String,
 }
 
-// =============================================================================
+
 // WhisperModel — Transcription Methods
-// =============================================================================
+
 
 impl WhisperModel {
     // =========================================================================
@@ -524,9 +524,9 @@ impl WhisperModel {
     }
 }
 
-// =============================================================================
+
 // Helpers
-// =============================================================================
+
 
 /// Returns `true` if the time falls on (or very near) a 30-second boundary.
 fn is_chunk_boundary(time: f32) -> bool {
@@ -534,9 +534,9 @@ fn is_chunk_boundary(time: f32) -> bool {
     rem < 0.02 || (WHISPER_CHUNK_LENGTH_SECS - rem) < 0.02
 }
 
-// =============================================================================
+
 // Tests
-// =============================================================================
+
 
 #[cfg(test)]
 mod tests {
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_parse_timestamps_basic() {
-        use tokenizers::Tokenizer;
+        
 
         // We can't easily construct a real Whisper tokenizer in a unit test,
         // so this test just validates the segment-boundary logic with a dummy.

@@ -4,11 +4,11 @@
 //! Run integration tests (requires model): `cargo test --package kjarni embedder -- --ignored`
 
 use super::*;
-use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig};
+use crate::common::{DownloadPolicy, KjarniDevice};
 
-// =============================================================================
+
 // Type Tests
-// =============================================================================
+
 
 mod types_tests {
     use kjarni_transformers::PoolingStrategy;
@@ -109,9 +109,9 @@ mod types_tests {
     }
 }
 
-// =============================================================================
+
 // Builder Tests
-// =============================================================================
+
 
 mod builder_tests {
     use kjarni_transformers::PoolingStrategy;
@@ -250,9 +250,9 @@ mod builder_tests {
     }
 }
 
-// =============================================================================
+
 // Preset Tests
-// =============================================================================
+
 
 mod preset_tests {
     use kjarni_transformers::PoolingStrategy;
@@ -321,9 +321,9 @@ mod preset_tests {
     }
 }
 
-// =============================================================================
+
 // Validation Tests
-// =============================================================================
+
 
 mod validation_tests {
     use super::*;
@@ -367,9 +367,9 @@ mod embedder_golden_values_test {
         }
     }
 
-    // =============================================================================
+    
     // Embeddings: minilm-l6-v2
-    // =============================================================================
+    
 
     #[tokio::test]
     async fn golden_embed_hello_dimension() {
@@ -535,9 +535,9 @@ mod embedder_golden_values_test {
     }
 }
 
-// =============================================================================
+
 // Error Tests
-// =============================================================================
+
 
 mod error_tests {
     use super::*;
@@ -570,9 +570,9 @@ mod error_tests {
     }
 }
 
-// =============================================================================
+
 // Convenience Function Tests
-// =============================================================================
+
 
 mod convenience_tests {
     use super::*;
@@ -590,9 +590,9 @@ mod convenience_tests {
     }
 }
 
-// =============================================================================
+
 // Cosine Similarity Tests
-// =============================================================================
+
 
 mod similarity_tests {
     #[test]
@@ -636,9 +636,9 @@ mod similarity_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests (require model download)
-// =============================================================================
+
 
 mod integration_tests {
     use kjarni_transformers::PoolingStrategy;

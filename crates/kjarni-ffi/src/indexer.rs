@@ -25,9 +25,9 @@ use kjarni::indexer::{IndexInfo, IndexStats, Indexer, IndexerError};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
-// =============================================================================
+
 // FFI Structures
-// =============================================================================
+
 
 /// Statistics returned after indexing operations.
 ///
@@ -180,9 +180,9 @@ pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     }
 }
 
-// =============================================================================
+
 // Indexer Handle
-// =============================================================================
+
 
 /// Opaque handle to an Indexer instance.
 ///
@@ -316,9 +316,9 @@ pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
     }
 }
 
-// =============================================================================
+
 // Helper Functions
-// =============================================================================
+
 
 /// Convert Rust ProgressStage to FFI KjarniProgressStage
 fn convert_stage(stage: ProgressStage) -> KjarniProgressStage {
@@ -365,9 +365,9 @@ unsafe fn parse_inputs<'a>(
     Ok(input_vec)
 }
 
-// =============================================================================
+
 // Create Index Functions
-// =============================================================================
+
 
 /// Create a new index from files/directories (simple version).
 ///
@@ -565,9 +565,9 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     }
 }
 
-// =============================================================================
+
 // Add to Index Functions
-// =============================================================================
+
 
 /// Add documents to an existing index (simple version).
 ///
@@ -760,9 +760,9 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     }
 }
 
-// =============================================================================
+
 // Index Management Functions
-// =============================================================================
+
 
 /// Get information about an existing index.
 ///
@@ -843,9 +843,9 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
     }
 }
 
-// =============================================================================
+
 // Accessor Functions
-// =============================================================================
+
 
 /// Get the embedding model name used by the indexer.
 ///

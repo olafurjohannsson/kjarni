@@ -8,7 +8,6 @@ use kjarni_rag::{
 use kjarni_transformers::Device;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tokio::sync::watch;
 
 pub struct Indexer {
@@ -870,7 +869,7 @@ impl Indexer {
 
 #[cfg(test)]
 mod indexer_tests {
-    use std::collections::HashMap;
+    
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;

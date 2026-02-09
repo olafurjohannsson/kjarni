@@ -1,7 +1,3 @@
-// =============================================================================
-// kjarni/src/chat/conversation.rs
-// =============================================================================
-
 //! Stateful conversation management.
 
 use super::model::Chat;
@@ -55,11 +51,6 @@ impl<'a> ChatConversation<'a> {
             history: History::with_system(system),
         }
     }
-
-    // =========================================================================
-    // Blocking Send (Auto-manages history)
-    // =========================================================================
-
     /// Send a message and get a response.
     ///
     /// Both the user message and assistant response are added to history.
@@ -98,10 +89,6 @@ impl<'a> ChatConversation<'a> {
 
         Ok(response)
     }
-
-    // =========================================================================
-    // Streaming (Manual history management)
-    // =========================================================================
 
     /// Add a user message to history (for streaming workflow).
     pub fn push_user(&mut self, message: &str) {
@@ -154,10 +141,6 @@ impl<'a> ChatConversation<'a> {
         self.push_user(message);
         self.stream_next().await
     }
-
-    // =========================================================================
-    // History Management
-    // =========================================================================
 
     /// Get the conversation history.
     pub fn history(&self) -> &History {

@@ -30,9 +30,9 @@ use kjarni_transformers::{
 use crate::BertConfig;
 use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
 
-// =============================================================================
+
 // Cross Encoder
-// =============================================================================
+
 
 /// Cross-encoder for semantic similarity and reranking.
 ///
@@ -45,9 +45,9 @@ pub struct CrossEncoder {
     model_type: Option<ModelType>,
 }
 
-// =============================================================================
+
 // EncoderModelFactory Implementation
-// =============================================================================
+
 
 impl EncoderModelFactory for CrossEncoder {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
@@ -135,9 +135,9 @@ impl EncoderModelFactory for CrossEncoder {
     }
 }
 
-// =============================================================================
+
 // Public API
-// =============================================================================
+
 
 impl CrossEncoder {
     /// Create cross-encoder from HuggingFace model registry.
@@ -223,7 +223,7 @@ impl CrossEncoder {
                 .context()
                 .ok_or_else(|| anyhow!("GPU model missing context"))?;
             let pool = context.get_inference_pool();
-            let mut pool_guard = pool.lock().await;
+            let pool_guard = pool.lock().await;
             let mut frame = GpuFrameContext::new(&context, pool_guard);
             let (encoder_cmd, pool_ref) = frame.resources();
 
@@ -319,9 +319,9 @@ impl CrossEncoder {
     }
 }
 
-// =============================================================================
+
 // Trait Implementations
-// =============================================================================
+
 
 impl LanguageModel for CrossEncoder {
     fn vocab_size(&self) -> usize {

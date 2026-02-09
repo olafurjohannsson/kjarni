@@ -312,7 +312,7 @@ pub fn matmul_2d_cpu_bf16(a: &ArrayView2<f32>, b_weights: &ArrayView2<bf16>) -> 
     c
 }
 
-use faer::{MatRef, MatMut, Parallelism};
+use faer::Parallelism;
 
 pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
@@ -328,7 +328,7 @@ pub fn matmul_2d_cpu_f32_faer(a: &ArrayView2<f32>, b_weights: &ArrayView2<f32>) 
     // Remove ::<f32>. Rust infers the types automatically.
     let mat_a = faer::mat::from_row_major_slice(a_slice, m, k);
     let mat_b = faer::mat::from_row_major_slice(b_slice, n, k);
-    let mut mat_c = faer::mat::from_row_major_slice_mut(c_slice, m, n);
+    let mat_c = faer::mat::from_row_major_slice_mut(c_slice, m, n);
 
     faer::linalg::matmul::matmul(
         mat_c,
@@ -955,9 +955,6 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
                 }
             });
     } else {
-        // === PREFILL PATH ===
-        // Parallelize over batch rows for prompt processing
-
         c.outer_iter_mut()
             .into_par_iter()
             .zip(a.outer_iter())
@@ -983,25 +980,6 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
 }
 
 /// Computes `C = A @ B^T` for F32 input `A` and Q6_K quantized weight matrix `B`.
-///
-/// **Experimental AVX2 variant** — Uses direct F32 input without pre-quantization
-/// on the decode path for potentially better performance. Falls back to scalar
-/// with Q8_K quantization on the prefill path.
-///
-/// # Arguments
-///
-/// * `input` - Input activation matrix of shape `[batch, in_features]`.
-/// * `weights` - Quantized weight blocks.
-///
-/// # Returns
-///
-/// Output matrix of shape `[batch, out_features]`.
-///
-/// # Performance
-///
-/// Decode path uses AVX2 with fixed chunk size of 64 (tuned for Q6_K's
-/// computational intensity). Prefill path uses scalar kernels with on-the-fly
-/// Q8_K quantization of the input.
 #[cfg(target_arch = "x86_64")]
 pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     let (m, k) = input.dim();
@@ -1012,14 +990,10 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
     let mut output = Array2::zeros((m, out_features));
 
     if m == 1 {
-        // === DECODE PATH ===
-        // Uses direct F32 input with AVX2 kernel (no input quantization needed)
-
         let r = input.row(0);
         let a_slice = r.as_slice().unwrap();
         let out_slice = output.as_slice_mut().unwrap();
 
-        // Fixed chunk size of 64 is optimal for Q6_K's computational intensity
         out_slice
             .par_chunks_mut(64)
             .enumerate()
@@ -1039,13 +1013,10 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
                             k,
                         );
                     }
-                    // No scalar fallback for AVX2 path
+                    // scalar fallback ?
                 }
             });
     } else {
-        // === PREFILL PATH ===
-        // Uses scalar kernel with Q8_K quantization of input
-
         output
             .outer_iter_mut()
             .into_par_iter()
@@ -1058,7 +1029,6 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
 
                 let out_slice = out_row.as_slice_mut().unwrap();
                 for (i, out_val) in out_slice.iter_mut().enumerate() {
-                    // Extract weight blocks for this output feature
                     let start = i * num_blocks_per_row;
                     let end = start + num_blocks_per_row;
                     let w_row = &weights[start..end];
@@ -1071,37 +1041,8 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
 
     output
 }
+
 /// Computes `C = A @ B^T` for F32 input `A` and Q6_K quantized weight matrix `B`.
-///
-/// Q6_K is a 6-bit block-quantized format using "K-quants" with 256 elements per block.
-/// It provides approximately 5x memory compression with higher precision than Q4_K,
-/// making it suitable for models where quality is prioritized over memory savings.
-///
-/// # Arguments
-///
-/// * `input` - Input activation matrix of shape `[batch, in_features]`.
-/// * `weights` - Quantized weight blocks. Total elements = `out_features * in_features / 256`.
-///
-/// # Returns
-///
-/// Output matrix of shape `[batch, out_features]`.
-///
-/// # Implementation Details
-///
-/// This function quantizes the F32 input to Q8_K format before computing the dot
-/// product. This is necessary because the Q6_K dot product kernel expects a
-/// quantized input for efficient computation.
-///
-/// # Performance
-///
-/// Uses scalar kernels with Q8_K input quantization. The decode path pre-quantizes
-/// the input once and shares it across all output computations. Consider using
-/// [`matmul_2d_cpu_q6_k2`] for potentially faster AVX2 decode path.
-///
-/// # See Also
-///
-/// - [`matmul_2d_cpu_q6_k2`] — Experimental AVX2 variant.
-/// - [`matmul_2d_cpu_q4_k`] — Lower precision 4-bit variant.
 #[cfg(target_arch = "x86_64")]
 pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     let (m, k) = input.dim();
@@ -1113,9 +1054,6 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
     let mut output = Array2::zeros((m, out_features));
 
     if m == 1 {
-        // === DECODE PATH ===
-        // Pre-quantize input once, then parallelize over output features
-
         let r = input.row(0);
         let a_slice = r.as_slice().unwrap();
         let out_slice = output.as_slice_mut().unwrap();
@@ -1145,9 +1083,6 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
                 }
             });
     } else {
-        // === PREFILL PATH ===
-        // Each row quantizes its input independently
-
         output
             .outer_iter_mut()
             .into_par_iter()
@@ -1175,20 +1110,11 @@ pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Arr
 }
 
 
-
-// =========================================================================
-// TESTS
-// =========================================================================
-
 #[cfg(test)]
 mod matmul_tests {
     use super::*;
     use ndarray::Array2;
     use std::time::Instant;
-
-    // =========================================================================
-    // Test Utilities
-    // =========================================================================
 
     fn make_input(rows: usize, cols: usize, seed: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..rows * cols)
@@ -1213,7 +1139,6 @@ mod matmul_tests {
         sum / a.len() as f32
     }
 
-    /// Reference implementation using the known-working matmul_2d_cpu_f32
     fn reference_matmul_with_bias(
         a: &ArrayView2<f32>,
         b: &ArrayView2<f32>,
@@ -1229,10 +1154,6 @@ mod matmul_tests {
         }
         result
     }
-
-    // =========================================================================
-    // F32 Standard Path Tests (matmul_2d_cpu_f32)
-    // =========================================================================
 
     #[test]
     fn test_f32_decode_tiny() {
@@ -1271,10 +1192,6 @@ mod matmul_tests {
         println!("\n=== F32 Prefill Small (m={}, k={}, n={}) ===", m, k, n);
     }
 
-    // =========================================================================
-    // F32 Batched Path Tests (matmul_2d_cpu_f32_batched)
-    // =========================================================================
-
     #[test]
     fn test_batched_parity_tiny_no_bias() {
         let (m, k, n) = (4, 4, 3);
@@ -1308,7 +1225,6 @@ mod matmul_tests {
 
     #[test]
     fn test_batched_parity_small_no_bias() {
-        // Tests main 4x3 loop with exact multiple of 3 outputs
         let (m, k, n) = (8, 32, 12); // n=12 is divisible by 3
         let a = make_input(m, k, 0);
         let b = make_input(n, k, 100);
@@ -1374,7 +1290,6 @@ mod matmul_tests {
 
     #[test]
     fn test_batched_parity_medium_no_bias() {
-        // Medium test - this is where the previous bug showed up
         let (m, k, n) = (64, 128, 256);
         let a = make_input(m, k, 0);
         let b = make_input(n, k, 100);
@@ -1410,7 +1325,6 @@ mod matmul_tests {
 
     #[test]
     fn test_batched_parity_large_no_bias() {
-        // MiniLM-like dimensions
         let (m, k, n) = (120 * 24, 384, 384); // batch=120, seq=24
         let a = make_input(m, k, 0);
         let b = make_input(n, k, 100);
@@ -1428,7 +1342,6 @@ mod matmul_tests {
 
     #[test]
     fn test_batched_parity_minilm_ffn() {
-        // MiniLM FFN layer dimensions
         let (m, k, n) = (120 * 24, 384, 1536);
         let a = make_input(m, k, 0);
         let b = make_input(n, k, 100);
@@ -1447,7 +1360,6 @@ mod matmul_tests {
 
     #[test]
     fn test_batched_parity_non_aligned_k() {
-        // k not divisible by 8 (tests SIMD remainder)
         let (m, k, n) = (8, 37, 12);
         let a = make_input(m, k, 0);
         let b = make_input(n, k, 100);
@@ -1478,10 +1390,6 @@ mod matmul_tests {
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
 
-    // =========================================================================
-    // BF16 Tests
-    // =========================================================================
-
     #[test]
     fn test_bf16_decode() {
         use half::bf16;
@@ -1492,14 +1400,11 @@ mod matmul_tests {
         let b_bf16: Array2<bf16> = b_f32.mapv(bf16::from_f32);
 
         let result = matmul_2d_cpu_bf16(&a.view(), &b_bf16.view());
-
-        // Compare against F32 result (allowing for BF16 precision loss)
         let expected = matmul_2d_cpu_f32(&a.view(), &b_f32.view());
         let diff = max_diff(&expected, &result);
 
         println!("\n=== BF16 Decode (m={}, k={}, n={}) ===", m, k, n);
         println!("Max diff vs F32: {:.2e}", diff);
-        // BF16 has ~3 decimal digits of precision, so expect ~1e-3 error
         assert!(diff < 1e-2, "BF16 diff {} too large", diff);
     }
 
@@ -1520,98 +1425,6 @@ mod matmul_tests {
         println!("Max diff vs F32: {:.2e}", diff);
         assert!(diff < 1e-2, "BF16 diff {} too large", diff);
     }
-
-    // =========================================================================
-    // Performance Benchmarks
-    // =========================================================================
-
-    #[test]
-    fn perf_f32_standard_vs_batched() {
-        let (m, k, n) = (120 * 24, 384, 1536); // MiniLM FFN
-        let iterations = 10;
-
-        let a = make_input(m, k, 0);
-        let b = make_input(n, k, 100);
-        let bias = make_bias(n, 0.01);
-
-        // Warmup
-        let _ = matmul_2d_cpu_f32(&a.view(), &b.view());
-        let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-
-        // Benchmark standard (no bias - bias added separately)
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let mut result = matmul_2d_cpu_f32(&a.view(), &b.view());
-            // Add bias like LinearLayer::matmul does
-            for mut row in result.rows_mut() {
-                for (val, &b) in row.iter_mut().zip(bias.iter()) {
-                    *val += b;
-                }
-            }
-            std::hint::black_box(result);
-        }
-        let std_time = start.elapsed();
-
-        // Benchmark batched (bias inline)
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let result = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-            std::hint::black_box(result);
-        }
-        let batched_time = start.elapsed();
-
-        let ops = 2 * m * k * n * iterations;
-        let std_gflops = ops as f64 / std_time.as_secs_f64() / 1e9;
-        let batched_gflops = ops as f64 / batched_time.as_secs_f64() / 1e9;
-
-        println!("\n=== PERF: Standard vs Batched F32 Matmul ===");
-        println!("Dimensions: m={}, k={}, n={}", m, k, n);
-        println!("Standard (row-parallel): {:?} ({:.2} GFLOPS)", std_time / iterations as u32, std_gflops);
-        println!("Batched (4x3 blocks):    {:?} ({:.2} GFLOPS)", batched_time / iterations as u32, batched_gflops);
-        println!("Speedup: {:.2}x", std_time.as_secs_f64() / batched_time.as_secs_f64());
-    }
-
-    #[test]
-    fn perf_bf16_decode_vs_prefill() {
-        use half::bf16;
-        
-        let k = 384;
-        let n = 1536;
-        let iterations = 100;
-
-        let a_decode = make_input(1, k, 0);
-        let a_prefill = make_input(32, k, 0);
-        let b_f32 = make_input(n, k, 100);
-        let b_bf16: Array2<bf16> = b_f32.mapv(bf16::from_f32);
-
-        // Warmup
-        let _ = matmul_2d_cpu_bf16(&a_decode.view(), &b_bf16.view());
-        let _ = matmul_2d_cpu_bf16(&a_prefill.view(), &b_bf16.view());
-
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let result = matmul_2d_cpu_bf16(&a_decode.view(), &b_bf16.view());
-            std::hint::black_box(result);
-        }
-        let decode_time = start.elapsed();
-
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let result = matmul_2d_cpu_bf16(&a_prefill.view(), &b_bf16.view());
-            std::hint::black_box(result);
-        }
-        let prefill_time = start.elapsed();
-
-        println!("\n=== PERF: BF16 Decode vs Prefill ===");
-        println!("Decode (m=1):   {:?} per call", decode_time / iterations as u32);
-        println!("Prefill (m=32): {:?} per call", prefill_time / iterations as u32);
-        println!("Tokens/sec decode:  {:.0}", iterations as f64 / decode_time.as_secs_f64());
-        println!("Tokens/sec prefill: {:.0}", 32.0 * iterations as f64 / prefill_time.as_secs_f64());
-    }
-
-    // =========================================================================
-    // No-Alloc Tests (matmul_2d_f32_noalloc)
-    // =========================================================================
 
     #[test]
     fn test_noalloc_decode_no_bias() {
@@ -1713,10 +1526,6 @@ mod matmul_tests {
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-4, "Max diff {} exceeds tolerance", diff);
     }
-
-    // =========================================================================
-    // No-Alloc Batched Tests (matmul_2d_f32_batched_noalloc)
-    // =========================================================================
 
     #[test]
     fn test_batched_noalloc_single_token_fallback() {
@@ -1899,10 +1708,6 @@ mod matmul_tests {
         assert!(diff < 1e-5, "Max diff {} exceeds tolerance", diff);
     }
 
-    // =========================================================================
-    // Cross-Validation: Allocating vs No-Alloc
-    // =========================================================================
-
     #[test]
     fn test_noalloc_matches_allocating_decode() {
         let (m, k, n) = (1, 384, 1536);
@@ -1946,132 +1751,4 @@ mod matmul_tests {
         assert!(diff < 1e-6, "No-alloc should match allocating exactly");
     }
 
-    // =========================================================================
-    // Performance Comparison
-    // =========================================================================
-
-    #[test]
-    fn bench_noalloc_vs_allocating() {
-        use std::time::Instant;
-
-        println!("\n");
-        println!("╔══════════════════════════════════════════════════════════════════════╗");
-        println!("║           NO-ALLOC VS ALLOCATING BENCHMARK                           ║");
-        println!("╚══════════════════════════════════════════════════════════════════════╝");
-
-        let configs = [
-            ("Decode (m=1)", 1, 384, 1536, 1000, 100),
-            ("Small batch (m=16)", 16, 384, 384, 500, 50),
-            ("Medium batch (m=256)", 256, 384, 384, 100, 10),
-            ("Large batch (m=2880)", 2880, 384, 384, 50, 5),
-        ];
-
-        for (name, m, k, n, iterations, warmup) in configs {
-            let a = make_input(m, k, 0);
-            let b = make_input(n, k, 100);
-            let bias = make_bias(n, 0.01);
-            let mut output = Array2::zeros((m, n));
-
-            // Warmup
-            for _ in 0..warmup {
-                if m == 1 {
-                    let mut r = matmul_2d_cpu_f32(&a.view(), &b.view());
-                    for (val, &b) in r.as_slice_mut().unwrap().iter_mut().zip(bias.iter()) {
-                        *val += b;
-                    }
-                } else {
-                    let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-                }
-                matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
-            }
-
-            // Benchmark allocating
-            let start = Instant::now();
-            for _ in 0..iterations {
-                if m == 1 {
-                    let mut r = matmul_2d_cpu_f32(&a.view(), &b.view());
-                    for (val, &b) in r.as_slice_mut().unwrap().iter_mut().zip(bias.iter()) {
-                        *val += b;
-                    }
-                    std::hint::black_box(r);
-                } else {
-                    let r = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-                    std::hint::black_box(r);
-                }
-            }
-            let alloc_time = start.elapsed();
-
-            // Benchmark no-alloc
-            let start = Instant::now();
-            for _ in 0..iterations {
-                matmul_2d_f32_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
-                std::hint::black_box(&output);
-            }
-            let noalloc_time = start.elapsed();
-
-            let alloc_per = alloc_time / iterations as u32;
-            let noalloc_per = noalloc_time / iterations as u32;
-            let speedup = alloc_time.as_secs_f64() / noalloc_time.as_secs_f64();
-
-            println!("\n=== {} ===", name);
-            println!("Allocating: {:>10.2?}", alloc_per);
-            println!("No-alloc:   {:>10.2?}", noalloc_per);
-            println!("Speedup:    {:.2}x", speedup);
-        }
-    }
-
-    #[test]
-    fn bench_batched_noalloc_vs_allocating() {
-        use std::time::Instant;
-
-        println!("\n");
-        println!("╔══════════════════════════════════════════════════════════════════════╗");
-        println!("║           BATCHED NO-ALLOC VS ALLOCATING BENCHMARK                   ║");
-        println!("╚══════════════════════════════════════════════════════════════════════╝");
-
-        let configs = [
-            ("MiniLM QKV (m=2880, n=384)", 2880, 384, 384, 50, 5),
-            ("MiniLM FFN up (m=2880, n=1536)", 2880, 384, 1536, 30, 3),
-            ("MiniLM FFN down (m=2880, n=384)", 2880, 1536, 384, 30, 3),
-            ("BERT QKV (m=2048, n=768)", 2048, 768, 768, 20, 3),
-        ];
-
-        for (name, m, k, n, iterations, warmup) in configs {
-            let a = make_input(m, k, 0);
-            let b = make_input(n, k, 100);
-            let bias = make_bias(n, 0.01);
-            let mut output = Array2::zeros((m, n));
-
-            // Warmup
-            for _ in 0..warmup {
-                let _ = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-                matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
-            }
-
-            // Benchmark allocating
-            let start = Instant::now();
-            for _ in 0..iterations {
-                let r = matmul_2d_cpu_f32_batched(&a.view(), &b.view(), Some(&bias));
-                std::hint::black_box(r);
-            }
-            let alloc_time = start.elapsed();
-
-            // Benchmark no-alloc
-            let start = Instant::now();
-            for _ in 0..iterations {
-                matmul_2d_f32_batched_noalloc(&a.view(), &b.view(), Some(&bias), &mut output);
-                std::hint::black_box(&output);
-            }
-            let noalloc_time = start.elapsed();
-
-            let alloc_per = alloc_time / iterations as u32;
-            let noalloc_per = noalloc_time / iterations as u32;
-            let speedup = alloc_time.as_secs_f64() / noalloc_time.as_secs_f64();
-
-            println!("\n=== {} ===", name);
-            println!("Allocating: {:>10.2?}", alloc_per);
-            println!("No-alloc:   {:>10.2?}", noalloc_per);
-            println!("Speedup:    {:.2}x", speedup);
-        }
-    }
 }

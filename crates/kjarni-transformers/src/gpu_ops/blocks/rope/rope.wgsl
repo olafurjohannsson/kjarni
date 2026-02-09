@@ -1,49 +1,4 @@
 //! Rotary Position Embedding (RoPE) for dual tensors (Q and K).
-//!
-//! Applies rotary position embeddings to query and key tensors simultaneously.
-//! RoPE encodes position information by rotating pairs of dimensions using
-//! precomputed sin/cos tables based on position.
-//!
-//! # Algorithm
-//!
-//! For each pair of dimensions (i, i + head_dim/2):
-//! ```text
-//! x[i]            = x_old[i] * cos(θ) - x_old[i+d/2] * sin(θ)
-//! x[i + head_dim/2] = x_old[i+d/2] * cos(θ) + x_old[i] * sin(θ)
-//! ```
-//! Where θ = position / (10000^(2i/d))
-//!
-//! # Performance
-//!
-//! - **Current**: ~0.05ms for [1, 32, 128, 128] on RTX 3090
-//! - **Memory bound**: Simple read-modify-write pattern
-//! - **Fully parallel**: Each thread handles one dimension pair
-//!
-//! # Benefits of RoPE
-//!
-//! - Better extrapolation to longer sequences than learned position embeddings
-//! - Relative position encoding (tokens relate based on distance, not absolute position)
-//! - No learned parameters (saves memory and initialization time)
-//! - Used by Llama, Mistral, Qwen, Phi-3, and most modern LLMs
-//!
-//! # TODO / Improvements
-//!
-//! - Increase workgroup size from 16 to 64 or 128 for better occupancy
-//! - Add vec2 loads/stores for 2x bandwidth (process both dimensions together)
-//! - Consider fusing with attention computation to save memory passes
-//! - Profile cache miss rate on sin/cos lookups
-//!
-//! # Limitations
-//!
-//! - Assumes head_dim is even (required for pair rotation)
-//! - Out-of-place only (requires separate input/output buffers)
-//! - No support for RoPE scaling variants (YaRN, NTK, etc.)
-//!
-//! # See Also
-//!
-//! - [`rope_single.wgsl`] — Single tensor variant (when Q and K processed separately)
-//! - [`crate::gpu_ops::blocks::rope::GpuRoPE`] — Rust dispatch and sin/cos table generation
-//! - [RoFormer paper](https://arxiv.org/abs/2104.09864) — Original RoPE publication
 
 /// Uniform parameters for RoPE operation.
 struct RoPEUniforms {
@@ -100,8 +55,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Fetch precomputed sin/cos for this position and dimension
     let cos_val = cos_cache[pos * uniforms.cos_stride + dim_idx];
     let sin_val = sin_cache[pos * uniforms.sin_stride + dim_idx];
-
-    // --- Apply RoPE to Q tensor (Out-of-Place) ---
+    // RoPE Q Tensor
     {
         let base_idx = head_batch_idx * uniforms.seq_len * uniforms.head_dim + seq_idx * uniforms.head_dim;
 
@@ -113,7 +67,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         q_out[base_idx + dim_idx + half_dim] = q1 * cos_val + q0 * sin_val;
     }
 
-    // --- Apply RoPE to K tensor (Out-of-Place) ---
+    // RoPE K Tensor
     {
         let base_idx = head_batch_idx * uniforms.seq_len * uniforms.head_dim + seq_idx * uniforms.head_dim;
 

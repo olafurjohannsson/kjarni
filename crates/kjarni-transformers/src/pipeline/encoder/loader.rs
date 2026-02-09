@@ -9,9 +9,9 @@ use crate::{Device, ModelType, WgpuContext, cpu::encoder::{
 }, models::{base::ModelLoadConfig, download_model_files, registry::WeightsFormat}, pipeline::encoder::{EncoderPipeline, EncoderPipelineBuilder}, traits::{ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights};
 use anyhow::{anyhow, Result};
 
-// =============================================================================
+
 // Encoder Model Factory
-// =============================================================================
+
 
 /// Factory trait for encoder-based models.
 ///
@@ -54,9 +54,9 @@ pub trait EncoderModelFactory: Sized {
     ) -> Self;
 }
 
-// =============================================================================
+
 // Generic Encoder Loader
-// =============================================================================
+
 
 pub struct EncoderLoader;
 

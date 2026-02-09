@@ -169,7 +169,6 @@ impl LlamaGpuDecoder {
         i: usize,
         load_config: ModelLoadConfig,
     ) -> Result<GpuRoPEDecoderLayer> {
-        // Get the specific nested layouts for the decoder.
         let decoder_layout = layout
             .decoder
             .as_ref()
@@ -182,10 +181,8 @@ impl LlamaGpuDecoder {
         let name = |template: &String| template.replace("{}", &idx);
         let target_dt = load_config.target_dtype;
 
-        // for now force layers to use F32
         let layer_dt = target_dt;
 
-        // --- 1. Attention Weights (Using original GpuTensor::from_raw calls) ---
         let q_t = GpuTensor::from_model_weights(
             &context,
             weights,
@@ -286,7 +283,6 @@ impl LlamaGpuDecoder {
             )?,
         )?);
 
-        // --- 3. Construct Dedicated Layer ---
         GpuRoPEDecoderLayer::new(
             &context,
             meta.hidden_size,

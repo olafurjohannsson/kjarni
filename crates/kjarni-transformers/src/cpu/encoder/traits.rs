@@ -3,15 +3,13 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
-use crate::cpu::encoder_decoder::EncoderOutput;
 use crate::cpu::strategy::ComputeStrategy;
 use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::{LanguageModel, ModelInput, PaddingSide};
+use crate::models::base::{LanguageModel, ModelInput};
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;
 use crate::{WgpuContext, last_token_pool, max_pool};
@@ -643,10 +641,10 @@ mod tests_trait {
         fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             Ok(hidden_states.clone())
         }
-        fn as_any(&self) -> &dyn Any {
+        fn as_any(&self) -> &dyn std::any::Any {
             self
         }
-        fn as_any_mut(&mut self) -> &mut dyn Any {
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
             self
         }
         fn num_attention_heads(&self) -> usize {

@@ -1,9 +1,8 @@
 use kjarni_models::models::llama::model::LlamaModel;
 use kjarni_transformers::common::GenerationConfig;
 use kjarni_transformers::decoder::prelude::*;
-use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::stats::GenerationStats;
-use kjarni_transformers::{Device, ModelType, WgpuContext};
+use kjarni_transformers::Device;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // This test verifies that our Llama implementation produces a known, correct output

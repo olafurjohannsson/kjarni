@@ -55,7 +55,7 @@ impl DecoderCrossAttention {
         &self,
         encoder_hidden_states: &Array3<f32>,
     ) -> Result<(Array4<f32>, Array4<f32>)> {
-        use ndarray::s;
+        
         // println!("=== PRECOMPUTE K/V DEBUG ===");
         // println!(
         //     "encoder_hidden_states [0,0,:5]: {:?}",
@@ -100,7 +100,7 @@ impl DecoderCrossAttention {
         encoder_v: &Array4<f32>,
         attention_mask: Option<&Array2<f32>>,
     ) -> Result<Array3<f32>> {
-        use ndarray::s;
+        
         let (batch, seq_len, _) = hidden_states.dim();
 
         // println!("=== CROSS-ATTN DEBUG ===");
@@ -197,7 +197,7 @@ mod cross_attention_tests {
     use super::*;
     use crate::linear_layer::LinearLayer;
     use anyhow::Result;
-    use ndarray::{Array1, Array2, Array3, Array4, s};
+    use ndarray::{Array1, Array2, Array3, Array4};
 
     /// Helper to create LinearLayer from weight and bias vecs
     fn load_linear(

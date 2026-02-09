@@ -31,13 +31,12 @@ use crate::models::base::AutoregressiveLoop;
 use crate::traits::InferenceModel;
 use crate::{Device, LanguageModel, WgpuContext};
 use anyhow::Result;
-use ndarray::{Array1, Array2, Array3, s};
+use ndarray::{Array1, Array2, Array3};
 use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokenizers::Tokenizer;
-use wgpu::CommandEncoder;
 
 #[cfg(test)]
 mod decoder_backend_tests {
@@ -110,10 +109,6 @@ mod decoder_backend_tests {
             Box::new(self.clone())
         }
     }
-
-    // -------------------------------------------------------------------------
-    //  Mock CPU Decoder
-    // -------------------------------------------------------------------------
 
     pub struct MockCpuDecoder {
         hidden_size: usize,
@@ -208,10 +203,6 @@ mod decoder_backend_tests {
         }
     }
 
-    // -------------------------------------------------------------------------
-    //  Mock CPU Decoder Ops
-    // -------------------------------------------------------------------------
-
     pub struct MockCpuDecoderOps {
         decoder: MockCpuDecoder,
         vocab_size: usize,
@@ -301,11 +292,6 @@ mod decoder_backend_tests {
             Ok(mask)
         }
     }
-
-    // -------------------------------------------------------------------------
-    //  Mock Decoder Language Model (CPU)
-    // -------------------------------------------------------------------------
-
     pub struct MockCpuDecoderModel {
         ops: MockCpuDecoderOps,
         loop_type: AutoregressiveLoop,

@@ -1,16 +1,9 @@
-use anyhow::{Result, anyhow};
-use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor};
-use kjarni_transformers::models::base::{ModelInput, ModelLoadConfig};
+use anyhow::Result;
 
 use kjarni_transformers::{
-    models::{ModelArchitecture, ModelTask, ModelType},
-    traits::{Device, ModelConfig, ModelLayout, ModelMetadata},
-    weights::ModelWeights,
+    models::ModelType,
+    traits::Device,
 };
-use ndarray::{Array2, Array3, s};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokenizers::{EncodeInput, Tokenizer};
 
 #[cfg(test)]
 mod cross_encoder_tests {

@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::gpu::DType;
     use crate::gpu_ops::primitives::layout::clsslice::GpuClsSlice;
     use crate::{gpu::GpuTensor, gpu_ops::primitives::layout::clsslice::ClsSliceUniforms};

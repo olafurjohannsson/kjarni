@@ -1,7 +1,5 @@
-// kjarni/src/searcher/types.rs
 
-use kjarni_rag::{MetadataFilter, SearchMode, SearchResult};
-use std::collections::HashMap;
+use kjarni_rag::{MetadataFilter, SearchMode};
 
 /// Search options
 #[derive(Debug, Clone, Default)]

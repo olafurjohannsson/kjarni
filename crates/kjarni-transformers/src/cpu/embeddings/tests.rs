@@ -1,15 +1,15 @@
 #[cfg(test)]
 mod embeddings_tests {
-    use super::*;
+    
     use crate::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
     use crate::gpu::{GpuTensor, GpuTensorPool};
     use crate::models::base::ModelInput; // <--- Using your actual input enum
-    use crate::tensor::{CpuTensor, DType};
+    use crate::tensor::DType;
     use crate::weights::ModelWeights;
     use crate::{Embeddings, WgpuContext};
     use anyhow::Result;
-    use ndarray::{Array2, Array3, ArrayView2, arr2, s};
-    use std::path::Path;
+    use ndarray::{Array2, Array3, arr2};
+    
     use std::sync::Arc;
 
     // =========================================================================
@@ -21,7 +21,7 @@ mod embeddings_tests {
     ) -> (tempfile::TempDir, ModelWeights) {
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
-        use std::io::Write;
+        
 
         let dir = tempfile::TempDir::new().unwrap();
         let model_path = dir.path().join("model.safetensors");

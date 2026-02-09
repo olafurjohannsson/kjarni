@@ -3,9 +3,9 @@
 use std::fmt;
 use std::path::PathBuf;
 
-// =============================================================================
+
 // Task
-// =============================================================================
+
 
 /// Whisper task type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,9 +31,9 @@ impl fmt::Display for Task {
     }
 }
 
-// =============================================================================
+
 // Transcription Result
-// =============================================================================
+
 
 /// Full transcription result returned by [`Transcriber`](super::Transcriber).
 #[derive(Debug, Clone)]
@@ -60,9 +60,9 @@ pub struct TranscriptionSegment {
     pub text: String,
 }
 
-// =============================================================================
+
 // Streaming Token
-// =============================================================================
+
 
 /// A single token emitted during streamed transcription.
 #[derive(Debug, Clone)]
@@ -75,9 +75,9 @@ pub struct TranscribedToken {
     pub is_special: bool,
 }
 
-// =============================================================================
+
 // Progress Reporting
-// =============================================================================
+
 
 /// Stage of the transcription pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,9 +140,9 @@ impl TranscriptionProgress {
 pub type TranscriptionProgressCallback =
     Box<dyn Fn(&TranscriptionProgress, Option<&str>) + Send + Sync>;
 
-// =============================================================================
+
 // Errors
-// =============================================================================
+
 
 /// Errors returned by the transcription API.
 #[derive(Debug)]

@@ -1,6 +1,5 @@
-// src/cpu/strategy.rs
 
-/// Thresholds for selecting optimal compute strategies
+// heuristics
 pub mod thresholds {
     /// Below this token count, fused QKV always wins
     pub const FUSED_ALWAYS_WINS_TOKENS: usize = 64;
@@ -21,10 +20,7 @@ pub mod thresholds {
 /// Compute strategy decisions for attention and matmul operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputeStrategy {
-    /// Use fused QKV projection (1 matmul) vs separate (3 matmuls)
     pub use_fused_qkv: bool,
-    
-    /// Use pre-allocated scratch buffers vs allocating per-call
     pub use_scratch_buffers: bool,
 }
 

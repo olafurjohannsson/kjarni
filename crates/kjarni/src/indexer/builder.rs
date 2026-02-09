@@ -1,12 +1,9 @@
-// kjarni/src/indexer/builder.rs
 
 use crate::Indexer;
-use crate::embedder::Embedder;
 use crate::indexer::IndexerResult;
-use kjarni_rag::{LoaderConfig, Progress, ProgressCallback, SplitterConfig};
+use kjarni_rag::{Progress, ProgressCallback};
 use kjarni_transformers::Device;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::sync::watch;
 
 pub struct IndexerBuilder {

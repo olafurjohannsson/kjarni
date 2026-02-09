@@ -66,7 +66,7 @@ use ndarray::{Array2, Array3};
 use std::sync::Arc;
 
 use crate::{
-    Normalization, cpu::decoder::{DecoderAttention, decoder_attention::DecoderAttentionNew}, feedforward::SwiGluFeedForward, rope::RoPE
+    Normalization, cpu::decoder::DecoderAttention, feedforward::SwiGluFeedForward, rope::RoPE
 };
 
 /// A complete transformer decoder layer with RoPE, pre-normalization, and SwiGLU.

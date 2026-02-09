@@ -38,12 +38,10 @@ impl GpuRoPE {
         cos_cache_cpu: &Array2<f32>,
         sin_cache_cpu: &Array2<f32>,
     ) -> Result<Self> {
-        // --- Compile the single-tensor WGSL shader ---
         let shader = context
             .device
             .create_shader_module(wgpu::include_wgsl!("./rope_single.wgsl"));
 
-        // --- Create the BindGroupLayout for the single-tensor version ---
         let bind_group_layout =
             context
                 .device
@@ -108,7 +106,6 @@ impl GpuRoPE {
                     ],
                 });
 
-        // --- Create the Pipeline Layout ---
         let pipeline_layout =
             context
                 .device
@@ -118,7 +115,6 @@ impl GpuRoPE {
                     push_constant_ranges: &[],
                 });
 
-        // --- Create the Compute Pipeline ---
         let pipeline = context
             .device
             .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -130,7 +126,6 @@ impl GpuRoPE {
                 cache: None,
             });
 
-        // --- Upload caches to GPU ---
         let cos_cache = GpuTensor::from_ndarray::<f32, _>(context, cos_cache_cpu)?;
         let sin_cache = GpuTensor::from_ndarray::<f32, _>(context, sin_cache_cpu)?;
 
@@ -143,7 +138,7 @@ impl GpuRoPE {
         })
     }
 
-    /// Encodes the RoPE operation for a SINGLE tensor. This is an OUT-OF-PLACE operation.
+    /// Encodes the RoPE operation for a single tensor
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -217,17 +212,6 @@ impl GpuRoPE {
                 let workgroups_z = (batch_size * num_heads) as u32;
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
             });
-        // let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        //     label: Some("RoPE Pass"),
-        //     timestamp_writes: None,
-        // });
-        // compute_pass.set_pipeline(&self.pipeline);
-        // compute_pass.set_bind_group(0, &bind_group, &[]);
-
-        // let workgroups_x = (head_dim as u32 / 2 + 15) / 16;
-        // let workgroups_y = seq_len as u32;
-        // let workgroups_z = (batch_size * num_heads) as u32;
-        // compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, workgroups_z);
     }
 }
 

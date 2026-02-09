@@ -1,13 +1,13 @@
+use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
-use crate::{EmbeddingConfig, LoadedEmbeddings};
 use crate::execution::ExecutionPlan;
 use crate::loaders::{LMHeadConfig, LoadedLMHead};
 use crate::models::base::ModelLoadConfig;
 use crate::pipeline::{DecoderPipeline, DecoderPipelineConfig};
 use crate::traits::{Device, ModelConfig};
 use crate::weights::ModelWeights;
-use crate::WgpuContext;
-use anyhow::{anyhow, Context, Result};
+use crate::{EmbeddingConfig, LoadedEmbeddings};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 pub struct DecoderPipelineBuilder<'a> {
     weights: &'a ModelWeights,
@@ -55,8 +55,7 @@ impl<'a> DecoderPipelineBuilder<'a> {
         let layout = self.config.layout();
         let ctx = self.context.as_ref();
         let target_dt = self.load_config.target_dtype;
-
-        // 1. Determine Device Strategy
+        // Determine Device Strategy
         let primary_device = if ctx.is_some() {
             Device::Wgpu
         } else {
@@ -64,16 +63,16 @@ impl<'a> DecoderPipelineBuilder<'a> {
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
 
-        // 3. Extract Decoder Layout
+        // Extract Decoder Layout
         let dec_layout = layout
             .decoder
             .as_ref()
             .ok_or_else(|| anyhow!("Pipeline requires a DecoderLayout in ModelLayout"))?;
 
-         let start_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
+        let start_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
         println!("  [Builder] Pre-Embeddings RAM: {:.2} MB", start_ram);
 
-        // 4. Load Embeddings
+        // Load Embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
         if let Some(pos) = &dec_layout.position_embedding {
             emb_builder = emb_builder.position_embedding(pos);
@@ -99,11 +98,11 @@ impl<'a> DecoderPipelineBuilder<'a> {
         )?;
 
         let mid_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
-        println!("  [Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)", mid_ram, mid_ram - start_ram);
-
-        // 5. Load LM Head (The "Tied" Check)
-
-        // Load LM head as Q8_0 is gguf if not already set
+        println!(
+            "  [Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)",
+            mid_ram,
+            mid_ram - start_ram
+        );
 
         log::warn!("FORCING LM HEAD TO USE Q8_0 QUANTIZATION FOR PERFORMANCE TEST");
 
@@ -129,12 +128,12 @@ impl<'a> DecoderPipelineBuilder<'a> {
             )?
         };
         let end_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
-        println!("  [Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)", end_ram, end_ram - mid_ram);
-        // 6. Build Model Backends (Handover RoPE and DType)
-        // We resolve backends here using the specific model's factory logic
-        // This is where you call build_backends from the DecoderLoader
+        println!(
+            "  [Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)",
+            end_ram,
+            end_ram - mid_ram
+        );
 
-        // Return dummy/empty backends for now; the DecoderLoader will populate these
         DecoderPipeline::new(
             embeddings,
             self.cpu_backend,

@@ -140,7 +140,7 @@ impl RMSNormSIMD {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
-    use ndarray::{array, Array3};
+    use ndarray::Array3;
 
     /// Helper function to compare two 3D tensors for approximate equality.
     fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {

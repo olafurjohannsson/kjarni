@@ -32,11 +32,7 @@ pub struct EmbedderPreset {
     pub description: &'static str,
 }
 
-// =============================================================================
-// V1 Presets
-// =============================================================================
 
-/// Small, fast embedding model.
 pub const EMBEDDING_SMALL_V1: EmbedderPreset = EmbedderPreset {
     name: "EMBEDDING_SMALL_V1",
     model: "minilm-l6-v2",

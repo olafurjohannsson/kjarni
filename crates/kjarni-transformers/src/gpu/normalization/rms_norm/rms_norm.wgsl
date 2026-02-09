@@ -1,38 +1,4 @@
-//! RMS Normalization with learnable scale (gamma) and BF16 support.
-//!
-//! RMSNorm: x_norm = x / sqrt(mean(x²) + eps) * gamma
-//! Simpler than LayerNorm (no mean subtraction, no bias), used by Llama/Mistral.
-//!
-//! # Algorithm
-//!
-//! 1. Parallel sum of squares across row (stride 256)
-//! 2. Tree reduction to compute total sum
-//! 3. Compute RMS = sqrt(sum / N + eps)
-//! 4. Normalize and scale: output = input / RMS * gamma
-//!
-//! # Performance
-//!
-//! - **Current**: ~0.3ms for [128, 4096] on RTX 3090
-//! - **Memory bound**: 3 passes over data (read input, write output, read gamma)
-//! - Uses parallel reduction (good!) unlike softmax
-//!
-//! # TODO / Improvements
-//!
-//! - Fuse passes: Load input + gamma in single pass, compute RMS on-the-fly
-//! - Add welford online algorithm for better numerical stability
-//! - Support in-place operation (input == output buffer)
-//! - Use subgroup operations for faster reduction on modern GPUs
-//! - Profile shared memory bank conflicts in reduction tree
-//!
-//! # Limitations
-//!
-//! - Assumes N <= 256 * 256 = 65536 (max elements per row)
-//! - Workgroup size 256 is hardcoded (should be tunable)
-//! - Three memory passes is suboptimal (can be fused to 2)
-//!
-//! # See Also
-//!
-//! - [`layer_norm.wgsl`] — Full LayerNorm with mean centering
+//! RMS Normalization
 
 /// Uniform parameters for RMS normalization.
 struct NormUniforms {
@@ -52,7 +18,6 @@ struct NormUniforms {
 @group(0) @binding(3) var<storage, read_write> output: array<f32>;
 
 // Shared memory for parallel reduction
-// TODO: Could reduce to 128 elements if we unroll final iterations
 var<workgroup> s_sum: array<f32, 256>;
 
 /// Fetches gamma value, handling F32 or BF16 format.
@@ -83,7 +48,6 @@ fn main(
 
     let row_offset = row * uniforms.n;
 
-    // === Phase 1: Parallel sum of squares ===
     // Each thread processes elements strided by 256
     // TODO: Vectorize loads (vec4) for better bandwidth
     var sum_sq = 0.0;
@@ -92,12 +56,11 @@ fn main(
         sum_sq += val * val;
     }
 
-    // === Phase 2: Tree reduction in shared memory ===
+    // Tree reduction in shared memory ===
     s_sum[tid] = sum_sq;
     workgroupBarrier();
 
     // Binary tree reduction: 128 → 64 → 32 → 16 → 8 → 4 → 2 → 1
-    // TODO: Use subgroup operations (subgroupAdd) for first few levels
     for (var s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             s_sum[tid] += s_sum[tid + s];
@@ -105,7 +68,7 @@ fn main(
         workgroupBarrier();
     }
 
-    // === Phase 3: Compute inverse RMS (single thread) ===
+    // Compute inverse RMS (single thread)
     if (tid == 0u) {
         let mean = s_sum[0] / f32(uniforms.n);
         s_sum[0] = 1.0 / sqrt(mean + uniforms.eps);
@@ -114,7 +77,7 @@ fn main(
 
     let inv_rms = s_sum[0];
 
-    // === Phase 4: Normalize and scale ===
+    // Normalize and scale
     // TODO: Could fuse with Phase 1 using online algorithms
     for (var i = tid; i < uniforms.n; i += 256u) {
         let idx = row_offset + i;

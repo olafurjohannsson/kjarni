@@ -1,23 +1,6 @@
 //! Shared utility functions
 
 /// Compute cosine similarity between two embeddings
-///
-/// # Arguments
-/// * `a` - First embedding vector
-/// * `b` - Second embedding vector
-///
-/// # Returns
-/// Cosine similarity score between -1.0 and 1.0
-///
-/// # Example
-/// ```ignore
-/// use edgegpt::utils::cosine_similarity;
-///
-/// let emb1 = vec![0.5, 0.5, 0.5];
-/// let emb2 = vec![0.6, 0.4, 0.5];
-/// let sim = cosine_similarity(&emb1, &emb2);
-/// println!("Similarity: {:.4}", sim);
-/// ```
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(a.len(), b.len(), "Embeddings must have the same length");
 
@@ -33,26 +16,6 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Compute pairwise cosine similarity matrix for a batch of embeddings
-///
-/// # Arguments
-/// * `embeddings` - Slice of embedding vectors
-///
-/// # Returns
-/// 2D similarity matrix where matrix[i][j] is the similarity between embeddings[i] and embeddings[j]
-///
-/// # Example
-/// ```ignore
-/// use edgegpt::utils::similarity_matrix;
-///
-/// let embeddings = vec![
-///     vec![0.5, 0.5, 0.5],
-///     vec![0.6, 0.4, 0.5],
-///     vec![0.1, 0.1, 0.9],
-/// ];
-///
-/// let matrix = similarity_matrix(&embeddings);
-/// println!("Similarity between 0 and 1: {:.4}", matrix[0][1]);
-/// ```
 pub fn similarity_matrix(embeddings: &[Vec<f32>]) -> Vec<Vec<f32>> {
     let n = embeddings.len();
     let mut matrix = vec![vec![0.0; n]; n];
@@ -70,31 +33,6 @@ pub fn similarity_matrix(embeddings: &[Vec<f32>]) -> Vec<Vec<f32>> {
 }
 
 /// Find the most similar embeddings to a query embedding
-///
-/// # Arguments
-/// * `query` - Query embedding
-/// * `candidates` - Slice of candidate embeddings
-/// * `top_k` - Number of top results to return
-///
-/// # Returns
-/// Vector of (index, similarity_score) tuples, sorted by similarity (highest first)
-///
-/// # Example
-/// ```ignore
-/// use edgegpt::utils::find_most_similar;
-///
-/// let query = vec![0.5, 0.5, 0.5];
-/// let candidates = vec![
-///     vec![0.6, 0.4, 0.5],
-///     vec![0.1, 0.1, 0.9],
-///     vec![0.5, 0.5, 0.6],
-/// ];
-///
-/// let top_2 = find_most_similar(&query, &candidates, 2);
-/// for (idx, score) in top_2 {
-///     println!("Candidate {} has similarity {:.4}", idx, score);
-/// }
-/// ```
 pub fn find_most_similar(
     query: &[f32],
     candidates: &[Vec<f32>],

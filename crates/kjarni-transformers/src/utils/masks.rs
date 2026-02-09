@@ -220,7 +220,7 @@ pub fn expand_mask_for_attention(mask: &Array2<f32>, num_heads: usize) -> Array3
 #[cfg(test)]
 mod masking_tests {
     use super::*;
-    use ndarray::{Array4, arr2, arr3};
+    use ndarray::{Array4, arr2};
 
     // ========================================================================
     //  Helper for float comparison
@@ -244,7 +244,7 @@ mod masking_tests {
     #[test]
     fn test_apply_padding_mask_basic() {
         // Batch=1, Heads=1, Q=2, K=3
-        let mut scores = Array4::zeros((1, 1, 2, 3));
+        let scores = Array4::zeros((1, 1, 2, 3));
 
         // Mask: Keep indices 0 and 1, mask index 2
         // Shape [1, 3]
@@ -295,7 +295,7 @@ mod masking_tests {
     #[test]
     fn test_apply_bias_mask_broadcasting() {
         // Batch=2, Heads=1, Q=2, K=2
-        let mut scores = Array4::zeros((2, 1, 2, 2));
+        let scores = Array4::zeros((2, 1, 2, 2));
 
         // Bias Mask [2, 2] - e.g. Causal or ALiBi
         // 1 0

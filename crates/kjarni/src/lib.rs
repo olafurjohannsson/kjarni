@@ -96,12 +96,7 @@ pub mod prelude {
     pub use kjarni_transformers::prelude::*;
 }
 
-
-// ============================================================================
-// Top-level convenience functions
-// ============================================================================
-
-/// Send a chat message (convenience wrapper).
+/// Send a chat message
 ///
 /// # Example
 ///
@@ -135,10 +130,6 @@ pub async fn classify(model: &str, text: &str) -> anyhow::Result<crate::classifi
     let result = classifier.classify(text).await?;
     Ok(result)
 }
-
-// ============================================================================
-// Version Info
-// ============================================================================
 
 /// Get the kjarni version.
 pub fn version() -> &'static str {

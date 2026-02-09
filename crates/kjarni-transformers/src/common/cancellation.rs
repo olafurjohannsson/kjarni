@@ -1,60 +1,9 @@
-// kjarni-transformers/src/common/cancellation.rs
-
-//! Cooperative cancellation for long-running generation tasks.
-//!
-//! This module provides a lightweight cancellation mechanism that allows
-//! callers to signal that generation should stop early. It's designed for:
-//!
-//! - User-initiated cancellation (Ctrl+C, cancel button)
-//! - Timeout-based cancellation
-//! - Resource cleanup triggers
-//!
-//! # Design
-//!
-//! The cancellation system uses a simple atomic boolean shared between
-//! the caller (who can trigger cancellation) and the generator (who checks it).
-//!
-//! ```text
-//! ┌──────────────┐                    ┌──────────────────┐
-//! │   Caller     │                    │    Generator     │
-//! │              │    Arc<AtomicBool> │                  │
-//! │  .cancel() ──┼───────────────────►│ .is_cancelled()  │
-//! │              │                    │      ▼           │
-//! │              │                    │  if true: break  │
-//! └──────────────┘                    └──────────────────┘
-//! ```
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni_transformers::common::CancellationToken;
-//!
-//! let (token, handle) = CancellationToken::new();
-//!
-//! // Spawn generation with the token
-//! let generation_task = tokio::spawn(async move {
-//!     generator.generate_with_cancellation("prompt", &config, token).await
-//! });
-//!
-//! // Cancel after 5 seconds
-//! tokio::time::sleep(Duration::from_secs(5)).await;
-//! handle.cancel();
-//!
-//! let result = generation_task.await?;
-//! ```
+//! Cooperative cancellation
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A token that can be checked to determine if cancellation was requested.
-///
-/// This is the "receiver" side - passed into the generation function.
-/// It can only check cancellation status, not trigger it.
-///
-/// # Thread Safety
-///
-/// `CancellationToken` is `Send + Sync` and can be safely shared across threads.
-/// The check is a single atomic load with relaxed ordering (very fast).
 #[derive(Clone)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
@@ -88,17 +37,6 @@ impl CancellationToken {
     }
 
     /// Creates a token that is never cancelled.
-    ///
-    /// Useful when cancellation support is optional and you want to
-    /// avoid `Option<CancellationToken>` in APIs.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // These are equivalent:
-    /// generator.generate_cancellable("prompt", &config, CancellationToken::never()).await;
-    /// generator.generate("prompt", &config).await;
-    /// ```
     pub fn never() -> Self {
         CancellationToken {
             cancelled: Arc::new(AtomicBool::new(false)),
@@ -106,8 +44,6 @@ impl CancellationToken {
     }
 
     /// Creates a token that is already cancelled.
-    ///
-    /// Useful for testing cancellation handling.
     pub fn already_cancelled() -> Self {
         CancellationToken {
             cancelled: Arc::new(AtomicBool::new(true)),
@@ -115,30 +51,12 @@ impl CancellationToken {
     }
 
     /// Checks if cancellation has been requested.
-    ///
-    /// This is a very fast operation (single atomic load) and can be
-    /// called frequently in hot loops without performance impact.
-    ///
-    /// # Returns
-    ///
-    /// `true` if `cancel()` was called on the associated `CancellationHandle`.
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
 
     /// Returns an error if cancellation was requested.
-    ///
-    /// Convenience method for use with the `?` operator.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// for step in 0..max_steps {
-    ///     token.check()?;  // Returns Err if cancelled
-    ///     // ... do work ...
-    /// }
-    /// ```
     #[inline]
     pub fn check(&self) -> Result<(), CancellationError> {
         if self.is_cancelled() {
@@ -165,15 +83,6 @@ impl std::fmt::Debug for CancellationToken {
 }
 
 /// A handle that can trigger cancellation.
-///
-/// This is the "sender" side - kept by the caller to signal cancellation.
-/// When `cancel()` is called, all associated `CancellationToken`s will
-/// return `true` from `is_cancelled()`.
-///
-/// # Drop Behavior
-///
-/// Dropping the handle does NOT cancel the token. This allows the handle
-/// to go out of scope without affecting ongoing generation.
 #[derive(Clone)]
 pub struct CancellationHandle {
     cancelled: Arc<AtomicBool>,
@@ -181,12 +90,6 @@ pub struct CancellationHandle {
 
 impl CancellationHandle {
     /// Signals cancellation to all associated tokens.
-    ///
-    /// This is idempotent - calling it multiple times has no additional effect.
-    ///
-    /// # Thread Safety
-    ///
-    /// Can be safely called from any thread at any time.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
@@ -217,26 +120,10 @@ impl std::fmt::Display for CancellationError {
 
 impl std::error::Error for CancellationError {}
 
-// Allow converting CancellationError to anyhow::Error
-// impl From<CancellationError> for anyhow::Error {
-//     fn from(_: CancellationError) -> Self {
-//         anyhow::anyhow!("Generation cancelled")
-//     }
-// }
 
 /// Extension trait for creating timeout-based cancellation.
 impl CancellationHandle {
     /// Creates a handle that auto-cancels after a timeout.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let (token, handle) = CancellationToken::new();
-    /// handle.cancel_after(Duration::from_secs(30));
-    ///
-    /// // Generation will be cancelled after 30 seconds
-    /// generator.generate_cancellable("prompt", &config, token).await;
-    /// ```
     pub fn cancel_after(self, timeout: std::time::Duration) {
         let handle = self.clone();
         tokio::spawn(async move {
@@ -333,7 +220,6 @@ mod cancellation_tests {
     fn test_never_token() {
         let token = CancellationToken::never();
         assert!(!token.is_cancelled());
-        // No way to cancel it - that's the point
     }
 
     #[test]

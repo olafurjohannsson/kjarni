@@ -3,9 +3,9 @@
 use super::*;
 use futures::StreamExt;
 
-// =============================================================================
+
 // Expected Outputs from PyTorch Reference
-// =============================================================================
+
 
 mod expected {
     // =========================================================================
@@ -36,9 +36,9 @@ mod expected {
     pub const DISTILBART_CNN_PYTHON_LANGUAGE_BEAM: &str = " Python is widely used in web development, data science, and artificial intelligence . It was created by Guido van Rossum and first released in 1991 .";
 }
 
-// =============================================================================
+
 // Unit Tests - Validation
-// =============================================================================
+
 
 mod validation_tests {
     use crate::summarizer::SummarizerError;
@@ -83,9 +83,9 @@ mod validation_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Presets
-// =============================================================================
+
 
 mod preset_tests {
     use crate::summarizer::presets::*;
@@ -120,9 +120,9 @@ mod preset_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Builder
-// =============================================================================
+
 
 mod builder_tests {
     use crate::common::KjarniDevice;
@@ -146,21 +146,6 @@ mod builder_tests {
     }
 
     #[test]
-    fn test_builder_length_presets() {
-        let short = SummarizerBuilder::new("bart-large-cnn").short();
-        assert_eq!(short.overrides.min_length, Some(30));
-        assert_eq!(short.overrides.max_length, Some(60));
-
-        let medium = SummarizerBuilder::new("bart-large-cnn").medium();
-        assert_eq!(medium.overrides.min_length, Some(50));
-        assert_eq!(medium.overrides.max_length, Some(150));
-
-        let long = SummarizerBuilder::new("bart-large-cnn").long();
-        assert_eq!(long.overrides.min_length, Some(100));
-        assert_eq!(long.overrides.max_length, Some(300));
-    }
-
-    #[test]
     fn test_builder_overrides_are_explicit() {
         let builder = SummarizerBuilder::new("bart-large-cnn")
             .num_beams(6)
@@ -179,9 +164,9 @@ mod builder_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Error Types
-// =============================================================================
+
 
 mod error_tests {
     use crate::summarizer::SummarizerError;
@@ -212,9 +197,9 @@ mod error_tests {
     }
 }
 
-// =============================================================================
+
 // Unit Tests - Module Functions
-// =============================================================================
+
 
 mod module_function_tests {
     use crate::summarizer::{available_models, is_summarization_model};
@@ -251,9 +236,9 @@ mod module_function_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - bart-large-cnn Output Verification
-// =============================================================================
+
 
 #[cfg(test)]
 mod bart_large_cnn_tests {
@@ -439,9 +424,9 @@ mod bart_large_golden_values_test {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - distilbart-cnn Output Verification
-// =============================================================================
+
 
 #[cfg(test)]
 mod distilbart_cnn_tests {
@@ -549,9 +534,9 @@ mod distilbart_cnn_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - Error Handling
-// =============================================================================
+
 
 #[cfg(test)]
 mod error_handling_tests {
@@ -661,9 +646,9 @@ mod error_handling_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - Accessors
-// =============================================================================
+
 
 #[cfg(test)]
 mod accessor_tests {
@@ -701,9 +686,9 @@ mod accessor_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - Concurrent Usage
-// =============================================================================
+
 
 #[cfg(test)]
 mod concurrency_tests {
@@ -755,9 +740,9 @@ mod concurrency_tests {
     }
 }
 
-// =============================================================================
+
 // Integration Tests - Module-level Convenience Function
-// =============================================================================
+
 
 #[cfg(test)]
 mod convenience_function_tests {

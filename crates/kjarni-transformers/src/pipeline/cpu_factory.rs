@@ -1,5 +1,4 @@
 use crate::activations::Activation;
-use crate::cpu::decoder::DecoderAttentionNew;
 use crate::cpu::feedforward::SwiGluFeedForward;
 use crate::cpu::normalization::{LayerNorm, Normalization, RMSNorm};
 use crate::decoder::prelude::DecoderAttention;
@@ -171,7 +170,7 @@ mod tests {
     use crate::traits::{ModelMetadata, NormalizationStrategy};
     use safetensors::serialize;
     use safetensors::tensor::{Dtype, TensorView};
-    use std::io::Write;
+    
     use tempfile::TempDir;
     // Use TempDir instead of NamedTempFile
 
@@ -182,7 +181,7 @@ mod tests {
         let config_path = dir.path().join("config.json");
 
         // 2. Create byte buffers and data map
-        let mut buffers: Vec<(String, Vec<u8>, Vec<usize>)> = tensors
+        let buffers: Vec<(String, Vec<u8>, Vec<usize>)> = tensors
             .into_iter()
             .map(|(name, data, shape)| {
                 let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();

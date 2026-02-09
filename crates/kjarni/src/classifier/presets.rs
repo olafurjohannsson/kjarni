@@ -39,9 +39,9 @@ pub enum ClassificationTask {
 }
 
 
-// =============================================================================
+
 // V1 Presets - Sentiment
-// =============================================================================
+
 
 /// Binary sentiment (positive/negative) - fastest
 pub const SENTIMENT_BINARY_V1: ClassifierPreset = ClassifierPreset {
@@ -79,9 +79,9 @@ pub const SENTIMENT_5STAR_V1: ClassifierPreset = ClassifierPreset {
     description: "5-star ratings, multilingual (EN/DE/FR/ES/IT/NL)",
 };
 
-// =============================================================================
+
 // V1 Presets - Emotion
-// =============================================================================
+
 
 /// 7 basic emotions
 pub const EMOTION_V1: ClassifierPreset = ClassifierPreset {
@@ -113,9 +113,9 @@ pub const EMOTION_DETAILED_V1: ClassifierPreset = ClassifierPreset {
     description: "28 fine-grained emotions (multi-label)",
 };
 
-// =============================================================================
+
 // V1 Presets - Toxicity
-// =============================================================================
+
 
 /// Toxicity detection (multi-label)
 pub const TOXICITY_V1: ClassifierPreset = ClassifierPreset {
@@ -129,9 +129,9 @@ pub const TOXICITY_V1: ClassifierPreset = ClassifierPreset {
     description: "Multi-label toxicity detection",
 };
 
-// =============================================================================
+
 // Preset Collections
-// =============================================================================
+
 
 /// All V1 presets.
 pub const ALL_V1_PRESETS: &[&ClassifierPreset] = &[
@@ -155,9 +155,9 @@ pub fn find_preset(name: &str) -> Option<&'static ClassifierPreset> {
         .copied()
 }
 
-// =============================================================================
+
 // Tier-Based Selection
-// =============================================================================
+
 
 /// Tier-based preset selection for sentiment analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

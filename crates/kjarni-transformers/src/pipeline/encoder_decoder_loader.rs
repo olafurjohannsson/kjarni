@@ -139,11 +139,11 @@ mod tests {
     use crate::common::HFGenerationConfig;
     use crate::cpu::encoder::CpuEncoder;
     use crate::cpu::encoder::traits::CpuEncoderOutput;
-    use crate::cpu::encoder_decoder::EncoderOutput;
+    
     use crate::encoder_decoder::traits::{
         CpuCrossAttentionKVCache, CpuCrossDecoder, CpuCrossDecoderOutput,
     };
-    use crate::models::base::{ModelInput, ModelLoadConfig};
+    use crate::models::base::ModelLoadConfig;
     use crate::traits::{ModelConfig, ModelLayout, ModelMetadata, NormalizationStrategy};
     use crate::weights::ModelWeights;
     use crate::{Cache, Device};

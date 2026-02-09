@@ -318,14 +318,12 @@ mod tests {
 
     #[test]
     fn test_log_softmax_1d_all_negative() {
-        let mut logits = array![1.0, 2.0, 3.0];
+        let logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
 
         // All log probabilities should be <= 0
         assert!(log_probs.iter().all(|&lp| lp <= 0.0));
     }
-
-    // ============== top_k_filtering ==============
 
     #[test]
     fn test_top_k_filtering_basic() {
@@ -333,11 +331,11 @@ mod tests {
         let filtered = top_k_filtering(logits, 3);
 
         // Top 3 are indices 1 (5.0), 3 (4.0), 2 (3.0)
-        assert!(filtered[1].is_finite()); // 5.0 - kept
-        assert!(filtered[3].is_finite()); // 4.0 - kept
-        assert!(filtered[2].is_finite()); // 3.0 - kept
-        assert!(filtered[0] == f32::NEG_INFINITY); // 1.0 - filtered
-        assert!(filtered[4] == f32::NEG_INFINITY); // 2.0 - filtered
+        assert!(filtered[1].is_finite()); 
+        assert!(filtered[3].is_finite()); 
+        assert!(filtered[2].is_finite()); 
+        assert!(filtered[0] == f32::NEG_INFINITY);
+        assert!(filtered[4] == f32::NEG_INFINITY);
     }
 
     #[test]
@@ -359,18 +357,12 @@ mod tests {
         assert!(filtered[0] == f32::NEG_INFINITY);
         assert!(filtered[2] == f32::NEG_INFINITY);
     }
-
-    // ============== top_p_filtering ==============
-
     #[test]
     fn test_top_p_filtering_basic() {
         // Create logits where softmax gives clear probabilities
         let logits = array![0.0, 1.0, 2.0, 3.0];
         let filtered = top_p_filtering(logits, 0.9);
-
-        // Should keep tokens until cumulative prob > 0.9
-        // Higher logits should be kept
-        assert!(filtered[3].is_finite()); // Highest - definitely kept
+        assert!(filtered[3].is_finite());
     }
 
     #[test]
@@ -488,8 +480,6 @@ mod tests {
         let mut logits = array![1.0, 1.0, 1.0, 1.0];
         let tokens = vec![0, 1, 2, 3]; // All unique, no repeats possible
         apply_no_repeat_ngram(&mut logits, &tokens, 3);
-
-        // Nothing should be banned
         assert!(logits.iter().all(|x| x.is_finite()));
     }
 
@@ -499,12 +489,8 @@ mod tests {
         // Tokens: [0, 1, 0] - current prefix is [0], which appeared before [1]
         let tokens = vec![0, 1, 0];
         apply_no_repeat_ngram(&mut logits, &tokens, 2);
-
-        // Token 1 should be banned (would repeat bigram [0, 1])
         assert_eq!(logits[1], f32::NEG_INFINITY);
     }
-
-    // ============== sample_from_probs ==============
 
     #[test]
     fn test_sample_from_probs_deterministic() {
@@ -526,8 +512,6 @@ mod tests {
             assert!(result < 4);
         }
     }
-
-    // ============== sample_token ==============
 
     #[test]
     fn test_sample_token_greedy() {

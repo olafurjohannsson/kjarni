@@ -411,7 +411,7 @@ mod decoder_pipeline_test {
     ) -> (tempfile::TempDir, ModelWeights) {
         use safetensors::serialize;
         use safetensors::tensor::{Dtype, TensorView};
-        use std::io::Write;
+        
 
         let dir = tempfile::TempDir::new().unwrap();
         let model_path = dir.path().join("model.safetensors");

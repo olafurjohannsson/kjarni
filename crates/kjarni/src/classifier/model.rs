@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use kjarni_transformers::cpu::encoder::CpuEncoderOps;
 use kjarni_transformers::{WgpuContext, models::ModelType, traits::Device};
 
 use crate::SequenceClassifier;
@@ -12,7 +11,7 @@ use crate::common::{default_cache_dir, ensure_model_downloaded};
 use super::builder::ClassifierBuilder;
 use super::types::{
     ClassificationMode, ClassificationOverrides, ClassificationResult, ClassifierError,
-    ClassifierResult, LabelConfig,
+    ClassifierResult,
 };
 use super::validation::validate_for_classification;
 
@@ -280,8 +279,6 @@ impl Classifier {
 
         match model_type_str {
             Some(s) if s.to_lowercase().contains("bert") => {
-                // Default to a known BERT classifier type
-                // This is a simplification - in reality you'd want more sophisticated detection
                 Ok(ModelType::MiniLML6V2CrossEncoder)
             }
             Some(s) => Err(ClassifierError::IncompatibleModel {
@@ -293,10 +290,6 @@ impl Classifier {
             )),
         }
     }
-
-    // =========================================================================
-    // Classification Methods
-    // =========================================================================
 
     /// Classify a single text.
     pub async fn classify(&self, text: &str) -> ClassifierResult<ClassificationResult> {
@@ -312,13 +305,6 @@ impl Classifier {
     ) -> ClassifierResult<ClassificationResult> {
         let merged = self.merge_overrides(overrides);
         let top_k = merged.top_k.unwrap_or(usize::MAX);
-
-        // // Get raw scores
-        // let raw_scores = self
-        //     .inner
-        //     .classify_scores(text)
-        //     .await
-        //     .map_err(ClassifierError::ClassificationFailed)?;
 
         let scores = match self.mode {
             ClassificationMode::SingleLabel => self
@@ -371,7 +357,6 @@ impl Classifier {
         let label_index = if filtered_scores[0].0 == result.label {
             result.label_index
         } else {
-            // Find new index - but we've lost it. Need different approach.
             0
         };
 
@@ -461,10 +446,6 @@ impl Classifier {
         })
     }
 
-    // =========================================================================
-    // Label Management
-    // =========================================================================
-
     /// Get the effective labels (custom or model).
     fn get_labels(&self) -> ClassifierResult<Vec<String>> {
         // Custom labels take precedence
@@ -478,10 +459,6 @@ impl Classifier {
             .map(|l| l.to_vec())
             .ok_or(ClassifierError::NoLabels)
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model identifier.
     pub fn model_id(&self) -> &str {
@@ -533,10 +510,6 @@ impl Classifier {
     pub fn has_custom_labels(&self) -> bool {
         self.custom_labels.is_some()
     }
-
-    // =========================================================================
-    // Internal
-    // =========================================================================
 
     fn merge_overrides(&self, runtime: &ClassificationOverrides) -> ClassificationOverrides {
         ClassificationOverrides {

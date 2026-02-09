@@ -1,33 +1,10 @@
 //! Grouped Query Attention (GQA) Projection
-//!
-//! For GQA models (Llama 2/3, Qwen, Mistral), Q has different output size than K/V:
-//! - Q: [hidden_size] -> [num_heads * head_dim]  
-//! - K: [hidden_size] -> [num_kv_heads * head_dim]
-//! - V: [hidden_size] -> [num_kv_heads * head_dim]
-//!
-//! Since K and V have the same dimensions, we fuse them into a single
-//! matmul, reducing 3 matmuls to 2.
-//!
-//! # Performance
-//!
-//! | Approach     | Matmuls | Kernel Launches |
-//! |--------------|---------|-----------------|
-//! | Separate Q/K/V | 3       | 3               |
-//! | Q + fused KV   | 2       | 2               |
-//!
-//! Expected speedup: ~15-25% on QKV projection
 
-use anyhow::Result;
 use ndarray::{Array1, Array2, ArrayView2, ArrayViewMut2, s};
 
 use crate::linear_layer::LinearLayer;
 
 /// GQA-aware projection that keeps Q separate and fuses K+V.
-///
-/// This is optimal for GQA where:
-/// - Q output: num_heads * head_dim (typically 4096)
-/// - K output: num_kv_heads * head_dim (typically 1024 for 8 KV heads)
-/// - V output: num_kv_heads * head_dim (same as K)
 pub struct GQAProjection {
     /// Query projection: [hidden_size] -> [num_heads * head_dim]
     q_proj: LinearLayer,
@@ -41,16 +18,6 @@ pub struct GQAProjection {
 
 impl GQAProjection {
     /// Creates a new GQA projection by fusing K and V weights.
-    ///
-    /// # Arguments
-    ///
-    /// * `q` - Query projection `[q_dim, hidden_size]`
-    /// * `k` - Key projection `[kv_dim, hidden_size]`
-    /// * `v` - Value projection `[kv_dim, hidden_size]`
-    ///
-    /// # Panics
-    ///
-    /// If K and V have different dimensions.
     pub fn new(q: LinearLayer, k: LinearLayer, v: LinearLayer) -> Self {
         assert_eq!(
             k.out_features(),
@@ -84,17 +51,6 @@ impl GQAProjection {
     }
 
     /// Forward pass returning (Q, K, V).
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor `[tokens, hidden_size]`
-    ///
-    /// # Returns
-    ///
-    /// Tuple of (Q, K, V):
-    /// - Q: `[tokens, q_dim]` = `[tokens, num_heads * head_dim]`
-    /// - K: `[tokens, kv_dim]` = `[tokens, num_kv_heads * head_dim]`
-    /// - V: `[tokens, kv_dim]` = `[tokens, num_kv_heads * head_dim]`
     pub fn forward(&self, hidden: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
         // Run Q and KV in parallel!
         let (q, kv) = rayon::join(
@@ -110,20 +66,6 @@ impl GQAProjection {
     }
 
     /// Forward pass writing K/V directly to cache slices.
-    ///
-    /// This is the optimal path for decoder attention - avoids intermediate
-    /// K/V allocations by writing directly to the cache.
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor `[tokens, hidden_size]`
-    /// * `k_cache_slice` - Mutable slice of K cache to write to `[tokens, kv_dim]`
-    /// * `v_cache_slice` - Mutable slice of V cache to write to `[tokens, kv_dim]`
-    /// * `kv_scratch` - Scratch buffer for fused KV output `[tokens, 2 * kv_dim]`
-    ///
-    /// # Returns
-    ///
-    /// Q tensor `[tokens, q_dim]`
     pub fn forward_to_cache(
         &self,
         hidden: &ArrayView2<f32>,
@@ -168,8 +110,6 @@ impl GQAProjection {
     }
 
     /// Forward pass with pre-allocated output buffers (zero allocation).
-    ///
-    /// For use with buffer pools.
     pub fn forward_noalloc(
         &self,
         hidden: &ArrayView2<f32>,
