@@ -14,7 +14,6 @@ mod tests;
 #[cfg(target_os = "linux")]
 fn set_thread_affinity(num_cores: usize) {
 
-    // Use libc to set CPU affinity
     unsafe {
         let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
         for i in 0..num_cores {
@@ -31,7 +30,7 @@ pub fn configure_threading() {
     let (num_threads, is_hybrid) = if is_intel_hybrid() {
         (get_p_core_count().unwrap_or(physical_cores / 2), true)
     } else if physical_cores < logical_cores {
-        (physical_cores, false) // This hits for your Xeon (sets 6 threads)
+        (physical_cores, false) 
     } else {
         (logical_cores, false)
     };
@@ -86,7 +85,6 @@ fn is_intel_hybrid() -> bool {
 fn get_p_core_count() -> Option<usize> {
     #[cfg(target_os = "linux")]
     {
-        // Count cores where core_type == "Core" (P-core) vs "Atom" (E-core)
         let mut p_cores = 0;
         for i in 0..256 {
             let path = format!("/sys/devices/system/cpu/cpu{}/topology/core_type", i);
@@ -103,14 +101,12 @@ fn get_p_core_count() -> Option<usize> {
             return Some(p_cores);
         }
 
-        // Fallback: known configurations
         if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
             let model = cpuinfo
                 .lines()
                 .find(|l| l.starts_with("model name"))
                 .unwrap_or("");
 
-            // Common hybrid configs (P-cores only, no HT count)
             if model.contains("i5-12") || model.contains("i5-13") {
                 return Some(6);
             }

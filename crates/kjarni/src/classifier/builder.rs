@@ -55,7 +55,7 @@ pub struct ClassifierBuilder {
 
     // Classification mode
     pub(crate) mode: ClassificationMode,
-
+    pub(crate) mode_explicitly_set: bool,
     // Classification defaults
     pub(crate) overrides: ClassificationOverrides,
 
@@ -80,6 +80,7 @@ impl ClassifierBuilder {
             download_policy: DownloadPolicy::default(),
             label_config: None,
             mode: ClassificationMode::default(),
+            mode_explicitly_set: false,
             overrides: ClassificationOverrides::default(),
             quiet: false,
         }
@@ -236,12 +237,14 @@ impl ClassifierBuilder {
     /// Set classification mode.
     pub fn mode(mut self, mode: ClassificationMode) -> Self {
         self.mode = mode;
+        self.mode_explicitly_set = true;
         self
     }
 
     /// Use single-label classification (softmax, default).
     pub fn single_label(mut self) -> Self {
         self.mode = ClassificationMode::SingleLabel;
+        self.mode_explicitly_set = true;
         self
     }
 
@@ -250,6 +253,7 @@ impl ClassifierBuilder {
     /// Each label is predicted independently.
     pub fn multi_label(mut self) -> Self {
         self.mode = ClassificationMode::MultiLabel;
+        self.mode_explicitly_set = true;
         self
     }
 

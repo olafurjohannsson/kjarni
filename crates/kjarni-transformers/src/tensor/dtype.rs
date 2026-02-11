@@ -46,7 +46,8 @@ impl DType {
             DType::Q8_0 | DType::Q4_K | DType::Q5_K | DType::Q6_K => None,
         }
     }
-    /// Maps a `gguf::Type` to our internal `DType`.
+    
+
     pub fn from_gguf(dtype: gguf::GGMLType) -> Result<Self> {
         match dtype {
             gguf::GGMLType::F32 => Ok(DType::F32),
@@ -71,9 +72,6 @@ impl DType {
         }
     }
     /// Calculates the required buffer size in bytes for a tensor of a given shape.
-    ///
-    /// This is superior to a simple `size_of()` method because it correctly handles
-    /// block-quantized types.
     pub fn buffer_size_for_shape(&self, shape: &[usize]) -> Result<usize> {
         let num_elements = shape.iter().product::<usize>();
         match self {
@@ -112,8 +110,6 @@ impl DType {
     }
 
     /// Returns the size in bytes of a single element of the type.
-    ///
-    /// Panics for block-quantized types, as they don't have a fixed element size.
     pub fn size_of(&self) -> usize {
         match self {
             DType::F32 => 4,

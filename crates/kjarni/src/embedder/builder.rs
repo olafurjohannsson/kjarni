@@ -70,11 +70,7 @@ impl EmbedderBuilder {
         }
     }
 
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
-
-    /// Run on CPU (default).
+    /// Run on CPU 
     pub fn cpu(mut self) -> Self {
         self.device = KjarniDevice::Cpu;
         self
@@ -99,10 +95,6 @@ impl EmbedderBuilder {
         self
     }
 
-    // =========================================================================
-    // Paths
-    // =========================================================================
-
     /// Set custom cache directory.
     pub fn cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.cache_dir = Some(path.into());
@@ -121,10 +113,6 @@ impl EmbedderBuilder {
         self
     }
 
-    // =========================================================================
-    // Loading Configuration
-    // =========================================================================
-
     /// Set model loading configuration.
     pub fn load_config(mut self, config: LoadConfig) -> Self {
         self.load_config = Some(config);
@@ -140,10 +128,6 @@ impl EmbedderBuilder {
         self
     }
 
-    // =========================================================================
-    // Download Policy
-    // =========================================================================
-
     /// Set download policy.
     pub fn download_policy(mut self, policy: DownloadPolicy) -> Self {
         self.download_policy = policy;
@@ -155,10 +139,6 @@ impl EmbedderBuilder {
         self.download_policy = DownloadPolicy::Never;
         self
     }
-
-    // =========================================================================
-    // Embedding Defaults
-    // =========================================================================
 
     /// Set default pooling strategy.
     pub fn pooling(mut self, strategy: PoolingStrategy) -> Self {
@@ -184,19 +164,11 @@ impl EmbedderBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
     /// Suppress non-error output.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Embedder.
     pub async fn build(self) -> EmbedderResult<Embedder> {

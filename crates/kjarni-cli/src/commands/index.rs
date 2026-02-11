@@ -197,7 +197,6 @@ async fn process_inputs(
     chunk_overlap: usize,
     quiet: bool,
 ) -> Result<usize> {
-    // 1. Configure Loader
     let loader_config = LoaderConfig {
         splitter: SplitterConfig {
             chunk_size,
@@ -208,12 +207,11 @@ async fn process_inputs(
     };
     let loader = Arc::new(DocumentLoader::new(loader_config));
 
-    // 2. Setup Concurrency
     let (tx, mut rx) = mpsc::channel::<Vec<Chunk>>(64); 
     let concurrency_limit = 16; 
     let semaphore = Arc::new(Semaphore::new(concurrency_limit));
 
-    // 3. Spawn Producer Task
+    // Producer Task
     let inputs_owned = inputs.to_vec();
     let loader_ref = loader.clone();
     
@@ -253,7 +251,7 @@ async fn process_inputs(
         }
     });
 
-    // 4. Consumer Loop
+    // Consumer Loop
     let mut batch_texts: Vec<String> = Vec::with_capacity(ENCODE_BATCH_SIZE);
     let mut batch_metadata: Vec<HashMap<String, String>> = Vec::with_capacity(ENCODE_BATCH_SIZE);
     let mut total_indexed = 0;
@@ -373,7 +371,6 @@ fn format_index_info(index_path: &str, reader: &IndexReader) -> Result<String> {
     Ok(output)
 }
 
-/// Helper to load embedder using high-level builder
 async fn load_embedder(model: &str, gpu: bool, quiet: bool) -> Result<Embedder> {
     let mut builder = Embedder::builder(model)
         .quiet(quiet);
@@ -421,10 +418,6 @@ fn truncate(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // format_size tests
-    // =========================================================================
 
     #[test]
     fn test_format_size_bytes() {

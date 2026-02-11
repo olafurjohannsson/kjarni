@@ -871,8 +871,6 @@ pub fn matmul_4d_decode(q: &Array4<f32>, k_transposed: &Array4<f32>) -> Array4<f
                 .for_each(|((mut out_h, q_h), k_h)| {
                     let q_ptr = q_h.as_ptr();
                     let out_s = out_h.as_slice_mut().unwrap();
-                    // Simple dot product loop (k_h is transposed so rows are D, cols are S)
-                    // If k_h is from standard layout [D, S], then accessing (d,t) strides 1.
                     for t in 0..cache_len {
                         let mut sum = 0.0;
                         for d in 0..dim {
@@ -887,7 +885,7 @@ pub fn matmul_4d_decode(q: &Array4<f32>, k_transposed: &Array4<f32>) -> Array4<f
     out
 }
 
-/// Optimized Decode Context (Non-GQA): Scores=[B, H, 1, S], V=[B, H, S, D]
+///  Scores=[B, H, 1, S], V=[B, H, S, D]
 pub fn matmul_4d_context(scores: &Array4<f32>, v: &Array4<f32>) -> Array4<f32> {
     let (batch, heads, _, cache_len) = scores.dim();
     let dim = v.shape()[3];
@@ -919,22 +917,13 @@ pub fn matmul_4d_context(scores: &Array4<f32>, v: &Array4<f32>) -> Array4<f32> {
     out
 }
 
-// =========================================================================
-//  SECTION 4: FIXED MASKING UTILITY
-// =========================================================================
-
-/// Safe implementation of masking using NDArray Zip.
-/// This handles Broadcasting (Batch=1 mask -> Batch=4 scores)
-/// and Memory Strides correctly.
 pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
     let (batch, heads, seq_q, seq_k) = scores.dim();
 
-    // Safety check: Encoder mask length must match Key length
     if mask.shape()[1] != seq_k {
         return scores;
     }
 
-    // Expand mask: [MaskBatch, SeqK] → [MaskBatch, 1, 1, SeqK]
     let mask_expanded = mask.view().insert_axis(Axis(1)).insert_axis(Axis(1));
 
     // Broadcast and apply
@@ -942,7 +931,6 @@ pub fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Arra
         Zip::from(&mut scores)
             .and(&broadcast_mask)
             .par_for_each(|s, &m| {
-                // If mask is 0.0, set score to very low value
                 if m == 0.0 {
                     *s = MASK_VALUE;
                 }
@@ -1140,10 +1128,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    // matmul_2d_f32_notranspose tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_2d_f32_notranspose_simple() {
         let a = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
@@ -1191,10 +1175,6 @@ mod tests {
             "matmul_2d_f32_notranspose batch",
         );
     }
-
-    // ========================================================================
-    // matmul_2d_mixed_bf16 tests
-    // ========================================================================
 
     #[test]
     fn test_matmul_2d_mixed_bf16_simple() {
@@ -1245,10 +1225,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    // matmul_2d_mixed_bf16_new tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_2d_mixed_bf16_new_simple() {
         let a = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
@@ -1277,10 +1253,6 @@ mod tests {
             "matmul_2d_mixed_bf16_new batch",
         );
     }
-
-    // ========================================================================
-    // matmul_3d_2d tests
-    // ========================================================================
 
     #[test]
     fn test_matmul_3d_2d_simple() {
@@ -1314,10 +1286,6 @@ mod tests {
         assert_eq!(result.dim(), (2, 16, 128));
     }
 
-    // ========================================================================
-    // matmul_3d_2d_transposed tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_3d_2d_transposed_simple() {
         let a = Array3::from_shape_fn((2, 3, 4), |(b, i, j)| (b * 12 + i * 4 + j) as f32);
@@ -1350,10 +1318,6 @@ mod tests {
         assert_eq!(result.dim(), (2, 16, 3072));
     }
 
-    // ========================================================================
-    // matmul_4d tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_4d_simple() {
         let a = Array4::from_shape_fn((1, 2, 3, 4), |(b, h, i, j)| (b + h + i + j) as f32);
@@ -1382,10 +1346,6 @@ mod tests {
 
         assert_eq!(scores.dim(), (batch, heads, seq, seq));
     }
-
-    // ========================================================================
-    // matmul_4d_noalloc tests
-    // ========================================================================
 
     #[test]
     fn test_matmul_4d_noalloc_simple() {
@@ -1433,10 +1393,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    // matmul_4d_decode tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_4d_decode_simple() {
         let q = Array4::from_shape_fn((1, 4, 1, 64), |(_, h, _, d)| (h + d) as f32 * 0.1);
@@ -1466,10 +1422,6 @@ mod tests {
         assert_eq!(result.dim(), (batch, heads, 1, cache_len));
     }
 
-    // ========================================================================
-    // matmul_4d_context tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_4d_context_simple() {
         let scores = Array4::from_shape_fn((1, 4, 1, 8), |(_, h, _, s)| (h + s) as f32 * 0.1);
@@ -1498,10 +1450,6 @@ mod tests {
 
         assert_eq!(result.dim(), (batch, heads, 1, head_dim));
     }
-
-    // ========================================================================
-    // matmul_4d_decode_gqa tests
-    // ========================================================================
 
     #[test]
     fn test_matmul_4d_decode_gqa_simple() {
@@ -1545,10 +1493,6 @@ mod tests {
         assert_eq!(result.dim(), (batch, heads, 1, cache_len));
     }
 
-    // ========================================================================
-    // matmul_4d_context_gqa tests
-    // ========================================================================
-
     #[test]
     fn test_matmul_4d_context_gqa_simple() {
         let batch = 1;
@@ -1590,10 +1534,6 @@ mod tests {
 
         assert_eq!(result.dim(), (batch, heads, 1, head_dim));
     }
-
-    // ========================================================================
-    // apply_attention_mask tests
-    // ========================================================================
 
     #[test]
     fn test_apply_attention_mask_simple() {
@@ -1691,10 +1631,6 @@ mod tests {
         assert_eq!(result[[1, 0, 0, 3]], MASK_VALUE);
         assert_eq!(result[[1, 0, 0, 0]], 1.0);
     }
-
-    // ========================================================================
-    // Edge cases and numerical stability
-    // ========================================================================
 
     #[test]
     fn test_matmul_2d_zeros() {

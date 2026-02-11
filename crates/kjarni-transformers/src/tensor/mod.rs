@@ -1,7 +1,4 @@
-//! Defines the core tensor and data type structures for the engine.
-//!
-//! The central enum is `CpuTensor`, which provides a type-safe container
-//! for different numerical formats, including standard floats and quantized blocks.
+//! Defines the tensor
 
 pub mod dtype;
 pub mod raw_tensor;
@@ -17,13 +14,7 @@ use half::{bf16, f16};
 use ndarray::{Array1, Array2, Array3, ArrayD, Ix1, Ix2, Ix3};
 
 
-// QuantizedMatrix
-
-
-/// A wrapper for quantized matrix data, pairing the raw blocks with shape information.
-///
-/// This is crucial because the raw blocks themselves don't store the tensor's dimensions.
-/// Storing the shape here allows for correct dimension checking and avoids panics.
+/// A wrapper for quantized matrix dat
 #[derive(Debug, Clone)]
 pub struct QuantizedMatrix<T> {
     pub blocks: Vec<T>,
@@ -48,7 +39,7 @@ pub trait Dequantizable {
     /// Dequantize a single block into the output slice
     fn dequantize_block(block: &Self, output: &mut [f32]);
     
-    /// Dequantize all blocks into a 2D array (default implementation)
+    /// Dequantize all blocks into a 2D array
     fn dequantize_blocks(
         blocks: &[Self],
         output: &mut Array2<f32>,
@@ -107,14 +98,12 @@ pub enum CpuTensor {
     F32(ArrayD<f32>),
     BF16(ArrayD<bf16>),
     F16(ArrayD<f16>),
-    /// Quantized tensors are stored as a vector of their block structs for maximum performance.
     Q8_0(QuantizedMatrix<BlockQ8_0>),
     Q4_K(QuantizedMatrix<BlockQ4_K>),
     Q6_K(QuantizedMatrix<BlockQ6_K>),
 }
 
 impl CpuTensor {
-    /// Returns the `DType` of the tensor.
     pub fn dtype(&self) -> DType {
         match self {
             CpuTensor::F32(_) => DType::F32,
@@ -126,7 +115,6 @@ impl CpuTensor {
         }
     }
 
-    /// Returns true if this tensor uses a quantized format.
     pub fn is_quantized(&self) -> bool {
         matches!(
             self,
@@ -171,7 +159,6 @@ impl CpuTensor {
     /// Converts to a 1D f32 array, consuming self.
     ///
     /// Works for F32, F16, BF16. Fails for quantized matrix types.
-    /// Useful for biases and layer norm weights.
     pub fn to_array1_f32(self) -> Result<Array1<f32>> {
         let len = self.num_elements();
         

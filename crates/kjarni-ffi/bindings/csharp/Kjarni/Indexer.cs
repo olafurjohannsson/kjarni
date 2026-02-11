@@ -107,7 +107,7 @@ namespace Kjarni
     }
 
     /// <summary>
-    /// Document indexer for RAG applications.
+    /// Document indexer.
     /// </summary>
     /// <example>
     /// <code>

@@ -44,7 +44,7 @@ pub const EMBEDDING_SMALL_V1: EmbedderPreset = EmbedderPreset {
     description: "Fast, lightweight embeddings",
 };
 
-/// Nomic embedding model - good quality/speed tradeoff.
+/// Nomic embedding model
 pub const EMBEDDING_NOMIC_V1: EmbedderPreset = EmbedderPreset {
     name: "EMBEDDING_NOMIC_V1",
     model: "nomic-embed-text",

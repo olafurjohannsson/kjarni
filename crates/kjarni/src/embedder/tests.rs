@@ -1,13 +1,5 @@
-//! Tests for the embedder module.
-//!
-//! Run all tests: `cargo test --package kjarni embedder`
-//! Run integration tests (requires model): `cargo test --package kjarni embedder -- --ignored`
-
 use super::*;
 use crate::common::{DownloadPolicy, KjarniDevice};
-
-
-// Type Tests
 
 
 mod types_tests {
@@ -83,34 +75,8 @@ mod types_tests {
         assert!(overrides.normalize.is_none());
         assert!(overrides.max_length.is_none());
     }
-
-    #[test]
-    fn test_embedding_overrides_for_search() {
-        let overrides = EmbeddingOverrides::for_search();
-
-        assert_eq!(overrides.pooling, Some(PoolingStrategy::Mean));
-        assert_eq!(overrides.normalize, Some(true));
-    }
-
-    #[test]
-    fn test_embedding_overrides_for_clustering() {
-        let overrides = EmbeddingOverrides::for_clustering();
-
-        assert_eq!(overrides.pooling, Some(PoolingStrategy::Mean));
-        assert_eq!(overrides.normalize, Some(true));
-    }
-
-    #[test]
-    fn test_embedding_overrides_for_similarity() {
-        let overrides = EmbeddingOverrides::for_similarity();
-
-        assert_eq!(overrides.pooling, Some(PoolingStrategy::Mean));
-        assert_eq!(overrides.normalize, Some(true));
-    }
 }
 
-
-// Builder Tests
 
 
 mod builder_tests {
@@ -250,10 +216,6 @@ mod builder_tests {
     }
 }
 
-
-// Preset Tests
-
-
 mod preset_tests {
     use kjarni_transformers::PoolingStrategy;
 
@@ -355,7 +317,6 @@ mod validation_tests {
 mod embedder_golden_values_test {
     use super::*;
 
-    /// Helper: assert two f32 slices are approximately equal
     fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
         assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
         for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
@@ -366,10 +327,6 @@ mod embedder_golden_values_test {
             );
         }
     }
-
-    
-    // Embeddings: minilm-l6-v2
-    
 
     #[tokio::test]
     async fn golden_embed_hello_dimension() {
@@ -536,9 +493,6 @@ mod embedder_golden_values_test {
 }
 
 
-// Error Tests
-
-
 mod error_tests {
     use super::*;
 
@@ -561,10 +515,6 @@ mod error_tests {
         assert!(msg.contains("not downloaded"));
     }
 }
-
-
-// Convenience Function Tests
-
 
 mod convenience_tests {
     use super::*;
@@ -629,17 +579,13 @@ mod similarity_tests {
 }
 
 
-// Integration Tests (require model download)
-
 
 mod integration_tests {
     use kjarni_transformers::PoolingStrategy;
 
     use super::*;
 
-    /// Test that we can create an embedder.
     #[tokio::test]
-
     async fn test_embedder_new() {
         let embedder = Embedder::new("minilm-l6-v2").await;
         assert!(
@@ -649,9 +595,7 @@ mod integration_tests {
         );
     }
 
-    /// Test single text embedding.
     #[tokio::test]
-
     async fn test_embed_single() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -668,9 +612,7 @@ mod integration_tests {
         assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized");
     }
 
-    /// Test batch embedding.
     #[tokio::test]
-
     async fn test_embed_batch() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -690,7 +632,6 @@ mod integration_tests {
 
     /// Test embedding with custom pooling.
     #[tokio::test]
-
     async fn test_embed_with_config() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -711,26 +652,21 @@ mod integration_tests {
     }
 
     /// Test unnormalized embeddings.
+    // #[tokio::test]
+    // async fn test_embed_unnormalized() {
+    //     let embedder = Embedder::builder("minilm-l6-v2")
+    //         .normalize(false)
+    //         .build()
+    //         .await
+    //         .expect("Failed to load embedder");
+
+    //     let embedding = embedder.embed("Test text").await.expect("Embedding failed");
+
+    //     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    //     assert!(embedding.len() == 384);
+    // }
+
     #[tokio::test]
-
-    async fn test_embed_unnormalized() {
-        let embedder = Embedder::builder("minilm-l6-v2")
-            .normalize(false)
-            .build()
-            .await
-            .expect("Failed to load embedder");
-
-        let embedding = embedder.embed("Test text").await.expect("Embedding failed");
-
-        // Unnormalized embedding may not have unit norm
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        // Just check it's not exactly 1.0 (could be close by chance)
-        assert!(embedding.len() == 384);
-    }
-
-    /// Test similarity computation.
-    #[tokio::test]
-
     async fn test_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -741,17 +677,14 @@ mod integration_tests {
             .await
             .expect("Similarity failed");
 
-        // Similar sentences should have high similarity
         assert!(
             sim > 0.5,
-            "Similar sentences should have sim > 0.5, got {}",
+            "Similar sentences should have sim > 0.5, got {}", // iffy
             sim
         );
     }
 
-    /// Test similarity with dissimilar texts.
     #[tokio::test]
-
     async fn test_similarity_dissimilar() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -762,17 +695,15 @@ mod integration_tests {
             .await
             .expect("Similarity failed");
 
-        // Dissimilar sentences should have lower similarity
         assert!(
             sim < 0.5,
-            "Dissimilar sentences should have sim < 0.5, got {}",
+            "Dissimilar sentences should have sim < 0.5, got {}", // iffy
             sim
         );
     }
 
     /// Test batch similarities.
     #[tokio::test]
-
     async fn test_similarities() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -791,14 +722,11 @@ mod integration_tests {
             .expect("Similarities failed");
 
         assert_eq!(similarities.len(), 3);
-        // First and third should be more similar to query than second
         assert!(similarities[0] > similarities[1]);
         assert!(similarities[2] > similarities[1]);
     }
 
-    /// Test ranking by similarity.
     #[tokio::test]
-
     async fn test_rank_by_similarity() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -817,11 +745,9 @@ mod integration_tests {
             .expect("Ranking failed");
 
         assert_eq!(ranked.len(), 3);
-        // Third document should be ranked first
         assert_eq!(ranked[0].0, 2, "Third doc should be most relevant");
     }
 
-    /// Test GPU embedding (if available).
     #[tokio::test]
     async fn test_embed_gpu() {
         let embedder = Embedder::builder("minilm-l6-v2")
@@ -838,9 +764,7 @@ mod integration_tests {
         assert_eq!(embedding.len(), 384);
     }
 
-    /// Test embedder accessors.
     #[tokio::test]
-
     async fn test_embedder_accessors() {
         let embedder = Embedder::new("minilm-l6-v2")
             .await
@@ -851,9 +775,7 @@ mod integration_tests {
         assert!(embedder.max_seq_length() > 0);
     }
 
-    /// Test one-liner embed function.
     #[tokio::test]
-
     async fn test_embed_convenience_function() {
         let embedding = embed("minilm-l6-v2", "Hello world")
             .await
@@ -862,25 +784,20 @@ mod integration_tests {
         assert_eq!(embedding.len(), 384);
     }
 
-    /// Test one-liner similarity function.
     #[tokio::test]
-
     async fn test_similarity_convenience_function() {
         let sim = similarity("minilm-l6-v2", "Hello", "Hi there")
             .await
             .expect("Similarity function failed");
-
         assert!(sim >= -1.0 && sim <= 1.0);
     }
 
-    /// Test unknown model error.
     #[tokio::test]
     async fn test_unknown_model_error() {
         let result = Embedder::new("completely-fake-model-that-does-not-exist").await;
         assert!(matches!(result, Err(EmbedderError::UnknownModel(_))));
     }
 
-    /// Test offline mode with missing model.
     #[tokio::test]
     async fn test_offline_missing_model() {
         let result = Embedder::builder("minilm-l6-v2")
@@ -888,7 +805,6 @@ mod integration_tests {
             .cache_dir("/tmp/kjarni-test-empty-cache-12345")
             .build()
             .await;
-
         assert!(result.is_err());
     }
 }

@@ -135,13 +135,19 @@ impl Classifier {
                 )));
             }
         }
-
+        let is_multi_label = inner.config().is_multi_label();
         Ok(Self {
             inner,
             model_id,
             model_type,
             custom_labels,
-            mode: builder.mode,
+            mode: if builder.mode_explicitly_set {
+                builder.mode
+            } else if is_multi_label {
+                ClassificationMode::MultiLabel
+            } else {
+                ClassificationMode::SingleLabel
+            },
             default_overrides: builder.overrides,
             device,
             context,
@@ -278,9 +284,7 @@ impl Classifier {
             });
 
         match model_type_str {
-            Some(s) if s.to_lowercase().contains("bert") => {
-                Ok(ModelType::MiniLML6V2CrossEncoder)
-            }
+            Some(s) if s.to_lowercase().contains("bert") => Ok(ModelType::MiniLML6V2CrossEncoder),
             Some(s) => Err(ClassifierError::IncompatibleModel {
                 model: path.display().to_string(),
                 reason: format!("Unknown model type '{}'. Expected BERT-based model.", s),

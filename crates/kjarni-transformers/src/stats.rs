@@ -1,7 +1,4 @@
-//! Generation statistics tracking for performance monitoring.
-//!
-//! Provides low-overhead metrics collection for prefill and decode throughput.
-//! Disabled by default; enable with `GenerationStats::enable()`.
+//! Generation statistics
 
 use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,9 +7,6 @@ use std::time::{Duration, Instant};
 static STATS_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Tracks generation performance metrics.
-///
-/// Designed for minimal overhead: no allocations after construction,
-/// atomic check for the global enable flag, monotonic timing.
 #[derive(Debug)]
 pub struct GenerationStats {
     prefill_start: Option<Instant>,

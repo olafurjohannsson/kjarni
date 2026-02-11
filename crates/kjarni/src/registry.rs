@@ -1,6 +1,4 @@
 //! Model registry and management
-//!
-//! Provides high-level functions for listing, downloading, and managing models.
 
 use anyhow::{Result, anyhow};
 use kjarni_transformers::models::{
@@ -77,7 +75,6 @@ pub fn get_model_info(name: &str) -> Result<ModelEntry> {
 }
 
 /// Download a model by CLI name
-/// Updated to accept format preference
 pub async fn download_model(name: &str, prefer_gguf: bool, quiet: bool) -> Result<()> {
     let model_type = ModelType::from_cli_name(name).ok_or_else(|| {
         anyhow!(

@@ -64,32 +64,3 @@ pub struct EmbeddingOverrides {
     /// Truncate inputs longer than this.
     pub max_length: Option<usize>,
 }
-
-impl EmbeddingOverrides {
-    /// Create overrides for search queries (normalized, mean pooling).
-    pub fn for_search() -> Self {
-        Self {
-            pooling: Some(PoolingStrategy::Mean),
-            normalize: Some(true),
-            max_length: None,
-        }
-    }
-
-    /// Create overrides for clustering (normalized).
-    pub fn for_clustering() -> Self {
-        Self {
-            pooling: Some(PoolingStrategy::Mean),
-            normalize: Some(true),
-            max_length: None,
-        }
-    }
-
-    /// Create overrides for similarity (normalized).
-    pub fn for_similarity() -> Self {
-        Self {
-            pooling: Some(PoolingStrategy::Mean),
-            normalize: Some(true),
-            max_length: None,
-        }
-    }
-}

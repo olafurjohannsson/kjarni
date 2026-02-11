@@ -1,17 +1,7 @@
-//! High-level tensor operations, primarily using ndarray and other libraries.
-
 use faer::Parallelism;
 use ndarray::{Array2, ArrayView2};
 
-/// Computes matrix multiplication `C = A @ B` using the `faer` library.
-///
-/// This function is intended for use with the `F32MatmulStrategy::Faer`, where
-/// weights are pre-transposed into the `[In, Out]` layout that `faer` expects
-/// for a standard `A @ B` multiplication.
-///
-/// # Arguments
-/// * `a` - Input matrix of shape `[M, K]`.
-/// * `b` - Weight matrix of shape `[K, N]`.
+/// Computes matrix multiplication `C = A @ B`
 pub fn matmul_2d_faer(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
     let (m, k) = a.dim();
     let (k2, n) = b.dim();
@@ -19,21 +9,19 @@ pub fn matmul_2d_faer(a: &ArrayView2<f32>, b: &ArrayView2<f32>) -> Array2<f32> {
 
     let mut c = Array2::<f32>::zeros((m, n));
 
-    // Ensure data is contiguous for faer.
     let a_s = a.as_standard_layout();
     let b_s = b.as_standard_layout();
     let a_sl = a_s.as_slice().unwrap();
     let b_sl = b_s.as_slice().unwrap();
     let c_sl = c.as_slice_mut().unwrap();
 
-    // faer is highly optimized and handles its own parallelism.
     faer::linalg::matmul::matmul(
         faer::mat::from_row_major_slice_mut(c_sl, m, n),
         faer::mat::from_row_major_slice(a_sl, m, k),
         faer::mat::from_row_major_slice(b_sl, k, n),
         None,
         1.0,
-        Parallelism::Rayon(0), // Use existing rayon thread pool
+        Parallelism::Rayon(0),
     );
     c
 }

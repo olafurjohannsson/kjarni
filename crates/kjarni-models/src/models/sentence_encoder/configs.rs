@@ -60,6 +60,8 @@ pub struct BertConfig {
     pub mlp_fc1_bias: bool,
     #[serde(default = "default_true")]
     pub mlp_fc2_bias: bool,
+    #[serde(default)]
+    pub problem_type: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -127,6 +129,7 @@ impl BertConfig {
                 label2id: None,
                 labels_vec: None,
                 num_labels: None,
+                problem_type: None,
             }))
         } else {
             let json_str = config_json.context("Config JSON required for SafeTensors")?;
@@ -208,6 +211,7 @@ impl ModelConfig for BertConfig {
             transpose_attention_weights: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            problem_type: self.problem_type.clone(),
         }
     }
 
@@ -413,6 +417,7 @@ impl ModelConfig for MpnetConfig {
             is_prenorm: false,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
             intermediate_size: self.intermediate_size(),
@@ -502,6 +507,8 @@ pub struct DistilBertConfig {
     pub sinusoidal_pos_embds: Option<bool>,
     #[serde(default)]
     pub tie_weights_: Option<bool>,
+    #[serde(default)]
+    pub problem_type: Option<String>,
 }
 
 impl DistilBertConfig {
@@ -560,6 +567,7 @@ impl DistilBertConfig {
                 pad_token_id: Some(0),
                 sinusoidal_pos_embds: Some(false),
                 tie_weights_: None,
+                problem_type: None,
             }))
         } else {
             let json_str = config_json.context("Config JSON required for DistilBERT")?;
@@ -620,6 +628,7 @@ impl ModelConfig for DistilBertConfig {
             is_prenorm: false,
             transpose_ffn_weights: true,
             transpose_attention_weights: false,
+            problem_type: self.problem_type.clone(),
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
             intermediate_size: self.intermediate_size(),

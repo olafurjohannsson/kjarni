@@ -25,14 +25,14 @@ pub struct EncoderPipelineBuilder<'a> {
     load_config: ModelLoadConfig,
     context: Option<Arc<WgpuContext>>,
 
-    // Backends (set by the model factory)
+    // Backends 
     cpu_encoder: Option<Box<dyn CpuEncoder>>,
     gpu_encoder: Option<Box<dyn GpuEncoder>>,
 
-    // Optional head (set by the model factory)
+    // Optional head
     cpu_head: Option<CpuSequenceClassificationHead>,
 
-    // Pooling strategy (varies by model type)
+    // Pooling strategy
     pooling_strategy: PoolingStrategy,
 }
 
@@ -86,7 +86,7 @@ impl<'a> EncoderPipelineBuilder<'a> {
         let ctx = self.context.as_ref();
         let target_dtype = self.load_config.target_dtype;
 
-        // 1. Determine execution plan
+        // Determine execution plan
         let primary_device = if ctx.is_some() {
             Device::Wgpu
         } else {
@@ -94,13 +94,13 @@ impl<'a> EncoderPipelineBuilder<'a> {
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
 
-        // 2. Get encoder layout
+        // Get encoder layout
         let enc_layout = layout
             .encoder
             .as_ref()
             .ok_or_else(|| anyhow!("Pipeline requires an EncoderLayout in ModelLayout"))?;
 
-        // 3. Load embeddings
+        // Load embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
             .position_offset(meta.extra_pos_embeddings);
 
@@ -123,7 +123,7 @@ impl<'a> EncoderPipelineBuilder<'a> {
             target_dtype,
         )?;
 
-        // 4. Build pipeline config
+        //  Build pipeline config
         let pipeline_config = EncoderPipelineConfig {
             num_layers: meta.num_layers,
             hidden_size: meta.hidden_size,
@@ -134,7 +134,7 @@ impl<'a> EncoderPipelineBuilder<'a> {
             num_labels: self.cpu_head.as_ref().map(|h| h.num_classes()),
         };
 
-        // 5. Build pipeline
+        // Build pipeline
         EncoderPipeline::new(
             embeddings,
             self.cpu_encoder,
@@ -159,11 +159,6 @@ mod tests {
         EncoderLayerLayout, FeedForwardLayout, ModelConfig, ModelLayout, ModelMetadata,
         NormalizationStrategy,
     };
-
-    // ========================================================================
-    //  Mock ModelConfig
-    // ========================================================================
-
     struct MockModelConfig {
         metadata: ModelMetadata,
         layout: ModelLayout,
@@ -188,6 +183,7 @@ mod tests {
                     extra_pos_embeddings: 0,
                     transpose_ffn_weights: false,
                     transpose_attention_weights: false,
+                    problem_type: None,
                     is_prenorm: false,
                     normalize_embedding: true,
                     normalization_strategy: NormalizationStrategy::LayerNorm,
@@ -304,11 +300,6 @@ mod tests {
             self.layout.clone()
         }
     }
-
-    // ========================================================================
-    //  Builder Construction Tests
-    // ========================================================================
-
     #[test]
     fn test_pooling_strategy_variants() {
         let mean = PoolingStrategy::Mean;
@@ -319,21 +310,6 @@ mod tests {
         assert!(matches!(cls, PoolingStrategy::Cls));
         assert!(matches!(last, PoolingStrategy::LastToken));
     }
-
-    // ========================================================================
-    //  ModelLoadConfig Tests
-    // ========================================================================
-
-    #[test]
-    fn test_model_load_config_default() {
-        let config = ModelLoadConfig::default();
-        let _ = config;
-    }
-
-    // ========================================================================
-    //  MockModelConfig Tests
-    // ========================================================================
-
     #[test]
     fn test_mock_model_config_metadata() {
         let config = MockModelConfig::new();
@@ -383,10 +359,6 @@ mod tests {
         assert!(dec.layer.cross_attn.is_some());
     }
 
-    // ========================================================================
-    //  EncoderPipelineConfig Tests
-    // ========================================================================
-
     #[test]
     fn test_encoder_pipeline_config_creation() {
         let config = EncoderPipelineConfig {
@@ -420,10 +392,6 @@ mod tests {
         assert_eq!(config.num_labels, Some(2));
     }
 
-    // ========================================================================
-    //  ExecutionPlan Tests
-    // ========================================================================
-
     #[test]
     fn test_execution_plan_from_load_config_cpu() {
         let load_config = ModelLoadConfig::default();
@@ -440,10 +408,6 @@ mod tests {
         assert_eq!(plan.embeddings, Device::Wgpu);
     }
 
-    // ========================================================================
-    //  Device Selection Logic Tests
-    // ========================================================================
-
     #[test]
     fn test_device_selection_with_context() {
         let has_context = true;
@@ -457,11 +421,6 @@ mod tests {
         let primary_device = if has_context { Device::Wgpu } else { Device::Cpu };
         assert_eq!(primary_device, Device::Cpu);
     }
-
-    // ========================================================================
-    //  ModelMetadata Field Tests
-    // ========================================================================
-
     #[test]
     fn test_model_metadata_bert_style() {
         let meta = ModelMetadata {
@@ -485,6 +444,7 @@ mod tests {
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
             decoder_layers: None,
+            problem_type: None,
             intermediate_size: 3072,
         };
         
@@ -501,6 +461,7 @@ mod tests {
             num_layers: 32,
             num_attention_heads: 32,
             num_kv_heads: 8, // GQA
+            problem_type: None,
             head_dim: 128,
             vocab_size: 32000,
             max_seq_len: 4096,
@@ -549,6 +510,7 @@ mod tests {
             normalize_embedding: true,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
+            problem_type: None,
             decoder_layers: Some(12),
             intermediate_size: 4096,
         };
@@ -557,10 +519,6 @@ mod tests {
         assert_eq!(meta.extra_pos_embeddings, 2);
         assert_eq!(meta.decoder_layers, Some(12));
     }
-
-    // ========================================================================
-    //  AttentionLayout Tests
-    // ========================================================================
 
     #[test]
     fn test_attention_layout_with_biases() {
@@ -606,10 +564,6 @@ mod tests {
         assert!(layout.norm_bias.is_none());
     }
 
-    // ========================================================================
-    //  FeedForwardLayout Tests
-    // ========================================================================
-
     #[test]
     fn test_feedforward_layout_standard() {
         let layout = FeedForwardLayout {
@@ -642,10 +596,6 @@ mod tests {
         
         assert!(layout.gate_weight.is_some());
     }
-
-    // ========================================================================
-    //  EncoderLayout Tests
-    // ========================================================================
 
     #[test]
     fn test_encoder_layout_full() {
@@ -726,10 +676,6 @@ mod tests {
         assert!(layout.token_type_embedding.is_none());
     }
 
-    // ========================================================================
-    //  DecoderLayout Tests
-    // ========================================================================
-
     #[test]
     fn test_decoder_layout_with_cross_attention() {
         let config = MockModelConfig::new().with_decoder_layout();
@@ -778,10 +724,6 @@ mod tests {
         assert!(layout.layer.ffn.gate_weight.is_some()); // SwiGLU
     }
 
-    // ========================================================================
-    //  ModelLayout Tests
-    // ========================================================================
-
     #[test]
     fn test_model_layout_encoder_only() {
         let config = MockModelConfig::new().with_encoder_layout();
@@ -811,10 +753,6 @@ mod tests {
         assert!(layout.decoder.is_some());
     }
 
-    // ========================================================================
-    //  Activation Tests
-    // ========================================================================
-
     #[test]
     fn test_activation_variants() {
         let gelu = Activation::Gelu;
@@ -825,10 +763,6 @@ mod tests {
         assert!(matches!(silu, Activation::SilU));
         assert!(matches!(relu, Activation::Relu));
     }
-
-    // ========================================================================
-    //  NormalizationStrategy Tests
-    // ========================================================================
 
     #[test]
     fn test_normalization_strategy_variants() {

@@ -139,11 +139,9 @@ mod tests {
         let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
         let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
 
-        // Prepend 1 byte to misalign start
         let mut unaligned = vec![0u8];
         unaligned.extend_from_slice(&bytes);
 
-        // Slice to remove the first byte (misaligned but still divisible by 4)
         let tensor = TensorView {
             name: "unaligned_f32".to_string(),
             bytes: Cow::Owned(unaligned[1..].to_vec()),

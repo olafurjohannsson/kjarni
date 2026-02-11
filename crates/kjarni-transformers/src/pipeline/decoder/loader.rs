@@ -19,8 +19,6 @@ use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use crate::{ChatTemplate, WgpuContext};
 
-/// The Factory trait that every model (Llama, Phi, etc.) implements to
-/// plug into the generic loading pipeline.
 pub trait DecoderModelFactory: Sized {
     type Config: ModelConfig + 'static;
 
@@ -28,7 +26,7 @@ pub trait DecoderModelFactory: Sized {
         weights: &ModelWeights,
         meta: &ModelMetadata,
         layout: &ModelLayout,
-        rope: &LoadedRoPE, // Handover RoPE
+        rope: &LoadedRoPE,
         load_config: ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
         device: Device,
@@ -65,8 +63,6 @@ impl DecoderLoader {
 
         let config = load_config.clone().unwrap_or_default();
 
-        // Logic: If user asked for Q4/Q6/Q8, OR explicitly set a GGUF flag (if you have one),
-        // and the model supports it, download GGUF.
         let is_quantized_request = matches!(
             config.target_dtype,
             Some(DType::Q4_K) | Some(DType::Q6_K) | Some(DType::Q8_0)
@@ -103,12 +99,11 @@ impl DecoderLoader {
         let weights = ModelWeights::new(model_path)?;
         let load_config: ModelLoadConfig = load_config.unwrap_or_default();
 
-        // 1. Load Architecture-Specific Config (Handles GGUF/Safetensors automatically)
         let config = M::load_config(&weights)?;
         let meta = config.metadata();
         let layout = config.layout();
 
-        // 2. Load Tokenizer
+        // Load Tokenizer
         let tokenizer_path = if model_path.is_file() {
             model_path.parent().unwrap().join("tokenizer.json")
         } else {
@@ -131,8 +126,7 @@ impl DecoderLoader {
         // try load generation defaults from generation_config.json
         let generation_defaults = Self::try_load_generation_defaults(model_path);
 
-        // 2. Build Backends (The model-specific loops for Llama/GPT/etc)
-        // Notice we pass 'rope' and 'load_config.target_dtype' here!
+        // Build Backends 
         let (cpu_decoder, gpu_decoder) = M::build_backends(
             &weights,
             &meta,
@@ -143,7 +137,7 @@ impl DecoderLoader {
             device,
         )?;
 
-        // 3. Build Pipeline via Builder (Coordinates tied weights internally)
+        //  Build Pipeline via Builder (Coordinates tied weights internally)
         let pipeline: DecoderPipeline = DecoderPipelineBuilder::new(&weights, config.clone())
             .with_load_config(load_config)
             .with_backends(cpu_decoder, gpu_decoder)
@@ -170,7 +164,6 @@ impl DecoderLoader {
                 _ => None,
             }
         });
-        // 5. Wrap in the specific model struct
         Ok(M::new_from_pipeline(
             pipeline,
             tokenizer,

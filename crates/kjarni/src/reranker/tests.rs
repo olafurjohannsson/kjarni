@@ -119,10 +119,6 @@ fn test_reranker_tier_default() {
 }
 
 
-// Integration Tests (require model download)
-
-
-#[cfg(feature = "integration_tests")]
 mod integration {
     use super::*;
 
@@ -253,11 +249,6 @@ mod integration {
 
     #[tokio::test]
     async fn test_reranker_builder_gpu() {
-        // Skip if no GPU available
-        if std::env::var("SKIP_GPU_TESTS").is_ok() {
-            return;
-        }
-
         let result = Reranker::builder("minilm-l6-v2-cross-encoder")
             .gpu()
             .build()

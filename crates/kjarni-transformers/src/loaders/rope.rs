@@ -46,20 +46,15 @@ mod loaded_rope {
     use ndarray::Array4;
     use std::sync::Arc;
 
-    // =========================================================================
-    //  Helpers
-    // =========================================================================
-
     fn dummy_metadata() -> ModelMetadata {
         ModelMetadata {
             hidden_size: 64,
             num_attention_heads: 2,
             num_kv_heads: 2,
-            head_dim: 32, // Head dim = 32
+            head_dim: 32, 
             max_seq_len: 128,
             rope_theta: Some(10000.0),
             rope_scaling: None,
-            // ... defaults ...
             decoder_layers: None,
             intermediate_size: 0,
             num_layers: 1,
@@ -72,6 +67,7 @@ mod loaded_rope {
             is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: crate::traits::NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
         }
@@ -84,15 +80,10 @@ mod loaded_rope {
         }
     }
 
-    // =========================================================================
-    //  Unit Tests
-    // =========================================================================
-
     #[test]
     fn test_loaded_rope_cpu_only() {
         let meta = dummy_metadata();
 
-        // Test pure CPU loading
         let loaded = LoadedRoPE::new(None, &meta, false).unwrap();
 
         assert!(loaded.gpu.is_none());
@@ -127,14 +118,8 @@ mod loaded_rope {
 
         let loaded = LoadedRoPE::new(None, &meta, false).unwrap();
 
-        // Verify cache was built (non-zero values)
-        // Cos(0) = 1.0
         assert!((loaded.cpu.cos_cache[[0, 0]] - 1.0).abs() < 1e-6);
     }
-
-    // =========================================================================
-    //  Integration Tests: Parity
-    // =========================================================================
 
     #[tokio::test]
     async fn test_rope_gpu_cpu_parity() -> Result<()> {
@@ -144,8 +129,6 @@ mod loaded_rope {
         let loaded = LoadedRoPE::new(Some(&ctx), &meta, true)?;
         let gpu_rope = loaded.gpu.as_ref().unwrap();
 
-        // 1. Create Input [Batch, Heads, Seq, HeadDim]
-        // 1 batch, 2 heads, 4 tokens, 32 dim
         let shape = [1, 2, 4, 32];
         let size = 1 * 2 * 4 * 32;
         let data: Vec<f32> = (0..size).map(|i| (i as f32) * 0.01).collect();
@@ -155,10 +138,8 @@ mod loaded_rope {
         let output_gpu =
             GpuTensor::zeros(&ctx, input_cpu.shape().to_vec(), crate::tensor::DType::F32, "zeros")?;
 
-        // 2. Run CPU RoPE
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, 0);
 
-        // 3. Run GPU RoPE
         let mut encoder = ctx.device.create_command_encoder(&Default::default());
 
         gpu_rope.encode(
@@ -183,12 +164,10 @@ mod loaded_rope {
 
     #[tokio::test]
     async fn test_rope_gpu_offset_parity() -> Result<()> {
-        // Verify position offset works identically
         let ctx = WgpuContext::new().await?;
         let meta = dummy_metadata();
         let loaded = LoadedRoPE::new(Some(&ctx), &meta, true)?;
 
-        // Single token at position 10
         let shape = [1, 1, 1, 32];
         let input_cpu = Array4::from_elem(shape, 1.0);
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input_cpu)?;
@@ -196,11 +175,7 @@ mod loaded_rope {
             GpuTensor::zeros(&ctx, input_cpu.shape().to_vec(), crate::tensor::DType::F32, "zeros")?;
 
         let offset = 10;
-
-        // CPU
         let cpu_rotated = loaded.cpu.rotate_4d(&input_cpu, offset);
-
-        // GPU
         let mut encoder = ctx.device.create_command_encoder(&Default::default());
         loaded
             .gpu

@@ -1,7 +1,6 @@
 use crate::{
     WgpuContext,
     cpu::encoder::{CpuEncoder, GpuEncoder},
-    decoder::prelude::{CpuDecoder, GpuDecoder},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
     execution::ExecutionPlan,
     gpu::GpuTensor,
@@ -13,7 +12,7 @@ use crate::{
     {EmbeddingConfig, EmbeddingData, LoadedEmbeddings},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
 pub struct EncoderDecoderPipelineBuilder<'a> {
@@ -120,7 +119,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         let ctx = self.context.as_ref();
         let target_dt = self.load_config.target_dtype;
 
-        // 1. Determine Device Strategy
         let primary_device = if ctx.is_some() {
             Device::Wgpu
         } else {
@@ -128,7 +126,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         };
         let plan = ExecutionPlan::from_load_config(primary_device, &self.load_config);
 
-        // 4. Load Embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
         if let Some(pos) = &dec_layout.position_embedding {
             emb_builder = emb_builder.position_embedding(pos);
@@ -142,15 +139,9 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
         let emb_load_gpu =
             plan.embeddings == Device::Wgpu || (tied_weights && plan.lm_head == Device::Wgpu);
 
-        // =========================================================
-        // Step 1: Load word embeddings ONCE
-        // =========================================================
         let (shared_word_cpu, shared_word_gpu) =
             self.load_shared_word_embeddings(&layout.token_embedding, emb_load_cpu, emb_load_gpu)?;
 
-        // =========================================================
-        // Step 2: Build encoder embeddings (if text encoder)
-        // =========================================================
         let encoder_embeddings = if let Some(enc) = enc_layout {
             if !self.is_audio_encoder {
                 let mut enc_emb_builder =
@@ -158,7 +149,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
                         .position_offset(meta.extra_pos_embeddings)
                         .scale_embeddings(meta.scale_embeddings);
 
-                // Only add position embedding if it exists
                 if let Some(pos) = &enc.position_embedding {
                     enc_emb_builder = enc_emb_builder.position_embedding(pos);
                 }
@@ -174,15 +164,12 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
                     self.load_config.target_dtype,
                 )?)
             } else {
-                None // Whisper encoder - no token embeddings
+                None 
             }
         } else {
             None
         };
 
-        // =========================================================
-        // Step 3: Build decoder embeddings
-        // =========================================================
         let dec_config = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size)
             .position_embedding(dec_layout.position_embedding.as_deref().unwrap_or_default())
             .position_offset(meta.extra_pos_embeddings)
@@ -207,7 +194,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             .map(|t| t.into_dimensionality::<ndarray::Ix2>())
             .transpose()?;
 
-        // 5. Load LM Head (The "Tied" Check)
         let lm_head = if tied_weights {
             log::info!("Using tied weights between embeddings and LM head");
             LoadedLMHead::from_shared_weights(
@@ -230,11 +216,6 @@ impl<'a> EncoderDecoderPipelineBuilder<'a> {
             )?
         };
 
-        // 6. Build Model Backends (Handover RoPE and DType)
-        // We resolve backends here using the specific model's factory logic
-        // This is where you call build_backends from the DecoderLoader
-
-        // Return dummy/empty backends for now; the DecoderLoader will populate these
         EncoderDecoderPipeline::new(
             encoder_embeddings,
             decoder_embeddings,

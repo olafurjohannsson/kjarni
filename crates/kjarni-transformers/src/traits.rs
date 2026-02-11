@@ -1,11 +1,10 @@
 //! Core model traits and data structures for Kjarni.
-//!
-//! Defines the unified interface for Encoders, Decoders, and Seq2Seq models.
 
 use ndarray::Array3;
 use anyhow::Result;
 use crate::activations::Activation;
 pub use crate::cache::Cache;
+use crate::cpu::encoder::traits::ClassificationMode;
 use crate::models::base::RopeScalingConfig;
 use crate::WgpuContext;
 use std::any::Any;
@@ -77,6 +76,7 @@ pub struct ModelMetadata {
     pub no_scale_qk: bool,
     pub decoder_layers: Option<usize>,
     pub intermediate_size: usize,
+    pub problem_type: Option<String>,
 }
 
 /// Weight tensor names for an attention block.
@@ -148,7 +148,7 @@ pub struct DecoderLayout {
     pub layer: DecoderLayerLayout,
 }
 
-/// Complete weight tensor layout for any transformer architecture.
+///  tensor layout for any transformer
 ///
 /// - Decoder-only (Llama): `encoder` is `None`
 /// - Encoder-only (BERT): `decoder` is `None`
@@ -216,6 +216,13 @@ pub trait ModelConfig: Send + Sync {
     /// Returns the number of classification labels.
     fn num_labels(&self) -> Option<usize> {
         self.id2label().map(|l| l.len())
+    }
+
+    fn default_classification_mode(&self) -> Option<ClassificationMode> {
+        ClassificationMode::SingleLabel.into()
+    }
+    fn is_multi_label(&self) -> bool {
+        self.metadata().problem_type.as_deref() == Some("multi_label_classification")
     }
 }
 
@@ -305,6 +312,7 @@ mod tests {
             extra_pos_embeddings: 0,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             is_prenorm: true,
             normalize_embedding: false,
             normalization_strategy: NormalizationStrategy::LayerNorm,

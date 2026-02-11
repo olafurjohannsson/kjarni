@@ -154,6 +154,7 @@ impl ModelConfig for BartConfig {
             is_prenorm: false, // BART is Post-Norm
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
             decoder_layers: Some(self.decoder_layers),

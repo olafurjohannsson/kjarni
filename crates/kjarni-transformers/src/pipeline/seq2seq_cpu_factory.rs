@@ -52,11 +52,6 @@ impl<'a> Seq2SeqFactory<'a> {
         self
     }
 
-    // =========================================================================
-    // Build from Layout structs
-    // =========================================================================
-
-    /// Build normalization from layout norm fields.
     pub fn build_norm(
         &self,
         weight_template: &str,
@@ -80,7 +75,6 @@ impl<'a> Seq2SeqFactory<'a> {
         }
     }
 
-    /// Build normalization using AttentionLayout or FeedForwardLayout norm fields.
     pub fn build_norm_from_layout(
         &self,
         norm_weight: &str,
@@ -114,10 +108,6 @@ impl<'a> Seq2SeqFactory<'a> {
             .with_f32_strategy(self.f32_strategy)
             .build()
     }
-
-    
-
-   
 
     /// Build encoder self-attention from AttentionLayout.
     pub fn build_encoder_self_attention(
@@ -189,9 +179,6 @@ impl<'a> Seq2SeqFactory<'a> {
     }
 
     /// Build LayerNorm from layout fields.
-    ///
-    /// Note: Returns LayerNorm specifically (not Normalization enum).
-    /// For T5/models needing RMSNorm, use `build_norm` instead.
     pub fn build_layer_norm(
         &self,
         weight_template: &str,
@@ -390,9 +377,6 @@ impl<'a> Seq2SeqFactory<'a> {
     }
 
     /// Build a complete decoder layer with cross-attention.
-    ///
-    /// Currently returns `CrossDecoderLayer` which uses LayerNorm
-    /// and post-norm ordering. Works for BART.
     pub fn build_decoder_layer(
         &self,
         decoder_layout: &crate::traits::DecoderLayout,
@@ -487,7 +471,6 @@ impl<'a> Seq2SeqFactory<'a> {
         ))
     }
 
-    /// Replace `{}` with layer index.
     fn resolve(template: &str, layer_idx: usize) -> String {
         template.replace("{}", &layer_idx.to_string())
     }

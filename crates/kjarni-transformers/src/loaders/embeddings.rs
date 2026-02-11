@@ -25,7 +25,6 @@ pub struct EmbeddingConfig {
 }
 
 impl EmbeddingConfig {
-    /// Creates a simple config for RoPE models (word embeddings only).
     pub fn new(word_embedding: impl Into<String>, hidden_size: usize) -> Self {
         Self {
             word_embedding: word_embedding.into(),
@@ -60,7 +59,6 @@ impl EmbeddingConfig {
     }
 }
 
-/// Builder for `EmbeddingConfig`.
 pub struct EmbeddingConfigBuilder {
     word_embedding: String,
     hidden_size: usize,
@@ -123,7 +121,6 @@ pub struct LoadedEmbeddings {
 }
 
 impl LoadedEmbeddings {
-    /// Creates a new `LoadedEmbeddings` from configuration.
     pub fn new(
         ctx: Option<&Arc<WgpuContext>>,
         weights: &ModelWeights,
@@ -302,7 +299,6 @@ impl LoadedEmbeddings {
         ))
     }
 
-    /// Universal embedding function with automatic data movement.
     pub fn embed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -400,7 +396,6 @@ impl LoadedEmbeddings {
         Err(anyhow!("no embeddings loaded"))
     }
 
-    /// Embedding with automatic CPU/GPU location handling.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,

@@ -1,6 +1,5 @@
 //! Core Embedder implementation.
 
-use std::sync::Arc;
 
 use kjarni_transformers::{LanguageModel, WgpuContext, models::ModelType, traits::Device};
 
@@ -27,9 +26,6 @@ pub struct Embedder {
 
     /// Device.
     device: Device,
-
-    /// GPU context.
-    context: Option<Arc<WgpuContext>>,
 }
 
 impl Embedder {
@@ -57,10 +53,9 @@ impl Embedder {
         let model_type =
             ModelType::resolve(&builder.model).map_err(|msg| EmbedderError::UnknownModel(msg))?;
 
-        // 2. Validate for embedding
         validate_for_embedding(model_type)?;
 
-        // 3. Ensure model is downloaded
+        // download if needed
         let cache_dir = builder.cache_dir.clone().unwrap_or_else(default_cache_dir);
         ensure_model_downloaded(
             model_type,
@@ -79,10 +74,10 @@ impl Embedder {
             other => EmbedderError::EmbeddingFailed(other.into()),
         })?;
 
-        // 4. Resolve device
+        // Resolve
         let device = builder.device.to_device();
 
-        // 5. Create GPU context if needed
+        // i like bug gpu context
         let context = if device == Device::Wgpu {
             if let Some(ctx) = builder.context {
                 Some(ctx)
@@ -97,7 +92,7 @@ impl Embedder {
             None
         };
 
-        // 6. Load the encoder
+        // create sentence encoder that does the djerb
         let load_config = builder.load_config.map(|c| c.into_inner());
         let inner = SentenceEncoder::from_registry(
             model_type,
@@ -117,13 +112,8 @@ impl Embedder {
             model_type,
             default_overrides: builder.overrides,
             device,
-            context,
         })
     }
-
-    // =========================================================================
-    // Embedding Methods
-    // =========================================================================
 
     /// Embed a single text.
     pub async fn embed(&self, text: &str) -> EmbedderResult<Vec<f32>> {
@@ -219,21 +209,14 @@ impl Embedder {
         Ok(indexed)
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
-    /// Get the model type.
     pub fn model_type(&self) -> ModelType {
         self.model_type
     }
 
-    /// Get the model's CLI name.
     pub fn model_name(&self) -> &str {
         self.model_type.cli_name()
     }
 
-    /// Get the device.
     pub fn device(&self) -> Device {
         self.device
     }
@@ -247,10 +230,6 @@ impl Embedder {
     pub fn max_seq_length(&self) -> usize {
         self.inner.context_size()
     }
-
-    // =========================================================================
-    // Internal
-    // =========================================================================
 
     fn merge_overrides(&self, runtime: &EmbeddingOverrides) -> EmbeddingOverrides {
         EmbeddingOverrides {

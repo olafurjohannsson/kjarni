@@ -18,6 +18,17 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array2, Array3};
 
+/// Classification mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClassificationMode {
+    /// Single-label classification (softmax, mutually exclusive).
+    #[default]
+    SingleLabel,
+
+    /// Multi-label classification (sigmoid, independent labels).
+    MultiLabel,
+}
+
 /// Trait for encoder-only language models (BERT, RoBERTa, etc.)
 ///
 /// These models encode text into fixed-size embeddings.

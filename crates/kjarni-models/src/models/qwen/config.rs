@@ -213,6 +213,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             transpose_attention_weights: false,
             normalization_strategy: kjarni_transformers::traits::NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
+            problem_type: None,
             decoder_layers: None,
             intermediate_size: self.intermediate_size(),
         }

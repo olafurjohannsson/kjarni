@@ -1,10 +1,6 @@
 //! String distance algorithms for fuzzy matching
 
 /// Calculate Levenshtein (edit) distance between two strings
-///
-/// Returns the minimum number of single-character edits (insertions,
-/// deletions, or substitutions) required to change one string into another.
-///
 pub fn distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -32,16 +28,6 @@ pub fn distance(a: &str, b: &str) -> usize {
 }
 
 /// Calculate normalized similarity between two strings (0.0 to 1.0)
-///
-/// Returns 1.0 for identical strings, 0.0 for completely different.
-///
-/// # Example
-/// ```
-/// use kjarni_transformers::utils::levenshtein::similarity;
-///
-/// assert_eq!(similarity("hello", "hello"), 1.0);
-/// assert!(similarity("hello", "hallo") > 0.7);
-/// ```
 pub fn similarity(a: &str, b: &str) -> f32 {
     let max_len = a.len().max(b.len());
     if max_len == 0 {
@@ -52,17 +38,6 @@ pub fn similarity(a: &str, b: &str) -> f32 {
 }
 
 /// Find the best matches for a query from a list of candidates
-///
-/// Returns candidates sorted by similarity (best first), filtered by threshold.
-///
-/// # Example
-/// ```
-/// use kjarni_transformers::utils::levenshtein::find_similar;
-///
-/// let candidates = vec!["llama-3.2-1b", "llama-3.2-3b", "gpt2", "gpt2-medium"];
-/// let matches = find_similar("llma", &candidates, 3, 0.5);
-/// // Returns llama variants first
-/// ```
 pub fn find_similar(
     query: &str,
     candidates: &[&str],
@@ -86,8 +61,6 @@ pub fn find_similar(
 }
 
 /// Find matches using edit distance threshold
-///
-/// Returns candidates where edit distance <= max_distance.
 pub fn find_within_distance(
     query: &str,
     candidates: &[&str],

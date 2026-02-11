@@ -1,7 +1,4 @@
 //! Encoder pipeline for embedding and classification models.
-//!
-//! Supports SentenceEncoder, SequenceClassifier, and CrossEncoder through
-//! a unified pipeline with optional classification head.
 
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
@@ -34,19 +31,7 @@ pub struct EncoderPipelineConfig {
     pub num_labels: Option<usize>,
 }
 
-
-// Encoder Pipeline
-
-
 /// A container that holds all components needed for encoder inference.
-///
-/// This provides a unified structure for:
-/// - **SentenceEncoder**: Encoder → Pooling → Embeddings (no head)
-/// - **SequenceClassifier**: Encoder → Head → Class logits
-/// - **CrossEncoder**: Encoder → Head → Relevance score
-///
-/// The actual model-specific logic (pair tokenization, embedding normalization)
-/// is handled by the model structs that own this pipeline.
 pub struct EncoderPipeline {
     // Core components
     embeddings: LoadedEmbeddings,
@@ -55,7 +40,7 @@ pub struct EncoderPipeline {
     
     // Optional classification head (None for SentenceEncoder)
     cpu_head: Option<CpuSequenceClassificationHead>,
-    // gpu_head: Option<GpuSequenceClassificationHead>, // TODO: Add when needed
+    // gpu_head: Option<GpuSequenceClassificationHead>, // TODO:
     
     // Configuration
     plan: ExecutionPlan,
@@ -90,10 +75,6 @@ impl EncoderPipeline {
         pipeline.validate_plan(&pipeline.plan)?;
         Ok(pipeline)
     }
-    
-    // ========================================================================
-    // Plan Management
-    // ========================================================================
     
     pub fn plan(&self) -> &ExecutionPlan {
         &self.plan
@@ -137,10 +118,6 @@ impl EncoderPipeline {
         Ok(())
     }
     
-    // ========================================================================
-    // Component Accessors
-    // ========================================================================
-    
     pub fn embeddings(&self) -> &LoadedEmbeddings {
         &self.embeddings
     }
@@ -164,10 +141,6 @@ impl EncoderPipeline {
     pub fn has_head(&self) -> bool {
         self.cpu_head.is_some()
     }
-    
-    // ========================================================================
-    // Metadata Accessors
-    // ========================================================================
     
     pub fn num_layers(&self) -> usize {
         self.config.num_layers

@@ -1,6 +1,4 @@
-//! GPU buffer utilities for testing and debugging.
-//!
-//! Buffer readback functions are slow (CPU/GPU sync) - use only for tests.
+
 
 use anyhow::Result;
 use ndarray::{Array2, Array3};
@@ -8,7 +6,6 @@ use wgpu::util::DeviceExt;
 
 use crate::WgpuContext;
 
-/// Reads a GPU buffer as a 2D array. Blocks until GPU completes.
 pub async fn read_buffer_2d(
     context: &WgpuContext,
     buffer: &wgpu::Buffer,
@@ -274,10 +271,6 @@ mod tests {
         assert_vecs_are_close(&a, &b, 1e-5);
     }
 
-    // ========================================================================
-    //  create_uniform_buffer Tests
-    // ========================================================================
-
     #[repr(C)]
     #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
     struct TestUniforms {
@@ -342,10 +335,6 @@ mod tests {
 
         assert_eq!(buffer.size(), 64); // 16 x 4 bytes
     }
-
-    // ========================================================================
-    //  read_buffer_2d Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_read_buffer_2d_simple() -> Result<()> {
@@ -501,10 +490,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    //  read_buffer_3d Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_read_buffer_3d_simple() -> Result<()> {
         let context = get_test_context().await;
@@ -583,7 +568,6 @@ mod tests {
     async fn test_read_buffer_3d_transformer_shape() -> Result<()> {
         let context = get_test_context().await;
 
-        // Common transformer shape: [batch=2, seq=16, hidden=64]
         let batch = 2;
         let seq = 16;
         let hidden = 64;
@@ -601,7 +585,6 @@ mod tests {
 
         assert_eq!(result.shape(), &[batch, seq, hidden]);
         
-        // Spot check some values
         assert!((result[[0, 0, 0]] - 0.0).abs() < 1e-5);
         assert!((result[[0, 0, 50]] - 5.0).abs() < 1e-5);
         assert!((result[[1, 0, 0]] - (((seq * hidden) % 100) as f32 / 10.0)).abs() < 1e-5);
@@ -629,7 +612,6 @@ mod tests {
 
         assert_eq!(result.shape(), &[batch, seq, hidden]);
         
-        // Check first and last elements
         assert_eq!(result[[0, 0, 0]], 0.0);
         assert_eq!(result[[batch - 1, seq - 1, hidden - 1]], (total - 1) as f32);
 
@@ -655,18 +637,12 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Roundtrip Tests (write -> read)
-    // ========================================================================
-
     #[tokio::test]
     async fn test_roundtrip_2d() -> Result<()> {
         let context = get_test_context().await;
 
         let original = Array2::from_shape_fn((8, 16), |(i, j)| (i * 16 + j) as f32);
         
-        // Create buffer from array
         let data = original.as_slice().unwrap();
         let buffer = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("roundtrip 2d"),
@@ -674,7 +650,6 @@ mod tests {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
-        // Read back
         let result = read_buffer_2d(&context, &buffer, (8, 16)).await?;
 
         assert_eq!(original, result);
@@ -690,7 +665,6 @@ mod tests {
             (i * 128 + j * 16 + k) as f32
         });
         
-        // Create buffer from array
         let data = original.as_slice().unwrap();
         let buffer = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("roundtrip 3d"),
@@ -698,17 +672,12 @@ mod tests {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
-        // Read back
         let result = read_buffer_3d(&context, &buffer, (4, 8, 16)).await?;
 
         assert_eq!(original, result);
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Edge Case: Special Float Values
-    // ========================================================================
 
     #[tokio::test]
     async fn test_read_buffer_2d_special_floats() -> Result<()> {
@@ -737,10 +706,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Multiple Reads from Same Buffer
-    // ========================================================================
 
     #[tokio::test]
     async fn test_multiple_reads_same_buffer() -> Result<()> {

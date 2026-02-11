@@ -1,52 +1,7 @@
 //! Second feedforward layer (FC2): projects back to hidden dimension.
-//!
-//! Implements the second fully connected layer in encoder FFN blocks (BERT, GPT-2, T5).
-//! Computes output = input @ W^T + bias, projecting from intermediate_size back to hidden_size.
-//!
-//! # Algorithm
-//!
-//! For each output element [m, n]:
-//! 1. Compute dot product: val = sum(input[m, i] * W[n, i])
-//!    *Uses FMA (Fused Multiply-Add) for high precision.*
-//! 2. Add bias: output[m, n] = val + bias[n]
-//!
-//! No activation function (linear projection).
-//!
-//! # Performance
-//!
-//! - **Current**: ~0.5ms for [128, 3072] @ [768, 3072] on RTX 3090
-//! - **Memory bound**: Dominated by weight reads
-//! - **Simpler than FC1**: No activation computation overhead
-//!
-//! # FFN Architecture
-//!
-//! Standard encoder FFN has two layers:
-//! 1. **FC1**: hidden_size → intermediate_size (typically 4x) + GELU
-//! 2. **FC2**: intermediate_size → hidden_size (this layer, no activation)
-//!
-//! Example (BERT-base):
-//! - FC1: [batch, 768] @ [3072, 768] + GELU → [batch, 3072]
-//! - FC2: [batch, 3072] @ [768, 3072] → [batch, 768]
-//!
-//! # Memory Layout
-//!
-//! **Weight is transposed** to [N, K] for coalesced reads:
-//! - Each thread reads a contiguous row for one output dimension
-//! - Improves cache locality and bandwidth utilization
-//!
-//! # Vectorization
-//!
-//! Uses vec4 loads with manual FMA (fused multiply-add):
-//! - Processes 4 elements per iteration
-//! - FMA provides better numerical accuracy and speed
-//! - Remainder handled separately for non-divisible-by-4 dimensions
-//!
-//! # See Also
-//!
-//! - [`fc1.wgsl`] — First FFN layer with activation
-//! - [`swiglu_fused.wgsl`] — Fused FFN for decoder architectures
 
-/// Uniform parameters for FC2 operation.
+
+
 struct FfnUniforms {
     /// Number of input rows (batch * seq_len).
     m: u32,
@@ -59,7 +14,6 @@ struct FfnUniforms {
 };
 
 @group(0) @binding(0) var<uniform> info: FfnUniforms;
-// Weight is transposed to [N, K] for coalesced memory access
 @group(0) @binding(1) var<storage, read> fc2_weight: array<f32>;
 @group(0) @binding(2) var<storage, read> fc2_bias: array<f32>;
 @group(0) @binding(3) var<storage, read> input: array<f32>;
@@ -80,7 +34,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum: f32 = 0.0;
 
     let input_offset = row * info.k;
-    // The weight for a given output column `col` is a contiguous row in the transposed matrix.
     let weight_offset = col * info.k;
 
     // Vectorized FMA loop
@@ -114,6 +67,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         sum = fma(input[input_offset + kk], fc2_weight[weight_offset + kk], sum);
     }
 
-    // Optimization: Write directly using the global index
     output[idx] = sum + fc2_bias[col];
 }

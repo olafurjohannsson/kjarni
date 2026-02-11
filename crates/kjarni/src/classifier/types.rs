@@ -2,6 +2,7 @@
 
 use std::fmt;
 use thiserror::Error;
+pub use kjarni_transformers::cpu::encoder::traits::ClassificationMode;
 
 /// Errors specific to classification.
 #[derive(Debug, Error)]
@@ -155,16 +156,7 @@ impl fmt::Display for ClassificationResult {
     }
 }
 
-/// Classification mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ClassificationMode {
-    /// Single-label classification (softmax, mutually exclusive).
-    #[default]
-    SingleLabel,
 
-    /// Multi-label classification (sigmoid, independent labels).
-    MultiLabel,
-}
 
 /// Overrides for classification behavior.
 #[derive(Debug, Clone, Default)]

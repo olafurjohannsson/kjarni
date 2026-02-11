@@ -1,180 +1,126 @@
 # Kjarni
 
-AI inference for .NET — embeddings, classification, reranking, and search.  
-No Python. No ONNX. No API keys. One NuGet package.
+A native library for running machine learning models from C#.
 
-## Install
+Classification, embeddings, reranking, and semantic search.
+No Python, no containers, no GPU requirements.
 
-```bash
-dotnet add package Kjarni
-```
+Full documentation on [GitHub](https://github.com/olafurjohannsson/kjarni).
 
 ## Quick Start
-
-### Classify Text
 
 ```csharp
 using Kjarni;
 
-using var classifier = new Classifier("distilbert-sentiment");
-var result = classifier.Classify("I love this product!");
-Console.WriteLine(result);
-// POSITIVE (99.9%)
+using var classifier = new Classifier("roberta-sentiment");
+Console.WriteLine(classifier.Classify("I love this product!"));
+// positive (98.5%)
 ```
 
-### Content Moderation
+Models download on first use and are cached locally.
+
+## Classification
 
 ```csharp
-using var classifier = new Classifier("toxic-bert");
-var result = classifier.Classify("You are an idiot");
-var toxicScore = result.AllScores.First(s => s.Label == "toxic").Score;
-Console.WriteLine($"Toxic: {toxicScore > 0.5} ({toxicScore:P0})");
-// Toxic: True (72%)
+using var classifier = new Classifier("roberta-sentiment");
+Console.WriteLine(classifier.Classify("Terrible quality.").ToJson());
+// {"label": "negative", "score": 0.9408, "predictions": [...]}
+
+using var multi = new Classifier("bert-sentiment-multilingual");
+Console.WriteLine(multi.Classify("Esta es la peor compra que he hecho."));
+// 1 star (94.1%)
+
+using var toxic = new Classifier("toxic-bert");
+Console.WriteLine(toxic.Classify("You are an idiot").ToDetailedString());
+//              toxic   72.32%  ████████████████████████████
+//             insult   24.45%  █████████
+//            obscene    3.17%  █
+
+using var emotion = new Classifier("distilroberta-emotion");
+Console.WriteLine(emotion.Classify("I just got promoted!"));
+// surprise (50.7%)
 ```
 
-### Semantic Search
-
-```csharp
-using var embedder = new Embedder("minilm-l6-v2");
-
-// Index your documents
-var docs = new[] {
-    "Refunds are processed within 5-7 business days.",
-    "Shipping takes 3-5 business days.",
-    "Premium members get free expedited shipping.",
-};
-var docVectors = docs.Select(d => embedder.Encode(d)).ToArray();
-
-// Search by meaning — no keyword overlap needed
-var query = embedder.Encode("how do I get my money back?");
-var best = docVectors
-    .Select((v, i) => (Doc: docs[i], Score: Embedder.CosineSimilarity(query, v)))
-    .OrderByDescending(r => r.Score)
-    .First();
-
-Console.WriteLine($"{best.Score:F3}: {best.Doc}");
-// 0.489: Refunds are processed within 5-7 business days.
-```
-
-### Generate Embeddings
+## Embeddings
 
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2");
-float[] vector = embedder.Encode("Hello world");
-Console.WriteLine($"Dimensions: {vector.Length}");
-// Dimensions: 384
+
+float[] vector = embedder.Encode("Hello world");           // 384 dimensions
+Console.WriteLine(embedder.Similarity("doctor", "physician")); // 0.8598
+
+var docs = new[] { "How do I reset my password?", "What is your refund policy?" };
+var vectors = embedder.EncodeBatch(docs);
+var query = embedder.Encode("I need to change my login credentials");
+var score = Embedder.CosineSimilarity(query, vectors[0]);  // 0.5981
 ```
 
-### Compute Similarity
-
-```csharp
-using var embedder = new Embedder("minilm-l6-v2");
-float score = embedder.Similarity("cat", "dog");
-Console.WriteLine($"Similarity: {score:F4}");
-// Similarity: 0.6606
-```
-
-### Rerank Search Results
+## Reranking
 
 ```csharp
 using var reranker = new Reranker();
-var results = reranker.Rerank(
-    "What is machine learning?",
-    new[] {
-        "Machine learning is a subset of artificial intelligence.",
-        "The weather today is sunny.",
-        "Deep learning uses neural networks with many layers.",
-    });
-
-foreach (var r in results)
-    Console.WriteLine($"[{r.Index}] {r.Score:F4} {r.Document}");
+var results = reranker.Rerank("What is machine learning?", new[] {
+    "Machine learning is a subset of artificial intelligence.",
+    "The weather today is sunny.",
+});
+//  10.5139: Machine learning is a subset of artificial intelligence.
+// -11.1001: The weather today is sunny.
 ```
 
-### Index & Search Documents (RAG)
+## Index & Search
 
 ```csharp
-// Index a folder of documents
-using var indexer = new Indexer(model: "minilm-l6-v2");
-var stats = indexer.Create("my_index", new[] { "docs/" });
-Console.WriteLine($"Indexed {stats.DocumentsIndexed} documents");
+using var indexer = new Indexer(model: "minilm-l6-v2", quiet: true);
+indexer.Create("my_index", new[] { "docs/" });
 
-// Search the index
-using var searcher = new Searcher(model: "minilm-l6-v2");
-var results = searcher.Search("my_index", "What is machine learning?");
-foreach (var r in results)
-    Console.WriteLine($"{r.Score:F4}: {r.Text[..60]}...");
+using var searcher = new Searcher(
+    model: "minilm-l6-v2",
+    rerankerModel: "minilm-l6-v2-cross-encoder");
+var results = searcher.Search("my_index", "how do returns work?",
+    mode: SearchMode.Hybrid);
 ```
+
+Search modes: `Semantic`, `Keyword` (BM25), `Hybrid`.
+
+## GPU
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
+```
+
+WebGPU — Vulkan on Linux, DX12/Vulkan on Windows. CUDA is not required.
 
 ## Models
 
-Models are downloaded automatically on first use and cached locally.
-
-| Task | Model | Size | Description |
-|------|-------|------|-------------|
-| Embeddings | `minilm-l6-v2` | 90MB | Fast, 384 dimensions |
-| Embeddings | `mpnet-base-v2` | 420MB | High quality, 768 dimensions |
-| Embeddings | `distilbert-base` | 260MB | General purpose, 768 dimensions |
-| Classification | `distilbert-sentiment` | 268MB | Positive/negative |
-| Classification | `roberta-sentiment` | 499MB | Negative/neutral/positive |
-| Classification | `bert-sentiment-multilingual` | 681MB | 5-star rating, 6 languages |
-| Classification | `distilroberta-emotion` | 329MB | 7 emotions |
-| Classification | `toxic-bert` | 438MB | Toxicity detection, 6 labels |
-| Reranking | `minilm-l6-v2-cross-encoder` | 90MB | Passage reranking |
+| Task | Model | Size |
+|------|-------|------|
+| Sentiment (3-class) | `roberta-sentiment` | 125MB |
+| Sentiment (multilingual) | `bert-sentiment-multilingual` | 168MB |
+| Sentiment (binary) | `distilbert-sentiment` | 66MB |
+| Emotion (7-class) | `distilroberta-emotion` | 82MB |
+| Emotion (28-class) | `roberta-emotions` | 125MB |
+| Toxicity | `toxic-bert` | 110MB |
+| Embeddings | `minilm-l6-v2` | 90MB |
+| Embeddings | `mpnet-base-v2` | 420MB |
+| Reranking | `minilm-l6-v2-cross-encoder` | 90MB |
 
 ## Configuration
 
-All constructors accept optional parameters:
-
 ```csharp
-// GPU acceleration
-using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
-
 // Custom cache directory
-using var classifier = new Classifier("distilbert-sentiment", cacheDir: "/models");
+using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
 
-// Suppress download progress
-using var reranker = new Reranker(quiet: true);
+// Quiet mode
+using var embedder = new Embedder("minilm-l6-v2", quiet: true);
 ```
 
-### Indexer Options
-
-```csharp
-using var indexer = new Indexer(
-    model: "minilm-l6-v2",
-    chunkSize: 512,
-    chunkOverlap: 50,
-    batchSize: 32,
-    extensions: new[] { "txt", "md", "pdf" },
-    recursive: true
-);
-```
-
-### Search Options
-
-```csharp
-var results = searcher.Search("my_index", "query",
-    mode: SearchMode.Hybrid,    // Keyword, Semantic, or Hybrid
-    topK: 10,
-    threshold: 0.5f
-);
-```
-
-## How It Works
-
-Kjarni is a native inference engine written in Rust with hand-tuned SIMD kernels (AVX2/FMA on x86, NEON on ARM). It loads HuggingFace models directly from safetensors using memory-mapped I/O — no Python runtime, no ONNX conversion step, no GPU required.
-
-The C# package includes precompiled native libraries for each platform. `dotnet add package Kjarni` is all you need.
+Set `KJARNI_CACHE_DIR` to override the default cache location.
+Set `HF_TOKEN` for gated models.
 
 ## Platform Support
 
-| Platform | Architecture | Status |
-|----------|-------------|--------|
-| Linux | x64 | ✅ |
-| Windows | x64 | ✅ |
-| macOS | ARM64 (Apple Silicon) | Planned |
-| macOS | x64 | Planned |
-| Linux | ARM64 | Planned |
-
-## License
-
-MIT
+| Platform | CPU | GPU |
+|----------|-----|-----|
+| Linux x64 | Yes | Yes Vulkan |
+| Windows x64 | Yes | Yes DX12/Vulkan |
+| macOS ARM64 | Planned | Planned |

@@ -34,12 +34,10 @@ impl<'a> CpuLayerFactory<'a> {
         self
     }
 
-    /// Replace `{}` with layer index.
     fn resolve(template: &str, layer_idx: usize) -> String {
         template.replace("{}", &layer_idx.to_string())
     }
 
-    /// Build a LinearLayer from template strings.
     pub fn build_linear(
         &self,
         weight_template: &str,
@@ -56,8 +54,6 @@ impl<'a> CpuLayerFactory<'a> {
             .build()
     }
 
-    /// Builds a Normalization brick.
-    /// Logic: If bias template exists -> LayerNorm, else -> RMSNorm.
     pub fn build_norm(
         &self,
         w_template: &String,
@@ -84,21 +80,10 @@ impl<'a> CpuLayerFactory<'a> {
         idx: usize,
     ) -> Result<SwiGluFeedForward> {
         let i_str = idx.to_string();
-        let strategy = Some(F32MatmulStrategy::CustomSimd);
-
-        // Helper to resolve template strings
-        let name = |t: &String| t.replace("{}", &i_str);
-
-        // 1. Get the Gate name (SwiGLU requires this)
-        let gate_name = layout.gate_weight.as_ref().ok_or_else(|| {
-            anyhow!("Architecture layout missing required gate_weight for SwiGLU")
-        })?;
         let gate_template = layout
             .gate_weight
             .as_ref()
             .ok_or_else(|| anyhow!("SwiGLU requires gate_weight"))?;
-        // 2. Load the 3 Linear Layers
-        // SwiGLU variants typically do not use biases, so we pass None
         let gate = Self::build_linear(&self, gate_template, layout.gate_bias.as_deref(), idx)?;
         let up = Self::build_linear(&self, &layout.up_weight, layout.up_bias.as_deref(), idx)?;
         let down =
@@ -113,14 +98,8 @@ impl<'a> CpuLayerFactory<'a> {
         idx: usize,
     ) -> Result<DecoderAttention> {
         let i_str = idx.to_string();
-        let strategy = Some(F32MatmulStrategy::CustomSimd);
-
-        // Helper to resolve template strings
-        let name = |t: &String| t.replace("{}", &i_str);
         let opt_name = |t: &Option<String>| t.as_ref().map(|s| s.replace("{}", &i_str));
 
-        // 1. Load the 4 Linear Layers
-        // LinearLayer::from_weights handles the bias automatically if opt_name returns Some
         let q = Self::build_linear(
             &self,
             &layout.q_weight,
@@ -149,7 +128,6 @@ impl<'a> CpuLayerFactory<'a> {
             idx,
         )?;
 
-        // 2. Construct the DecoderAttention brick
         Ok(DecoderAttention::new(
             meta.hidden_size,
             meta.num_attention_heads,
@@ -172,15 +150,11 @@ mod tests {
     use safetensors::tensor::{Dtype, TensorView};
     
     use tempfile::TempDir;
-    // Use TempDir instead of NamedTempFile
-
     fn create_dummy_weights(tensors: Vec<(&str, Vec<f32>, Vec<usize>)>) -> (TempDir, ModelWeights) {
-        // 1. Create a temporary directory
         let dir = TempDir::new().unwrap();
         let model_path = dir.path().join("model.safetensors");
         let config_path = dir.path().join("config.json");
 
-        // 2. Create byte buffers and data map
         let buffers: Vec<(String, Vec<u8>, Vec<usize>)> = tensors
             .into_iter()
             .map(|(name, data, shape)| {
@@ -195,12 +169,9 @@ mod tests {
             data_map.insert(name.clone(), view);
         }
 
-        // 3. Write model.safetensors
         let serialized = serialize(&data_map, &None).unwrap();
         std::fs::write(&model_path, &serialized).unwrap();
 
-        // 4. Write a dummy config.json (Required by ModelWeights::new for directory)
-        // We put minimal valid JSON here.
         let config_json = r#"{
         "architectures": ["LlamaForCausalLM"],
         "hidden_size": 4,
@@ -208,7 +179,6 @@ mod tests {
     }"#;
         std::fs::write(&config_path, config_json).unwrap();
 
-        // 5. Load from the directory
         let weights = ModelWeights::new(dir.path()).unwrap();
         (dir, weights)
     }
@@ -234,14 +204,11 @@ mod tests {
             is_prenorm: true,
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: false,
         }
     }
-
-    // =========================================================================
-    //  Normalization Tests
-    // =========================================================================
 
     #[test]
     fn test_build_rmsnorm() {
@@ -253,7 +220,7 @@ mod tests {
         let norm = factory
             .build_norm(
                 &"layer.{}.norm.weight".to_string(),
-                &None, // No bias -> RMSNorm
+                &None,
                 1e-5,
                 0,
             )
@@ -296,14 +263,8 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    //  FFN Tests
-    // =========================================================================
-
     #[test]
     fn test_build_swiglu_ffn() {
-        // Hidden=4, Intermediate=8
-        // Weights are [Out, In]
         let (_file, weights) = create_dummy_weights(vec![
             ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
             ("layer.0.up.weight", vec![0.2; 32], vec![8, 4]),
@@ -355,20 +316,14 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    //  Attention Tests
-    // =========================================================================
-
     #[test]
     fn test_build_decoder_attention() {
-        // Hidden=4, Heads=2, HeadDim=2
-        // Q, K, V, O weights
         let (_file, weights) = create_dummy_weights(vec![
             ("l.0.q.weight", vec![0.1; 16], vec![4, 4]),
             ("l.0.k.weight", vec![0.1; 16], vec![4, 4]),
             ("l.0.v.weight", vec![0.1; 16], vec![4, 4]),
             ("l.0.o.weight", vec![0.1; 16], vec![4, 4]),
-            ("l.0.q.bias", vec![0.0; 4], vec![4]), // Optional bias
+            ("l.0.q.bias", vec![0.0; 4], vec![4]),
         ]);
 
         let layout = AttentionLayout {
@@ -392,10 +347,6 @@ mod tests {
         assert!(!attn.k_proj.has_bias());
         assert_eq!(attn.q_proj.shape(), [4, 4]);
     }
-    // =========================================================================
-    //  Factory Construction Tests
-    // =========================================================================
-
     #[test]
     fn test_factory_new() {
         let (_dir, weights) = create_dummy_weights(vec![]);
@@ -435,10 +386,6 @@ mod tests {
         assert_eq!(factory.target_dtype, Some(DType::F32));
     }
 
-    // =========================================================================
-    //  Resolve Helper Tests
-    // =========================================================================
-
     #[test]
     fn test_resolve_single_placeholder() {
         let result = CpuLayerFactory::resolve("layer.{}.weight", 5);
@@ -468,10 +415,6 @@ mod tests {
         let result = CpuLayerFactory::resolve("layer.{}.weight", 999);
         assert_eq!(result, "layer.999.weight");
     }
-
-    // =========================================================================
-    //  build_linear Tests
-    // =========================================================================
 
     #[test]
     fn test_build_linear_weight_only() {
@@ -544,10 +487,6 @@ mod tests {
         
         assert_eq!(linear.shape(), [8, 4]);
     }
-
-    // =========================================================================
-    //  build_norm Additional Tests
-    // =========================================================================
 
     #[test]
     fn test_build_norm_different_eps() {
@@ -644,11 +583,6 @@ mod tests {
         
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    //  build_decoder_attention Additional Tests
-    // =========================================================================
-
     #[test]
     fn test_build_decoder_attention_all_biases() {
         let (_dir, weights) = create_dummy_weights(vec![
@@ -781,11 +715,6 @@ mod tests {
         assert_eq!(attn1.q_proj.shape(), [4, 4]);
     }
 
-
-    // =========================================================================
-    //  build_swiglu_ffn Additional Tests
-    // =========================================================================
-
     #[test]
     fn test_build_swiglu_ffn_with_biases() {
         let (_dir, weights) = create_dummy_weights(vec![
@@ -837,11 +766,9 @@ mod tests {
 
         let factory = CpuLayerFactory::new(&weights);
         
-        // SiLU (Llama-style)
         let ffn_silu = factory.build_swiglu_ffn(&layout, Activation::SilU, 0).unwrap();
         assert_eq!(ffn_silu.activation, Activation::SilU);
         
-        // GELU (some models)
         let ffn_gelu = factory.build_swiglu_ffn(&layout, Activation::Gelu, 0).unwrap();
         assert_eq!(ffn_gelu.activation, Activation::Gelu);
     }
@@ -881,7 +808,6 @@ mod tests {
     fn test_build_swiglu_ffn_missing_up_weight() {
         let (_dir, weights) = create_dummy_weights(vec![
             ("layer.0.gate.weight", vec![0.1; 32], vec![8, 4]),
-            // Missing up.weight!
             ("layer.0.down.weight", vec![0.3; 32], vec![4, 8]),
         ]);
 
@@ -901,10 +827,6 @@ mod tests {
 
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    //  Metadata Variations Tests
-    // =========================================================================
 
     #[test]
     fn test_build_attention_gqa_config() {
@@ -941,10 +863,6 @@ mod tests {
         assert_eq!(attn.q_proj.shape(), [16, 4]);
         assert_eq!(attn.k_proj.shape(), [4, 4]);
     }
-
-    // =========================================================================
-    //  Integration-style Tests
-    // =========================================================================
 
     #[test]
     fn test_build_full_layer_components() {
@@ -990,7 +908,6 @@ mod tests {
         let meta = dummy_metadata();
         let factory = CpuLayerFactory::new(&weights);
 
-        // Build all components for layer 0
         let attn = factory.build_decoder_attention(&meta, &attn_layout, 0).unwrap();
         let ffn = factory.build_swiglu_ffn(&ffn_layout, Activation::SilU, 0).unwrap();
         let attn_norm = factory.build_norm(

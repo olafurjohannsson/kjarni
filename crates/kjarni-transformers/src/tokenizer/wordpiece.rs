@@ -15,7 +15,6 @@ pub struct WordPieceTokenizer {
 }
 impl ModelTokenizer for WordPieceTokenizer {
     fn encode(&self, text: &str, _add_special_tokens: bool) -> anyhow::Result<Vec<u32>> {
-        // Map your existing encode to return just Vec<u32>
         Ok(self.encode(text, 1024)?.get_ids().clone())
     }
     fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> anyhow::Result<String> {
@@ -26,7 +25,6 @@ impl WordPieceTokenizer {
     pub fn from_json_str(content: &str) -> Result<Self> {
         let json: Value = serde_json::from_str(content)?;
 
-        // Extract vocabulary
         let vocab = json["model"]["vocab"]
             .as_object()
             .ok_or_else(|| anyhow!("Could not find vocab in tokenizer json"))?
@@ -34,7 +32,6 @@ impl WordPieceTokenizer {
             .map(|(token, id)| (token.clone(), id.as_u64().unwrap() as u32))
             .collect::<HashMap<String, u32>>();
 
-        // Helper to get token ID
         let get_token_id = |token: &str| -> Result<u32> {
             vocab
                 .get(token)
@@ -56,7 +53,6 @@ impl WordPieceTokenizer {
         })
     }
 
-    /// Tokenize a word using WordPiece algorithm
     fn tokenize_word(&self, word: &str) -> Vec<u32> {
         if let Some(id) = self.vocab.get(word) {
             return vec![*id];
@@ -99,7 +95,6 @@ impl WordPieceTokenizer {
         }
         let mut ids = vec![self.cls_token_id];
 
-        // Pre-tokenize text
         let mut spaced_text = String::new();
         for c in text.to_lowercase().chars() {
             if c.is_ascii_punctuation() {
@@ -115,18 +110,14 @@ impl WordPieceTokenizer {
             ids.extend(self.tokenize_word(word));
         }
 
-        // Truncate to leave room for SEP
         if ids.len() >= max_len {
             ids.truncate(max_len - 1);
         }
 
-        // Add SEP token
         ids.push(self.sep_token_id);
 
-        // Attention mask
         let mut attention_mask = vec![1; ids.len()];
 
-        // Pad if needed
         if ids.len() < max_len {
             let pad_len = max_len - ids.len();
             ids.extend(vec![self.pad_token_id; pad_len]);
@@ -149,7 +140,6 @@ mod tests {
     use super::*;
     use anyhow::Result;
 
-    // Minimal WordPiece JSON for testing
     const TEST_JSON: &str = "{  
 \"model\": {  
     \"vocab\": {  
@@ -196,7 +186,6 @@ mod tests {
     fn test_tokenize_word_with_subtokens() -> Result<()> {
         let tokenizer = WordPieceTokenizer::from_json_str(TEST_JSON)?;
         let ids = tokenizer.tokenize_word("worlds");
-        // "world" exists, "##s" exists
         assert_eq!(ids, vec![5, 6]);
         Ok(())
     }
@@ -208,23 +197,15 @@ mod tests {
         let max_len = 10;
         let encoding = tokenizer.encode(text, max_len)?;
 
-        // 1. Check length
         assert_eq!(encoding.ids.len(), max_len);
-
-        // 2. Check structure: [CLS, hello, world, !, SEP, PAD...]
-        // IDs: [0, 4, 5, 7, 1, 2, 2, 2, 2, 2]
+        assert_eq!(encoding.ids[0], tokenizer.cls_token_id);
         
-        assert_eq!(encoding.ids[0], tokenizer.cls_token_id); // CLS
+        assert_eq!(encoding.ids[1], 4);
+        assert_eq!(encoding.ids[2], 5);
+        assert_eq!(encoding.ids[3], 7);
         
-        // Content
-        assert_eq!(encoding.ids[1], 4); // hello
-        assert_eq!(encoding.ids[2], 5); // world
-        assert_eq!(encoding.ids[3], 7); // !
+        assert_eq!(encoding.ids[4], tokenizer.sep_token_id); 
         
-        // SEP is immediately after content
-        assert_eq!(encoding.ids[4], tokenizer.sep_token_id); // SEP
-        
-        // Padding fills the rest
         for i in 5..10 {
             assert_eq!(encoding.ids[i], tokenizer.pad_token_id);
         }
@@ -241,10 +222,9 @@ mod tests {
         assert_eq!(encoding.ids.len(), max_len);
         assert_eq!(encoding.ids[max_len - 1], tokenizer.sep_token_id);
 
-        // Verify attention mask
         if let Some(attn) = &encoding.attention_mask {
             assert_eq!(attn.len(), max_len);
-            assert!(attn[max_len - 1] == 1); // last token is SEP
+            assert!(attn[max_len - 1] == 1); 
         }
 
         Ok(())
@@ -258,8 +238,6 @@ mod tests {
 
         assert_eq!(encodings.len(), 2);
 
-        // Encoding 0: "hello" -> [CLS, hello, SEP, PAD, PAD]
-        // IDs: [0, 4, 1, 2, 2]
         let e0 = &encodings[0];
         assert_eq!(e0.ids[0], 0); // CLS
         assert_eq!(e0.ids[1], 4); // hello
@@ -267,8 +245,6 @@ mod tests {
         assert_eq!(e0.ids[3], 2); // PAD
         assert_eq!(e0.ids[4], 2); // PAD
 
-        // Encoding 1: "world" -> [CLS, world, SEP, PAD, PAD]
-        // IDs: [0, 5, 1, 2, 2]
         let e1 = &encodings[1];
         assert_eq!(e1.ids[0], 0);
         assert_eq!(e1.ids[1], 5);

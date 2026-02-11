@@ -10,10 +10,6 @@ use crate::{
     WgpuContext,
 };
 
-
-// Helper Functions
-
-
 fn create_f32_layer() -> LinearLayer {
     let weights = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     LinearLayer::new_f32(weights, None)
@@ -54,10 +50,6 @@ fn make_input(batch: usize, inp: usize) -> Array2<f32> {
         ((b * 31 + i * 7) % 1000) as f32 * 0.001 - 0.5
     })
 }
-
-
-// Original Tests
-
 
 #[test]
 fn test_matmul_f32_basic() {
@@ -331,10 +323,6 @@ fn test_matmul_noalloc_faer_fallback() {
     assert!(output.iter().any(|&x| x != 0.0));
 }
 
-
-// matmul() Strategy Tests
-
-
 #[test]
 fn test_matmul_f32_decode_path() {
     let layer = make_f32_layer_with_bias(64, 32);
@@ -420,10 +408,6 @@ fn test_matmul_f16_panics() {
     let _ = layer.matmul(&input.view());
 }
 
-
-// weights_view() / weights_slice() Tests
-
-
 #[test]
 fn test_weights_view_f32() {
     let layer = make_f32_layer(64, 32);
@@ -465,10 +449,6 @@ fn test_weights_slice_bf16_returns_none_for_f32() {
     let layer = make_f32_layer(64, 32);
     assert!(layer.weights_slice_bf16().is_none());
 }
-
-
-// to_quantized() Tests
-
 
 #[test]
 fn test_to_quantized_f32_to_q8_0() {
@@ -513,10 +493,6 @@ fn test_to_quantized_q8_0_to_q8_0_fails() {
 
     assert!(result.is_err());
 }
-
-
-// Dimension Tests with Different Strategies
-
 
 #[test]
 fn test_out_features_faer_strategy() {
@@ -649,9 +625,6 @@ fn test_from_arc_q8_0() {
 }
 
 
-// Quantized Matmul Accuracy Tests
-
-
 #[test]
 fn test_q8_0_matmul_accuracy() {
     let f32_layer = make_f32_layer(64, 32);
@@ -669,17 +642,12 @@ fn test_q8_0_matmul_accuracy() {
         }
     }
     
-    // Q8_0 quantization typically has 5-10% relative error
-    // This is expected behavior for 8-bit block quantization
     assert!(
         max_rel_error < 0.10, 
         "Max relative error too high: {:.4} (expected < 10%)", 
         max_rel_error
     );
 }
-
-
-// Clone Test
 
 
 #[test]

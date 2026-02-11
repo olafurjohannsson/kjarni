@@ -1,8 +1,7 @@
-// Allow this module to be used by other tests, but not compiled into the final library.
 #![allow(dead_code)]
 
 use crate::WgpuContext;
-use crate::gpu::GpuTensor; // Adjust path as needed
+use crate::gpu::GpuTensor; 
 use anyhow::Result;
 use ndarray::{Array, Array2, Array3, Array4, Dimension, Ix2, Ix3, Ix4};
 use std::sync::Arc;
@@ -28,7 +27,6 @@ pub async fn read_gpu_tensor<D: Dimension>(tensor: &GpuTensor) -> Result<Array<f
     Ok(Array::from_shape_vec(shape, data_slice.to_vec())?.into_dimensionality::<D>()?)
 }
 
-/// A crucial helper function to compare CPU and GPU tensors with a tolerance.
 pub async fn assert_tensors_are_close_4d(
     cpu_tensor: &Array4<f32>,
     gpu_tensor: &GpuTensor,
@@ -42,7 +40,6 @@ pub async fn assert_tensors_are_close_4d(
         .all(|(a, b)| (a - b).abs() < tolerance);
 
     if !close {
-        // For smaller tensors, you can print the whole thing
         println!("CPU tensor: \n{:?}", cpu_tensor);
         println!("GPU tensor: \n{:?}", gpu_as_cpu);
         panic!(
@@ -52,7 +49,6 @@ pub async fn assert_tensors_are_close_4d(
     }
 }
 
-/// A crucial helper function to compare CPU and GPU tensors with a tolerance.
 pub async fn assert_tensors_are_close_2d(
     cpu_tensor: &Array2<f32>,
     gpu_tensor: &GpuTensor,
@@ -61,10 +57,8 @@ pub async fn assert_tensors_are_close_2d(
 ) {
     let gpu_as_cpu = read_gpu_tensor::<Ix2>(gpu_tensor).await.unwrap();
 
-    // Calculate the absolute differences for all elements
     let diffs = (cpu_tensor - &gpu_as_cpu).mapv(f32::abs);
 
-    // Find the maximum difference and its index
     let mut max_diff = 0.0;
     let mut max_diff_index = 0;
     
@@ -79,7 +73,6 @@ pub async fn assert_tensors_are_close_2d(
         println!("Mismatch in tensor '{}'", label);
         println!("Max difference: {} at flat index {}", max_diff, max_diff_index);
         
-        // Only print full tensors if they aren't massive to avoid spamming the logs
         if cpu_tensor.len() < 1000 {
             println!("CPU tensor: \n{:?}", cpu_tensor);
             println!("GPU tensor: \n{:?}", gpu_as_cpu);
@@ -149,7 +142,6 @@ pub fn assert_all_close_4d(a: &Array4<f32>, b: &Array4<f32>, tolerance: f32) {
     );
 }
 
-/// A test utility function to read any GpuTensor back to the CPU for verification.
 pub async fn read_gpu_tensor_to_vec<A>(tensor: &GpuTensor) -> Result<(Vec<A>, Vec<usize>)>
 where
     A: bytemuck::Pod + Copy,
@@ -184,11 +176,10 @@ where
 
     let data = buffer_slice.get_mapped_range();
     let result_slice: &[A] = bytemuck::cast_slice(&data);
-    let result_vec = result_slice.to_vec(); // Convert to an owned Vec
+    let result_vec = result_slice.to_vec();
 
     drop(data);
     staging_buffer.unmap();
 
-    // Return the flat data and the shape
     Ok((result_vec, tensor.shape().to_vec()))
 }

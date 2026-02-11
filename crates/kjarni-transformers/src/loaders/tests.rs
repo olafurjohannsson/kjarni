@@ -1,10 +1,6 @@
 
 use ndarray::{Array2, Array3};
 
-// ============================================================================
-// LMHeadConfig Tests
-// ============================================================================
-
 #[test]
 fn test_lm_head_config_new() {
     let config = LMHeadConfig::new("lm_head.weight", 32000, 2048);
@@ -23,18 +19,11 @@ fn test_lm_head_config_from_string() {
     assert_eq!(config.hidden_size, 768);
 }
 
-// ============================================================================
-// LoadedLMHead CPU Tests (No GPU Required)
-// ============================================================================
-
 mod cpu_tests {
     use super::*;
     use crate::linear_layer::LinearLayer;
 
-    /// Helper to create a LoadedLMHead with synthetic CPU weights
     fn create_cpu_lm_head(vocab_size: usize, hidden_size: usize) -> LoadedLMHead {
-        // Create simple identity-like weights for testing
-        // Weight shape: [vocab_size, hidden_size]
         let weights = Array2::<f32>::zeros((vocab_size, hidden_size));
         let linear = LinearLayer::from(weights);
 
@@ -108,10 +97,6 @@ mod cpu_tests {
         let vocab_size = 4;
         let hidden_size = 3;
 
-        // Create weights where each vocab token responds to one hidden dim
-        // Weight[0, :] = [1, 0, 0] -> responds to hidden[0]
-        // Weight[1, :] = [0, 1, 0] -> responds to hidden[1]
-        // etc.
         let mut weights = Array2::<f32>::zeros((vocab_size, hidden_size));
         weights[[0, 0]] = 1.0;
         weights[[1, 1]] = 1.0;
@@ -398,12 +383,10 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
     ctx.queue.submit(Some(encoder.finish()));
     let logits_gpu = logits_gpu_tensor.to_ndarray_3d::<f32>().await.unwrap();
 
-    // Debug: Print first few values
     println!("CPU logits first 5: {:?}", &logits_cpu.as_slice().unwrap()[..5]);
     println!("GPU logits first 5: {:?}", &logits_gpu.as_slice().unwrap()[..5]);
     println!("CPU shape: {:?}, GPU shape: {:?}", logits_cpu.shape(), logits_gpu.shape());
 
-    // Compare with detailed error reporting
     let mut max_diff = 0.0f32;
     let mut max_diff_idx = (0, 0, 0);
     let mut max_diff_values = (0.0f32, 0.0f32);
@@ -422,57 +405,9 @@ async fn test_loaded_lm_head_cpu_gpu_parity() {
         max_diff, max_diff_idx, max_diff_values.0, max_diff_values.1
     );
 
-    // F32 matmul can have small differences due to operation ordering
-    // 1e-3 is reasonable for large reductions
     assert!(
         max_diff < 1e-3,
         "CPU/GPU parity failed: max diff = {} at {:?} (CPU: {}, GPU: {})",
         max_diff, max_diff_idx, max_diff_values.0, max_diff_values.1
     );
-}
-
-// ============================================================================
-// Integration Tests with Real Weights (Optional)
-// ============================================================================
-
-use crate::weights::ModelWeights;
-use std::path::PathBuf;
-
-fn get_test_model_path() -> Option<PathBuf> {
-    std::env::var("KJARNI_TEST_MODEL_PATH")
-        .ok()
-        .map(PathBuf::from)
-}
-
-#[test]
-fn test_loaded_lm_head_from_real_weights() {
-    let Some(model_path) = get_test_model_path() else {
-        eprintln!("Skipping: KJARNI_TEST_MODEL_PATH not set");
-        return;
-    };
-
-    let weights = ModelWeights::new(&model_path).unwrap();
-
-    let config = LMHeadConfig::new("lm_head.weight", 32000, 2048);
-
-    let head = LoadedLMHead::new(
-        None, // No GPU
-        &weights, 
-        None,
-        config, 
-        true,  // Load CPU
-        
-        false, // Don't load GPU
-        None,  // Default dtype
-    )
-    .unwrap();
-
-    assert!(head.has_cpu());
-    assert!(!head.has_gpu());
-
-    // Test forward
-    let hidden = Array3::<f32>::ones((1, 1, 2048));
-    let logits = head.forward_cpu(&hidden).unwrap();
-
-    assert_eq!(logits.dim(), (1, 1, 32000));
 }

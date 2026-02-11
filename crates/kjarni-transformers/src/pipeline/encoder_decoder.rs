@@ -11,14 +11,6 @@ use ndarray::Array2;
 use std::sync::Arc;
 
 /// A container that holds all components needed for encoder decoder inference.
-///
-/// This provides:
-/// - Unified access to embeddings, encoder, decoder layers, and LM head
-/// - ExecutionPlan for configuring where each stage runs
-/// - Validation that components match the plan
-///
-/// The actual inference is still handled by the existing backends
-/// through the `*Ops` traits that the model implements.
 pub struct EncoderDecoderPipeline {
     // Core components
     encoder_embeddings: Option<LoadedEmbeddings>,
@@ -98,17 +90,11 @@ impl EncoderDecoderPipeline {
         Ok(pipeline)
     }
 
-    // ========================================================================
-    // Plan Management
-    // ========================================================================
-
     pub fn plan(&self) -> &ExecutionPlan {
         &self.plan
     }
 
     /// Update the execution plan.
-    ///
-    /// Returns an error if the new plan requires components that aren't loaded.
     pub fn set_plan(&mut self, plan: ExecutionPlan) -> Result<()> {
         self.validate_plan(&plan)?;
         self.plan = plan;
@@ -177,10 +163,6 @@ impl EncoderDecoderPipeline {
         Ok(())
     }
 
-    // ========================================================================
-    // Component Accessors
-    // ========================================================================
-
     pub fn encoder_embeddings(&self) -> Option<&LoadedEmbeddings> {
         self.encoder_embeddings.as_ref()
     }
@@ -221,10 +203,6 @@ impl EncoderDecoderPipeline {
         self.context.as_ref()
     }
 
-    // ========================================================================
-    // Metadata
-    // ========================================================================
-
     pub fn num_layers(&self) -> usize {
         self.num_layers
     }
@@ -236,10 +214,6 @@ impl EncoderDecoderPipeline {
     pub fn vocab_size(&self) -> usize {
         self.vocab_size
     }
-
-    // ========================================================================
-    // Convenience Methods for Ops Implementation
-    // ========================================================================
 
     /// Get the active decoder based on the current plan.
     pub fn active_cpu_decoder(&self) -> Result<&dyn CpuCrossDecoder> {

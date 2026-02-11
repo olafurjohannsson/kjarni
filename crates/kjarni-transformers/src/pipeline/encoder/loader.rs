@@ -10,16 +10,9 @@ use crate::{Device, ModelType, WgpuContext, cpu::encoder::{
 use anyhow::{anyhow, Result};
 
 
-// Encoder Model Factory
-
-
-/// Factory trait for encoder-based models.
-///
-/// Implement this for SentenceEncoder, SequenceClassifier, and CrossEncoder
-/// to get automatic loading from registry and pretrained paths.
 /// Factory trait for encoder-based models.
 pub trait EncoderModelFactory: Sized {
-    /// Load the model config from weights (auto-detects config type).
+    /// Load the model config from weights
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>>;
     
     /// Build the encoder backend(s).
@@ -32,7 +25,7 @@ pub trait EncoderModelFactory: Sized {
         device: Device,
     ) -> Result<(Option<Box<dyn CpuEncoder>>, Option<Box<dyn GpuEncoder>>)>;
     
-    /// Build the classification head (None for SentenceEncoder).
+    /// Build the classification head
     fn build_head(
         weights: &ModelWeights,
         load_config: &ModelLoadConfig,
@@ -53,9 +46,6 @@ pub trait EncoderModelFactory: Sized {
         model_type: Option<ModelType>,
     ) -> Self;
 }
-
-
-// Generic Encoder Loader
 
 
 pub struct EncoderLoader;
@@ -101,12 +91,12 @@ impl EncoderLoader {
         let weights = ModelWeights::new(model_path)?;
         let load_config = load_config.unwrap_or_default();
         
-        // 1. Load model-specific config
+        // Load model-specific config
         let config = M::load_config(&weights)?;
         let meta = config.metadata();
         let layout = config.layout();
         
-        // 2. Load tokenizer
+        // Load tokenizer
         let tokenizer_path = model_path.join("tokenizer.json");
         if !tokenizer_path.exists() {
             return Err(anyhow!("Tokenizer not found at {:?}", tokenizer_path));
@@ -124,7 +114,7 @@ impl EncoderLoader {
             ..Default::default()
         }));
         
-        // 3. Build backends
+        // Build backends
         let (cpu_encoder, gpu_encoder) = M::build_backends(
             &weights,
             &meta,
@@ -134,10 +124,10 @@ impl EncoderLoader {
             device,
         )?;
         
-        // 4. Build head (if any)
+        // Build head (if any)
         let cpu_head = M::build_head(&weights, &load_config)?;
         
-        // 5. Build pipeline
+        // Build pipeline
         let pipeline = EncoderPipelineBuilder::new(&weights, config.clone())
             .with_load_config(load_config)
             .with_backends(cpu_encoder, gpu_encoder)
@@ -146,7 +136,7 @@ impl EncoderLoader {
             .with_context(context)
             .build()?;
         
-        // 6. Construct the model
+        // Construct the model
         Ok(M::new_from_pipeline(pipeline, tokenizer, config, model_type))
     }
 }

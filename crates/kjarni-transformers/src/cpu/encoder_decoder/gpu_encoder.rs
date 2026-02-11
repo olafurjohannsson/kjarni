@@ -686,6 +686,7 @@ mod seq2seq_gpu_encoder_tests {
                 is_prenorm: self.is_prenorm,
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
+                problem_type: None,
                 normalization_strategy: NormalizationStrategy::LayerNorm,
                 no_scale_qk: false,
             }

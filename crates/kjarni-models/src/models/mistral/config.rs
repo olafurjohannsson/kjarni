@@ -183,6 +183,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             no_scale_qk: false,
             decoder_layers: None,
             intermediate_size: self.intermediate_size(),
+            problem_type: None,
         }
     }
 

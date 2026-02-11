@@ -40,6 +40,29 @@ namespace Kjarni
 
         public override string ToString()
             => $"{Label} ({Score * 100:F1}%)";
+        public string ToJson(bool pretty = true)
+        {
+            var predictions = string.Join(",\n      ",
+                AllScores.Select(s =>
+                    $"{{\"label\": \"{s.Label}\", \"score\": {s.Score:F4}}}"));
+
+            var json = $"{{\"label\": \"{Label}\", \"score\": {Score:F4}, \"predictions\": [\n      {predictions}\n    ]}}";
+
+            return pretty ? json : json.Replace("\n", "").Replace("  ", "");
+        }
+
+        public string ToDetailedString()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var (label, score) in AllScores)
+            {
+                var barLen = (int)(score * 40);
+                var bar = new string('█', barLen);
+                sb.AppendLine($"  {label,16}  {score * 100,6:F2}%  {bar}");
+            }
+            return sb.ToString();
+        }
+
     }
 
     /// <summary>

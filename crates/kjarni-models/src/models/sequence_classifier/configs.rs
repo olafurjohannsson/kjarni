@@ -78,7 +78,7 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             activation: match self.hidden_act.as_str() {
                 "gelu" => Activation::Gelu,
                 "gelu_new" => Activation::GeluNew,
-                _ => Activation::Gelu, // BERT default
+                _ => Activation::Gelu,
             },
             decoder_layers: None,
             rope_theta: None,
@@ -87,9 +87,10 @@ impl ModelConfig for MiniLMCrossEncoderConfig {
             scale_embeddings: false,
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: false,            // BERT uses Post-Norm
-            transpose_ffn_weights: false, // true, // MiniLM quirk
+            is_prenorm: false,           
+            transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
         }
@@ -229,6 +230,7 @@ fn as_any(&self) -> &dyn std::any::Any {
             is_prenorm: false, 
             transpose_ffn_weights: false,
             transpose_attention_weights: false,
+            problem_type: None,
             normalization_strategy: NormalizationStrategy::LayerNorm,
             no_scale_qk: false,
         }

@@ -2,7 +2,7 @@
 //!
 //! Transformer inference for Rust.
 //!
-//! **Author:** Ólafur Aron <olafurjohannss@gmail.com>  
+//! **Author:** Ólafur Aron Jóhannsson <olafurjohannss@gmail.com>  
 //! **License:** MIT OR Apache-2.0
 
 pub mod activations;
@@ -73,7 +73,6 @@ pub use gpu_ops::context::WgpuContext;
 pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
 
-/// Commonly used types for convenience imports.
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache};
     pub use crate::gpu::cache::{GpuKVCache, GpuBeamKVCache};

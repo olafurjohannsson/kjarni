@@ -11,13 +11,8 @@ use crate::{
 use super::*;
 use std::path::PathBuf;
 
-// =========================================================================
-//  Metadata Tests
-// =========================================================================
-
 #[test]
 fn test_model_info_retrieval() {
-    // Test a specific model (Llama 3.2 1B)
     let model = ModelType::Llama3_2_1B_Instruct;
     let info = model.info();
 
@@ -36,7 +31,6 @@ fn test_embedding_model_info() {
 
     assert_eq!(info.architecture, ModelArchitecture::Bert);
     assert_eq!(info.task, ModelTask::Embedding);
-    // Embeddings usually don't have GGUF by default in this registry
     assert!(info.paths.gguf_url.is_none());
 }
 
@@ -66,10 +60,6 @@ fn test_model_input_from_2d_array() {
     assert_eq!(input.seq_len(), 2);
 }
 
-// ========================================================================
-//  ModelLoadConfig Tests
-// ========================================================================
-
 #[test]
 fn test_config_defaults() {
     let config = ModelLoadConfig::default();
@@ -83,7 +73,6 @@ fn test_config_offload_embeddings() {
     let config = ModelLoadConfig::set_offload_embeddings();
     assert!(config.offload_embeddings);
 
-    // Test chainable builder
     let config2 = ModelLoadConfig::default().with_offload_embeddings(true);
     assert!(config2.offload_embeddings);
 }
@@ -113,10 +102,6 @@ fn test_config_prealloc() {
     assert_eq!(config.max_sequence_length, Some(2048));
 }
 
-// ========================================================================
-//  RopeScalingConfig Tests
-// ========================================================================
-
 #[test]
 fn test_rope_scaling_serialization() {
     let config = RopeScalingConfig {
@@ -127,7 +112,6 @@ fn test_rope_scaling_serialization() {
         rope_type: "llama3".to_string(),
     };
 
-    // Verify it can serialize/deserialize (common source of bugs in config loading)
     let json = serde_json::to_string(&config).unwrap();
     let deserialized: RopeScalingConfig = serde_json::from_str(&json).unwrap();
 
@@ -136,11 +120,10 @@ fn test_rope_scaling_serialization() {
 
 #[test]
 fn test_autoregressive_loop_variants() {
-    // Just ensuring the enum exists and derives work
     let l1 = AutoregressiveLoop::Pipelined;
     let l2 = AutoregressiveLoop::Legacy;
     assert_ne!(l1, l2);
-    let _copy = l1; // Test Copy trait
+    let _copy = l1;
 }
 #[test]
 fn test_seq2seq_model_info() {
@@ -150,10 +133,6 @@ fn test_seq2seq_model_info() {
     assert_eq!(info.architecture, ModelArchitecture::T5);
     assert_eq!(info.task, ModelTask::Seq2Seq);
 }
-
-// =========================================================================
-//  Helper Method Tests
-// =========================================================================
 
 #[test]
 fn test_is_instruct_model() {
@@ -202,13 +181,8 @@ fn test_repo_id_extraction() {
     assert_eq!(bert.repo_id(), "sentence-transformers/all-MiniLM-L6-v2");
 }
 
-// =========================================================================
-//  Search & Lookup Tests
-// =========================================================================
-
 #[test]
 fn test_from_cli_name() {
-    // 1. Update the input string to match the full registry name
     assert_eq!(
         ModelType::from_cli_name("llama3.2-1b-instruct"), 
         Some(ModelType::Llama3_2_1B_Instruct)
@@ -219,7 +193,6 @@ fn test_from_cli_name() {
         Some(ModelType::MiniLML6V2)
     );
 
-    // 2. Update the case-insensitivity check
     assert_eq!(
         ModelType::from_cli_name("Llama3.2-1B-Instruct"),
         Some(ModelType::Llama3_2_1B_Instruct)
@@ -230,15 +203,10 @@ fn test_from_cli_name() {
 
 #[test]
 fn test_find_similar() {
-    // 1. Update the query to be closer to the target length 
-    // "lama3.2" (7 chars) is too far from "llama3.2-1b-instruct" (20 chars) 
-    // for standard fuzzy matching thresholds. 
-    // Using "lama3.2-instruct" ensures the levenshtein distance is small enough.
     let suggestions = ModelType::find_similar("lama3.2-instruct");
     
     assert!(!suggestions.is_empty(), "Should find suggestions for typo");
     
-    // 2. Update expectation to check for the actual registry names
     assert!(
         suggestions
             .iter()
@@ -248,12 +216,10 @@ fn test_find_similar() {
 
 #[test]
 fn test_search_functionality() {
-    // Search by name substring
     let results = ModelType::search("nomic");
     assert!(!results.is_empty());
     assert_eq!(results[0].0, ModelType::NomicEmbedText);
 
-    // Search by description keyword (e.g., "reasoning")
     let results = ModelType::search("reasoning");
     assert!(
         results
@@ -261,11 +227,6 @@ fn test_search_functionality() {
             .any(|(m, _)| *m == ModelType::Phi3_5_Mini_Instruct)
     );
 }
-
-// =========================================================================
-//  Formatting Utility Tests
-// =========================================================================
-
 #[test]
 fn test_format_params() {
     assert_eq!(format_params(500), "500M");
@@ -281,10 +242,6 @@ fn test_format_size() {
     assert_eq!(format_size(16000), "16.0 GB");
 }
 
-// =========================================================================
-//  Path & Cache Tests
-// =========================================================================
-
 #[test]
 fn test_cache_directory_structure() {
     let base_dir = PathBuf::from("/tmp/cache");
@@ -292,27 +249,19 @@ fn test_cache_directory_structure() {
 
     let model_dir = model.cache_dir(&base_dir);
 
-    // Should replace '/' with '_' in repo ID
-    // meta-llama/Llama-3.2-1B-Instruct -> meta-llama_Llama-3.2-1B-Instruct
     let expected = base_dir.join("meta-llama_Llama-3.2-1B-Instruct");
     assert_eq!(model_dir, expected);
 }
 
 #[test]
 fn test_get_default_cache_dir() {
-    // Just verify it doesn't panic and returns a valid path
     let path = get_default_cache_dir();
     assert!(path.is_absolute());
 
-    // On Linux/Mac it usually ends with 'kjarni'
     if cfg!(unix) {
         assert!(path.to_string_lossy().contains("kjarni"));
     }
 }
-
-// =========================================================================
-//  Architecture Tests
-// =========================================================================
 
 #[test]
 fn test_architecture_categories() {

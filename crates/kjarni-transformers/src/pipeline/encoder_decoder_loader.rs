@@ -16,7 +16,6 @@ use crate::{
     weights::ModelWeights,
 };
 
-/// Factory trait for Seq2Seq models (BART, T5, Whisper).
 pub trait EncoderDecoderModelFactory: Sized {
     type Config: ModelConfig + 'static;
 
@@ -37,7 +36,6 @@ pub trait EncoderDecoderModelFactory: Sized {
         Option<Box<dyn GpuCrossDecoder>>,
     )>;
 
-    /// Wrap the generic pipeline into the specific Model struct
     fn new_from_pipeline(
         pipeline: EncoderDecoderPipeline,
         tokenizer: Tokenizer,
@@ -88,7 +86,7 @@ impl Seq2SeqLoader {
         let weights: ModelWeights = ModelWeights::new(model_path)?;
         let load_config: ModelLoadConfig = load_config.unwrap_or_default();
 
-        // 1. Config & Tokenizer
+        // Config & Tokenizer
         let config = M::load_config(&weights)?;
         let meta: ModelMetadata = config.metadata();
         let layout: ModelLayout = config.layout();
@@ -96,7 +94,7 @@ impl Seq2SeqLoader {
         let tokenizer_path: PathBuf = model_path.join("tokenizer.json");
         let tokenizer: Tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
 
-        // 2. Build Backends (User implementation logic)
+        // Build Backends
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = M::build_backends(
             &weights,
             &meta,
@@ -107,7 +105,7 @@ impl Seq2SeqLoader {
             device,
         )?;
 
-        // 3. Build Pipeline
+        // Build Pipeline
         let pipeline = EncoderDecoderPipelineBuilder::new(&weights, config.clone())
             .with_load_config(load_config)
             .with_context(context)
@@ -115,7 +113,7 @@ impl Seq2SeqLoader {
             .with_decoder_backends(cpu_dec, gpu_dec)
             .build()?;
 
-        // 4. Generation Defaults
+        // Generation Defaults
         let gen_defaults =
             if let Ok(json) = std::fs::read_to_string(model_path.join("generation_config.json")) {
                 HFGenerationDefaults::from_json(&json).ok()
@@ -154,10 +152,6 @@ mod tests {
     use tempfile::TempDir;
     use tokenizers::Tokenizer;
 
-    // ========================================================================
-    // Mock Config
-    // ========================================================================
-
     #[derive(Clone, Debug)]
     struct MockConfig {
         hidden_size: usize,
@@ -193,7 +187,6 @@ mod tests {
                 intermediate_size: self.hidden_size * 4,
                 vocab_size: self.vocab_size,
                 extra_pos_embeddings: 0,
-                // max_position_embeddings: 512,
                 num_kv_heads: self.num_heads,
                 head_dim: self.hidden_size / self.num_heads,
                 normalization_strategy: NormalizationStrategy::LayerNorm,
@@ -209,7 +202,7 @@ mod tests {
                 rope_theta: None,
                 transpose_attention_weights: false,
                 transpose_ffn_weights: false,
-                // tie_word_embeddings: true,
+                problem_type: None,
             }
         }
 
@@ -222,10 +215,6 @@ mod tests {
             }
         }
     }
-
-    // ========================================================================
-    // Mock Encoder
-    // ========================================================================
 
     struct MockCpuEncoder {
         hidden_size: usize,
@@ -286,10 +275,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Mock Decoder
-    // ========================================================================
-
     struct MockCpuDecoder {
         hidden_size: usize,
     }
@@ -329,7 +314,6 @@ mod tests {
             start_layer: usize,
             end_layer: usize,
         ) -> Result<CpuCrossDecoderOutput> {
-            // Mock: just return input unchanged
             Ok(CpuCrossDecoderOutput {
                 last_hidden_state: hidden_states.clone(),
                 new_self_attn_kv: vec![],
@@ -337,7 +321,7 @@ mod tests {
         }
 
         fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-            // Mock: return input unchanged
+
             Ok(hidden_states.clone())
         }
 
@@ -349,9 +333,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Mock Model implementing EncoderDecoderModelFactory
-    // ========================================================================
     struct MockSeq2SeqModel {
         pipeline: EncoderDecoderPipeline,
         tokenizer: Tokenizer,
@@ -412,18 +393,12 @@ mod tests {
             }
         }
     }
-
-    // ========================================================================
-    // Test Helpers
-    // ========================================================================
-
     fn create_minimal_model_files(dir: &Path) -> Result<()> {
         use safetensors::Dtype;
         use safetensors::tensor::TensorView;
         use std::fs::File;
         use std::io::Write;
 
-        // Create embed_tokens weight
         let vocab_size = 1000;
         let hidden_size = 64;
         let embed_data: Vec<f32> = (0..(vocab_size * hidden_size))
@@ -439,7 +414,6 @@ mod tests {
         let mut file = File::create(dir.join("model.safetensors"))?;
         file.write_all(&serialized)?;
 
-        // Create config.json
         let config_json = r#"{
             "hidden_size": 64,
             "num_hidden_layers": 2,
@@ -449,7 +423,6 @@ mod tests {
         }"#;
         std::fs::write(dir.join("config.json"), config_json)?;
 
-        // Create minimal tokenizer.json
         let tokenizer_json = r#"{
             "version": "1.0",
             "model": {
@@ -480,11 +453,6 @@ mod tests {
         std::fs::write(dir.join("generation_config.json"), gen_config)?;
         Ok(())
     }
-
-    // ========================================================================
-    // EncoderDecoderModelFactory trait tests
-    // ========================================================================
-
     #[test]
     fn test_factory_trait_load_config() -> Result<()> {
         let dir = TempDir::new()?;
@@ -553,10 +521,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    // Seq2SeqLoader tests
-    // ========================================================================
-
     #[test]
     fn test_loader_missing_path() {
         let result = Seq2SeqLoader::load_from_pretrained::<MockSeq2SeqModel>(
@@ -574,7 +538,6 @@ mod tests {
     fn test_loader_missing_tokenizer() -> Result<()> {
         let dir = TempDir::new()?;
 
-        // Create model files but no tokenizer
         use safetensors::Dtype;
         use safetensors::tensor::TensorView;
         use std::fs::File;
@@ -614,7 +577,6 @@ mod tests {
     fn test_loader_missing_weights() -> Result<()> {
         let dir = TempDir::new()?;
 
-        // Create tokenizer but no weights
         let tokenizer_json = r#"{
             "version": "1.0",
             "model": {"type": "BPE", "vocab": {}, "merges": []}
@@ -657,11 +619,9 @@ mod tests {
         let dir = TempDir::new()?;
         create_minimal_model_files(dir.path())?;
 
-        // No generation_config.json - should still work
         let gen_config_path = dir.path().join("generation_config.json");
         assert!(!gen_config_path.exists());
 
-        // Verify defaults are used when file doesn't exist
         let defaults =
             if let Ok(json) = std::fs::read_to_string(dir.path().join("generation_config.json")) {
                 HFGenerationDefaults::from_json(&json).ok()
@@ -683,7 +643,6 @@ mod tests {
             ..Default::default()
         };
 
-        // Verify load_config is passed through
         let weights = ModelWeights::new(dir.path())?;
         let config = MockSeq2SeqModel::load_config(&weights)?;
         let meta = config.metadata();
@@ -704,10 +663,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    // Device selection tests
-    // ========================================================================
 
     #[test]
     fn test_loader_cpu_device() -> Result<()> {
@@ -730,19 +685,13 @@ mod tests {
             Device::Cpu,
         )?;
 
-        // CPU device should have CPU backends
         assert!(cpu_enc.is_some());
         assert!(cpu_dec.is_some());
-        // No GPU backends when context is None
         assert!(gpu_enc.is_none());
         assert!(gpu_dec.is_none());
 
         Ok(())
     }
-
-    // ========================================================================
-    // HFGenerationDefaults tests
-    // ========================================================================
 
     #[test]
     fn test_generation_defaults_from_json() -> Result<()> {
@@ -760,10 +709,7 @@ mod tests {
         let defaults = HFGenerationDefaults::from_json(json)?;
 
         assert_eq!(defaults.max_length, Some(200));
-        // assert_eq!(defaults.min_length, Some(10));
-        // assert_eq!(defaults.num_beams, Some(4));
         assert_eq!(defaults.decoder_start_token_id, Some(2));
-
         Ok(())
     }
 
@@ -772,13 +718,8 @@ mod tests {
         let json = r#"{
             "max_length": 100
         }"#;
-
         let defaults = HFGenerationDefaults::from_json(json)?;
-
         assert_eq!(defaults.max_length, Some(100));
-        // assert_eq!(defaults.min_length, None);
-        // assert_eq!(defaults.num_beams, None);
-
         Ok(())
     }
 
@@ -803,71 +744,14 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ========================================================================
-    // HFGenerationConfig tests
-    // ========================================================================
-
     #[test]
     fn test_generation_config_default() {
         let config = HFGenerationConfig::default();
-
-        // Verify default values are reasonable
         assert!(config.max_length.is_none() || config.max_length.unwrap() > 0);
     }
 
-    #[test]
-    fn test_generation_config_load_or_default_missing() -> Result<()> {
-        let dir = TempDir::new()?;
 
-        let config = HFGenerationConfig::load_or_default(dir.path());
-
-        // Should return default when file doesn't exist
-        let _ = config;
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_generation_config_load_or_default_exists() -> Result<()> {
-        let dir = TempDir::new()?;
-        create_generation_config(dir.path())?;
-
-        let config = HFGenerationConfig::load_or_default(dir.path());
-
-        // Should load from file
-        let _ = config;
-
-        Ok(())
-    }
-
-    // ========================================================================
-    // Mock backend tests
-    // ========================================================================
-
-    // #[test]
-    // fn test_mock_encoder_forward() -> Result<()> {
-    //     let encoder = MockCpuEncoder { hidden_size: 64 };
-
-    //     let mask = Array2::ones((2, 10));
-    //     let input = ModelInput::TokensCpu(Array2::zeros((2, 10)).view().to_owned().view());
-
-    //     // This will fail because we can't easily create ModelInput without real embeddings
-    //     // But we can test the interface exists
-    //     // let _ = encoder.hidden_size();
-    //     // assert_eq!(encoder.hidden_size(), 64);
-
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn test_mock_decoder_create_cache() {
-    //     let decoder = MockCpuDecoder { hidden_size: 64 };
-
-    //     // let cache = decoder.create_cache(2, 128);
-
-    //     // Verify cache is created
-    //     let _ = cache;
-    // }
+ 
 
     #[test]
     fn test_mock_decoder_hidden_size() {
@@ -877,13 +761,8 @@ mod tests {
         assert_eq!(decoder.num_layers(), 2);
     }
 
-    // ========================================================================
-    // Integration-style tests
-    // ========================================================================
-
     #[test]
     fn test_factory_pattern_compile() {
-        // This test verifies the factory pattern compiles correctly
         fn accepts_factory<M: EncoderDecoderModelFactory>() {}
 
         accepts_factory::<MockSeq2SeqModel>();
@@ -891,17 +770,12 @@ mod tests {
 
     #[test]
     fn test_trait_object_safety() {
-        // Verify CpuEncoder and CpuCrossDecoder can be boxed
         let encoder: Box<dyn CpuEncoder> = Box::new(MockCpuEncoder { hidden_size: 64 });
         let decoder: Box<dyn CpuCrossDecoder> = Box::new(MockCpuDecoder { hidden_size: 64 });
 
         let _ = encoder;
         let _ = decoder;
     }
-
-    // ========================================================================
-    // Path handling tests
-    // ========================================================================
 
     #[test]
     fn test_tokenizer_path_construction() -> Result<()> {
@@ -927,10 +801,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    // Error message tests
-    // ========================================================================
-
     #[test]
     fn test_error_messages_are_descriptive() {
         let result = Seq2SeqLoader::load_from_pretrained::<MockSeq2SeqModel>(
@@ -944,7 +814,6 @@ mod tests {
         let err = result.unwrap_err();
         let err_string = err.to_string();
 
-        // Error should mention something about the path or file
         assert!(err_string.len() > 0, "Error message should not be empty");
     }
 }

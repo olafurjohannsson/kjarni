@@ -515,6 +515,7 @@ mod tests {
                 is_prenorm: false,
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
+                problem_type: None,
                 normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
                 no_scale_qk: false,
             };
@@ -591,6 +592,7 @@ mod tests {
                 is_prenorm: false, // Legacy style post-norm
                 transpose_ffn_weights: false,
                 transpose_attention_weights: false,
+                problem_type: None,
                 normalization_strategy: crate::traits::NormalizationStrategy::LayerNorm,
                 no_scale_qk: false,
             }

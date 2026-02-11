@@ -94,21 +94,22 @@ fn as_any(&self) -> &dyn std::any::Any {
             num_layers: self.num_layers,
             num_attention_heads: self.num_heads,
             num_kv_heads: self.num_heads,
-            head_dim: self.d_kv, // T5 explicit head dim
+            head_dim: self.d_kv,
             vocab_size: self.vocab_size,
-            max_seq_len: 2048, // T5 uses relative positions, theoretically infinite, but practical limit needed
+            max_seq_len: 2048, 
             norm_eps: self.layer_norm_epsilon,
             activation,
             rope_theta: None,
             rope_scaling: None,
-            scale_embeddings: false, // T5 does not scale embeddings
+            scale_embeddings: false, 
             normalize_embedding: false,
             extra_pos_embeddings: 0,
-            is_prenorm: true,             // T5 is Pre-Norm
-            transpose_ffn_weights: false, // T5 weights are [out, in] in HF, usually
+            is_prenorm: true,             
+            transpose_ffn_weights: false, 
             transpose_attention_weights: false,
-            normalization_strategy: NormalizationStrategy::RMSNorm, // T5LayerNorm is effectively RMSNorm
+            normalization_strategy: NormalizationStrategy::RMSNorm,
             no_scale_qk: true,
+            problem_type: None,
             decoder_layers: self.num_decoder_layers,
             intermediate_size: 0,
         }
@@ -117,7 +118,6 @@ fn as_any(&self) -> &dyn std::any::Any {
     fn layout(&self) -> ModelLayout {
         let is_gated = self.is_gated();
 
-        // Helper to build FFN layout correctly
         let build_ffn_layout = |prefix: &str| {
             if is_gated {
                 FeedForwardLayout {

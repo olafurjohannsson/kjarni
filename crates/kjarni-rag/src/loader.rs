@@ -85,6 +85,7 @@ impl DocumentLoader {
     /// Load chunks from a single file
     pub fn load_file(&self, path: &Path) -> Result<Vec<Chunk>> {
         let content = fs::read_to_string(path)?;
+        
         eprintln!("Splitting file: {} (Size: {} bytes)", path.display(), content.len());
         let texts = self.splitter.split(&content);
         eprintln!("  -> Generated {} chunks", texts.len());
