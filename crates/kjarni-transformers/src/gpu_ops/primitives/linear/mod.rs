@@ -19,7 +19,7 @@ pub struct GpuLinearLayer {
     // Pipelines
     gemv_f32: wgpu::ComputePipeline,
     gemv_bf16: wgpu::ComputePipeline,
-    gemv_bf16_wide: wgpu::ComputePipeline, // <--- NEW
+    gemv_bf16_wide: wgpu::ComputePipeline,
     bmm_f32: wgpu::ComputePipeline,
     bmm_bf16: wgpu::ComputePipeline,
 
@@ -121,7 +121,7 @@ impl GpuLinearLayer {
             bind_group_layout: Arc::new(bind_group_layout),
             gemv_f32: make_pipeline("gemv_f32"),
             gemv_bf16: make_pipeline("gemv_bf16"),
-            gemv_bf16_wide: make_pipeline("gemv_bf16_wide"), // <--- Load new kernel
+            gemv_bf16_wide: make_pipeline("gemv_bf16_wide"),
             bmm_f32: make_pipeline("bmm_f32"),
             bmm_bf16: make_pipeline("bmm_bf16"),
             buffer,

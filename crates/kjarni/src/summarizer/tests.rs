@@ -563,7 +563,6 @@ mod error_handling_tests {
     }
     #[tokio::test]
     async fn test_t5_model_can_summarize() {
-        // PyTorch reference: greedy decoding with max_new_tokens=64
         const EXPECTED_SUMMARY: &str = "Eiffel Tower";
 
         let summarizer = Summarizer::new("flan-t5-base")
@@ -573,10 +572,10 @@ mod error_handling_tests {
         let text = "The Eiffel Tower is a wrought-iron lattice tower in Paris, France. \
                 It was constructed from 1887 to 1889 as the entrance arch for the 1889 World's Fair.";
 
-        // Use explicit greedy config matching PyTorch
         let overrides = Seq2SeqOverrides {
             max_length: Some(64),
             num_beams: Some(1),
+            min_length: Some(0),
             ..Default::default()
         };
 
@@ -592,8 +591,6 @@ mod error_handling_tests {
         );
     }
 }
-
-// Integration Tests - Accessors
 
 #[cfg(test)]
 mod accessor_tests {

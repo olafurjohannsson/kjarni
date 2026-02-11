@@ -390,7 +390,6 @@ mod embeddings_tests {
         let mut encoder = context.device.create_command_encoder(&Default::default());
         let mut pool = GpuTensorPool::new(context.clone());
 
-        // Pass ModelInput::TokensGpu for both
         let result = loaded.embed(
             &mut encoder,
             &mut pool,
@@ -402,39 +401,28 @@ mod embeddings_tests {
         context.queue.submit(Some(encoder.finish()));
         let output = result.to_ndarray_3d::<f32>().await?;
 
-        // 1.0 (Word) + 5.0 (Type) = 6.0
         assert_eq!(output[[0, 0, 0]], 6.0);
         Ok(())
     }
 
-    // Scenario 6: Pure CPU Execution (Decoder Backend Use Case)
-    // This tests the `embed_cpu` method specifically used by CpuDecoderBackend
     #[tokio::test]
     async fn test_scenario_pure_cpu_backend() -> Result<()> {
-        // Note: No WgpuContext needed!
         let (_dir, weights) = create_dummy_weights(vec![("w", vec![7.0; 100], vec![100, 1])]);
         let config = EmbeddingConfig::builder("w", 1).build();
 
-        // Load CPU only
         let loaded = LoadedEmbeddings::new(None, &weights, config, true, false, None)?;
 
         let input_tokens = arr2(&[[0u32, 1]]);
-
-        // Direct CPU call (no command encoder needed)
         let output = loaded.embed_cpu(&input_tokens, None, 0)?;
 
         assert_eq!(output[[0, 0, 0]], 7.0);
         Ok(())
     }
-    // Scenario 5: Full BERT Parity (GPU vs CPU)
-    // Verifies complex logic (Word + Pos + Type) matches on both devices
     #[tokio::test]
     async fn test_gpu_cpu_parity_bert() -> Result<()> {
         let context = WgpuContext::new().await?;
         let hidden = 32;
         let vocab = 50;
-
-        // Create random-ish data
         let word_data: Vec<f32> = (0..vocab * hidden).map(|i| (i as f32) * 0.01).collect();
         let type_data = vec![0.5f32; 2 * hidden];
 
@@ -453,10 +441,8 @@ mod embeddings_tests {
         let input_ids = arr2(&[[1u32, 5]]);
         let type_ids = arr2(&[[0u32, 1]]);
 
-        // 1. Run CPU
         let cpu_out = loaded.embed_cpu(&input_ids, Some(&type_ids), 0)?;
 
-        // 2. Run GPU
         let mut encoder = context.device.create_command_encoder(&Default::default());
         let mut pool = GpuTensorPool::new(context.clone());
 
@@ -470,18 +456,13 @@ mod embeddings_tests {
 
         context.queue.submit(Some(encoder.finish()));
         let gpu_out = gpu_tensor.to_ndarray_3d::<f32>().await?;
-
-        // 3. Compare
         assert_tensors_are_close(&cpu_out, &gpu_out, 1e-5);
         Ok(())
     }
     #[test]
     fn test_q8_0_lifecycle_correctness() {
-        // 1. Setup: Create known F32 weights
-        let hidden_size = 32; // Must be multiple of 32 for Q8_0
+        let hidden_size = 32; 
         let vocab_size = 4;
-
-        // Create a pattern: Token 0 = 1.0, Token 1 = 2.0, etc.
         let mut word_data = Vec::new();
         for i in 0..vocab_size {
             word_data.extend(vec![i as f32; hidden_size]);
@@ -493,33 +474,23 @@ mod embeddings_tests {
             vec![vocab_size, hidden_size],
         )]);
 
-        // 2. Load: Request Q8_0 quantization
         let embeddings = Embeddings::from_weights(
             &weights,
             "q8.weight",
             None,
             None,
-            Some(DType::Q8_0), // <--- Force Q8_0
+            Some(DType::Q8_0), 
         )
         .expect("Failed to load/quantize Q8_0");
 
-        // 3. Verify Internal Storage (Optional reflection check)
         match embeddings.word_embeddings {
             EmbeddingData::Q8_0(_) => println!("Confirmed loaded as Q8_0"),
             _ => panic!("Failed to load as Q8_0"),
         }
-
-        // 4. Run Forward (Triggers dequantization)
         let input_ids = arr2(&[[0u32, 1, 3]]); // Skip 2
         let output = embeddings.forward(&input_ids, None, 0, false);
-
-        // 5. Assert Values
-        // Q8_0 is lossy but precise for simple integers like 1.0, 2.0
-        // Token 0 -> 0.0
         assert!((output[[0, 0, 0]] - 0.0).abs() < 1e-2);
-        // Token 1 -> 1.0
         assert!((output[[0, 1, 0]] - 1.0).abs() < 1e-2);
-        // Token 3 -> 3.0
         assert!((output[[0, 2, 0]] - 3.0).abs() < 1e-2);
     }
 

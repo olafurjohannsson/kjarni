@@ -1,5 +1,3 @@
-//! Comprehensive tests for the Translator module.
-
 use super::*;
 use futures::StreamExt;
 

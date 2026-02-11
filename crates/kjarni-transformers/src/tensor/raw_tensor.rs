@@ -8,8 +8,7 @@ use std::borrow::Cow;
 /// This is the primary output of a file loader before any CPU/GPU-specific processing.
 /// 
 /// Important to note is that TensorView borrows and is only valid while
-/// mmap pages are alive and loader is alive
-/// IMPORTANT: The view must be fully consumed synchronously
+/// mmap pages are alive and loader is alive, the view must be fully consumed synchronously
 #[derive(Debug)] 
 pub(crate) struct TensorView<'a> {
     pub name: String,

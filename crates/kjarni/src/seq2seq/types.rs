@@ -54,9 +54,6 @@ pub enum Seq2SeqError {
 pub type Seq2SeqResult<T> = Result<T, Seq2SeqError>;
 
 
-// Generated Token
-
-
 /// A single token from streaming generation.
 #[derive(Debug, Clone)]
 pub struct Seq2SeqToken {
@@ -66,18 +63,12 @@ pub struct Seq2SeqToken {
     /// The token ID.
     pub id: u32,
 
-    /// Whether this is a special token (EOS, PAD, etc.).
+    /// Whether this is a special token (EOS, PAD, etc.)
     pub is_special: bool,
 }
 
 
-// Overrides
-
-
-/// User-specified overrides for seq2seq generation.
-///
-/// All fields are optional. `None` means "use model default".
-/// Only set values the user explicitly requests - the model already has good defaults.
+/// User-specified overrides for seq2seq generation
 #[derive(Debug, Clone, Default)]
 pub struct Seq2SeqOverrides {
     /// Minimum output length in tokens.

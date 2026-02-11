@@ -1,5 +1,4 @@
 /// A uniform struct to pass metadata about the tensor size.
-/// This prevents the shader from accessing memory out of bounds.
 struct AddUniforms {
     size: u32,
 };
@@ -21,7 +20,6 @@ struct AddUniforms {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
 
-    // Boundary check to ensure memory safety.
     if (idx >= uniforms.size) {
         return;
     }

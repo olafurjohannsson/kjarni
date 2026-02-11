@@ -95,11 +95,8 @@ pub fn sample_token(mut logits: Array1<f32>, strategy: &DecodingStrategy) -> Res
                 logits = top_p_filtering(logits, p);
             }
             if let Some(mp) = params.min_p {
-                logits = min_p_filtering(logits, mp); // <--- NEW
+                logits = min_p_filtering(logits, mp);
             }
-
-            // Temperature must be applied BEFORE softmax
-            // Guard against div by zero
             let temp = if params.temperature < 1e-5 {
                 1.0
             } else {

@@ -45,17 +45,6 @@ pub fn set_last_error(msg: impl Into<String>) {
         *e.borrow_mut() = CString::new(msg).ok();
     });
 }
-
-// pub fn map_internal_result<T>(
-//     result: Result<T, crate::error::KjarniError>,
-// ) -> Result<T, KjarniErrorCode> {
-//     result.map_err(|e| {
-//         set_last_error(e.to_string());
-//         KjarniErrorCode::from(e)
-//     })
-// }
-
-
 /// Map a Result to KjarniError, setting the error message if Err.
 pub fn map_result<T, E: std::fmt::Display>(result: Result<T, E>, err_code: KjarniErrorCode) -> Result<T, KjarniErrorCode> {
     result.map_err(|e| {

@@ -294,9 +294,6 @@ impl LanguageModel for T5Model {
         self.config.metadata().max_seq_len
     }
 
-    // fn forced_eos_token_id(&self) -> Option<u32> {
-    //     Some(self.config.eos_token_id)
-    // }
     fn forced_eos_token_id(&self) -> Option<u32> {
         self.generation_config.forced_eos_token_id
     }
@@ -304,10 +301,6 @@ impl LanguageModel for T5Model {
     fn pad_token_id(&self) -> Option<u32> {
         self.generation_config.pad_token_id.or(Some(0))
     }
-
-    // fn pad_token_id(&self) -> Option<u32> {
-    //     Some(self.config.pad_token_id)
-    // }
 
     fn vocab_size(&self) -> usize {
         self.config.vocab_size
@@ -325,9 +318,6 @@ impl LanguageModel for T5Model {
         self.config.num_layers
     }
 
-    // fn eos_token_id(&self) -> Option<u32> {
-    //     Some(self.config.eos_token_id)
-    // }
     fn eos_token_id(&self) -> Option<u32> {
         self.generation_config
             .eos_token_id
@@ -396,8 +386,6 @@ impl CpuEncoderDecoderOps for T5Model {
             .embed_cpu(input_ids, None, position_offset)
     }
     fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
-        // Creates a triangular matrix where 1.0 is allowed and 0.0 is masked
-        // This prevents the decoder from "looking ahead"
         Some(kjarni_transformers::utils::create_causal_mask(
             seq_len, past_len,
         ))
@@ -509,9 +497,6 @@ impl EncoderDecoderLanguageModel for T5Model {
         }
     }
 
-    // fn decoder_start_token_id(&self) -> u32 {
-    //     self.config.decoder_start_token_id
-    // }
     fn decoder_start_token_id(&self) -> u32 {
         self.generation_config.decoder_start_token_id.unwrap_or(0)
     }

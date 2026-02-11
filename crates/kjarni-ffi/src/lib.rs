@@ -1,6 +1,4 @@
-//! Kjarni FFI - C bindings for Kjarni ML library
-//!
-//! This crate provides C-compatible bindings for use from C, C++, C#, Go, Python, etc.
+//! Kjarni FFI - C bindings for Kjarni
 mod callback;
 mod error;
 mod embedder;
@@ -32,25 +30,14 @@ pub(crate) fn get_runtime() -> &'static Runtime {
     })
 }
 
-
-// Global Functions
-
-
 /// Initialize the Kjarni runtime. Optional - auto-initialized on first use.
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_init() -> KjarniErrorCode {
-    // 1. Initialize Rayon Global Thread Pool (Compute)
-    // We explicitly set this to physical cores to maximize AVX/SIMD throughput.
-    // This fixes the issue where Rayon defaults to 1 thread when loaded inside Python.
     let physical_cores = num_cpus::get_physical();
-    
-    // build_global() returns an Err if the pool is already initialized.
-    // We intentionally ignore the error because it means we are good to go.
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(physical_cores)
         .build_global();
 
-    // 2. Initialize Tokio Runtime (Async/IO)
     let _ = get_runtime();
 
     KjarniErrorCode::Ok
@@ -67,10 +54,6 @@ pub extern "C" fn kjarni_version() -> *const std::ffi::c_char {
     static VERSION: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
     VERSION.as_ptr() as *const std::ffi::c_char
 }
-
-
-// Memory Management - Common Types
-
 
 /// Float array returned by FFI functions. Caller must free with kjarni_float_array_free.
 #[repr(C)]
@@ -202,10 +185,6 @@ pub unsafe extern "C" fn kjarni_cosine_similarity(
     let b = std::slice::from_raw_parts(b, len);
     cosine_similarity(a, b)
 }
-
-
-// Unit Tests
-
 
 #[cfg(test)]
 mod ffi_bridge_tests {
@@ -346,14 +325,13 @@ mod ffi_bridge_tests {
         
         let slice = unsafe { std::slice::from_raw_parts(arr.data, arr.len) };
         
-        // Check non-NaN values
         assert_eq!(slice[0], 0.0);
         assert_eq!(slice[2], f32::MIN);
         assert_eq!(slice[3], f32::MAX);
         assert_eq!(slice[4], f32::MIN_POSITIVE);
         assert_eq!(slice[5], f32::INFINITY);
         assert_eq!(slice[6], f32::NEG_INFINITY);
-        assert!(slice[7].is_nan()); // NaN != NaN, so use is_nan()
+        assert!(slice[7].is_nan());
         
         unsafe { kjarni_float_array_free(arr); }
     }
@@ -371,7 +349,6 @@ mod ffi_bridge_tests {
 
     #[test]
     fn test_float_array_free_null_pointer() {
-        // Should not crash when freeing null
         let arr = KjarniFloatArray {
             data: std::ptr::null_mut(),
             len: 0,

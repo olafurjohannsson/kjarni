@@ -1,19 +1,4 @@
 //! Indexer FFI bindings
-//!
-//! This module provides C-compatible bindings for the Kjarni indexer functionality.
-//! The indexer allows creating and managing vector indexes for RAG (Retrieval Augmented Generation)
-//! applications.
-//!
-//! # Architecture
-//!
-//! The FFI layer is intentionally thin:
-//! - Simple functions (`kjarni_indexer_create`, `kjarni_indexer_add`) call the Rust API directly
-//! - Callback functions (`kjarni_indexer_create_with_callback`, etc.) wrap FFI callbacks and pass them through
-//!
-//! # Thread Safety
-//!
-//! All functions are thread-safe. The underlying Indexer uses async operations
-//! which are executed on a shared Tokio runtime.
 
 use crate::callback::{
     KjarniCancelToken, KjarniProgress, KjarniProgressCallbackFn, KjarniProgressStage, is_cancelled,
@@ -26,13 +11,6 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
 
-// FFI Structures
-
-
-/// Statistics returned after indexing operations.
-///
-/// This struct is returned by `kjarni_indexer_create` and contains
-/// information about what was indexed and how long it took.
 #[repr(C)]
 pub struct KjarniIndexStats {
     /// Number of document chunks indexed (after splitting)
@@ -65,10 +43,7 @@ impl From<IndexStats> for KjarniIndexStats {
     }
 }
 
-/// Information about an existing index.
-///
-/// Retrieved via `kjarni_index_info`. The caller must free this struct
-/// using `kjarni_index_info_free` to avoid memory leaks.
+/// Information about an existing index
 #[repr(C)]
 pub struct KjarniIndexInfo {
     /// Path to the index directory (must be freed)
@@ -105,11 +80,7 @@ impl KjarniIndexInfo {
     }
 }
 
-/// Free memory allocated for index info strings.
-///
-/// # Safety
-///
-/// Must only be called once per `KjarniIndexInfo` returned from `kjarni_index_info`.
+/// Free memory allocated for index info strings
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
     if !info.path.is_null() {
@@ -120,10 +91,7 @@ pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
     }
 }
 
-/// Configuration for creating an Indexer.
-///
-/// Use `kjarni_indexer_config_default()` to get sensible defaults,
-/// then modify fields as needed before passing to `kjarni_indexer_new()`.
+/// Configuration for creating an Indexer
 #[repr(C)]
 pub struct KjarniIndexerConfig {
     /// Device to run embeddings on (CPU or GPU)
@@ -152,16 +120,7 @@ pub struct KjarniIndexerConfig {
     pub quiet: i32,
 }
 
-/// Get default indexer configuration.
-///
-/// Returns a configuration with sensible defaults:
-/// - CPU device
-/// - minilm-l6-v2 model
-/// - 512 character chunks with 50 character overlap
-/// - 32 batch size
-/// - 10MB max file size
-/// - Recursive directory traversal
-/// - Hidden files excluded
+/// Get default indexer configuration
 #[unsafe(no_mangle)]
 pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     KjarniIndexerConfig {
@@ -180,33 +139,14 @@ pub extern "C" fn kjarni_indexer_config_default() -> KjarniIndexerConfig {
     }
 }
 
-
-// Indexer Handle
-
-
 /// Opaque handle to an Indexer instance.
 ///
-/// Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`.
+/// Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`
 pub struct KjarniIndexer {
     inner: Indexer,
 }
 
-/// Create a new Indexer.
-///
-/// # Arguments
-///
-/// * `config` - Configuration options (NULL for defaults)
-/// * `out` - Pointer to receive the created indexer handle
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, error code otherwise.
-/// On error, call `kjarni_last_error_message()` for details.
-///
-/// # Safety
-///
-/// - `out` must be a valid pointer
-/// - The returned handle must be freed with `kjarni_indexer_free`
+/// Create a new Indexer
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
@@ -302,22 +242,13 @@ pub unsafe extern "C" fn kjarni_indexer_new(
     }
 }
 
-/// Free an Indexer handle.
-///
-/// # Safety
-///
-/// - `indexer` must be a handle returned by `kjarni_indexer_new`
-/// - Must not be called more than once per handle
-/// - Handle must not be used after freeing
+/// Free an Indexer handle
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
     if !indexer.is_null() {
         let _ = Box::from_raw(indexer);
     }
 }
-
-
-// Helper Functions
 
 
 /// Convert Rust ProgressStage to FFI KjarniProgressStage
@@ -447,14 +378,11 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     };
 
     // Create progress callback closure
-    // We always create a closure to avoid generic type inference issues
-    // The closure checks internally if the FFI callback is present
     let on_progress =
         move |stage: ProgressStage, current: usize, total: usize, msg: Option<&str>| {
             if let Some(callback) = progress_callback {
                 let ffi_stage = convert_stage(stage);
 
-                // Convert message to C string (temporary, valid for callback duration)
                 let msg_cstring = msg.and_then(|s| CString::new(s).ok());
                 let msg_ptr = msg_cstring
                     .as_ref()
@@ -505,7 +433,6 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
         }
     }
 }
-
 
 
 /// Add documents to an existing index 

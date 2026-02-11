@@ -168,8 +168,6 @@ pub struct KjarniSearcher {
     inner: Searcher,
 }
 
-/// # Safety
-/// - `out` must be a valid pointer
 /// - The returned handle must be freed with `kjarni_searcher_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_new(
@@ -181,8 +179,6 @@ pub unsafe extern "C" fn kjarni_searcher_new(
     }
 
     let default_config = kjarni_searcher_config_default();
-    // SAFETY: We check for null above, and the caller guarantees config points to valid memory
-    // if non-null. We only read from config, never write.
     let config = unsafe {
         if config.is_null() {
             &default_config
@@ -193,7 +189,6 @@ pub unsafe extern "C" fn kjarni_searcher_new(
 
     let result = get_runtime().block_on(async {
         let model_name = if !config.model_name.is_null() {
-            // SAFETY: Caller guarantees model_name is a valid null-terminated C string if non-null
             match unsafe { CStr::from_ptr(config.model_name) }.to_str() {
                 Ok(s) => s,
                 Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
@@ -210,7 +205,6 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         }
 
         if !config.cache_dir.is_null() {
-            // SAFETY: Caller guarantees cache_dir is a valid null-terminated C string if non-null
             match unsafe { CStr::from_ptr(config.cache_dir) }.to_str() {
                 Ok(s) => builder = builder.cache_dir(s),
                 Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
@@ -218,7 +212,6 @@ pub unsafe extern "C" fn kjarni_searcher_new(
         }
 
         if !config.rerank_model.is_null() {
-            // SAFETY: Caller guarantees rerank_model is a valid null-terminated C string if non-null
             match unsafe { CStr::from_ptr(config.rerank_model) }.to_str() {
                 Ok(s) => builder = builder.reranker(s),
                 Err(_) => return Err(KjarniErrorCode::InvalidUtf8),
@@ -242,7 +235,6 @@ pub unsafe extern "C" fn kjarni_searcher_new(
     match result {
         Ok(searcher) => {
             let handle = Box::new(KjarniSearcher { inner: searcher });
-            // SAFETY: out is non-null (checked above) and caller guarantees it's valid for writes
             unsafe { *out = Box::into_raw(handle) };
             KjarniErrorCode::Ok
         }
@@ -250,21 +242,15 @@ pub unsafe extern "C" fn kjarni_searcher_new(
     }
 }
 
-/// # Safety
-/// - `searcher` must be a handle returned by `kjarni_searcher_new`
-/// - Must not be called more than once per handle
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_free(searcher: *mut KjarniSearcher) {
     if !searcher.is_null() {
-        // SAFETY: Caller guarantees searcher was returned by kjarni_searcher_new (via Box::into_raw)
-        // and this is the only call to free it
         unsafe {
             let _ = Box::from_raw(searcher);
         }
     }
 }
 
-/// # Safety
 /// All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_search(
@@ -274,11 +260,9 @@ pub unsafe extern "C" fn kjarni_searcher_search(
     out: *mut KjarniSearchResults,
 ) -> KjarniErrorCode {
     let options = kjarni_search_options_default();
-    // SAFETY: We're forwarding to search_with_options with the same safety requirements
     unsafe { kjarni_searcher_search_with_options(searcher, index_path, query, &options, out) }
 }
 
-/// # Safety
 /// All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_search_with_options(
@@ -292,16 +276,12 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
         return KjarniErrorCode::NullPointer;
     }
 
-    // SAFETY: searcher is non-null and caller guarantees it's a valid KjarniSearcher from kjarni_searcher_new
     let searcher_ref = unsafe { &(*searcher).inner };
-
-    // SAFETY: index_path is non-null and caller guarantees it's a valid null-terminated C string
     let index_path = match unsafe { CStr::from_ptr(index_path) }.to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    // SAFETY: query is non-null and caller guarantees it's a valid null-terminated C string
     let query = match unsafe { CStr::from_ptr(query) }.to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
@@ -310,7 +290,6 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
     let mut search_opts = SearchOptions::default();
 
     if !options.is_null() {
-        // SAFETY: options is non-null and caller guarantees it points to valid KjarniSearchOptions
         let opts = unsafe { &*options };
 
         if opts.mode >= 0 {
@@ -337,7 +316,6 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
         let mut has_filter = false;
 
         if !opts.source_pattern.is_null() {
-            // SAFETY: source_pattern is non-null and caller guarantees valid C string
             if let Ok(s) = unsafe { CStr::from_ptr(opts.source_pattern) }.to_str() {
                 filter = filter.source(s);
                 has_filter = true;
@@ -345,7 +323,6 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
         }
 
         if !opts.filter_key.is_null() && !opts.filter_value.is_null() {
-            // SAFETY: filter_key and filter_value are non-null and caller guarantees valid C strings
             if let (Ok(k), Ok(v)) = (
                 unsafe { CStr::from_ptr(opts.filter_key) }.to_str(),
                 unsafe { CStr::from_ptr(opts.filter_value) }.to_str(),
@@ -368,13 +345,11 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
 
     match result {
         Ok(results) => {
-            // SAFETY: out is non-null (checked above) and caller guarantees valid for writes
             unsafe { *out = KjarniSearchResults::from_results(results) };
             KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
-            // SAFETY: out is non-null (checked above) and caller guarantees valid for writes
             unsafe { *out = KjarniSearchResults::empty() };
             match e {
                 SearcherError::IndexNotFound(_) => KjarniErrorCode::ModelNotFound,
@@ -385,7 +360,6 @@ pub unsafe extern "C" fn kjarni_searcher_search_with_options(
     }
 }
 
-/// # Safety
 /// All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_search_keywords(
@@ -398,13 +372,11 @@ pub unsafe extern "C" fn kjarni_search_keywords(
         return KjarniErrorCode::NullPointer;
     }
 
-    // SAFETY: index_path is non-null and caller guarantees valid null-terminated C string
     let index_path = match unsafe { CStr::from_ptr(index_path) }.to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
     };
 
-    // SAFETY: query is non-null and caller guarantees valid null-terminated C string
     let query = match unsafe { CStr::from_ptr(query) }.to_str() {
         Ok(s) => s,
         Err(_) => return KjarniErrorCode::InvalidUtf8,
@@ -412,31 +384,26 @@ pub unsafe extern "C" fn kjarni_search_keywords(
 
     match Searcher::search_keywords(index_path, query, top_k) {
         Ok(results) => {
-            // SAFETY: out is non-null (checked above) and caller guarantees valid for writes
             unsafe { *out = KjarniSearchResults::from_results(results) };
             KjarniErrorCode::Ok
         }
         Err(e) => {
             set_last_error(e.to_string());
-            // SAFETY: out is non-null (checked above) and caller guarantees valid for writes
             unsafe { *out = KjarniSearchResults::empty() };
             KjarniErrorCode::InferenceFailed
         }
     }
 }
 
-/// # Safety
 /// `searcher` must be a valid handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_has_reranker(searcher: *const KjarniSearcher) -> bool {
     if searcher.is_null() {
         return false;
     }
-    // SAFETY: searcher is non-null and caller guarantees it's a valid KjarniSearcher
     unsafe { (*searcher).inner.has_reranker() }
 }
 
-/// # Safety
 /// `searcher` must be a valid handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_default_mode(
@@ -445,28 +412,19 @@ pub unsafe extern "C" fn kjarni_searcher_default_mode(
     if searcher.is_null() {
         return KjarniSearchMode::Hybrid;
     }
-    // SAFETY: searcher is non-null and caller guarantees it's a valid KjarniSearcher
     unsafe { (*searcher).inner.default_mode().into() }
 }
 
-/// # Safety
 /// `searcher` must be a valid handle or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_default_top_k(searcher: *const KjarniSearcher) -> usize {
     if searcher.is_null() {
         return 10;
     }
-    // SAFETY: searcher is non-null and caller guarantees it's a valid KjarniSearcher
     unsafe { (*searcher).inner.default_top_k() }
 }
 
-/// Get searcher model name into caller-provided buffer.
-/// Returns the required buffer size (including null terminator).
-/// If buf is NULL or buf_len is 0, just returns required size.
-///
-/// # Safety
-/// - `searcher` must be a valid handle or null
-/// - `buf` must be valid for writes of `buf_len` bytes if non-null
+/// Get searcher model name into caller-provided buffer
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_model_name(
     searcher: *const KjarniSearcher,
@@ -498,14 +456,7 @@ pub unsafe extern "C" fn kjarni_searcher_model_name(
     required
 }
 
-/// Get reranker model name into caller-provided buffer.
-/// Returns the required buffer size (including null terminator).
-/// Returns 0 if no reranker is configured or searcher is null.
-/// If buf is NULL or buf_len is 0, just returns required size.
-///
-/// # Safety
-/// - `searcher` must be a valid handle or null
-/// - `buf` must be valid for writes of `buf_len` bytes if non-null
+/// Get reranker model name into caller-provided buffer
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_searcher_reranker_model(
     searcher: *const KjarniSearcher,

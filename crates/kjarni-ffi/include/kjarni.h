@@ -276,10 +276,7 @@ typedef struct KjarniKjarniRerankerConfig {
 } KjarniKjarniRerankerConfig;
 
 /**
- * Information about an existing index.
- *
- * Retrieved via `kjarni_index_info`. The caller must free this struct
- * using `kjarni_index_info_free` to avoid memory leaks.
+ * Information about an existing index
  */
 typedef struct KjarniKjarniIndexInfo {
   /**
@@ -309,10 +306,7 @@ typedef struct KjarniKjarniIndexInfo {
 } KjarniKjarniIndexInfo;
 
 /**
- * Configuration for creating an Indexer.
- *
- * Use `kjarni_indexer_config_default()` to get sensible defaults,
- * then modify fields as needed before passing to `kjarni_indexer_new()`.
+ * Configuration for creating an Indexer
  */
 typedef struct KjarniKjarniIndexerConfig {
   /**
@@ -366,10 +360,7 @@ typedef struct KjarniKjarniIndexerConfig {
 } KjarniKjarniIndexerConfig;
 
 /**
- * Statistics returned after indexing operations.
- *
- * This struct is returned by `kjarni_indexer_create` and contains
- * information about what was indexed and how long it took.
+ * Statistics returned after indexing operations
  */
 typedef struct KjarniKjarniIndexStats {
   /**
@@ -746,39 +737,12 @@ enum KjarniKjarniErrorCode kjarni_indexer_new(const struct KjarniKjarniIndexerCo
                                               struct KjarniKjarniIndexer **out);
 
 /**
- * Free an Indexer handle.
- *
- * # Safety
- *
- * - `indexer` must be a handle returned by `kjarni_indexer_new`
- * - Must not be called more than once per handle
- * - Handle must not be used after freeing
+ * Free an Indexer handle
  */
 kjarni_ void kjarni_indexer_free(struct KjarniKjarniIndexer *indexer);
 
 /**
- * Create a new index from files/directories (simple version).
- *
- * This is the simple API without progress callbacks. For progress reporting
- * and cancellation support, use `kjarni_indexer_create_with_callback`.
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle from `kjarni_indexer_new`
- * * `index_path` - Path where the index will be created
- * * `inputs` - Array of file/directory paths to index
- * * `num_inputs` - Number of elements in `inputs` array
- * * `force` - If non-zero, overwrite existing index at `index_path`
- * * `out` - Pointer to receive indexing statistics
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
- * # Safety
- *
- * - All pointers must be valid
- * - `inputs` must contain at least `num_inputs` valid C strings
+ * Create a new index from files/directories 
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_create(struct KjarniKjarniIndexer *indexer,
@@ -789,42 +753,7 @@ enum KjarniKjarniErrorCode kjarni_indexer_create(struct KjarniKjarniIndexer *ind
                                                  struct KjarniKjarniIndexStats *out);
 
 /**
- * Create a new index with progress callback and cancellation support.
- *
- * This is the full-featured API that supports:
- * - Progress reporting via callback
- * - Cancellation via cancel token
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle from `kjarni_indexer_new`
- * * `index_path` - Path where the index will be created
- * * `inputs` - Array of file/directory paths to index
- * * `num_inputs` - Number of elements in `inputs` array
- * * `force` - If non-zero, overwrite existing index at `index_path`
- * * `progress_callback` - Optional callback for progress updates (may be NULL)
- * * `user_data` - Opaque pointer passed to callback (may be NULL)
- * * `cancel_token` - Optional cancellation token (may be NULL)
- * * `out` - Pointer to receive indexing statistics
- *
- * # Callback
- *
- * The progress callback receives a `KjarniProgress` struct with:
- * - `stage`: Current operation (scanning, loading, embedding, etc.)
- * - `current`: Current item number
- * - `total`: Total items (may be 0 if unknown)
- * - `message`: Optional status message (may be NULL)
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
- * or other error code on failure.
- *
- * # Safety
- *
- * - All non-optional pointers must be valid
- * - `inputs` must contain at least `num_inputs` valid C strings
- * - Callback must be thread-safe if indexer uses multiple threads
+ * Create a new index with progress callback and cancellation support
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniKjarniIndexer *indexer,
@@ -838,28 +767,7 @@ enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniKjar
                                                                struct KjarniKjarniIndexStats *out);
 
 /**
- * Add documents to an existing index (simple version).
- *
- * This is the simple API without progress callbacks. For progress reporting
- * and cancellation support, use `kjarni_indexer_add_with_callback`.
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle from `kjarni_indexer_new`
- * * `index_path` - Path to existing index
- * * `inputs` - Array of file/directory paths to add
- * * `num_inputs` - Number of elements in `inputs` array
- * * `documents_added` - Pointer to receive count of documents added
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
- * # Safety
- *
- * - All pointers must be valid
- * - `inputs` must contain at least `num_inputs` valid C strings
- * - Index at `index_path` must exist and be compatible (same embedding dimension)
+ * Add documents to an existing index 
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_add(struct KjarniKjarniIndexer *indexer,
@@ -869,33 +777,7 @@ enum KjarniKjarniErrorCode kjarni_indexer_add(struct KjarniKjarniIndexer *indexe
                                               uintptr_t *documents_added);
 
 /**
- * Add documents to an existing index with progress callback and cancellation support.
- *
- * This is the full-featured API that supports:
- * - Progress reporting via callback
- * - Cancellation via cancel token
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle from `kjarni_indexer_new`
- * * `index_path` - Path to existing index
- * * `inputs` - Array of file/directory paths to add
- * * `num_inputs` - Number of elements in `inputs` array
- * * `progress_callback` - Optional callback for progress updates (may be NULL)
- * * `user_data` - Opaque pointer passed to callback (may be NULL)
- * * `cancel_token` - Optional cancellation token (may be NULL)
- * * `documents_added` - Pointer to receive count of documents added
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
- * or other error code on failure.
- *
- * # Safety
- *
- * - All non-optional pointers must be valid
- * - `inputs` must contain at least `num_inputs` valid C strings
- * - Index at `index_path` must exist and be compatible
+ * Add documents to an existing index with progress callback and cancellation support
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniKjarniIndexer *indexer,
@@ -908,64 +790,19 @@ enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniKjarniI
                                                             uintptr_t *documents_added);
 
 /**
- * Get information about an existing index.
- *
- * This is a static function that doesn't require an Indexer handle.
- *
- * # Arguments
- *
- * * `index_path` - Path to the index directory
- * * `out` - Pointer to receive index information
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
- * # Safety
- *
- * - All pointers must be valid
- * - Caller must free the returned `KjarniIndexInfo` with `kjarni_index_info_free`
+ * Get information about an existing index
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_index_info(const char *index_path,
                                              struct KjarniKjarniIndexInfo *out);
 
 /**
- * Delete an index.
- *
- * This permanently removes the index directory and all its contents.
- * This is a static function that doesn't require an Indexer handle.
- *
- * # Arguments
- *
- * * `index_path` - Path to the index directory to delete
- *
- * # Returns
- *
- * `KjarniErrorCode::Ok` on success, error code otherwise.
- *
- * # Safety
- *
- * - `index_path` must be a valid C string
+ * Delete an index
  */
 kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete(const char *index_path);
 
 /**
- * Get the embedding model name used by the indexer.
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle
- *
- * # Returns
- *
- * Pointer to model name string, or NULL if indexer is NULL.
- * The returned pointer is valid until the next call to this function.
- *
- * # Safety
- *
- * - `indexer` must be a valid handle or NULL
- * - Returned string must not be modified or freed
+ * Get the embedding model name used by the indexer
  */
 kjarni_
 uintptr_t kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer,
@@ -973,34 +810,16 @@ uintptr_t kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer,
                                     uintptr_t buf_len);
 
 /**
- * Get the embedding dimension used by the indexer.
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle
- *
- * # Returns
- *
- * Embedding dimension, or 0 if indexer is NULL.
+ * Get the embedding dimension used by the indexer
  */
 kjarni_ uintptr_t kjarni_indexer_dimension(const struct KjarniKjarniIndexer *indexer);
 
 /**
- * Get the chunk size configured for the indexer.
- *
- * # Arguments
- *
- * * `indexer` - Indexer handle
- *
- * # Returns
- *
- * Chunk size in characters, or 0 if indexer is NULL.
+ * Get the chunk size configured for the indexer
  */
 kjarni_ uintptr_t kjarni_indexer_chunk_size(const struct KjarniKjarniIndexer *indexer);
 
 /**
- * # Safety
- * Must only be called once per `KjarniSearchResults` returned from search functions.
  */
 kjarni_ void kjarni_search_results_free(struct KjarniKjarniSearchResults results);
 
@@ -1009,24 +828,16 @@ kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default(void);
 kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default(void);
 
 /**
- * # Safety
- * - `out` must be a valid pointer
- * - The returned handle must be freed with `kjarni_searcher_free`
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_searcher_new(const struct KjarniKjarniSearcherConfig *config,
                                                struct KjarniKjarniSearcher **out);
 
 /**
- * # Safety
- * - `searcher` must be a handle returned by `kjarni_searcher_new`
- * - Must not be called more than once per handle
  */
 kjarni_ void kjarni_searcher_free(struct KjarniKjarniSearcher *searcher);
 
 /**
- * # Safety
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *searcher,
@@ -1035,8 +846,6 @@ enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *s
                                                   struct KjarniKjarniSearchResults *out);
 
 /**
- * # Safety
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjarniSearcher *searcher,
@@ -1046,8 +855,6 @@ enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjar
                                                                struct KjarniKjarniSearchResults *out);
 
 /**
- * # Safety
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
 kjarni_
 enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
@@ -1056,32 +863,20 @@ enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
                                                   struct KjarniKjarniSearchResults *out);
 
 /**
- * # Safety
- * `searcher` must be a valid handle or null.
  */
 kjarni_ bool kjarni_searcher_has_reranker(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * # Safety
- * `searcher` must be a valid handle or null.
  */
 kjarni_
 enum KjarniKjarniSearchMode kjarni_searcher_default_mode(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * # Safety
- * `searcher` must be a valid handle or null.
  */
 kjarni_ uintptr_t kjarni_searcher_default_top_k(const struct KjarniKjarniSearcher *searcher);
 
 /**
- * Get searcher model name into caller-provided buffer.
- * Returns the required buffer size (including null terminator).
- * If buf is NULL or buf_len is 0, just returns required size.
- *
- * # Safety
- * - `searcher` must be a valid handle or null
- * - `buf` must be valid for writes of `buf_len` bytes if non-null
+ * Get searcher model name into caller-provided buffer
  */
 kjarni_
 uintptr_t kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher,
@@ -1089,14 +884,7 @@ uintptr_t kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher
                                      uintptr_t buf_len);
 
 /**
- * Get reranker model name into caller-provided buffer.
- * Returns the required buffer size (including null terminator).
- * Returns 0 if no reranker is configured or searcher is null.
- * If buf is NULL or buf_len is 0, just returns required size.
- *
- * # Safety
- * - `searcher` must be a valid handle or null
- * - `buf` must be valid for writes of `buf_len` bytes if non-null
+ * Get reranker model name into caller-provided buffer
  */
 kjarni_
 uintptr_t kjarni_searcher_reranker_model(const struct KjarniKjarniSearcher *searcher,

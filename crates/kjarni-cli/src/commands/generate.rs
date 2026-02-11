@@ -394,7 +394,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_large_max_tokens() {
         let config = build_generation_config(100_000, 0.7, None, None, None, 1.0, false);
