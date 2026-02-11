@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::feedforward::FeedForward;
 use crate::rope::RoPE;
@@ -10,10 +8,7 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// A generic encoder transformer layer supporting:
-/// - BERT, RoBERTa, BART (post-norm)
-/// - T5 encoder (pre-norm with relative position bias)
-/// - Any bidirectional encoder architecture
+/// A generic encoder transformer layer
 pub struct EncoderLayer {
     pub self_attn: EncoderSelfAttention,
     pub self_attn_layer_norm: Normalization,
@@ -48,11 +43,7 @@ impl EncoderLayer {
         }
     }
 
-    // Forward pass with pre-allocated buffers (no allocation in hot path).
-    ///
-    /// # Note
-    ///
-    /// Still allocates: RoPE, 4D attention matmuls, reshape/permute operations.
+    // Forward pass
     pub fn forward_noalloc(
         &self,
         hidden: &mut Array3<f32>,
@@ -80,14 +71,14 @@ impl EncoderLayer {
         let (batch, seq, hidden_dim) = hidden.dim();
         let tokens = batch * seq;
 
-        // 1. Pre-norm for attention
+        // Pre-norm for attention
         let normed = self.self_attn_layer_norm.forward(hidden);
 
-        // 2. Self attention (writes to buffers.attn_output)
+        // Self attention (writes to buffers.attn_output)
         self.self_attn
             .forward_noalloc(&normed, attention_mask, position_bias, rope, buffers)?;
 
-        // 3. Residual: hidden = hidden + attn_output
+        // Residual: hidden = hidden + attn_output
         {
             let attn_out_slice = buffers.attn_output.slice(s![..tokens, ..]);
             let hidden_flat = hidden.as_slice_mut().unwrap();
@@ -97,16 +88,16 @@ impl EncoderLayer {
             }
         }
 
-        // 4. Pre-norm for FFN
+        // Pre-norm for FFN
         let normed_ffn = self.ffn_layer_norm.forward(hidden);
         let normed_ffn_2d = normed_ffn
             .view()
             .into_shape_with_order((tokens, hidden_dim))?;
 
-        // 5. FFN (writes to buffers.ffn_output)
+        // FFN (writes to buffers.ffn_output)
         self.feedforward.forward_noalloc(&normed_ffn_2d, buffers);
 
-        // 6. Residual: hidden = hidden + ffn_output
+        // Residual: hidden = hidden + ffn_output
         {
             let ffn_out_slice = buffers.ffn_output.slice(s![..tokens, ..]);
             let hidden_flat = hidden.as_slice_mut().unwrap();
@@ -130,11 +121,11 @@ impl EncoderLayer {
         let (batch, seq, hidden_dim) = hidden.dim();
         let tokens = batch * seq;
 
-        // 1. Self attention (writes to buffers.attn_output)
+        // Self attention (writes to buffers.attn_output)
         self.self_attn
             .forward_noalloc(hidden, attention_mask, position_bias, rope, buffers)?;
 
-        // 2. Residual: hidden = hidden + attn_output
+        //  Residual: hidden = hidden + attn_output
         {
             let attn_out_slice = buffers.attn_output.slice(s![..tokens, ..]);
             let hidden_flat = hidden.as_slice_mut().unwrap();
@@ -144,7 +135,7 @@ impl EncoderLayer {
             }
         }
 
-        // 3. Layer norm (in-place via scratch buffer)
+        // Layer norm (in-place via scratch buffer)
         {
             let hidden_2d = hidden.view().into_shape_with_order((tokens, hidden_dim))?;
             let mut norm_scratch = buffers.norm_scratch.slice_mut(s![..tokens, ..hidden_dim]);
@@ -157,11 +148,11 @@ impl EncoderLayer {
             hidden_flat.copy_from_slice(norm_flat);
         }
 
-        // 4. FFN (uses normed hidden)
+        //  FFN (uses normed hidden)
         let hidden_2d = hidden.view().into_shape_with_order((tokens, hidden_dim))?;
         self.feedforward.forward_noalloc(&hidden_2d, buffers);
 
-        // 5. Residual: hidden = hidden + ffn_output
+        //  hidden = hidden + ffn_output
         {
             let ffn_out_slice = buffers.ffn_output.slice(s![..tokens, ..]);
             let hidden_flat = hidden.as_slice_mut().unwrap();
@@ -171,7 +162,7 @@ impl EncoderLayer {
             }
         }
 
-        // 6. Final layer norm (in-place via scratch buffer)
+        // Final layer norm
         {
             let hidden_2d = hidden.view().into_shape_with_order((tokens, hidden_dim))?;
             let mut norm_scratch = buffers.norm_scratch.slice_mut(s![..tokens, ..hidden_dim]);
@@ -188,13 +179,7 @@ impl EncoderLayer {
     }
 
  
-    /// Forward pass with configurable norm order
-    ///
-    /// # Arguments
-    /// * `hidden` - Input tensor [batch, seq, hidden]
-    /// * `attention_mask` - Padding mask [batch, seq], 0 = masked
-    /// * `position_bias` - Optional relative position bias [1, heads, seq, seq] (T5/ALiBi)
-    /// * `is_prenorm` - If true, use pre-norm (T5/GPT), else post-norm (BERT/BART)
+    /// Forward pass
     pub fn forward(
         &self,
         hidden: Array3<f32>,

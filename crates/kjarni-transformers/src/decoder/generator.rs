@@ -413,12 +413,8 @@ pub async fn generate_tokens(
 mod tests {
     use super::*;
     use crate::cache::Cache;
-    
-    use std::any::Any;
-    use std::collections::HashSet;
-    
 
- 
+    use std::any::Any;
     #[test]
     fn test_token_type_equality() {
         assert_eq!(TokenType::Prompt, TokenType::Prompt);
@@ -437,10 +433,6 @@ mod tests {
         assert!(debug_str.contains("hello"));
         assert!(debug_str.contains("42"));
     }
-
-    // ========================================================================
-    //  StreamedToken Tests
-    // ========================================================================
 
     #[test]
     fn test_streamed_token_creation() {
@@ -477,11 +469,6 @@ mod tests {
 
         assert_eq!(token.text, "こんにちは");
     }
-
-    // ========================================================================
-    //  TokenType Tests
-    // ========================================================================
-
     #[test]
     fn test_token_type_debug() {
         let prompt = TokenType::Prompt;
@@ -493,11 +480,6 @@ mod tests {
         assert!(prompt_debug.contains("Prompt"));
         assert!(generated_debug.contains("Generated"));
     }
-
-    // ========================================================================
-    //  Mock Infrastructure
-    // ========================================================================
-
     #[derive(Clone)]
     struct MockCache {
         len: usize,

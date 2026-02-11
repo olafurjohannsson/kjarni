@@ -382,7 +382,6 @@ mod decoder_pipeline_test {
 
             ModelLayout {
                 token_embedding: "token_embd.weight".to_string(),
-                // CRITICAL: If tied, point to same name as token_embedding
                 lm_head: if self.tied {
                     "token_embd.weight".to_string()
                 } else {

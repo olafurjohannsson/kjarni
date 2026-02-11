@@ -37,12 +37,10 @@ impl KjarniDevice {
         }
     }
 
-    /// Check if this is CPU.
     pub fn is_cpu(&self) -> bool {
         matches!(self.resolve(), Self::Cpu)
     }
 
-    /// Check if this is GPU.
     pub fn is_gpu(&self) -> bool {
         matches!(self.resolve(), Self::Gpu)
     }

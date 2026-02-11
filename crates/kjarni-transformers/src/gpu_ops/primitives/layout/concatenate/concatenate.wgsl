@@ -41,8 +41,6 @@ struct Uniforms {
 };
 @group(0) @binding(3) var<uniform> uniforms: Uniforms;
 
-// We launch enough threads to fill the entire output tensor.
-// The workgroup size can be tuned. 8x8x8 is a good generic start.
 @compute @workgroup_size(8, 8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // global_id represents the index in the OUTPUT tensor.
@@ -52,12 +50,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let i1 = global_id.z % uniforms.out_shape_1;
     let i0 = global_id.z / uniforms.out_shape_1;
 
-    // Bounds check to avoid writing out of the output tensor's range.
     if (i0 >= uniforms.out_shape_0 || i1 >= uniforms.out_shape_1 || i2 >= uniforms.out_shape_2 || i3 >= uniforms.out_shape_3) {
         return;
     }
 
-    // Calculate the linear index for the output tensor
     let out_idx = i0 * uniforms.out_stride_0 +
                   i1 * uniforms.out_stride_1 +
                   i2 * uniforms.out_stride_2 +
@@ -65,8 +61,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var src_idx: u32;
 
-    // This is the core logic: decide whether to read from tensor A or B.
-    // We check the index of the concatenation axis.
     var axis_idx: u32;
     if (uniforms.concat_axis == 0u) { axis_idx = i0; }
     else if (uniforms.concat_axis == 1u) { axis_idx = i1; }
@@ -74,16 +68,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     else { axis_idx = i3; }
 
     if (axis_idx < uniforms.a_shape_2) { // Using a_shape_2 as placeholder for concat axis size
-        // This thread corresponds to a position in tensor A.
-        // We use the same indices (i0, i1, i2, i3) to calculate the source index in A.
         src_idx = i0 * uniforms.a_stride_0 +
                   i1 * uniforms.a_stride_1 +
                   i2 * uniforms.a_stride_2 +
                   i3 * uniforms.a_stride_3;
         output[out_idx] = a[src_idx];
     } else {
-        // This thread corresponds to a position in tensor B.
-        // We must adjust the index for the concatenation axis before calculating the source index in B.
         var b_i0 = i0;
         var b_i1 = i1;
         var b_i2 = i2;

@@ -1,6 +1,4 @@
-//! Weight loading infrastructure for model files.
-//!
-//! Supports SafeTensors and GGUF formats with memory-mapped loading.
+//! Weight loading
 
 mod gguf_conversion;
 mod gguf_loader;
@@ -20,10 +18,7 @@ pub use mmap_cache::{clear_mmap_cache, mmap_cache_stats};
 pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
 pub use safetensors_loader::SafeTensorsLoader;
 
-/// Trait for loading model weights from various file formats.
-///
-/// Implementations handle format-specific details while providing a unified
-/// interface for weight access. Object-safe for use as `Box<dyn WeightLoader>`.
+/// Trait for loading model weights from various file formats
 pub trait WeightLoader: Send + Sync {
     /// Returns a raw tensor view by name.
     ///
@@ -67,10 +62,6 @@ mod more_tests {
     use std::collections::HashMap;
     use std::path::Path;
     use tempfile::TempDir;
-
-    // ========================================================================
-    // Mock WeightLoader for testing trait defaults
-    // ========================================================================
 
     struct MockWeightLoader {
         tensors: HashMap<String, Vec<f32>>,
@@ -124,7 +115,6 @@ mod more_tests {
     impl WeightLoader for MockWeightLoader {
         fn get_raw(&self, name: &str) -> Result<TensorView<'_>> {
             if self.tensors.contains_key(name) {
-                // For testing, we'll return an error since we can't easily create TensorView
                 anyhow::bail!("Mock: use contains() to check existence")
             } else {
                 anyhow::bail!("Tensor '{}' not found", name)
@@ -155,10 +145,6 @@ mod more_tests {
             self
         }
     }
-
-    // ========================================================================
-    // WeightLoader trait tests
-    // ========================================================================
 
     #[test]
     fn test_weight_loader_contains() {
@@ -258,10 +244,6 @@ mod more_tests {
         assert!(wrong_downcast.is_none());
     }
 
-    // ========================================================================
-    // AttentionLayout tests
-    // ========================================================================
-
     #[test]
     fn test_attention_layout_resolve_placeholder() {
         // Test that placeholder resolution works
@@ -270,10 +252,6 @@ mod more_tests {
 
         assert_eq!(resolved, "model.layers.5.self_attn.q_proj.weight");
     }
-
-    // ========================================================================
-    // ModelWeights tests (with real safetensors files)
-    // ========================================================================
 
     fn create_test_safetensors(
         dir: &Path,
@@ -312,7 +290,6 @@ mod more_tests {
         let mut file = File::create(dir.join("model.safetensors"))?;
         file.write_all(&serialized)?;
 
-        // Create minimal config.json
         let config = r#"{"hidden_size": 64, "num_layers": 2}"#;
         std::fs::write(dir.join("config.json"), config)?;
 
@@ -476,10 +453,6 @@ mod more_tests {
         Ok(())
     }
 
-    // ========================================================================
-    // cast_or_copy tests
-    // ========================================================================
-
     #[test]
     fn test_cast_or_copy_f32_to_f32() {
         let data: Vec<f32> = vec![1.0, 2.0, 3.0];
@@ -494,18 +467,10 @@ mod more_tests {
 
     #[test]
     fn test_clear_mmap_cache() {
-        // Should not panic
         clear_mmap_cache();
-
-        // Verify cache is empty after clear
         let stats = mmap_cache_stats();
-        // Stats format may vary, just ensure no panic
         let _ = stats;
     }
-
-    // ========================================================================
-    // SafeTensorsLoader tests
-    // ========================================================================
 
     #[test]
     fn test_safetensors_loader_new() -> Result<()> {
@@ -527,7 +492,6 @@ mod more_tests {
 
         let loader = SafeTensorsLoader::new(dir.path())?;
 
-        // SafeTensors doesn't have GGUF-style metadata
         assert!(!loader.has_metadata());
         assert_eq!(loader.get_string("any"), None);
         assert_eq!(loader.get_u32("any"), None);
@@ -553,7 +517,6 @@ mod more_tests {
     fn test_safetensors_loader_multiple_files() -> Result<()> {
         let dir = TempDir::new()?;
 
-        // Create first safetensors file
         {
             use safetensors::Dtype;
             use safetensors::tensor::TensorView as SafeTensorView;
@@ -571,7 +534,6 @@ mod more_tests {
             file.write_all(&serialized)?;
         }
 
-        // Create second safetensors file
         {
             use safetensors::Dtype;
             use safetensors::tensor::TensorView as SafeTensorView;
@@ -589,7 +551,6 @@ mod more_tests {
             file.write_all(&serialized)?;
         }
 
-        // Create index file that HuggingFace uses for sharded models
         let index = serde_json::json!({
             "metadata": {},
             "weight_map": {
@@ -681,10 +642,6 @@ mod more_tests {
         assert!(loader.contains("test"));
         assert!(!loader.has_metadata());
     }
-
-    // ========================================================================
-    // Thread safety tests
-    // ========================================================================
 
     #[test]
     fn test_weight_loader_send_sync() {

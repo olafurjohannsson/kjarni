@@ -1,4 +1,4 @@
-//! GPU-specific building blocks for constructing decoder compute components.
+//! GPU
 
 pub mod rope_decoder_layer;
 pub mod prenorm_decoder_layer;

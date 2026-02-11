@@ -1,107 +1,4 @@
-//! CPU-based decoder generation backend using ndarray.
-//!
-//! This module provides the CPU implementation of autoregressive text generation,
-//! operating entirely on the CPU using ndarray for tensor operations and AVX2
-//! SIMD for optimized matrix multiplication.
-//!
-//! # Architecture
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     CpuDecoderBackend                           │
-//! ├─────────────────────────────────────────────────────────────────┤
-//! │  prefill(tokens: &Array2<u32>)                                  │
-//! │      │                                                          │
-//! │      ▼                                                          │
-//! │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-//! │  │   Embed      │───▶│   Layers     │───▶│   LM Head    │      │
-//! │  │  (ndarray)   │    │   (ndarray)  │    │   (ndarray)  │      │
-//! │  └──────────────┘    └──────────────┘    └──────────────┘      │
-//! │                             │                    │              │
-//! │                             ▼                    ▼              │
-//! │                      ┌──────────────┐    ┌──────────────┐      │
-//! │                      │  KV Cache    │    │   Logits     │      │
-//! │                      │  (Vec<f32>)  │    │  [vocab_size]│      │
-//! │                      └──────────────┘    └──────────────┘      │
-//! │                                                                 │
-//! │  decode_one(token: &Array2<u32>)                               │
-//! │      │                                                          │
-//! │      └──────────────────────────────────────────────────────►  │
-//! └─────────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! # Design Philosophy
-//!
-//! The `CpuDecoderBackend` is a **thin controller** that delegates all actual
-//! computation to the model's `CpuDecoderOps`. It does not:
-//! - Know how to multiply matrices
-//! - Know model architecture details
-//! - Create attention masks
-//!
-//! Instead, it orchestrates the high-level flow and lets the model handle specifics.
-//!
-//! # Autoregressive Loop Strategies
-//!
-//! The backend supports two autoregressive strategies, determined by the model:
-//!
-//! ## Pipelined (Modern: Llama, Mistral, Phi)
-//!
-//! ```text
-//! Prefill:  [tok1, tok2, tok3, tok4] ─────────────────► logits[4]
-//!                                                            │
-//! Decode:                                    [tok5] ─────────► logits[5]
-//!                                            [tok6] ─────────► logits[6]
-//! ```
-//!
-//! - Processes entire prompt in single forward pass
-//! - Cache populated during prefill
-//! - Each decode step processes exactly one token
-//!
-//! ## Legacy (GPT-2)
-//!
-//! ```text
-//! Prefill:  [tok1, tok2, tok3] ──► cache only (no logits)
-//!                    [tok4] ──────────────────► logits[4]
-//!
-//! Decode:            [tok5] ──────────────────► logits[5]
-//! ```
-//!
-//! - Prompt processed in two phases: cache fill + last token
-//! - Requires +1 cache capacity for implementation quirks
-//! - Kept for backward compatibility with older models
-//!
-//! # Token Tensor Lifecycle
-//!
-//! ```text
-//! Tokenizer output (CPU)
-//!         │
-//!         ▼
-//! prefill(&Array2<u32>) ────► Populate cache, return first logits
-//!         │
-//!         ▼
-//! new_decode_token() ────────► Allocate reusable Array2 [1, 1]
-//!         │
-//!         ▼
-//! ┌───────────────────────────────────────┐
-//! │  Decode Loop                          │
-//! │  ┌─────────────────────────────────┐  │
-//! │  │ update_decode_token(token_id)   │  │  ◄── Simple array write
-//! │  │ decode_one(&token_tensor)       │  │  ◄── Full CPU forward
-//! │  │ sample(logits) → next token_id  │  │  ◄── CPU sampling
-//! │  └─────────────────────────────────┘  │
-//! └───────────────────────────────────────┘
-//! ```
-//!
-//! # Performance Characteristics
-//!
-//! | Phase | Complexity | Bottleneck |
-//! |-------|------------|------------|
-//! | Prefill | O(n²) attention | Compute-bound (matmul) |
-//! | Decode | O(n) per token | Memory-bound (KV cache reads) |
-//!
-//! Typical performance on modern CPUs:
-//! - Prefill: 100-500 tokens/second (depends on prompt length)
-//! - Decode: 10-50 tokens/second (depends on model size)
+//! CPU-based decoder generation backend using ndarray
 
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
@@ -113,55 +10,11 @@ use ndarray::{s, Array1, Array2, Array3};
 use std::time::Instant;
 
 /// CPU-based backend for autoregressive decoder generation.
-///
-/// This is a stateless controller that delegates computation to the model's
-/// `CpuDecoderOps`. It handles:
-/// - Prefill orchestration (prompt processing)
-/// - Decode step coordination
-/// - Autoregressive loop strategy selection
-///
-/// # Stateless Design
-///
-/// Unlike `GpuDecoderBackend`, this backend has no internal state. All state
-/// lives in:
-/// - The model (weights, configuration)
-/// - The KV cache (passed as argument)
-/// - The token tensors (owned by caller)
-///
-/// This makes the CPU backend trivially thread-safe and allows multiple
-/// generations to share a single backend instance.
-///
-/// # Example
-///
-/// ```ignore
-/// let backend = CpuDecoderBackend;
-/// let mut cache = model.new_cache(1, 2048, 1)?;
-///
-/// // Tokenize prompt
-/// let prompt_tokens = tokenizer.encode("Hello, world!")?;
-/// let tokens = Array2::from_shape_vec((1, prompt_tokens.len()), prompt_tokens)?;
-///
-/// // Prefill
-/// let logits = backend.prefill(&model, &tokens, &mut cache).await?;
-/// let first_token = sample(&logits, &config);
-///
-/// // Allocate reusable decode tensor
-/// let mut decode_token = backend.new_decode_token()?;
-///
-/// // Decode loop
-/// for _ in 0..max_tokens {
-///     backend.update_decode_token(&mut decode_token, current_token)?;
-///     let logits = backend.decode_one(&model, &decode_token, seq_len, &mut cache).await?;
-///     current_token = sample(&logits);
-/// }
-/// ```
 #[derive(Clone, Default)]
 pub struct CpuDecoderBackend;
 
 impl CpuDecoderBackend {
     /// Creates a new CPU decoder backend.
-    ///
-    /// This is a zero-cost operation as the backend is stateless.
     pub fn new() -> Self {
         Self
     }
@@ -170,31 +23,14 @@ impl CpuDecoderBackend {
 #[async_trait]
 impl DecoderGenerationBackend for CpuDecoderBackend {
     /// Token tensor type for decode loop: 2D ndarray with shape `[1, 1]`.
-    ///
-    /// Using `Array2` for consistency with the prefill input type and
-    /// the ndarray-based pipeline, even though it always holds a single token.
     type DecodeToken = Array2<u32>;
 
     /// Creates a single-token tensor for the decode loop.
-    ///
-    /// Allocates a `[1, 1]` array that will be reused for each decode step.
-    /// This avoids per-step allocation overhead in the hot loop.
-    ///
-    /// # Returns
-    ///
-    /// A 2D array of shape `[1, 1]` initialized to zero.
     fn new_decode_token(&self) -> Result<Self::DecodeToken> {
         Ok(Array2::zeros((1, 1)))
     }
 
     /// Updates the decode token tensor with a newly sampled token ID.
-    ///
-    /// This is a simple array write - no allocation required.
-    ///
-    /// # Arguments
-    ///
-    /// * `tensor` - The token tensor to update (must have shape `[1, 1]`)
-    /// * `new_token_id` - The token ID to write
     fn update_decode_token(
         &self,
         tensor: &mut Self::DecodeToken,
@@ -205,60 +41,6 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
     }
 
     /// Processes the prompt and returns logits for the first generated token.
-    ///
-    /// The prompt tokens are received as a CPU array and processed directly.
-    /// No device transfer is needed since everything runs on CPU.
-    ///
-    /// # Prefill Strategies
-    ///
-    /// The prefill behavior depends on the model's autoregressive loop type:
-    ///
-    /// ## Pipelined (Llama, Phi, Mistral)
-    ///
-    /// Processes all tokens in a single forward pass:
-    ///
-    /// 1. Build causal attention mask for full prompt
-    /// 2. Embed all tokens
-    /// 3. Forward pass through all layers (populates KV cache)
-    /// 4. Apply final normalization
-    /// 5. Project to logits
-    /// 6. Return logits for last position
-    ///
-    /// ```text
-    /// [tok1, tok2, tok3, tok4] ─────────────────► logits for position 4
-    /// ```
-    ///
-    /// ## Legacy (GPT-2)
-    ///
-    /// Splits prefill into two phases:
-    ///
-    /// 1. Forward pass for tokens `[0..n-1]` (cache only, no projection)
-    /// 2. Forward pass for token `[n-1]` with projection
-    /// 3. Return logits for that position
-    ///
-    /// ```text
-    /// [tok1, tok2, tok3] ──► cache only (no logits)
-    ///              [tok4] ──► logits for position 4
-    /// ```
-    ///
-    /// This two-phase approach is required because GPT-2's attention
-    /// implementation has different cache semantics.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - The decoder language model
-    /// * `tokens` - Prompt token IDs as CPU array of shape `[batch, seq_len]`
-    /// * `cache` - KV cache to populate
-    ///
-    /// # Returns
-    ///
-    /// Vocabulary logits as 1D array of shape `[vocab_size]`
-    ///
-    /// # Errors
-    ///
-    /// - Empty prompt
-    /// - Model doesn't support CPU execution
-    /// - Forward pass failure
     async fn prefill(
         &self,
         model: &dyn DecoderLanguageModel,
@@ -296,30 +78,6 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
     }
 
     /// Processes a single token and returns logits for the next token.
-    ///
-    /// This is the inner loop of autoregressive generation. Uses the KV cache
-    /// populated during prefill and previous decode steps.
-    ///
-    /// The decode token should be pre-allocated via `new_decode_token` and
-    /// updated via `update_decode_token` to minimize allocation overhead,
-    /// though the cost is minimal on CPU.
-    ///
-    /// # Attention Mask Sizing
-    ///
-    /// The mask size depends on the autoregressive loop type:
-    /// - **Pipelined**: mask size = `seq_len` (matches actual sequence)
-    /// - **Legacy**: mask size = `seq_len + 1` (GPT-2 quirk)
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - The decoder language model
-    /// * `token_tensor` - Tensor containing the current token (`[1, 1]`)
-    /// * `seq_len` - Total sequence length so far (prompt + generated)
-    /// * `cache` - KV cache with previous keys/values
-    ///
-    /// # Returns
-    ///
-    /// Vocabulary logits as 1D array of shape `[vocab_size]`
     async fn decode_one(
         &self,
         model: &dyn DecoderLanguageModel,
@@ -369,8 +127,6 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 
 impl CpuDecoderBackend {
     /// Pipelined prefill: process entire prompt in one forward pass.
-    ///
-    /// This is the standard path for modern models (Llama, Mistral, Phi).
     fn prefill_pipelined(
         &self,
         ops: &dyn CpuDecoderOps,

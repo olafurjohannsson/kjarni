@@ -35,10 +35,6 @@ def _find_library():
 
 _lib = ctypes.CDLL(_find_library())
 
-# =============================================================================
-# Error Codes
-# =============================================================================
-
 class KjarniError:
     OK = 0
     NULL_POINTER = 1
@@ -71,10 +67,6 @@ class KjarniProgressStage:
     SEARCHING = 5
     RERANKING = 6
 
-# =============================================================================
-# Progress Callback
-# =============================================================================
-
 class KjarniProgress(Structure):
     _fields_ = [
         ("stage", c_int),
@@ -85,10 +77,6 @@ class KjarniProgress(Structure):
 
 # Callback type: void callback(KjarniProgress progress, void* user_data)
 PROGRESS_CALLBACK_TYPE = CFUNCTYPE(None, KjarniProgress, c_void_p)
-
-# =============================================================================
-# Basic Structures (existing)
-# =============================================================================
 
 class KjarniFloatArray(Structure):
     _fields_ = [
@@ -115,23 +103,11 @@ class KjarniFloat2DArray(Structure):
         """Convert to NumPy array efficiently."""
         if not self.data or self.rows == 0 or self.cols == 0:
             return np.empty((0, 0), dtype=np.float32)
-
-        # 1. Create a ctypes array type of the correct size
-        # This describes the memory layout without allocating
         total_size = self.rows * self.cols
         c_array_type = c_float * total_size
-
-        # 2. Cast the void/float pointer to this array type
-        # address of contents gives us the raw memory address
         c_array = c_array_type.from_address(ctypes.addressof(self.data.contents))
 
-        # 3. Create NumPy wrapper
-        # np.ctypeslib.as_array creates a view (zero-copy)
         raw_view = np.ctypeslib.as_array(c_array)
-
-        # 4. Reshape and Copy
-        # We MUST .copy() here because result.free() will be called 
-        # immediately after this returns, which would kill the view.
         return raw_view.reshape((self.rows, self.cols)).copy()
 
     def to_list(self) -> list:
@@ -146,10 +122,6 @@ class KjarniFloat2DArray(Structure):
     def free(self):
         _lib.kjarni_float_2d_array_free(self)
 
-# =============================================================================
-# Embedder Structures
-# =============================================================================
-
 class KjarniEmbedderConfig(Structure):
     _fields_ = [
         ("device", c_int),
@@ -159,10 +131,6 @@ class KjarniEmbedderConfig(Structure):
         ("normalize", c_int32),
         ("quiet", c_int32),
     ]
-
-# =============================================================================
-# Classifier Structures
-# =============================================================================
 
 class KjarniClassResult(Structure):
     _fields_ = [
@@ -199,10 +167,6 @@ class KjarniClassifierConfig(Structure):
         ("quiet", c_int32),
     ]
 
-# =============================================================================
-# Reranker Structures
-# =============================================================================
-
 class KjarniRerankResult(Structure):
     _fields_ = [
         ("index", c_size_t),
@@ -234,10 +198,6 @@ class KjarniRerankerConfig(Structure):
         ("model_path", c_char_p),
         ("quiet", c_int32),
     ]
-
-# =============================================================================
-# Indexer Structures
-# =============================================================================
 
 class KjarniIndexStats(Structure):
     _fields_ = [
@@ -275,10 +235,6 @@ class KjarniIndexerConfig(Structure):
         ("max_file_size", c_size_t),
         ("quiet", c_int32),
     ]
-
-# =============================================================================
-# Searcher Structures
-# =============================================================================
 
 class KjarniSearchResult(Structure):
     _fields_ = [
@@ -339,10 +295,6 @@ class KjarniSearcherConfig(Structure):
         ("default_top_k", c_size_t),
         ("quiet", c_int32),
     ]
-
-# =============================================================================
-# Function Signatures
-# =============================================================================
 
 # Error handling
 _lib.kjarni_last_error_message.restype = c_char_p
@@ -487,10 +439,6 @@ _lib.kjarni_searcher_model_name.restype = c_size_t
 _lib.kjarni_searcher_model_name.argtypes = [c_void_p, c_char_p, c_size_t]
 _lib.kjarni_searcher_reranker_model.restype = c_size_t
 _lib.kjarni_searcher_reranker_model.argtypes = [c_void_p, c_char_p, c_size_t]
-
-# =============================================================================
-# Error Handling
-# =============================================================================
 
 class KjarniException(Exception):
     """Exception raised by Kjarni operations."""

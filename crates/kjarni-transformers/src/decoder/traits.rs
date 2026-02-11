@@ -36,14 +36,7 @@ use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
 use wgpu::CommandEncoder;
 
-// ============================================================================
-//  The Generation Backend
-// ============================================================================
-
-/// Defines the low-level orchestration for the generation loop.
-///
-/// Implementations (e.g., `GpuDecoderBackend`) manage the state of the "current token"
-/// and coordinate the `prefill` (prompt processing) and `decode_one` (token generation) phases.
+/// Defines the generation loop.
 #[async_trait]
 pub trait DecoderGenerationBackend: Send + Sync {
     /// Token tensor for decode loop (GPU: GpuTensor, CPU: Array2<u32>)
@@ -73,13 +66,7 @@ pub trait DecoderGenerationBackend: Send + Sync {
     ) -> Result<Array1<f32>>;
 }
 
-// ============================================================================
-//  Compute Components
-// ============================================================================
-
 /// Defines the asynchronous interface for a GPU-native Transformer Decoder.
-///
-/// Breaks the forward pass into granular steps for testability and advanced control.
 pub trait GpuDecoder: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
 
@@ -100,8 +87,6 @@ pub trait GpuDecoder: Send + Sync {
         unimplemented!()
     }
 
-    /// Step 1: Compute embeddings.
-    /// Handles lookup (Tokens) or passthrough (Hidden).
     fn embed(
         &self,
         encoder: &mut CommandEncoder,
@@ -110,8 +95,6 @@ pub trait GpuDecoder: Send + Sync {
         position_offset: usize,
     ) -> Result<GpuTensor>;
 
-    /// Step 2: Apply initial normalization (Pre-Norm).
-    /// Used by Llama, Mistral, etc.
     fn embed_and_normalize(
         &self,
         encoder: &mut CommandEncoder,
@@ -120,8 +103,6 @@ pub trait GpuDecoder: Send + Sync {
         position_offset: usize,
     ) -> Result<GpuTensor>;
 
-    /// Step 3: Run the stack of decoder layers.
-    /// Accepts `start_layer` and `end_layer` to support pipeline parallelism or debugging.
     fn forward_layers(
         &self,
         encoder: &mut CommandEncoder,
@@ -159,14 +140,11 @@ pub trait GpuDecoder: Send + Sync {
         unimplemented!()
     }
 
-    /// Metadata: Total number of layers.
     fn num_layers(&self) -> usize;
 
-    /// Metadata: Hidden dimension size.
     fn hidden_size(&self) -> usize;
 
     /// Default full forward pass.
-    /// Chains `embed_and_normalize` -> `forward_layers`.
     fn forward(
         &self,
         encoder: &mut CommandEncoder,
@@ -192,33 +170,12 @@ pub trait GpuDecoder: Send + Sync {
     }
 }
 
-/// Defines the synchronous interface for a CPU-native Transformer Decoder.
-/// Mirrors `GpuDecoder` structure for symmetry.
 pub trait CpuDecoder: Send + Sync {
-    // =========================================================================
-    // Downcasting
-    // =========================================================================
-
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    // =========================================================================
-    // Core Forward Pass
-    // =========================================================================
 
-    /// Forward pass through transformer layers.
-    /// Applies attention, feed-forward, residuals, etc.
-    ///
-    /// # Arguments
-    /// * `hidden_states` - Input hidden states of shape `[Batch, SeqLen, Hidden]`.
-    /// * `attention_mask` - Attention mask of shape `[Batch, SeqLen, SeqLen]`.
-    /// * `position_offset` - Offset for positional embeddings (for generation).
-    /// * `cache` - Optional KV cache for autoregressive decoding.
-    /// * `start_layer` - Index of the first layer to process (inclusive).
-    /// * `end_layer` - Index of the last layer to process (exclusive).
-    ///
-    /// # Returns
-    /// * Output hidden states of shape `[Batch, SeqLen, Hidden]`.
+    /// Forward pass through transformer layers
     fn forward_layers(
         &self,
         hidden_states: &Array3<f32>,
@@ -230,32 +187,11 @@ pub trait CpuDecoder: Send + Sync {
     ) -> Result<Array3<f32>>;
 
     /// Apply final layer normalization.
-    ///
-    /// For Llama: RMSNorm
-    /// For BERT: LayerNorm
-    /// For GPT-2: LayerNorm (or none, handled in LM head)
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden_states` - Output from `forward_layers`
-    ///
-    /// # Returns
-    ///
-    /// Normalized hidden states, ready for LM head projection.
-    /// Apply final layer normalization (RMSNorm/LayerNorm).
     fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
-
-    // =========================================================================
-    // Metadata
-    // =========================================================================
 
     fn num_layers(&self) -> usize;
     fn hidden_size(&self) -> usize;
     fn num_attention_heads(&self) -> usize;
-
-    // =========================================================================
-    // Metadata (optional, with defaults)
-    // =========================================================================
 
     fn num_kv_heads(&self) -> usize {
         self.num_attention_heads()
@@ -265,11 +201,6 @@ pub trait CpuDecoder: Send + Sync {
         self.hidden_size() / self.num_attention_heads()
     }
 
-    // =========================================================================
-    // Convenience Methods (default implementations)
-    // =========================================================================
-
-    /// Forward through all layers.
     fn forward_all_layers(
         &self,
         hidden_states: &Array3<f32>,
@@ -288,8 +219,6 @@ pub trait CpuDecoder: Send + Sync {
     }
 
     /// Full decoder pass: layers + final norm.
-    ///
-    /// This is the most common usage pattern.
     fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -303,12 +232,6 @@ pub trait CpuDecoder: Send + Sync {
     }
 }
 
-// ============================================================================
-//  Ops
-// ============================================================================
-
-/// Logic specific to CPU execution.
-/// Abstracts away how to access the component and how to project final logits.
 pub trait CpuDecoderOps: Send + Sync {
     /// Access the underlying CPU compute component.
     fn decoder(&self) -> &dyn CpuDecoder;
@@ -323,11 +246,7 @@ pub trait CpuDecoderOps: Send + Sync {
     /// Allows models to implement Sliding Window or Alibi logic.
     fn get_attention_mask(&self, seq_len: usize, past_len: usize) -> Result<Array2<f32>>;
 
-    // =========================================================================
-    // Default Implementations
-    // =========================================================================
-
-    /// Full forward pass: embed → layers → norm.
+    /// Full forward pass
     fn forward(
         &self,
         tokens: &Array2<u32>,
@@ -353,17 +272,11 @@ pub trait CpuDecoderOps: Send + Sync {
     }
 }
 
-/// Logic specific to GPU execution.
-/// Abstracts away masking strategies (RoPE vs ALiBi) and projection (Head Norm).
 pub trait GpuDecoderOps: Send + Sync {
     /// Access the underlying GPU compute component.
     fn decoder(&self) -> &dyn GpuDecoder;
 
     /// Generates the attention mask on the GPU.
-    ///
-    /// # Arguments
-    /// * `seq_len`: The length of the sequence currently being processed.
-    /// * `max_len`: The total capacity (or max position) for the mask.
     fn get_attention_mask(
         &self,
         ctx: &mut GpuFrameContext,
@@ -372,12 +285,6 @@ pub trait GpuDecoderOps: Send + Sync {
     ) -> Result<GpuTensor>;
 
     /// Handles model-specific projection logic.
-    ///
-    /// # Arguments
-    /// * `last_hidden_state`: Tensor of shape `[Batch, 1, Hidden]`.
-    ///
-    /// # Returns
-    /// * Tensor of shape `[Batch, 1, Vocab]`.
     fn project_to_logits(
         &self,
         ctx: &mut GpuFrameContext,
@@ -385,14 +292,7 @@ pub trait GpuDecoderOps: Send + Sync {
     ) -> Result<GpuTensor>;
 }
 
-// ============================================================================
-//  5. The Model Container
-// ============================================================================
-
-/// The primary trait for Decoder-only Language Models (Llama, GPT, Mistral, etc.).
-///
-/// This trait acts as a "Router", directing the Backend to the correct
-/// Operations implementation (`CpuDecoderOps` or `GpuDecoderOps`).
+/// The primary trait for Decoder-only Language Models Llama, GPT, Mistral,
 #[async_trait]
 pub trait DecoderLanguageModel: LanguageModel {
     /// Access CPU operations strategy. Returns `None` if model is GPU-only.
@@ -457,29 +357,19 @@ pub trait DecoderLanguageModel: LanguageModel {
         let pool = context.get_inference_pool();
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&context, pool_guard);
-
-        // 1. Prepare Mask
         let attention_mask = ops.get_attention_mask(&mut frame, seq_len, seq_len)?;
-
-        // 2. Forward Pass
-        // Split borrow to satisfy borrow checker
         let (encoder, pool) = frame.resources();
-
         let hidden = ops.decoder().forward(
             encoder,
             pool,
-            ModelInput::TokensCpu(input_ids.view()), // Fix: Pass by value
+            ModelInput::TokensCpu(input_ids.view()),
             &attention_mask,
             0,    // offset
             None, // no cache
             None, // no encoder hidden
         )?;
 
-        // 3. Project
-        // Borrow of `frame` is available again here
         let logits = ops.project_to_logits(&mut frame, &hidden)?;
-
-        // 4. Readback
         let logits_cpu = logits.to_ndarray_3d::<f32>().await?;
 
         frame.finish();
@@ -497,10 +387,6 @@ mod tests {
     use crate::traits::InferenceModel;
     use tokenizers::Tokenizer;
 
-    // ========================================================================
-    //  Mock Cache
-    // ========================================================================
-
     #[derive(Clone)]
     struct MockCache {
         len: usize,
@@ -515,10 +401,6 @@ mod tests {
         fn increment_len(&mut self, n: usize) { self.len += n; }
         fn clone_box(&self) -> Box<dyn Cache> { Box::new(self.clone()) }
     }
-
-    // ========================================================================
-    //  Mock CpuDecoder
-    // ========================================================================
 
     struct MockCpuDecoder {
         num_layers: usize,
@@ -545,12 +427,10 @@ mod tests {
             _start_layer: usize,
             _end_layer: usize,
         ) -> Result<Array3<f32>> {
-            // Mock: just return input unchanged
             Ok(hidden_states.clone())
         }
 
         fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
-            // Mock: return input unchanged
             Ok(hidden_states.clone())
         }
 
@@ -558,10 +438,6 @@ mod tests {
         fn hidden_size(&self) -> usize { self.hidden_size }
         fn num_attention_heads(&self) -> usize { self.num_heads }
     }
-
-    // ========================================================================
-    //  CpuDecoder Metadata Tests
-    // ========================================================================
 
     #[test]
     fn test_cpu_decoder_metadata() {
@@ -575,8 +451,7 @@ mod tests {
     #[test]
     fn test_cpu_decoder_default_num_kv_heads() {
         let decoder = MockCpuDecoder::new(12, 768, 12);
-        
-        // Default: num_kv_heads == num_attention_heads
+    
         assert_eq!(decoder.num_kv_heads(), 12);
     }
 
@@ -584,7 +459,6 @@ mod tests {
     fn test_cpu_decoder_default_head_dim() {
         let decoder = MockCpuDecoder::new(12, 768, 12);
         
-        // head_dim = hidden_size / num_attention_heads
         assert_eq!(decoder.head_dim(), 64); // 768 / 12
     }
 
@@ -602,10 +476,6 @@ mod tests {
         let decoder3 = MockCpuDecoder::new(6, 512, 8);
         assert_eq!(decoder3.head_dim(), 64); // 512 / 8
     }
-
-    // ========================================================================
-    //  CpuDecoder Forward Tests
-    // ========================================================================
 
     #[test]
     fn test_cpu_decoder_forward_layers() {
@@ -698,10 +568,6 @@ mod tests {
         assert_eq!(output.shape(), &[1, 1, 64]);
     }
 
-    // ========================================================================
-    //  CpuDecoder Downcasting Tests
-    // ========================================================================
-
     #[test]
     fn test_cpu_decoder_as_any() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
@@ -726,10 +592,6 @@ mod tests {
         
         assert_eq!(decoder.num_layers, 12);
     }
-
-    // ========================================================================
-    //  Mock CpuDecoderOps
-    // ========================================================================
 
     struct MockCpuDecoderOps {
         decoder: MockCpuDecoder,
@@ -762,10 +624,6 @@ mod tests {
             Ok(Array2::<f32>::ones((seq_len, seq_len)))
         }
     }
-
-    // ========================================================================
-    //  CpuDecoderOps Tests
-    // ========================================================================
 
     #[test]
     fn test_cpu_decoder_ops_decoder_access() {
@@ -831,10 +689,6 @@ mod tests {
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
 
-    // ========================================================================
-    //  Mock DecoderLanguageModel (partial)
-    // ========================================================================
-
     struct MockDecoderModel {
         cpu_ops: MockCpuDecoderOps,
     }
@@ -878,10 +732,6 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    //  DecoderLanguageModel Default Method Tests
-    // ========================================================================
-
     #[test]
     fn test_decoder_language_model_get_default_generation_config() {
         let model = MockDecoderModel {
@@ -910,7 +760,6 @@ mod tests {
             cpu_ops: MockCpuDecoderOps::new(),
         };
         
-        // Default: not an instruct model (no chat template)
         assert!(!model.is_instruct_model());
     }
 
@@ -946,10 +795,6 @@ mod tests {
         assert!(matches!(model.autoregressive_loop(), AutoregressiveLoop::Pipelined));
     }
 
-    // ========================================================================
-    //  AutoregressiveLoop Tests
-    // ========================================================================
-
     #[test]
     fn test_autoregressive_loop_variants() {
         let pipelined = AutoregressiveLoop::Pipelined;
@@ -959,11 +804,6 @@ mod tests {
         assert!(!matches!(pipelined, AutoregressiveLoop::Legacy));
         assert!(!matches!(legacy, AutoregressiveLoop::Pipelined));
     }
-
-    // ========================================================================
-    //  Edge Cases
-    // ========================================================================
-
     #[test]
     fn test_cpu_decoder_empty_sequence() {
         let decoder = MockCpuDecoder::new(6, 64, 4);
@@ -1019,10 +859,6 @@ mod tests {
         assert_eq!(decoder.head_dim(), 128);
     }
 
-    // ========================================================================
-    //  Mask Generation Tests
-    // ========================================================================
-
     #[test]
     fn test_attention_mask_generation_prefill() {
         let ops = MockCpuDecoderOps::new();
@@ -1043,29 +879,20 @@ mod tests {
         assert_eq!(mask.shape(), &[1, 1]);
     }
 
-    // ========================================================================
-    //  Full Pipeline Test
-    // ========================================================================
-
     #[test]
     fn test_full_cpu_inference_pipeline() {
         let ops = MockCpuDecoderOps::new();
         
-        // 1. Tokenize (mock)
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 100, 200, 300, 2]).unwrap();
         
-        // 2. Get mask
         let mask = ops.get_attention_mask(5, 0).unwrap();
         
-        // 3. Embed
         let hidden = ops.embed(&tokens, 0).unwrap();
         assert_eq!(hidden.shape(), &[1, 5, 64]);
         
-        // 4. Forward through decoder
         let output = ops.decoder().forward(&hidden, &mask, 0, None).unwrap();
         assert_eq!(output.shape(), &[1, 5, 64]);
         
-        // 5. Project to logits
         let logits = ops.project_to_logits(&output).unwrap();
         assert_eq!(logits.shape(), &[1, 5, 1000]);
     }
@@ -1077,7 +904,6 @@ mod tests {
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 100, 200, 300, 2]).unwrap();
         let mask = ops.get_attention_mask(5, 0).unwrap();
         
-        // Single call that does everything
         let logits = ops.forward_to_logits(&tokens, &mask, 0, None).unwrap();
         
         assert_eq!(logits.shape(), &[1, 5, 1000]);

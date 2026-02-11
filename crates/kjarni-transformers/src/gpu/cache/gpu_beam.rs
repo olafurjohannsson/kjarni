@@ -9,10 +9,7 @@ use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 
-/// A specialized, high-performance, GPU-resident KV cache for beam search decoding.
-///
-/// This cache pre-allocates memory for all beams and uses a specialized `reorder`
-/// kernel to efficiently shuffle beam histories, avoiding expensive deep copies.
+/// A specialized, high-performance, GPU-resident KV cache for beam search decoding
 pub struct GpuBeamKVCache {
     // Main K/V tensors. Layout: [NumBeams, NumHeads, Capacity, HeadDim]
     k_tensors: Vec<GpuTensor>,
@@ -89,8 +86,7 @@ impl GpuBeamKVCache {
         })
     }
 
-    /// Updates all beams with their new KV values. This method is stateful and
-    /// updates the internal sequence length.
+    /// Updates all beams with their new KV value
     pub fn update(
         &mut self,
         encoder: &mut CommandEncoder,
@@ -98,7 +94,6 @@ impl GpuBeamKVCache {
         new_k: &GpuTensor, // Expected shape: [NumBeams, 1, HiddenSize]
         new_v: &GpuTensor, // Expected shape: [NumBeams, 1, HiddenSize]
     ) -> Result<()> {
-        // ASSERTION 1: Valid layer index
         assert!(
             layer_idx < self.k_tensors.len(),
             "Layer index {} out of bounds (num_layers: {})",
@@ -106,13 +101,11 @@ impl GpuBeamKVCache {
             self.k_tensors.len()
         );
 
-        // ASSERTION 2: Check input shapes
         assert_eq!(new_k.shape().len(), 3, "new_k must be 3D");
         assert_eq!(new_v.shape().len(), 3, "new_v must be 3D");
         assert_eq!(new_k.shape()[1], 1, "new_k must have seq_len=1");
         assert_eq!(new_v.shape()[1], 1, "new_v must have seq_len=1");
 
-        // ASSERTION 3: Check we're not exceeding capacity
         let capacity = self.k_tensors[0].shape()[2];
         assert!(
             self.seq_length < capacity,
@@ -121,7 +114,6 @@ impl GpuBeamKVCache {
             capacity
         );
 
-        // ASSERTION 4: Verify tensor dimensions match
         let expected_beams = self.k_tensors[0].shape()[0];
         assert_eq!(
             new_k.shape()[0],
@@ -140,9 +132,7 @@ impl GpuBeamKVCache {
         Ok(())
     }
 
-    /// Reorders the beam histories based on the parent indices from the beam search algorithm.
     pub fn reorder(&mut self, encoder: &mut CommandEncoder, parent_indices: &GpuTensor) {
-        // ASSERTION 5: Check indices shape
         assert_eq!(parent_indices.shape().len(), 1, "parent_indices must be 1D");
 
         let num_beams = self.k_tensors[0].shape()[0];
@@ -156,7 +146,6 @@ impl GpuBeamKVCache {
 
         assert!(self.seq_length > 0, "Cannot reorder empty GPU cache!");
 
-        // Original reorder code...
         for i in 0..self.k_tensors.len() {
             self.reorder_kernel.encode(
                 encoder,
@@ -166,7 +155,6 @@ impl GpuBeamKVCache {
                 self.seq_length,
             );
         }
-        // Reorder V tensors
         for i in 0..self.v_tensors.len() {
             self.reorder_kernel.encode(
                 encoder,
@@ -182,7 +170,6 @@ impl GpuBeamKVCache {
         std::mem::swap(&mut self.v_tensors, &mut self.temp_v_tensors);
     }
 
-    // We still need a way to get the tensors for the forward pass.
     pub fn get_layer_tensors(&self, layer_idx: usize) -> Option<(&GpuTensor, &GpuTensor)> {
         if layer_idx >= self.k_tensors.len() {
             None
@@ -192,7 +179,6 @@ impl GpuBeamKVCache {
     }
 }
 
-// Implement the base Cache trait
 impl Cache for GpuBeamKVCache {
     fn get_seq_length(&self) -> usize {
         self.seq_length
@@ -200,7 +186,6 @@ impl Cache for GpuBeamKVCache {
     fn set_seq_length(&mut self, len: usize) {
         self.seq_length = len;
     }
-    // fn increment_len(&mut self, new_tokens_len: usize) { self.seq_length += new_tokens_len; }
     fn increment_len(&mut self, new_tokens_len: usize) {
         self.seq_length += new_tokens_len;
 
@@ -222,10 +207,7 @@ impl Cache for GpuBeamKVCache {
         self
     }
 
-    // This is an expensive operation and should not be used in a hot loop for beam search.
-    // The `reorder` method is the performant alternative.
     fn clone_box(&self) -> Box<dyn Cache> {
-        // Your deep-clone logic is correct for creating a truly independent copy.
         let new_k_tensors = self
             .k_tensors
             .iter()
@@ -242,8 +224,8 @@ impl Cache for GpuBeamKVCache {
         Box::new(Self {
             k_tensors: new_k_tensors,
             v_tensors: new_v_tensors,
-            temp_k_tensors: vec![], // Temp buffers don't need to be cloned
-            temp_v_tensors: vec![], // They are recreated if this new cache is reordered
+            temp_k_tensors: vec![], 
+            temp_v_tensors: vec![], 
             seq_length: self.seq_length,
             update_kernel: self.update_kernel.clone(),
             reorder_kernel: self.reorder_kernel.clone(),

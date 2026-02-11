@@ -1,23 +1,15 @@
 
 //! Common data structures and constants for quantized kernels.
 
-use bytemuck::{Pod, Zeroable}; // <-- IMPORT THE TRAITS
+use bytemuck::{Pod, Zeroable}; 
 use half::f16;
-
-// =======================================================================
-//  Constants for K-Quants
-// =======================================================================
 
 pub const QK_K: usize = 256;
 pub const QS_K: usize = 32;
 
-// =======================================================================
-//  Quantization Block Definitions
-// =======================================================================
-
 /// An 8-bit quantization block (type 0).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)] // <-- DERIVE THE TRAITS
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct BlockQ8_0 {
     /// The block-specific scale factor.
     pub d: f16,
@@ -26,7 +18,6 @@ pub struct BlockQ8_0 {
 }
 
 /// Q8_K block structure for quantized activations
-/// Used as the "right-hand side" in Q4_K × Q8_K dot products
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct BlockQ8_K {
@@ -38,9 +29,9 @@ pub struct BlockQ8_K {
     pub bsums: [i16; 16],
 }
 
-/// A 4-bit "K-Quant" quantization block.
+/// A 4-bitquantization block.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)] // <-- DERIVE THE TRAITS
+#[derive(Debug, Clone, Copy, Pod, Zeroable)] 
 pub struct BlockQ4_K {
     /// Super-block scale and min, used to derive sub-block scales/mins.
     pub d: f16,
@@ -51,7 +42,7 @@ pub struct BlockQ4_K {
     pub qs: [u8; QK_K / 2],
 }
 
-/// A 6-bit "K-Quant" quantization block (256 elements).
+/// A 6-bit  quantization block (256 elements).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BlockQ6_K {

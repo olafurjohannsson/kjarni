@@ -98,7 +98,7 @@ impl EncoderDecoderModelFactory for BartModel {
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
-        _layout: &ModelLayout, // Pipeline builder handles generic layout, backends handle specific
+        _layout: &ModelLayout,
         config: &Arc<BartConfig>,
         load_config: &ModelLoadConfig,
         context: Option<&Arc<WgpuContext>>,
@@ -116,13 +116,10 @@ impl EncoderDecoderModelFactory for BartModel {
         let enc_config = Seq2SeqEncoderConfig::bart();
         let dec_config = Seq2SeqDecoderConfig::bart();
 
-        // CPU Backends
         if device.is_cpu() || load_config.offload_embeddings {
-            // Unified Encoder
-
             cpu_enc = Some(Box::new(Seq2SeqCPUEncoder::new(
                 weights,
-                config.as_ref(), // Pass as &dyn ModelConfig
+                config.as_ref(),
                 enc_config,
                 *load_config,
             )?) as Box<dyn CpuEncoder>);
@@ -319,8 +316,6 @@ impl LanguageModel for BartModel {
         // match self.device {
         match self.pipeline.plan().layers {
             Device::Cpu => {
-                // BART generation relies heavily on Beam Search.
-                // If num_beams > 1, the cache must be sized for [num_beams, heads, seq, head_dim]
                 let effective_batch = if num_beams > 0 { num_beams } else { batch_size };
                 Ok(Box::new(CpuBeamKVCache::new(
                     self.config.decoder_layers,
@@ -330,7 +325,6 @@ impl LanguageModel for BartModel {
                 )))
             }
             Device::Wgpu => {
-                // let ctx = self.context.as_ref().unwrap();
                 let context = self
                     .context()
                     .ok_or_else(|| anyhow!("GPU cache requires WgpuContext"))?;
@@ -366,7 +360,6 @@ impl CpuEncoderDecoderOps for BartModel {
         encoder_hidden_states: &Array3<f32>,
         num_beams: usize,
     ) -> Result<Array3<f32>> {
-        // This is the exact logic from your old CpuBackend
         Ok(encoder_hidden_states
             .broadcast((
                 num_beams,
@@ -377,7 +370,6 @@ impl CpuEncoderDecoderOps for BartModel {
             .to_owned())
     }
 
-    // This is the logic moved from the old CpuBackend
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         self.pipeline.lm_head().forward_cpu(hidden_states)
     }
@@ -426,51 +418,16 @@ impl GpuEncoderDecoderOps for BartModel {
             "expanded_encoder_states",
         );
 
-        // Get the broadcast kernel from the model struct
-        // let broadcast_kernel = self
-        //     .gpu_broadcast_kernel
-        //     .as_ref()
-        //     .ok_or_else(|| anyhow!("GpuBroadcast kernel not initialized for this model"))?;
-
         broadcast.encode(encoder_cmd, encoder_hidden_states, &expanded_states, 0);
 
         Ok(expanded_states)
     }
 
-    // This is the logic moved from the old GpuBackend
     fn project_to_logits(
         &self,
         frame: &mut GpuFrameContext,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
-        // let (batch, seq, hidden) = hidden_states.dims3();
-        // let (encoder_cmd, pool) = frame.resources();
-
-        // let lm_head_weights = self.gpu_lm_head.as_ref().unwrap();
-        // let vocab_size = lm_head_weights.shape()[0];
-
-        // let logits = pool.get(vec![batch * seq, vocab_size]);
-        // let hidden_states_2d = hidden_states.view(vec![batch * seq, hidden]);
-
-        // // This kernel should be a shared primitive, not created on the fly.
-        // // For now, this works. In a future cleanup, you might pass it into the ops from the backend.
-        // let linear_kernel = self
-        //     .gpu_linear_kernel
-        //     .as_ref()
-        //     .ok_or_else(|| anyhow!("GpuLinear kernel not initialized for this model"))?;
-        // linear_kernel.encode(encoder_cmd, &hidden_states_2d, lm_head_weights, &logits);
-
-        // let final_logits = if let Some(bias) = self.gpu_final_logits_bias.as_ref() {
-        //     let logits_with_bias = pool.get(logits.shape().to_vec());
-        //     let add_kernel = GpuAdd::new(&self.context.as_ref().unwrap());
-        //     add_kernel.encode_broadcast_row(encoder_cmd, &logits, bias, &logits_with_bias);
-        //     logits_with_bias
-        // } else {
-        //     logits
-        // };
-
-        // Ok(final_logits.view(vec![batch, seq, vocab_size]))
-
         let (encoder_cmd, pool) = frame.resources();
 
         self.pipeline

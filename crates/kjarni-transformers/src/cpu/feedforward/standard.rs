@@ -18,12 +18,6 @@ pub struct StdFeedForward {
 
 impl StdFeedForward {
     /// Creates a new `FeedForward` layer.
-    ///
-    /// # Arguments
-    /// * `dense1_weight` - Shape `[intermediate_size, hidden_size]` ([Out, In])
-    /// * `dense1_bias` - Shape `[intermediate_size]`
-    /// * `dense2_weight` - Shape `[hidden_size, intermediate_size]` ([Out, In])
-    /// * `dense2_bias` - Shape `[hidden_size]`
     pub fn new(
         dense1_weight: Array2<f32>,
         dense1_bias: Array1<f32>,
@@ -95,26 +89,6 @@ impl StdFeedForward {
     }
 
     /// Forward pass writing to pre-allocated EncoderBuffers (no allocation).
-    ///
-    /// Uses `buffers.ffn_intermediate` for hidden activations.
-    /// Writes output to `buffers.ffn_output`.
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor [tokens, hidden]
-    /// * `buffers` - Pre-allocated encoder buffers
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if buffer dimensions don't match.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut buffers = EncoderBuffers::new_auto(1024, 768, 3072);
-    /// ffn.forward_noalloc(&hidden_2d, &mut buffers);
-    /// // Result in buffers.ffn_output
-    /// ```
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         let tokens = hidden.shape()[0];
         let intermediate_dim = self.fc1.out_features();
@@ -132,25 +106,20 @@ impl StdFeedForward {
             }
         }
 
-        // FC1 into ffn_intermediate (full buffer, we'll use slice for tokens)
+        // FC1 into ffn_intermediate
         self.fc1
             .matmul_noalloc(hidden, &mut buffers.ffn_intermediate);
 
-        // Apply activation in-place to actual tokens only
+        // Apply activation
         {
             let mut intermediate_slice = buffers.ffn_intermediate.slice_mut(s![..tokens, ..]);
             apply_activation_2d_mut(&mut intermediate_slice, self.activation);
         }
 
         // FC2: need contiguous input
-        // Take slice and make it contiguous
         let intermediate_slice = buffers.ffn_intermediate.slice(s![..tokens, ..]);
         let intermediate_owned = intermediate_slice.as_standard_layout().to_owned();
-
-        // Create a mutable slice of output for just the tokens we need
         let mut output_slice = buffers.ffn_output.slice_mut(s![..tokens, ..]);
-
-        // Manual matmul since we need to write to a slice
         let result = self.fc2.matmul(&intermediate_owned.view());
         output_slice.assign(&result);
     }

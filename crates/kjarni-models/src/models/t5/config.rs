@@ -158,9 +158,8 @@ fn as_any(&self) -> &dyn std::any::Any {
             encoder: Some(EncoderLayout {
                 position_embedding: None,
                 token_type_embedding: None,
-                embedding_norm_weight: None, // T5 has no embedding norm
+                embedding_norm_weight: None,
                 embedding_norm_bias: None,
-                // THIS is where the T5 final norm goes
                 final_norm_weight: Some("encoder.final_layer_norm.weight".to_string()),
                 final_norm_bias: None,
                 layer: EncoderLayerLayout {

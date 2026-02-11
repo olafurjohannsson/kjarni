@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array4};
 
 pub struct T5RelativePositionBias {
-    pub bias_table: Array2<f32>, // Shape: [num_buckets, num_heads]
+    pub bias_table: Array2<f32>,
     pub num_buckets: usize,
     pub max_distance: usize,
     pub is_bidirectional: bool,
@@ -17,8 +17,6 @@ impl T5RelativePositionBias {
         num_buckets: usize,
         max_distance: usize,
     ) -> Result<Self> {
-        // T5 weights are typically [buckets, heads]
-        // We check all common naming conventions for T5 (Safetensors/HF style)
         let bias_table = weights
             .get_array2(&format!(
                 "{}.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
@@ -81,7 +79,6 @@ impl T5RelativePositionBias {
 
         for q in 0..query_len {
             for k in 0..key_len {
-                // Absolute position of query token 'q' is q + offset
                 let abs_q = q + query_offset;
                 let abs_k = k;
 
@@ -97,7 +94,7 @@ impl T5RelativePositionBias {
         Ok(bias)
     }
     fn relative_position_bucket(&self, relative_position: i32) -> usize {
-        let mut num_buckets = self.num_buckets as i32; // Local mutable copy
+        let mut num_buckets = self.num_buckets as i32; 
         let max_distance = self.max_distance as i32;
 
         let mut n = -relative_position;

@@ -53,11 +53,6 @@ pub struct KjarniEmbedder {
 }
 
 /// Create a new Embedder.
-///
-/// # Safety
-/// - `config` must be valid or NULL (uses defaults)
-/// - `out` must be a valid pointer
-/// - The returned handle must be freed with `kjarni_embedder_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_new(
     config: *const KjarniEmbedderConfig,
@@ -136,10 +131,6 @@ pub unsafe extern "C" fn kjarni_embedder_new(
 }
 
 /// Free an Embedder instance.
-///
-/// # Safety
-/// - `embedder` must be a valid handle or NULL
-/// - The handle must not be used after this call
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) {
     if !embedder.is_null() {
@@ -148,12 +139,6 @@ pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) {
 }
 
 /// Encode a single text to an embedding vector.
-///
-/// # Safety
-/// - `embedder` must be a valid handle
-/// - `text` must be a valid null-terminated UTF-8 string
-/// - `out` must be a valid pointer
-/// - The returned array must be freed with `kjarni_float_array_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_encode(
     embedder: *mut KjarniEmbedder,
@@ -186,12 +171,6 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
 }
 
 /// Encode multiple texts to embedding vectors.
-///
-/// # Safety
-/// - `embedder` must be a valid handle
-/// - `texts` must be an array of `num_texts` valid null-terminated UTF-8 strings
-/// - `out` must be a valid pointer
-/// - The returned array must be freed with `kjarni_float_2d_array_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     embedder: *mut KjarniEmbedder,
@@ -245,11 +224,6 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
 }
 
 /// Compute cosine similarity between two texts.
-///
-/// # Safety
-/// - `embedder` must be a valid handle
-/// - `text1` and `text2` must be valid null-terminated UTF-8 strings
-/// - `out` must be a valid pointer
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_similarity(
     embedder: *mut KjarniEmbedder,
@@ -289,9 +263,6 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
 }
 
 /// Get the embedding dimension.
-///
-/// # Safety
-/// - `embedder` must be a valid handle
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) -> usize {
     if embedder.is_null() {

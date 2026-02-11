@@ -28,7 +28,6 @@ impl StdFeedForwardNew {
     pub fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, _) = hidden.dim();
 
-        // Ensure contiguous layout before reshape
         let hidden_contig = hidden.as_standard_layout();
         let hidden_2d = hidden_contig
             .view()
@@ -44,27 +43,7 @@ impl StdFeedForwardNew {
         Ok(output.into_shape_with_order((batch, seq, self.fc2.out_features()))?)
     }
 
-    /// Forward pass writing to pre-allocated EncoderBuffers (no allocation).
-    ///
-    /// Uses `buffers.ffn_intermediate` for hidden activations.
-    /// Writes output to `buffers.ffn_output`.
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor [tokens, hidden]
-    /// * `buffers` - Pre-allocated encoder buffers
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if buffer dimensions don't match.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut buffers = EncoderBuffers::new_auto(1024, 768, 3072);
-    /// ffn.forward_noalloc(&hidden_2d, &mut buffers);
-    /// // Result in buffers.ffn_output
-    /// ```
+    /// Forward pass writing to pre-allocated EncoderBuffers
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         let tokens = hidden.shape()[0];
         let intermediate_dim = self.fc1.out_features();
@@ -86,7 +65,6 @@ impl StdFeedForwardNew {
         self.fc1.matmul_noalloc(hidden, &mut buffers.ffn_intermediate);
 
         // Apply activation in-place
-        // Only apply to the actual tokens, not the full buffer capacity
         {
             let mut intermediate_slice = buffers
                 .ffn_intermediate
@@ -112,7 +90,6 @@ mod feedforward_new_tests {
     use crate::feedforward::StdFeedForward;
     use crate::linear_layer::LinearLayer; 
 
-    /// Helper for approximate float comparison
     fn assert_all_close(a: &Array3<f32>, b: &Array3<f32>, tol: f32) {
         assert_eq!(a.dim(), b.dim(), "Dimensions mismatch");
         let diff = a - b;
@@ -156,8 +133,6 @@ mod feedforward_new_tests {
 
     #[test]
     fn test_ffn_logic_relu() -> Result<()> {
-        // Simple manual check
-        // Input: [1.0, -1.0]
         let input = arr3(&[[[1.0, -1.0]]]);
 
         // FC1 (Identity): [[1, 0], [0, 1]]
@@ -178,16 +153,12 @@ mod feedforward_new_tests {
 
     #[test]
     fn test_ffn_golden_values_gelu() -> Result<()> {
-        // Golden values from Python script
-        // Config: Batch=1, Seq=2, In=3, Hidden=4, Out=3
-        
         let input_data = vec![
             0.5, -0.2000, 0.1000, 
             -0.5, 0.0, 0.8000
         ];
         let input = Array3::from_shape_vec((1, 2, 3), input_data)?;
 
-        // FC1 Weights [4, 3]
         let w1_data = vec![
             0.4414, 0.4792, -0.1353, 
             0.5304, -0.1265, 0.1165, 
@@ -196,7 +167,6 @@ mod feedforward_new_tests {
         ];
         let fc1 = mock_linear(w1_data, (4, 3));
 
-        // FC2 Weights [3, 4]
         let w2_data = vec![
             0.3694, 0.0677, 0.2411, -0.0706, 
             0.3854, 0.0739, -0.2334, 0.1274, 
@@ -222,16 +192,12 @@ mod feedforward_new_tests {
 
         #[test]
     fn test_ffn_golden_values_gelu2() -> Result<()> {
-        // === 1. Setup Input ===
-        // Batch=1, Seq=2, In=3
         let input_data = vec![
             0.5, -0.2000, 0.1000, 
             -0.5, 0.0, 0.8000
         ];
         let input = Array3::from_shape_vec((1, 2, 3), input_data)?;
 
-        // === 2. Setup FC1 (Dense 1) ===
-        // Shape: [Out=4, In=3]
         let w1_data = vec![
             0.4414, 0.4792, -0.1353, 
             0.5304, -0.1265, 0.1165, 
@@ -242,8 +208,6 @@ mod feedforward_new_tests {
         // Previous mock used no bias, so we provide explicit zeros here
         let dense1_bias = Array1::zeros(4);
 
-        // === 3. Setup FC2 (Dense 2) ===
-        // Shape: [Out=3, In=4]
         let w2_data = vec![
             0.3694, 0.0677, 0.2411, -0.0706, 
             0.3854, 0.0739, -0.2334, 0.1274, 
@@ -252,27 +216,19 @@ mod feedforward_new_tests {
         let dense2_weight = Array2::from_shape_vec((3, 4), w2_data)?;
         let dense2_bias = Array1::zeros(3);
 
-        // === 4. Initialize Legacy StdFeedForward ===
         let ffn = StdFeedForward::new(
             dense1_weight,
             dense1_bias,
             dense2_weight,
             dense2_bias,
-            Activation::Gelu, // Standard Gelu used in previous context
+            Activation::Gelu, 
         );
-
-        // === 5. Forward Pass ===
         let output = ffn.forward(&input)?;
-
-        // === 6. Verify against Golden Values ===
-        // These values match the output of (x @ W1.T).gelu() @ W2.T
         let expected_data = vec![
             0.0266, 0.0386, -0.0491, 
             0.0304, -0.1196, 0.0148
         ];
         let expected = Array3::from_shape_vec((1, 2, 3), expected_data)?;
-
-        // Tolerance for GELU approximation differences
         assert_all_close(&output, &expected, 1e-4);
 
         Ok(())

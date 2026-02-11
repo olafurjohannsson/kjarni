@@ -173,7 +173,6 @@ fn test_bart_large_cnn_config_parsing() {
 
     let config = BartConfig::from_json(json).unwrap();
 
-    // Architecture
     assert_eq!(config.d_model, 1024);
     assert_eq!(config.encoder_layers, 12);
     assert_eq!(config.decoder_layers, 12);
@@ -186,7 +185,6 @@ fn test_bart_large_cnn_config_parsing() {
     assert!(!config.scale_embedding);
     assert!(!config.normalize_before);
 
-    // Critical token IDs
     assert_eq!(config.bos_token_id, 0);
     assert_eq!(config.eos_token_id, 2);
     assert_eq!(config.pad_token_id, 1);
@@ -194,7 +192,6 @@ fn test_bart_large_cnn_config_parsing() {
     assert_eq!(config.forced_bos_token_id, Some(0));
     assert_eq!(config.forced_eos_token_id, Some(2));
 
-    // Task-specific params
     let task_params = config.task_specific_params.as_ref().unwrap();
     let summary = task_params.summarization.as_ref().unwrap();
     assert_eq!(summary.max_length, 142);
@@ -209,25 +206,21 @@ fn test_bart_large_cnn_config_parsing() {
 async fn test_bart_large_cnn_architectural_properties() -> Result<()> {
     let model = load_bart_large_cnn().await?;
 
-    // Trait methods should reflect config.json values
     assert_eq!(model.vocab_size(), 50264);
     assert_eq!(model.hidden_size(), 1024);
     assert_eq!(model.num_layers(), 12);
     assert_eq!(model.num_heads(), 16);
     assert_eq!(model.context_size(), 1024);
 
-    // Critical token IDs from config — NOT from generation_config.json
     assert_eq!(model.bos_token_id(), Some(0), "bos_token_id should be 0");
     assert_eq!(model.eos_token_id(), Some(2), "eos_token_id should be 2");
     assert_eq!(model.pad_token_id(), Some(1), "pad_token_id should be 1");
 
-    // Decoder start token — this is the one that matters most for generation
     assert_eq!(
         model.config.decoder_start_token_id, 2,
         "decoder_start_token_id must be 2 (EOS), not 0 (BOS)"
     );
 
-    // Forced tokens
     assert_eq!(
         model.forced_bos_token_id(), Some(0),
         "forced_bos_token_id should be 0"
@@ -273,17 +266,8 @@ async fn test_bart_large_cnn_trait_config_consistency() -> Result<()> {
 
 #[tokio::test]
 async fn test_bart_large_cnn_generation_config_does_not_override_token_ids() -> Result<()> {
-    // This test exists because the generation_config.json that ships with
-    // facebook/bart-large-cnn has WRONG values:
-    //   eos_token_id: 1 (should be 2)
-    //   pad_token_id: 0 (should be 1)
-    //   decoder_start_token_id: 0 (should be 2)
-    //
-    // The model MUST use config.json values for these critical token IDs.
-
     let model = load_bart_large_cnn().await?;
 
-    // These must match config.json, regardless of what generation_config.json says
     assert_ne!(
         model.eos_token_id(), Some(1),
         "eos_token_id is 1 — generation_config.json is overriding config.json!"
@@ -297,7 +281,6 @@ async fn test_bart_large_cnn_generation_config_does_not_override_token_ids() -> 
         "decoder_start_token_id is 0 — generation_config.json is overriding config.json!"
     );
 
-    // Positive assertions for the correct values
     assert_eq!(model.eos_token_id(), Some(2));
     assert_eq!(model.pad_token_id(), Some(1));
     assert_eq!(model.config.decoder_start_token_id, 2);
@@ -310,7 +293,6 @@ async fn test_bart_large_cnn_default_generation_config() -> Result<()> {
     let model = load_bart_large_cnn().await?;
     let gen_config = model.get_default_generation_config();
 
-    // Should come from task_specific_params.summarization in config.json
     assert_eq!(gen_config.max_length, 142);
     assert_eq!(gen_config.min_length, 56);
     assert_eq!(gen_config.no_repeat_ngram_size, 3);

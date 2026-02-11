@@ -1,7 +1,4 @@
-//! Unified Seq2Seq GPU encoder supporting BART, T5, Whisper, and similar architectures.
-//!
-//! Mirrors `Seq2SeqCPUEncoder` but runs on GPU via wgpu.
-//! Does NOT own embeddings - those are provided via the GpuEncoderOps trait.
+//! Unified Seq2Seq GPU encoder
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3};
@@ -28,7 +25,6 @@ use crate::{
     weights::ModelWeights,
 };
 
-/// Unified transformer encoder for seq2seq models on GPU.
 pub struct Seq2SeqGPUEncoder {
     context: Arc<WgpuContext>,
 
@@ -50,14 +46,7 @@ pub struct Seq2SeqGPUEncoder {
 }
 
 impl Seq2SeqGPUEncoder {
-    /// Create encoder from ModelConfig + Seq2SeqEncoderConfig.
-    ///
-    /// # Arguments
-    /// * `context` - WGPU context
-    /// * `weights` - Model weights
-    /// * `config` - Model configuration (BartConfig, T5Config, etc.)
-    /// * `encoder_config` - Seq2Seq-specific settings
-    /// * `load_config` - Weight loading options (dtype, etc.)
+    /// Create encoder
     pub fn new<C: ModelConfig>(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,

@@ -1,7 +1,4 @@
 //! High-level interface for loading model weights.
-//!
-//! Provides format-agnostic access to model weights (SafeTensors or GGUF).
-//! Prefer `with_raw_tensor` for memory-efficient mmap-based access.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -17,7 +14,6 @@ use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
 use crate::weights::raw_to_typed_gguf;
 
-/// Attention layout information for quantized weight reshaping.
 #[derive(Debug, Clone, Copy)]
 pub struct AttentionLayout {
     pub n_heads: usize,
@@ -32,9 +28,6 @@ struct ModelWeightsInner {
 }
 
 /// High-level interface for loading model weights.
-///
-/// Provides format-agnostic access with automatic format detection.
-/// Thread-safe and cloneable (shares underlying mmap via `Arc`).
 pub struct ModelWeights {
     inner: Arc<ModelWeightsInner>,
 }
@@ -49,9 +42,6 @@ impl Clone for ModelWeights {
 
 impl ModelWeights {
     /// Creates a new ModelWeights from a path.
-    ///
-    /// Accepts a `.gguf` file, a directory with SafeTensors, or a directory
-    /// containing a `.gguf` file.
     pub fn new(path: &Path) -> Result<Self> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
             return Self::from_gguf_file(path);
@@ -221,9 +211,6 @@ impl ModelWeights {
     }
 
     /// Processes a tensor's raw bytes through a callback.
-    ///
-    /// This is the recommended way to access tensor data. Data remains on disk
-    /// until accessed; only pages touched during the callback are loaded.
     pub fn with_raw_tensor<R, F>(&self, name: &str, f: F) -> Result<R>
     where
         F: FnOnce(TensorView<'_>) -> Result<R>,

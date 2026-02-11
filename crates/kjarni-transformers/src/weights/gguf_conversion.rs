@@ -1,17 +1,4 @@
-//! GGUF tensor conversion and block reordering.
-//!
-//! Converts raw GGUF tensor data into typed CPU tensors, including block
-//! reordering for quantized attention weights.
-//!
-//! # Warning: Do Not Modify Reordering Logic
-//!
-//! The block reordering functions are the result of extensive debugging.
-//! GGUF files store quantized blocks in an interleaved "super-block" layout
-//! optimized for SIMD. Our row-major kernels expect standard layout, so we
-//! reorder at load time.
-//!
-//! Only Q and K projection weights need reordering. V, O, and MLP weights
-//! use standard row-major layout.
+//! GGUF tensor conversion
 
 use anyhow::{Result, anyhow};
 use half::{bf16, f16};
@@ -37,10 +24,6 @@ pub fn cast_or_copy<T: bytemuck::Pod + bytemuck::Zeroable>(bytes: &[u8]) -> Vec<
 }
 
 /// Computes the GGUF block group index for a given logical row.
-///
-/// Implements the inverse of GGUF's 64-row super-tile interleaving:
-/// - Rows 0-31 of each tile → even block groups
-/// - Rows 32-63 of each tile → odd block groups
 #[inline]
 pub fn gguf_block_group_for_row(logical_row: usize) -> usize {
     let super_tile = logical_row / SUPER_TILE_SIZE;
@@ -54,8 +37,6 @@ pub fn gguf_block_group_for_row(logical_row: usize) -> usize {
 }
 
 /// Computes the GGUF source row for attention weight reordering.
-///
-/// Uses head-dimension-based interleaving for Q4_K and Q6_K tensors.
 #[inline]
 fn get_gguf_src_row(logical_row: usize, head_dim: usize) -> usize {
     let half_dim = head_dim / 2;
@@ -145,8 +126,6 @@ pub fn reorder_q_k_blocks3(
 }
 
 /// Returns `true` if this tensor needs GGUF block reordering.
-///
-/// Only Q and K projections use interleaved layout.
 fn needs_gguf_reordering(name: &str, _rows: usize) -> bool {
     name.contains("q_proj")
         || name.contains("k_proj")
@@ -155,9 +134,6 @@ fn needs_gguf_reordering(name: &str, _rows: usize) -> bool {
 }
 
 /// Converts a raw GGUF tensor view into a typed CPU tensor.
-///
-/// Handles float types directly and applies block reordering for quantized
-/// Q/K projection weights.
 pub fn raw_to_typed_gguf(raw: TensorView<'_>, attn: Option<AttentionLayout>) -> Result<CpuTensor> {
     match raw.dtype {
         DType::F32 => {

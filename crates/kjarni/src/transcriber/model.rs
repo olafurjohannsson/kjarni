@@ -394,13 +394,7 @@ impl Transcriber {
 }
 
 
-// Simple Linear Resampling
-
-
 /// Resample audio via linear interpolation.
-///
-/// This is a lightweight fallback so that `transcribe_audio()` works with
-/// non-16 kHz input.  For production quality consider using the `rubato` crate.
 fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate || samples.is_empty() {
         return samples.to_vec();

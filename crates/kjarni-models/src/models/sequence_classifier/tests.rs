@@ -162,11 +162,11 @@ mod cross_encoder_tests {
         .await?;
         let query = "machine learning";
         let documents = vec![
-            "Machine learning is awesome",          // Should rank high
-            "The weather is nice today",            // Should rank low
-            "Deep learning uses neural networks",   // Should rank high
-            "I like pizza",                         // Should rank low
-            "AI and ML are transforming the world", // Should rank high
+            "Machine learning is awesome",          
+            "The weather is nice today",            
+            "Deep learning uses neural networks",   
+            "I like pizza",                         
+            "AI and ML are transforming the world", 
         ];
         let top_2 = encoder.rerank_top_k(query, &documents, 2).await?;
         assert_eq!(top_2.len(), 2, "Should return exactly 2 results");

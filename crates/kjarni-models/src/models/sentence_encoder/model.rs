@@ -29,16 +29,7 @@ use super::configs::{BertConfig, DistilBertConfig};
 use crate::MpnetConfig;
 use crate::models::sequence_classifier::configs::RobertaConfig;
 
-
-// Sentence Encoder
-
-
 /// Sentence encoder for semantic similarity tasks.
-///
-/// Produces dense vector embeddings from text for use in:
-/// - Semantic search
-/// - Clustering
-/// - Similarity comparison
 pub struct SentenceEncoder {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
@@ -156,10 +147,6 @@ impl SentenceEncoder {
         )
     }
 
-    // ========================================================================
-    // Encoding API
-    // ========================================================================
-
     /// Encode text with default mean pooling and normalization.
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
         let config = EncodingConfig {
@@ -179,17 +166,6 @@ impl SentenceEncoder {
     }
 
     /// Encode with custom pooling strategy and optional normalization.
-    ///
-    /// # Arguments
-    /// * `text` - The text to encode
-    /// * `pooling_strategy` - Pooling method: "mean", "cls", "max", or "lastToken"
-    /// * `normalize` - Whether to L2-normalize the output embedding
-    ///
-    /// # Example
-    /// ```ignore
-    /// let mean_embedding = encoder.encode_with(text, Some("mean"), true).await?;
-    /// let cls_embedding = encoder.encode_with(text, Some("cls"), true).await?;
-    /// ```
     pub async fn encode_with(
         &self,
         text: &str,
@@ -227,11 +203,11 @@ impl SentenceEncoder {
 
         let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?;
 
-        // let config = EncodingConfig {
-        //     normalize: false,
-        //     pooling_strategy: self.pipeline.pooling_strategy(),
-        // };
-
+        let config = EncodingConfig {
+            normalize: false,
+            pooling_strategy: self.pipeline.pooling_strategy(),
+        };
+        
         kjarni_transformers::cpu::encoder::traits::l2_normalize_inplace(&mut pooled);
 
         let (rows, cols) = pooled.dim();
@@ -267,10 +243,6 @@ impl SentenceEncoder {
         <Self as SentenceEncoderModel>::encode_batch(self, texts, &config).await
     }
 
-    // ========================================================================
-    // Helper Methods
-    // ========================================================================
-
     /// Parse a string pooling strategy into the enum.
     fn parse_pooling_strategy(strategy: Option<&str>) -> Result<PoolingStrategy> {
         match strategy.unwrap_or("mean") {
@@ -284,10 +256,6 @@ impl SentenceEncoder {
             )),
         }
     }
-
-    // ========================================================================
-    // Accessors
-    // ========================================================================
 
     pub fn pipeline(&self) -> &EncoderPipeline {
         &self.pipeline
@@ -313,9 +281,6 @@ impl SentenceEncoder {
         self.pipeline.plan().layers
     }
 }
-
-
-// Trait Implementations
 
 
 impl LanguageModel for SentenceEncoder {
@@ -401,10 +366,9 @@ impl GpuEncoderOps for SentenceEncoder {
         token_type_ids: Option<ModelInput<'_>>,
         pos: usize,
     ) -> Result<GpuTensor> {
-        unimplemented!()
-        // self.pipeline()
-        //     .embeddings()
-        //     .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
+        self.pipeline()
+            .embeddings()
+            .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 

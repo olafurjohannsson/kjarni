@@ -25,10 +25,10 @@ pub const TEXT_EXTENSIONS: &[&str] = &[
 pub struct LoaderConfig {
     pub splitter: SplitterConfig,
     pub recursive: bool,
-    pub extensions: Vec<String>,        // If empty, use defaults
-    pub exclude_patterns: Vec<String>,  // NEW: glob patterns to exclude
+    pub extensions: Vec<String>,       
+    pub exclude_patterns: Vec<String>, 
     pub include_hidden: bool,
-    pub max_file_size: Option<usize>,   // NEW: skip files larger than this
+    pub max_file_size: Option<usize>,   
 }
 
 impl LoaderConfig {

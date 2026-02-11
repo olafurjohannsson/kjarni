@@ -1,10 +1,3 @@
-//! LLaMA-style decoder-only language model.
-//!
-//! This module provides the `LlamaModel`, a model container responsible for loading
-//! weights and configuration for Llama and its variants.
-//!
-//! The actual text generation is handled by the generic `Generator` struct.
-
 use crate::models::llama::config::LlamaConfig;
 use crate::models::llama::model::LlamaModel;
 use anyhow::Result;
@@ -45,11 +38,9 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
         log::warn!("Skipping Llama-3.2-8B test since model files not found in cache.");
         return Ok(());
     }
-    // 1. Arrange: Load the model.
     let model = load_llama_8b_for_test().await?;
     let config = model.config();
 
-    // 2. Assert: Check architectural values directly from the config struct.
     assert_eq!(config.vocab_size, 128256);
     assert_eq!(config.hidden_size, 4096);
     assert_eq!(config.num_hidden_layers, 32);
@@ -60,8 +51,6 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
     assert_eq!(config.rope_theta, 500000.0);
     assert_eq!(config.rms_norm_eps, 1e-5);
 
-    // 3. Assert: Check that the trait implementations correctly expose these values.
-    // This catches hardcoded values like the bug we just found!
     assert_eq!(
         model.vocab_size(),
         config.vocab_size,
@@ -85,20 +74,16 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
 
     // Check token IDs match config.json
     assert_eq!(model.bos_token_id(), Some(128000));
-    assert_eq!(model.eos_token_id(), Some(128009)); // Note: 8B uses 128009, not 128001
+    assert_eq!(model.eos_token_id(), Some(128009)); 
 
     Ok(())
 }
 
-/// Generic test to ensure trait values match config values.
-/// Run this for ANY model to catch hardcoded values.
 #[tokio::test]
 async fn test_llama_trait_config_consistency() -> Result<()> {
-    // Test with 1B
     let model_1b = load_llama_for_test().await?;
     assert_trait_matches_config(&model_1b, "Llama-3.2-1B");
 
-    // Test with 8B (if available)
     if let Ok(model_8b) = load_llama_8b_for_test().await {
         assert_trait_matches_config(&model_8b, "Llama-3-8B");
     }
@@ -190,12 +175,10 @@ fn test_llama_config_parsing_1b() {
 
 #[tokio::test]
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
-    // 1. Arrange: Load the model.
     {
         let model = load_llama_for_test().await?;
         let config = model.config();
 
-        // 2. Assert: Check architectural values directly from the config struct.
         assert_eq!(config.vocab_size, 128256);
         assert_eq!(config.hidden_size, 2048);
         assert_eq!(config.num_hidden_layers, 16);
@@ -204,17 +187,14 @@ async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
         assert_eq!(config.max_position_embeddings, 131072);
         assert_eq!(config.rope_theta, 500000.0);
 
-        // 3. Assert: Check that the trait implementations correctly expose these values.
         assert_eq!(model.vocab_size(), 128256);
         assert_eq!(model.hidden_size(), 2048);
         assert_eq!(model.num_layers(), 16);
         assert_eq!(model.num_heads(), 32);
         assert_eq!(model.max_length(), 131072);
 
-        // Check token IDs.
         assert_eq!(model.bos_token_id(), Some(128000));
         assert_eq!(model.eos_token_id(), Some(128001));
-        // Llama often doesn't define a pad token, so this should be None.
         assert_eq!(model.pad_token_id(), None);
     }
     kjarni_transformers::weights::clear_mmap_cache();
@@ -223,28 +203,18 @@ async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
 
 #[tokio::test]
 async fn test_llama3_2_1b_generation_parity() -> Result<()> {
-    // This test verifies that our Llama implementation produces a known, correct output
-    // for a deterministic (greedy) generation task.
-
-    // 1. Setup: Define the model, prompt, and expected output.
-    // let model_type = ModelType::Llama3_2_1B;
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
-
-    // The "golden" output string for generating 5 new tokens, based on previous correct runs.
     let expected_output =
         "The field of Artificial Intelligence has seen a lot of progress in the last few years.";
 
-    // Create a config for deterministic, greedy decoding.
     let config = GenerationConfig {
         max_new_tokens: Some(6),
         strategy: DecodingStrategy::Greedy,
-        repetition_penalty: 1.0, // No penalty.
-        add_bos_token: true,     // CRITICAL for Llama models.
+        repetition_penalty: 1.0, 
+        add_bos_token: true,     
         ..Default::default()
     };
-    // decoder_layer::tests::test_decoder_layer_with_rope_and_gqa
     {
-        // 2. Load model and create the generator.
         let llama_model = LlamaModel::from_pretrained(
             Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
             Device::Cpu,

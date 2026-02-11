@@ -1,3 +1,0 @@
-// cargo llvm-cov --html --output-dir coverage/
-
-// cargo build --release --features c-bindings

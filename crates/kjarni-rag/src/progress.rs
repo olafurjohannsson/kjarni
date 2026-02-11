@@ -576,20 +576,14 @@ mod progress_tests {
             }
         });
 
-        // Same stage multiple times
         reporter.report(&Progress::loading(1, None), None);
         reporter.report(&Progress::loading(2, None), None);
         reporter.report(&Progress::loading(3, None), None);
 
-        // Different stage
         reporter.report(&Progress::embedding(1, None), None);
 
         assert_eq!(stage_changes.load(Ordering::Relaxed), 2);
     }
-
-    // ============================================================================
-    // EDGE CASES
-    // ============================================================================
 
     #[test]
     fn test_progress_zero_values() {
@@ -609,16 +603,11 @@ mod progress_tests {
 
     #[test]
     fn test_progress_current_exceeds_total() {
-        // This is valid - might happen if total was estimated
         let progress = Progress::new(ProgressStage::Loading, 150, Some(100));
 
         assert_eq!(progress.current, 150);
         assert_eq!(progress.total, Some(100));
     }
-
-    // ============================================================================
-    // INTEGRATION TESTS
-    // ============================================================================
 
     #[test]
     fn test_full_indexing_workflow() {

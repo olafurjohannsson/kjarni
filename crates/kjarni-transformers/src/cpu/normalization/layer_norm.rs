@@ -1,4 +1,5 @@
 //! Layer normalization implementation
+
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -7,8 +8,6 @@ use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
 
-/// A data structure holding the learnable parameters for Layer Normalization.
-/// This allows for type-safe handling of different on-disk data types.
 
 /// Layer normalization
 pub struct LayerNorm {
@@ -105,7 +104,6 @@ impl LayerNorm {
         let weight = self.weight.as_slice().unwrap();
         let bias = self.bias.as_slice().unwrap();
 
-        // Process each token (row)
         for t in 0..tokens {
             let input_row = input.row(t);
             let mut output_row = output.row_mut(t);
@@ -113,14 +111,12 @@ impl LayerNorm {
             let in_slice = input_row.as_slice().unwrap();
             let out_slice = output_row.as_slice_mut().unwrap();
 
-            // Compute mean (single pass)
             let mut sum = 0.0f32;
             for i in 0..hidden {
                 sum += in_slice[i];
             }
             let mean = sum / hidden as f32;
 
-            // Compute variance (single pass)
             let mut var_sum = 0.0f32;
             for i in 0..hidden {
                 let diff = in_slice[i] - mean;
@@ -128,7 +124,6 @@ impl LayerNorm {
             }
             let inv_std = 1.0 / (var_sum / hidden as f32 + eps).sqrt();
 
-            // Normalize, scale, shift (single pass, SIMD-friendly)
             for i in 0..hidden {
                 out_slice[i] = (in_slice[i] - mean) * inv_std * weight[i] + bias[i];
             }
@@ -146,7 +141,6 @@ impl LayerNorm {
         bias_name: &str,
         eps: f32,
     ) -> Result<Self> {
-        // Small tensors - always convert to F32
         let weight = match weights.get_typed_tensor(weight_name)? {
             CpuTensor::F32(arr) => arr.into_dimensionality::<Ix1>()?,
             CpuTensor::F16(arr) => arr.mapv(|v| v.to_f32()).into_dimensionality::<Ix1>()?,
@@ -200,7 +194,6 @@ impl LayerNorm {
     }
 
     /// Apply layer norm to a 3D tensor of activations.
-    /// This method is now extremely simple and fast because it knows its weights are already F32.
     #[inline]
     pub fn forward(&self, hidden_states: &ArrayView3<f32>) -> Array3<f32> {
         let mean = hidden_states.mean_axis(Axis(2)).unwrap();
@@ -216,7 +209,6 @@ impl LayerNorm {
         normalized_hidden * &self.weight + &self.bias
     }
 
-    /// Apply layer norm to a 3D tensor
     pub fn forward_3d(&self, hidden: &Array3<f32>) -> Array3<f32> {
         self.forward(&hidden.view())
     }
@@ -229,23 +221,14 @@ mod layer_norm_tests {
 
     #[test]
     fn test_layer_norm_basic() {
-        // Simple test with known values
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let bias = Array1::from_vec(vec![0.0, 0.0, 0.0]);
         let eps = 1e-6;
         let layer_norm = LayerNorm::new(weight, bias, eps);
-
-        // Input: [1, 1, 3] tensor with values [1.0, 2.0, 3.0]
-        // Mean = 2.0, Variance = 2/3
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
         let output = layer_norm.forward_3d(&hidden);
-
-        // After normalization: mean=0, variance=1
         let output_mean = (output[[0, 0, 0]] + output[[0, 0, 1]] + output[[0, 0, 2]]) / 3.0;
-        assert!(output_mean.abs() < 1e-5); // Mean should be ~0
-
-        // Verify normalized values
-        // (1-2)/sqrt(2/3) ≈ -1.2247, (2-2)/sqrt(2/3) = 0, (3-2)/sqrt(2/3) ≈ 1.2247
+        assert!(output_mean.abs() < 1e-5);
         assert!((output[[0, 0, 0]] - (-1.2247)).abs() < 1e-3);
         assert!((output[[0, 0, 1]] - 0.0).abs() < 1e-5);
         assert!((output[[0, 0, 2]] - 1.2247).abs() < 1e-3);
@@ -261,7 +244,6 @@ mod layer_norm_tests {
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
         let output = layer_norm.forward_3d(&hidden);
 
-        // First normalize, then scale by weight and add bias
         let mean = 2.0;
         let var = 2.0 / 3.0;
         let std = (var + eps).sqrt();
@@ -299,28 +281,12 @@ mod layer_norm_tests {
         .unwrap();
 
         let output = layer_norm.forward_3d(&hidden);
-
-        // Each position should be normalized independently
-        // Position [0, 0]: [1.0, 3.0] -> normalized to [-1, 1]
         assert!((output[[0, 0, 0]] - (-1.0)).abs() < 1e-3);
         assert!((output[[0, 0, 1]] - 1.0).abs() < 1e-3);
     }
 
     #[test]
     fn test_layer_norm_pytorch_parity() {
-        // Test against known PyTorch output
-        // PyTorch code:
-        // ```python
-        // import torch
-        // x = torch.tensor([[[1.0, 2.0, 3.0, 4.0]]])
-        // layer_norm = torch.nn.LayerNorm(4)
-        // layer_norm.weight.data = torch.tensor([1.0, 1.0, 1.0, 1.0])
-        // layer_norm.bias.data = torch.tensor([0.0, 0.0, 0.0, 0.0])
-        // output = layer_norm(x)
-        // print(output)
-        // ```
-        // Output: tensor([[[-1.3416, -0.4472,  0.4472,  1.3416]]])
-
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0, 1.0]);
         let bias = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.0]);
         let eps = 1e-5;
@@ -337,8 +303,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_layer_norm_constant_input() {
-        // When all values are the same, variance is 0
-        // Should handle gracefully (eps prevents division by zero)
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let bias = Array1::from_vec(vec![0.0, 0.0, 0.0]);
         let eps = 1e-5;
@@ -347,7 +311,6 @@ mod layer_norm_tests {
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![5.0, 5.0, 5.0]).unwrap();
         let output = layer_norm.forward_3d(&hidden);
 
-        // All outputs should be 0 (mean-centered with no variance)
         assert!(output[[0, 0, 0]].abs() < 1e-3);
         assert!(output[[0, 0, 1]].abs() < 1e-3);
         assert!(output[[0, 0, 2]].abs() < 1e-3);
@@ -364,10 +327,6 @@ mod layer_norm_tests {
 
         assert_eq!(output.shape(), &[1, 1, 2]);
     }
-    // ============================================================================
-    // TEST UTILITIES
-    // ============================================================================
-
     fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
         (a - b).abs() < eps
     }
@@ -394,10 +353,6 @@ mod layer_norm_tests {
             val
         })
     }
-
-    // ============================================================================
-    // SIMD vs SCALAR EQUIVALENCE TESTS
-    // ============================================================================
 
     #[test]
     fn test_simd_scalar_equivalence_hidden_64() {
@@ -454,9 +409,8 @@ mod layer_norm_tests {
 
     #[test]
     fn test_simd_scalar_equivalence_hidden_384_minilm() {
-        // MiniLM-L6-v2 hidden size
         let hidden = 384;
-        let tokens = 120; // Batch size from your benchmark
+        let tokens = 120; 
 
         let weight = Array1::from_vec((0..hidden).map(|i| 0.9 + (i as f32) * 0.001).collect());
         let bias = Array1::from_vec((0..hidden).map(|i| -0.5 + (i as f32) * 0.002).collect());
@@ -481,7 +435,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_simd_scalar_equivalence_hidden_768() {
-        // BERT-base hidden size
         let hidden = 768;
         let tokens = 32;
 
@@ -503,13 +456,8 @@ mod layer_norm_tests {
         assert!(arrays_approx_eq(&output_simd, &output_scalar, 1e-5));
     }
 
-    // ============================================================================
-    // FALLBACK TRIGGER TESTS
-    // ============================================================================
-
     #[test]
     fn test_fallback_small_hidden_32() {
-        // hidden < 64 should trigger scalar fallback
         let hidden = 32;
         let tokens = 5;
 
@@ -521,7 +469,6 @@ mod layer_norm_tests {
         let mut output_dispatch = Array2::<f32>::zeros((tokens, hidden));
         let mut output_scalar = Array2::<f32>::zeros((tokens, hidden));
 
-        // forward_2d_noalloc should dispatch to scalar for hidden=32
         ln.forward_2d_noalloc(&input.view(), &mut output_dispatch.view_mut());
         ln.forward_2d_noalloc_scalar(&input.view(), &mut output_scalar.view_mut());
 
@@ -534,7 +481,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_fallback_small_hidden_63() {
-        // hidden=63 < 64 should trigger scalar fallback
         let hidden = 63;
         let tokens = 5;
 
@@ -555,7 +501,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_fallback_unaligned_65() {
-        // hidden=65 not divisible by 8, should trigger scalar
         let hidden = 65;
         let tokens = 5;
 
@@ -576,7 +521,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_fallback_unaligned_100() {
-        // hidden=100 not divisible by 8
         let hidden = 100;
         let tokens = 5;
 
@@ -597,7 +541,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_simd_path_activates_64() {
-        // hidden=64 should use SIMD (64 >= 64 and 64 % 8 == 0)
         let hidden = 64;
         let tokens = 5;
 
@@ -613,8 +556,6 @@ mod layer_norm_tests {
         unsafe {
             ln.forward_2d_noalloc_simd(&input.view(), &mut output_simd.view_mut());
         }
-
-        // If SIMD path is used, these should be identical (not just approximately equal)
         let diff = max_diff(&output_dispatch, &output_simd);
         assert!(
             diff < 1e-7,
@@ -623,10 +564,6 @@ mod layer_norm_tests {
         );
         println!("[hidden=64] SIMD path active: PASS");
     }
-
-    // ============================================================================
-    // 2D vs 3D EQUIVALENCE TESTS
-    // ============================================================================
 
     #[test]
     fn test_2d_vs_3d_equivalence() {
@@ -638,13 +575,9 @@ mod layer_norm_tests {
         let weight = Array1::from_vec((0..hidden).map(|i| 1.0 + (i as f32) * 0.001).collect());
         let bias = Array1::from_vec((0..hidden).map(|i| (i as f32) * 0.0005).collect());
         let ln = LayerNorm::new(weight, bias, 1e-5);
-
-        // Create 3D input
         let input_3d = Array3::from_shape_fn((batch, seq, hidden), |(b, s, h)| {
             ((b * 100 + s * 10 + h) as f32) * 0.01 - 2.0
         });
-
-        // Reshape to 2D
         let input_2d = input_3d
             .clone()
             .into_shape_with_order((tokens, hidden))
@@ -667,20 +600,8 @@ mod layer_norm_tests {
         );
     }
 
-    // ============================================================================
-    // PYTORCH PARITY TESTS
-    // ============================================================================
-
     #[test]
     fn test_pytorch_parity_2d() {
-        // PyTorch reference:
-        // x = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
-        // ln = torch.nn.LayerNorm(4, eps=1e-5)
-        // ln.weight.data = torch.ones(4)
-        // ln.bias.data = torch.zeros(4)
-        // output = ln(x)
-        // # tensor([[-1.3416, -0.4472,  0.4472,  1.3416]])
-
         let hidden = 4;
         let weight = Array1::from_vec(vec![1.0; hidden]);
         let bias = Array1::from_vec(vec![0.0; hidden]);
@@ -711,14 +632,6 @@ mod layer_norm_tests {
 
     #[test]
     fn test_pytorch_parity_2d_with_weight_bias() {
-        // PyTorch reference:
-        // x = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
-        // ln = torch.nn.LayerNorm(4, eps=1e-5)
-        // ln.weight.data = torch.tensor([2.0, 0.5, 1.5, 1.0])
-        // ln.bias.data = torch.tensor([1.0, -1.0, 0.5, 0.0])
-        // output = ln(x)
-
-        let hidden = 4;
         let weight = Array1::from_vec(vec![2.0, 0.5, 1.5, 1.0]);
         let bias = Array1::from_vec(vec![1.0, -1.0, 0.5, 0.0]);
         let ln = LayerNorm::new(weight, bias, 1e-5);
@@ -728,10 +641,6 @@ mod layer_norm_tests {
 
         ln.forward_2d_noalloc(&input.view(), &mut output.view_mut());
 
-        // Compute expected manually:
-        // mean = 2.5, var = 1.25, std = sqrt(1.25 + 1e-5) ≈ 1.118
-        // normalized = [-1.3416, -0.4472, 0.4472, 1.3416]
-        // scaled = normalized * weight + bias
         let mean = 2.5f32;
         let var = 1.25f32;
         let std = (var + 1e-5).sqrt();
@@ -763,14 +672,11 @@ mod layer_norm_tests {
 
     #[test]
     fn test_pytorch_parity_2d_simd_path() {
-        // Test SIMD path with larger hidden dim
-        // Values computed from PyTorch
         let hidden = 64;
         let weight = Array1::from_vec(vec![1.0; hidden]);
         let bias = Array1::from_vec(vec![0.0; hidden]);
         let ln = LayerNorm::new(weight, bias, 1e-5);
 
-        // Input: [0, 1, 2, ..., 63]
         let input_vec: Vec<f32> = (0..hidden).map(|i| i as f32).collect();
         let input = Array2::from_shape_vec((1, hidden), input_vec.clone()).unwrap();
         let mut output = Array2::<f32>::zeros((1, hidden));
@@ -778,8 +684,6 @@ mod layer_norm_tests {
             ln.forward_2d_noalloc_simd(&input.view(), &mut output.view_mut());
         }
 
-        // Verify properties of layer norm:
-        // 1. Output should have mean ≈ 0
         let out_slice = output.as_slice().unwrap();
         let out_mean: f32 = out_slice.iter().sum::<f32>() / hidden as f32;
         assert!(
@@ -788,7 +692,6 @@ mod layer_norm_tests {
             out_mean
         );
 
-        // 2. Output should have variance ≈ 1
         let out_var: f32 = out_slice
             .iter()
             .map(|x| (x - out_mean).powi(2))
@@ -806,13 +709,8 @@ mod layer_norm_tests {
         );
     }
 
-    // ============================================================================
-    // EDGE CASE TESTS
-    // ============================================================================
-
     #[test]
     fn test_constant_input_2d() {
-        // All same values -> variance = 0, should handle gracefully
         let hidden = 64;
         let tokens = 5;
 
@@ -825,7 +723,6 @@ mod layer_norm_tests {
 
         ln.forward_2d_noalloc(&input.view(), &mut output.view_mut());
 
-        // All outputs should be ~0 (mean-centered with no variance, eps prevents NaN)
         for val in output.iter() {
             assert!(
                 val.abs() < 1e-2,
@@ -905,7 +802,6 @@ mod layer_norm_tests {
         let bias = Array1::from_vec(vec![0.0; hidden]);
         let ln = LayerNorm::new(weight, bias, 1e-5);
 
-        // Mix of positive and negative, large and small
         let input = Array2::from_shape_fn((tokens, hidden), |(t, h)| {
             let base = ((t * hidden + h) as f32 * 0.37).sin() * 100.0;
             base
@@ -919,11 +815,6 @@ mod layer_norm_tests {
         }
         println!("[Mixed values] Numerically stable: PASS");
     }
-
-    // ============================================================================
-    // MULTI-TOKEN BATCH TESTS
-    // ============================================================================
-
     #[test]
     fn test_multi_token_batch_correctness() {
         let hidden = 384;
@@ -938,12 +829,9 @@ mod layer_norm_tests {
 
         ln.forward_2d_noalloc(&input.view(), &mut output.view_mut());
 
-        // Verify each row independently
         for t in 0..tokens {
             let row_input = input.row(t);
             let row_output = output.row(t);
-
-            // Compute expected for this row
             let in_slice = row_input.as_slice().unwrap();
             let mean: f32 = in_slice.iter().sum::<f32>() / hidden as f32;
             let var: f32 = in_slice.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / hidden as f32;

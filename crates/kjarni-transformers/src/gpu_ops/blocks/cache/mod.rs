@@ -18,11 +18,7 @@ struct UpdateCacheUniforms {
     _padding: [u32; 2],
 }
 
-/// A specialized kernel to update the KV cache from raw 3D projection outputs.
-///
-/// This kernel reads from `[B, S_new, H*D]` tensors and writes the data into
-/// the `[B, H, S_total, D]` cache tensors at the correct offset, performing the
-/// "split heads" transformation in a single, fused operation.
+/// A specialized kernel to update the KV cache
 #[derive(Clone)]
 pub struct GpuUpdateCache {
     pipeline: Arc<ComputePipeline>,

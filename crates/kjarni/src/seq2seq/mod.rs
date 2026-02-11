@@ -70,9 +70,6 @@ pub use model::Seq2SeqGenerator;
 pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 
 /// Generate text with default settings.
-///
-/// This is the simplest possible API - a one-liner for quick seq2seq generation.
-///
 /// # Example
 ///
 /// ```ignore
@@ -80,13 +77,6 @@ pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 ///     "flan-t5-base",
 ///     "translate English to German: How are you?"
 /// ).await?;
-/// ```
-///
-/// # Notes
-///
-/// - Uses CPU by default
-/// - Downloads model if not present
-/// - For repeated generation, create a `Seq2SeqGenerator` instance instead
 pub async fn generate(model: &str, input: &str) -> Seq2SeqResult<String> {
     Seq2SeqGenerator::new(model).await?.generate(input).await
 }

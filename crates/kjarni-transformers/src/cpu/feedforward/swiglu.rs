@@ -1,9 +1,4 @@
 //! SwiGLU Feed-Forward Network.
-//!
-//! Implements the gated linear unit with configurable activation:
-//! ```text
-//! output = down_proj(activation(gate_proj(x)) * up_proj(x))
-//! ```
 
 use crate::activations::{apply_activation_2d, Activation};
 use crate::linear_layer::LinearLayer;
@@ -11,8 +6,6 @@ use anyhow::Result;
 use ndarray::{Array2, Array3};
 
 /// SwiGLU Feed-Forward Network.
-///
-/// Uses parallel execution for gate and up projections via rayon::join.
 pub struct SwiGluFeedForward {
     pub gate: LinearLayer,
     pub up: LinearLayer,

@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find the Rust library
-# You need to build the Rust library first with: cargo build --release
 set(EDGEGPT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../target/release")
 
 # Include directories

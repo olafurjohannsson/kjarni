@@ -16,10 +16,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-// =========================================================================
-//  1. Mock Configuration
-// =========================================================================
-
 #[derive(Debug, Clone)]
 struct MockConfig {
     vocab_size: usize,
@@ -102,10 +98,6 @@ impl ModelConfig for MockConfig {
         }
     }
 }
-
-// =========================================================================
-//  2. Mock Model
-// =========================================================================
 
 struct MockDecoderModel {
     vocab_size: usize,
@@ -222,7 +214,6 @@ impl LanguageModel for MockDecoderModel {
     }
 }
 
-// 2. Implement InferenceModel
 impl InferenceModel for MockDecoderModel {
     fn device(&self) -> Device {
         self.device
@@ -230,16 +221,12 @@ impl InferenceModel for MockDecoderModel {
     fn context(&self) -> Option<Arc<WgpuContext>> {
         None
     }
-    // fn config(&self) -> &ModelConfig { unimplemented!() }
-    // fn quantization_config(&self) -> Option<&QuantizationConfig> { None }
     fn as_any(&self) -> &dyn Any {
         self
     }
 }
 
-// 3. Implement DecoderLanguageModel
 impl DecoderLanguageModel for MockDecoderModel {
-    // Return SELF as the ops provider
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
         Some(self)
     }
@@ -257,7 +244,6 @@ impl DecoderLanguageModel for MockDecoderModel {
     }
 }
 
-// 4. Implement CpuDecoderOps for the Model itself
 impl CpuDecoderOps for MockDecoderModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         &self.decoder
@@ -268,11 +254,9 @@ impl CpuDecoderOps for MockDecoderModel {
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
         let (batch, seq, _hidden) = hidden_states.dim();
 
-        // Initialize with a very low value so the chosen token stands out
         let mut logits = Array3::from_elem((batch, seq, self.vocab_size), -100.0);
 
         // Force prediction of token ID 2 ("hello")
-        // This ensures we don't hit EOS (ID 1) prematurely
         use ndarray::s;
         logits.slice_mut(s![.., .., 2]).fill(100.0);
 
@@ -284,7 +268,6 @@ impl CpuDecoderOps for MockDecoderModel {
     }
 }
 
-// 5. Mock CpuDecoder Component
 struct MockCpuDecoder {
     hidden_size: usize,
     num_layers: usize,
@@ -407,8 +390,6 @@ async fn test_encode_with_bos() {
 
 #[tokio::test]
 async fn test_generation_flow_control() {
-    // Now this test should actually RUN because we have a valid CpuDecoderOps implementation.
-    // It will generate random tokens (since logits are all 0.0), but the loop logic is verified.
 
     let model = Arc::new(MockDecoderModel::new());
     let generator = DecoderGenerator::new(model).unwrap();

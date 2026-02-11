@@ -1,9 +1,4 @@
 //! FFI callback infrastructure for progress reporting and streaming
-//!
-//! This module provides a unified callback pattern that works for:
-//! - Progress reporting during indexing
-//! - Token streaming during decoding (future)
-//! - Any other streaming/progress use case
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::Arc;
@@ -105,8 +100,6 @@ pub fn is_cancelled(token: *const KjarniCancelToken) -> bool {
     }
 }
 
-/// Wrapper that adapts FFI callback to Rust closure
-/// This is the key abstraction that makes callbacks reusable
 pub struct FfiCallback<T> {
     callback: Option<extern "C" fn(T, *mut c_void)>,
     user_data: *mut c_void,

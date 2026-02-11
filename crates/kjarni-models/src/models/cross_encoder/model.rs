@@ -1,8 +1,4 @@
 //! Cross-encoder for semantic similarity and reranking.
-//!
-//! Takes query-document pairs and outputs relevance scores.
-//! Unlike bi-encoders (which encode texts separately), cross-encoders
-//! process the pair together for more accurate scoring.
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -31,13 +27,8 @@ use crate::BertConfig;
 use crate::models::sequence_classifier::configs::MiniLMCrossEncoderConfig;
 
 
-// Cross Encoder
-
 
 /// Cross-encoder for semantic similarity and reranking.
-///
-/// Processes query-document pairs together through the encoder,
-/// producing a single relevance score per pair.
 pub struct CrossEncoder {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
@@ -45,8 +36,6 @@ pub struct CrossEncoder {
     model_type: Option<ModelType>,
 }
 
-
-// EncoderModelFactory Implementation
 
 
 impl EncoderModelFactory for CrossEncoder {
@@ -107,12 +96,10 @@ impl EncoderModelFactory for CrossEncoder {
         weights: &ModelWeights,
         load_config: &ModelLoadConfig,
     ) -> Result<Option<CpuSequenceClassificationHead>> {
-        // Cross-encoders output a single score (num_labels = 1)
-        // Use from_weights which auto-detects the head structure
         Ok(Some(CpuSequenceClassificationHead::from_weights(
             weights,
             load_config,
-            None, // No label names for regression
+            None,
         )?))
     }
 
@@ -136,11 +123,8 @@ impl EncoderModelFactory for CrossEncoder {
 }
 
 
-// Public API
-
 
 impl CrossEncoder {
-    /// Create cross-encoder from HuggingFace model registry.
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -158,7 +142,6 @@ impl CrossEncoder {
         .await
     }
 
-    /// Create cross-encoder from local model directory.
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
@@ -174,11 +157,6 @@ impl CrossEncoder {
             model_type,
         )
     }
-
-    // =========================================================================
-    // Pair Scoring API
-    // =========================================================================
-
     /// Score a single query-document pair.
     pub async fn predict_pair(&self, query: &str, document: &str) -> Result<f32> {
         let scores = self.predict_pairs(&[(query, document)]).await?;
@@ -261,13 +239,7 @@ impl CrossEncoder {
         Ok(logits.column(0).to_vec())
     }
 
-    // =========================================================================
-    // Reranking API
-    // =========================================================================
-
     /// Rerank documents by relevance to a query.
-    ///
-    /// Returns (original_index, score) tuples sorted by score descending.
     pub async fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<(usize, f32)>> {
         if documents.is_empty() {
             return Ok(vec![]);
@@ -294,10 +266,6 @@ impl CrossEncoder {
         Ok(ranked)
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
     pub fn pipeline(&self) -> &EncoderPipeline {
         &self.pipeline
     }
@@ -318,10 +286,6 @@ impl CrossEncoder {
         self.pipeline.plan().layers
     }
 }
-
-
-// Trait Implementations
-
 
 impl LanguageModel for CrossEncoder {
     fn vocab_size(&self) -> usize {

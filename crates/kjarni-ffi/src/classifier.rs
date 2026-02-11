@@ -10,18 +10,13 @@ use std::ptr;
 /// Single classification result (label + score).
 #[repr(C)]
 pub struct KjarniClassResult {
-    /// Label name (must be freed with kjarni_string_free)
     pub label: *mut c_char,
-    /// Confidence score
     pub score: c_float,
 }
 
-/// Array of classification results.
 #[repr(C)]
 pub struct KjarniClassResults {
-    /// Array of results
     pub results: *mut KjarniClassResult,
-    /// Number of results
     pub len: usize,
 }
 
@@ -57,7 +52,6 @@ impl KjarniClassResults {
     }
 }
 
-/// Free classification results.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) {
     if !results.results.is_null() && results.len > 0 {
@@ -71,7 +65,6 @@ pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) 
     }
 }
 
-/// Configuration for creating a Classifier.
 #[repr(C)]
 pub struct KjarniClassifierConfig {
     /// Device to use
@@ -221,12 +214,6 @@ pub unsafe extern "C" fn kjarni_classifier_free(classifier: *mut KjarniClassifie
 }
 
 /// Classify a single text.
-///
-/// # Safety
-/// - `classifier` must be valid
-/// - `text` must be valid UTF-8
-/// - `out` must be valid
-/// - Results must be freed with `kjarni_class_results_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_classify(
     classifier: *mut KjarniClassifier,
@@ -260,11 +247,6 @@ pub unsafe extern "C" fn kjarni_classifier_classify(
 }
 
 /// Get the classifier's labels.
-///
-/// # Safety
-/// - `classifier` must be valid
-/// - `out` must be valid
-/// - Results must be freed with `kjarni_string_array_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_labels(
     classifier: *const KjarniClassifier,

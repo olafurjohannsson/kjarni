@@ -38,16 +38,7 @@ use crate::models::sequence_classifier::configs::RobertaConfig;
 use crate::{BertConfig, DistilBertConfig};
 
 
-// Sequence Classifier
-
-
 /// A generic sequence classifier for encoder-only models.
-///
-/// Supports:
-/// - BERT, DistilBERT, RoBERTa for sentiment/emotion/toxicity
-/// - RoBERTa-MNLI, DeBERTa-MNLI for NLI-based zero-shot (via ZeroShotClassifier wrapper)
-///
-/// For BART-based zero-shot, use `BartZeroShotClassifier` instead.
 pub struct SequenceClassifier {
     pipeline: EncoderPipeline,
     tokenizer: Tokenizer,
@@ -55,10 +46,6 @@ pub struct SequenceClassifier {
     model_type: Option<ModelType>,
     labels: Option<Vec<String>>,
 }
-
-
-// EncoderModelFactory Implementation
-
 
 impl EncoderModelFactory for SequenceClassifier {
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>> {
@@ -163,16 +150,11 @@ impl EncoderModelFactory for SequenceClassifier {
     }
 }
 
-
-// Public API
-
-
 impl SequenceClassifier {
     pub fn config(&self) -> &dyn ModelConfig {
         self.config.as_ref()
     }
 
-    /// Create classifier from HuggingFace model registry.
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -207,10 +189,6 @@ impl SequenceClassifier {
         )
     }
 
-    // =========================================================================
-    // Classification API
-    // =========================================================================
-
     /// Classify text, returning the top prediction.
     pub async fn classify(&self, text: &str) -> Result<ClassificationResult> {
         let results = self.classify_top_k(text, 1).await?;
@@ -221,8 +199,6 @@ impl SequenceClassifier {
     }
 
     /// Classify text, returning all scores (after softmax).
-    ///
-    /// This is the method the higher-level API depends on.
     pub async fn classify_scores(&self, text: &str) -> Result<Vec<f32>> {
         let batch_scores = self.classify_scores_batch(&[text]).await?;
         batch_scores
@@ -238,8 +214,6 @@ impl SequenceClassifier {
     }
 
     /// Batch classify multiple texts, returning top-k per text.
-    ///
-    /// Returns Vec<Vec<(String, f32)>> to match original API.
     pub async fn classify_batch(
         &self,
         texts: &[&str],
@@ -371,10 +345,6 @@ impl SequenceClassifier {
         Ok(logits.outer_iter().map(|row| row.to_vec()).collect())
     }
 
-    // =========================================================================
-    // Helper Methods
-    // =========================================================================
-
     fn scores_to_top_result(&self, scores: &[f32]) -> Result<ClassificationResult> {
         let (idx, &score) = scores
             .iter()
@@ -419,10 +389,6 @@ impl SequenceClassifier {
             .collect())
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
     pub fn pipeline(&self) -> &EncoderPipeline {
         &self.pipeline
     }
@@ -452,10 +418,6 @@ impl SequenceClassifier {
     }
 }
 
-
-// Classification Result
-
-
 /// Result of a classification.
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
@@ -463,11 +425,6 @@ pub struct ClassificationResult {
     pub score: f32,
     pub index: usize,
 }
-
-
-// Trait Implementations
-
-
 impl LanguageModel for SequenceClassifier {
     fn vocab_size(&self) -> usize {
         self.pipeline.vocab_size()

@@ -3,17 +3,13 @@ use serde::{Deserialize, Serialize};
 /// Index configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexConfig {
-    /// Embedding dimension
     pub dimension: usize,
-    /// Maximum documents per segment before flushing
     pub max_docs_per_segment: usize,
-    /// Maximum memory for in-flight segment (bytes)
     pub max_segment_memory: usize,
-    /// Model used to generate embeddings (for validation)
     pub embedding_model: Option<String>,
-    pub model_name: Option<String>,     // Human-readable model name
-    pub created_at: Option<u64>,        // Unix timestamp
-    pub version: u32,                   // Index format version (for future migrations)
+    pub model_name: Option<String>,     
+    pub created_at: Option<u64>,        
+    pub version: u32,                   
 }
 
 impl Default for IndexConfig {

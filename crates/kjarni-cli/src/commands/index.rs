@@ -470,10 +470,6 @@ mod tests {
         assert_eq!(format_size(1_234_567_890), "1.23 GB");
     }
 
-    // =========================================================================
-    // truncate tests
-    // =========================================================================
-
     #[test]
     fn test_truncate_short_string() {
         assert_eq!(truncate("hello", 10), "hello");
@@ -512,7 +508,6 @@ mod tests {
 
     #[test]
     fn test_truncate_with_newlines_then_truncate() {
-        // First replaces newlines, then truncates
         let input = "line one\nline two\nline three";
         let result = truncate(input, 15);
         assert_eq!(result, "line one lin...");
@@ -526,8 +521,6 @@ mod tests {
 
     #[test]
     fn test_truncate_unicode() {
-        // Note: This will panic if max_len cuts in the middle of a multi-byte char
-        // Testing with safe boundaries
         assert_eq!(truncate("héllo", 10), "héllo");
         assert_eq!(truncate("日本語テスト", 20), "日本語テスト");
     }
@@ -540,13 +533,8 @@ mod tests {
 
     #[test]
     fn test_truncate_minimum_length() {
-        // With max_len=4, we get 1 char + "..."
         assert_eq!(truncate("hello", 4), "h...");
     }
-
-    // =========================================================================
-    // Edge cases and integration-like tests
-    // =========================================================================
 
     #[test]
     fn test_truncate_realistic_document() {
@@ -567,16 +555,10 @@ mod tests {
         assert_eq!(format_size(104_857_600), "104.86 MB"); // 100 MiB
         assert_eq!(format_size(1_073_741_824), "1.07 GB"); // 1 GiB
     }
-
-    // =========================================================================
-    // ENCODE_BATCH_SIZE constant test
-    // =========================================================================
-
     #[test]
     fn test_encode_batch_size_is_reasonable() {
-        // Sanity check that the constant is in a reasonable range
         assert!(ENCODE_BATCH_SIZE > 0);
         assert!(ENCODE_BATCH_SIZE <= 128);
-        assert_eq!(ENCODE_BATCH_SIZE, 32); // Document expected value
+        assert_eq!(ENCODE_BATCH_SIZE, 32);
     }
 }

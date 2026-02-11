@@ -329,9 +329,6 @@ impl Seq2SeqGPUDecoder {
                     )?,
                 )?);
 
-            // ================================================================
-            // FEED-FORWARD
-            // ================================================================
             let feedforward =
                 GpuFeedForward::Standard(GpuFeedForwardStd::new(context, meta.activation)?);
 
@@ -368,9 +365,6 @@ impl Seq2SeqGPUDecoder {
                 )?,
             )?);
 
-            // ================================================================
-            // BUILD LAYER
-            // ================================================================
             layers.push(GpuCrossDecoderLayer::new(
                 context,
                 self_attn_weights,
@@ -390,10 +384,6 @@ impl Seq2SeqGPUDecoder {
         Ok(layers)
     }
 
-    // ========================================================================
-    // ACCESSORS
-    // ========================================================================
-
     pub fn context(&self) -> &Arc<WgpuContext> {
         &self.context
     }
@@ -410,13 +400,6 @@ impl Seq2SeqGPUDecoder {
         self.final_layer_norm.is_some()
     }
 
-    // ========================================================================
-    // NEW UNIFIED METHODS
-    // ========================================================================
-
-    /// Apply embedding layer normalization (BART/Whisper have; T5 doesn't).
-
-    /// Process through decoder layers (new unified API, mirrors forward_layers).
     pub fn forward_layers2(
         &self,
         encoder: &mut CommandEncoder,
@@ -496,10 +479,6 @@ impl Seq2SeqGPUDecoder {
     }
 }
 
-// ============================================================================
-// GpuCrossDecoder TRAIT IMPLEMENTATION
-// ============================================================================
-
 impl GpuCrossDecoder for Seq2SeqGPUDecoder {
     fn embed_norm(
         &self,
@@ -520,8 +499,6 @@ impl GpuCrossDecoder for Seq2SeqGPUDecoder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    /// Apply final layer normalization (T5/Whisper have; BART doesn't).
     fn final_norm(
         &self,
         encoder: &mut CommandEncoder,
@@ -601,9 +578,6 @@ impl GpuCrossDecoder for Seq2SeqGPUDecoder {
         self.precompute_cross_attention_kv2(encoder, pool, encoder_hidden_states)
     }
 }
-// ============================================================================
-// TESTS
-// ============================================================================
 
 #[cfg(test)]
 mod seq2seq_gpu_decoder_tests {
@@ -623,10 +597,6 @@ mod seq2seq_gpu_decoder_tests {
     use safetensors::tensor::{Dtype, TensorView};
     use std::collections::HashMap;
     use tempfile::TempDir;
-
-    // ========================================================================
-    // Test Helpers
-    // ========================================================================
 
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new()
@@ -667,10 +637,6 @@ mod seq2seq_gpu_decoder_tests {
 
         println!("{}: PASSED (max_diff={})", context, max_diff);
     }
-
-    // ========================================================================
-    // Mock Config
-    // ========================================================================
 
     #[derive(Debug, Clone)]
     struct MockDecoderConfig {
@@ -775,10 +741,6 @@ mod seq2seq_gpu_decoder_tests {
         }
     }
 
-    // ========================================================================
-    // Weight Creation Helper
-    // ========================================================================
-
     fn create_model_weights(
         weights_map: HashMap<String, Vec<f32>>,
         shapes: HashMap<String, Vec<usize>>,
@@ -807,10 +769,6 @@ mod seq2seq_gpu_decoder_tests {
 
         Ok((weights, dir))
     }
-
-    // ========================================================================
-    // Golden Data Generator (BART-style decoder)
-    // ========================================================================
 
     fn get_bart_decoder_golden_data() -> (HashMap<String, Vec<f32>>, HashMap<String, Vec<usize>>) {
         let mut w = HashMap::new();
@@ -916,10 +874,6 @@ mod seq2seq_gpu_decoder_tests {
         (w, s)
     }
 
-    // ========================================================================
-    // TESTS
-    // ========================================================================
-
     #[tokio::test]
     async fn test_gpu_decoder_construction_bart() -> Result<()> {
         let ctx = get_test_context().await;
@@ -994,13 +948,11 @@ mod seq2seq_gpu_decoder_tests {
             ModelLoadConfig::default(),
         )?;
 
-        // Input hidden states (simulating embeddings output)
         let input =
             Array3::from_shape_vec((1, 2, 4), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])?;
 
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
 
-        // Run embed_norm
         let gpu_output = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;
@@ -1012,10 +964,7 @@ mod seq2seq_gpu_decoder_tests {
             normed.to_ndarray_3d::<f32>().await?
         };
 
-        // Verify output shape
         assert_eq!(gpu_output.shape(), &[1, 2, 4]);
-
-        // Verify normalization happened (values should be different from input)
         let diff: f32 = gpu_output
             .iter()
             .zip(input.iter())
@@ -1042,7 +991,6 @@ mod seq2seq_gpu_decoder_tests {
             no_pos_emb_in_layout: true,
         };
 
-        // T5-like: no embed norm
         let dec_config = Seq2SeqDecoderConfig {
             position_encoding: PositionEncodingType::None,
             normalize_embeddings: false,
@@ -1065,7 +1013,6 @@ mod seq2seq_gpu_decoder_tests {
 
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
 
-        // embed_norm should return input unchanged
         let output = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;
@@ -1077,7 +1024,6 @@ mod seq2seq_gpu_decoder_tests {
             out.to_ndarray_3d::<f32>().await?
         };
 
-        // Should be identical to input
         let max_diff = output
             .iter()
             .zip(input.iter())
@@ -1115,7 +1061,6 @@ mod seq2seq_gpu_decoder_tests {
             pre_norm: false,
         };
 
-        // Build both CPU and GPU decoders
         let cpu_decoder = Seq2SeqCPUDecoder::new(
             &model_weights,
             &config,
@@ -1131,23 +1076,11 @@ mod seq2seq_gpu_decoder_tests {
             ModelLoadConfig::default(),
         )?;
 
-        // Same input for both (hidden states, simulating embedded tokens)
         let input_hidden =
             Array3::from_shape_vec((1, 2, 4), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])?;
 
-        // Encoder hidden states (for cross-attention)
-        let encoder_hidden = Array3::from_shape_vec(
-            (1, 3, 4),
-            vec![
-                0.336690, 0.128809, 0.234462, 0.230333, -1.122856, -0.186328, 2.208201, -0.637997,
-                0.461657, 0.267351, 0.534905, 0.809357,
-            ],
-        )?;
-
-        // CPU: embed_norm
         let cpu_normed = cpu_decoder.embed_norm(&input_hidden)?;
 
-        // GPU: embed_norm
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input_hidden)?;
 
         let gpu_normed = {
@@ -1197,7 +1130,6 @@ mod seq2seq_gpu_decoder_tests {
             ModelLoadConfig::default(),
         )?;
 
-        // Encoder hidden states [batch=1, seq=3, hidden=4]
         let encoder_hidden = Array3::from_shape_vec(
             (1, 3, 4),
             vec![
@@ -1219,17 +1151,11 @@ mod seq2seq_gpu_decoder_tests {
             kv
         };
 
-        // Verify we got K/V for each layer
         assert_eq!(cross_kv.0.len(), decoder.num_layers());
-
-        // Verify shapes
-        // K: [B, H, D, S_enc] = [1, 2, 2, 3]
-        // V: [B, H, S_enc, D] = [1, 2, 3, 2]
         let (k, v) = &cross_kv.0[0];
         let k_shape = k.shape();
         let v_shape = v.shape();
 
-        // batch=1, num_heads=2, head_dim=2, enc_seq=3
         assert_eq!(k_shape, &[1, 2, 2, 3], "K should be [B, H, D, S_enc]");
         assert_eq!(v_shape, &[1, 2, 3, 2], "V should be [B, H, S_enc, D]");
 

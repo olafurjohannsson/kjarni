@@ -74,32 +74,21 @@ async fn test_distilgpt2_architectural_properties() -> Result<()> {
 
 #[tokio::test]
 async fn test_distilgpt2_generation_parity_2() -> Result<()> {
-    // This test verifies that our implementation produces the exact same output
-    // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-
-    // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
     let model_type = ModelType::DistilGpt2;
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-    // The "golden" output string from the Python reference script and your now-working Rust implementation.
     let expected_output = "The field of Artificial Intelligence has seen a lot of progress in the past few years, but it is still not clear how much improvement will be made.";
 
-    // Create a config that perfectly matches the reference implementations.
     let config = GenerationConfig {
         max_new_tokens: Some(20),
         strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.1,
-        add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+        add_bos_token: false, 
         ..Default::default()
     };
-
-    // 2. Load model and create the generator.
-    //    We run on CPU to match the Python script's environment.
     let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
     let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
-
-    // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
     let generated_text = generator.generate(prompt, &config, None).await?;
 
     let concat_prompt = prompt.to_string() + "" + &generated_text;
@@ -110,29 +99,19 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
 
 #[tokio::test]
 async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
-    // This test verifies that our implementation produces the exact same output
-    // as the HuggingFace transformers library for a deterministic (greedy) generation task.
-
-    // 1. Setup: Define the exact same configuration as the Python script and the working main.rs.
     let model_type = ModelType::DistilGpt2;
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
 
-    // Create a config that perfectly matches the reference implementations.
     let config = GenerationConfig {
         max_new_tokens: Some(5),
         strategy: DecodingStrategy::Greedy,
         repetition_penalty: 1.1,
-        add_bos_token: false, // CRITICAL for parity with default Hugging Face behavior
+        add_bos_token: false, 
         ..Default::default()
     };
-
-    // 2. Load model and create the generator.
-    //    We run on CPU to match the Python script's environment.
     let gpt2_model = Gpt2Model::from_registry(model_type, None, Device::Cpu, None, None).await?;
 
     let generator = DecoderGenerator::new(Arc::new(gpt2_model))?;
-
-    // 3. Execute the generation. We use the non-streaming `generate` for a simple string comparison.
     let generated_text = generator.generate(prompt, &config, None).await?;
 
     let ctx = WgpuContext::new().await?;
@@ -141,8 +120,6 @@ async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
     let generator_2 = DecoderGenerator::new(Arc::new(gpt2_model_2))?;
     let generated_text_2 = generator_2.generate(prompt, &config, None).await?;
 
-    // 4. Assert that the generated output is bit-for-bit identical to the golden value.
-    //    We trim both strings to avoid any potential whitespace differences at the end.
     assert_eq!(generated_text.trim(), generated_text_2.trim());
 
     Ok(())

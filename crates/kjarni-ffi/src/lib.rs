@@ -651,7 +651,6 @@ mod ffi_bridge_tests {
             vec![3.0, 4.0],
         ]);
         
-        // Simulate C caller doing arr[row][col] access
         unsafe {
             assert_eq!(*arr.data.add(0 * arr.cols + 0), 1.0); // [0][0]
             assert_eq!(*arr.data.add(0 * arr.cols + 1), 2.0); // [0][1]
@@ -661,10 +660,6 @@ mod ffi_bridge_tests {
         
         unsafe { kjarni_float_2d_array_free(arr); }
     }
-
-    // =========================================================================
-    // Alignment Tests (Important for SIMD/AVX)
-    // =========================================================================
 
     #[test]
     fn test_float_array_alignment() {
@@ -685,13 +680,8 @@ mod ffi_bridge_tests {
         unsafe { kjarni_float_2d_array_free(arr); }
     }
 
-    // =========================================================================
-    // Struct Layout Tests (Critical for FFI compatibility)
-    // =========================================================================
-
     #[test]
     fn test_float_array_repr_c_layout() {
-        // Verify #[repr(C)] gives predictable layout
         assert_eq!(
             std::mem::size_of::<KjarniFloatArray>(),
             std::mem::size_of::<*mut f32>() + std::mem::size_of::<usize>()

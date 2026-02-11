@@ -1,21 +1,10 @@
-//! Root Mean Square Layer Normalization (RMSNorm)
-//!
-//! RMSNorm is a simpler and more efficient alternative to LayerNorm,
-//! used in LLaMA and other modern architectures.
-//!
-//! Unlike LayerNorm, RMSNorm:
-//! - Does not subtract the mean (no centering)
-//! - Does not have a bias term
-//! - Only normalizes by the RMS (root mean square)
+//! Root Mean Square Layer Normalization
 
 use ndarray::{Array1, Array2, Array3, Axis};
 
 use crate::cpu::kernels::x86::rms_norm::rms_norm_avx2;
 
 /// Root Mean Square Layer Normalization
-///
-/// Formula: y = (x / RMS(x)) * weight
-/// where RMS(x) = sqrt(mean(x^2) + eps)
 #[derive(Clone)]
 pub struct RMSNorm {
     pub weight: Array1<f32>,
@@ -24,47 +13,21 @@ pub struct RMSNorm {
 
 impl RMSNorm {
     /// Create a new RMSNorm layer
-    ///
-    /// # Arguments
-    /// * `weight` - Learnable scale parameter (shape: [hidden_size])
-    /// * `eps` - Small constant for numerical stability (typically 1e-6)
     pub fn new(weight: Array1<f32>, eps: f32) -> Self {
         Self { weight, eps }
     }
 
     /// Apply RMS normalization to a 3D tensor
-    ///
-    /// # Arguments
-    /// * `hidden` - Input tensor of shape [batch, seq_len, hidden_size]
-    ///
-    /// # Returns
-    /// Normalized tensor of the same shape
     pub fn forward_3d(&self, hidden: &Array3<f32>) -> Array3<f32> {
-        // 1. Compute the mean of squared values along the last axis (features)
-        //    mean(x^2) for each position
         let squared = hidden.mapv(|x| x * x);
         let mean_squared = squared.mean_axis(Axis(2)).unwrap();
-
-        // 2. Expand dimensions for broadcasting: [batch, seq] -> [batch, seq, 1]
         let mean_squared_expanded = mean_squared.insert_axis(Axis(2));
-
-        // 3. Compute RMS: sqrt(mean(x^2) + eps)
         let rms = (&mean_squared_expanded + self.eps).mapv(|x| x.sqrt());
-
-        // 4. Normalize: x / RMS(x)
         let normalized = hidden / &rms;
-
-        // 5. Scale by learnable weight parameter
         normalized * &self.weight
     }
 
     /// Apply RMS normalization to a 2D tensor
-    ///
-    /// # Arguments
-    /// * `hidden` - Input tensor of shape [seq_len, hidden_size] or [batch, hidden_size]
-    ///
-    /// # Returns
-    /// Normalized tensor of the same shape
     pub fn forward_2d(&self, hidden: &ndarray::Array2<f32>) -> ndarray::Array2<f32> {
         let squared = hidden.mapv(|x| x * x);
         let mean_squared = squared.mean_axis(Axis(1)).unwrap();
@@ -100,7 +63,6 @@ impl RMSNormSIMD {
                 rms_norm_avx2(row, w, self.eps);
             }
         } else {
-            // Scalar fallback
             let sum_sq: f32 = row.iter().map(|v| v * v).sum();
             let mean = sum_sq / row.len() as f32;
             let scale = 1.0 / (mean + self.eps).sqrt();
@@ -142,7 +104,6 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::Array3;
 
-    /// Helper function to compare two 3D tensors for approximate equality.
     fn assert_tensors_approx_equal(a: &Array3<f32>, b: &Array3<f32>, tolerance: f32) {
         assert_eq!(a.shape(), b.shape(), "Tensor shapes do not match");
         for (i, (val_a, val_b)) in a.iter().zip(b.iter()).enumerate() {
@@ -353,14 +314,9 @@ mod tests {
             .unwrap();
 
         let output = rms_norm.forward_3d(&hidden);
-
-        // Verify each position independently
-        // Position [0, 0]: [1.0, 2.0] -> RMS = sqrt((1+4)/2) = sqrt(2.5)
         let rms_00 = ((1.0_f32.powi(2) + 2.0_f32.powi(2)) / 2.0).sqrt();
         assert!((output[[0, 0, 0]] - (1.0 / rms_00)).abs() < 1e-4);
         assert!((output[[0, 0, 1]] - (2.0 / rms_00)).abs() < 1e-4);
-
-        // Position [1, 1]: [7.0, 8.0] -> RMS = sqrt((49+64)/2) = sqrt(56.5)
         let rms_11 = ((7.0_f32.powi(2) + 8.0_f32.powi(2)) / 2.0).sqrt();
         assert!((output[[1, 1, 0]] - (7.0 / rms_11)).abs() < 1e-4);
         assert!((output[[1, 1, 1]] - (8.0 / rms_11)).abs() < 1e-4);
@@ -368,7 +324,6 @@ mod tests {
 
     #[test]
     fn test_rms_norm_near_zero_2() {
-        // Test stability with near-zero values
         let weight = Array1::from_vec(vec![1.0, 1.0, 1.0]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
@@ -376,36 +331,12 @@ mod tests {
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![1e-8, 2e-8, 1e-8]).unwrap();
         let output = rms_norm.forward_3d(&hidden);
 
-        // Should not panic or produce NaN/Inf
         assert!(output[[0, 0, 0]].is_finite());
         assert!(output[[0, 0, 1]].is_finite());
         assert!(output[[0, 0, 2]].is_finite());
     }
     #[test]
     fn test_rms_norm_pytorch_parity() {
-        // Test against known PyTorch output
-        // PyTorch code:
-        // ```python
-        // import torch
-        // x = torch.tensor([[[1.0, 2.0, 3.0]]])
-        // weight = torch.tensor([0.5, 1.0, 1.5])
-        // eps = 1e-6
-        //
-        // # RMSNorm
-        // rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + eps)
-        // normalized = x / rms
-        // output = normalized * weight
-        // print(output)
-        // ```
-        //
-        // Manual calculation:
-        // mean(x^2) = (1^2 + 2^2 + 3^2) / 3 = 14/3 = 4.6667
-        // RMS = sqrt(4.6667 + 1e-6) ≈ 2.1602
-        // normalized = [1.0/2.1602, 2.0/2.1602, 3.0/2.1602] = [0.4629, 0.9258, 1.3887]
-        // output = [0.4629*0.5, 0.9258*1.0, 1.3887*1.5] = [0.2315, 0.9258, 2.0831]
-        //
-        // Output: tensor([[[0.2315, 0.9258, 2.0831]]])
-
         let weight = Array1::from_vec(vec![0.5, 1.0, 1.5]);
         let eps = 1e-6;
         let rms_norm = RMSNorm::new(weight, eps);
@@ -413,7 +344,6 @@ mod tests {
         let hidden = Array3::from_shape_vec((1, 1, 3), vec![1.0, 2.0, 3.0]).unwrap();
         let output = rms_norm.forward_3d(&hidden);
 
-        // Corrected expected values
         assert!(
             (output[[0, 0, 0]] - 0.2315).abs() < 1e-3,
             "Expected ~0.2315, got {}",

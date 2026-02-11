@@ -1,44 +1,4 @@
-//! Scalar (non-SIMD) kernel implementations for matrix operations.
-//!
-//! This module provides portable, hardware-agnostic computation kernels that work
-//! on any CPU architecture. These kernels serve two purposes:
-//!
-//! 1. **Fallback implementations** when SIMD extensions (AVX2, NEON) are unavailable.
-//! 2. **Reference implementations** for validating correctness of optimized kernels.
-//!
-//! # Overview
-//!
-//! All kernels compute vector-matrix products of the form `out = A @ B^T` where:
-//! - `A` is a single input vector (F32)
-//! - `B` is a weight matrix in various formats (F32, BF16, Q8_0, Q4_K, Q6_K)
-//! - `out` is the output vector (F32)
-//!
-//! For quantized formats, the kernels handle on-the-fly dequantization during
-//! the dot product computation.
-//!
-//! # Performance
-//!
-//! These kernels prioritize correctness and portability over speed. For production
-//! workloads on x86_64, use the AVX2+FMA kernels in [`crate::kernels::x86`]. On
-//! aarch64, use the NEON kernels in [`crate::kernels::aarch64`].
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni_transformers::kernels::scalar::matmul_vec_f32_scalar;
-//!
-//! let input = vec![1.0f32; 2048];
-//! let weights = vec![0.5f32; 2048 * 4096]; // [4096, 2048] flattened
-//! let mut output = vec![0.0f32; 4096];
-//!
-//! matmul_vec_f32_scalar(&mut output, &input, &weights, 2048);
-//! ```
-//!
-//! # See Also
-//!
-//! - [`crate::kernels::x86`] — AVX2+FMA optimized kernels.
-//! - [`crate::kernels::aarch64`] — ARM NEON optimized kernels.
-//! - [`crate::ops::matmul`] — High-level dispatchers that select the best kernel.
+//! Scala kernel implementations for matrix operations.
 
 use crate::cpu::kernels::{
     dequantize::{dequantize_q4_k_block, dequantize_q6_k_block, get_scale_min_k4},
@@ -46,23 +6,6 @@ use crate::cpu::kernels::{
 };
 
 /// Computes vector-matrix product for F32 input and BF16 weights.
-///
-/// Performs `out[i] = dot(a, b_rows[i])` for each output element, converting
-/// BF16 weights to F32 on-the-fly using bit manipulation.
-///
-/// # Arguments
-///
-/// * `out_chunk` - Output slice to write results into.
-/// * `a` - Input vector of length `k`.
-/// * `b_rows` - Flattened weight matrix stored as raw u16 (BF16 bit patterns).
-///   Shape is `[out_chunk.len(), k]` in row-major order.
-/// * `k` - Number of input features (inner dimension).
-///
-/// # BF16 Conversion
-///
-/// BF16 to F32 conversion is done by left-shifting the 16-bit value by 16 bits,
-/// effectively placing the BF16 mantissa and exponent in the upper bits of an
-/// F32 representation: `f32::from_bits((bf16_bits as u32) << 16)`.
 pub fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[u16], k: usize) {
     for (i, out_val) in out_chunk.iter_mut().enumerate() {
         // Extract this output's weight row
@@ -83,16 +26,6 @@ pub fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[u16], 
 }
 
 /// Computes vector-matrix product for F32 input and F32 weights.
-///
-/// Performs `out[i] = dot(a, b_rows[i])` for each output element.
-/// This is the simplest kernel with no format conversion.
-///
-/// # Arguments
-///
-/// * `out_chunk` - Output slice to write results into.
-/// * `a` - Input vector of length `k`.
-/// * `b_rows` - Flattened weight matrix of shape `[out_chunk.len(), k]`.
-/// * `k` - Number of input features (inner dimension).
 pub fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[f32], k: usize) {
     for (i, out_val) in out_chunk.iter_mut().enumerate() {
         // Extract this output's weight row
@@ -105,25 +38,6 @@ pub fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[f32], k
 }
 
 /// Computes vector-matrix product for F32 input and Q8_0 quantized weights.
-///
-/// Performs `out[i] = dot(a, dequant(b_blocks[i]))` for each output element.
-/// Q8_0 weights are dequantized on-the-fly: `value = scale * q` where `q` is
-/// the int8 quantized value and `scale` is the per-block F16 scale factor.
-///
-/// # Arguments
-///
-/// * `out_chunk` - Output slice to write results into.
-/// * `a` - Input vector of length `k`.
-/// * `b_blocks` - Q8_0 blocks containing quantized weights.
-/// * `k` - Number of input features (must be a multiple of 32).
-///
-/// # Q8_0 Format
-///
-/// Each Q8_0 block contains:
-/// - `d`: F16 scale factor
-/// - `qs`: 32 int8 quantized values
-///
-/// Dequantization: `value[i] = d * qs[i]`
 pub fn matmul_vec_q8_0_scalar(out_chunk: &mut [f32], a: &[f32], b_blocks: &[BlockQ8_0], k: usize) {
     // Q8_0 block size: 32 elements per block
     let k_per_block = std::mem::size_of_val(&b_blocks[0].qs);

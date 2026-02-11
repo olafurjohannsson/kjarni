@@ -9,27 +9,6 @@ use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::linear_layer::LinearLayer;
 
 /// QKV Projection supporting both fused (1 matmul) and separate (3 matmul) strategies.
-///
-/// # Strategy Selection
-///
-/// - **Fused** (hidden <= 512): Single matmul producing [tokens, 3*hidden], then split.
-///   Better for small models due to reduced kernel launch overhead.
-/// - **Separate** (hidden > 512): Three independent matmuls.
-///   Better for large models where cache efficiency matters more.
-///
-/// # Example
-///
-/// ```ignore
-/// // Automatic strategy selection
-/// let qkv = QKVProjection::new(q_proj, k_proj, v_proj);
-///
-/// // Allocating forward
-/// let (q, k, v) = qkv.forward(&hidden_states);
-///
-/// // No-alloc forward (uses pre-allocated buffers)
-/// qkv.forward_noalloc(&hidden_states, &mut buffers);
-/// // Results in buffers.q, buffers.k, buffers.v
-/// ```
 pub struct QKVProjection {
     storage: QKVStorage,
     hidden_size: usize,
@@ -47,16 +26,7 @@ enum QKVStorage {
 }
 
 impl QKVProjection {
-    /// Creates projection with automatic strategy selection based on hidden size.
-    ///
-    /// - hidden <= 512: Uses fused (1 matmul, ~1.5-3x faster)
-    /// - hidden > 512: Uses separate (3 matmuls, better cache efficiency)
-    ///
-    /// # Arguments
-    ///
-    /// * `q` - Query projection layer [hidden, hidden]
-    /// * `k` - Key projection layer [hidden, hidden]
-    /// * `v` - Value projection layer [hidden, hidden]
+    /// Creates projection
     pub fn new(q: LinearLayer, k: LinearLayer, v: LinearLayer) -> Self {
         let hidden_size = q.out_features();
 
@@ -71,9 +41,6 @@ impl QKVProjection {
     }
 
     /// Creates fused projection (single matmul, ~1.5-3x faster for small models).
-    ///
-    /// Fuses Q, K, V weights into a single [3*hidden, hidden] matrix.
-    /// Forward pass does 1 matmul then splits the result.
     pub fn new_fused(q: LinearLayer, k: LinearLayer, v: LinearLayer) -> Self {
         let hidden_size = q.out_features();
         let qkv_proj = Self::fuse_layers(&q, &k, &v);
@@ -85,8 +52,6 @@ impl QKVProjection {
     }
 
     /// Creates separate projection (three independent matmuls).
-    ///
-    /// Better for large models (hidden >= 768) with large batch sizes.
     pub fn new_separate(q: LinearLayer, k: LinearLayer, v: LinearLayer) -> Self {
         let hidden_size = q.out_features();
         Self {
@@ -100,16 +65,6 @@ impl QKVProjection {
     }
 
     /// Forward pass - returns (Q, K, V) arrays.
-    ///
-    /// Allocates new arrays for the output. For hot paths, use `forward_noalloc`.
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor [tokens, hidden]
-    ///
-    /// # Returns
-    ///
-    /// Tuple of (Q, K, V) each with shape [tokens, hidden]
     pub fn forward(&self, hidden: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
         match &self.storage {
             QKVStorage::Separate {
@@ -134,20 +89,7 @@ impl QKVProjection {
         }
     }
 
-    /// Forward pass writing to pre-allocated EncoderBuffers (no allocation).
-    ///
-    /// Writes Q, K, V to `buffers.q`, `buffers.k`, `buffers.v` respectively.
-    /// For fused storage, uses `buffers.qkv_scratch` as intermediate.
-    ///
-    /// # Arguments
-    ///
-    /// * `hidden` - Input tensor [tokens, hidden]
-    /// * `buffers` - Pre-allocated encoder buffers
-    ///
-    /// # Panics
-    ///
-    /// - In debug mode: panics if buffer capacity is insufficient
-    /// - Panics if fused storage but `buffers.qkv_scratch` is None
+    /// Forward pass writing to pre-allocated EncoderBuffers
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         let tokens = hidden.shape()[0];
 
@@ -165,22 +107,19 @@ impl QKVProjection {
                 v_proj.matmul_noalloc(hidden, &mut buffers.v);
             }
             QKVStorage::Fused { qkv_proj } => {
-                // Scoped mutable borrow for matmul - released before split
                 {
                     let scratch = buffers.qkv_scratch.as_mut().expect(
                         "qkv_scratch not allocated - buffers created with use_fused_qkv=false",
                     );
                     qkv_proj.matmul_noalloc(hidden, scratch);
-                } // scratch borrow ends here
+                }
 
-                // Now split - Rust allows split borrows of different struct fields
                 let h = self.hidden_size;
                 let qkv_slice = buffers.qkv_scratch.as_ref().unwrap().as_slice().unwrap();
                 let q_slice = buffers.q.as_slice_mut().unwrap();
                 let k_slice = buffers.k.as_slice_mut().unwrap();
                 let v_slice = buffers.v.as_slice_mut().unwrap();
 
-                // Sequential read from qkv, sequential write to q/k/v - cache friendly
                 for t in 0..tokens {
                     let src_offset = t * 3 * h;
                     let dst_offset = t * h;
@@ -198,8 +137,6 @@ impl QKVProjection {
         }
     }
 
-    /// Returns a reference to the internal projections for testing/debugging.
-    /// Returns (q_proj, k_proj, v_proj) if separate, or None if fused.
     pub fn get_separate_projections(&self) -> Option<(&LinearLayer, &LinearLayer, &LinearLayer)> {
         match &self.storage {
             QKVStorage::Separate {
@@ -211,15 +148,12 @@ impl QKVProjection {
         }
     }
 
-    /// Forward pass returning separate Q, K, V (for testing compatibility).
-    /// Same as `forward()` but more explicit name.
+    /// Forward pass returning separate Q, K, V
     pub fn forward_qkv(&self, hidden: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
         self.forward(hidden)
     }
 
-    /// Efficient split of fused QKV buffer into separate Q, K, V buffers.
-    ///
-    /// Uses sequential memory access pattern for cache efficiency.
+    /// split of fused QKV buffer
     #[inline]
     fn split_qkv_buffer(
         qkv: &Array2<f32>,   // [tokens, 3*hidden]
@@ -234,8 +168,6 @@ impl QKVProjection {
         let k_slice = k.as_slice_mut().unwrap();
         let v_slice = v.as_slice_mut().unwrap();
 
-        // Sequential read from qkv, sequential write to q/k/v
-        // This is cache-friendly: reads each cache line once
         for t in 0..tokens {
             let src_offset = t * 3 * hidden;
             let dst_offset = t * hidden;

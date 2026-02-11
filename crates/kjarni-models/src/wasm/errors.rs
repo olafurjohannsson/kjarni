@@ -14,5 +14,4 @@ impl From<WasmError> for JsValue {
     }
 }
 
-// Your new result type
 pub type WasmResult<T> = Result<T, WasmError>;

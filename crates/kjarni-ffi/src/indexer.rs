@@ -366,31 +366,7 @@ unsafe fn parse_inputs<'a>(
 }
 
 
-// Create Index Functions
-
-
-/// Create a new index from files/directories (simple version).
-///
-/// This is the simple API without progress callbacks. For progress reporting
-/// and cancellation support, use `kjarni_indexer_create_with_callback`.
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle from `kjarni_indexer_new`
-/// * `index_path` - Path where the index will be created
-/// * `inputs` - Array of file/directory paths to index
-/// * `num_inputs` - Number of elements in `inputs` array
-/// * `force` - If non-zero, overwrite existing index at `index_path`
-/// * `out` - Pointer to receive indexing statistics
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, error code otherwise.
-///
-/// # Safety
-///
-/// - All pointers must be valid
-/// - `inputs` must contain at least `num_inputs` valid C strings
+/// Create a new index from files/directories
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create(
     indexer: *mut KjarniIndexer,
@@ -439,41 +415,6 @@ pub unsafe extern "C" fn kjarni_indexer_create(
 }
 
 /// Create a new index with progress callback and cancellation support.
-///
-/// This is the full-featured API that supports:
-/// - Progress reporting via callback
-/// - Cancellation via cancel token
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle from `kjarni_indexer_new`
-/// * `index_path` - Path where the index will be created
-/// * `inputs` - Array of file/directory paths to index
-/// * `num_inputs` - Number of elements in `inputs` array
-/// * `force` - If non-zero, overwrite existing index at `index_path`
-/// * `progress_callback` - Optional callback for progress updates (may be NULL)
-/// * `user_data` - Opaque pointer passed to callback (may be NULL)
-/// * `cancel_token` - Optional cancellation token (may be NULL)
-/// * `out` - Pointer to receive indexing statistics
-///
-/// # Callback
-///
-/// The progress callback receives a `KjarniProgress` struct with:
-/// - `stage`: Current operation (scanning, loading, embedding, etc.)
-/// - `current`: Current item number
-/// - `total`: Total items (may be 0 if unknown)
-/// - `message`: Optional status message (may be NULL)
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
-/// or other error code on failure.
-///
-/// # Safety
-///
-/// - All non-optional pointers must be valid
-/// - `inputs` must contain at least `num_inputs` valid C strings
-/// - Callback must be thread-safe if indexer uses multiple threads
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     indexer: *mut KjarniIndexer,
@@ -566,31 +507,8 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
 }
 
 
-// Add to Index Functions
 
-
-/// Add documents to an existing index (simple version).
-///
-/// This is the simple API without progress callbacks. For progress reporting
-/// and cancellation support, use `kjarni_indexer_add_with_callback`.
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle from `kjarni_indexer_new`
-/// * `index_path` - Path to existing index
-/// * `inputs` - Array of file/directory paths to add
-/// * `num_inputs` - Number of elements in `inputs` array
-/// * `documents_added` - Pointer to receive count of documents added
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, error code otherwise.
-///
-/// # Safety
-///
-/// - All pointers must be valid
-/// - `inputs` must contain at least `num_inputs` valid C strings
-/// - Index at `index_path` must exist and be compatible (same embedding dimension)
+/// Add documents to an existing index 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add(
     indexer: *mut KjarniIndexer,
@@ -641,32 +559,6 @@ pub unsafe extern "C" fn kjarni_indexer_add(
 }
 
 /// Add documents to an existing index with progress callback and cancellation support.
-///
-/// This is the full-featured API that supports:
-/// - Progress reporting via callback
-/// - Cancellation via cancel token
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle from `kjarni_indexer_new`
-/// * `index_path` - Path to existing index
-/// * `inputs` - Array of file/directory paths to add
-/// * `num_inputs` - Number of elements in `inputs` array
-/// * `progress_callback` - Optional callback for progress updates (may be NULL)
-/// * `user_data` - Opaque pointer passed to callback (may be NULL)
-/// * `cancel_token` - Optional cancellation token (may be NULL)
-/// * `documents_added` - Pointer to receive count of documents added
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, `KjarniErrorCode::Cancelled` if cancelled,
-/// or other error code on failure.
-///
-/// # Safety
-///
-/// - All non-optional pointers must be valid
-/// - `inputs` must contain at least `num_inputs` valid C strings
-/// - Index at `index_path` must exist and be compatible
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     indexer: *mut KjarniIndexer,
@@ -761,26 +653,7 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
 }
 
 
-// Index Management Functions
-
-
-/// Get information about an existing index.
-///
-/// This is a static function that doesn't require an Indexer handle.
-///
-/// # Arguments
-///
-/// * `index_path` - Path to the index directory
-/// * `out` - Pointer to receive index information
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, error code otherwise.
-///
-/// # Safety
-///
-/// - All pointers must be valid
-/// - Caller must free the returned `KjarniIndexInfo` with `kjarni_index_info_free`
+/// Get information about an existing index
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
@@ -808,21 +681,6 @@ pub unsafe extern "C" fn kjarni_index_info(
 }
 
 /// Delete an index.
-///
-/// This permanently removes the index directory and all its contents.
-/// This is a static function that doesn't require an Indexer handle.
-///
-/// # Arguments
-///
-/// * `index_path` - Path to the index directory to delete
-///
-/// # Returns
-///
-/// `KjarniErrorCode::Ok` on success, error code otherwise.
-///
-/// # Safety
-///
-/// - `index_path` must be a valid C string
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode {
     if index_path.is_null() {
@@ -844,24 +702,7 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
 }
 
 
-// Accessor Functions
-
-
 /// Get the embedding model name used by the indexer.
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle
-///
-/// # Returns
-///
-/// Pointer to model name string, or NULL if indexer is NULL.
-/// The returned pointer is valid until the next call to this function.
-///
-/// # Safety
-///
-/// - `indexer` must be a valid handle or NULL
-/// - Returned string must not be modified or freed
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_model_name(
     indexer: *const KjarniIndexer,
@@ -893,14 +734,6 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(
 }
 
 /// Get the embedding dimension used by the indexer.
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle
-///
-/// # Returns
-///
-/// Embedding dimension, or 0 if indexer is NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {
@@ -910,14 +743,6 @@ pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer)
 }
 
 /// Get the chunk size configured for the indexer.
-///
-/// # Arguments
-///
-/// * `indexer` - Indexer handle
-///
-/// # Returns
-///
-/// Chunk size in characters, or 0 if indexer is NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize {
     if indexer.is_null() {

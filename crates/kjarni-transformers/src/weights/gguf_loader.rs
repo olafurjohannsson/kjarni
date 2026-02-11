@@ -1,7 +1,4 @@
-//! GGUF format loader with mmap caching.
-//!
-//! Loads model weights from `.gguf` files used by llama.cpp. Automatically
-//! translates HuggingFace tensor names to GGUF conventions.
+//! GGUF format loader with mmap caching
 
 use std::any::Any;
 use std::borrow::Cow;
@@ -22,10 +19,7 @@ use crate::weights::WeightLoader;
 use crate::weights::mmap_cache::get_or_create_mmap;
 use crate::weights::model_weights::AttentionLayout;
 
-/// A loader for `.gguf` files with mmap caching.
-///
-/// Provides access to quantized model weights and embedded metadata.
-/// Automatically translates HuggingFace tensor names to GGUF conventions.
+/// A loader for `.gguf` files with mmap caching
 pub struct GgufLoader {
     mmap: Arc<Mmap>,
     tensor_map: HashMap<String, GgufTensorInfo>,

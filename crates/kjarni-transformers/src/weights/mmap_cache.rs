@@ -1,8 +1,4 @@
-//! Global memory-map cache for weight files.
-//!
-//! Prevents duplicate mappings when the same model is loaded multiple times.
-//! Cached mmaps use `Arc` and are released when all references are dropped.
-
+//! Global memory-map cache for weight files
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -12,7 +8,7 @@ use memmap2::Mmap;
 
 static MMAP_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Mmap>>>> = OnceLock::new();
 
-/// Returns a shared memory-mapped file, creating and caching it if needed.
+/// Returns a shared memory-mapped file
 pub fn get_or_create_mmap(path: &Path) -> Result<Arc<Mmap>> {
     let cache = MMAP_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().unwrap();
@@ -31,7 +27,6 @@ pub fn get_or_create_mmap(path: &Path) -> Result<Arc<Mmap>> {
     let file = std::fs::File::open(&canonical)
         .with_context(|| format!("failed to open file for mmap: {:?}", canonical))?;
 
-    // SAFETY: File is opened read-only and Arc maintains lifetime.
     let mmap = Arc::new(unsafe { Mmap::map(&file)? });
 
     guard.insert(canonical, Arc::clone(&mmap));
@@ -40,8 +35,6 @@ pub fn get_or_create_mmap(path: &Path) -> Result<Arc<Mmap>> {
 }
 
 /// Clears all cached memory mappings.
-///
-/// Existing `Arc<Mmap>` references held by loaded models continue to work.
 pub fn clear_mmap_cache() {
     if let Some(cache) = MMAP_CACHE.get() {
         let mut guard = cache.lock().unwrap();
@@ -51,7 +44,6 @@ pub fn clear_mmap_cache() {
     }
 }
 
-/// Returns cache statistics as `(file_count, total_bytes)`.
 pub fn mmap_cache_stats() -> (usize, usize) {
     if let Some(cache) = MMAP_CACHE.get() {
         let guard = cache.lock().unwrap();

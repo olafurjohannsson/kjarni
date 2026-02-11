@@ -165,10 +165,6 @@ mod tests {
     use super::*;
     use ndarray::Array2;
 
-    // ========================================================================
-    //  CpuSeq2SeqState Tests
-    // ========================================================================
-
     #[test]
     fn test_cpu_seq2seq_state_u32_creation() {
         let tokens = Array2::from_shape_vec((2, 3), vec![1, 2, 3, 4, 5, 6]).unwrap();
@@ -214,15 +210,9 @@ mod tests {
     fn test_cpu_seq2seq_state_debug() {
         let tokens = Array2::from_shape_vec((1, 2), vec![1, 2]).unwrap();
         let state = CpuSeq2SeqState::U32(tokens);
-
-        // Should not panic - Debug is derived
         let debug_str = format!("{:?}", state);
         assert!(debug_str.contains("U32"));
     }
-
-    // ========================================================================
-    //  CpuBackend::create_token_tensor Tests
-    // ========================================================================
 
     #[test]
     fn test_create_token_tensor_single_beam() {
@@ -288,11 +278,6 @@ mod tests {
         let result = backend.create_token_tensor(tokens, num_beams);
         assert!(result.is_err(), "Expected error for zero beams");
     }
-
-    // ========================================================================
-    //  CpuBackend::update_token_tensor Tests
-    // ========================================================================
-
     #[test]
     fn test_update_token_tensor_basic() {
         let backend = CpuBackend;
@@ -354,9 +339,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    //  CpuBackend::reorder_cache Tests
-    // ===========================================
     #[test]
     fn test_reorder_cache_basic() {
         let backend = CpuBackend;
@@ -367,8 +349,6 @@ mod tests {
 
         let mut cache = CpuBeamKVCache::new(num_layers, num_beams, max_len, hidden_size);
 
-        // Populate cache with one token for all layers
-        // Shape: (num_beams, seq_len=1, hidden_size)
         let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
             (b * hidden_size + h) as f32
         });
@@ -376,14 +356,11 @@ mod tests {
             (b * hidden_size + h) as f32 * 0.5
         });
 
-        // Update all layers
         for layer in 0..num_layers {
             cache.update(layer, &k, &v).unwrap();
         }
-        // CRITICAL: increment seq_length after updating all layers
         cache.increment_len(1);
 
-        // Now reorder should work
         let indices = vec![1, 0, 2, 3];
         let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
@@ -419,7 +396,6 @@ mod tests {
 
         let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
 
-        // Populate with distinct values per beam
         let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
             (b * 100 + h) as f32
         });
@@ -429,7 +405,6 @@ mod tests {
         cache.update(0, &k, &v).unwrap();
         cache.increment_len(1);
 
-        // Duplicate beam 0 to all positions
         let indices = vec![0, 0, 0, 0];
         let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
@@ -441,8 +416,6 @@ mod tests {
         let num_beams = 4;
         let num_layers = 6;
         let hidden_size = 64;
-
-        // 1. Create initial tokens for beam search
         let initial_tokens: Vec<u32> = vec![2; num_beams];
         let decoder_state = backend
             .create_token_tensor(&initial_tokens, num_beams)
@@ -454,8 +427,6 @@ mod tests {
             }
             _ => panic!("Expected U32"),
         }
-
-        // 2. After first decode step, update with selected tokens
         let mut decoder_state = decoder_state;
         let selected_tokens = vec![10u32, 20, 30, 40];
         backend
@@ -471,18 +442,13 @@ mod tests {
             _ => panic!("Expected U32"),
         }
 
-        // 3. Create and populate cache before reordering
         let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
-
-        // Simulate one decode step - populate all layers then increment
         let k = Array3::zeros((num_beams, 1, hidden_size));
         let v = Array3::zeros((num_beams, 1, hidden_size));
         for layer in 0..num_layers {
             cache.update(layer, &k, &v).unwrap();
         }
-        cache.increment_len(1); // <-- Critical!
-
-        // 4. Now reorder cache based on beam scores
+        cache.increment_len(1); 
         let reorder_indices = vec![2, 2, 0, 1];
         backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
     }
@@ -496,7 +462,6 @@ mod tests {
 
         let mut cache = CpuBeamKVCache::new(num_layers, num_beams, 128, hidden_size);
 
-        // Simulate 3 decode steps
         for _step in 0..3 {
             let k = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);
             let v = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| (b + h) as f32);

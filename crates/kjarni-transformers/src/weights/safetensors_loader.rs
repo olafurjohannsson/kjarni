@@ -1,7 +1,4 @@
-//! SafeTensors format loader with mmap caching.
-//!
-//! Loads model weights from `.safetensors` files, supporting both single-file
-//! and sharded (multi-file) models.
+//! SafeTensors format loader with mmap caching
 
 use std::any::Any;
 use std::borrow::Cow;
@@ -19,10 +16,7 @@ use crate::tensor::raw_tensor::TensorView;
 use crate::weights::mmap_cache::get_or_create_mmap;
 use crate::weights::WeightLoader;
 
-/// A loader for `.safetensors` files with mmap caching.
-///
-/// Supports both single-file and sharded models. Uses the global mmap cache
-/// to deduplicate mappings across multiple model loads.
+/// A loader for `.safetensors` files with mmap caching
 #[derive(Debug)]
 pub struct SafeTensorsLoader {
     shards: Vec<ShardInfo>,
@@ -33,8 +27,8 @@ pub struct SafeTensorsLoader {
 struct ShardInfo {
     #[allow(dead_code)]
     mmap: Arc<Mmap>,
-    // SAFETY: The 'static lifetime is safe because the mmap is owned by Arc
-    // and stored alongside tensors, ensuring it outlives the SafeTensors.
+    // The 'static lifetime is ecause the mmap is owned by Arc
+    // and stored alongside tensors, ensuring it outlives the SafeTensors
     tensors: SafeTensors<'static>,
 }
 
@@ -136,8 +130,6 @@ impl SafeTensorsLoader {
 
     fn load_shard(path: &Path) -> Result<ShardInfo> {
         let mmap = get_or_create_mmap(path)?;
-
-        // SAFETY: See ShardInfo comment
         let static_slice: &'static [u8] =
             unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&mmap[..]) };
 

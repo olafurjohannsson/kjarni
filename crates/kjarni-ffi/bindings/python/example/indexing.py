@@ -115,7 +115,6 @@ def test_indexer_creation():
     print("TEST: Indexer Creation")
     print("=" * 60)
     
-    # Test with default settings
     print("Creating indexer with defaults...")
     indexer = Indexer(quiet=True)
     
@@ -127,9 +126,6 @@ def test_indexer_creation():
     assert indexer.dimension > 0, "Dimension should be positive"
     assert indexer.chunk_size > 0, "Chunk size should be positive"
     
-    print("✓ Default indexer creation passed\n")
-    
-    # Test with custom settings
     print("Creating indexer with custom settings...")
     indexer2 = Indexer(
         model="minilm-l6-v2",
@@ -271,7 +267,6 @@ def test_index_add(index_path: str, temp_dir: Path):
         print(f"  Documents added: {docs_added}")
         assert docs_added > 0, "Should have added some documents"
         
-        # Verify with info
         info = Indexer.info(index_path)
         print(f"  Total documents now: {info.document_count}")
         
@@ -299,10 +294,10 @@ def test_index_delete(index_path: str):
         assert not os.path.exists(index_path), "Index should be deleted"
         
         print(f"  Deleted index at: {index_path}")
-        print("✓ Index delete passed\n")
+        print("Index delete passed\n")
         
     except Exception as e:
-        print(f"✗ Index delete failed: {e}\n")
+        print(f"Index delete failed: {e}\n")
 
 
 def test_index_not_found():
@@ -316,7 +311,7 @@ def test_index_not_found():
         print("✗ Should have raised an exception")
     except Exception as e:
         print(f"  Got expected error: {e}")
-        print("✓ Error handling passed\n")
+        print("Error handling passed\n")
 
 
 def test_empty_inputs():
@@ -329,10 +324,10 @@ def test_empty_inputs():
     
     try:
         indexer.create("/tmp/test_index", [])
-        print("✗ Should have raised an exception")
+        print("Should have raised an exception")
     except ValueError as e:
         print(f"  Got expected ValueError: {e}")
-        print("✓ Empty inputs validation passed\n")
+        print("Empty inputs validation passed\n")
     except Exception as e:
         print(f"  Got exception (may be from FFI): {e}\n")
 
@@ -351,14 +346,12 @@ def test_progress_callback(temp_dir: Path, docs_dir: list[str]):
         quiet=True,
     )
     
-    # Collect all progress updates
     progress_updates: list[Progress] = []
     stages_seen: set[str] = set()
     
     def on_progress(p: Progress):
         progress_updates.append(p)
         stages_seen.add(p.stage)
-        # Print each update for visibility
         msg = f" - {p.message}" if p.message else ""
         print(f"  [{p.stage}] {p.current}/{p.total}{msg}")
     
@@ -467,7 +460,6 @@ def test_cancellation(temp_dir: Path):
     print("TEST: Cancellation")
     print("=" * 60)
     
-    # Create a larger dataset that takes some time to index
     print("  Creating large test dataset...")
     large_docs_dir = create_large_test_documents(temp_dir, num_files=100)
     
@@ -476,20 +468,18 @@ def test_cancellation(temp_dir: Path):
     indexer = Indexer(
         model="minilm-l6-v2",
         chunk_size=256,
-        batch_size=8,  # Smaller batch to make more opportunities for cancellation check
+        batch_size=8, 
         quiet=True,
     )
     
     cancel_token = CancelToken()
     files_seen = []
-    cancelled_at_stage = [None]  # Use list to allow mutation in closure
+    cancelled_at_stage = [None]
     cancelled_at_count = [0]
     
     def on_progress(p: Progress):
         files_seen.append(p)
         
-        # Cancel after seeing some progress in the loading stage
-        # This gives us time to start but cancels before completion
         if p.stage == "loading" and p.current >= 10:
             if not cancel_token.is_cancelled:
                 print(f"  Requesting cancellation at {p.stage} {p.current}/{p.total}")
@@ -508,8 +498,7 @@ def test_cancellation(temp_dir: Path):
             cancel_token=cancel_token,
         )
         
-        # If we get here, cancellation didn't work
-        print(f"✗ Indexing completed without cancellation!")
+        print(f" Indexing completed without cancellation!")
         print(f"  Documents indexed: {stats.documents_indexed}")
         print(f"  This might mean cancellation check isn't frequent enough\n")
         
@@ -526,8 +515,6 @@ def test_cancellation(temp_dir: Path):
             print(f"  Cancelled at count: {cancelled_at_count[0]}")
             print(f"  Total progress updates before cancel: {len(files_seen)}")
             
-            # Verify we didn't process everything
-            # We created 100 files but should have stopped around 10
             if cancelled_at_count[0] < 50:
                 print("✓ Cancellation test passed\n")
             else:
@@ -597,9 +584,9 @@ def test_cancellation_immediate(temp_dir: Path, docs_dir: list[str]):
             else:
                 print(f"  Warning: Some progress happened before cancellation")
             
-            print("✓ Immediate cancellation test passed\n")
+            print("Immediate cancellation test passed\n")
         else:
-            print(f"✗ Got unexpected error: {e}\n")
+            print(f"Got unexpected error: {e}\n")
         
         # Clean up partial index if it exists
         if os.path.exists(index_path):
@@ -630,7 +617,7 @@ def test_cancellation_from_thread(temp_dir: Path):
     
     cancel_token = CancelToken()
     indexing_started = threading.Event()
-    indexing_result = [None]  # [stats or exception]
+    indexing_result = [None]
     progress_updates = []
     
     def on_progress(p: Progress):
@@ -651,12 +638,10 @@ def test_cancellation_from_thread(temp_dir: Path):
         except Exception as e:
             indexing_result[0] = e
     
-    # Start indexing in background thread
     print("  Starting indexing in background thread...")
     thread = threading.Thread(target=indexing_thread)
     thread.start()
     
-    # Wait for indexing to start, then cancel
     print("  Waiting for indexing to start...")
     if indexing_started.wait(timeout=30):
         print(f"  Indexing started, cancelling from main thread...")
@@ -682,10 +667,10 @@ def test_cancellation_from_thread(temp_dir: Path):
             else:
                 print(f"✗ Got unexpected error: {result}\n")
         elif isinstance(result, IndexStats):
-            print(f"✗ Indexing completed without cancellation!")
+            print(f"Indexing completed without cancellation!")
             print(f"  Documents indexed: {result.documents_indexed}\n")
         else:
-            print(f"✗ Unexpected result: {result}\n")
+            print(f"Unexpected result: {result}\n")
     
     # Clean up
     if os.path.exists(index_path):
@@ -701,11 +686,9 @@ def main():
     print("KJARNI INDEXER TEST SUITE")
     print("=" * 60 + "\n")
     
-    # Create temporary directory for all test artifacts
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         
-        # Create test documents
         docs_dirs = create_test_documents(temp_path)
         print(f"Created test documents in: {docs_dirs[0]}\n")
         

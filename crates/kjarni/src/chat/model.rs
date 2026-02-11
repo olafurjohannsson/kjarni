@@ -226,16 +226,6 @@ impl Chat {
     }
 
     /// Send a message and get a response.
-    ///
-    /// This is stateless - no conversation history is maintained.
-    /// For multi-turn conversations, use `conversation()`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let response = chat.send("What is the capital of France?").await?;
-    /// println!("{}", response);
-    /// ```
     pub async fn send(&self, message: &str) -> ChatResult<String> {
         let mut conversation = self.create_conversation();
         conversation.push_user(message);

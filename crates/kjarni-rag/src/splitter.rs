@@ -240,9 +240,6 @@ impl TextSplitter {
     }
 
     /// Get the suffix of a string for overlap
-    ///
-    /// Returns the last `chunk_overlap` characters of the string,
-    /// handling UTF-8 boundaries correctly.
     fn get_overlap_suffix(&self, text: &str) -> String {
         let chars: Vec<char> = text.chars().collect();
 
@@ -256,9 +253,6 @@ impl TextSplitter {
     }
 
     /// Split a large text section that exceeds chunk_size
-    ///
-    /// This is called when a single section (between separators) is larger
-    /// than the configured chunk size. It splits at character boundaries.
     fn split_large_text(&self, text: &str) -> Vec<String> {
         let mut chunks = Vec::new();
         let chars: Vec<char> = text.chars().collect();
@@ -352,8 +346,6 @@ impl TextSplitter {
     }
 
     /// Estimate the number of chunks for a given text
-    ///
-    /// This is a rough estimate and may not be exact due to separator handling.
     pub fn estimate_chunks(&self, text: &str) -> usize {
         if text.is_empty() {
             return 0;
@@ -372,10 +364,6 @@ impl TextSplitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ============================================================================
-    // SPLITTER CONFIG TESTS
-    // ============================================================================
 
     #[test]
     fn test_config_default() {
@@ -414,14 +402,14 @@ mod tests {
     fn test_config_validate_overlap_too_large() {
         let config = SplitterConfig {
             chunk_size: 100,
-            chunk_overlap: 100, // Equal to chunk_size
+            chunk_overlap: 100, 
             separator: "\n".to_string(),
         };
         assert!(config.validate().is_err());
 
         let config2 = SplitterConfig {
             chunk_size: 100,
-            chunk_overlap: 150, // Greater than chunk_size
+            chunk_overlap: 150, 
             separator: "\n".to_string(),
         };
         assert!(config2.validate().is_err());

@@ -1,10 +1,5 @@
-//! BART CPU decoder implementation.
-
 use std::sync::Arc;
-
 use anyhow::Result;
-
-use kjarni_transformers::encoder_decoder::traits::CpuCrossDecoder;
 use kjarni_transformers::linear_layer::LinearLayer;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{ModelConfig, ModelMetadata};

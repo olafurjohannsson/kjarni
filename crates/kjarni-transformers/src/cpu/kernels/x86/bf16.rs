@@ -1,22 +1,10 @@
 //! AVX2/FMA accelerated kernels for BF16 weights.
-//!
-//! This module is part of the `unsafe` kernel zone. The functions within are
-//! designed to be called from the safe dispatchers in the `ops` module.
 
 #![allow(unsafe_code)]
 use super::common::hsum_ps_avx;
 use std::arch::x86_64::*;
 
-/// Computes a vector-matrix multiplication (vec @ mat) for BF16 weights using AVX2/FMA.
-///
-/// This is the core routine for `LinearLayer` during single-token decoding.
-/// It computes `out = a @ b.T` where `b` is stored row-major ([out_features, in_features]).
-///
-/// # Safety
-///
-/// This function is `unsafe` because it operates on raw pointers and relies on
-/// AVX2/FMA CPU features being present, which must be checked by the caller.
-/// The caller must also ensure that pointers are valid and slices have the correct dimensions.
+/// Computes a vector-matrix multiplication (vec @ mat) for BF16 weights
 #[target_feature(enable = "avx2", enable = "fma")]
 pub(crate) unsafe fn matmul_vec_bf16(
     out_chunk: &mut [f32],

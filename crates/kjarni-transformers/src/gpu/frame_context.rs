@@ -42,20 +42,11 @@ impl<'a> GpuFrameContext<'a> {
 
 impl Drop for GpuFrameContext<'_> {
     fn drop(&mut self) {
-        // 1. If we are already panicking (e.g. from unwinding), DO NOT panic again.
         if std::thread::panicking() {
             return;
         }
-
-        // 2. If we haven't submitted, but the encoder is still there, it means
-        // we are returning early (likely due to an Err result).
-        // Panicking here hides the actual error!
         if !self.submitted && self.encoder.is_some() {
-            // OPTION A: Log a warning instead of panicking
             log::warn!("GpuFrameContext dropped without submission. Work discarded.");
-
-            // OPTION B: Just silently let it drop. The command encoder will be destroyed.
-            // This is actually safer for error handling patterns using `?`.
         }
     }
 }

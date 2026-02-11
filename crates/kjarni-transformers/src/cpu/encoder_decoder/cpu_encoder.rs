@@ -1,7 +1,4 @@
 //! Unified Seq2Seq encoder supporting BART, T5, Whisper, and similar architectures.
-//!
-//! This encoder uses `ModelConfig` and `ModelLayout` to configure itself,
-//! and accepts `ModelInput` for flexible input handling.
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -28,9 +25,6 @@ use crate::{
 };
 
 
-// Encoder Output
-
-
 /// Output from the Seq2Seq encoder.
 #[derive(Debug)]
 pub struct EncoderOutput {
@@ -43,33 +37,7 @@ pub struct EncoderOutput {
 }
 
 
-// Seq2Seq Encoder (CPU)
-
-
 /// Unified transformer encoder for seq2seq models.
-///
-/// Supports BART, T5, Whisper, mBART, and similar architectures.
-/// Configuration is driven by `ModelConfig` and `Seq2SeqEncoderConfig`.
-///
-/// # Example
-///
-/// ```ignore
-/// // From a BartConfig
-/// let encoder = Seq2SeqEncoder::new(
-///     &weights,
-///     &bart_config,
-///     Seq2SeqEncoderConfig::bart(),
-///     load_config,
-/// )?;
-///
-/// // Forward with tokens
-/// let input = ModelInput::from_tokens(&token_ids);
-/// let output = encoder.forward(input, &attention_mask)?;
-///
-/// // Forward with pre-computed hidden states (e.g., from audio frontend)
-/// let input = ModelInput::from_hidden(audio_hidden_states.view());
-/// let output = encoder.forward(input, &attention_mask)?;
-/// ```
 pub struct Seq2SeqCPUEncoder {
     /// Token embeddings (None for audio-only models like Whisper encoder)
     pub embeddings: Option<Embeddings>,
@@ -97,13 +65,7 @@ pub struct Seq2SeqCPUEncoder {
 }
 
 impl Seq2SeqCPUEncoder {
-    /// Create encoder from ModelConfig.
-    ///
-    /// # Arguments
-    /// * `weights` - Model weights
-    /// * `config` - Model configuration implementing `ModelConfig`
-    /// * `encoder_config` - Seq2Seq-specific configuration
-    /// * `load_config` - Weight loading options
+    /// Create encoder
     pub fn new<C: ModelConfig>(
         weights: &ModelWeights,
         config: &C,
@@ -120,21 +82,16 @@ impl Seq2SeqCPUEncoder {
 
         let factory = Seq2SeqFactory::new(weights).with_load_config(&load_config);
 
-        // 1. Build embeddings (optional - Whisper doesn't need token embeddings)
         let embeddings = if let Some(pos_name) = &encoder_layout.position_embedding {
             Some(factory.build_embeddings(&layout.token_embedding, Some(pos_name))?)
         } else {
-            // Check if we should still build token embeddings without positions
-            // (for models that handle positions differently)
             match encoder_config.position_encoding {
                 PositionEncodingType::RelativeBias { .. }
                 | PositionEncodingType::Sinusoidal
                 | PositionEncodingType::None => {
-                    // These don't use learned position embeddings in the Embeddings struct
                     Some(factory.build_embeddings(&layout.token_embedding, None)?)
                 }
                 PositionEncodingType::Learned { .. } => {
-                    // Learned positions should have been in the layout
                     return Err(anyhow!(
                         "Learned position encoding requires position_embedding in layout"
                     ));
@@ -142,7 +99,6 @@ impl Seq2SeqCPUEncoder {
             }
         };
 
-        // 2. Build embedding normalization
         let embed_norm = if encoder_config.normalize_embeddings {
             if let (Some(w), Some(b)) = (
                 &encoder_layout.embedding_norm_weight,
@@ -170,12 +126,10 @@ impl Seq2SeqCPUEncoder {
             None
         };
 
-        // 3. Build transformer layers
         let layers = (0..meta.num_layers)
             .map(|i| factory.build_encoder_layer(encoder_layout, &meta, i))
             .collect::<Result<Vec<_>>>()?;
 
-        // 4. Build final layer normalization
         let final_norm = if encoder_config.final_layer_norm {
             if let Some(w) = &encoder_layout.final_norm_weight {
                 Some(factory.build_norm(
@@ -192,7 +146,6 @@ impl Seq2SeqCPUEncoder {
             None
         };
 
-        // 5. Build position encoding
         let position_encoding = match encoder_config.position_encoding {
             PositionEncodingType::Learned { offset } => {
                 let pos_name = encoder_layout.position_embedding.as_ref().ok_or_else(|| {
@@ -208,7 +161,7 @@ impl Seq2SeqCPUEncoder {
                 let bias = T5RelativePositionBias::new(
                     weights,
                     "encoder",
-                    true, // Encoders ARE bidirectional
+                    true,
                     num_buckets,
                     max_distance,
                 )?;
@@ -236,19 +189,11 @@ impl Seq2SeqCPUEncoder {
         &self.layers
     }
     /// Forward pass accepting ModelInput.
-    ///
-    /// # Arguments
-    /// * `input` - Either token IDs or pre-computed hidden states
-    /// * `attention_mask` - Attention mask [batch, seq], 1.0 for real tokens
-    ///
-    /// # Returns
-    /// Encoder output containing final hidden states
     pub fn forward(
         &self,
         input: ModelInput,
         attention_mask: &Array2<f32>,
     ) -> Result<EncoderOutput> {
-        // 1. Get initial hidden states based on input type
         let mut hidden = match input {
             ModelInput::TokensCpu(tokens) => {
                 let embeddings = self
@@ -265,7 +210,6 @@ impl Seq2SeqCPUEncoder {
                     self.meta.scale_embeddings,
                 );
 
-                // Apply sinusoidal position encoding (for T5-style, not BART)
                 h = self.apply_position_encoding(h)?;
 
                 // Embedding layer normalization
@@ -283,31 +227,18 @@ impl Seq2SeqCPUEncoder {
             }
         };
 
-        // if !is_raw_hidden {
-        //     // 2. Add position encoding (for non-learned positions)
-        // }
-        // hidden = self.apply_position_encoding(hidden)?;
-
-        // // 3. Embedding layer normalization
-        // if let Some(norm) = &self.embed_norm {
-        //     hidden = norm.forward(&hidden);
-        // }
-
-        // 4. Compute relative position bias (T5)
         let position_bias = self.compute_position_bias(&hidden)?;
 
-        // 5. Transformer layers
         for layer in &self.layers {
             hidden = layer.forward(
                 hidden,
                 attention_mask,
                 position_bias.as_ref(),
                 self.pre_norm,
-                None, // output_attentions
+                None, 
             )?;
         }
 
-        // 6. Final layer normalization
         if let Some(norm) = &self.final_norm {
             hidden = norm.forward(&hidden);
         }
@@ -319,7 +250,6 @@ impl Seq2SeqCPUEncoder {
         })
     }
 
-    /// Forward pass for token input (convenience method).
     pub fn forward_tokens(
         &self,
         input_ids: &Array2<u32>,
@@ -328,9 +258,7 @@ impl Seq2SeqCPUEncoder {
         self.forward(ModelInput::TokensCpu(input_ids.view()), attention_mask)
     }
 
-    /// Forward pass for hidden state input (convenience method).
-    ///
-    /// Use this for audio models where hidden states come from an AudioPipeline.
+    /// Forward pass
     pub fn forward_hidden_states(
         &self,
         hidden_states: &Array3<f32>,
@@ -353,8 +281,6 @@ impl Seq2SeqCPUEncoder {
 
         match &self.position_encoding {
             PositionEncoding::Learned { embeddings, offset } => {
-                // Learned positions are typically added during embedding lookup
-                // If they weren't, add them here
                 let mut result = hidden;
                 for b in 0..batch {
                     for s in 0..seq_len {
@@ -408,10 +334,6 @@ impl Seq2SeqCPUEncoder {
     }
 }
 
-
-// Position Encoding Implementations
-
-
 /// Runtime position encoding implementation.
 pub enum PositionEncoding {
     /// Learned absolute positions (BART)
@@ -433,9 +355,6 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
 
     for pos in 0..max_len {
         for i in 0..dim / 2 {
-            // Python: denom = 10000.0 ** (2 * i / dim)
-            // Rust: 10000_f32.powf(...)
-            // CRITICAL: Ensure integer division (2*i)/dim is floating point division in calculation
             let exponent = (2 * i) as f32 / dim as f32;
             let denom = 10000_f32.powf(exponent);
 
@@ -445,13 +364,8 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
             embeddings[[pos, 2 * i + 1]] = angle.cos();
         }
     }
-
     embeddings
 }
-
-
-// Trait Implementations
-
 
 impl InferenceModel for Seq2SeqCPUEncoder {
     fn device(&self) -> Device {
@@ -477,7 +391,6 @@ impl CpuTransformerCore for Seq2SeqCPUEncoder {
         }
     }
     fn embed_norm(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
-        // DON'T apply position encoding here - already done in embed_tokens!
         if let Some(norm) = &self.embed_norm {
             Ok(norm.forward(hidden))
         } else {
@@ -534,7 +447,6 @@ impl CpuEncoder for Seq2SeqCPUEncoder {
         Ok(hidden)
     }
     fn forward(&self, hidden_states: &Array3<f32>, mask: &Array2<f32>) -> Result<CpuEncoderOutput> {
-        // DON'T do embedding here - it's already done!
         let output = self.forward_layers(hidden_states, mask, 0, self.num_layers())?;
         let normed = self.final_norm(&output)?;
         Ok(CpuEncoderOutput {
@@ -559,7 +471,6 @@ mod seq2seq_encoder_tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    // ... [MockConfig struct remains the same] ...
     #[derive(Debug, Clone)]
     struct MockConfig {
         vocab_size: usize,
@@ -567,7 +478,6 @@ mod seq2seq_encoder_tests {
         num_layers: usize,
         num_heads: usize,
         is_prenorm: bool,
-        // Allow overriding layout for T5/Whisper specific needs
         no_pos_emb_in_layout: bool,
     }
 

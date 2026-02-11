@@ -10,7 +10,7 @@ pub mod thresholds {
     /// Above this token count, no-alloc with buffer reuse wins
     pub const NOALLOC_WINS_TOKENS: usize = 1000;
     
-    /// Below this token count (decode), no-alloc is critical (5x speedup)
+    /// Below this token count (decode)
     pub const DECODE_THRESHOLD: usize = 1;
     
     /// Threshold for switching from vec kernel to batched 4x3 kernel

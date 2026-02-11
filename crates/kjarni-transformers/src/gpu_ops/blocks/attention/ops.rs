@@ -1,7 +1,4 @@
 //! Shared attention primitives.
-//!
-//! This module contains the low-level building blocks used by all attention
-//! implementations. These operations are stateless and operate on tensors directly.
 
 use crate::gpu_ops::primitives::{
     add_bias::GpuAddBias,
@@ -16,8 +13,6 @@ use crate::gpu_ops::primitives::{
 use crate::gpu::{GpuTensor, GpuTensorPool, Kernel};
 use crate::WgpuContext;
 use std::sync::Arc;
-
-/// Shared attention operations used by all attention variants.
 pub struct AttentionOps {
     // Compute kernels
     linear: GpuLinearLayer,
@@ -39,14 +34,6 @@ pub struct AttentionOps {
 }
 
 impl AttentionOps {
-    /// Creates a new `AttentionOps` instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - The WGPU context for creating GPU resources.
-    /// * `hidden_size` - The model's hidden dimension (e.g., 1024 for BART-large).
-    /// * `num_heads` - Number of attention heads for queries.
-    /// * `num_kv_heads` - Number of attention heads for keys/values (same as num_heads for MHA).
     pub fn new(
         context: &Arc<WgpuContext>,
         hidden_size: u32,
@@ -103,20 +90,6 @@ impl AttentionOps {
     }
 
     /// Projects input through a linear layer with bias.
-    ///
-    /// Computes: `output = input @ weight + bias`
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `input` - Input tensor of shape `[B, S, H]`.
-    /// * `weight` - Weight matrix of shape `[H, O]` or `[O, H]` depending on layout.
-    /// * `bias` - Bias vector of shape `[O]`.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, S, O]`.
     pub fn project(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -148,20 +121,6 @@ impl AttentionOps {
     }
 
     /// Splits heads from `[B, S, H*D]` into `[B, H, S, D]`.
-    ///
-    /// This reshapes the hidden dimension into separate attention heads,
-    /// then permutes to put the head dimension before sequence length
-    /// for efficient batched matrix multiplication.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `input` - Input tensor of shape `[B, S, H*D]`.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, H, S, D]`.
     pub fn split_heads(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -186,19 +145,6 @@ impl AttentionOps {
     }
 
     /// Merges heads from `[B, H, S, D]` back to `[B, S, H*D]`.
-    ///
-    /// This is the inverse of `split_heads`, combining the attention head
-    /// outputs back into a single hidden dimension.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `input` - Input tensor of shape `[B, H, S, D]`.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, S, H*D]`.
     pub fn merge_heads(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -212,23 +158,6 @@ impl AttentionOps {
     }
 
     /// Performs 4D batched matrix multiplication.
-    ///
-    /// Computes: `C[b,h,:,:] = A[b,h,:,:] @ B[b,h,:,:]`
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `a` - First input tensor of shape `[B, H, M, K]`.
-    /// * `b` - Second input tensor of shape `[B, H, K, N]`.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, H, M, N]`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the inner dimensions don't match (`a.shape[3] != b.shape[2]`).
     pub fn bmm_4d(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -252,14 +181,6 @@ impl AttentionOps {
     }
 
     /// Applies attention mask and softmax to attention scores.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `scores` - Attention scores of shape `[B, H, S_q, S_k]`.
-    /// * `mask` - Attention mask of shape `[B, S_k]` or broadcastable.
-    /// * `is_causal` - Whether to apply causal (autoregressive) masking.
-    /// * `position_offset` - Offset for causal mask (used with KV cache).
     pub fn apply_mask_and_softmax(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -286,26 +207,6 @@ impl AttentionOps {
     }
 
     /// Computes attention output from Q, K, V tensors.
-    ///
-    /// This is the core attention computation:
-    /// 1. Compute scores: `Q @ K^T`
-    /// 2. Apply mask and softmax
-    /// 3. Compute context: `scores @ V`
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `q` - Query tensor of shape `[B, H, S_q, D]`.
-    /// * `k` - Key tensor of shape `[B, H, S_k, D]`.
-    /// * `v` - Value tensor of shape `[B, H, S_k, D]`.
-    /// * `mask` - Optional attention mask.
-    /// * `is_causal` - Whether to apply causal masking.
-    /// * `position_offset` - Offset for causal mask.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Context tensor of shape `[B, H, S_q, D]`.
     pub fn attention(
         &self,
         encoder: &mut wgpu::CommandEncoder,

@@ -82,22 +82,12 @@ pub use types::{ChatDevice, ChatError, ChatMode, ChatResult, ChatWarning, Histor
 
 /// Send a single message and get a response.
 ///
-/// This is the simplest possible API - a one-liner for quick interactions.
-/// Creates a Chat instance, sends the message, and returns the response.
-///
 /// # Example
 ///
 /// ```ignore
 /// let response = kjarni::chat::send("llama3.2-1b", "What is Rust?").await?;
 /// println!("{}", response);
 /// ```
-///
-/// # Notes
-///
-/// - Uses CPU by default
-/// - Downloads model if not present
-/// - No conversation history (stateless)
-/// - For repeated interactions, create a `Chat` instance instead
 pub async fn send(model: &str, message: &str) -> ChatResult<String> {
     let chat = Chat::new(model).await?;
     chat.send(message).await

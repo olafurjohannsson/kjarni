@@ -279,7 +279,6 @@ class Indexer:
                     )
                     on_progress(py_progress)
                 
-                # Create ctypes callback - must keep reference!
                 callback_ref = PROGRESS_CALLBACK_TYPE(_callback_wrapper)
                 c_callback = callback_ref
 
@@ -292,7 +291,7 @@ class Indexer:
                 len(inputs),
                 1 if force else 0,
                 c_callback,
-                None,  # user_data not needed, closure captures on_progress
+                None, 
                 c_cancel,
                 byref(stats),
             )
@@ -340,16 +339,13 @@ class Indexer:
         if not inputs:
             return 0
 
-        # Prepare input array
         c_inputs = (c_char_p * len(inputs))()
         for i, inp in enumerate(inputs):
             c_inputs[i] = inp.encode("utf-8")
 
         docs_added = c_size_t()
 
-        # Decide which FFI function to call
         if on_progress is None and cancel_token is None:
-            # Simple path
             err = _lib.kjarni_indexer_add(
                 self._handle,
                 index_path.encode("utf-8"),
@@ -426,7 +422,6 @@ class Indexer:
             embedding_model=info.embedding_model.decode("utf-8") if info.embedding_model else None,
         )
 
-        # Free the C strings
         _lib.kjarni_index_info_free(info)
         return result
 
@@ -452,12 +447,10 @@ class Indexer:
     @property
     def model_name(self) -> str:
         """Get the embedding model name used by this indexer."""
-        # First call to get required size
         required = _lib.kjarni_indexer_model_name(self._handle, None, 0)
         if required == 0:
             return ""
         
-        # Allocate buffer and get the string
         buf = create_string_buffer(required)
         _lib.kjarni_indexer_model_name(self._handle, buf, required)
         return buf.value.decode("utf-8")

@@ -372,10 +372,6 @@ mod index_reader_tests {
 
     use crate::index_reader::MetadataFilter;
 
-    // ============================================================================
-    // METADATA FILTER CONSTRUCTION TESTS
-    // ============================================================================
-
     #[test]
     fn test_filter_default() {
         let filter = MetadataFilter::default();
@@ -437,10 +433,6 @@ mod index_reader_tests {
         assert_eq!(filter.source_patterns.len(), 1);
     }
 
-    // ============================================================================
-    // METADATA FILTER MATCHES TESTS - MUST_MATCH
-    // ============================================================================
-
     #[test]
     fn test_matches_empty_filter() {
         let filter = MetadataFilter::default();
@@ -501,7 +493,6 @@ mod index_reader_tests {
 
         let mut metadata = HashMap::new();
         metadata.insert("type".to_string(), "article".to_string());
-        // Missing "language"
 
         assert!(!filter.matches(&metadata));
     }
@@ -518,10 +509,6 @@ mod index_reader_tests {
 
         assert!(!filter.matches(&metadata));
     }
-
-    // ============================================================================
-    // METADATA FILTER MATCHES TESTS - MUST_NOT_MATCH
-    // ============================================================================
 
     #[test]
     fn test_matches_must_not_match_key_absent() {
@@ -575,13 +562,8 @@ mod index_reader_tests {
         let mut metadata = HashMap::new();
         metadata.insert("archived".to_string(), "true".to_string());
 
-        // One banned condition matches
         assert!(!filter.matches(&metadata));
     }
-
-    // ============================================================================
-    // METADATA FILTER MATCHES TESTS - SHOULD_MATCH
-    // ============================================================================
 
     #[test]
     fn test_matches_should_match_empty() {
@@ -657,22 +639,16 @@ mod index_reader_tests {
 
         filter.should_match = vec![group];
 
-        // Both keys must match within the group
         let mut metadata1 = HashMap::new();
         metadata1.insert("type".to_string(), "article".to_string());
         metadata1.insert("language".to_string(), "en".to_string());
         assert!(filter.matches(&metadata1));
 
-        // Only one key matches - not enough
         let mut metadata2 = HashMap::new();
         metadata2.insert("type".to_string(), "article".to_string());
         metadata2.insert("language".to_string(), "de".to_string());
         assert!(!filter.matches(&metadata2));
     }
-
-    // ============================================================================
-    // METADATA FILTER MATCHES TESTS - SOURCE PATTERNS
-    // ============================================================================
 
     #[test]
     fn test_matches_source_pattern_no_patterns() {
@@ -727,7 +703,6 @@ mod index_reader_tests {
 
     #[test]
     fn test_matches_source_pattern_extracts_filename() {
-        // Pattern without path components matches against filename only
         let filter = MetadataFilter::default().source("*.md");
 
         let mut metadata = HashMap::new();
@@ -740,9 +715,7 @@ mod index_reader_tests {
     fn test_matches_source_missing_source_key() {
         let filter = MetadataFilter::default().source("*.txt");
 
-        let metadata = HashMap::new(); // No "source" key
-
-        // Can't match pattern if source is missing
+        let metadata = HashMap::new();
         assert!(!filter.matches(&metadata));
     }
 
@@ -758,10 +731,6 @@ mod index_reader_tests {
         metadata2.insert("source".to_string(), "README.txt".to_string());
         assert!(!filter.matches(&metadata2));
     }
-
-    // ============================================================================
-    // COMBINED FILTER TESTS
-    // ============================================================================
 
     #[test]
     fn test_matches_combined_must_and_must_not() {
@@ -985,7 +954,6 @@ mod index_reader_tests {
 
         let sizes = [10, 5, 8];
 
-        // Test roundtrip for all valid IDs
         for seg_idx in 0..sizes.len() {
             for local_id in 0..sizes[seg_idx] {
                 let global = local_to_global(&sizes, seg_idx, local_id);
@@ -997,13 +965,8 @@ mod index_reader_tests {
         }
     }
 
-    // ============================================================================
-    // SEARCH RESULT FILTERING TESTS
-    // ============================================================================
-
     #[test]
     fn test_filter_application_concept() {
-        // Conceptual test for apply_filter logic
         use crate::SearchResult;
 
         fn apply_filter(
@@ -1020,7 +983,6 @@ mod index_reader_tests {
 
         let mut results = Vec::new();
 
-        // Result 1: matches filter
         let mut meta1 = HashMap::new();
         meta1.insert("category".to_string(), "tech".to_string());
         results.push(SearchResult {
@@ -1030,7 +992,6 @@ mod index_reader_tests {
             metadata: meta1,
         });
 
-        // Result 2: doesn't match filter
         let mut meta2 = HashMap::new();
         meta2.insert("category".to_string(), "sports".to_string());
         results.push(SearchResult {
@@ -1040,7 +1001,6 @@ mod index_reader_tests {
             metadata: meta2,
         });
 
-        // Result 3: matches filter
         let mut meta3 = HashMap::new();
         meta3.insert("category".to_string(), "tech".to_string());
         results.push(SearchResult {
@@ -1089,11 +1049,9 @@ mod index_reader_tests {
 
         let filter = MetadataFilter::default().must("type", "doc");
 
-        // All 10 match, but limit to 5
         let filtered = apply_filter(results, &filter, 5);
         assert_eq!(filtered.len(), 5);
 
-        // Verify order preserved (highest scores first)
         assert_eq!(filtered[0].document_id, 0);
         assert_eq!(filtered[4].document_id, 4);
     }

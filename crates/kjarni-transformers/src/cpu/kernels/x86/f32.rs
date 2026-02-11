@@ -1,19 +1,10 @@
 //! AVX2/FMA accelerated kernels for F32 weights.
-//!
-//! This module is part of the `unsafe` kernel zone. The functions within are
-//! designed to be called from the safe dispatchers in the `ops` module.
 
 #![allow(unsafe_code)]
 use super::common::hsum_ps_avx;
 use std::arch::x86_64::*;
 
 /// Computes a [4 x 3] block matrix multiplication.
-///
-/// Processes 4 Input Tokens against 3 Output Features (Weight rows) simultaneously.
-/// This reduces Input memory reads by 3x compared to the 4x1 kernel.
-///
-/// # Safety
-/// Pointers must be valid.
 #[target_feature(enable = "avx2", enable = "fma")]
 pub(crate) unsafe fn matmul_block_4x3_f32(
     out_ptr: *mut f32,       // Pointer to Output [row, col]
@@ -141,14 +132,7 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
     *dst3.add(2) = r32;
 }}
 
-/// Computes a vector-matrix multiplication (vec @ mat) for F32 weights using AVX2/FMA.
-///
-/// This is the F32 equivalent of the BF16 matmul kernel.
-///
-/// # Safety
-///
-/// This function is `unsafe` for the same reasons as its BF16 counterpart.
-/// The caller must ensure CPU features are present and all pointers/slices are valid.
+/// Computes a vector-matrix multiplication (vec @ mat) for F32 weights
 #[target_feature(enable = "avx2", enable = "fma")]
 pub(crate) unsafe fn matmul_vec_f32(
     out_chunk: &mut [f32],
@@ -212,18 +196,10 @@ mod simd_matmul_tests {
     use super::*;
     use std::time::Instant;
 
-    // =========================================================================
-    // SCALAR REFERENCE IMPLEMENTATIONS (Ground Truth)
-    // =========================================================================
-
-    /// Scalar dot product - the simplest possible implementation
     fn scalar_dot(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len());
         a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
     }
-
-    /// Scalar matmul: C[m, n] = A[m, k] @ B[n, k]^T
-    /// B is in [out_features, in_features] layout (row = one output neuron's weights)
     fn scalar_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
         let mut c = vec![0.0f32; m * n];
         for row in 0..m {
@@ -236,7 +212,6 @@ mod simd_matmul_tests {
         c
     }
 
-    /// Scalar matmul with bias: C[m, n] = A[m, k] @ B[n, k]^T + bias[n]
     fn scalar_matmul_bias(a: &[f32], b: &[f32], bias: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
         let mut c = scalar_matmul(a, b, m, k, n);
         for row in 0..m {
@@ -246,10 +221,6 @@ mod simd_matmul_tests {
         }
         c
     }
-
-    // =========================================================================
-    // TEST UTILITIES
-    // =========================================================================
 
     fn max_diff(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len());
@@ -275,10 +246,6 @@ mod simd_matmul_tests {
     fn make_bias(n: usize, val: f32) -> Vec<f32> {
         (0..n).map(|i| val + i as f32 * 0.001).collect()
     }
-
-    // =========================================================================
-    // matmul_vec_f32 TESTS (Single Row / Decode Path)
-    // =========================================================================
 
     #[test]
     fn test_matmul_vec_f32_tiny() {
@@ -384,10 +351,6 @@ mod simd_matmul_tests {
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Non-aligned test failed. Max diff: {}", diff);
     }
-
-    // =========================================================================
-    // matmul_block_4x3_f32 TESTS (Batched Path)
-    // =========================================================================
 
     #[test]
     fn test_block_4x3_tiny_no_bias() {
@@ -672,8 +635,6 @@ mod simd_matmul_tests {
 
     #[test]
     fn test_block_4x3_output_stride() {
-        // Test that out_stride works correctly (writing to non-contiguous output)
-        // Simulates writing to a larger output matrix where we only fill 3 columns
         let k = 32;
         let m = 4;
         let n_kernel = 3;  // kernel produces 3 outputs
@@ -711,133 +672,5 @@ mod simd_matmul_tests {
         println!("\n=== matmul_block_4x3 OUTPUT STRIDE (stride={}) ===", n_total);
         println!("Max diff: {:.2e}", diff);
         assert!(diff < 1e-5, "Output stride test failed. Max diff: {}", diff);
-    }
-
-    // =========================================================================
-    // PERFORMANCE TESTS (run with --nocapture)
-    // =========================================================================
-
-    #[test]
-    fn perf_matmul_vec_f32() {
-        let k = 384;
-        let n = 1536;
-        let iterations = 1000;
-
-        let a = make_input(1, k, 0);
-        let b = make_input(n, k, 100);
-        let mut out = vec![0.0f32; n];
-
-        // Warmup
-        for _ in 0..10 {
-            unsafe { matmul_vec_f32(&mut out, a.as_ptr(), b.as_ptr(), k); }
-        }
-
-        let start = Instant::now();
-        for _ in 0..iterations {
-            unsafe { matmul_vec_f32(&mut out, a.as_ptr(), b.as_ptr(), k); }
-        }
-        let elapsed = start.elapsed();
-
-        let ops_per_call = 2 * k * n; // multiply + add
-        let total_ops = ops_per_call * iterations;
-        let gflops = total_ops as f64 / elapsed.as_secs_f64() / 1e9;
-
-        println!("\n=== PERF: matmul_vec_f32 (decode path) ===");
-        println!("Dimensions: k={}, n={}", k, n);
-        println!("Time: {:?} for {} iterations", elapsed, iterations);
-        println!("Per call: {:.2?}", elapsed / iterations as u32);
-        println!("Throughput: {:.2} GFLOPS", gflops);
-    }
-
-    #[test]
-    fn perf_matmul_block_4x3_f32() {
-        let k = 384;
-        let m = 4;
-        let n = 3;
-        let iterations = 1000;
-
-        let a = make_input(m, k, 0);
-        let b = make_input(n, k, 100);
-        let mut out = vec![0.0f32; m * n];
-
-        // Warmup
-        for _ in 0..10 {
-            unsafe {
-                matmul_block_4x3_f32(out.as_mut_ptr(), n, a.as_ptr(), b.as_ptr(), k, std::ptr::null());
-            }
-        }
-
-        let start = Instant::now();
-        for _ in 0..iterations {
-            unsafe {
-                matmul_block_4x3_f32(out.as_mut_ptr(), n, a.as_ptr(), b.as_ptr(), k, std::ptr::null());
-            }
-        }
-        let elapsed = start.elapsed();
-
-        let ops_per_call = 2 * m * k * n;
-        let total_ops = ops_per_call * iterations;
-        let gflops = total_ops as f64 / elapsed.as_secs_f64() / 1e9;
-
-        println!("\n=== PERF: matmul_block_4x3_f32 (batch path) ===");
-        println!("Dimensions: m={}, k={}, n={}", m, k, n);
-        println!("Time: {:?} for {} iterations", elapsed, iterations);
-        println!("Per call: {:.2?}", elapsed / iterations as u32);
-        println!("Throughput: {:.2} GFLOPS", gflops);
-    }
-
-    #[test]
-    fn perf_comparison_batch_simulation() {
-        // Compare: calling matmul_vec_f32 4 times vs matmul_block_4x3_f32 once
-        let k = 384;
-        let n = 3;
-        let iterations = 1000;
-
-        let a = make_input(4, k, 0);
-        let b = make_input(n, k, 100);
-        let mut out_vec = vec![0.0f32; 4 * n];
-        let mut out_block = vec![0.0f32; 4 * n];
-
-        // Benchmark: 4x matmul_vec_f32
-        let start = Instant::now();
-        for _ in 0..iterations {
-            for row in 0..4 {
-                unsafe {
-                    matmul_vec_f32(
-                        &mut out_vec[row * n..(row + 1) * n],
-                        a.as_ptr().add(row * k),
-                        b.as_ptr(),
-                        k,
-                    );
-                }
-            }
-        }
-        let vec_time = start.elapsed();
-
-        // Benchmark: 1x matmul_block_4x3_f32
-        let start = Instant::now();
-        for _ in 0..iterations {
-            unsafe {
-                matmul_block_4x3_f32(
-                    out_block.as_mut_ptr(),
-                    n,
-                    a.as_ptr(),
-                    b.as_ptr(),
-                    k,
-                    std::ptr::null(),
-                );
-            }
-        }
-        let block_time = start.elapsed();
-
-        println!("\n=== PERF COMPARISON: vec×4 vs block_4x3 ===");
-        println!("4× matmul_vec_f32:    {:?}", vec_time);
-        println!("1× matmul_block_4x3:  {:?}", block_time);
-        println!("Speedup: {:.2}x", vec_time.as_secs_f64() / block_time.as_secs_f64());
-
-        // Also verify they produce the same result
-        let diff = max_diff(&out_vec, &out_block);
-        println!("Correctness diff: {:.2e}", diff);
-        assert!(diff < 1e-5, "Results differ! Max diff: {}", diff);
     }
 }
