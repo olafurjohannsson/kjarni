@@ -65,15 +65,6 @@ fn test_validation_unknown_model() {
 }
 
 #[test]
-fn test_available_models_not_empty() {
-    let models = available_models();
-    // Should have at least one reranking model
-    // This test will pass once you have models registered
-    // assert!(!models.is_empty());
-    let _ = models; // Avoid unused warning
-}
-
-#[test]
 fn test_preset_minilm() {
     let preset = &presets::RERANKER_MINILM_V1;
     assert_eq!(preset.name, "RERANKER_MINILM_V1");

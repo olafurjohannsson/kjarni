@@ -102,23 +102,18 @@ impl ChatBuilder {
         self
     }
 
-    /// Use creative mode (higher temperature).
     pub fn creative(self) -> Self {
         self.mode(ChatMode::Creative)
     }
 
-    /// Use reasoning mode (lower temperature).
     pub fn reasoning(self) -> Self {
         self.mode(ChatMode::Reasoning)
     }
-
-    /// Set the device for inference.
     pub fn device(mut self, device: KjarniDevice) -> Self {
         self.device = device;
         self
     }
 
-    /// Use CPU for inference.
     pub fn cpu(self) -> Self {
         self.device(KjarniDevice::Cpu)
     }

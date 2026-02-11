@@ -2127,15 +2127,10 @@ mod classifier_tests {
                 .await
                 .expect("Classification with threshold failed");
 
-            // Only sadness should be above 0.05 threshold (0.96455652)
             assert_eq!(result.all_scores.len(), 1);
             assert_eq!(result.all_scores[0].0, "sadness");
         }
     }
-
-    
-    // Custom Labels Tests
-    
 
     mod custom_labels_tests {
         use super::*;

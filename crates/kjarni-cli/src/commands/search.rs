@@ -32,7 +32,7 @@ pub async fn run(
     let search_mode: SearchMode = mode.parse()
         .map_err(|e: String| anyhow!(e))?;
 
-    // If rerank model is provided, we will fetch more results initially
+    // If rerank model is provided, fetch more results initially
     let fetch_k = if rerank_model.is_some() { top_k * 5 } else { top_k };
 
     // Search based on mode

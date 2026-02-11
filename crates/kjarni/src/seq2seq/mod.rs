@@ -1,61 +1,5 @@
 //! Generic encoder-decoder (seq2seq) text generation.
-//!
-//! This module provides `Seq2SeqGenerator`, a foundation for text-to-text
-//! generation using encoder-decoder models like T5 and BART.
-//!
-//! For most use cases, prefer the higher-level task APIs:
-//! - [`crate::translator`] - Translation between languages
-//! - [`crate::summarizer`] - Text summarization
-//!
-//! Use `Seq2SeqGenerator` directly when you need:
-//! - Custom prompt formats
-//! - Direct access to generation parameters
-//! - Tasks not covered by specific APIs
-//!
-//! # Quick Start
-//!
-//! ```ignore
-//! use kjarni::seq2seq::Seq2SeqGenerator;
-//!
-//! // One-liner
-//! let output = kjarni::seq2seq::generate("flan-t5-base", "translate English to French: Hello").await?;
-//!
-//! // Reusable instance
-//! let generator = Seq2SeqGenerator::new("flan-t5-base").await?;
-//! let output1 = generator.generate("summarize: Long text...").await?;
-//! let output2 = generator.generate("translate: More text...").await?;
-//! ```
-//!
-//! # Configuration
-//!
-//! ```ignore
-//! use kjarni::seq2seq::{Seq2SeqGenerator, Seq2SeqOverrides};
-//!
-//! // Builder pattern
-//! let generator = Seq2SeqGenerator::builder("flan-t5-large")
-//!     .num_beams(6)           // Higher quality
-//!     .max_length(256)        // Longer outputs
-//!     .gpu()                  // Use GPU
-//!     .build()
-//!     .await?;
-//!
-//! // Runtime overrides
-//! let output = generator.generate_with_config(
-//!     "summarize: ...",
-//!     &Seq2SeqOverrides::greedy()  // Fast single-beam
-//! ).await?;
-//! ```
-//!
-//! # Streaming
-//!
-//! ```ignore
-//! use futures::StreamExt;
-//!
-//! let mut stream = generator.stream("translate: Hello world").await?;
-//! while let Some(token) = stream.next().await {
-//!     print!("{}", token?.text);
-//! }
-//! ```
+
 
 
 mod builder;
@@ -70,30 +14,11 @@ pub use model::Seq2SeqGenerator;
 pub use types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 
 /// Generate text with default settings.
-/// # Example
-///
-/// ```ignore
-/// let output = kjarni::seq2seq::generate(
-///     "flan-t5-base",
-///     "translate English to German: How are you?"
-/// ).await?;
 pub async fn generate(model: &str, input: &str) -> Seq2SeqResult<String> {
     Seq2SeqGenerator::new(model).await?.generate(input).await
 }
 
-/// Generate with custom overrides.
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::seq2seq::{generate_with_config, Seq2SeqOverrides};
-///
-/// let output = generate_with_config(
-///     "flan-t5-base",
-///     "summarize: Long article...",
-///     Seq2SeqOverrides::high_quality()
-/// ).await?;
-/// ```
+/// Generate with custom overrides
 pub async fn generate_with_config(
     model: &str,
     input: &str,

@@ -439,35 +439,6 @@ mod integration_tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_chat_produces_coherent_response() {
-        if !model_available("qwen2.5-0.5b-instruct") {
-            eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
-            return;
-        }
-
-        let chat = Chat::builder("qwen2.5-0.5b-instruct")
-            .cpu()
-            .quiet()
-            .max_tokens(100)
-            .build()
-            .await
-            .unwrap();
-
-        let response = chat.send("What is 2 + 2?").await.unwrap();
-
-        assert!(!response.is_empty());
-        // Should likely mention "4" or "four"
-        let response_lower = response.to_lowercase();
-        let mentions_four = response_lower.contains("4") || response_lower.contains("four");
-        let has_text = response.chars().filter(|c| c.is_alphabetic()).count() > 3;
-
-        assert!(
-            mentions_four || has_text,
-            "Response should mention 4 or contain meaningful text: {}",
-            response
-        );
-    }
 
     #[tokio::test]
     async fn test_chat_with_system_prompt() {

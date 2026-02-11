@@ -132,22 +132,7 @@ impl ClassifierBuilder {
         self
     }
 
-    /// Load model from a local path instead of registry.
-    ///
-    /// The path should contain:
-    /// - `config.json` - Model configuration
-    /// - `tokenizer.json` - Tokenizer
-    /// - `model.safetensors` or `pytorch_model.bin` - Weights
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let classifier = Classifier::builder("icebert")
-    ///     .model_path("/models/icebert-sentiment")
-    ///     .labels(vec!["neikvætt", "jákvætt"])
-    ///     .build()
-    ///     .await?;
-    /// ```
+    /// Load model from a local path instead of registry
     pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.model_path = Some(path.into());
         self
@@ -169,8 +154,6 @@ impl ClassifierBuilder {
     }
 
     /// Set target data type for model weights.
-    ///
-    /// Use for quantization or precision control.
     pub fn dtype(mut self, dtype: DType) -> Self {
         self.dtype = Some(dtype);
         self

@@ -1,40 +1,4 @@
-//! LLaMA-style decoder-only language model.
-//!
-//! This module provides the `LlamaModel`, a model container responsible for loading
-//! weights and configuration for Llama and its variants.
-//!
-//! ## Architecture
-//!
-//! The model uses a `DecoderPipeline` to manage its components:
-//! - `LoadedEmbeddings` - Token embeddings (CPU or GPU)
-//! - `LlamaCpuDecoder` / `LlamaGpuDecoder` - Transformer layers
-//! - `LoadedLMHead` - Language model head for logit projection
-//!
-//! The `ExecutionPlan` determines where each stage runs, enabling:
-//! - Full GPU execution (default)
-//! - Full CPU execution
-//! - Hybrid: GPU layers with CPU embeddings/head (VRAM savings)
-//!
-//! ## Usage
-//!
-//! ```ignore
-//! // Simple usage
-//! let model = LlamaModel::from_pretrained(path, Device::Wgpu, context, None)?;
-//!
-//! // With configuration
-//! let config = ModelLoadConfig::builder()
-//!     .offload_lm_head(true)  // Save ~500MB VRAM
-//!     .target_dtype(Some(DType::BF16))
-//!     .build();
-//! let model = LlamaModel::from_pretrained(path, Device::Wgpu, context, Some(config))?;
-//!
-//! // Change execution plan at runtime
-//! model.pipeline_mut().set_plan(ExecutionPlan::gpu_offload_head())?;
-//! ```
-
-
-// Imports
-
+//! LLaMA-style decoder
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -51,60 +15,25 @@ use kjarni_transformers::traits::{ModelLayout, ModelMetadata};
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-// Crate-specific imports
 use crate::models::llama::{
     config::LlamaConfig, cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder,
 };
 
-// Workspace imports
 use kjarni_transformers::{
-    // Utilities
     WgpuContext,
     cache::{Cache, CpuKVCache},
     decoder::prelude::*,
     execution::ExecutionPlan,
     gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
-    // Decoder traits
     models::base::{AutoregressiveLoop, ModelLoadConfig},
-    // Embeddings
     models::{LanguageModel, ModelType},
-    // Execution planning
     pipeline::{DecoderPipeline},
-    // GPU operations
     prelude::*,
     traits::{InferenceModel, ModelConfig},
-    // Pipeline
     weights::ModelWeights,
 };
 
-
-// Model Definition
-
-
-/// A model container for LLaMA and its variants (Llama 2, Llama 3, Code Llama, etc.).
-///
-/// This struct holds the model's components via a `DecoderPipeline` and implements
-/// the necessary traits for the generation infrastructure to use it.
-///
-/// ## Supported Models
-///
-/// - Llama 3.2 1B / 3B
-/// - Llama 3 8B Instruct
-/// - Other Llama variants with compatible architecture
-///
-/// ## Example
-///
-/// ```ignore
-/// use kjarni_models::LlamaModel;
-/// use kjarni_transformers::prelude::Device;
-///
-/// let model = LlamaModel::from_pretrained(
-///     Path::new("/models/llama-3.2-1b"),
-///     Device::Wgpu,
-///     Some(context),
-///     None,
-/// )?;
-/// ```
+/// A model container for LLaMA
 pub struct LlamaModel {
     pipeline: DecoderPipeline,
     tokenizer: Tokenizer,
@@ -112,10 +41,6 @@ pub struct LlamaModel {
     chat_template: Option<Box<dyn ChatTemplate>>,
     generation_defaults: Option<HFGenerationDefaults>,
 }
-
-
-// Model Loading
-
 
 impl DecoderModelFactory for LlamaModel {
     type Config = LlamaConfig;
@@ -223,18 +148,11 @@ impl LlamaModel {
     }
 
     /// Returns a reference to the decoder pipeline.
-    ///
-    /// Use this to inspect the current execution plan or access components.
     pub fn pipeline(&self) -> &DecoderPipeline {
         &self.pipeline
     }
 
-    /// Returns a mutable reference to the decoder pipeline.
-    ///
-    /// Use this to change the execution plan at runtime:
-    ///
-    /// ```ignore
-    /// // Switch to CPU-offloaded head to save VRAM
+    /// Returns a mutable reference to the decoder pipeline
     /// model.pipeline_mut().set_plan(ExecutionPlan::gpu_offload_head())?;
     /// ```
     pub fn pipeline_mut(&mut self) -> &mut DecoderPipeline {
@@ -254,7 +172,6 @@ impl InferenceModel for LlamaModel {
     }
 
     fn context(&self) -> Option<Arc<WgpuContext>> {
-        // self.context.clone()
         self.pipeline.context().cloned()
     }
 
@@ -362,10 +279,6 @@ impl LanguageModel for LlamaModel {
     }
 }
 
-
-// CpuDecoderOps Implementation
-
-
 impl CpuDecoderOps for LlamaModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         self.pipeline
@@ -378,25 +291,13 @@ impl CpuDecoderOps for LlamaModel {
     }
 
     fn get_attention_mask(&self, seq: usize, past: usize) -> Result<Array2<f32>> {
-        // Llama uses full attention (no sliding window in base model)
-        // Ok(kjarni_transformers::utils::create_full_attention_mask(
-        //     1, seq_len,
-        // ))
         Ok(kjarni_transformers::utils::create_causal_mask(seq, seq + past))
-        // Ok(kjarni_transformers::utils::create_causal_mask(seq_len, _past_len))
     }
 
-
-
-    // CpuDecoderOps (for Autoregressive Decoders)
     fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
         self.pipeline.embeddings().embed_cpu(&tokens, None, pos)
     }
 }
-
-
-// GpuDecoderOps Implementation
-
 
 impl GpuDecoderOps for LlamaModel {
     fn decoder(&self) -> &dyn GpuDecoder {
@@ -445,13 +346,9 @@ impl GpuDecoderOps for LlamaModel {
 }
 
 
-// DecoderLanguageModel Implementation
-
-
 #[async_trait]
 impl DecoderLanguageModel for LlamaModel {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps> {
-        // Return self if CPU decoder is available
         if self.pipeline.cpu_decoder().is_some() {
             Some(self)
         } else {
@@ -460,7 +357,6 @@ impl DecoderLanguageModel for LlamaModel {
     }
 
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
-        // Return self if GPU decoder is available
         if self.pipeline.gpu_decoder().is_some() {
             Some(self)
         } else {

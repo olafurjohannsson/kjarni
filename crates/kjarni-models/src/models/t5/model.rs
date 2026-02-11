@@ -183,7 +183,6 @@ impl T5Model {
                     }
                 }
                 T5Task::TranslationCustom { .. } | T5Task::Question | T5Task::Unknown => {
-                    // Use base config with translation-safe defaults
                     config.min_length = 0;
                     config.no_repeat_ngram_size = 0;
                 }
@@ -195,26 +194,15 @@ impl T5Model {
 
     fn apply_translation_params(&self, config: &mut GenerationConfig, params: &TranslationParams) {
         config.max_length = params.max_length;
-        config.min_length = 0; // Translation should not force min length
-        config.no_repeat_ngram_size = 0; // Translation may need repetition
+        config.min_length = 0; 
+        config.no_repeat_ngram_size = 0; 
         config.strategy = DecodingStrategy::BeamSearch(BeamSearchParams {
             num_beams: params.num_beams,
             length_penalty: 1.0,
             early_stopping: params.early_stopping,
         });
     }
-
-    const SUPPORTED_MODELS: &'static [ModelType] = &[
-        // ModelType::FlanT5Small,
-        ModelType::FlanT5Base,
-        ModelType::FlanT5Large,
-        // Add more as needed
-    ];
 }
-
-
-// Trait Implementations
-
 
 impl InferenceModel for T5Model {
     fn device(&self) -> Device {

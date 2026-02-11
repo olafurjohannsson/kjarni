@@ -31,8 +31,6 @@ pub fn validate_for_reranking(model_type: ModelType) -> RerankerResult<()> {
             // Ideal - explicitly trained for reranking
         }
         ModelTask::Classification | ModelTask::SentimentAnalysis => {
-            // Can work as cross-encoder if it has a head
-            // (e.g., NLI models can be used for semantic similarity)
         }
         _ => {
             return Err(RerankerError::IncompatibleModel {

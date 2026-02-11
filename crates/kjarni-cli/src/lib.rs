@@ -1380,6 +1380,7 @@ mod tests {
     fn test_summarize_with_options() {
         let cli = parse_args(&[
             "summarize",
+            "--input",
             "input.txt",
             "--min-length",
             "50",

@@ -522,10 +522,6 @@ mod tests {
     #[test]
     fn test_parse_timestamps_basic() {
         
-
-        // We can't easily construct a real Whisper tokenizer in a unit test,
-        // so this test just validates the segment-boundary logic with a dummy.
-        // Integration tests should use a real model.
         let segments = WhisperModel::merge_boundary_segments(vec![
             WhisperSegment { start: 0.0, end: 30.0, text: "Hello ".into() },
             WhisperSegment { start: 30.0, end: 45.0, text: "world.".into() },

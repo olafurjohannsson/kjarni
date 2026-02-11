@@ -624,7 +624,6 @@ mod encoder_layer_tests {
         let mut buffers = EncoderBuffers::new(batch, seq, hidden, heads, intermediate, use_fused);
         layer.forward_noalloc(&mut input_noalloc, &mask, None, true, None, &mut buffers)?;
 
-        // Use relative tolerance
         let mut max_rel_diff = 0.0f32;
         for ((_, a), (_, b)) in output_alloc
             .indexed_iter()

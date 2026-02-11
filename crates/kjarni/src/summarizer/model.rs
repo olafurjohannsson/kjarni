@@ -11,28 +11,7 @@ use super::builder::SummarizerBuilder;
 use super::types::{SummarizerError, SummarizerResult};
 use super::validation::validate_for_summarization;
 
-/// High-level summarization API.
-///
-/// Summarizer wraps `Seq2SeqGenerator` and adds:
-/// - Model-aware prompt formatting (T5 vs BART)
-/// - Length presets (short/medium/long)
-/// - Summarization-specific defaults
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::summarizer::Summarizer;
-///
-/// // Simple usage
-/// let s = Summarizer::new("distilbart-cnn").await?;
-/// let summary = s.summarize(&long_article).await?;
-///
-/// // With length control
-/// let s = Summarizer::builder("bart-large-cnn")
-///     .short()  // 30-60 tokens
-///     .build()
-///     .await?;
-/// ```
+/// High-level summarization API
 pub struct Summarizer {
     /// Underlying seq2seq generator.
     generator: Seq2SeqGenerator,

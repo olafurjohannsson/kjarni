@@ -221,19 +221,12 @@ pub fn apply_repetition_penalty_mut(logits: &mut Array1<f32>, tokens: &[u32], pe
 
 pub fn apply_no_repeat_ngram(logits: &mut Array1<f32>, tokens: &[u32], ngram_size: usize) {
     let n = ngram_size;
-    // We can't form a prefix of length n-1, so we can't complete an n-gram.
     if tokens.len() < n - 1 {
         return;
     }
-
-    // The sequence of tokens that would form the start of a new n-gram.
     let current_prefix = &tokens[tokens.len() - (n - 1)..];
-
-    // Iterate through all historical n-grams in the generated sequence.
     for window in tokens.windows(n) {
-        // Check if a historical n-gram starts with the same prefix.
         if &window[..n - 1] == current_prefix {
-            // If it does, ban the token that completed that n-gram.
             let banned_token = window[n - 1] as usize;
             if banned_token < logits.len() {
                 logits[banned_token] = f32::NEG_INFINITY;

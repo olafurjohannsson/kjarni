@@ -172,8 +172,6 @@ impl GpuTensor {
         dtype: DType,
         context: Arc<WgpuContext>,
     ) -> Self {
-        // For quantized types, we can't easily validate size since buffer_size_for_shape
-        // can fail. Just trust that the buffer was created correctly.
         if let Some(elem_size) = dtype.element_size() {
             let expected_size = shape.iter().product::<usize>() * elem_size;
             assert_eq!(
@@ -182,7 +180,6 @@ impl GpuTensor {
                 "buffer size does not match shape dimensions"
             );
         }
-        // For quantized types, skip validation (buffer was already created with correct size)
 
         Self {
             buffer,

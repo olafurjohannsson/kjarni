@@ -496,7 +496,6 @@ mod tests {
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
         
-        // Uses default implementation
         let output = decoder.forward_all_layers(&hidden, &mask, 0, None).unwrap();
         
         assert_eq!(output.shape(), &[1, 5, 64]);
@@ -509,7 +508,6 @@ mod tests {
         let hidden = Array3::<f32>::ones((1, 5, 64));
         let mask = Array2::<f32>::ones((5, 5));
         
-        // Uses default implementation: forward_all_layers + final_norm
         let output = decoder.forward(&hidden, &mask, 0, None).unwrap();
         
         assert_eq!(output.shape(), &[1, 5, 64]);

@@ -115,7 +115,6 @@ namespace Kjarni.Tests
                 return score;
             }).ToArray();
 
-            // Each pair should be more similar than the next
             for (int i = 0; i < scores.Length - 1; i++)
             {
                 Assert.True(scores[i] > scores[i + 1],

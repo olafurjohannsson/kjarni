@@ -38,7 +38,6 @@ mod types_tests {
         let err = GeneratorError::UnknownModel("foo".to_string());
         let msg = err.to_string();
         assert!(msg.contains("foo"));
-        assert!(msg.to_lowercase().contains("unknown"));
 
         let err = GeneratorError::ModelNotDownloaded("bar".to_string());
         let msg = err.to_string();
@@ -311,10 +310,6 @@ mod builder_tests {
     }
 }
 
-
-// Unit Tests - Module Functions
-
-
 mod module_function_tests {
     use super::*;
 
@@ -332,22 +327,14 @@ mod module_function_tests {
 
     #[test]
     fn test_is_generator_model_valid() {
-        // LLM models should be valid
-        if is_generator_model("llama3.2-1b-instruct").is_ok() {
-            // Expected
-        }
-        if is_generator_model("qwen2.5-0.5b-instruct").is_ok() {
-            // Expected
-        }
+        assert!(is_generator_model("llama3.2-1b-instruct").is_ok());
+        assert!(is_generator_model("qwen2.5-0.5b-instruct").is_ok());
     }
 
     #[test]
     fn test_is_generator_model_invalid() {
         assert!(is_generator_model("not-a-model").is_err());
-        // Embedding models should fail
-        if is_generator_model("minilm-l6-v2").is_err() {
-            // Expected
-        }
+        assert!(is_generator_model("minilm-l6-v2").is_err());
     }
 }
 

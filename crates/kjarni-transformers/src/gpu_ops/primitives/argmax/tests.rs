@@ -409,8 +409,6 @@ async fn test_argmax_matches_cpu_random_small() -> Result<()> {
 async fn test_argmax_matches_cpu_random_large() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
-
-    // Use values with a UNIQUE maximum
     let mut logits_vec: Vec<f32> = (0..10000)
         .map(|i| ((i * 17 + 31) % 997) as f32 / 10.0 - 50.0) // Prime modulo avoids repeats
         .collect();

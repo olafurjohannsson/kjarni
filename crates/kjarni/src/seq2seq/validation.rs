@@ -53,14 +53,12 @@ pub fn validate_for_seq2seq(model_type: ModelType) -> Seq2SeqResult<Seq2SeqValid
             // Ideal - general seq2seq
         }
         ModelTask::Summarization => {
-            // Good - specifically tuned for summarization
             warnings.push(format!(
                 "Model '{}' is optimized for summarization. For translation, consider using flan-t5-base or flan-t5-large.",
                 cli_name
             ));
         }
         ModelTask::Translation => {
-            // Good - specifically tuned for translation
         }
         _ => {
             return Err(Seq2SeqError::IncompatibleModel {

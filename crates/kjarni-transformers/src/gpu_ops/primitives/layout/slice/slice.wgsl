@@ -28,7 +28,6 @@ struct Uniforms {
 };
 @group(0) @binding(2) var<uniform> uniforms: Uniforms;
 
-// Use a 3D workgroup. We'll map the IDs to the 4D tensor indices.
 @compute @workgroup_size(16, 4, 4)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // These IDs map directly to the *destination* tensor's indices
