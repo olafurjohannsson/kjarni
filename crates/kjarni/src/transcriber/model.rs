@@ -39,13 +39,7 @@ use super::builder::TranscriberBuilder;
 use super::types::*;
 use super::validation;
 
-
-// Transcriber
-
-
 /// High-level Whisper transcriber.
-///
-/// Wraps a [`WhisperModel`] and provides file-level and streaming transcription.
 pub struct Transcriber {
     model: Arc<WhisperModel>,
     model_type: ModelType,
@@ -59,16 +53,11 @@ pub struct Transcriber {
 }
 
 impl Transcriber {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
-    /// Create a builder targeting the given model (e.g. `"whisper-small"`).
+    /// Create a builder targeting the given model
     pub fn builder(model: &str) -> TranscriberBuilder {
         TranscriberBuilder::new(model)
     }
 
-    /// Internal constructor — called by [`TranscriberBuilder::build`].
     pub(crate) fn new(
         model: Arc<WhisperModel>,
         model_type: ModelType,
@@ -93,9 +82,6 @@ impl Transcriber {
         }
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Human-readable model name.
     pub fn model_name(&self) -> &str {
@@ -107,13 +93,7 @@ impl Transcriber {
         self.device
     }
 
-    // =========================================================================
-    // Transcription — Full Result
-    // =========================================================================
-
     /// Transcribe an audio file on disk.
-    ///
-    /// Handles loading, resampling, chunking, encoding, decoding, and stitching.
     pub fn transcribe_file(
         &self,
         path: impl AsRef<Path>,
@@ -131,10 +111,6 @@ impl Transcriber {
     }
 
     /// Transcribe raw audio samples.
-    ///
-    /// Expects **mono 16 kHz** `f32` samples.  If your audio has a different
-    /// sample rate, use [`transcribe_file`](Self::transcribe_file) which
-    /// resamples automatically, or resample before calling this method.
     pub fn transcribe_audio(
         &self,
         samples: &[f32],
@@ -223,14 +199,7 @@ impl Transcriber {
         })
     }
 
-    // =========================================================================
-    // Transcription — Streaming
-    // =========================================================================
-
     /// Stream decoded tokens from an audio file.
-    ///
-    /// Tokens are emitted as they are decoded.  The stream ends when the last
-    /// chunk is fully decoded.
     pub async fn stream_file(
         &self,
         path: impl AsRef<Path>,
@@ -245,9 +214,7 @@ impl Transcriber {
         self.stream_audio(audio.samples, audio.sample_rate).await
     }
 
-    /// Stream decoded tokens from raw audio samples.
-    ///
-    /// The `samples` are moved into a background task.
+    /// Stream decoded tokens from raw audio samples
     pub async fn stream_audio(
         &self,
         samples: Vec<f32>,
@@ -291,7 +258,7 @@ impl Transcriber {
                     }
                 };
 
-                // Decode with per-token callback → channel
+                // Decode with per-token callback into channel
                 let tx_ref = &tx;
                 let mut on_token = |id: u32, text: &str| -> bool {
                     let token = TranscribedToken {
@@ -315,11 +282,6 @@ impl Transcriber {
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Ok(Box::pin(stream))
     }
-
-    // =========================================================================
-    // Internal Helpers
-    // =========================================================================
-
     /// Build the low-level decode config from high-level settings.
     fn build_config(&self) -> WhisperTranscriberConfig {
         WhisperTranscriberConfig {
@@ -333,7 +295,7 @@ impl Transcriber {
         }
     }
 
-    /// Audio loader config: 16 kHz mono, **no** 30-second truncation.
+    /// Audio loader config: 16 kHz mono, 30-second truncation.
     fn audio_loader_config(&self) -> AudioLoaderConfig {
         AudioLoaderConfig {
             target_sample_rate: WHISPER_SAMPLE_RATE,

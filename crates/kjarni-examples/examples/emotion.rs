@@ -6,10 +6,6 @@ use kjarni::classifier::{self, Classifier, ClassificationMode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // =========================================================================
-    // 1. Basic emotions (7 classes)
-    // =========================================================================
-    
     let text = "I can't believe they cancelled the concert!";
     let result = classifier::classify("distilroberta-emotion", text).await?;
     
@@ -22,10 +18,6 @@ async fn main() -> anyhow::Result<()> {
     for (label, score) in result.top_k(3) {
         println!("    {}: {:.1}%", label, score * 100.0);
     }
-    
-    // =========================================================================
-    // 2. Fine-grained emotions (28 classes, multi-label)
-    // =========================================================================
     
     let text = "Thank you so much, this means the world to me!";
     
@@ -43,10 +35,6 @@ async fn main() -> anyhow::Result<()> {
     for (label, score) in &result.all_scores {
         println!("    {}: {:.1}%", label, score * 100.0);
     }
-    
-    // =========================================================================
-    // 3. Comparing models on the same text
-    // =========================================================================
     
     let texts = [
         "This is the best day of my life!",

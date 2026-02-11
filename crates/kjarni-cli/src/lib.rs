@@ -540,20 +540,11 @@ pub fn verbosity_to_log_level(verbose: u8) -> &'static str {
 mod tests {
     use super::*;
     use clap::Parser;
-
-    // =========================================================================
-    // Helper function
-    // =========================================================================
-
     fn parse_args(args: &[&str]) -> Result<Cli, clap::Error> {
         let mut full_args = vec!["kjarni"];
         full_args.extend(args);
         Cli::try_parse_from(full_args)
     }
-
-    // =========================================================================
-    // verbosity_to_log_level tests
-    // =========================================================================
 
     #[test]
     fn test_verbosity_to_log_level_zero() {
@@ -580,10 +571,6 @@ mod tests {
         assert_eq!(verbosity_to_log_level(10), "trace");
         assert_eq!(verbosity_to_log_level(255), "trace");
     }
-
-    // =========================================================================
-    // Generate command tests
-    // =========================================================================
 
     #[test]
     fn test_generate_minimal() {
@@ -785,10 +772,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Chat command tests
-    // =========================================================================
-
     #[test]
     fn test_chat_defaults() {
         let cli = parse_args(&["chat"]).unwrap();
@@ -837,10 +820,6 @@ mod tests {
             _ => panic!("Expected Chat command"),
         }
     }
-
-    // =========================================================================
-    // Classify command tests
-    // =========================================================================
 
     #[test]
     fn test_classify_defaults() {
@@ -920,10 +899,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Search command tests
-    // =========================================================================
-
     #[test]
     fn test_search_minimal() {
         let cli = parse_args(&["search", "./index", "my query"]).unwrap();
@@ -992,10 +967,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Similarity command tests
-    // =========================================================================
-
     #[test]
     fn test_similarity_minimal() {
         let cli = parse_args(&["similarity", "text one", "text two"]).unwrap();
@@ -1017,10 +988,6 @@ mod tests {
             _ => panic!("Expected Similarity command"),
         }
     }
-
-    // =========================================================================
-    // Model subcommand tests
-    // =========================================================================
 
     #[test]
     fn test_model_list_defaults() {
@@ -1146,10 +1113,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Index subcommand tests
-    // =========================================================================
-
     #[test]
     fn test_index_create_minimal() {
         let cli = parse_args(&["index", "create", "output.idx"]).unwrap();
@@ -1272,10 +1235,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Global verbose flag tests
-    // =========================================================================
-
     #[test]
     fn test_verbose_zero() {
         let cli = parse_args(&["generate"]).unwrap();
@@ -1313,10 +1272,6 @@ mod tests {
         assert_eq!(cli.verbose, 1);
     }
 
-    // =========================================================================
-    // Error cases
-    // =========================================================================
-
     #[test]
     fn test_missing_command() {
         let result = parse_args(&[]);
@@ -1347,10 +1302,6 @@ mod tests {
         let result = parse_args(&["generate", "-t", "not_a_float"]);
         assert!(result.is_err());
     }
-
-    // =========================================================================
-    // Rerank command tests
-    // =========================================================================
 
     #[test]
     fn test_rerank_minimal() {
@@ -1401,10 +1352,6 @@ mod tests {
             _ => panic!("Expected Rerank command"),
         }
     }
-
-    // =========================================================================
-    // Summarize command tests
-    // =========================================================================
 
     #[test]
     fn test_summarize_defaults() {
@@ -1464,10 +1411,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Translate command tests
-    // =========================================================================
-
     #[test]
     fn test_translate_defaults() {
         let cli = parse_args(&["translate"]).unwrap();
@@ -1501,11 +1444,6 @@ mod tests {
             _ => panic!("Expected Translate command"),
         }
     }
-
-    // =========================================================================
-    // Transcribe command tests
-    // =========================================================================
-
     #[test]
     fn test_transcribe_minimal() {
         let cli = parse_args(&["transcribe", "audio.wav"]).unwrap();
@@ -1569,7 +1507,7 @@ mod send_sync_tests {
     use kjarni::{
         Classifier, Embedder, Indexer, Reranker, Searcher, chat::Chat, generator::Generator,
     };
-    // Compile time verification
+    // Compile time verificatio
     const _: () = {
         const fn assert_send<T: Send>() {}
         const fn assert_sync<T: Sync>() {}

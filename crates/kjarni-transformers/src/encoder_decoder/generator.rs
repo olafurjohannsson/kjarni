@@ -380,10 +380,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    //  AnyEncoderDecoderBackend Tests
-    // ========================================================================
-
     #[test]
     fn test_any_backend_debug_cpu() {
         let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
@@ -436,7 +432,6 @@ mod tests {
     fn test_any_backend_reorder_cache_cpu() {
         let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
 
-        // Create cache with actual data
         let num_layers = 2;
         let num_heads = 4;
         let max_seq = 128;
@@ -444,15 +439,21 @@ mod tests {
         let batch_size = 4;
 
         let mut cache = crate::cache::CpuBeamKVCache::new(num_layers, num_heads, max_seq, head_dim);
-
-        // Populate cache with dummy data for each layer
+        let seq_len = 1;
         for layer in 0..num_layers {
-            let k = Array3::<f32>::zeros((batch_size, num_heads, head_dim)); // seq_len=1
-            let v = Array3::<f32>::zeros((batch_size, num_heads, head_dim));
-            let _ = cache.update(layer, &k, &v);
+            let k = Array3::<f32>::ones((batch_size, num_heads, head_dim));
+            let v = Array3::<f32>::ones((batch_size, num_heads, head_dim));
+            cache.update(layer, &k, &v);
         }
+        cache.increment_len(seq_len);
 
-        let indices = vec![1, 0, 2, 3]; // Reorder batch dimension
+        assert_eq!(
+            cache.get_seq_length(),
+            1,
+            "Cache should have seq_length=1 after update"
+        );
+
+        let indices = vec![1, 0, 2, 3];
         let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
     }
@@ -476,10 +477,6 @@ mod tests {
         let debug_str = format!("{:?}", model);
         assert_eq!(debug_str, "EncoderDecoder");
     }
-
-    // ========================================================================
-    //  decode_step Type Mismatch Tests
-    // ========================================================================
 
     #[derive(Clone)]
     struct MockCache {
@@ -517,7 +514,6 @@ mod tests {
             device: Device::Cpu,
         };
 
-        // Wrong type for decoder_tokens
         let decoder_tokens: Box<dyn Any + Send + Sync> = Box::new("wrong type");
         let encoder_state: Box<dyn Any + Send + Sync> = Box::new(
             cpu_backend::CpuSeq2SeqState::U32(ndarray::Array2::zeros((1, 1))),
@@ -544,11 +540,9 @@ mod tests {
             device: Device::Cpu,
         };
 
-        // Correct type for decoder_tokens
         let decoder_tokens: Box<dyn Any + Send + Sync> = Box::new(
             cpu_backend::CpuSeq2SeqState::U32(ndarray::Array2::zeros((1, 1))),
         );
-        // Wrong type for encoder_state
         let encoder_state: Box<dyn Any + Send + Sync> = Box::new("wrong type");
 
         let mut cache = MockCache { len: 0 };

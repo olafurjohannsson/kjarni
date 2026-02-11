@@ -1,69 +1,7 @@
 //! Simple text splitting utilities for document chunking
-//!
-//! This module provides text splitting functionality for RAG (Retrieval-Augmented Generation)
-//! pipelines. It breaks large documents into smaller chunks suitable for embedding and indexing.
-//!
-//! # Features
-//!
-//! - Configurable chunk size and overlap
-//! - Custom separators for intelligent splitting
-//! - UTF-8 safe splitting (never breaks multi-byte characters)
-//! - Metadata preservation across chunks
-//!
-//! # Example
-//!
-//! ```
-//! use kjarni_rag::splitter::{TextSplitter, SplitterConfig};
-//!
-//! let config = SplitterConfig {
-//!     chunk_size: 500,
-//!     chunk_overlap: 50,
-//!     separator: "\n\n".to_string(),
-//! };
-//!
-//! let splitter = TextSplitter::new(config);
-//! let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
-//! let chunks = splitter.split(text);
-//!
-//! for chunk in chunks {
-//!     println!("Chunk: {}", chunk);
-//! }
-//! ```
-
 use std::collections::HashMap;
 
 /// Configuration for text splitting
-///
-/// Controls how documents are split into chunks for embedding and indexing.
-///
-/// # Fields
-///
-/// * `chunk_size` - Maximum size of each chunk in characters. Chunks may be slightly
-///   smaller to avoid breaking at awkward positions.
-/// * `chunk_overlap` - Number of characters to overlap between consecutive chunks.
-///   This helps maintain context across chunk boundaries.
-/// * `separator` - Primary separator used for splitting. The splitter will try to
-///   break at these boundaries first before resorting to character-level splitting.
-///
-/// # Example
-///
-/// ```
-/// use kjarni_rag::splitter::SplitterConfig;
-///
-/// // Good for prose documents
-/// let prose_config = SplitterConfig {
-///     chunk_size: 1000,
-///     chunk_overlap: 200,
-///     separator: "\n\n".to_string(), // Split on paragraphs
-/// };
-///
-/// // Good for code
-/// let code_config = SplitterConfig {
-///     chunk_size: 500,
-///     chunk_overlap: 50,
-///     separator: "\n".to_string(), // Split on lines
-/// };
-/// ```
 #[derive(Debug, Clone)]
 pub struct SplitterConfig {
     /// Maximum chunk size in characters
@@ -85,9 +23,6 @@ impl Default for SplitterConfig {
 }
 
 impl SplitterConfig {
-    /// Create a new config with specified chunk size
-    ///
-    /// Uses default overlap (20% of chunk size) and paragraph separator.
     pub fn with_chunk_size(chunk_size: usize) -> Self {
         Self {
             chunk_size,
@@ -95,10 +30,6 @@ impl SplitterConfig {
             separator: "\n\n".to_string(),
         }
     }
-
-    /// Validate the configuration
-    ///
-    /// Returns an error message if the config is invalid.
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.chunk_size == 0 {
             return Err("chunk_size must be greater than 0");
@@ -111,33 +42,12 @@ impl SplitterConfig {
 }
 
 /// Simple text splitter for document chunking
-///
-/// Splits text into overlapping chunks suitable for embedding and retrieval.
-/// The splitter tries to break at natural boundaries (using the configured separator)
-/// before falling back to character-level splitting for very long sections.
-///
-/// # Thread Safety
-///
-/// `TextSplitter` is `Send` and `Sync`, making it safe to share across threads.
-///
-/// # Example
-///
-/// ```
-/// use kjarni_rag::splitter::TextSplitter;
-///
-/// let splitter = TextSplitter::with_defaults();
-/// let chunks = splitter.split("Your long document text here...");
-/// ```
 pub struct TextSplitter {
     config: SplitterConfig,
 }
 
 impl TextSplitter {
     /// Create a new text splitter with the given configuration
-    ///
-    /// # Panics
-    ///
-    /// Panics if the configuration is invalid (chunk_size == 0 or overlap >= chunk_size).
     pub fn new(config: SplitterConfig) -> Self {
         if let Err(e) = config.validate() {
             panic!("Invalid SplitterConfig: {}", e);
@@ -146,8 +56,6 @@ impl TextSplitter {
     }
 
     /// Create a text splitter with default configuration
-    ///
-    /// Default: 1000 char chunks with 200 char overlap, splitting on paragraphs.
     pub fn with_defaults() -> Self {
         Self::new(SplitterConfig::default())
     }
@@ -158,28 +66,6 @@ impl TextSplitter {
     }
 
     /// Split text into chunks
-    ///
-    /// The text is first split on the configured separator. Sections that fit within
-    /// the chunk size are combined. Sections larger than the chunk size are split
-    /// at character boundaries with overlap.
-    ///
-    /// # Arguments
-    ///
-    /// * `text` - The text to split
-    ///
-    /// # Returns
-    ///
-    /// A vector of text chunks, each no larger than `chunk_size` characters.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use kjarni_rag::splitter::TextSplitter;
-    ///
-    /// let splitter = TextSplitter::with_defaults();
-    /// let chunks = splitter.split("Para 1.\n\nPara 2.\n\nPara 3.");
-    /// assert!(!chunks.is_empty());
-    /// ```
     pub fn split(&self, text: &str) -> Vec<String> {
         // Handle empty text
         if text.is_empty() {
@@ -196,7 +82,6 @@ impl TextSplitter {
                 continue;
             }
 
-            // 1. Handle sections larger than chunk_size
             if section.len() > self.config.chunk_size {
                 if !current_chunk.is_empty() {
                     chunks.push(current_chunk.clone());
@@ -206,7 +91,6 @@ impl TextSplitter {
                 continue;
             }
 
-            // 2. Check if adding section exceeds size
             let would_be_size = if current_chunk.is_empty() {
                 section.len()
             } else {
@@ -216,7 +100,6 @@ impl TextSplitter {
             if would_be_size > self.config.chunk_size && !current_chunk.is_empty() {
                 chunks.push(current_chunk.clone());
 
-                // 3. Handle Overlap SAFELY (UTF-8 aware)
                 if self.config.chunk_overlap > 0 {
                     current_chunk = self.get_overlap_suffix(&current_chunk);
                 } else {
@@ -224,14 +107,12 @@ impl TextSplitter {
                 }
             }
 
-            // 4. Add section to current chunk
             if !current_chunk.is_empty() {
                 current_chunk.push_str(&self.config.separator);
             }
             current_chunk.push_str(section);
         }
 
-        // Don't forget the last chunk
         if !current_chunk.is_empty() {
             chunks.push(current_chunk);
         }
@@ -239,12 +120,10 @@ impl TextSplitter {
         chunks
     }
 
-    /// Get the suffix of a string for overlap
     fn get_overlap_suffix(&self, text: &str) -> String {
         let chars: Vec<char> = text.chars().collect();
 
         if chars.len() <= self.config.chunk_overlap {
-            // Text is shorter than overlap, keep all of it
             return text.to_string();
         }
 
@@ -252,7 +131,6 @@ impl TextSplitter {
         chars[start_idx..].iter().collect()
     }
 
-    /// Split a large text section that exceeds chunk_size
     fn split_large_text(&self, text: &str) -> Vec<String> {
         let mut chunks = Vec::new();
         let chars: Vec<char> = text.chars().collect();
@@ -268,19 +146,16 @@ impl TextSplitter {
             let chunk: String = chars[start..end].iter().collect();
             chunks.push(chunk);
 
-            // Check if we've reached the end
             if end >= chars.len() {
                 break;
             }
 
-            // Calculate next start position with overlap
             let step = if self.config.chunk_overlap > 0 && self.config.chunk_overlap < self.config.chunk_size {
                 self.config.chunk_size - self.config.chunk_overlap
             } else {
                 self.config.chunk_size
             };
 
-            // Ensure we always make progress to avoid infinite loops
             start = if start + step > start {
                 start + step
             } else {
@@ -292,39 +167,6 @@ impl TextSplitter {
     }
 
     /// Split text into chunks with metadata
-    ///
-    /// Each chunk receives a copy of the base metadata plus additional
-    /// chunk-specific metadata (index and total count).
-    ///
-    /// # Arguments
-    ///
-    /// * `text` - The text to split
-    /// * `base_metadata` - Metadata to attach to each chunk
-    ///
-    /// # Returns
-    ///
-    /// A vector of (chunk_text, metadata) tuples.
-    ///
-    /// # Metadata Added
-    ///
-    /// * `chunk_index` - Zero-based index of this chunk
-    /// * `total_chunks` - Total number of chunks produced
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use kjarni_rag::splitter::TextSplitter;
-    /// use std::collections::HashMap;
-    ///
-    /// let splitter = TextSplitter::with_defaults();
-    /// let mut metadata = HashMap::new();
-    /// metadata.insert("source".to_string(), "document.txt".to_string());
-    ///
-    /// let chunks = splitter.split_with_metadata("Long text...", metadata);
-    /// for (text, meta) in chunks {
-    ///     println!("Chunk {} of {}", meta["chunk_index"], meta["total_chunks"]);
-    /// }
-    /// ```
     pub fn split_with_metadata(
         &self,
         text: &str,

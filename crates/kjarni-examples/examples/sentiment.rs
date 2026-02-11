@@ -6,16 +6,12 @@ use kjarni::classifier::{self, Classifier};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // =========================================================================
-    // 1. One-liner — the simplest API
-    // =========================================================================
+    // One-liner — the simplest API
     
     let result = classifier::classify("distilbert-sentiment", "I love this product!").await?;
     println!("One-liner: {} ({:.1}%)", result.label, result.score * 100.0);
     
-    // =========================================================================
-    // 2. Builder — when you need configuration
-    // =========================================================================
+    // Builder configuration
     
     let classifier = Classifier::builder("distilbert-sentiment")
         .top_k(2)           // return top 2 results
@@ -29,9 +25,7 @@ async fn main() -> anyhow::Result<()> {
         println!("  {}: {:.2}%", label, score * 100.0);
     }
     
-    // =========================================================================
-    // 3. Three sentiment models — different granularity
-    // =========================================================================
+    // Three sentiment models 
     
     let text = "The food was okay, nothing special.";
     
@@ -50,9 +44,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  3-class:   {}", three_class.label);
     println!("  5-star:    {}", five_star.label);
     
-    // =========================================================================
-    // 4. Batch classification — multiple texts at once
-    // =========================================================================
+    // Batch classification — multiple texts at once
     
     let reviews = [
         "Absolutely fantastic, exceeded expectations!",

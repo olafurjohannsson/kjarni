@@ -10,20 +10,7 @@ use crate::common::{DownloadPolicy, KjarniDevice, LoadConfig, LoadConfigBuilder}
 use super::model::Seq2SeqGenerator;
 use super::types::{Seq2SeqOverrides, Seq2SeqResult};
 
-/// Builder for configuring a Seq2SeqGenerator instance.
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::seq2seq::{Seq2SeqGenerator, Seq2SeqOverrides};
-///
-/// let generator = Seq2SeqGenerator::builder("flan-t5-base")
-///     .num_beams(6)
-///     .max_length(256)
-///     .gpu()
-///     .build()
-///     .await?;
-/// ```
+/// Builder for configuring a Seq2SeqGenerator instance
 pub struct Seq2SeqGeneratorBuilder {
     // Model selection
     pub(crate) model: String,
@@ -48,10 +35,6 @@ pub struct Seq2SeqGeneratorBuilder {
 
 impl Seq2SeqGeneratorBuilder {
     /// Create a new builder for the specified model.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - Model name from registry (e.g., "flan-t5-base", "distilbart-cnn")
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
@@ -72,10 +55,6 @@ impl Seq2SeqGeneratorBuilder {
         self.model_path = Some(path.into());
         self
     }
-
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
 
     /// Set the device for inference.
     pub fn device(mut self, device: KjarniDevice) -> Self {
@@ -102,15 +81,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Generation Parameters
-    // =========================================================================
-
     /// Set the number of beams for beam search.
-    ///
-    /// - `1` = greedy decoding (fastest)
-    /// - `4` = typical default
-    /// - `6-8` = higher quality, slower
     pub fn num_beams(mut self, n: usize) -> Self {
         self.overrides.num_beams = Some(n);
         self
@@ -129,10 +100,6 @@ impl Seq2SeqGeneratorBuilder {
     }
 
     /// Set the length penalty for beam search.
-    ///
-    /// - `< 1.0` = favor shorter outputs
-    /// - `= 1.0` = neutral
-    /// - `> 1.0` = favor longer outputs
     pub fn length_penalty(mut self, penalty: f32) -> Self {
         self.overrides.length_penalty = Some(penalty);
         self
@@ -144,10 +111,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    /// Set n-gram blocking size (prevents repetition).
-    ///
-    /// - `0` = disabled
-    /// - `3` = typical for summarization
+    /// Set n-gram blocking size
     pub fn no_repeat_ngram_size(mut self, size: usize) -> Self {
         self.overrides.no_repeat_ngram_size = Some(size);
         self
@@ -159,7 +123,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    /// Use greedy decoding (fastest, single beam).
+    /// Use greedy decoding 
     pub fn greedy(mut self) -> Self {
         self.overrides.num_beams = Some(1);
         self
@@ -183,17 +147,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Model Loading Configuration
-    // =========================================================================
-
     /// Configure model loading options.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// .with_load_config(|c| c.dtype(DType::BF16))
-    /// ```
     pub fn with_load_config<F>(mut self, f: F) -> Self
     where
         F: FnOnce(LoadConfigBuilder) -> LoadConfigBuilder,
@@ -220,11 +174,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
-    /// Suppress informational output (download progress, warnings).
+    /// Suppress informational output
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
         self
@@ -236,24 +186,7 @@ impl Seq2SeqGeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Build
-    // =========================================================================
-
-    /// Build the Seq2SeqGenerator instance.
-    ///
-    /// This will:
-    /// 1. Validate the model is compatible with seq2seq
-    /// 2. Download the model if needed (based on download_policy)
-    /// 3. Load the model onto the specified device
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The model is unknown or incompatible
-    /// - The model is not downloaded and download_policy is Never
-    /// - Model loading fails
-    /// - GPU is requested but unavailable
+    /// Build the Seq2SeqGenerator instance
     pub async fn build(self) -> Seq2SeqResult<Seq2SeqGenerator> {
         Seq2SeqGenerator::from_builder(self).await
     }

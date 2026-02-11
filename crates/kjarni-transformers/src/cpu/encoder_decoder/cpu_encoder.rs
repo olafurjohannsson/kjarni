@@ -24,7 +24,6 @@ use crate::{
     traits::CpuTransformerCore,
 };
 
-
 /// Output from the Seq2Seq encoder.
 #[derive(Debug)]
 pub struct EncoderOutput {
@@ -36,31 +35,16 @@ pub struct EncoderOutput {
     pub attentions: Option<Vec<Array4<f32>>>,
 }
 
-
 /// Unified transformer encoder for seq2seq models.
 pub struct Seq2SeqCPUEncoder {
-    /// Token embeddings (None for audio-only models like Whisper encoder)
     pub embeddings: Option<Embeddings>,
-
-    /// Embedding layer normalization
     embed_norm: Option<Normalization>,
-
-    /// Transformer layers
     layers: Vec<EncoderLayer>,
-
-    /// Final layer normalization
     final_norm: Option<Normalization>,
-
-    /// Position encoding implementation
     position_encoding: PositionEncoding,
-
-    /// Use pre-norm (T5, Whisper) vs post-norm (BART)
     pre_norm: bool,
-
-    /// Model metadata
     pub meta: ModelMetadata,
-
-    /// Model layout (for reference)
+    sinusoidal_cache: Option<Array2<f32>>, // cpu cache
     pub layout: ModelLayout,
 }
 
@@ -174,9 +158,18 @@ impl Seq2SeqCPUEncoder {
             PositionEncodingType::None => PositionEncoding::None,
         };
 
+        let sinusoidal_cache = match &encoder_config.position_encoding {
+            PositionEncodingType::Sinusoidal => Some(create_sinusoidal_embeddings(
+                meta.max_seq_len,
+                meta.hidden_size,
+            )),
+            _ => None,
+        };
+
         Ok(Self {
             embeddings,
             embed_norm,
+            sinusoidal_cache,
             layers,
             final_norm,
             position_encoding,
@@ -235,7 +228,7 @@ impl Seq2SeqCPUEncoder {
                 attention_mask,
                 position_bias.as_ref(),
                 self.pre_norm,
-                None, 
+                None,
             )?;
         }
 
@@ -331,6 +324,36 @@ impl Seq2SeqCPUEncoder {
     /// Hidden size.
     pub fn hidden_size(&self) -> usize {
         self.meta.hidden_size
+    }
+
+    pub fn apply_sinusoidal_positions(
+        &self,
+        hidden_states: &Array3<f32>,
+        position_offset: usize,
+    ) -> Result<Array3<f32>> {
+        match &self.sinusoidal_cache {
+            Some(cache) => {
+                let mut result = hidden_states.clone();
+                let (batch, seq_len, hidden_size) = result.dim();
+
+                for b in 0..batch {
+                    for s in 0..seq_len {
+                        let pos = s + position_offset;
+                        if pos < cache.nrows() {
+                            for h in 0..hidden_size {
+                                result[[b, s, h]] += cache[[pos, h]];
+                            }
+                        }
+                    }
+                }
+                Ok(result)
+            }
+            None => Ok(hidden_states.clone()),
+        }
+    }
+
+    pub fn has_sinusoidal(&self) -> bool {
+        matches!(self.position_encoding, PositionEncoding::Sinusoidal { .. })
     }
 }
 
@@ -913,6 +936,11 @@ mod seq2seq_encoder_tests {
             ModelLoadConfig::default(),
         )?;
 
+        assert!(
+            encoder.has_sinusoidal(),
+            "Whisper should have sinusoidal positions"
+        );
+
         let input_hidden = Array3::from_shape_vec(
             (1, 3, 4),
             vec![
@@ -921,9 +949,12 @@ mod seq2seq_encoder_tests {
             ],
         )
         .unwrap();
+
+        let input_with_pos = encoder.apply_sinusoidal_positions(&input_hidden, 0)?;
+
         let mask = Array2::from_elem((1, 3), 1.0);
 
-        let output = encoder.forward_hidden_states(&input_hidden, &mask)?;
+        let output = encoder.forward_hidden_states(&input_with_pos, &mask)?;
 
         let golden_data = vec![
             -1.153330, 0.814141, -0.794141, 1.173330, 0.247473, -0.264928, -1.361826, 1.419281,

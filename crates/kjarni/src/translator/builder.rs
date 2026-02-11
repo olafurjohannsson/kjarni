@@ -68,10 +68,6 @@ impl TranslatorBuilder {
         }
     }
 
-    // =========================================================================
-    // Language Configuration
-    // =========================================================================
-
     /// Set default source language.
     pub fn from(mut self, lang: impl Into<String>) -> Self {
         self.default_from = Some(lang.into());
@@ -88,10 +84,6 @@ impl TranslatorBuilder {
     pub fn languages(self, from: impl Into<String>, to: impl Into<String>) -> Self {
         self.from(from).to(to)
     }
-
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
 
     /// Set the device for inference.
     pub fn device(mut self, device: KjarniDevice) -> Self {
@@ -115,10 +107,6 @@ impl TranslatorBuilder {
         self.device = KjarniDevice::Gpu;
         self
     }
-
-    // =========================================================================
-    // Generation Configuration
-    // =========================================================================
 
     /// Set the number of beams for beam search.
     pub fn num_beams(mut self, n: usize) -> Self {
@@ -156,30 +144,22 @@ impl TranslatorBuilder {
         self
     }
 
-    /// Use greedy decoding (fastest, deterministic).
     pub fn greedy(mut self) -> Self {
         self.overrides.do_sample = Some(false);
         self.overrides.num_beams = Some(1);
         self
     }
 
-    /// Use high-quality beam search.
     pub fn high_quality(mut self) -> Self {
         self.overrides.num_beams = Some(6);
         self
     }
 
-    // =========================================================================
-    // Loading Configuration
-    // =========================================================================
-
-    /// Set the cache directory for model files.
     pub fn cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.cache_dir = Some(path.into());
         self
     }
 
-    /// Set the download policy.
     pub fn download_policy(mut self, policy: DownloadPolicy) -> Self {
         self.download_policy = policy;
         self
@@ -191,15 +171,10 @@ impl TranslatorBuilder {
         self
     }
 
-    /// Suppress informational output.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Translator instance.
     pub async fn build(self) -> TranslatorResult<Translator> {

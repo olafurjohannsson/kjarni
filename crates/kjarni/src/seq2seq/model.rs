@@ -24,34 +24,7 @@ use super::resolution::apply_overrides;
 use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 use super::validation::validate_for_seq2seq;
 
-/// Generic text-to-text generator for encoder-decoder models.
-///
-/// Seq2SeqGenerator provides raw access to encoder-decoder generation without
-/// task-specific formatting. It's the foundation for higher-level APIs like
-/// `Translator` and `Summarizer`.
-///
-/// # Supported Models
-///
-/// - T5 family (flan-t5-base, flan-t5-large)
-/// - BART family (bart-large-cnn, distilbart-cnn)
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::seq2seq::Seq2SeqGenerator;
-///
-/// // Basic usage - uses model defaults
-/// let generator = Seq2SeqGenerator::new("flan-t5-base").await?;
-/// let output = generator.generate("translate English to German: Hello").await?;
-///
-/// // With user overrides
-/// let generator = Seq2SeqGenerator::builder("flan-t5-large")
-///     .num_beams(6)
-///     .max_length(256)
-///     .gpu()
-///     .build()
-///     .await?;
-/// ```
+/// Generic text-to-text generator for encoder-decoder models
 pub struct Seq2SeqGenerator {
     /// The underlying encoder-decoder generator (wrapped in Arc for streaming).
     encoder_decoder: Arc<EncoderDecoderGenerator>,
@@ -70,13 +43,7 @@ pub struct Seq2SeqGenerator {
 }
 
 impl Seq2SeqGenerator {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
     /// Create a Seq2SeqGenerator with default settings.
-    ///
-    /// Uses CPU, downloads model if needed. Model defaults are used for generation.
     pub async fn new(model: &str) -> Seq2SeqResult<Self> {
         Seq2SeqGeneratorBuilder::new(model).build().await
     }
@@ -86,7 +53,7 @@ impl Seq2SeqGenerator {
         Seq2SeqGeneratorBuilder::new(model)
     }
 
-    /// Internal: construct from builder.
+    /// construct from builder.
     pub(crate) async fn from_builder(builder: Seq2SeqGeneratorBuilder) -> Seq2SeqResult<Self> {
         let load_start = Instant::now();
 
@@ -257,23 +224,13 @@ impl Seq2SeqGenerator {
         }
     }
 
-    // =========================================================================
-    // Generation
-    // =========================================================================
-
     /// Generate output from input text.
-    ///
-    /// Uses model defaults. The input should be the fully-formatted prompt 
-    /// (e.g., "translate English to German: Hello").
     pub async fn generate(&self, input: &str) -> Seq2SeqResult<String> {
         self.generate_with_config(input, &Seq2SeqOverrides::default())
             .await
     }
 
-    /// Generate with runtime overrides for this call only.
-    ///
-    /// Runtime overrides are merged with user overrides (from builder).
-    /// If no overrides are set, model defaults are used (None is passed).
+    /// Generate with runtime overrides for this call only
     pub async fn generate_with_config(
         &self,
         input: &str,
@@ -309,8 +266,6 @@ impl Seq2SeqGenerator {
     }
 
     /// Stream generated tokens.
-    ///
-    /// Uses model defaults.
     pub async fn stream(
         &self,
         input: &str,
@@ -321,8 +276,6 @@ impl Seq2SeqGenerator {
     }
 
     /// Stream with runtime overrides.
-    ///
-    /// If no overrides are set, model defaults are used.
     pub async fn stream_with_config(
         &self,
         input: &str,
@@ -390,10 +343,6 @@ impl Seq2SeqGenerator {
         let mapped = inner_stream.map(|result| result.map(|token| token.text));
         Ok(Box::pin(mapped))
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model's default generation config.
     pub fn get_model_defaults(&self) -> GenerationConfig {

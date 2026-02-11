@@ -1,31 +1,18 @@
-//! Comprehensive tests for the Summarizer module.
-
 use super::*;
 use futures::StreamExt;
 
 // Expected Outputs from PyTorch Reference
 
 mod expected {
-    // =========================================================================
-    // Test Inputs
-    // =========================================================================
     pub const INPUT_EIFFEL_TOWER: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. It was the first structure to reach a height of 300 metres. Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct.";
     pub const INPUT_AMAZON_RAINFOREST: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers. The forest is home to approximately 10 percent of all species on Earth.";
     pub const INPUT_PYTHON_LANGUAGE: &str = "Python is a high-level programming language known for its simple syntax and readability. It was created by Guido van Rossum and first released in 1991. Python is widely used in web development, data science, and artificial intelligence.";
-
-    // =========================================================================
-    // bart-large-cnn
-    // =========================================================================
     pub const BART_LARGE_CNN_EIFFEL_TOWER_GREEDY: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct.";
     pub const BART_LARGE_CNN_EIFFEL_TOWER_BEAM: &str = "The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building. Excluding transmitters, it is the second tallest free-standing structure in France after the Millau Viaduct.";
     pub const BART_LARGE_CNN_AMAZON_RAINFOREST_GREEDY: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers. The forest is home to approximately 10 percent of all species on Earth.";
     pub const BART_LARGE_CNN_AMAZON_RAINFOREST_BEAM: &str = "The Amazon rainforest produces about 20 percent of the world's oxygen. It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers.";
     pub const BART_LARGE_CNN_PYTHON_LANGUAGE_GREEDY: &str = "Python is a high-level programming language. It was created by Guido van Rossum and first released in 1991.";
     pub const BART_LARGE_CNN_PYTHON_LANGUAGE_BEAM: &str = "Python is a high-level programming language. It was created by Guido van Rossum and first released in 1991. Python is widely used in web development, data science, and artificial intelligence.";
-
-    // =========================================================================
-    // distilbart-cnn
-    // =========================================================================
     pub const DISTILBART_CNN_EIFFEL_TOWER_GREEDY: &str = " The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building . Excluding transmitters, it is the second tallest free-standing structure in France after the Millau Viaduct .";
     pub const DISTILBART_CNN_EIFFEL_TOWER_BEAM: &str = " The tower is 324 metres (1,063 ft) tall, about the same height as an 81-storey building . Excluding transmitters, the Eiffel Tower is the second tallest free-standing structure in France after the Millau Viaduct .";
     pub const DISTILBART_CNN_AMAZON_RAINFOREST_GREEDY: &str = " Amazon rainforest produces 20 percent of the world's oxygen . It is the largest tropical rainforest in the world, covering over 5.5 million square kilometers . The forest is home to approximately 10 percent of all species on Earth .";
@@ -34,10 +21,7 @@ mod expected {
     pub const DISTILBART_CNN_PYTHON_LANGUAGE_BEAM: &str = " Python is widely used in web development, data science, and artificial intelligence . It was created by Guido van Rossum and first released in 1991 .";
 }
 
-// Unit Tests - Validation
-
 mod validation_tests {
-    use crate::summarizer::SummarizerError;
     use crate::summarizer::validation::*;
     use kjarni_transformers::models::ModelType;
 
@@ -79,8 +63,6 @@ mod validation_tests {
     }
 }
 
-// Unit Tests - Presets
-
 mod preset_tests {
     use crate::summarizer::presets::*;
 
@@ -113,8 +95,6 @@ mod preset_tests {
         assert_eq!(SummarizerTier::Quality.resolve().model, "bart-large-cnn");
     }
 }
-
-// Unit Tests - Builder
 
 mod builder_tests {
     use crate::common::KjarniDevice;

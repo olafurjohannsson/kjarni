@@ -80,19 +80,15 @@ mod seq2seq_tests {
 
     #[test]
     fn test_is_seq2seq_model_invalid() {
-        // Decoder-only models
         assert!(is_seq2seq_model("llama3.2-1b-instruct").is_err());
         assert!(is_seq2seq_model("gpt2").is_err());
 
-        // Encoder-only models
         assert!(is_seq2seq_model("minilm-l6-v2").is_err());
 
-        // Unknown model
         assert!(is_seq2seq_model("not-a-real-model").is_err());
     }
 
 
-    /// Helper to check if a model is downloaded
     fn model_available(model: &str) -> bool {
         let cache_dir = dirs::cache_dir().expect("no cache dir").join("kjarni");
 
@@ -102,10 +98,6 @@ mod seq2seq_tests {
             false
         }
     }
-
-    // =========================================================================
-    // T5 Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_t5_translation() {
@@ -127,7 +119,6 @@ mod seq2seq_tests {
             .expect("Generation failed");
 
         assert!(!output.is_empty());
-        // T5 should produce German text
         println!("T5 translation output: {}", output);
     }
 
@@ -154,46 +145,6 @@ mod seq2seq_tests {
         assert!(!output.is_empty());
         println!("T5 summary output: {}", output);
     }
-
-    // #[tokio::test]
-    // async fn test_t5_greedy_vs_beam() {
-    //     if !model_available("flan-t5-base") {
-    //         eprintln!("Skipping test: flan-t5-base not downloaded");
-    //         return;
-    //     }
-
-    //     let generator = Seq2SeqGenerator::builder("flan-t5-base")
-    //         .cpu()
-    //         .quiet()
-    //         .build()
-    //         .await
-    //         .expect("Failed to load model");
-
-    //     let input = "translate English to French: Good morning";
-
-    //     // Greedy (fast)
-    //     let greedy_output = generator
-    //         .generate_with_config(input, &Seq2SeqOverrides::greedy())
-    //         .await
-    //         .expect("Greedy generation failed");
-
-    //     // Beam search (quality)
-    //     let beam_output = generator
-    //         .generate_with_config(input, &Seq2SeqOverrides::high_quality())
-    //         .await
-    //         .expect("Beam generation failed");
-
-    //     assert!(!greedy_output.is_empty());
-    //     assert!(!beam_output.is_empty());
-
-    //     println!("Greedy: {}", greedy_output);
-    //     println!("Beam:   {}", beam_output);
-    // }
-
-    // =========================================================================
-    // BART Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_bart_summarization() {
         if !model_available("distilbart-cnn") {
@@ -253,10 +204,6 @@ mod seq2seq_tests {
         println!("BART constrained summary: {}", summary);
     }
 
-    // =========================================================================
-    // Streaming Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_streaming_generation() {
         use futures::StreamExt;
@@ -291,10 +238,6 @@ mod seq2seq_tests {
         println!("Streamed output: {}", full_text);
     }
 
-    // =========================================================================
-    // Error Handling Tests
-    // =========================================================================
-
     #[tokio::test]
     async fn test_unknown_model_error() {
         let result = Seq2SeqGenerator::new("not-a-real-model").await;
@@ -303,7 +246,6 @@ mod seq2seq_tests {
 
     #[tokio::test]
     async fn test_incompatible_model_error() {
-        // Try to use a decoder-only model
         let result = Seq2SeqGenerator::new("gpt2").await;
         assert!(matches!(
             result,
@@ -313,21 +255,15 @@ mod seq2seq_tests {
 
     #[tokio::test]
     async fn test_offline_mode_not_downloaded() {
-        // Use a model name that's valid but unlikely to be downloaded
         let result = Seq2SeqGenerator::builder("flan-t5-large")
             .offline()
             .build()
             .await;
 
-        // Either succeeds (if downloaded) or fails with ModelNotDownloaded
         if let Err(e) = result {
             assert!(matches!(e, Seq2SeqError::ModelNotDownloaded(_)));
         }
     }
-
-    // =========================================================================
-    // Convenience Function Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_generate_convenience_function() {
@@ -343,10 +279,6 @@ mod seq2seq_tests {
         assert!(!output.is_empty());
         println!("Convenience function output: {}", output);
     }
-
-    // =========================================================================
-    // Concurrent Usage Tests
-    // =========================================================================
 
     #[tokio::test]
     async fn test_concurrent_generation() {

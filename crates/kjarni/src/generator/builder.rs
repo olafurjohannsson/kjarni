@@ -49,10 +49,6 @@ pub struct GeneratorBuilder {
 
 impl GeneratorBuilder {
     /// Create a new builder for the specified model.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - Model name from registry (e.g., "gpt2", "llama3.2-1b")
     pub fn new(model: impl Into<String>) -> Self {
         Self {
             model: model.into(),
@@ -68,19 +64,11 @@ impl GeneratorBuilder {
         }
     }
 
-    // =========================================================================
-    // Model Selection
-    // =========================================================================
-
     /// Load model from a local path instead of registry.
     pub fn model_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.model_path = Some(path.into());
         self
     }
-
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
 
     /// Set the device for inference.
     pub fn device(mut self, device: KjarniDevice) -> Self {
@@ -104,10 +92,6 @@ impl GeneratorBuilder {
         self.device = KjarniDevice::Gpu;
         self
     }
-
-    // =========================================================================
-    // Generation Parameters
-    // =========================================================================
 
     /// Create a builder from a preset.
     pub fn from_preset(preset: &GeneratorPreset) -> Self {
@@ -137,9 +121,6 @@ impl GeneratorBuilder {
     }
 
     /// Set the sampling temperature.
-    ///
-    /// Higher values (e.g., 1.0) make output more random.
-    /// Lower values (e.g., 0.1) make output more deterministic.
     pub fn temperature(mut self, temp: f32) -> Self {
         self.generation_overrides.temperature = Some(temp);
         self
@@ -170,8 +151,6 @@ impl GeneratorBuilder {
     }
 
     /// Set repetition penalty.
-    ///
-    /// Values > 1.0 discourage repetition. Default is typically 1.1.
     pub fn repetition_penalty(mut self, penalty: f32) -> Self {
         self.generation_overrides.repetition_penalty = Some(penalty);
         self
@@ -190,23 +169,7 @@ impl GeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Model Loading Configuration
-    // =========================================================================
-
     /// Configure model loading options.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// Generator::builder("llama3.2-3b")
-    ///     .with_load_config(|cfg| cfg
-    ///         .offload_embeddings(true)
-    ///         .quantize_lm_head_q8()
-    ///     )
-    ///     .build()
-    ///     .await?;
-    /// ```
     pub fn with_load_config<F>(mut self, f: F) -> Self
     where
         F: FnOnce(LoadConfigBuilder) -> LoadConfigBuilder,
@@ -233,10 +196,6 @@ impl GeneratorBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
     /// Suppress informational output.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
@@ -248,10 +207,6 @@ impl GeneratorBuilder {
         self.allow_warnings = true;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Generator.
     pub async fn build(self) -> GeneratorResult<Generator> {

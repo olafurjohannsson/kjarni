@@ -566,10 +566,6 @@ fn create_sinusoidal_embeddings(max_len: usize, dim: usize) -> Array2<f32> {
     embeddings
 }
 
-// ============================================================================
-// TESTS
-// ============================================================================
-
 #[cfg(test)]
 mod seq2seq_gpu_encoder_tests {
     use super::*;

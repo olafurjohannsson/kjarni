@@ -66,10 +66,6 @@ impl RerankerBuilder {
         }
     }
 
-    // =========================================================================
-    // Device Configuration
-    // =========================================================================
-
     /// Run on CPU (default).
     pub fn cpu(mut self) -> Self {
         self.device = KjarniDevice::Cpu;
@@ -95,10 +91,6 @@ impl RerankerBuilder {
         self
     }
 
-    // =========================================================================
-    // Paths
-    // =========================================================================
-
     /// Set custom cache directory.
     pub fn cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.cache_dir = Some(path.into());
@@ -110,10 +102,6 @@ impl RerankerBuilder {
         self.model_path = Some(path.into());
         self
     }
-
-    // =========================================================================
-    // Loading Configuration
-    // =========================================================================
 
     /// Set model loading configuration.
     pub fn load_config(mut self, config: LoadConfig) -> Self {
@@ -130,10 +118,6 @@ impl RerankerBuilder {
         self
     }
 
-    // =========================================================================
-    // Download Policy
-    // =========================================================================
-
     /// Set download policy.
     pub fn download_policy(mut self, policy: DownloadPolicy) -> Self {
         self.download_policy = policy;
@@ -145,11 +129,6 @@ impl RerankerBuilder {
         self.download_policy = DownloadPolicy::Never;
         self
     }
-
-    // =========================================================================
-    // Reranking Defaults
-    // =========================================================================
-
     /// Set default top-k results to return.
     pub fn top_k(mut self, k: usize) -> Self {
         self.overrides.top_k = Some(k);
@@ -174,19 +153,11 @@ impl RerankerBuilder {
         self
     }
 
-    // =========================================================================
-    // Behavior
-    // =========================================================================
-
     /// Suppress non-error output.
     pub fn quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Build the Reranker.
     pub async fn build(self) -> RerankerResult<Reranker> {

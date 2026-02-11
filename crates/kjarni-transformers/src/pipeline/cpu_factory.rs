@@ -79,7 +79,6 @@ impl<'a> CpuLayerFactory<'a> {
         activation: Activation,
         idx: usize,
     ) -> Result<SwiGluFeedForward> {
-        let i_str = idx.to_string();
         let gate_template = layout
             .gate_weight
             .as_ref()
@@ -298,7 +297,7 @@ mod tests {
         let (_file, weights) = create_dummy_weights(vec![]);
 
         let layout = FeedForwardLayout {
-            gate_weight: None, // Missing gate!
+            gate_weight: None,
             gate_bias: None,
             up_weight: "up".to_string(),
             down_weight: "down".to_string(),
@@ -312,7 +311,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.err().unwrap().to_string(),
-            "Architecture layout missing required gate_weight for SwiGLU"
+            "SwiGLU requires gate_weight"
         );
     }
 

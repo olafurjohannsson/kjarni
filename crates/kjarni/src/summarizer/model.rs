@@ -93,10 +93,6 @@ impl Summarizer {
         })
     }
 
-    // =========================================================================
-    // Summarization
-    // =========================================================================
-
     /// Summarize text with default settings.
     pub async fn summarize(&self, text: &str) -> SummarizerResult<String> {
         let prompt = self.format_prompt(text);
@@ -119,10 +115,6 @@ impl Summarizer {
             .map_err(SummarizerError::from)
     }
 
-    // =========================================================================
-    // Streaming
-    // =========================================================================
-
     /// Stream summarization.
     pub async fn stream(
         &self,
@@ -137,10 +129,6 @@ impl Summarizer {
         Ok(Box::pin(mapped))
     }
 
-    // =========================================================================
-    // Internal
-    // =========================================================================
-
     /// Format the prompt based on model type.
     fn format_prompt(&self, text: &str) -> String {
         if self.needs_prefix {
@@ -150,10 +138,6 @@ impl Summarizer {
             text.to_string()
         }
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model type.
     pub fn model_type(&self) -> ModelType {

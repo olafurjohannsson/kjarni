@@ -55,10 +55,10 @@ gguf-rs = "0.1.5"
 memmap2 = "0.9.9"
 
 [profile.release]
-opt-level = 3       # Max optimizations
-lto = "fat"         # Enable Link Time Optimization (Cross-crate optimization)
-codegen-units = 1   # Reduce parallel compilation to allow better optimization
-panic = "abort"     # Remove stack unwinding (smaller, slightly faster binaries)
-strip = true        # Remove symbols (smaller binary)
+opt-level = 3       
+lto = "fat"         
+codegen-units = 1   
+panic = "abort"     
+strip = true        
 
 

@@ -352,9 +352,6 @@ mod module_function_tests {
 }
 
 
-// Integration Tests (require model download)
-
-
 #[cfg(test)]
 mod integration_tests {
     use crate::generator::model::generate;
@@ -369,10 +366,6 @@ mod integration_tests {
             .map(|m| m.is_downloaded(&cache_dir))
             .unwrap_or(false)
     }
-
-    // =========================================================================
-    // Basic Generation Tests with Assertions
-    // =========================================================================
 
     #[tokio::test]
     async fn test_basic_generation() {
@@ -442,7 +435,7 @@ mod integration_tests {
         let r#gen = Generator::builder("qwen2.5-0.5b-instruct")
             .cpu()
             .quiet()
-            .max_tokens(10) // Very short
+            .max_tokens(10)
             .build()
             .await
             .unwrap();
@@ -450,13 +443,7 @@ mod integration_tests {
         let output = r#gen.generate("Tell me a long story about").await.unwrap();
 
         assert!(!output.is_empty());
-        // With only 10 tokens, output should be relatively short
-        // (though exact length depends on tokenization)
     }
-
-    // =========================================================================
-    // Generation Config Tests with Assertions
-    // =========================================================================
 
     #[tokio::test]
     async fn test_greedy_generation() {
@@ -474,7 +461,6 @@ mod integration_tests {
             .await
             .unwrap();
 
-        // Greedy should be deterministic - same input = same output
         let output1 = r#gen.generate("1 + 1 = ").await.unwrap();
         let output2 = r#gen.generate("1 + 1 = ").await.unwrap();
 
@@ -557,8 +543,6 @@ mod integration_tests {
             .await
             .unwrap();
 
-        // With temperature > 0, multiple runs may produce different results
-        // (though not guaranteed for short outputs)
         let hot_overrides = GenerationOverrides {
             temperature: Some(1.0),
             ..Default::default()
@@ -575,12 +559,7 @@ mod integration_tests {
 
         assert!(!output1.is_empty());
         assert!(!output2.is_empty());
-        // Note: They may or may not be different - high temp just means they CAN differ
     }
-
-    // =========================================================================
-    // Streaming Tests with Assertions
-    // =========================================================================
 
     #[tokio::test]
     async fn test_streaming_generation() {

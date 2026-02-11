@@ -15,32 +15,7 @@ use super::languages::normalize_language;
 use super::types::{TranslatorError, TranslatorResult};
 use super::validation::validate_for_translation;
 
-/// High-level translation API.
-///
-/// Translator wraps `Seq2SeqGenerator` and adds:
-/// - Language normalization (accepts "en", "english", "English")
-/// - Prompt formatting for T5 models
-/// - Default language pairs for batch translation
-///
-/// # Example
-///
-/// ```ignore
-/// use kjarni::translator::Translator;
-///
-/// // Simple usage
-/// let t = Translator::new("flan-t5-base").await?;
-/// let german = t.translate("Hello, how are you?", "en", "de").await?;
-///
-/// // With default languages for batch translation
-/// let t = Translator::builder("flan-t5-base")
-///     .from("english")
-///     .to("german")
-///     .build()
-///     .await?;
-///
-/// let out1 = t.translate_default("Hello").await?;
-/// let out2 = t.translate_default("Goodbye").await?;
-/// ```
+/// High-level translation API
 pub struct Translator {
     /// Underlying seq2seq generator.
     generator: Seq2SeqGenerator,
@@ -56,10 +31,6 @@ pub struct Translator {
 }
 
 impl Translator {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
     /// Create a Translator with default settings.
     pub async fn new(model: &str) -> TranslatorResult<Self> {
         TranslatorBuilder::new(model).build().await
@@ -137,23 +108,7 @@ impl Translator {
         })
     }
 
-    // =========================================================================
-    // Translation (explicit languages)
-    // =========================================================================
-
-    /// Translate text with explicit source and target languages.
-    ///
-    /// Languages can be specified as:
-    /// - ISO codes: "en", "de", "fr"
-    /// - Full names: "English", "German", "French"
-    /// - Native names: "deutsch", "français"
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let german = translator.translate("Hello", "en", "de").await?;
-    /// let french = translator.translate("Hello", "english", "french").await?;
-    /// ```
+    /// Translate text with explicit source and target languages
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> TranslatorResult<String> {
         let translate_start = Instant::now();
 
@@ -219,24 +174,7 @@ impl Translator {
             .await
             .map_err(TranslatorError::from)
     }
-
-    // =========================================================================
-    // Translation (default languages)
-    // =========================================================================
-
-    /// Translate using default languages set via builder.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let t = Translator::builder("flan-t5-base")
-    ///     .from("english")
-    ///     .to("german")
-    ///     .build()
-    ///     .await?;
-    ///
-    /// let german = t.translate_default("Hello").await?;
-    /// ```
+    /// Translate using default languages set via builder
     pub async fn translate_default(&self, text: &str) -> TranslatorResult<String> {
         let from = self
             .default_from
@@ -294,10 +232,6 @@ impl Translator {
             .await
             .map_err(TranslatorError::from)
     }
-
-    // =========================================================================
-    // Streaming
-    // =========================================================================
 
     /// Stream translation with explicit languages.
     pub async fn stream(
@@ -357,18 +291,10 @@ impl Translator {
         Ok(Box::pin(mapped))
     }
 
-    // =========================================================================
-    // Internal
-    // =========================================================================
-
     /// Format the translation prompt for T5.
     fn format_prompt(&self, text: &str, from: &str, to: &str) -> String {
         format!("translate {} to {}: {}", from, to, text)
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model type.
     pub fn model_type(&self) -> ModelType {

@@ -63,10 +63,10 @@ pub async fn run(
         .await
         .map_err(|e| anyhow!("Failed to initialize chat: {}", e))?;
 
-    // 2. Setup stateful conversation
+    // Setup stateful conversation
     let mut convo = chat.conversation();
 
-    // 3. Welcome message
+    // Welcome message
     if !quiet {
         println!("{}", format_welcome_message(chat.model_name(), &format!("{:?}", chat.device())));
     }
@@ -95,12 +95,10 @@ pub async fn run(
             match handle_command(&command, &mut convo, &chat, quiet) {
                 CommandResult::Exit => break,
                 CommandResult::Handled => continue,
-                CommandResult::Continue => {} // Fall through to message handling
+                CommandResult::Continue => {} 
             }
         }
 
-        // 4. Stream the response
-        // First, add user message to history
         convo.push_user(input);
 
         // Get the stream
@@ -159,7 +157,6 @@ fn parse_command(input: &str) -> ChatCommand {
     }
 }
 
-/// Handle a parsed command, returning the appropriate result
 fn handle_command<C>(
     command: &ChatCommand,
     convo: &mut C,
@@ -219,13 +216,11 @@ where
     }
 }
 
-/// Trait to abstract conversation operations for testing
 pub trait ConversationLike {
     fn clear_history(&mut self, keep_system: bool);
     fn get_history_info(&self) -> (usize, Vec<(String, String)>);
 }
 
-/// Implementation for the real Conversation type
 impl ConversationLike for kjarni::chat::conversation::ChatConversation<'_> {
     fn clear_history(&mut self, keep_system: bool) {
         self.clear(keep_system);
@@ -242,7 +237,6 @@ impl ConversationLike for kjarni::chat::conversation::ChatConversation<'_> {
     }
 }
 
-/// Format the welcome message
 fn format_welcome_message(model_name: &str, device: &str) -> String {
     format!(
         "\nKjarni Chat: {}\nDevice: {}\nType '/help' for commands, '/quit' to exit.\n",
@@ -250,7 +244,6 @@ fn format_welcome_message(model_name: &str, device: &str) -> String {
     )
 }
 
-/// Format the help text
 fn format_help_text() -> String {
     r#"
 Commands:
@@ -266,14 +259,9 @@ Commands:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // Mock conversation for testing
-    // =========================================================================
-
     struct MockConversation {
         messages: Vec<(String, String)>,
-        clear_calls: Vec<bool>, // Track clear calls with keep_system param
+        clear_calls: Vec<bool>,
     }
 
     impl MockConversation {
@@ -310,10 +298,6 @@ mod tests {
             (self.messages.len(), self.messages.clone())
         }
     }
-
-    // =========================================================================
-    // parse_command tests
-    // =========================================================================
 
     #[test]
     fn test_parse_command_quit() {
@@ -402,10 +386,6 @@ mod tests {
         ));
     }
 
-    // =========================================================================
-    // format_welcome_message tests
-    // =========================================================================
-
     #[test]
     fn test_format_welcome_message() {
         let msg = format_welcome_message("llama-3.2-1b", "Cpu");
@@ -424,10 +404,6 @@ mod tests {
         assert!(msg.contains("phi3.5-mini"));
         assert!(msg.contains("Wgpu"));
     }
-
-    // =========================================================================
-    // format_help_text tests
-    // =========================================================================
 
     #[test]
     fn test_format_help_text_contains_all_commands() {
@@ -453,10 +429,6 @@ mod tests {
         assert!(help.contains("system prompt"));
         assert!(help.contains("conversation history"));
     }
-
-    // =========================================================================
-    // ChatCommand enum tests
-    // =========================================================================
 
     #[test]
     fn test_chat_command_debug() {
@@ -489,10 +461,6 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // CommandResult enum tests
-    // =========================================================================
-
     #[test]
     fn test_command_result_debug() {
         let result = CommandResult::Exit;
@@ -516,10 +484,6 @@ mod tests {
         assert_ne!(CommandResult::Exit, CommandResult::Handled);
         assert_ne!(CommandResult::Continue, CommandResult::Handled);
     }
-
-    // =========================================================================
-    // MockConversation tests (testing the mock itself)
-    // =========================================================================
 
     #[test]
     fn test_mock_conversation_new() {
@@ -571,10 +535,6 @@ mod tests {
         assert_eq!(mock.clear_calls, vec![false]);
     }
 
-    // =========================================================================
-    // Integration-like tests
-    // =========================================================================
-
     #[test]
     fn test_parse_and_identify_quit_commands() {
         let quit_inputs = vec!["/quit", "/exit", "/q", "/QUIT", "/Exit", "/Q"];
@@ -614,10 +574,6 @@ mod tests {
             assert_eq!(result, expected, "Failed for input: {}", input);
         }
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
 
     #[test]
     fn test_parse_command_empty_after_slash() {

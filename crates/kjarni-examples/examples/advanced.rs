@@ -9,9 +9,6 @@ use kjarni::classifier::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // =========================================================================
-    // 1. Device selection
-    // =========================================================================
     
     println!("=== Device Selection ===\n");
     
@@ -36,10 +33,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("Auto-selected: {:?}", classifier.device());
     
-    // =========================================================================
-    // 2. Precision control
-    // =========================================================================
-    
     println!("\n=== Precision Control ===\n");
     
     // Use float16 for lower memory
@@ -55,10 +48,6 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
     println!("Loaded with bf16 precision");
-    
-    // =========================================================================
-    // 3. Custom labels
-    // =========================================================================
     
     println!("\n=== Custom Labels ===\n");
     
@@ -87,10 +76,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("Using sentiment_labels(): {:?}", classifier.labels());
     
-    // =========================================================================
-    // 4. Classification modes
-    // =========================================================================
-    
     println!("\n=== Classification Modes ===\n");
     
     let text = "I'm happy but also a bit nervous about this.";
@@ -115,10 +100,6 @@ async fn main() -> anyhow::Result<()> {
         println!("  {}: {:.1}%", label, score * 100.0);
     }
     
-    // =========================================================================
-    // 5. Default overrides
-    // =========================================================================
-    
     println!("\n=== Default Overrides ===\n");
     
     let classifier = Classifier::builder("roberta-sentiment")
@@ -134,10 +115,6 @@ async fn main() -> anyhow::Result<()> {
     for (label, score) in &result.all_scores {
         println!("  {}: {:.1}%", label, score * 100.0);
     }
-    
-    // =========================================================================
-    // 6. Runtime overrides
-    // =========================================================================
     
     println!("\n=== Runtime Overrides ===\n");
     
@@ -161,10 +138,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("Using top_1(): {}", result);
     
-    // =========================================================================
-    // 7. Batch with overrides
-    // =========================================================================
-    
     println!("\n=== Batch Classification ===\n");
     
     let texts = [
@@ -182,18 +155,10 @@ async fn main() -> anyhow::Result<()> {
         println!("{:30} → {}", text, result);
     }
     
-    // =========================================================================
-    // 8. Raw scores (no labels)
-    // =========================================================================
-    
     println!("\n=== Raw Scores ===\n");
     
     let scores = classifier.classify_scores("Not bad at all.").await?;
     println!("Raw score vector: {:?}", scores);
-    
-    // =========================================================================
-    // 9. Result inspection
-    // =========================================================================
     
     println!("\n=== Result Methods ===\n");
     
@@ -211,10 +176,6 @@ async fn main() -> anyhow::Result<()> {
     // Get top K
     println!("Top 2: {:?}", result.top_k(2));
     
-    // =========================================================================
-    // 10. Model introspection
-    // =========================================================================
-    
     println!("\n=== Model Introspection ===\n");
     
     let classifier = Classifier::new("roberta-sentiment").await?;
@@ -227,10 +188,6 @@ async fn main() -> anyhow::Result<()> {
     println!("Max seq length:  {}", classifier.max_seq_length());
     println!("Mode:            {:?}", classifier.mode());
     println!("Custom labels:   {}", classifier.has_custom_labels());
-    
-    // =========================================================================
-    // 11. Presets and tiers
-    // =========================================================================
     
     println!("\n=== Presets and Tiers ===\n");
     
@@ -255,10 +212,6 @@ async fn main() -> anyhow::Result<()> {
         println!("Found preset:  {} - {}", preset.name, preset.description);
     }
     
-    // =========================================================================
-    // 12. Offline mode
-    // =========================================================================
-    
     println!("\n=== Download Policy ===\n");
     
     // Never download (fail if not cached)
@@ -272,10 +225,6 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => println!("Offline mode error: {}", e),
     }
     
-    // =========================================================================
-    // 13. Quiet mode
-    // =========================================================================
-    
     // Suppress progress output
     let _classifier = Classifier::builder("distilbert-sentiment")
         .quiet(true)
@@ -283,13 +232,9 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("\nLoaded with quiet mode (no progress output)");
     
-    // =========================================================================
-    // 14. Reusing a classifier (performance)
-    // =========================================================================
-    
     println!("\n=== Reusing Classifier ===\n");
     
-    // Load once, classify many — model stays in memory
+    // Load once, classify many since model stays in memory
     let classifier = Classifier::new("distilbert-sentiment").await?;
     
     let inputs = vec![
@@ -299,13 +244,11 @@ async fn main() -> anyhow::Result<()> {
         "Fourth review",
     ];
     
-    // Individual calls (classifier is reused)
     for text in &inputs {
         let result = classifier.classify(text).await?;
         println!("{}: {}", text, result.label);
     }
     
-    // Or use batch for better throughput
     let results = classifier.classify_batch(&inputs).await?;
     println!("\nBatch processed {} items", results.len());
     

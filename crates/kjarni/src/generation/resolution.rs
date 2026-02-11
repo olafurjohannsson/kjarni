@@ -1,7 +1,4 @@
 //! Generation configuration resolution.
-//!
-//! Merges model defaults, user overrides, and runtime overrides
-//! into a fully resolved configuration.
 
 use super::overrides::GenerationOverrides;
 use super::resolved::ResolvedGenerationConfig;
@@ -9,42 +6,13 @@ use kjarni_transformers::common::{
     BeamSearchParams, DecodingStrategy, GenerationConfig, SamplingParams,
 };
 
-/// Merge model defaults, user overrides, and runtime overrides into a
-/// fully resolved generation configuration.
-///
-/// # Precedence (highest to lowest)
-///
-/// 1. Runtime overrides
-/// 2. User overrides
-/// 3. Model defaults
-///
-/// # Strategy Resolution
-///
-/// The decoding strategy is resolved based on explicit flags:
-/// - `num_beams > 1` → BeamSearch
-/// - `do_sample = false` → Greedy
-/// - `do_sample = true` → Sample
-/// - Otherwise → Keep model default
-///
-/// # Example
-///
-/// ```ignore
-/// let model_defaults = model.get_default_generation_config();
-/// let user = GenerationOverrides { temperature: Some(0.8), ..Default::default() };
-/// let runtime = GenerationOverrides::default();
-///
-/// let resolved = resolve_generation_config(model_defaults, &user, &runtime);
-/// ```
+/// Merge model defaults
 pub fn resolve_generation_config(
     model_defaults: GenerationConfig,
     user: &GenerationOverrides,
     runtime: &GenerationOverrides,
 ) -> ResolvedGenerationConfig {
     let mut config = model_defaults;
-
-    // =========================================================================
-    // Step 1: Resolve decoding strategy
-    // =========================================================================
 
     let force_beams = runtime
         .num_beams
@@ -56,7 +24,6 @@ pub fn resolve_generation_config(
     let force_sampling = runtime.do_sample.or(user.do_sample) == Some(true);
 
     config.strategy = if force_beams {
-        // Get beam search params, defaulting if not already beam search
         let base_params = match &config.strategy {
             DecodingStrategy::BeamSearch(p) => p.clone(),
             _ => BeamSearchParams::default(),
@@ -65,7 +32,6 @@ pub fn resolve_generation_config(
     } else if force_greedy {
         DecodingStrategy::Greedy
     } else if force_sampling {
-        // Get sample params, defaulting if not already sampling
         let base_params = match &config.strategy {
             DecodingStrategy::Sample(p) => p.clone(),
             _ => SamplingParams::default(),
@@ -75,32 +41,21 @@ pub fn resolve_generation_config(
         config.strategy
     };
 
-    // =========================================================================
-    // Step 2: Apply common scalar overrides
-    // =========================================================================
-
-    // max_new_tokens is Option<usize>
     if let Some(v) = runtime.max_new_tokens.or(user.max_new_tokens) {
         config.max_new_tokens = Some(v);
     }
 
-    // repetition_penalty is f32 (not Option)
     if let Some(v) = runtime.repetition_penalty {
         config.repetition_penalty = v;
     } else if let Some(v) = user.repetition_penalty {
         config.repetition_penalty = v;
     }
 
-    // no_repeat_ngram_size is usize (not Option)
     if let Some(v) = runtime.no_repeat_ngram_size {
         config.no_repeat_ngram_size = v;
     } else if let Some(v) = user.no_repeat_ngram_size {
         config.no_repeat_ngram_size = v;
     }
-
-    // =========================================================================
-    // Step 3: Apply strategy-specific overrides
-    // =========================================================================
 
     match &mut config.strategy {
         DecodingStrategy::Sample(params) => {

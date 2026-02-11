@@ -210,13 +210,7 @@ impl Reranker {
         Ok((inner, None, model_id))
     }
 
-    // =========================================================================
-    // Scoring API
-    // =========================================================================
-
     /// Score a single query-document pair.
-    ///
-    /// Returns a relevance score (higher = more relevant).
     pub async fn score(&self, query: &str, document: &str) -> RerankerResult<f32> {
         self.inner
             .predict_pair(query, document)
@@ -225,8 +219,6 @@ impl Reranker {
     }
 
     /// Score multiple query-document pairs.
-    ///
-    /// More efficient than calling `score()` multiple times.
     pub async fn score_pairs(&self, pairs: &[(&str, &str)]) -> RerankerResult<Vec<f32>> {
         self.inner
             .predict_pairs(pairs)
@@ -234,13 +226,7 @@ impl Reranker {
             .map_err(RerankerError::RerankingFailed)
     }
 
-    // =========================================================================
-    // Reranking API
-    // =========================================================================
-
     /// Rerank documents by relevance to a query.
-    ///
-    /// Returns results sorted by score (highest first).
     pub async fn rerank(
         &self,
         query: &str,
@@ -325,7 +311,7 @@ impl Reranker {
         .await
     }
 
-    /// Rerank owned strings (convenience method).
+    /// Rerank
     pub async fn rerank_owned(
         &self,
         query: &str,
@@ -334,10 +320,6 @@ impl Reranker {
         let doc_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
         self.rerank(query, &doc_refs).await
     }
-
-    // =========================================================================
-    // Accessors
-    // =========================================================================
 
     /// Get the model identifier.
     pub fn model_id(&self) -> &str {
@@ -370,11 +352,6 @@ impl Reranker {
     pub fn hidden_size(&self) -> usize {
         self.inner.hidden_size()
     }
-
-    // =========================================================================
-    // Internal
-    // =========================================================================
-
     fn merge_overrides(&self, runtime: &RerankOverrides) -> RerankOverrides {
         RerankOverrides {
             top_k: runtime.top_k.or(self.default_overrides.top_k),
