@@ -89,18 +89,8 @@ pub struct WhisperChunkResult {
 }
 
 
-// WhisperModel — Transcription Methods
-
-
 impl WhisperModel {
-    // =========================================================================
-    // Audio Chunking
-    // =========================================================================
-
     /// Split audio samples into 30-second chunks.
-    ///
-    /// Each chunk is exactly [`WHISPER_CHUNK_SAMPLES`] long; the last chunk is
-    /// zero-padded if shorter.  An empty input returns an empty vec.
     pub fn chunk_audio(samples: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
         let chunk_size = (WHISPER_CHUNK_LENGTH_SECS * sample_rate as f32) as usize;
 
@@ -134,17 +124,7 @@ impl WhisperModel {
         chunks
     }
 
-    // =========================================================================
-    // Encoding
-    // =========================================================================
-
-    /// Encode a mel spectrogram into encoder hidden states.
-    ///
-    /// # Arguments
-    /// * `mel` — 2-D mel spectrogram `[n_mels, n_frames]`
-    ///
-    /// # Returns
-    /// Encoder output `[1, seq_len, hidden_size]`
+    /// Encode a mel spectrogram into encoder hidden states
     pub fn encode_mel(&self, mel: &Array2<f32>) -> Result<Array3<f32>> {
         // [n_mels, time] → [1, n_mels, time]
         let mel_batch = mel
@@ -166,19 +146,7 @@ impl WhisperModel {
         Ok(output.last_hidden_state)
     }
 
-    // =========================================================================
-    // Greedy Decoding
-    // =========================================================================
-
-    /// Decode encoder hidden states into text segments using greedy search.
-    ///
-    /// # Arguments
-    /// * `encoder_hidden_states` — `[1, enc_seq, hidden]` from [`encode_mel`].
-    /// * `config` — transcription settings.
-    /// * `chunk_time_offset` — time offset in seconds for this chunk
-    ///   (e.g. `chunk_index * 30.0`).
-    /// * `on_token` — optional callback invoked for every generated token.
-    ///   Return `false` to stop decoding early.
+    /// Decode encoder hidden states into text segments
     pub fn decode_chunk(
         &self,
         encoder_hidden_states: &Array3<f32>,
@@ -243,10 +211,6 @@ impl WhisperModel {
                 }
             }
         }
-
-        // =================================================================
-        // Autoregressive loop
-        // =================================================================
         for _step in 0..config.max_tokens_per_chunk {
             if next_token == eos_token_id {
                 break;
@@ -288,10 +252,6 @@ impl WhisperModel {
         self.finalize_chunk(generated_ids, config, chunk_time_offset)
     }
 
-    // =========================================================================
-    // Token Selection
-    // =========================================================================
-
     /// Greedy argmax over logits, suppressing special tokens as configured.
     fn pick_token(
         logits: &ndarray::ArrayView1<f32>,
@@ -322,10 +282,6 @@ impl WhisperModel {
             .unwrap_or(eos_token_id)
     }
 
-    // =========================================================================
-    // Prompt Building
-    // =========================================================================
-
     /// Build the decoder prompt token sequence for the given config.
     fn build_prompt_tokens(&self, config: &WhisperTranscriberConfig) -> Vec<u32> {
         let mut tokens = vec![SOT_TOKEN];
@@ -348,17 +304,13 @@ impl WhisperModel {
         tokens
     }
 
-    /// Resolve a language code (e.g. `"en"`) to the corresponding special token ID.
+    /// Resolve a language code
     fn resolve_language_token(&self, language: &str) -> Option<u32> {
         let tag = format!("<|{}|>", language.to_lowercase());
         self.tokenizer().token_to_id(&tag)
     }
 
-    // =========================================================================
-    // Segment Parsing
-    // =========================================================================
-
-    /// Convert generated token IDs into a [`WhisperChunkResult`].
+    /// Convert generated token IDs into a WhisperChunkResult
     fn finalize_chunk(
         &self,
         generated_ids: Vec<u32>,
@@ -472,13 +424,7 @@ impl WhisperModel {
         segments
     }
 
-    // =========================================================================
-    // Segment Stitching
-    // =========================================================================
-
     /// Stitch results from multiple chunks into a single transcription.
-    ///
-    /// Returns `(full_text, merged_segments)`.
     pub fn stitch_segments(
         chunk_results: Vec<WhisperChunkResult>,
     ) -> (String, Vec<WhisperSegment>) {
@@ -525,17 +471,10 @@ impl WhisperModel {
 }
 
 
-// Helpers
-
-
-/// Returns `true` if the time falls on (or very near) a 30-second boundary.
 fn is_chunk_boundary(time: f32) -> bool {
     let rem = time % WHISPER_CHUNK_LENGTH_SECS;
     rem < 0.02 || (WHISPER_CHUNK_LENGTH_SECS - rem) < 0.02
 }
-
-
-// Tests
 
 
 #[cfg(test)]

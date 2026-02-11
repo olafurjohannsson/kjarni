@@ -434,14 +434,6 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    //  reorder_cache Tests
-    // ========================================================================
-    // ========================================================================
-    //  Cache helper with correct parameters
-    // ========================================================================
-
-    /// Helper to create a properly configured GpuBeamKVCache
     fn create_test_cache(
         ctx: &Arc<WgpuContext>,
         num_layers: usize,
@@ -453,9 +445,6 @@ mod tests {
         GpuBeamKVCache::new(ctx, num_layers, num_beams, num_heads, head_dim, capacity)
             .expect("Failed to create GpuBeamKVCache")
     }
-
-    /// Helper to populate GPU cache with dummy data
-    /// Cache expects shape: [num_beams, num_heads, seq_len, head_dim]
     async fn populate_gpu_cache(
         ctx: &Arc<WgpuContext>,
         cache: &mut GpuBeamKVCache,
@@ -466,7 +455,6 @@ mod tests {
     ) {
         let hidden_size = num_heads * head_dim;
 
-        // update() expects 3D: [num_beams, seq_len=1, hidden_size]
         let k_data = Array3::from_shape_fn((num_beams, 1, hidden_size), |(b, _, h)| {
             (b * hidden_size + h) as f32
         });
@@ -488,10 +476,6 @@ mod tests {
         ctx.queue.submit(std::iter::once(encoder.finish()));
         cache.increment_len(1);
     }
-
-    // ========================================================================
-    //  reorder_cache Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_reorder_cache_basic() {
@@ -607,7 +591,6 @@ mod tests {
         let head_dim = 64;
         let capacity = 128;
 
-        // 1. Create initial tokens
         let initial_tokens: Vec<u32> = vec![2; num_beams];
         let decoder_state = backend
             .create_token_tensor(&initial_tokens, num_beams)
@@ -620,34 +603,26 @@ mod tests {
             _ => panic!("Expected TokenIds"),
         }
 
-        // 2. Update with selected tokens
         let mut decoder_state = decoder_state;
         let selected_tokens = vec![10u32, 20, 30, 40];
         backend
             .update_token_tensor(&mut decoder_state, &selected_tokens)
             .unwrap();
 
-        // 3. Create and populate cache
         let mut cache =
             create_test_cache(&ctx, num_layers, num_beams, num_heads, head_dim, capacity);
         populate_gpu_cache(&ctx, &mut cache, num_layers, num_beams, num_heads, head_dim).await;
 
-        // 4. Reorder cache
         let reorder_indices = vec![2, 2, 0, 1];
         backend.reorder_cache(&mut cache, &reorder_indices).unwrap();
     }
-
-    // ========================================================================
-    //  Integration Flow Tests (state management only)
-    // ========================================================================
 
     #[tokio::test]
     async fn test_typical_generation_flow_states() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
 
-        // 1. Create initial decoder tokens (decoder_start_token)
-        let initial_tokens = vec![2u32]; // e.g., <s> token
+        let initial_tokens = vec![2u32];
         let decoder_state = backend.create_token_tensor(&initial_tokens, 1).unwrap();
 
         match &decoder_state {
@@ -657,7 +632,6 @@ mod tests {
             _ => panic!("Expected TokenIds"),
         }
 
-        // 2. Update with new token
         let mut decoder_state = decoder_state;
         let new_tokens = vec![100u32];
         backend
@@ -672,10 +646,6 @@ mod tests {
             _ => panic!("Expected TokenIds"),
         }
     }
-
-    // ========================================================================
-    //  WgpuContext Debug Test
-    // ========================================================================
 
     #[tokio::test]
     async fn test_wgpu_context_debug() {

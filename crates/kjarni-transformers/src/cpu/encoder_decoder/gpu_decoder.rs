@@ -249,9 +249,6 @@ impl Seq2SeqGPUDecoder {
             log::trace!("Building decoder layer {}", i);
             let i_str = i.to_string();
 
-            // ================================================================
-            // SELF-ATTENTION
-            // ================================================================
             let self_attn_weights = GpuAttentionWeights::from_decoder_self_attn_layout(
                 context,
                 weights,
@@ -287,9 +284,6 @@ impl Seq2SeqGPUDecoder {
                     )?,
                 )?);
 
-            // ================================================================
-            // CROSS-ATTENTION
-            // ================================================================
             let cross_layout = layer_layout
                 .cross_attn
                 .as_ref()

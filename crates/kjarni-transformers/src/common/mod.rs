@@ -219,7 +219,6 @@ impl HFGenerationConfig {
         Self::load(&path).unwrap_or_default()
     }
     
-    /// Convert to your internal GenerationConfig with sensible defaults
     pub fn to_generation_config(&self, model_defaults: &ModelGenerationDefaults) -> GenerationConfig {
         let strategy = self.determine_strategy(model_defaults);
         

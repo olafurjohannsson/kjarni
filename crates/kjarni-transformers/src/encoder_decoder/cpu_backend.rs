@@ -479,9 +479,6 @@ mod tests {
         let result = backend.reorder_cache(&mut cache, &indices);
         assert!(result.is_ok());
     }
-    // ========================================================================
-    //  CpuBackend Debug
-    // ========================================================================
 
     #[test]
     fn test_cpu_backend_debug() {

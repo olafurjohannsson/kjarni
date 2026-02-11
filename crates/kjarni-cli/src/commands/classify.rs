@@ -245,11 +245,6 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // Helper to create mock ClassificationResult
-    // =========================================================================
-
     fn mock_result(label: &str, score: f32, label_index: usize) -> ClassificationResult {
         ClassificationResult {
             label: label.to_string(),
@@ -279,10 +274,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // parse_dtype tests
-    // =========================================================================
-
     #[test]
     fn test_parse_dtype_f32() {
         assert!(matches!(parse_dtype("f32").unwrap(), DType::F32));
@@ -308,11 +299,6 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid dtype"));
     }
-
-    // =========================================================================
-    // truncate_text tests
-    // =========================================================================
-
     #[test]
     fn test_truncate_text_short() {
         assert_eq!(truncate_text("hello", 50), "hello");
@@ -331,11 +317,6 @@ mod tests {
         assert_eq!(result.len(), 50);
         assert!(result.ends_with("..."));
     }
-
-    // =========================================================================
-    // format_single_result tests
-    // =========================================================================
-
     #[test]
     fn test_format_single_result_json() {
         let result = mock_result("positive", 0.95, 0);
@@ -394,11 +375,6 @@ mod tests {
         assert!(output.is_err());
         assert!(output.unwrap_err().to_string().contains("Unknown format"));
     }
-
-    // =========================================================================
-    // format_batch_results tests
-    // =========================================================================
-
     #[test]
     fn test_format_batch_results_json() {
         let texts = vec!["good", "bad"];
@@ -503,16 +479,10 @@ mod tests {
         assert!(parsed.is_empty());
     }
 
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_format_single_result_special_characters() {
         let result = mock_result("label", 0.5, 0);
         let output = format_single_result("text with \"quotes\" and\nnewlines", &result, "json", false).unwrap();
-
-        // Should be valid JSON (properly escaped)
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert!(parsed["text"].as_str().unwrap().contains("quotes"));
     }

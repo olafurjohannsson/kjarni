@@ -178,29 +178,9 @@ fn build_generation_config(
     }
 }
 
-/// Get default sampling params with overrides
-fn get_sampling_params(
-    temperature: f32,
-    top_k: Option<usize>,
-    top_p: Option<f32>,
-    min_p: Option<f32>,
-) -> SamplingParams {
-    SamplingParams {
-        temperature,
-        top_k: top_k.or(Some(50)),
-        top_p: top_p.or(Some(0.9)),
-        min_p: min_p.or(Some(0.1)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // is_supported_decoder_architecture tests
-    // =========================================================================
-
     #[test]
     fn test_supported_gpt() {
         assert!(is_supported_decoder_architecture(ModelArchitecture::GPT));
@@ -248,14 +228,8 @@ mod tests {
 
     #[test]
     fn test_unsupported_phi3() {
-        // Phi3 might need to be added to supported list if it should work
         assert!(!is_supported_decoder_architecture(ModelArchitecture::Phi3));
     }
-
-    // =========================================================================
-    // build_decoding_strategy tests
-    // =========================================================================
-
     #[test]
     fn test_strategy_greedy_flag() {
         let strategy = build_decoding_strategy(0.7, None, None, None, true);
@@ -336,60 +310,9 @@ mod tests {
 
     #[test]
     fn test_strategy_greedy_overrides_temperature() {
-        // Even with high temperature, greedy flag should win
         let strategy = build_decoding_strategy(1.5, Some(100), Some(0.99), Some(0.01), true);
         assert!(matches!(strategy, DecodingStrategy::Greedy));
     }
-
-    // =========================================================================
-    // get_sampling_params tests
-    // =========================================================================
-
-    #[test]
-    fn test_sampling_params_defaults() {
-        let params = get_sampling_params(0.7, None, None, None);
-        
-        assert_eq!(params.temperature, 0.7);
-        assert_eq!(params.top_k, Some(50));
-        assert_eq!(params.top_p, Some(0.9));
-        assert_eq!(params.min_p, Some(0.1));
-    }
-
-    #[test]
-    fn test_sampling_params_custom() {
-        let params = get_sampling_params(1.2, Some(100), Some(0.95), Some(0.05));
-        
-        assert_eq!(params.temperature, 1.2);
-        assert_eq!(params.top_k, Some(100));
-        assert_eq!(params.top_p, Some(0.95));
-        assert_eq!(params.min_p, Some(0.05));
-    }
-
-    #[test]
-    fn test_sampling_params_partial_override() {
-        let params = get_sampling_params(0.5, Some(25), None, None);
-        
-        assert_eq!(params.temperature, 0.5);
-        assert_eq!(params.top_k, Some(25));
-        assert_eq!(params.top_p, Some(0.9)); // default
-        assert_eq!(params.min_p, Some(0.1)); // default
-    }
-
-    #[test]
-    fn test_sampling_params_zero_temperature() {
-        let params = get_sampling_params(0.0, None, None, None);
-        assert_eq!(params.temperature, 0.0);
-    }
-
-    #[test]
-    fn test_sampling_params_high_temperature() {
-        let params = get_sampling_params(2.0, None, None, None);
-        assert_eq!(params.temperature, 2.0);
-    }
-
-    // =========================================================================
-    // build_generation_config tests
-    // =========================================================================
 
     #[test]
     fn test_generation_config_basic() {
@@ -447,11 +370,6 @@ mod tests {
             _ => panic!("Expected Sample strategy"),
         }
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_very_low_temperature() {
         let strategy = build_decoding_strategy(0.001, None, None, None, false);
@@ -476,29 +394,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_top_k_zero() {
-        let params = get_sampling_params(0.7, Some(0), None, None);
-        assert_eq!(params.top_k, Some(0));
-    }
-
-    #[test]
-    fn test_top_p_zero() {
-        let params = get_sampling_params(0.7, None, Some(0.0), None);
-        assert_eq!(params.top_p, Some(0.0));
-    }
-
-    #[test]
-    fn test_top_p_one() {
-        let params = get_sampling_params(0.7, None, Some(1.0), None);
-        assert_eq!(params.top_p, Some(1.0));
-    }
-
-    #[test]
-    fn test_min_p_zero() {
-        let params = get_sampling_params(0.7, None, None, Some(0.0));
-        assert_eq!(params.min_p, Some(0.0));
-    }
 
     #[test]
     fn test_large_max_tokens() {
@@ -530,14 +425,8 @@ mod tests {
         let config = build_generation_config(100, 0.7, None, None, None, 5.0, false);
         assert_eq!(config.repetition_penalty, 5.0);
     }
-
-    // =========================================================================
-    // Realistic parameter combinations
-    // =========================================================================
-
     #[test]
     fn test_typical_creative_writing_params() {
-        // High temperature, moderate top_p, low min_p
         let config = build_generation_config(512, 1.0, None, Some(0.95), Some(0.05), 1.1, false);
         
         match config.strategy {

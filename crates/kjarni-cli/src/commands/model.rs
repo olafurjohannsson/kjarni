@@ -341,10 +341,6 @@ fn truncate(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
-    // =========================================================================
-    // format_bytes tests
-    // =========================================================================
-
     #[test]
     fn test_format_bytes_megabytes() {
         let mb = 1024 * 1024;
@@ -382,21 +378,14 @@ mod tests {
     fn test_format_bytes_realistic_model_sizes() {
         let mb = 1024 * 1024;
         let gb = 1024 * 1024 * 1024;
-        
-        // Typical model sizes
-        assert_eq!(format_bytes(90 * mb), "90.0 MB");      // MiniLM
-        assert_eq!(format_bytes(268 * mb), "268.0 MB");    // DistilBERT
-        assert_eq!(format_bytes(550 * mb), "550.0 MB");    // Nomic Embed
-        assert_eq!(format_bytes(gb + 600 * mb), "1.59 GB"); // ~1.6GB model
-        assert_eq!(format_bytes(3 * gb), "3.00 GB");       // 3B model
-        assert_eq!(format_bytes(7 * gb), "7.00 GB");       // 7B model
-        assert_eq!(format_bytes(16 * gb), "16.00 GB");     // 8B model (fp16)
+        assert_eq!(format_bytes(90 * mb), "90.0 MB");      
+        assert_eq!(format_bytes(268 * mb), "268.0 MB");    
+        assert_eq!(format_bytes(550 * mb), "550.0 MB");    
+        assert_eq!(format_bytes(gb + 600 * mb), "1.59 GB");
+        assert_eq!(format_bytes(3 * gb), "3.00 GB");      
+        assert_eq!(format_bytes(7 * gb), "7.00 GB");      
+        assert_eq!(format_bytes(16 * gb), "16.00 GB");     
     }
-
-    // =========================================================================
-    // format_params tests
-    // =========================================================================
-
     #[test]
     fn test_format_params_millions() {
         assert_eq!(format_params(22), "22M");
@@ -427,22 +416,16 @@ mod tests {
 
     #[test]
     fn test_format_params_realistic_models() {
-        // Real model parameter counts from registry
-        assert_eq!(format_params(22), "22M");      // MiniLM
-        assert_eq!(format_params(66), "66M");      // DistilBERT
-        assert_eq!(format_params(137), "137M");    // Nomic Embed
-        assert_eq!(format_params(490), "490M");    // Qwen2.5-0.5B
-        assert_eq!(format_params(1230), "1.2B");   // Llama 3.2-1B
-        assert_eq!(format_params(3210), "3.2B");   // Llama 3.2-3B
-        assert_eq!(format_params(3800), "3.8B");   // Phi 3.5 Mini
-        assert_eq!(format_params(7240), "7.2B");   // Mistral 7B
-        assert_eq!(format_params(8030), "8.0B");   // Llama 3.1-8B
+        assert_eq!(format_params(22), "22M");      
+        assert_eq!(format_params(66), "66M");      
+        assert_eq!(format_params(137), "137M");    
+        assert_eq!(format_params(490), "490M");    
+        assert_eq!(format_params(1230), "1.2B");   
+        assert_eq!(format_params(3210), "3.2B");   
+        assert_eq!(format_params(3800), "3.8B");   
+        assert_eq!(format_params(7240), "7.2B");   
+        assert_eq!(format_params(8030), "8.0B");   
     }
-
-    // =========================================================================
-    // pad_center tests
-    // =========================================================================
-
     #[test]
     fn test_pad_center_shorter_string() {
         assert_eq!(pad_center("hi", 10), "    hi    ");
@@ -452,7 +435,6 @@ mod tests {
 
     #[test]
     fn test_pad_center_odd_padding() {
-        // When padding is odd, extra space goes to the right
         assert_eq!(pad_center("hi", 5), " hi  ");
         assert_eq!(pad_center("a", 4), " a  ");
         assert_eq!(pad_center("abc", 6), " abc  ");
@@ -493,17 +475,12 @@ mod tests {
 
     #[test]
     fn test_pad_center_realistic_model_name() {
-        // Used in info display with width 37
         let result = pad_center("llama3.2-1b-instruct", 37);
         assert_eq!(result.len(), 37);
         assert!(result.starts_with(' '));
         assert!(result.ends_with(' '));
         assert!(result.contains("llama3.2-1b-instruct"));
     }
-
-    // =========================================================================
-    // truncate tests
-    // =========================================================================
 
     #[test]
     fn test_truncate_short_string() {
@@ -538,7 +515,6 @@ mod tests {
 
     #[test]
     fn test_truncate_realistic_descriptions() {
-        // Model descriptions from registry, truncated to 30 chars
         assert_eq!(
             truncate("Fastest sentence embedding model. Ideal for basic RAG.", 30),
             "Fastest sentence embedding ..."
@@ -552,10 +528,6 @@ mod tests {
             "Zero-shot classifier. Class..."
         );
     }
-
-    // =========================================================================
-    // Integration-like tests combining functions
-    // =========================================================================
 
     #[test]
     fn test_format_functions_together() {
@@ -586,30 +558,21 @@ mod tests {
             assert!(padded.contains(name));
         }
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_truncate_unicode() {
-        // ASCII-safe truncation
         assert_eq!(truncate("hello", 10), "hello");
-        // Note: truncate uses byte indexing, so unicode may cause issues
-        // Testing with ASCII for safety
     }
 
     #[test]
     fn test_format_bytes_very_large() {
         let tb = 1024u64 * 1024 * 1024 * 1024;
-        // Still shows as GB (no TB support)
         assert_eq!(format_bytes(tb), "1024.00 GB");
     }
 
     #[test]
     fn test_format_params_very_large() {
-        assert_eq!(format_params(70000), "70.0B");   // 70B model
-        assert_eq!(format_params(175000), "175.0B"); // GPT-3 scale
-        assert_eq!(format_params(540000), "540.0B"); // PaLM scale
+        assert_eq!(format_params(70000), "70.0B");   
+        assert_eq!(format_params(175000), "175.0B"); 
+        assert_eq!(format_params(540000), "540.0B"); 
     }
 }

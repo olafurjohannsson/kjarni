@@ -11,91 +11,32 @@ use anyhow::Result;
 use std::sync::Arc;
 
 /// A single encoder layer for transformer models.
-///
-/// Supports both pre-norm (LLaMA-style) and post-norm (BERT-style) architectures.
-///
-/// # Architecture (Post-Norm)
-///
-/// ```text
-/// Input
-///   │
-///   ├──────────────────────────┐
-///   ▼                          │ (residual)
-/// Self-Attention               │
-///   │                          │
-///   ▼                          │
-/// Add ◄────────────────────────┘
-///   │
-///   ▼
-/// LayerNorm
-///   │
-///   ├──────────────────────────┐
-///   ▼                          │ (residual)
-/// FFN                          │
-///   │                          │
-///   ▼                          │
-/// Add ◄────────────────────────┘
-///   │
-///   ▼
-/// LayerNorm
-///   │
-///   ▼
-/// Output
-/// ```
 pub struct GpuEncoderLayer {
-    // Attention
     self_attn: GpuEncoderSelfAttention,
     self_attn_weights: GpuAttentionWeights,
-    // Use Enum for Normalization (LayerNorm vs RMSNorm)
     self_attn_layer_norm: GpuNormalization,
     self_attn_ln_weights: GpuNormalizationWeights,
-
-    // Feed-forward (Enum: Standard vs SwiGlu)
     feedforward: crate::gpu_ops::blocks::GpuFeedForward,
     ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights,
     ffn_layer_norm: GpuNormalization,
     ffn_ln_weights: GpuNormalizationWeights,
-
-    // Primitives
     add: GpuAdd,
 }
 
 impl GpuEncoderLayer {
     /// Creates a new encoder layer.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - The WGPU context for creating GPU resources.
-    /// * `self_attn_weights` - Pre-loaded attention weights (Q, K, V, O projections).
-    /// * `self_attn_ln_weights` - LayerNorm weights for attention block.
-    /// * `ff_weights` - Pre-loaded feed-forward weights.
-    /// * `ffn_ln_weights` - LayerNorm weights for FFN block.
-    /// * `activation` - Activation function (GELU, ReLU, SiLU, etc.).
-    /// * `meta` - Model metadata containing dimensions and configuration.
-    ///
-    /// # Returns
-    ///
-    /// A configured `GpuEncoderLayer` ready for forward passes.
     pub fn new(
         context: &Arc<WgpuContext>,
         self_attn_weights: GpuAttentionWeights,
-        self_attn_ln_weights: GpuNormalizationWeights, // Changed to Enum
-        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights, // Changed to Enum
-        ffn_ln_weights: GpuNormalizationWeights,       // Changed to Enum
+        self_attn_ln_weights: GpuNormalizationWeights,
+        ff_weights: crate::gpu_ops::blocks::GpuFeedForwardWeights, 
+        ffn_ln_weights: GpuNormalizationWeights,       
         activation: activations::Activation,
         meta: &ModelMetadata,
     ) -> Result<Self> {
         let hidden_size = meta.hidden_size as u32;
         let num_heads = meta.num_attention_heads as u32;
-
-        // Initialize Attention
         let self_attn = GpuEncoderSelfAttention::new(context, hidden_size, num_heads);
-
-        // Initialize Normalization (Logic to pick LayerNorm vs RMSNorm moved to caller usually,
-        // but if passed as Enum weights, we need matching Enum compute).
-        // Note: The Weights Enum usually dictates the Compute Enum type.
-        // Assuming caller passed correct weights, we create matching compute ops.
-
         let create_norm = |w: &GpuNormalizationWeights| -> GpuNormalization {
             match w {
                 GpuNormalizationWeights::LayerNorm(_) => {
@@ -130,21 +71,8 @@ impl GpuEncoderLayer {
             add,
         })
     }
-    /// Performs the forward pass through this encoder layer.
-    ///
-    /// Automatically dispatches to pre-norm or post-norm based on model metadata.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `hidden_states` - Input tensor of shape `[B, S, H]`.
-    /// * `attention_mask` - Padding mask of shape `[B, S]`.
-    /// * `meta` - Model metadata (used to determine norm style).
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, S, H]`.
+
+    /// Performs the forward pass through this encoder layer
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -160,9 +88,7 @@ impl GpuEncoderLayer {
         }
     }
 
-    /// Forward pass for pre-normalization architecture (LLaMA-style).
-    ///
-    /// Order: Norm → Attention → Add → Norm → FFN → Add
+    /// Forward pass for pre-normalization
     pub fn forward_prenorm(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -171,8 +97,6 @@ impl GpuEncoderLayer {
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
-
-        // 1. Pre-norm before attention
         let ln1_out = pool.get(hidden_states.shape().to_vec());
         self.self_attn_layer_norm.encode(
             encoder,
@@ -180,8 +104,6 @@ impl GpuEncoderLayer {
             hidden_states,
             &ln1_out,
         );
-
-        // 2. Self-attention (using new clean module)
         let attn_out = self.self_attn.forward(
             encoder,
             &ln1_out,
@@ -189,24 +111,16 @@ impl GpuEncoderLayer {
             Some(attention_mask),
             pool,
         );
-
-        // 3. Residual connection
         let attn_block_output = pool.get(hidden_states.shape().to_vec());
         self.add
             .encode(encoder, &[residual, &attn_out], &attn_block_output);
-
-        // 4. Pre-norm before FFN
         let residual_2 = &attn_block_output;
         let ln2_out = pool.get(residual_2.shape().to_vec());
         self.ffn_layer_norm
             .encode(encoder, &self.ffn_ln_weights, residual_2, &ln2_out);
-
-        // 5. FFN
         let ffn_out = GpuTensorPool::get(pool, ln2_out.shape().to_vec());
         self.feedforward
             .encode(encoder, &self.ff_weights, &ln2_out, &ffn_out, pool);
-
-        // 6. Residual connection
         let final_output = pool.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &final_output);
@@ -214,9 +128,7 @@ impl GpuEncoderLayer {
         Ok(final_output)
     }
 
-    /// Forward pass for post-normalization architecture (BERT/BART-style).
-    ///
-    /// Order: Attention → Add → Norm → FFN → Add → Norm
+    /// Forward pass for post-normalization
     pub fn forward_postnorm(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -225,8 +137,6 @@ impl GpuEncoderLayer {
         pool: &mut GpuTensorPool,
     ) -> Result<GpuTensor> {
         let residual = hidden_states;
-
-        // 1. Self-attention (using new clean module)
         let attn_out = self.self_attn.forward(
             encoder,
             hidden_states,
@@ -234,8 +144,6 @@ impl GpuEncoderLayer {
             Some(attention_mask),
             pool,
         );
-
-        // 2. Residual + LayerNorm
         let add_1_out = pool.get(hidden_states.shape().to_vec());
         self.add.encode(encoder, &[residual, &attn_out], &add_1_out);
 
@@ -246,22 +154,16 @@ impl GpuEncoderLayer {
             &add_1_out,
             &attn_block_output,
         );
-
-        // 3. FFN
         let residual_2 = &attn_block_output;
         let ffn_out = GpuTensorPool::get(pool, residual_2.shape().to_vec());
         self.feedforward
             .encode(encoder, &self.ff_weights, residual_2, &ffn_out, pool);
-
-        // 4. Residual + LayerNorm
         let add_2_out = pool.get(residual_2.shape().to_vec());
         self.add
             .encode(encoder, &[residual_2, &ffn_out], &add_2_out);
-
         let final_output = pool.get(residual_2.shape().to_vec());
         self.ffn_layer_norm
             .encode(encoder, &self.ffn_ln_weights, &add_2_out, &final_output);
-
         Ok(final_output)
     }
 }
@@ -289,9 +191,6 @@ mod tests {
 
     use crate::gpu::normalization::{GpuLayerNormWeights};
 
-    async fn get_test_context() -> Arc<WgpuContext> {
-        WgpuContext::new().await.unwrap()
-    }
     #[tokio::test]
     async fn test_bart_weights_loading_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);

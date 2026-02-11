@@ -1155,7 +1155,6 @@ mod encoder_layer_tests {
 
     #[test]
     fn test_residual_connection() -> Result<()> {
-        // Create layer with zero weights to isolate residual behavior
         let hidden = 32;
         let heads = 2;
 
@@ -1189,15 +1188,10 @@ mod encoder_layer_tests {
         ));
 
         let layer = EncoderLayer::new(self_attn, self_attn_layer_norm, feedforward, ffn_layer_norm);
-
-        // With zero attention/FFN weights, pre-norm output should equal input
-        // (residual passes through, sublayers contribute nothing)
         let input = Array3::from_shape_fn((1, 4, hidden), |(_, _, h)| h as f32);
         let mask = Array2::<f32>::ones((1, 4));
 
         let output = layer.forward(input.clone(), &mask, None, true, None)?;
-
-        // Pre-norm: input passes through residual unchanged when sublayers are zero
         for (inp, out) in input.iter().zip(output.iter()) {
             assert!(
                 (inp - out).abs() < 1e-5,

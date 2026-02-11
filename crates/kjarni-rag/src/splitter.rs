@@ -284,10 +284,6 @@ mod tests {
         TextSplitter::new(config);
     }
 
-    // ============================================================================
-    // SPLIT TESTS
-    // ============================================================================
-
     #[test]
     fn test_split_empty_text() {
         let splitter = TextSplitter::with_defaults();
@@ -418,10 +414,6 @@ mod tests {
         assert_eq!(chunks[0], text);
     }
 
-    // ============================================================================
-    // UTF-8 SAFETY TESTS
-    // ============================================================================
-
     #[test]
     fn test_split_utf8_characters() {
         let config = SplitterConfig {
@@ -431,14 +423,11 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
 
-        // Unicode characters (emojis, CJK, etc.)
         let text = "Hello 🌍 World 你好 世界";
         let chunks = splitter.split(text);
 
-        // Verify no broken UTF-8
         for chunk in &chunks {
             assert!(chunk.is_ascii() || chunk.chars().count() > 0);
-            // Verify we can iterate chars without panic
             for _ in chunk.chars() {}
         }
     }
@@ -482,10 +471,6 @@ mod tests {
         }
     }
 
-    // ============================================================================
-    // OVERLAP TESTS
-    // ============================================================================
-
     #[test]
     fn test_overlap_preserves_context() {
         let config = SplitterConfig {
@@ -497,14 +482,9 @@ mod tests {
 
         let text = "The quick brown fox jumps over the lazy dog";
         let chunks = splitter.split(text);
-
-        // With overlap, adjacent chunks should share some content
         for i in 0..chunks.len().saturating_sub(1) {
             let current = &chunks[i];
             let next = &chunks[i + 1];
-
-            // The end of current chunk might appear at start of next
-            // (This is a soft check - exact overlap depends on word boundaries)
             println!("Chunk {}: '{}'", i, current);
             println!("Chunk {}: '{}'", i + 1, next);
         }
@@ -526,11 +506,6 @@ mod tests {
 
         assert!(!chunks.is_empty());
     }
-
-    // ============================================================================
-    // SPLIT WITH METADATA TESTS
-    // ============================================================================
-
     #[test]
     fn test_split_with_metadata_empty() {
         let splitter = TextSplitter::with_defaults();
@@ -576,11 +551,9 @@ mod tests {
         assert_eq!(results.len(), 3);
 
         for (i, (_, meta)) in results.iter().enumerate() {
-            // Base metadata preserved
             assert_eq!(meta.get("author"), Some(&"Test Author".to_string()));
             assert_eq!(meta.get("doc_id"), Some(&"123".to_string()));
 
-            // Chunk metadata added
             assert_eq!(meta.get("chunk_index"), Some(&i.to_string()));
             assert_eq!(meta.get("total_chunks"), Some(&"3".to_string()));
         }
@@ -605,10 +578,6 @@ mod tests {
         assert_eq!(meta.get("key3"), Some(&"value3".to_string()));
     }
 
-    // ============================================================================
-    // ESTIMATE CHUNKS TESTS
-    // ============================================================================
-
     #[test]
     fn test_estimate_chunks_empty() {
         let splitter = TextSplitter::with_defaults();
@@ -630,17 +599,11 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
 
-        // 500 chars with chunk_size=100, overlap=20 → effective=80
-        // 500 / 80 ≈ 6-7 chunks
         let text = "a".repeat(500);
         let estimate = splitter.estimate_chunks(&text);
 
         assert!(estimate >= 5 && estimate <= 10);
     }
-
-    // ============================================================================
-    // EDGE CASES
-    // ============================================================================
 
     #[test]
     fn test_split_only_separators() {
@@ -654,7 +617,6 @@ mod tests {
         let text = "\n\n\n\n\n\n";
         let chunks = splitter.split(text);
 
-        // Empty sections between separators should be skipped
         assert!(chunks.is_empty());
     }
 
@@ -730,14 +692,8 @@ mod tests {
         assert_eq!(chunks[0], "Content here");
     }
 
-    // ============================================================================
-    // REGRESSION TESTS
-    // ============================================================================
-
     #[test]
     fn test_no_infinite_loop_large_overlap() {
-        // This was a bug: if overlap >= chunk_size, could infinite loop
-        // Now we validate config and prevent this
         let config = SplitterConfig {
             chunk_size: 100,
             chunk_overlap: 50,
@@ -748,7 +704,6 @@ mod tests {
         let text = "a".repeat(1000);
         let chunks = splitter.split(&text);
 
-        // Should complete without hanging
         assert!(!chunks.is_empty());
     }
 

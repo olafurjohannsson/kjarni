@@ -416,14 +416,11 @@ impl AudioPipeline {
 
         // Add batch dimension: [n_mels, time] -> [1, n_mels, time]
         let mel_batch = mel.insert_axis(ndarray::Axis(0));
-
-        // Run through conv frontend
         self.frontend.forward(&mel_batch)
     }
 
     /// Process batch of audio samples.
     pub fn process_batch(&self, audio_batch: &[Vec<f32>]) -> Result<Array3<f32>> {
-        // Process each audio independently
         let hidden_states: Vec<Array3<f32>> = audio_batch
             .iter()
             .map(|audio| self.process(audio))

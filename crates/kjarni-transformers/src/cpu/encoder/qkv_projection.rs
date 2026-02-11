@@ -386,11 +386,6 @@ mod tests {
 mod qkv_projection_tests {
     use super::*;
     
-
-    // =========================================================================
-    // Test Utilities
-    // =========================================================================
-
     fn make_linear_layer(
         out_features: usize,
         in_features: usize,
@@ -428,10 +423,6 @@ mod qkv_projection_tests {
             .map(|(x, y)| (x - y).abs())
             .fold(0.0f32, f32::max)
     }
-
-    // =========================================================================
-    // Correctness Tests
-    // =========================================================================
 
     #[test]
     fn test_separate_forward_works() {
@@ -623,9 +614,6 @@ mod qkv_projection_tests {
         assert!(v_diff < 1e-4, "V mismatch: {}", v_diff);
     }
 
-    // =========================================================================
-    // No-Alloc Correctness Tests
-    // =========================================================================
     #[test]
     fn test_noalloc_separate_matches_alloc() {
         let hidden = 384;

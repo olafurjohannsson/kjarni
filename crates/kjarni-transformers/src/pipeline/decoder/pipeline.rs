@@ -1,5 +1,3 @@
-// kjarni-transformers/src/pipeline/decoder.rs
-
 use crate::WgpuContext;
 use crate::decoder::prelude::{CpuDecoder, GpuDecoder};
 use crate::LoadedEmbeddings;
@@ -9,29 +7,13 @@ use crate::prelude::Device;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
-/// A container that holds all components needed for decoder inference.
-///
-/// This provides:
-/// - Unified access to embeddings, decoder layers, and LM head
-/// - ExecutionPlan for configuring where each stage runs
-/// - Validation that components match the plan
-///
-/// The actual inference is still handled by the existing backends
-/// through the `*Ops` traits that the model implements.
 pub struct DecoderPipeline {
-    // Core components
     embeddings: LoadedEmbeddings,
     cpu_decoder: Option<Box<dyn CpuDecoder>>,
     gpu_decoder: Option<Box<dyn GpuDecoder>>,
     lm_head: LoadedLMHead,
-
-    // Configuration
     plan: ExecutionPlan,
-
-    // Runtime context
     context: Option<Arc<WgpuContext>>,
-
-    // Metadata
     num_layers: usize,
     hidden_size: usize,
     vocab_size: usize,
@@ -76,18 +58,11 @@ impl DecoderPipeline {
 
         Ok(pipeline)
     }
-
-    // ========================================================================
-    // Plan Management
-    // ========================================================================
-
     pub fn plan(&self) -> &ExecutionPlan {
         &self.plan
     }
 
     /// Update the execution plan.
-    ///
-    /// Returns an error if the new plan requires components that aren't loaded.
     pub fn set_plan(&mut self, plan: ExecutionPlan) -> Result<()> {
         self.validate_plan(&plan)?;
         self.plan = plan;
@@ -136,10 +111,6 @@ impl DecoderPipeline {
         Ok(())
     }
 
-    // ========================================================================
-    // Component Accessors
-    // ========================================================================
-
     pub fn embeddings(&self) -> &LoadedEmbeddings {
         &self.embeddings
     }
@@ -159,11 +130,6 @@ impl DecoderPipeline {
     pub fn context(&self) -> Option<&Arc<WgpuContext>> {
         self.context.as_ref()
     }
-
-    // ========================================================================
-    // Metadata
-    // ========================================================================
-
     pub fn num_layers(&self) -> usize {
         self.num_layers
     }
@@ -182,11 +148,6 @@ impl DecoderPipeline {
     pub fn max_batch_size(&self) -> Option<usize> {
         None
     }
-
-    // ========================================================================
-    // Convenience Methods for Ops Implementation
-    // ========================================================================
-
     /// Get the active decoder based on the current plan.
     pub fn active_cpu_decoder(&self) -> Result<&dyn CpuDecoder> {
         self.cpu_decoder
@@ -213,7 +174,7 @@ mod decoder_pipeline_test {
     use crate::models::base::{ModelInput, ModelLoadConfig};
     use crate::pipeline::DecoderPipelineBuilder;
     use crate::tensor::DType;
-    use crate::traits::{ModelConfig, ModelLayout, ModelMetadata};
+    use crate::traits::{ModelLayout, ModelMetadata};
     use crate::weights::ModelWeights;
     use crate::{Cache, gpu::cache::GpuKVCache, WgpuContext};
     use std::sync::Arc;
@@ -228,7 +189,7 @@ mod decoder_pipeline_test {
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
             self
         }
-        fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        fn final_norm(&self, _: &Array3<f32>) -> Result<Array3<f32>> {
             unimplemented!()
         }
         fn head_dim(&self) -> usize {
@@ -353,7 +314,6 @@ mod decoder_pipeline_test {
         }
 
         fn layout(&self) -> ModelLayout {
-            // We only care about embeddings and head for pipeline tests
             let layer_layout = DecoderLayerLayout {
                 self_attn: AttentionLayout {
                     q_weight: "layer.{}.q.weight".to_string(),
@@ -437,25 +397,8 @@ mod decoder_pipeline_test {
         (dir, weights)
     }
 
-    // =========================================================================
-    //  Unit Tests: DecoderPipeline Validation
-    // =========================================================================
-
-    #[test]
-    fn test_pipeline_validation_cpu_ok() {
-        // Should succeed if plan=CPU and components loaded on CPU
-        let (_dir, weights) = create_dummy_weights(vec![("w", vec![0.0], vec![1, 1])]);
-        // Mock components would be complex to instantiate manually without builder.
-        // Testing via Builder is easier.
-    }
-
-    // =========================================================================
-    //  Integration Tests: DecoderPipelineBuilder
-    // =========================================================================
-
     #[test]
     fn test_builder_cpu_plan_tied_weights() {
-        // Verify that tied weights logic shares memory (Arc)
         let hidden = 32;
         let vocab = 100;
 
@@ -465,7 +408,6 @@ mod decoder_pipeline_test {
                 vec![1.0; vocab * hidden],
                 vec![vocab, hidden],
             ),
-            // No output.weight needed because tied
         ]);
 
         let config = Arc::new(MockConfig {
@@ -583,26 +525,16 @@ mod decoder_pipeline_test {
             vocab,
             tied: true,
         });
-
-        // Plan assumes GPU if context provided
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
             .with_backends(cpu, gpu) 
             .with_context_opt(Some(context))
             .build()?;
-
-        // Verify GPU placement
         assert!(pipeline.plan().embeddings.is_gpu());
         assert!(pipeline.plan().lm_head.is_gpu());
 
         assert!(pipeline.embeddings().is_gpu());
         assert!(pipeline.lm_head().has_gpu());
-
-        // Verify CPU was skipped (default behavior for pure GPU plan)
-        // Note: Depends on ExecutionPlan::from_load_config logic.
-        // If it defaults to hybrid, CPU might be loaded.
-        // Let's assume pure GPU for now.
-
         Ok(())
     }
 
@@ -625,10 +557,6 @@ mod decoder_pipeline_test {
             offload_embeddings: true, // Force CPU embeddings
             ..Default::default()
         };
-
-        // Even with GPU Context available (simulated by plan logic),
-        // offload should keep embeddings on CPU.
-        // Since we don't pass context here, plan defaults to CPU anyway.
         let (cpu, gpu) = get_mock_backends();
         let pipeline = DecoderPipelineBuilder::new(&weights, config)
             .with_backends(cpu, gpu) 
@@ -643,10 +571,8 @@ mod decoder_pipeline_test {
 
     #[test]
     fn test_builder_quantization_propagation() {
-        // Verify that quantize_lm_head config propagates to LoadedLMHead
         let hidden = 32;
         let vocab = 100;
-        // Provide F32 weights
         let (_dir, weights) = create_dummy_weights(vec![
             (
                 "token_embd.weight",

@@ -1,11 +1,9 @@
 use super::*;
 use crate::activations::Activation;
-// Imports GpuSwiGLUFFN, GpuSwiGLUFFNWeights
 use crate::feedforward::SwiGluFeedForward as CpuSwiGLUFFN;
 use crate::gpu::{GpuTensor, GpuTensorPool};
 use crate::linear_layer::LinearLayer;
 use crate::tests::common::assert_tensors_are_close_2d as assert_tensors_are_close;
-// Import your CPU implementation
 use crate::WgpuContext;
 use anyhow::Result;
 use ndarray::Array;
@@ -21,20 +19,15 @@ async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
     let intermediate_size = 512;
 
     let gpu_swiglu = GpuSwiGLUFFN::new(&context)?;
-
-    // CPU weights: [Out, In] (PyTorch/LinearLayer convention)
     let gate_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-1.0, 1.0));
     let up_cpu = Array::random((intermediate_size, hidden_size), Uniform::new(-1.0, 1.0));
     let down_cpu = Array::random((hidden_size, intermediate_size), Uniform::new(-1.0, 1.0));
 
-    // GPU F32 matmul expects [In, Out] - transpose on upload
     let weights_gpu = GpuSwiGLUFFNWeights::new(
         GpuTensor::from_ndarray(&context, &gate_cpu.as_standard_layout().to_owned())?,
         GpuTensor::from_ndarray(&context, &up_cpu.as_standard_layout().to_owned())?,
         GpuTensor::from_ndarray(&context, &down_cpu.as_standard_layout().to_owned())?,
     )?;
-
-    // CPU uses LinearLayer (handles transpose internally)
     let cpu_swiglu = CpuSwiGLUFFN::new(
         LinearLayer::from(gate_cpu),
         LinearLayer::from(up_cpu),

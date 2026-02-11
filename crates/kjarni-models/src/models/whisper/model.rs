@@ -36,9 +36,6 @@ use kjarni_transformers::{
 };
 
 
-// WhisperModel
-
-
 pub struct WhisperModel {
     tokenizer: Tokenizer,
     config: Arc<WhisperConfig>,
@@ -48,10 +45,6 @@ pub struct WhisperModel {
 }
 
 impl WhisperModel {
-    // =========================================================================
-    // Construction
-    // =========================================================================
-
     /// Load from Hugging Face model registry.
     pub async fn from_registry(
         model_type: ModelType,

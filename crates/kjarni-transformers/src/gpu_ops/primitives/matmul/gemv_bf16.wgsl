@@ -39,7 +39,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let b_row_start_idx = n_idx * info.k; // Element offset
 
     let k_u32_start = b_row_start_idx / 2u;
-    let k_u32_count = info.k / 2u; // NOTE: Assumes K is even!
+    let k_u32_count = info.k / 2u; 
 
     var a_idx = 0u;
 

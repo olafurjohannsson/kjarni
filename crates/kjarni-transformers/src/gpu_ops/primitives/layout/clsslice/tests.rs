@@ -1,7 +1,3 @@
-// ============================================================================
-// Tests for GpuClsSlice (clsslice.rs)
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     
@@ -17,10 +13,6 @@ mod tests {
        WgpuContext::new().await.unwrap()
     }
 
-    // ========================================================================
-    //  Construction Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_cls_slice_new() {
         let context = get_test_context().await;
@@ -29,10 +21,6 @@ mod tests {
         // Should create without error
         let _ = kernel;
     }
-
-    // ========================================================================
-    //  Basic Functionality Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_cls_slice_simple() -> Result<()> {
@@ -99,10 +87,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    //  Batched Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_cls_slice_batched() -> Result<()> {
         let context = get_test_context().await;
@@ -166,10 +150,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Transformer-like Hidden Sizes
-    // ========================================================================
 
     #[tokio::test]
     async fn test_cls_slice_bert_base_hidden() -> Result<()> {
@@ -243,10 +223,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Edge Cases
-    // ========================================================================
 
     #[tokio::test]
     async fn test_cls_slice_seq_len_1() -> Result<()> {
@@ -322,11 +298,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Numerical Values Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_cls_slice_negative_values() -> Result<()> {
         let context = get_test_context().await;
@@ -401,10 +372,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    //  Kernel Reuse
-    // ========================================================================
-
     #[tokio::test]
     async fn test_cls_slice_kernel_reuse() -> Result<()> {
         let context = get_test_context().await;
@@ -440,10 +407,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    //  Uniforms Struct Tests
-    // ========================================================================
 
     #[test]
     fn test_cls_slice_uniforms_struct() {

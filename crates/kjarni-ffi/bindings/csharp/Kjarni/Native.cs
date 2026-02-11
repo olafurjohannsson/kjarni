@@ -6,10 +6,6 @@ using System.Runtime.InteropServices;
 
 namespace Kjarni
 {
-    // =================================================================
-    // Error Codes
-    // =================================================================
-
     public enum KjarniErrorCode
     {
         Ok = 0,
@@ -128,13 +124,6 @@ namespace Kjarni
                 return $"osx-{arch}";
             return $"linux-{arch}";
         }
-
-
-
-        // =================================================================
-        // Basic Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniFloatArray
         {
@@ -177,11 +166,6 @@ namespace Kjarni
                 return result;
             }
         }
-
-        // =================================================================
-        // Embedder Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniEmbedderConfig
         {
@@ -192,11 +176,6 @@ namespace Kjarni
             public int Normalize;
             public int Quiet;
         }
-
-        // =================================================================
-        // Classifier Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniClassResult
         {
@@ -244,11 +223,6 @@ namespace Kjarni
             public int MultiLabel;
             public int Quiet;
         }
-
-        // =================================================================
-        // Reranker Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniRerankResult
         {
@@ -290,11 +264,6 @@ namespace Kjarni
             public IntPtr ModelPath;
             public int Quiet;
         }
-
-        // =================================================================
-        // Indexer Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniIndexStats
         {
@@ -348,10 +317,6 @@ namespace Kjarni
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate void KjarniProgressCallback(KjarniProgress progress, IntPtr userData);
 
-        // =================================================================
-        // Searcher Structures
-        // =================================================================
-
         [StructLayout(LayoutKind.Sequential)]
         public struct KjarniSearchResult
         {
@@ -392,10 +357,6 @@ namespace Kjarni
             public int Quiet;
         }
 
-        // =================================================================
-        // Function Declarations - Error Handling
-        // =================================================================
-
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr kjarni_last_error_message();
 
@@ -405,19 +366,11 @@ namespace Kjarni
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr kjarni_error_name(KjarniErrorCode err);
 
-        // =================================================================
-        // Function Declarations - Global
-        // =================================================================
-
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniErrorCode kjarni_init();
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr kjarni_version();
-
-        // =================================================================
-        // Function Declarations - Memory
-        // =================================================================
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void kjarni_float_array_free(KjarniFloatArray arr);
@@ -440,10 +393,6 @@ namespace Kjarni
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void kjarni_index_info_free(KjarniIndexInfo info);
 
-        // =================================================================
-        // Function Declarations - Cancel Token
-        // =================================================================
-
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr kjarni_cancel_token_new();
 
@@ -459,10 +408,6 @@ namespace Kjarni
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void kjarni_cancel_token_free(IntPtr token);
-
-        // =================================================================
-        // Function Declarations - Embedder
-        // =================================================================
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniEmbedderConfig kjarni_embedder_config_default();
@@ -481,12 +426,12 @@ namespace Kjarni
             [MarshalAs(UnmanagedType.LPUTF8Str)] string text,
             out KjarniFloatArray result);
 
-[DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-public static extern KjarniErrorCode kjarni_embedder_encode_batch(
-    IntPtr handle,
-    IntPtr[] texts,
-    UIntPtr numTexts,
-    out KjarniFloat2DArray result);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_embedder_encode_batch(
+            IntPtr handle,
+            IntPtr[] texts,
+            UIntPtr numTexts,
+            out KjarniFloat2DArray result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniErrorCode kjarni_embedder_similarity(
@@ -497,10 +442,6 @@ public static extern KjarniErrorCode kjarni_embedder_encode_batch(
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_embedder_dim(IntPtr handle);
-
-        // =================================================================
-        // Function Declarations - Classifier
-        // =================================================================
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniClassifierConfig kjarni_classifier_config_default();
@@ -522,10 +463,6 @@ public static extern KjarniErrorCode kjarni_embedder_encode_batch(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_classifier_num_labels(IntPtr handle);
 
-        // =================================================================
-        // Function Declarations - Reranker
-        // =================================================================
-
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniRerankerConfig kjarni_reranker_config_default();
 
@@ -544,26 +481,22 @@ public static extern KjarniErrorCode kjarni_embedder_encode_batch(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string document,
             out float result);
 
-[DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-public static extern KjarniErrorCode kjarni_reranker_rerank(
-    IntPtr handle,
-    [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
-    IntPtr[] documents,
-    UIntPtr numDocs,
-    out KjarniRerankResults result);
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_reranker_rerank(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
+            IntPtr[] documents,
+            UIntPtr numDocs,
+            out KjarniRerankResults result);
 
-[DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-public static extern KjarniErrorCode kjarni_reranker_rerank_top_k(
-    IntPtr handle,
-    [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
-    IntPtr[] documents,
-    UIntPtr numDocs,
-    UIntPtr topK,
-    out KjarniRerankResults result);
-
-        // =================================================================
-        // Function Declarations - Indexer
-        // =================================================================
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_reranker_rerank_top_k(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string query,
+            IntPtr[] documents,
+            UIntPtr numDocs,
+            UIntPtr topK,
+            out KjarniRerankResults result);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniIndexerConfig kjarni_indexer_config_default();
@@ -634,10 +567,6 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_indexer_chunk_size(IntPtr handle);
 
-        // =================================================================
-        // Function Declarations - Searcher
-        // =================================================================
-
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniSearcherConfig kjarni_searcher_config_default();
 
@@ -690,12 +619,8 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern UIntPtr kjarni_searcher_reranker_model(IntPtr handle, IntPtr buf, UIntPtr buf_len);
 
-[DllImport(LibName)]
-public static extern float kjarni_cosine_similarity(float[] a, float[] b, nuint len);
-
-        // =================================================================
-        // Helpers
-        // =================================================================
+        [DllImport(LibName)]
+        public static extern float kjarni_cosine_similarity(float[] a, float[] b, nuint len);
 
         public static void CheckError(KjarniErrorCode err)
         {

@@ -362,10 +362,6 @@ impl Cache for MockCache {
     }
 }
 
-// =========================================================================
-//  Tests
-// =========================================================================
-
 #[tokio::test]
 async fn test_generator_setup() {
     let model = Arc::new(MockDecoderModel::new());

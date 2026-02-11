@@ -33,28 +33,13 @@ pub struct DecoderOutput {
 
 /// Unified transformer decoder for seq2seq models.
 pub struct Seq2SeqCPUDecoder {
-    /// Token embeddings
     embeddings: Embeddings,
-
-    /// Embedding layer normalization (BART, Whisper)
     embed_norm: Option<Normalization>,
-
-    /// Transformer layers
     layers: Vec<CrossDecoderLayer>,
-
-    /// Final layer normalization (T5, Whisper)
     final_norm: Option<Normalization>,
-
-    /// Position encoding implementation
     position_encoding: PositionEncoding,
-
-    /// Use pre-norm (T5, Whisper) vs post-norm (BART)
     pre_norm: bool,
-
-    /// Model metadata
     pub meta: ModelMetadata,
-
-    /// Model layout (for reference)
     pub layout: ModelLayout,
 }
 
@@ -662,9 +647,6 @@ mod seq2seq_decoder_tests {
         }
     }
 
-    // =========================================================================
-    //  2. Helpers
-    // =========================================================================
 
     fn create_model_weights(
         weights_map: HashMap<String, Vec<f32>>,
@@ -826,10 +808,6 @@ mod seq2seq_decoder_tests {
         (w, s)
     }
 
-    // =========================================================================
-    //  3. Test
-    // =========================================================================
-
     #[test]
     fn test_decoder_bart_golden() -> Result<()> {
         let (weights_map, shapes) = get_bart_decoder_golden_data();
@@ -848,7 +826,7 @@ mod seq2seq_decoder_tests {
             position_encoding: PositionEncodingType::Learned { offset: 0 },
             normalize_embeddings: true,
             final_layer_norm: true,
-            pre_norm: false, // Match config
+            pre_norm: false, 
         };
 
         let decoder = Seq2SeqCPUDecoder::new(
@@ -858,8 +836,6 @@ mod seq2seq_decoder_tests {
             ModelLoadConfig::default(),
         )?;
 
-        // Inputs
-        // Decoder Input: [1, 2] (Batch=1, Seq=2)
         let dec_ids = Array2::from_shape_vec((1, 2), vec![1u32, 2]).unwrap();
 
         // Encoder Output: [1, 3, 4] (Batch, EncSeq, Hidden)
@@ -868,26 +844,13 @@ mod seq2seq_decoder_tests {
             0.461657, 0.267351, 0.534905, 0.809357,
         ];
         let enc_hidden = Array3::from_shape_vec((1, 3, 4), enc_out_data).unwrap();
-
-        // Masks (Optionally passed to forward2 via `decoder_padding_mask` / `encoder_padding_mask`)
-        // The trait method `forward2` generates the causal mask internally.
-        // We just need to pass None for padding if we assume full sequences.
-        // Or if we want to match the Python script exactly, Python used explicit masks.
-        // forward2 will generate causal mask [2, 2] which matches Python's torch.tril(ones).
-
-        // Cache Setup
         let mut cache = CpuBeamKVCache::new(1, 1, 10, 4);
-        // We need to initialize the Cross Attention cache since `forward2` expects it if optimization is used
-        // But for a single pass test without previous state, we can compute it on the fly or precompute.
-        // Let's precompute it properly using the decoder method.
         let cross_cache = decoder.precompute_cross_attention_kv(&enc_hidden)?;
-
-        // Run Forward
         let output = decoder.forward(
             &dec_ids,
             &enc_hidden,
-            None, // decoder_padding_mask (None = all ones)
-            None, // encoder_padding_mask (None = all ones)
+            None, 
+            None, 
             Some(&mut cache),
             Some(&cross_cache),
             0,

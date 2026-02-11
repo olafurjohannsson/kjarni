@@ -734,10 +734,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             }
             println!("[PASS] {}\n", name);
         }
-
-        // ========================================================================
-        // SETUP: Get encoder hidden states (we know this works)
-        // ========================================================================
         let encoder_tokens: Vec<u32> = vec![0, 100, 200, 300, 400, 2];
         let encoder_input_ids =
             Array2::from_shape_vec((1, encoder_tokens.len()), encoder_tokens.clone())?;
@@ -746,7 +742,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         // CPU encoder forward
         let cpu_ops = cpu_model.encoder_cpu_ops().expect("Ops invalid");
         let gpu_ops = gpu_model.encoder_gpu_ops().expect("erro");
-        // let cpu_encoder_output = cpu_encoder.forward(&encoder_input_ids, &encoder_mask, None)?;
         let cpu_encoder_output =
             cpu_ops.forward_tokens(&encoder_input_ids, Some(&encoder_mask), None, 0)?;
 
@@ -771,25 +766,9 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 None,
                 0,
             )?;
-
-            // let output = gpu_encoder.forward(
-            //     enc,
-            //     pool_ref,
-            //     ModelInput::TokensGpu(&encoder_input_ids_gpu),
-            //     &encoder_mask_gpu,
-            //     None,
-            // )?;
             frame.finish();
             output.last_hidden_state
         };
-
-        println!("✓ Encoder outputs ready\n");
-
-        // ========================================================================
-        // DECODER TESTS
-        // ========================================================================
-
-        // Decoder input: just the BOS token
         let decoder_tokens: Vec<u32> = vec![2]; // decoder_start_token_id for BART
         let decoder_input_ids =
             Array2::from_shape_vec((1, decoder_tokens.len()), decoder_tokens.clone())?;
@@ -905,9 +884,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             frame.finish();
             cross_kv
         };
-
-        // Compare cross KV caches
-        println!("GPU cross KV layers: {}", gpu_cross_kv.0.len());
         if let Some((k_gpu, v_gpu)) = gpu_cross_kv.0.first() {
             let k_cpu_arr = k_gpu.to_ndarray_4d::<f32>().await?;
             let v_cpu_arr = v_gpu.to_ndarray_4d::<f32>().await?;
@@ -928,18 +904,8 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             }
         }
 
-        println!("=== DECODER STEP 4: LAYER 0 DETAILED BREAKDOWN ===");
-
-        // Get layer 0 references
         let cpu_layer0 = &cpu_decoder.layers()[0];
         let gpu_layer0 = &gpu_decoder.layers()[0];
-
-        println!("=== DECODER STEP 4a-DETAIL: SELF-ATTENTION INTERNALS ===");
-
-        // ============================================================
-        // Check Q, K, V projections BEFORE attention
-        // ============================================================
-        println!("--- Checking Q/K/V Projections ---");
 
         let decoder_embed = cpu_ops.embed_tokens(&decoder_input_ids, None, position_offset)?;
         let decoder_hidden_cpu = cpu_decoder.embed_norm(&decoder_embed)?;
@@ -1023,21 +989,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 v_out.to_ndarray_3d::<f32>().await?,
             )
         };
-
-        println!(
-            "GPU Q first 5: {:?}",
-            gpu_q.iter().take(5).collect::<Vec<_>>()
-        );
-        println!(
-            "GPU K first 5: {:?}",
-            gpu_k.iter().take(5).collect::<Vec<_>>()
-        );
-        println!(
-            "GPU V first 5: {:?}",
-            gpu_v.iter().take(5).collect::<Vec<_>>()
-        );
-
-        // Compare
         let q_diff = cpu_q
             .iter()
             .zip(gpu_q.iter())
@@ -1067,13 +1018,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
         if v_diff > 0.001 {
             panic!("[FAIL] V projection diverged!");
         }
-
-        println!("[PASS] Q/K/V Projections match\n");
-
-        // ============================================================
-        // Check attention scores (Q @ K^T)
-        // ============================================================
-        println!("--- Checking Attention Scores ---");
 
         // CPU: Compute scores manually
         // Q, K are [1, 1024], need to reshape to [1, 16, 1, 64] for heads
@@ -1105,9 +1049,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             * scale;
         println!("CPU attention score (head 0): {:.6}", cpu_score_h0);
 
-        // ============================================================
-        // STEP 4a: SELF-ATTENTION ONLY (with residual + norm)
-        // ============================================================
         println!("--- 4a: Self-Attention Block ---");
 
         let (attn_out, new_k, new_v) =
@@ -1200,7 +1141,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             );
         }
 
-        println!("--- 4b: Cross-Attention Block ---");
         let cross_attn_output = cpu_layer0.cross_attn.forward(
             &cpu_after_self_attn,
             &cpu_cross_kv.0[0].0,
@@ -1313,13 +1253,6 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
                 cross_attn_diff
             );
         }
-        println!("[PASS] Cross-Attention Block\n");
-
-        // ============================================================
-        // STEP 4c: FFN ONLY (with residual + norm)
-        // ============================================================
-        println!("--- 4c: FFN Block ---");
-
         let cpu_after_ffn = cpu_layer0.feed_forward(&cpu_after_cross_attn)?;
         println!("CPU after FFN+norm shape: {:?}", cpu_after_ffn.shape());
         println!(
@@ -1420,30 +1353,15 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             final_output.to_ndarray_3d::<f32>().await?
         };
 
-        println!("GPU after FFN+norm shape: {:?}", gpu_after_ffn.shape());
-        println!(
-            "GPU after FFN+norm first 5: {:?}",
-            gpu_after_ffn.iter().take(5).collect::<Vec<_>>()
-        );
-
         let ffn_diff = cpu_after_ffn
             .iter()
             .zip(gpu_after_ffn.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        println!("[FFN Block] Max diff: {:.6}", ffn_diff);
 
         if ffn_diff > 0.001 {
             panic!("[FAIL] FFN Block diverged! max_diff = {}", ffn_diff);
         }
-        println!("[PASS] FFN Block\n");
-
-        // ============================================================
-        // STEP 4d: COMPARE WITH FULL LAYER FORWARD
-        // ============================================================
-        println!("--- 4d: Full Layer 0 Forward (should match 4c) ---");
-
-        // CPU full forward (what we had before)
         let cpu_layer0_full = cpu_decoder.forward_layers(
             &decoder_hidden_cpu,
             &cpu_encoder_hidden,
@@ -1461,18 +1379,11 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             .zip(cpu_after_ffn.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        println!(
-            "CPU full forward vs step-by-step diff: {:.6}",
-            full_vs_step_diff
-        );
 
         if full_vs_step_diff > 1e-6 {
-            println!("WARNING: CPU step-by-step doesn't match full forward!");
+            panic!("WARNING: CPU step-by-step doesn't match full forward!");
         }
 
-        println!("\n=== BREAKDOWN COMPLETE ===\n");
-
-        println!("=== DECODER STEP 4: FORWARD LAYER 0 (no self-attn cache) ===");
         let decoder_embed = cpu_ops.embed_tokens(&decoder_input_ids, None, position_offset)?;
         let decoder_hidden = cpu_decoder.embed_norm(&decoder_embed)?;
 

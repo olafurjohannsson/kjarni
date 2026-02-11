@@ -310,9 +310,6 @@ impl Seq2SeqGPUEncoder {
                 GpuTensor::from_ndarray(context, &fc2_b)?,
             )?);
 
-            // ================================================================
-            // FFN LAYER NORM
-            // ================================================================
             let ffn_norm_w = encoder_layout
                 .layer
                 .ffn
@@ -353,10 +350,6 @@ impl Seq2SeqGPUEncoder {
                     )?,
                 )?)
             };
-
-            // ================================================================
-            // BUILD LAYER
-            // ================================================================
             layers.push(GpuEncoderLayer::new(
                 context,
                 self_attn_weights,
@@ -371,11 +364,6 @@ impl Seq2SeqGPUEncoder {
         Ok(layers)
     }
 
-    // ========================================================================
-    // ACCESSORS
-    // ========================================================================
-
-    /// Get the WGPU context.
     pub fn context(&self) -> &Arc<WgpuContext> {
         &self.context
     }
@@ -390,21 +378,18 @@ impl Seq2SeqGPUEncoder {
         self.meta.hidden_size
     }
 
-    /// Whether this encoder uses pre-norm architecture.
     pub fn is_prenorm(&self) -> bool {
         self.pre_norm
     }
 
-    /// Whether this encoder has embedding layer norm.
     pub fn has_embed_norm(&self) -> bool {
         self.embed_layer_norm.is_some()
     }
 
-    /// Whether this encoder has final layer norm.
     pub fn has_final_norm(&self) -> bool {
         self.final_layer_norm.is_some()
     }
-    /// Uses CPU fallback since this is only for testing/rare use cases.
+    
     pub fn apply_sinusoidal_positions(
         &self,
         hidden_states: &Array3<f32>,
@@ -435,10 +420,6 @@ impl Seq2SeqGPUEncoder {
         self.sinusoidal_cache.is_some()
     }
 }
-
-// ============================================================================
-// GpuEncoder TRAIT IMPLEMENTATION
-// ============================================================================
 
 impl GpuEncoder for Seq2SeqGPUEncoder {
     fn embed(
@@ -472,7 +453,6 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
                 Ok(output)
             }
             _ => {
-                // No embed norm (e.g., T5) - return input unchanged
                 Ok(hidden_states.clone())
             }
         }
@@ -538,7 +518,6 @@ impl GpuEncoder for Seq2SeqGPUEncoder {
                 Ok(output)
             }
             _ => {
-                // No final norm (e.g., BART) - return input unchanged
                 Ok(hidden_states.clone())
             }
         }
@@ -583,10 +562,6 @@ mod seq2seq_gpu_encoder_tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    // ========================================================================
-    // Test Helpers
-    // ========================================================================
-
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new()
             .await
@@ -626,10 +601,6 @@ mod seq2seq_gpu_encoder_tests {
 
         println!("{}: PASSED (max_diff={})", context, max_diff);
     }
-
-    // ========================================================================
-    // Mock Config (same as CPU tests)
-    // ========================================================================
 
     #[derive(Debug, Clone)]
     struct MockConfig {
@@ -722,10 +693,6 @@ mod seq2seq_gpu_encoder_tests {
         }
     }
 
-    // ========================================================================
-    // Weight Creation Helper
-    // ========================================================================
-
     fn create_model_weights(
         weights_map: HashMap<String, Vec<f32>>,
         shapes: HashMap<String, Vec<usize>>,
@@ -755,15 +722,10 @@ mod seq2seq_gpu_encoder_tests {
         Ok((weights, dir))
     }
 
-    // ========================================================================
-    // Golden Data Generators (same as CPU tests)
-    // ========================================================================
-
     fn get_bart_golden_data() -> (HashMap<String, Vec<f32>>, HashMap<String, Vec<usize>>) {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
 
-        // Token embeddings
         w.insert(
             "token_emb".into(),
             vec![
@@ -775,7 +737,6 @@ mod seq2seq_gpu_encoder_tests {
         );
         s.insert("token_emb".into(), vec![10, 4]);
 
-        // Position embeddings
         let pos_data: Vec<f32> = (0..1024 * 4).map(|i| 0.041 + (i as f32 * 0.001)).collect();
         w.insert("pos_emb".into(), pos_data);
         s.insert("pos_emb".into(), vec![1024, 4]);
@@ -1130,7 +1091,6 @@ mod seq2seq_gpu_encoder_tests {
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
         let mask_gpu = GpuTensor::from_ndarray(&ctx, &mask)?;
 
-        // Test forward_layers with range [0, 0] - should return input unchanged
         let output_empty_range = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;
@@ -1143,9 +1103,7 @@ mod seq2seq_gpu_encoder_tests {
         };
 
         assert_eq!(output_empty_range.shape(), input.shape());
-        println!("Empty range test PASSED");
 
-        // Test forward_layers with full range [0, 1]
         let output_full = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;
@@ -1206,8 +1164,6 @@ mod seq2seq_gpu_encoder_tests {
             Array3::from_shape_vec((1, 2, 4), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])?;
 
         let input_gpu = GpuTensor::from_ndarray(&ctx, &input)?;
-
-        // embed_norm should return input unchanged
         let output = {
             let pool = ctx.get_inference_pool();
             let pool_guard = pool.lock().await;

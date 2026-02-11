@@ -7,12 +7,7 @@ use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-// Use your existing Llama decoders!
 use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder};
-
-// todo mode tom models?
-
-// Use the Qwen Config we just made
 use crate::models::qwen::config::QwenConfig;
 
 use kjarni_transformers::{
@@ -34,8 +29,6 @@ pub struct QwenModel {
     pipeline: DecoderPipeline,
     tokenizer: Tokenizer,
     config: Arc<QwenConfig>,
-    // Qwen uses ChatML. If you don't have ChatMLTemplate yet, use generic or generic llama3
-    // But Qwen typically uses: <|im_start|>user\n...\n<|im_end|><|im_start|>assistant\n
     chat_template: Option<Box<dyn ChatTemplate>>,
     generation_defaults: Option<HFGenerationDefaults>,
 }
@@ -102,8 +95,6 @@ impl DecoderModelFactory for QwenModel {
         }
     }
 }
-
-// ... Boilerplate Implementation (Copy of LlamaModel impls) ...
 
 impl QwenModel {
     pub async fn from_registry(
@@ -233,13 +224,10 @@ impl LanguageModel for QwenModel {
     }
     fn stop_token_ids(&self) -> std::collections::HashSet<u32> {
         let mut set = std::collections::HashSet::new();
-
-        // Add all IDs from the config (Qwen often has 2-3)
         for id in &self.config.eos_token_id {
             set.insert(*id);
         }
 
-        // Specifically ensure ChatML end token is there
         if let Some(im_end) = self.tokenizer().token_to_id("<|im_end|>") {
             set.insert(im_end);
         }
@@ -280,9 +268,9 @@ impl DecoderLanguageModel for QwenModel {
             max_new_tokens: Some(512),
             max_length: self.config.max_position_embeddings,
             min_length: 0,
-            repetition_penalty: 1.1, // Qwen benefits from slight penalty
+            repetition_penalty: 1.1, 
             no_repeat_ngram_size: 0,
-            add_bos_token: false, // Qwen usually doesn't need explicit BOS if chat template handles it
+            add_bos_token: false, 
             strategy: DecodingStrategy::Sample(SamplingParams {
                 temperature: 0.7,
                 top_k: Some(40),
@@ -294,7 +282,6 @@ impl DecoderLanguageModel for QwenModel {
     }
 }
 
-// Forward CPU/GPU Ops to the pipeline (Reuse Llama logic essentially)
 impl CpuDecoderOps for QwenModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         self.pipeline.cpu_decoder().unwrap()
@@ -307,9 +294,6 @@ impl CpuDecoderOps for QwenModel {
             seq,
             seq + past,
         ))
-        // Ok(kjarni_transformers::utils::create_full_attention_mask(
-        //     1, seq,
-        // ))
     }
     fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
         self.pipeline.embeddings().embed_cpu(tokens, None, pos)

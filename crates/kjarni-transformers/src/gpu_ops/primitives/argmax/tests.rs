@@ -50,10 +50,6 @@ fn create_output_buffer(context: &WgpuContext) -> wgpu::Buffer {
     })
 }
 
-// ========================================================================
-//  Basic Functionality Tests
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_simple() -> Result<()> {
     let context = get_test_context().await;
@@ -114,10 +110,6 @@ async fn test_argmax_last_element() -> Result<()> {
     Ok(())
 }
 
-// ========================================================================
-//  Negative Values Tests
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_with_negative_values() -> Result<()> {
     let context = get_test_context().await;
@@ -157,11 +149,6 @@ async fn test_argmax_mixed_positive_negative() -> Result<()> {
 
     Ok(())
 }
-
-// ========================================================================
-//  Edge Cases
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_single_element() -> Result<()> {
     let context = get_test_context().await;
@@ -242,10 +229,6 @@ async fn test_argmax_zeros() -> Result<()> {
     Ok(())
 }
 
-// ========================================================================
-//  Realistic Vocab Size Tests
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_large_vocab() -> Result<()> {
     let context = get_test_context().await;
@@ -324,10 +307,6 @@ async fn test_argmax_llama_vocab_size() -> Result<()> {
     Ok(())
 }
 
-// ========================================================================
-//  Numerical Precision Tests
-// ========================================================================
-
 #[tokio::test]
 async fn test_argmax_very_close_values() -> Result<()> {
     let context = get_test_context().await;
@@ -391,10 +370,6 @@ async fn test_argmax_small_magnitude() -> Result<()> {
     Ok(())
 }
 
-// ========================================================================
-//  CPU Reference Comparison Tests
-// ========================================================================
-
 fn cpu_argmax(logits: &[f32]) -> u32 {
     logits
         .iter()
@@ -440,12 +415,11 @@ async fn test_argmax_matches_cpu_random_large() -> Result<()> {
         .map(|i| ((i * 17 + 31) % 997) as f32 / 10.0 - 50.0) // Prime modulo avoids repeats
         .collect();
     
-    // Ensure unique max at known position
     let expected_idx = 7777;
-    logits_vec[expected_idx] = 1000.0; // Guaranteed unique max
+    logits_vec[expected_idx] = 1000.0;
 
     let expected = cpu_argmax(&logits_vec);
-    assert_eq!(expected, expected_idx as u32); // Sanity check
+    assert_eq!(expected, expected_idx as u32); 
 
     let logits = Array2::from_shape_vec((1, 10000), logits_vec)?;
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
@@ -491,7 +465,6 @@ async fn test_argmax_ascending_values() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
 
-    // Ascending values - max should be last
     let logits_vec: Vec<f32> = (0..256).map(|i| i as f32).collect();
 
     let logits = Array2::from_shape_vec((1, 256), logits_vec)?;
@@ -529,10 +502,6 @@ async fn test_argmax_descending_values() -> Result<()> {
 
     Ok(())
 }
-
-// ========================================================================
-//  Kernel Reuse Test
-// ========================================================================
 
 #[tokio::test]
 async fn test_argmax_kernel_reuse() -> Result<()> {

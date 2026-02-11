@@ -5,10 +5,6 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    // =================================================================
-    // Reranker (MiniLM-L6-V2 Cross-Encoder)
-    // =================================================================
-
     public class RerankerTests : IDisposable
     {
         private readonly Reranker _reranker;
@@ -178,15 +174,8 @@ namespace Kjarni.Tests
                 "El aprendizaje automático es una rama de la inteligencia artificial.");
 
             _output.WriteLine($"Spanish query-doc score: {score:F6}");
-
-            // Should return a valid float, not crash
             Assert.False(float.IsNaN(score));
         }
-
-        // =============================================================
-        // Dispose Safety
-        // =============================================================
-
         [Fact]
         public void Score_AfterDispose_Throws()
         {

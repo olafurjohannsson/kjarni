@@ -7,11 +7,9 @@ use std::path::Path;
 use kjarni::{Device, ModelArchitecture, ModelType, SentenceEncoder, registry};
 
 pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) -> Result<()> {
-    // 1. Resolve texts (could be file paths)
     let content1 = resolve_text(text1)?;
     let content2 = resolve_text(text2)?;
 
-    // 2. Load encoder
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
     let model_type =
         ModelType::from_cli_name(model).ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
@@ -33,7 +31,6 @@ pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) 
 
     let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
 
-    // 3. Encode both texts
     if !quiet {
         eprintln!("Computing similarity...");
         eprintln!();
@@ -41,10 +38,7 @@ pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) 
 
     let embeddings = encoder.encode_batch(&[&content1, &content2]).await?;
 
-    // 4. Compute cosine similarity
     let similarity = cosine_similarity(&embeddings[0], &embeddings[1]);
-
-    // 5. Output
     let output = format_output(similarity, &content1, &content2, quiet);
     print!("{}", output);
 
@@ -125,11 +119,6 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    // =========================================================================
-    // cosine_similarity tests
-    // =========================================================================
-
     #[test]
     fn test_cosine_similarity_identical() {
         let a = vec![1.0, 2.0, 3.0];
@@ -165,9 +154,8 @@ mod tests {
 
     #[test]
     fn test_cosine_similarity_scaled() {
-        // Cosine similarity should be scale-invariant
         let a = vec![1.0, 2.0, 3.0];
-        let b = vec![2.0, 4.0, 6.0]; // 2x scaled
+        let b = vec![2.0, 4.0, 6.0]; 
         let sim = cosine_similarity(&a, &b);
         assert!(
             (sim - 1.0).abs() < 1e-6,
@@ -188,7 +176,6 @@ mod tests {
         let a: Vec<f32> = vec![];
         let b: Vec<f32> = vec![];
         let sim = cosine_similarity(&a, &b);
-        // Empty vectors - edge case, should handle gracefully
         assert!(sim.is_finite());
     }
 
@@ -197,7 +184,6 @@ mod tests {
         let a = vec![0.0, 0.0, 0.0];
         let b = vec![1.0, 2.0, 3.0];
         let sim = cosine_similarity(&a, &b);
-        // Should handle zero vector without NaN (due to max(1e-9))
         assert!(sim.is_finite());
         assert!(sim.abs() < 1e-6);
     }
@@ -212,7 +198,6 @@ mod tests {
 
     #[test]
     fn test_cosine_similarity_realistic_embeddings() {
-        // Simulating 384-dim embeddings
         let a: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).sin()).collect();
         let b: Vec<f32> = (0..384).map(|i| (i as f32 * 0.01).cos()).collect();
         let sim = cosine_similarity(&a, &b);
@@ -235,10 +220,6 @@ mod tests {
         let sim = cosine_similarity(&a, &b);
         assert!((sim - (-1.0)).abs() < 1e-6);
     }
-
-    // =========================================================================
-    // interpret_similarity tests
-    // =========================================================================
 
     #[test]
     fn test_interpret_similarity_very_similar() {
@@ -278,23 +259,18 @@ mod tests {
 
     #[test]
     fn test_interpret_similarity_boundary_values() {
-        // Test exact boundary values
-        assert_eq!(interpret_similarity(0.9), "Highly similar"); // <= 0.9
+        assert_eq!(interpret_similarity(0.9), "Highly similar"); 
         assert_eq!(
             interpret_similarity(0.90001),
             "Very similar / near duplicate"
-        ); // > 0.9
-        assert_eq!(interpret_similarity(0.7), "Moderately similar"); // <= 0.7
-        assert_eq!(interpret_similarity(0.70001), "Highly similar"); // > 0.7
-        assert_eq!(interpret_similarity(0.5), "Somewhat related"); // <= 0.5
-        assert_eq!(interpret_similarity(0.50001), "Moderately similar"); // > 0.5
-        assert_eq!(interpret_similarity(0.3), "Not similar"); // <= 0.3
-        assert_eq!(interpret_similarity(0.30001), "Somewhat related"); // > 0.3
+        ); 
+        assert_eq!(interpret_similarity(0.7), "Moderately similar"); 
+        assert_eq!(interpret_similarity(0.70001), "Highly similar"); 
+        assert_eq!(interpret_similarity(0.5), "Somewhat related"); 
+        assert_eq!(interpret_similarity(0.50001), "Moderately similar"); 
+        assert_eq!(interpret_similarity(0.3), "Not similar"); 
+        assert_eq!(interpret_similarity(0.30001), "Somewhat related"); 
     }
-
-    // =========================================================================
-    // truncate tests
-    // =========================================================================
 
     #[test]
     fn test_truncate_short_string() {
@@ -346,10 +322,6 @@ mod tests {
         assert_eq!(truncate("hello", 4), "h...");
     }
 
-    // =========================================================================
-    // resolve_text tests
-    // =========================================================================
-
     #[test]
     fn test_resolve_text_literal() {
         let result = resolve_text("hello world").unwrap();
@@ -358,7 +330,6 @@ mod tests {
 
     #[test]
     fn test_resolve_text_literal_with_path_like_string() {
-        // A string that looks like a path but doesn't exist
         let result = resolve_text("/nonexistent/path/to/file.txt").unwrap();
         assert_eq!(result, "/nonexistent/path/to/file.txt");
     }
@@ -399,11 +370,6 @@ mod tests {
         let result = resolve_text("").unwrap();
         assert_eq!(result, "");
     }
-
-    // =========================================================================
-    // format_output tests
-    // =========================================================================
-
     #[test]
     fn test_format_output_quiet() {
         let output = format_output(0.85, "text one", "text two", true);
@@ -413,7 +379,7 @@ mod tests {
     #[test]
     fn test_format_output_quiet_precision() {
         let output = format_output(0.123456789, "a", "b", true);
-        assert!(output.contains("0.123457")); // 6 decimal places, rounded
+        assert!(output.contains("0.123457")); 
     }
 
     #[test]
@@ -461,13 +427,9 @@ mod tests {
         assert!(output.contains("Very similar / near duplicate"));
     }
 
-    // =========================================================================
-    // Integration-like tests
-    // =========================================================================
 
     #[test]
     fn test_full_workflow_literal_texts() {
-        // Simulate the non-encoder parts of the workflow
         let text1 = "The quick brown fox jumps over the lazy dog";
         let text2 = "A fast auburn fox leaps above a sleepy canine";
 
@@ -476,10 +438,7 @@ mod tests {
 
         assert_eq!(content1, text1);
         assert_eq!(content2, text2);
-
-        // Simulate similarity (would come from encoder)
         let similarity = 0.75;
-
         let output = format_output(similarity, &content1, &content2, false);
         assert!(output.contains("Highly similar"));
     }
@@ -498,14 +457,8 @@ mod tests {
         assert!(content1.contains("content from a file"));
         assert_eq!(content2, "literal text input");
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_cosine_similarity_small_values() {
-        // Use values small enough to test precision but large enough to avoid epsilon floor (1e-9)
         let a = vec![1e-4, 1e-4, 1e-4];
         let b = vec![1e-4, 1e-4, 1e-4];
         let sim = cosine_similarity(&a, &b);
@@ -546,7 +499,6 @@ mod tests {
     #[test]
     fn test_format_output_newlines_in_text() {
         let output = format_output(0.8, "line1\nline2", "other\ntext", false);
-        // truncate should replace newlines
         assert!(output.contains("line1 line2"));
         assert!(output.contains("other text"));
     }
@@ -559,13 +511,11 @@ mod tests {
 
     #[test]
     fn test_interpret_similarity_edge_negative() {
-        // Very negative similarity
         assert_eq!(interpret_similarity(-1.0), "Not similar");
     }
 
     #[test]
     fn test_interpret_similarity_edge_over_one() {
-        // Due to floating point, might get > 1.0
         assert_eq!(interpret_similarity(1.001), "Very similar / near duplicate");
     }
 }

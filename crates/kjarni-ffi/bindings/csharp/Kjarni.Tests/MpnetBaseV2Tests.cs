@@ -5,10 +5,6 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    // =================================================================
-    // MPNet Base V2 (768 dimensions)
-    // =================================================================
-
     public class MpnetBaseV2Tests : IDisposable
     {
         private readonly Embedder _embedder;

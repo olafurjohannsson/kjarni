@@ -63,11 +63,7 @@ impl DecoderAttention {
 
         let q = self.q_proj.matmul(&hidden_2d);
         let mut q_3d = q.into_shape_with_order((batch, seq_len, self.num_heads * self.head_dim))?;
-
-        // Write KV into the END of the cache
         let start_write = total_len - seq_len;
-
-        // K Projection -> Write directly to Cache slice
         let k_new = self.k_proj.matmul(&hidden_2d);
         k_cache
             .slice_mut(s![.., start_write.., ..])
@@ -76,8 +72,6 @@ impl DecoderAttention {
                 seq_len,
                 self.num_kv_heads * self.head_dim,
             ))?);
-
-        // V Projection -> Write directly to Cache slice
         let v_new = self.v_proj.matmul(&hidden_2d);
         v_cache
             .slice_mut(s![.., start_write.., ..])
@@ -200,23 +194,10 @@ mod decoder_attention_test {
     use anyhow::Result;
     use ndarray::{Array2, Array3, Array4, s};
 
-    // ========================================================================
-    // 1. Helper: Load Weights from Flat Vectors
-    // ========================================================================
     fn load_linear(rows: usize, cols: usize, data: Vec<f32>) -> LinearLayer {
-        // Rust Array2::from_shape_vec fills row-major.
-        // PyTorch weights are [Out, In].
-        // Our LinearLayer typically expects [Out, In] (or [In, Out] depending on your impl).
-        // Assuming LinearLayer stores weights in [Out, In] or handles transposition internally
-        // to match standard matrix multiplication Wx + b.
         let weight = Array2::from_shape_vec((rows, cols), data).unwrap();
-        // Python mock had bias=False
         LinearLayer::new_f32(weight, None)
     }
-
-    // ========================================================================
-    // 2. Golden Values (Copied from prompt)
-    // ========================================================================
     fn get_weights() -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
         // weight_q Shape: [16, 16]
         let weight_q_data = vec![

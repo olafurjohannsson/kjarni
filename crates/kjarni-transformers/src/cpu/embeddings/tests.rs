@@ -3,7 +3,7 @@ mod embeddings_tests {
     
     use crate::{EmbeddingConfig, EmbeddingData, LoadedEmbeddings};
     use crate::gpu::{GpuTensor, GpuTensorPool};
-    use crate::models::base::ModelInput; // <--- Using your actual input enum
+    use crate::models::base::ModelInput;
     use crate::tensor::DType;
     use crate::weights::ModelWeights;
     use crate::{Embeddings, WgpuContext};
@@ -11,10 +11,6 @@ mod embeddings_tests {
     use ndarray::{Array2, Array3, arr2};
     
     use std::sync::Arc;
-
-    // =========================================================================
-    //  Helpers & Mocks
-    // =========================================================================
 
     fn create_dummy_weights(
         tensors: Vec<(&str, Vec<f32>, Vec<usize>)>,
@@ -60,10 +56,6 @@ mod embeddings_tests {
         }
     }
 
-    // =========================================================================
-    //  Unit Tests: CPU Math Logic (Verify Correctness)
-    // =========================================================================
-
     #[test]
     fn test_cpu_embeddings_math() {
         // 1. Setup Data
@@ -108,7 +100,6 @@ mod embeddings_tests {
     }
     #[test]
     fn test_position_embedding_with_offset() {
-        // Setup: word embeddings = 1.0, position embeddings = increasing values
         let word_emb = Array2::<f32>::from_elem((10, 2), 1.0); 
         let pos_emb = Array2::<f32>::from_shape_fn((10, 2), |(i, j)| i as f32 * 0.1 + j as f32);
 
@@ -116,25 +107,15 @@ mod embeddings_tests {
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
 
         let input_ids = Array2::<u32>::zeros((1, 4)); // batch 1, seq 4
-
-        // Use position_offset = 2 → slice positions 2..6 (but max 10)
         let output = embeddings.forward(&input_ids, None, 2, false);
 
-        // Check first sequence position: word=1.0 + pos_emb[2] = 1.0 + 0.2, 1.0 + 1.2
         assert_eq!(output[[0, 0, 0]], 1.0 + 0.2);
         assert_eq!(output[[0, 0, 1]], 1.0 + 1.2);
 
-        // Check last sequence position: word=1.0 + pos_emb[5] = 1.0 + 0.5, 1.0 + 1.5
         assert_eq!(output[[0, 3, 0]], 1.0 + 0.5);
         assert_eq!(output[[0, 3, 1]], 1.0 + 1.5);
     }
 
-    // =========================================================================
-    //  Integration Tests: LoadedEmbeddings (The Decision Matrix)
-    // =========================================================================
-
-    // Scenario 2: Hybrid (GPU Weights, CPU Input)
-    // Verifies automatic upload of tokens
     #[tokio::test]
     async fn test_scenario_hybrid_gpu_weights() -> Result<()> {
         let context = WgpuContext::new().await?;

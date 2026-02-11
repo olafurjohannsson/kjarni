@@ -115,13 +115,8 @@ mod ff_error_tests {
     use super::*;
     use std::ffi::CStr;
 
-    // =========================================================================
-    // KjarniErrorCode Enum Tests
-    // =========================================================================
-
     #[test]
     fn test_error_code_values() {
-        // Verify exact discriminant values (important for FFI stability)
         assert_eq!(KjarniErrorCode::Ok as i32, 0);
         assert_eq!(KjarniErrorCode::NullPointer as i32, 1);
         assert_eq!(KjarniErrorCode::InvalidUtf8 as i32, 2);
@@ -138,7 +133,6 @@ mod ff_error_tests {
 
     #[test]
     fn test_error_code_repr_c_size() {
-        // repr(C) enum should be at least i32 sized for FFI compatibility
         assert!(std::mem::size_of::<KjarniErrorCode>() >= std::mem::size_of::<i32>());
     }
 
@@ -163,10 +157,6 @@ mod ff_error_tests {
         assert_eq!(KjarniErrorCode::Ok, KjarniErrorCode::Ok);
         assert_ne!(KjarniErrorCode::Ok, KjarniErrorCode::Unknown);
     }
-
-    // =========================================================================
-    // Error Name Tests
-    // =========================================================================
 
     #[test]
     fn test_error_name_all_variants() {
@@ -201,7 +191,6 @@ mod ff_error_tests {
 
     #[test]
     fn test_error_name_returns_static_pointer() {
-        // Should return same pointer each time (static strings)
         let ptr1 = kjarni_error_name(KjarniErrorCode::Ok);
         let ptr2 = kjarni_error_name(KjarniErrorCode::Ok);
         let ptr3 = kjarni_error_name(KjarniErrorCode::Ok);
@@ -212,7 +201,6 @@ mod ff_error_tests {
 
     #[test]
     fn test_error_code_to_string_same_as_error_name() {
-        // These two functions should return the same result
         for code in [
             KjarniErrorCode::Ok,
             KjarniErrorCode::NullPointer,
@@ -224,10 +212,6 @@ mod ff_error_tests {
             assert_eq!(name_ptr, str_ptr);
         }
     }
-
-    // =========================================================================
-    // set_last_error Tests
-    // =========================================================================
 
     #[test]
     fn test_set_last_error_basic() {
@@ -306,12 +290,7 @@ mod ff_error_tests {
     fn test_set_last_error_with_null_byte() {
         kjarni_clear_error();
         
-        // CString::new fails on interior null bytes
-        // set_last_error should handle this gracefully (uses .ok())
         set_last_error("Before\0After");
-        
-        // The error might be None (CString::new failed) or truncated
-        // Either way, it shouldn't panic
         let _ = kjarni_last_error_message();
     }
 
@@ -327,10 +306,6 @@ mod ff_error_tests {
         assert_eq!(msg.to_str().unwrap(), long_msg);
     }
 
-    // =========================================================================
-    // kjarni_last_error_message Tests
-    // =========================================================================
-
     #[test]
     fn test_last_error_message_null_when_no_error() {
         kjarni_clear_error();
@@ -343,8 +318,6 @@ mod ff_error_tests {
     fn test_last_error_message_stable_pointer() {
         kjarni_clear_error();
         set_last_error("Test error");
-        
-        // Multiple calls should return the same pointer (no reallocation)
         let ptr1 = kjarni_last_error_message();
         let ptr2 = kjarni_last_error_message();
         let ptr3 = kjarni_last_error_message();
@@ -352,11 +325,6 @@ mod ff_error_tests {
         assert_eq!(ptr1, ptr2);
         assert_eq!(ptr2, ptr3);
     }
-
-    // =========================================================================
-    // kjarni_clear_error Tests
-    // =========================================================================
-
     #[test]
     fn test_clear_error_clears_message() {
         set_last_error("Some error");
@@ -377,7 +345,6 @@ mod ff_error_tests {
 
     #[test]
     fn test_clear_error_when_no_error() {
-        // Should not panic when clearing non-existent error
         LAST_ERROR.with(|e| {
             *e.borrow_mut() = None;
         });
@@ -385,11 +352,6 @@ mod ff_error_tests {
         kjarni_clear_error();
         assert!(kjarni_last_error_message().is_null());
     }
-
-    // =========================================================================
-    // map_result Tests
-    // =========================================================================
-
     #[test]
     fn test_map_result_ok_passes_through() {
         kjarni_clear_error();
@@ -398,7 +360,7 @@ mod ff_error_tests {
         let result = map_result(input, KjarniErrorCode::Unknown);
         
         assert_eq!(result, Ok(42));
-        assert!(kjarni_last_error_message().is_null()); // No error set
+        assert!(kjarni_last_error_message().is_null()); 
     }
 
     #[test]
@@ -462,11 +424,6 @@ mod ff_error_tests {
         
         assert_eq!(result.unwrap(), vec![1.0, 2.0, 3.0]);
     }
-
-    // =========================================================================
-    // Thread Safety Tests (Thread-Local Storage)
-    // =========================================================================
-
     #[test]
     fn test_error_thread_local_isolation() {
         use std::thread;
@@ -478,7 +435,6 @@ mod ff_error_tests {
             // New thread should have no error
             assert!(kjarni_last_error_message().is_null());
             
-            // Set error in this thread
             set_last_error("Child thread error");
             
             let msg_ptr = kjarni_last_error_message();
@@ -488,7 +444,6 @@ mod ff_error_tests {
         
         handle.join().unwrap();
         
-        // Main thread error should be unchanged
         let msg_ptr = kjarni_last_error_message();
         let msg = unsafe { CStr::from_ptr(msg_ptr) };
         assert_eq!(msg.to_str().unwrap(), "Main thread error");
@@ -540,48 +495,30 @@ mod ff_error_tests {
         });
         
         handle.join().unwrap();
-        
-        // Main thread should still have its error
         let msg_ptr = kjarni_last_error_message();
         let msg = unsafe { CStr::from_ptr(msg_ptr) };
         assert_eq!(msg.to_str().unwrap(), "Main error");
     }
 
-    // =========================================================================
-    // FFI Simulation Tests (What C/C#/Go/Python would do)
-    // =========================================================================
-
     #[test]
     fn test_ffi_error_handling_pattern() {
-        // Simulate typical FFI error handling pattern:
-        // 1. Call function
-        // 2. Check error code
-        // 3. If error, get message
-        // 4. Clear error for next call
-        
         kjarni_clear_error();
         
-        // Simulate a failed operation
         let result: Result<(), &str> = Err("Model file corrupt");
         let code = match map_result(result, KjarniErrorCode::LoadFailed) {
             Ok(_) => KjarniErrorCode::Ok,
             Err(e) => e,
         };
         
-        // C caller checks code
         assert_ne!(code, KjarniErrorCode::Ok);
-        
-        // C caller gets error name
         let name_ptr = kjarni_error_name(code);
         let name = unsafe { CStr::from_ptr(name_ptr) };
         assert_eq!(name.to_str().unwrap(), "KJARNI_ERROR_LOAD_FAILED");
         
-        // C caller gets detailed message
         let msg_ptr = kjarni_last_error_message();
         let msg = unsafe { CStr::from_ptr(msg_ptr) };
         assert_eq!(msg.to_str().unwrap(), "Model file corrupt");
         
-        // C caller clears error before next call
         kjarni_clear_error();
         assert!(kjarni_last_error_message().is_null());
     }
@@ -590,7 +527,6 @@ mod ff_error_tests {
     fn test_ffi_success_pattern() {
         kjarni_clear_error();
         
-        // Simulate successful operation
         let result: Result<i32, &str> = Ok(100);
         let code = match map_result(result, KjarniErrorCode::Unknown) {
             Ok(_) => KjarniErrorCode::Ok,
@@ -615,14 +551,8 @@ mod ff_error_tests {
         let msg2 = unsafe { CStr::from_ptr(kjarni_last_error_message()) };
         assert_eq!(msg2.to_str().unwrap(), "Second");
     }
-
-    // =========================================================================
-    // Edge Cases and Robustness
-    // =========================================================================
-
     #[test]
     fn test_error_name_all_codes_exhaustive() {
-        // Ensure every variant has a name (compile-time check via match)
         let all_codes = [
             KjarniErrorCode::Ok,
             KjarniErrorCode::NullPointer,
@@ -642,7 +572,6 @@ mod ff_error_tests {
             let ptr = kjarni_error_name(code);
             assert!(!ptr.is_null());
             
-            // Should be valid null-terminated string
             let s = unsafe { CStr::from_ptr(ptr) };
             assert!(s.to_str().is_ok());
             assert!(!s.to_str().unwrap().is_empty());
@@ -651,7 +580,6 @@ mod ff_error_tests {
 
     #[test]
     fn test_error_names_are_valid_c_identifiers() {
-        // Error names should be valid C macro/enum names
         let all_codes = [
             KjarniErrorCode::Ok,
             KjarniErrorCode::NullPointer,
@@ -671,10 +599,8 @@ mod ff_error_tests {
             let ptr = kjarni_error_name(code);
             let name = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
             
-            // Should start with KJARNI_
             assert!(name.starts_with("KJARNI_"), "Name '{}' doesn't start with KJARNI_", name);
             
-            // Should only contain valid C identifier chars
             assert!(
                 name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'),
                 "Name '{}' contains invalid characters",
@@ -708,29 +634,19 @@ mod ff_error_tests {
         }
     }
 
-    // =========================================================================
-    // Memory Safety Tests
-    // =========================================================================
-
     #[test]
     fn test_error_message_pointer_validity_after_new_error() {
         set_last_error("First error message");
         let ptr1 = kjarni_last_error_message();
         
-        // Read the message
         let msg1 = unsafe { CStr::from_ptr(ptr1) }.to_str().unwrap().to_owned();
         assert_eq!(msg1, "First error message");
         
-        // Set new error - old pointer may be invalidated
         set_last_error("Second error message");
         let ptr2 = kjarni_last_error_message();
         
-        // New pointer should be valid
         let msg2 = unsafe { CStr::from_ptr(ptr2) }.to_str().unwrap();
         assert_eq!(msg2, "Second error message");
-        
-        // Note: ptr1 is now dangling - this is expected behavior
-        // C callers must copy the string if they need to keep it
     }
 
     #[test]
@@ -741,13 +657,7 @@ mod ff_error_tests {
         // Read before clear
         let msg = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
         assert_eq!(msg, "Error message");
-        
-        // Clear - pointer is now dangling
         kjarni_clear_error();
-        
-        // New call should return null
         assert!(kjarni_last_error_message().is_null());
-        
-        // Note: original ptr is dangling - C callers must not use it
     }
 }

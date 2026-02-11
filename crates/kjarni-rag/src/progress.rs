@@ -197,10 +197,6 @@ mod progress_tests {
 
     use crate::progress::{CancelToken, Progress, ProgressReporter, ProgressStage};
 
-    // ============================================================================
-    // PROGRESS STRUCT TESTS
-    // ============================================================================
-
     #[test]
     fn test_progress_new() {
         let progress = Progress::new(ProgressStage::Scanning, 5, Some(10));
@@ -274,13 +270,8 @@ mod progress_tests {
         assert_eq!(progress.total, None);
     }
 
-    // ============================================================================
-    // PROGRESS STAGE TESTS
-    // ============================================================================
-
     #[test]
     fn test_progress_stage_variants() {
-        // Verify all stages exist and have correct repr(C) values
         assert_eq!(ProgressStage::Scanning as u8, 0);
         assert_eq!(ProgressStage::Loading as u8, 1);
         assert_eq!(ProgressStage::Embedding as u8, 2);
@@ -316,10 +307,6 @@ mod progress_tests {
         assert_eq!(debug_str, "Reranking");
     }
 
-    // ============================================================================
-    // PROGRESS CLONE TESTS
-    // ============================================================================
-
     #[test]
     fn test_progress_clone() {
         let original = Progress::embedding(50, Some(100));
@@ -338,10 +325,6 @@ mod progress_tests {
         assert!(debug_str.contains("Scanning"));
         assert!(debug_str.contains("10"));
     }
-
-    // ============================================================================
-    // CANCEL TOKEN TESTS
-    // ============================================================================
 
     #[test]
     fn test_cancel_token_new() {
@@ -471,10 +454,6 @@ mod progress_tests {
         handle.join().unwrap();
         assert!(!token.is_cancelled());
     }
-
-    // ============================================================================
-    // PROGRESS REPORTER TESTS
-    // ============================================================================
 
     #[test]
     fn test_progress_reporter_new_quiet() {

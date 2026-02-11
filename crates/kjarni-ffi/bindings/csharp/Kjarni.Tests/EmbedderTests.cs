@@ -5,10 +5,6 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    /// <summary>
-    /// End-to-end tests for the Embedder using minilm-l6-v2.
-    /// These tests download and run the actual model — no mocks.
-    /// </summary>
     public class EmbedderTests : IDisposable
     {
         private readonly Embedder _embedder;
@@ -25,10 +21,6 @@ namespace Kjarni.Tests
             _embedder.Dispose();
         }
 
-        // =============================================================
-        // Model Properties
-        // =============================================================
-
         [Fact]
         public void Dimension_Is384()
         {
@@ -41,10 +33,6 @@ namespace Kjarni.Tests
             var embedding = _embedder.Encode("Hello world");
             Assert.Equal(384, embedding.Length);
         }
-
-        // =============================================================
-        // Normalization
-        // =============================================================
 
         [Fact]
         public void Encode_OutputIsL2Normalized()
@@ -69,10 +57,6 @@ namespace Kjarni.Tests
             Assert.InRange(norm, 0.998f, 1.002f);
         }
 
-        // =============================================================
-        // Determinism
-        // =============================================================
-
         [Fact]
         public void Encode_IsDeterministic()
         {
@@ -86,10 +70,6 @@ namespace Kjarni.Tests
                 Assert.Equal(a[i], b[i]);
             }
         }
-
-        // =============================================================
-        // Similarity
-        // =============================================================
 
         [Fact]
         public void Similarity_RelatedWordsHigherThanUnrelated()
@@ -120,7 +100,6 @@ namespace Kjarni.Tests
         [Fact]
         public void Similarity_SemanticPairsRankedCorrectly()
         {
-            // These pairs should rank from most to least similar
             var pairs = new[]
             {
                 ("dog", "puppy"),
@@ -149,14 +128,9 @@ namespace Kjarni.Tests
         {
             var score = _embedder.Similarity("hello", "world");
             _output.WriteLine($"Score: {score:F6}");
-
-            // Cosine similarity of normalized vectors is in [-1, 1]
             Assert.InRange(score, -1.0f, 1.0f);
         }
 
-        // =============================================================
-        // Batch Encoding
-        // =============================================================
         [Fact]
         public void EncodeBatch_MatchesSingleEncode2()
         {
@@ -167,7 +141,6 @@ namespace Kjarni.Tests
             for (int i = 0; i < texts.Length; i++)
             {
                 var single = _embedder.Encode(texts[i]);
-                // Cosine similarity should be ~1.0 even if padding causes tiny element-wise diffs
                 var dot = single.Zip(batch[i], (a, b) => a * b).Sum();
                 Assert.InRange(dot, 0.9999f, 1.0001f);
             }
@@ -225,10 +198,6 @@ namespace Kjarni.Tests
             }
         }
 
-        // =============================================================
-        // Edge Cases
-        // =============================================================
-
         [Fact]
         public void Encode_UnicodeText()
         {
@@ -256,17 +225,11 @@ namespace Kjarni.Tests
         {
             var a = _embedder.Encode("The stock market crashed yesterday.");
             var b = _embedder.Encode("I love chocolate ice cream.");
-
-            // At least some dimensions must differ
             var diffs = a.Zip(b, (x, y) => MathF.Abs(x - y)).Sum();
             _output.WriteLine($"Total absolute difference: {diffs:F6}");
 
             Assert.True(diffs > 0.1f, "Different texts should produce different embeddings");
         }
-
-        // =============================================================
-        // Dispose Safety
-        // =============================================================
 
         [Fact]
         public void Encode_AfterDispose_Throws()

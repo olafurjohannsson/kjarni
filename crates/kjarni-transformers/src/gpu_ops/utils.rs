@@ -148,11 +148,6 @@ mod tests {
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()
     }
-
-    // ========================================================================
-    //  assert_vecs_are_close Tests
-    // ========================================================================
-
     #[test]
     fn test_assert_vecs_close_pass() {
         let a = vec![1.0, 2.0, 3.0];
@@ -236,7 +231,6 @@ mod tests {
     fn test_assert_vecs_close_at_boundary() {
         let a = vec![1.0];
         let b = vec![1.0001];
-        // Difference is exactly 0.0001, tolerance is 0.0001 - should pass (<=)
         assert_vecs_are_close(&a, &b, 0.00011);
     }
 

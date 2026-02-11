@@ -194,11 +194,6 @@ fn truncate(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // Helper to create mock RerankResult
-    // =========================================================================
-
     fn mock_result(index: usize, score: f32, document: &str) -> RerankResult {
         RerankResult {
             index,
@@ -206,10 +201,6 @@ mod tests {
             document: document.to_string(),
         }
     }
-
-    // =========================================================================
-    // truncate tests
-    // =========================================================================
 
     #[test]
     fn test_truncate_short_string() {
@@ -272,10 +263,6 @@ mod tests {
         assert_eq!(truncate("hello", 4), "h...");
     }
 
-    // =========================================================================
-    // model_not_found_error tests
-    // =========================================================================
-
     #[test]
     fn test_model_not_found_error_basic() {
         let error = model_not_found_error("unknown-model");
@@ -284,23 +271,15 @@ mod tests {
 
     #[test]
     fn test_model_not_found_error_with_suggestions() {
-        // Using a typo of a known model
         let error = model_not_found_error("minilm");
         assert!(error.contains("Unknown model"));
-        // May or may not have suggestions depending on similarity threshold
     }
 
     #[test]
     fn test_model_not_found_error_close_match() {
-        // Close to "minilm-l6-v2"
         let error = model_not_found_error("minilm-l6");
         assert!(error.contains("Unknown model"));
     }
-
-    // =========================================================================
-    // format_json tests
-    // =========================================================================
-
     #[test]
     fn test_format_json_single() {
         let results = vec![mock_result(0, 0.95, "test document")];
@@ -352,11 +331,6 @@ mod tests {
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert!(parsed.is_empty());
     }
-
-    // =========================================================================
-    // format_jsonl tests
-    // =========================================================================
-
     #[test]
     fn test_format_jsonl_single() {
         let results = vec![mock_result(0, 0.95, "doc")];
@@ -406,11 +380,6 @@ mod tests {
         let output = format_jsonl(&results).unwrap();
         assert!(output.is_empty());
     }
-
-    // =========================================================================
-    // format_text tests
-    // =========================================================================
-
     #[test]
     fn test_format_text_basic() {
         let results = vec![mock_result(0, 0.9512, "test document")];
@@ -465,16 +434,10 @@ mod tests {
 
     #[test]
     fn test_format_text_negative_score() {
-        // Cross-encoders can produce negative scores
         let results = vec![mock_result(0, -0.5, "doc")];
         let output = format_text(&results);
         assert!(output.contains("-0.5000"));
     }
-
-    // =========================================================================
-    // format_docs tests
-    // =========================================================================
-
     #[test]
     fn test_format_docs_single() {
         let results = vec![mock_result(0, 0.9, "document content")];
@@ -501,8 +464,6 @@ mod tests {
         let long_doc = "a".repeat(200);
         let results = vec![mock_result(0, 0.9, &long_doc)];
         let output = format_docs(&results);
-
-        // Unlike text format, docs should preserve full content
         assert!(output.contains(&long_doc));
     }
 
@@ -530,11 +491,6 @@ mod tests {
         let output = format_docs(&results);
         assert!(output.is_empty());
     }
-
-    // =========================================================================
-    // format_results dispatcher tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_json() {
         let results = vec![mock_result(0, 0.9, "test")];
@@ -590,11 +546,6 @@ mod tests {
         assert!(err.contains("text"));
         assert!(err.contains("docs"));
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_special_characters_in_document() {
         let results = vec![mock_result(0, 0.9, "doc with \"quotes\" and\ttabs")];
@@ -643,8 +594,6 @@ mod tests {
     #[test]
     fn test_multiline_document_in_text_format() {
         let results = vec![mock_result(0, 0.9, "line1\nline2\nline3")];
-
-        // text format uses truncate which replaces newlines
         let output = format_text(&results);
         assert!(output.contains("line1 line2 line3"));
         assert!(!output.contains("line1\nline2"));
@@ -654,9 +603,7 @@ mod tests {
     fn test_multiline_document_in_docs_format() {
         let results = vec![mock_result(0, 0.9, "line1\nline2")];
 
-        // docs format should preserve the document as-is
         let output = format_docs(&results);
-        // Note: the document itself contains newlines, plus one trailing newline
         assert!(output.contains("line1\nline2"));
     }
 
@@ -674,7 +621,6 @@ mod tests {
 
     #[test]
     fn test_very_high_score() {
-        // Some cross-encoders can produce scores > 1.0
         let results = vec![mock_result(0, 15.5, "high score")];
 
         let text_output = format_text(&results);

@@ -559,25 +559,11 @@ mod tests {
         );
     }
 
-    // ========================================================================
-    //  encode Type Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_any_backend_encode_cpu_returns_boxed() {
-        // This test would need a fully mocked model with ops
-        // For now, just verify the structure
         let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
-
-        // The encode method needs a model with encoder_decoder_cpu_ops
-        // which MockModel doesn't provide, so this will fail
-        // but we can at least verify the backend is properly constructed
         assert!(matches!(backend, AnyEncoderDecoderBackend::Cpu(_)));
     }
-
-    // ========================================================================
-    //  Generator Construction Edge Cases
-    // ========================================================================
 
     struct MockModelWithContext {
         device: Device,
@@ -666,7 +652,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_generator_new_gpu_with_context() {
-        // Create a real context
         let context = WgpuContext::new().await.expect("Failed to create context");
 
         let model = MockModelWithContext {
@@ -676,17 +661,11 @@ mod tests {
 
         let generator = EncoderDecoderGenerator::new(Box::new(model));
         assert!(generator.is_ok());
-
-        // Verify it's using GPU backend
         match &generator.unwrap().backend {
             AnyEncoderDecoderBackend::Gpu(_) => {}
             _ => panic!("Expected GPU backend"),
         }
     }
-
-    // ========================================================================
-    //  Multiple Beams Tests
-    // ========================================================================
 
     #[test]
     fn test_any_backend_create_tensor_multiple_beams() {
@@ -706,11 +685,6 @@ mod tests {
             _ => panic!("Expected U32 state"),
         }
     }
-
-    // ========================================================================
-    //  Reorder Cache Error Handling
-    // ========================================================================
-
     struct WrongCacheType;
 
     impl Cache for WrongCacheType {
@@ -743,10 +717,6 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("CpuBeamKVCache"));
     }
 
-    // ========================================================================
-    //  Empty Tokens Edge Case
-    // ========================================================================
-
     #[test]
     fn test_any_backend_create_tensor_empty_tokens() {
         let backend = AnyEncoderDecoderBackend::Cpu(CpuBackend);
@@ -754,7 +724,6 @@ mod tests {
         let tokens: Vec<u32> = vec![];
         let tensor = backend.create_token_tensor(&tokens, 1);
 
-        // Should handle empty gracefully
         assert!(tensor.is_ok());
     }
 
@@ -764,11 +733,7 @@ mod tests {
 
         let tokens = vec![1u32, 2];
         let mut tensor = backend.create_token_tensor(&tokens, 1).unwrap();
-
-        // Update with empty tokens
         let result = backend.update_token_tensor(&mut tensor, &[]);
-        // This might fail or succeed depending on implementation
-        // Just ensure it doesn't panic
         let _ = result;
     }
 }

@@ -145,7 +145,7 @@ impl GpuProfiler {
         let data = slice.get_mapped_range();
         let timestamps: &[u64] = bytemuck::cast_slice(&data);
 
-        let period = context.queue.get_timestamp_period(); // ns per tick
+        let period = context.queue.get_timestamp_period(); 
 
         log::info!("\n=== GPU KERNEL PROFILER ===");
         let mut total = 0.0;
@@ -153,7 +153,6 @@ impl GpuProfiler {
             let start = timestamps[i * 2];
             let end = timestamps[i * 2 + 1];
 
-            // Handle counter wrap-around or invalid queries
             if end < start {
                 continue;
             }
@@ -164,9 +163,7 @@ impl GpuProfiler {
 
             log::info!("{:<40} : {:.4} ms", label, duration_ms);
         }
-        log::info!("===========================");
         log::info!("TOTAL GPU TIME: {:.4} ms", total);
-        log::info!("===========================\n");
 
         drop(data);
         self.destination_buffer.unmap();

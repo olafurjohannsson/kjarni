@@ -5,10 +5,6 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    // =================================================================
-    // DistilBERT Base Cased (768 dimensions)
-    // =================================================================
-
     public class DistilBertBaseTests : IDisposable
     {
         private readonly Embedder _embedder;

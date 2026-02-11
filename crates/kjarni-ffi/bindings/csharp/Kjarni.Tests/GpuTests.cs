@@ -27,7 +27,7 @@ namespace Kjarni.Tests
             catch (KjarniException ex) when (ex.ErrorCode == KjarniErrorCode.GpuUnavailable)
             {
                 Skip.If(true, "No GPU available");
-                throw; // unreachable, but compiler needs it
+                throw;
             }
         }
 
@@ -36,10 +36,6 @@ namespace Kjarni.Tests
             _gpu?.Dispose();
             _cpu?.Dispose();
         }
-
-        // =============================================================
-        // Parity: GPU should produce same results as CPU
-        // =============================================================
 
         [SkippableFact]
         public void Encode_GpuMatchesCpu()
@@ -94,10 +90,6 @@ namespace Kjarni.Tests
 
             Assert.True(catDog > catQuantum);
         }
-
-        // =============================================================
-        // Batch: GPU should handle batch encoding
-        // =============================================================
 
         [SkippableFact]
         public void EncodeBatch_GpuMatchesCpu()

@@ -212,10 +212,6 @@ mod ffi_bridge_tests {
     use super::*;
     use std::ffi::{CStr, CString};
 
-    // =========================================================================
-    // Global Functions Tests
-    // =========================================================================
-
     #[test]
     fn test_kjarni_init_returns_ok() {
         let result = kjarni_init();
@@ -265,18 +261,11 @@ mod ffi_bridge_tests {
     fn test_kjarni_shutdown_safe_to_call() {
         // Should not panic or crash
         kjarni_shutdown();
-        kjarni_shutdown(); // Multiple calls should be safe
+        kjarni_shutdown(); 
     }
-
-    // =========================================================================
-    // Runtime Tests
-    // =========================================================================
-
     #[test]
     fn test_get_runtime_returns_valid_runtime() {
         let runtime = get_runtime();
-        
-        // Verify runtime works by spawning a simple task
         let result = runtime.block_on(async { 42 });
         assert_eq!(result, 42);
     }
@@ -285,23 +274,14 @@ mod ffi_bridge_tests {
     fn test_get_runtime_same_instance() {
         let runtime1 = get_runtime();
         let runtime2 = get_runtime();
-        
-        // Should be the same instance (pointer equality)
         assert!(std::ptr::eq(runtime1, runtime2));
     }
-
-    // =========================================================================
-    // KjarniFloatArray Tests
-    // =========================================================================
 
     #[test]
     fn test_float_array_from_vec_empty() {
         let arr = KjarniFloatArray::from_vec(vec![]);
         
-        // Empty vec behavior - data becomes dangling but len is 0
         assert_eq!(arr.len, 0);
-        
-        // Clean up (should handle empty case)
         unsafe { kjarni_float_array_free(arr); }
     }
 
@@ -312,7 +292,6 @@ mod ffi_bridge_tests {
         assert!(!arr.data.is_null());
         assert_eq!(arr.len, 1);
         
-        // Verify data integrity
         let value = unsafe { *arr.data };
         assert!((value - 3.14159).abs() < f32::EPSILON);
         
@@ -402,17 +381,12 @@ mod ffi_bridge_tests {
 
     #[test]
     fn test_float_array_free_null_with_nonzero_len() {
-        // Edge case: null pointer but len > 0 (invalid state, but should not crash)
         let arr = KjarniFloatArray {
             data: std::ptr::null_mut(),
             len: 100,
         };
         unsafe { kjarni_float_array_free(arr); }
     }
-
-    // =========================================================================
-    // KjarniFloat2DArray Tests
-    // =========================================================================
 
     #[test]
     fn test_float_2d_array_from_vecs_empty() {
@@ -558,10 +532,6 @@ mod ffi_bridge_tests {
         unsafe { kjarni_float_2d_array_free(arr); }
     }
 
-    // =========================================================================
-    // KjarniStringArray Tests
-    // =========================================================================
-
     #[test]
     fn test_string_array_free_null() {
         let arr = KjarniStringArray {
@@ -605,10 +575,6 @@ mod ffi_bridge_tests {
         let ptr = s.into_raw();
         unsafe { kjarni_string_free(ptr); }
     }
-
-    // =========================================================================
-    // Memory Safety / Round-Trip Tests
-    // =========================================================================
 
     #[test]
     fn test_float_array_roundtrip_preserves_data() {
@@ -704,10 +670,6 @@ mod ffi_bridge_tests {
         );
     }
 
-    // =========================================================================
-    // Thread Safety Tests
-    // =========================================================================
-
     #[test]
     fn test_runtime_thread_safe() {
         use std::thread;
@@ -765,11 +727,6 @@ mod ffi_bridge_tests {
             handle.join().unwrap();
         }
     }
-
-    // =========================================================================
-    // Edge Case Stress Tests
-    // =========================================================================
-
     #[test]
     fn test_many_small_allocations() {
         // Simulate many small embedding returns
@@ -807,19 +764,13 @@ mod ffi_bridge_tests {
             }
         }
         
-        // Clean up remaining
         for arr in arrays {
             unsafe { kjarni_float_array_free(arr); }
         }
     }
 
-    // =========================================================================
-    // Negative / Defensive Tests  
-    // =========================================================================
-
     #[test]
     fn test_float_array_zero_len_nonzero_capacity() {
-        // Vec with capacity but no elements
         let mut v = Vec::with_capacity(100);
         v.clear();
         let arr = KjarniFloatArray::from_vec(v);
@@ -840,17 +791,11 @@ mod ffi_bridge_tests {
         unsafe { kjarni_float_2d_array_free(arr); }
     }
 
-    // =========================================================================
-    // Regression Tests (Add specific bugs as they're found)
-    // =========================================================================
-
     #[test]
     fn test_from_flat_memory_not_dropped() {
-        // Verifies std::mem::forget works correctly in from_flat
         let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
         let arr = KjarniFloat2DArray::from_flat(data, 2, 2);
         
-        // If memory was dropped, this would read garbage or crash
         let slice = unsafe { std::slice::from_raw_parts(arr.data, 4) };
         assert_eq!(slice, &[1.0, 2.0, 3.0, 4.0]);
         

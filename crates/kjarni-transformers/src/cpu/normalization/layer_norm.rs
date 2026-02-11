@@ -818,7 +818,7 @@ mod layer_norm_tests {
     #[test]
     fn test_multi_token_batch_correctness() {
         let hidden = 384;
-        let tokens = 120; // Your benchmark batch size
+        let tokens = 120;
 
         let weight = Array1::from_vec((0..hidden).map(|i| 1.0 + (i as f32) * 0.001).collect());
         let bias = Array1::from_vec((0..hidden).map(|i| (i as f32) * 0.0005).collect());

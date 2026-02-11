@@ -13,14 +13,10 @@ namespace Kjarni.Tests
             _output = output;
         }
 
-        // =============================================================
-        // Embedder - Unknown Model Suggestions
-        // =============================================================
-
         [Theory]
         [InlineData("minilm", "minilm-l6-v2")]
         [InlineData("minilm-l6", "minilm-l6-v2")]
-        [InlineData("minnilm-l6-v2", "minilm-l6-v2")]  // typo
+        [InlineData("minnilm-l6-v2", "minilm-l6-v2")] 
         [InlineData("mpnet", "mpnet-base-v2")]
         [InlineData("distilbert", "distilbert-base")]
         public void Embedder_UnknownModel_SuggestsSimilar(string badName, string expectedSuggestion)
@@ -42,15 +38,9 @@ namespace Kjarni.Tests
                 new Embedder(model: "xyzzy123notamodel", quiet: true));
 
             _output.WriteLine($"Error: {ex.Message}");
-
-            // Should error but might not have suggestions for completely wrong names
             Assert.NotNull(ex.Message);
             Assert.True(ex.Message.Length > 0);
         }
-
-        // =============================================================
-        // Classifier - Unknown Model Suggestions
-        // =============================================================
 
         [Theory]
         [InlineData("distilbert-sentment", "distilbert-sentiment")]   // typo
@@ -69,10 +59,6 @@ namespace Kjarni.Tests
             Assert.Contains(expectedSuggestion, ex.Message);
         }
 
-        // =============================================================
-        // Reranker - Unknown Model Suggestions
-        // =============================================================
-
         [Theory]
         [InlineData("minilm-cross-encoder", "minilm-l6-v2-cross-encoder")]
         [InlineData("minilm-l6-cross", "minilm-l6-v2-cross-encoder")]
@@ -88,10 +74,6 @@ namespace Kjarni.Tests
             Assert.Contains(expectedSuggestion, ex.Message);
         }
 
-        // =============================================================
-        // Error Code Verification
-        // =============================================================
-
         [Fact]
         public void Embedder_UnknownModel_HasCorrectErrorCode()
         {
@@ -100,8 +82,6 @@ namespace Kjarni.Tests
 
             _output.WriteLine($"ErrorCode: {ex.ErrorCode}");
             _output.WriteLine($"Message: {ex.Message}");
-
-            // Should be ModelNotFound (3) based on your error code enum
             Assert.Equal(KjarniErrorCode.ModelNotFound, ex.ErrorCode);
         }
 

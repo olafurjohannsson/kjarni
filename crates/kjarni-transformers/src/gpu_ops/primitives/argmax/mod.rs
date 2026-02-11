@@ -80,7 +80,6 @@ impl GpuArgMax {
         input_logits: &GpuTensor,    // Shape: [Batch, Vocab]
         output_index: &wgpu::Buffer, // A 4-byte buffer for the result
     ) {
-        let vocab_size = input_logits.shape()[1] as u32;
 
         let bind_group = self
             .context
@@ -107,9 +106,6 @@ impl GpuArgMax {
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-
-        // Dispatch: Simplest approach is 1 workgroup per batch item.
-        // This shader assumes 1D flattening within the shader for simplicity.
         pass.dispatch_workgroups(1, 1, 1);
     }
 }

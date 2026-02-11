@@ -342,14 +342,9 @@ mod tests {
             ModelInput::TokensCpu(t) => t.shape()[1],
             _ => 0,
         };
-
         assert_eq!(size, 5);
     }
     
-    // ========================================================================
-    //  Construction Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_gpu_decoder_backend_new() {
         let ctx = get_test_context().await;
@@ -379,13 +374,8 @@ mod tests {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx.clone()).unwrap();
         
-        // Should return the same context
         assert!(Arc::ptr_eq(&ctx, backend.context()));
     }
-
-    // ========================================================================
-    //  new_decode_token Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_new_decode_token() {
@@ -406,15 +396,9 @@ mod tests {
         
         let token = backend.new_decode_token().unwrap();
         
-        // Download and verify it's initialized to zero
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], 0);
     }
-
-    // ========================================================================
-    //  update_decode_token Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_update_decode_token() {
         let ctx = get_test_context().await;
@@ -452,18 +436,12 @@ mod tests {
         let backend = GpuDecoderBackend::new(ctx).unwrap();
         
         let mut token = backend.new_decode_token().unwrap();
-        
-        // Test with max u32 value
+
         backend.update_decode_token(&mut token, u32::MAX).unwrap();
         
         let downloaded: Array2<u32> = token.to_ndarray_2d().await.unwrap();
         assert_eq!(downloaded[[0, 0]], u32::MAX);
     }
-
-    // ========================================================================
-    //  get_or_create_staging_buffer Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_get_or_create_staging_buffer_creates_new() {
         let ctx = get_test_context().await;
@@ -503,7 +481,6 @@ mod tests {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
         
-        // Initially should be 0
         {
             let size_guard = backend.staging_buffer_size.lock().unwrap();
             assert_eq!(*size_guard, 0);
@@ -511,17 +488,11 @@ mod tests {
         
         backend.get_or_create_staging_buffer(512);
         
-        // Should be updated
         {
             let size_guard = backend.staging_buffer_size.lock().unwrap();
             assert_eq!(*size_guard, 512);
         }
     }
-
-    // ========================================================================
-    //  ModelInput Size Extraction Tests
-    // ========================================================================
-
     #[test]
     fn test_model_input_size_extraction_tokens_cpu() {
         let tokens = Array2::from_shape_vec((1, 5), vec![1u32, 2, 3, 4, 5]).unwrap();
@@ -592,10 +563,6 @@ mod tests {
         assert_eq!(size, 12);
     }
 
-    // ========================================================================
-    //  Batch Dimension Tests
-    // ========================================================================
-
     #[test]
     fn test_model_input_batch_size() {
         let tokens = Array2::from_shape_vec((4, 5), vec![0u32; 20]).unwrap();
@@ -610,10 +577,6 @@ mod tests {
 
         assert_eq!(batch_size, 4);
     }
-
-    // ========================================================================
-    //  Timeout Config Tests
-    // ========================================================================
 
     #[tokio::test]
     async fn test_default_timeout_config() {
@@ -639,16 +602,11 @@ mod tests {
         assert_eq!(backend.timeout_config.poll_interval, Duration::from_millis(10));
     }
 
-    // ========================================================================
-    //  Edge Cases
-    // ========================================================================
-
     #[tokio::test]
     async fn test_staging_buffer_small_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
         
-        // Very small buffer
         let buffer = backend.get_or_create_staging_buffer(4);
         assert_eq!(buffer.size(), 4);
     }
@@ -658,7 +616,6 @@ mod tests {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
         
-        // Large buffer (1MB)
         let buffer = backend.get_or_create_staging_buffer(1024 * 1024);
         assert_eq!(buffer.size(), 1024 * 1024);
     }
@@ -670,7 +627,6 @@ mod tests {
         let backend1 = GpuDecoderBackend::new(ctx.clone()).unwrap();
         let backend2 = GpuDecoderBackend::new(ctx.clone()).unwrap();
         
-        // Each should have its own staging buffer
         backend1.get_or_create_staging_buffer(1024);
         backend2.get_or_create_staging_buffer(2048);
         

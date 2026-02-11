@@ -5,7 +5,6 @@ use ndarray::Array1;
 use ndarray::{ArrayBase, DataMut, Ix1};
 use rand::Rng;
 
-/// Apply repetition penalty in-place - works with both Array1 and ArrayViewMut1
 pub fn apply_repetition_penalty_inplace<S>(
     logits: &mut ArrayBase<S, Ix1>,
     tokens: &[u32],
@@ -251,7 +250,6 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-    // ============== softmax_1d ==============
 
     #[test]
     fn test_softmax_1d_basic() {
@@ -301,14 +299,12 @@ mod tests {
         assert!(probs[1] > probs[0]);
     }
 
-    // ============== log_softmax_1d ==============
 
     #[test]
     fn test_log_softmax_1d_basic() {
         let mut logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
 
-        // log_softmax should equal log(softmax)
         softmax_1d_inplace(&mut logits);
         let probs = logits.clone();
         for i in 0..3 {
@@ -321,7 +317,6 @@ mod tests {
         let logits = array![1.0, 2.0, 3.0];
         let log_probs = log_softmax_1d(&logits);
 
-        // All log probabilities should be <= 0
         assert!(log_probs.iter().all(|&lp| lp <= 0.0));
     }
 
@@ -352,14 +347,12 @@ mod tests {
         let logits = array![1.0, 5.0, 3.0];
         let filtered = top_k_filtering(logits, 1);
 
-        // Only index 1 (max) should remain
         assert!(filtered[1].is_finite());
         assert!(filtered[0] == f32::NEG_INFINITY);
         assert!(filtered[2] == f32::NEG_INFINITY);
     }
     #[test]
     fn test_top_p_filtering_basic() {
-        // Create logits where softmax gives clear probabilities
         let logits = array![0.0, 1.0, 2.0, 3.0];
         let filtered = top_p_filtering(logits, 0.9);
         assert!(filtered[3].is_finite());
@@ -379,18 +372,15 @@ mod tests {
         let logits = array![1.0, 2.0, 10.0]; // 10.0 dominates after softmax
         let filtered = top_p_filtering(logits, 0.01);
 
-        // Only the dominant token should remain
         assert!(filtered[2].is_finite());
     }
 
-    // ============== apply_repetition_penalty ==============
 
     #[test]
     fn test_repetition_penalty_no_penalty() {
         let logits = array![1.0, 2.0, 3.0];
         let result = apply_repetition_penalty(logits.clone(), &[0, 1], 1.0);
 
-        // penalty=1.0 should not change anything
         assert_eq!(logits, result);
     }
 
@@ -399,7 +389,6 @@ mod tests {
         let logits = array![2.0, 4.0, 6.0];
         let result = apply_repetition_penalty(logits, &[1], 2.0);
 
-        // Token 1 (4.0) should be divided by 2.0
         assert_eq!(result[0], 2.0); // unchanged
         assert_eq!(result[1], 2.0); // 4.0 / 2.0
         assert_eq!(result[2], 6.0); // unchanged
@@ -409,8 +398,6 @@ mod tests {
     fn test_repetition_penalty_negative_logits() {
         let logits = array![-2.0, -4.0, 1.0];
         let result = apply_repetition_penalty(logits, &[0, 1], 2.0);
-
-        // Negative logits get multiplied (making them more negative)
         assert_eq!(result[0], -4.0); // -2.0 * 2.0
         assert_eq!(result[1], -8.0); // -4.0 * 2.0
         assert_eq!(result[2], 1.0); // unchanged
@@ -421,12 +408,10 @@ mod tests {
         let logits = array![-1.0, 0.0, 2.0];
         let result = apply_repetition_penalty(logits, &[0, 2], 2.0);
 
-        assert_eq!(result[0], -2.0); // negative: multiplied
-        assert_eq!(result[1], 0.0); // not penalized
-        assert_eq!(result[2], 1.0); // positive: divided
+        assert_eq!(result[0], -2.0);
+        assert_eq!(result[1], 0.0); 
+        assert_eq!(result[2], 1.0); 
     }
-
-    // ============== apply_repetition_penalty_mut ==============
 
     #[test]
     fn test_repetition_penalty_mut_basic() {
@@ -441,24 +426,17 @@ mod tests {
     #[test]
     fn test_repetition_penalty_mut_out_of_bounds() {
         let mut logits = array![1.0, 2.0, 3.0];
-        // Token ID 100 is out of bounds - should be ignored
         apply_repetition_penalty_mut(&mut logits, &[100], 2.0);
 
         assert_eq!(logits, array![1.0, 2.0, 3.0]);
     }
 
-    // ============== apply_no_repeat_ngram ==============
-
     #[test]
     fn test_no_repeat_ngram_basic() {
         let mut logits = array![1.0, 1.0, 1.0, 1.0, 1.0];
-        // Tokens: [0, 1, 2, 0, 1] - if next is 2, we repeat "0, 1, 2"
         let tokens = vec![0, 1, 2, 0, 1];
         apply_no_repeat_ngram(&mut logits, &tokens, 3);
-
-        // Token 2 should be banned (would repeat trigram [0, 1, 2])
         assert_eq!(logits[2], f32::NEG_INFINITY);
-        // Others should be unchanged
         assert_eq!(logits[0], 1.0);
         assert_eq!(logits[1], 1.0);
         assert_eq!(logits[3], 1.0);
@@ -486,7 +464,6 @@ mod tests {
     #[test]
     fn test_no_repeat_ngram_bigram() {
         let mut logits = array![1.0, 1.0, 1.0, 1.0];
-        // Tokens: [0, 1, 0] - current prefix is [0], which appeared before [1]
         let tokens = vec![0, 1, 0];
         apply_no_repeat_ngram(&mut logits, &tokens, 2);
         assert_eq!(logits[1], f32::NEG_INFINITY);
@@ -494,7 +471,6 @@ mod tests {
 
     #[test]
     fn test_sample_from_probs_deterministic() {
-        // When one prob is 1.0, should always return that index
         let probs = array![0.0, 0.0, 1.0, 0.0];
 
         for _ in 0..10 {
@@ -581,26 +557,21 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ============== get_top_k_from_log_probs ==============
-
     #[test]
     fn test_get_top_k_from_log_probs_basic() {
         let log_probs = array![-2.0, -1.0, -3.0, -0.5, -4.0];
         let top_k = get_top_k_from_log_probs(&log_probs, 3);
 
         assert_eq!(top_k.len(), 3);
-        // Should be sorted by log_prob descending
-        assert_eq!(top_k[0].0, 3); // -0.5 (highest)
-        assert_eq!(top_k[1].0, 1); // -1.0
-        assert_eq!(top_k[2].0, 0); // -2.0
+        assert_eq!(top_k[0].0, 3); 
+        assert_eq!(top_k[1].0, 1); 
+        assert_eq!(top_k[2].0, 0); 
     }
 
     #[test]
     fn test_get_top_k_from_log_probs_k_greater_than_len() {
         let log_probs = array![-1.0, -2.0];
         let top_k = get_top_k_from_log_probs(&log_probs, 10);
-
-        // Should return all available
         assert_eq!(top_k.len(), 2);
     }
 

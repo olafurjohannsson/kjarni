@@ -247,11 +247,7 @@ impl CpuTransformerEncoder {
 }
 
 impl CpuTransformerEncoder {
-    /// Forward pass through layers with pre-allocated buffers (no allocation in hot path).
-    ///
-    /// # Note
-    ///
-    /// Still allocates: RoPE, 4D attention matmuls, reshape/permute, layer norm.
+    /// Forward pass through layers with pre-allocated buffers
     pub fn forward_layers_noalloc(
         &self,
         hidden_states: &mut Array3<f32>,

@@ -30,8 +30,6 @@ pub enum ClassificationMode {
 }
 
 /// Trait for encoder-only language models (BERT, RoBERTa, etc.)
-///
-/// These models encode text into fixed-size embeddings.
 #[async_trait]
 pub trait EncoderLanguageModel: LanguageModel {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps>;
@@ -58,8 +56,6 @@ pub trait EncoderLanguageModel: LanguageModel {
             }
         }
     }
-    /// Get the encoder backend
-    // fn encoder(&self) -> &dyn Encoder<Input = Array2<u32>, Output = EncoderOutput>;
 
     /// Get hidden states for input text
     async fn get_hidden_states(&self, text: &str) -> Result<Array3<f32>> {
@@ -85,11 +81,6 @@ pub trait EncoderLanguageModel: LanguageModel {
             let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
 
             let hidden_states = if compute_strategy.use_scratch_buffers == false {
-                // Allocating was faster for medium batches (16-512 tokens)
-                // encoder
-                //     .forward(input_ids, &attention_mask_f32, None)?
-                //     .last_hidden_state
-
                 encoder
                     .forward(&normalized_hidden, &attention_mask_f32)?
                     .last_hidden_state
@@ -192,10 +183,7 @@ pub trait EncoderLanguageModel: LanguageModel {
     }
 }
 
-/// Defines the application of an encoder model for sentence similarity tasks.
-///
-/// This trait provides methods to convert raw hidden states into final, pooled,
-/// and normalized sentence embeddings.
+/// Defines the application of an encoder model for sentence similarity tasks
 #[async_trait]
 pub trait SentenceEncoderModel: EncoderLanguageModel {
     /// Encode a batch of texts into embedding vectors.
@@ -221,10 +209,8 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
 
         let (hidden_states, attention_mask) = self.get_hidden_states_batch(texts).await?;
 
-        // Apply pooling to the whole batch
         let mut pooled = match config.pooling_strategy {
             PoolingStrategy::Cls => {
-                // Use [CLS] token (first token of each item in the batch)
                 hidden_states.slice(ndarray::s![.., 0, ..]).to_owned()
             }
             PoolingStrategy::Mean => mean_pool(&hidden_states, &attention_mask)?,
@@ -232,7 +218,6 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
             PoolingStrategy::Max => max_pool(&hidden_states, &attention_mask)?,
         };
 
-        // 3. Apply the application-specific normalization logic.
         if config.normalize {
             l2_normalize_inplace(&mut pooled);
         }
@@ -240,24 +225,13 @@ impl<T: EncoderLanguageModel + Sync> SentenceEncoderModel for T {
         Ok(pooled.outer_iter().map(|row| row.to_vec()).collect())
     }
 }
-
-// ============================================================================
-// CPU ENCODER
-// ============================================================================
-
 /// Output from a CPU encoder.
 #[derive(Clone, Debug)]
 pub struct CpuEncoderOutput {
-    /// Final hidden states: `[batch_size, sequence_length, hidden_size]`
     pub last_hidden_state: Array3<f32>,
 }
 
-/// CPU-based transformer encoder trait.
-///
-/// Provides methods for embedding lookup, normalization, and layer execution
-/// with support for partial layer execution (for hybrid CPU/GPU workflows).
-///
-
+/// CPU-based transformer encoder trait
 /// ```
 pub trait CpuEncoder: CpuTransformerCore {
     fn forward_layers(
@@ -318,10 +292,6 @@ pub trait CpuEncoderOps: Send + Sync {
         Ok(Array2::ones((1, seq_len)))
     }
 
-    // =========================================================================
-    // Default Implementations
-    // =========================================================================
-
     /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
     fn forward_tokens(
         &self,
@@ -363,10 +333,6 @@ pub trait CpuEncoderOps: Send + Sync {
     }
 }
 
-// ============================================================================
-// GPU ENCODER
-// ============================================================================
-
 /// Output from GPU encoder.
 #[derive(Debug)]
 pub struct GpuEncoderOutput {
@@ -374,25 +340,9 @@ pub struct GpuEncoderOutput {
     pub last_hidden_state: GpuTensor,
 }
 
-/// GPU-based transformer encoder trait.
-///
-/// Provides methods for embedding lookup, normalization, and layer execution
-/// on GPU with support for hybrid CPU/GPU workflows through `ModelInput`.
-///
 
 pub trait GpuEncoder: Send + Sync {
-    /// Compute embeddings only (handles CPU/GPU input).
-    ///
-    /// Does NOT apply the initial layer normalization.
-    ///
-    /// # Arguments
-    /// * `cmd_encoder` - WGPU command encoder for recording GPU commands
-    /// * `pool` - Tensor pool for intermediate allocations
-    /// * `input` - Token IDs or hidden states (see `ModelInput`)
-    /// * `token_type_ids` - Optional token type IDs on GPU
-    ///
-    /// # Returns
-    /// Hidden states on GPU `[batch_size, sequence_length, hidden_size]`
+    /// Compute embeddings only 
     fn embed(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
@@ -401,18 +351,7 @@ pub trait GpuEncoder: Send + Sync {
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor>;
 
-    /// Compute embeddings + initial normalization.
-    ///
-    /// This produces hidden states ready to be processed by encoder layers.
-    ///
-    /// # Arguments
-    /// * `cmd_encoder` - WGPU command encoder
-    /// * `pool` - Tensor pool
-    /// * `input` - Token IDs or hidden states
-    /// * `token_type_ids` - Optional token type IDs
-    ///
-    /// # Returns
-    /// Normalized hidden states on GPU
+    /// Compute embeddings + initial normalization
     fn embed_and_normalize(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
@@ -421,18 +360,7 @@ pub trait GpuEncoder: Send + Sync {
         token_type_ids: Option<ModelInput<'_>>,
     ) -> Result<GpuTensor>;
 
-    /// Run layers `[start_layer, end_layer)` on hidden states.
-    ///
-    /// # Arguments
-    /// * `cmd_encoder` - WGPU command encoder
-    /// * `pool` - Tensor pool
-    /// * `hidden_states` - Input hidden states on GPU
-    /// * `attention_mask` - Attention mask on GPU
-    /// * `start_layer` - First layer to execute (inclusive)
-    /// * `end_layer` - Last layer to execute (exclusive)
-    ///
-    /// # Returns
-    /// Hidden states after processing through the specified layers
+    /// Run layers `[start_layer, end_layer)` on hidden states
     fn forward_layers(
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
@@ -468,9 +396,7 @@ pub trait GpuEncoder: Send + Sync {
     /// Hidden dimension of the model.
     fn hidden_size(&self) -> usize;
 
-    /// Full forward pass through the encoder.
-    ///
-    /// Default implementation calls embed_and_normalize + forward_layers(0, num_layers).
+    /// Full forward pass through the encoder
     #[deprecated]
     fn forward(
         &self,
@@ -493,7 +419,7 @@ pub trait GpuEncoder: Send + Sync {
             last_hidden_state: output,
         })
     }
-    fn forward2(
+    fn forward2( // todo do something
         &self,
         cmd_encoder: &mut wgpu::CommandEncoder,
         pool: &mut GpuTensorPool,
@@ -543,10 +469,6 @@ pub trait GpuEncoderOps: Send + Sync {
         let mask_cpu = Array2::<f32>::ones((1, seq_len));
         Ok(GpuTensor::from_ndarray(ctx, &mask_cpu)?)
     }
-
-    // =========================================================================
-    // Default Implementations
-    // =========================================================================
 
     /// Full forward from tokens: embed -> embed_norm -> layers -> final_norm
     fn forward_tokens(
@@ -621,11 +543,6 @@ mod tests_trait {
     use super::*;
     use ndarray::Array2;
     use std::sync::Mutex;
-
-    // ========================================================================
-    //  MOCK INFRASTRUCTURE (For Dispatch Test)
-    // ========================================================================
-
     struct MockCpuEncoder {
         hidden_size: usize,
         captured_mask_sum: Mutex<f32>,
@@ -761,12 +678,6 @@ mod tests_trait {
             None
         }
     }
-
-    // ========================================================================
-    //  MOCK INFRASTRUCTURE (For Golden Pooling Test)
-    // ========================================================================
-
-    // Allows us to inject EXACT golden hidden states regardless of encoder logic
     struct MockGoldenEncoder {
         hidden_states: Array3<f32>,
     }
@@ -831,14 +742,10 @@ mod tests_trait {
             None
         }
 
-        // Override to return GOLDEN data directly
         async fn get_hidden_states_batch(
             &self,
             _texts: &[&str],
         ) -> Result<(Array3<f32>, Array2<f32>)> {
-            // Mask from Python script:
-            // [1, 1, 1, 1, 1]
-            // [1, 1, 1, 0, 0]
             let mask = Array2::from_shape_vec(
                 (2, 5),
                 vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0],
@@ -847,10 +754,6 @@ mod tests_trait {
             Ok((self.hidden_states.clone(), mask))
         }
     }
-
-    // ========================================================================
-    //  TESTS
-    // ========================================================================
 
     #[tokio::test]
     async fn test_trait_dispatch_and_mask_conversion() -> Result<()> {

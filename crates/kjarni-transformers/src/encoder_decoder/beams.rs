@@ -873,10 +873,6 @@ mod tests {
         assert!(!done);
     }
 
-    // ========================================================================
-    //  BeamHypothesis Tests
-    // ========================================================================
-
     #[test]
     fn test_normalized_score_zero_length() {
         let beam = BeamHypothesis {
@@ -926,10 +922,6 @@ mod tests {
         assert!(debug_str.contains("tokens"));
         assert!(debug_str.contains("score"));
     }
-
-    // ========================================================================
-    //  FinishedHypotheses Edge Cases
-    // ========================================================================
 
     #[test]
     fn test_finished_hypotheses_empty_best() {
@@ -1012,13 +1004,8 @@ mod tests {
             score: -2.0, // normalized: -2 / 2^3 = -0.25
         });
 
-        // Longer one should be best due to high length penalty
         assert_eq!(finished.best().unwrap().tokens.len(), 10);
     }
-
-    // ========================================================================
-    //  find_best_beams_and_get_candidates Edge Cases
-    // ========================================================================
 
     #[test]
     fn test_find_best_beams_single_beam() {
@@ -1031,7 +1018,6 @@ mod tests {
         let candidates = find_best_beams_and_get_candidates(logits, &beams, 1);
 
         assert!(!candidates.is_empty());
-        // Best token should be 4 (highest logit)
         assert_eq!(candidates[0].1, 4);
     }
 
@@ -1072,7 +1058,6 @@ mod tests {
 
         let candidates = find_best_beams_and_get_candidates(logits, &beams, 2);
 
-        // All candidates should come from beam 0
         for (_, _, source_beam, _) in &candidates {
             assert_eq!(*source_beam, 0);
         }
@@ -1104,16 +1089,9 @@ mod tests {
 
         let candidates = find_best_beams_and_get_candidates(logits, &beams, 1);
 
-        // Score should be previous score + log_softmax(logit)
-        // log_softmax([0,0,0]) = [-1.0986, -1.0986, -1.0986] (ln(1/3))
         let expected_score = -5.0 + (-1.0986);
         assert!((candidates[0].0.score - expected_score).abs() < 0.01);
     }
-
-    // ========================================================================
-    //  beam_step Edge Cases
-    // ========================================================================
-
     struct MockBackendWithForcedBos {
         forced_token: u32,
     }

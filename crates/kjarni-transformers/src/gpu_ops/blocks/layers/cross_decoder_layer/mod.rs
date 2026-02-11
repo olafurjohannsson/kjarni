@@ -77,16 +77,7 @@ impl GpuCrossDecoderLayer {
         )
     }
 
-    /// Forward pass (post-norm for BART).
-    ///
-    /// # Arguments
-    ///
-    /// * `cross_kv` - Precomputed (K, V) tuple from `precompute_cross_kv`.
-    /// * `encoder_mask` - Encoder padding mask (optional for BART, usually None).
-    ///
-    /// # Returns
-    ///
-    /// (output, new_k, new_v) for self-attention cache update.
+    /// Forward pass
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -98,9 +89,6 @@ impl GpuCrossDecoderLayer {
         cache_len: usize,
         pool: &mut GpuTensorPool,
     ) -> Result<(GpuTensor, GpuTensor, GpuTensor)> {
-        // ========================================
-        // 1. Self-Attention (Post-Norm)
-        // ========================================
         let residual = hidden_states;
 
         let self_attn_out = self.self_attn.forward(
@@ -123,10 +111,6 @@ impl GpuCrossDecoderLayer {
             &after_add1,
             &after_norm1,
         );
-
-        // ========================================
-        // 2. Cross-Attention (Post-Norm)
-        // ========================================
         let residual = &after_norm1;
 
         let cross_attn_out = self.cross_attn.forward(
@@ -149,9 +133,6 @@ impl GpuCrossDecoderLayer {
             &after_norm2,
         );
 
-        // ========================================
-        // 3. FFN (Post-Norm)
-        // ========================================
         let residual = &after_norm2;
 
         let ffn_out = pool.get(residual.shape().to_vec());

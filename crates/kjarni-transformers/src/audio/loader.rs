@@ -1,5 +1,3 @@
-// kjarni_transformers/src/audio/loader.rs
-
 use anyhow::{anyhow, Result};
 use std::path::Path;
 

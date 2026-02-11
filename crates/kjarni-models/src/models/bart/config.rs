@@ -82,10 +82,6 @@ pub struct BartConfig {
 impl BartConfig {
     pub fn from_json(json: &str) -> anyhow::Result<Self> {
         let mut config: Self = serde_json::from_str(json)?;
-    //     if config.extra_pos_embeddings == 0 {
-    //     config.extra_pos_embeddings = 2;
-    // }
-        // Add label processing logic, just like in your other classifier configs.
         if let Some(ref map) = config.id2label {
             let mut labels: Vec<(usize, String)> = map
                 .iter()
@@ -105,7 +101,7 @@ impl BartConfig {
             .clone()
             .unwrap_or_else(|| "model.shared.weight".to_string())
     }
-    /// Checks if the model architecture is for sequence classification.
+    
     fn is_sequence_classifier(&self) -> bool {
         self.architectures
             .as_ref()
@@ -133,9 +129,9 @@ impl ModelConfig for BartConfig {
     fn metadata(&self) -> ModelMetadata {
         ModelMetadata {
             hidden_size: self.d_model,
-            num_layers: self.encoder_layers, // Defaults to encoder layers for backbone
+            num_layers: self.encoder_layers,
             num_attention_heads: self.encoder_attention_heads,
-            num_kv_heads: self.encoder_attention_heads, // BART is not GQA
+            num_kv_heads: self.encoder_attention_heads,
             head_dim: self.d_model / self.encoder_attention_heads,
             vocab_size: self.vocab_size,
             max_seq_len: self.max_position_embeddings,
@@ -144,9 +140,9 @@ impl ModelConfig for BartConfig {
                 Some("gelu") => Activation::Gelu,
                 Some("gelu_new") => Activation::GeluNew,
                 Some("silu") => Activation::SilU,
-                _ => Activation::Gelu, // BART default
+                _ => Activation::Gelu, 
             },
-            rope_theta: None, // BART uses learned absolute positions
+            rope_theta: None, 
             rope_scaling: None,
             scale_embeddings: self.scale_embedding,
             normalize_embedding: self.normalize_embedding,

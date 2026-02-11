@@ -179,10 +179,6 @@ mod cpu_tests {
     }
 }
 
-// ============================================================================
-// LoadedLMHead GPU Tests
-// ============================================================================
-
 use super::*;
 use crate::WgpuContext;
 use crate::gpu::{GpuTensor, GpuTensorPool};
@@ -194,7 +190,6 @@ async fn setup_gpu_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
 
-/// Helper to create a LoadedLMHead with synthetic GPU weights
 async fn create_gpu_lm_head(
     ctx: &Arc<WgpuContext>,
     vocab_size: usize,
@@ -202,7 +197,6 @@ async fn create_gpu_lm_head(
 ) -> LoadedLMHead {
     use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 
-    // Create weights on GPU
     let weights_cpu = Array2::<f32>::zeros((vocab_size, hidden_size));
     let gpu_weights = GpuTensor::from_ndarray(ctx, &weights_cpu).unwrap();
     let gpu_kernel = GpuLinearLayer::new(ctx);
@@ -333,7 +327,6 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     );
 }
 
-// kjarni-transformers/src/lm_head/tests.rs
 
 #[tokio::test]
 async fn test_loaded_lm_head_cpu_gpu_parity() {

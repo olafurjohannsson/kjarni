@@ -5,10 +5,6 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    // =================================================================
-    // DistilBERT SST-2 (binary sentiment: POSITIVE / NEGATIVE)
-    // =================================================================
-
     public class DistilBertSentimentTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -95,11 +91,6 @@ namespace Kjarni.Tests
             Assert.Contains("%", str);
         }
     }
-
-    // =================================================================
-    // Twitter RoBERTa (3-class: negative / neutral / positive)
-    // =================================================================
-
     public class RobertaSentimentTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -170,11 +161,6 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
-
-    // =================================================================
-    // BERT Multilingual Sentiment (5-star: 1 star - 5 stars)
-    // =================================================================
-
     public class BertMultilingualSentimentTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -265,10 +251,6 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
-
-    // =================================================================
-    // DistilRoBERTa Emotion (7 emotions)
-    // =================================================================
 
     public class DistilRobertaEmotionTests : IDisposable
     {
@@ -367,11 +349,6 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
-
-    // =================================================================
-    // Toxic BERT (6 toxicity labels, multi-label)
-    // =================================================================
-
     public class ToxicBertTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -455,10 +432,6 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
-
-    // =================================================================
-    // Shared Classifier Behavior Tests
-    // =================================================================
 
     public class ClassifierGeneralTests
     {

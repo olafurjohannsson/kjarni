@@ -342,9 +342,7 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
 async fn test_gpu_ffn_fc1_isolated_relu() -> Result<()> {
     let context = WgpuContext::new().await?;
     let (batch_size, seq_len, hidden_size, intermediate_size) = (2, 16, 128, 512);
-    let activation = Activation::Relu; // Ensure this exists in your Activation enum
-
-    // Deterministic weights
+    let activation = Activation::Relu;
     let fc1_w_cpu = Array2::from_shape_fn((hidden_size, intermediate_size), |(i, j)| {
         (i + j) as f32 * 0.01
     })

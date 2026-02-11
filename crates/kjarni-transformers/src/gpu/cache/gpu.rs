@@ -7,24 +7,14 @@ use std::any::Any;
 use std::sync::Arc;
 use wgpu::CommandEncoder;
 
-/// A high-performance, GPU-resident KV cache for transformer decoders.
-///
-/// This cache pre-allocates memory and uses a specialized compute kernel
-/// for efficient, in-place updates, mirroring the design of the `CpuKVCache`.
-
 pub struct GpuKVCache {
-    // A vector of K-cache tensors, one for each decoder layer.
-    // Layout: [Batch, Heads, MaxSequenceLength, HeadDim] for efficient attention.
+    // A vector of K-cache tensors, one for each decoder layer
     k_tensors: Vec<GpuTensor>,
-
-    // A vector of V-cache tensors, one for each decoder layer.
-    // Layout: [Batch, Heads, MaxSequenceLength, HeadDim]
+    // A vector of V-cache tensors, one for each decoder layer
     v_tensors: Vec<GpuTensor>,
-
     // The current number of tokens stored in the cache.
     seq_length: usize,
-
-    // The specialized kernel for performing in-place updates.
+    // The specialized kernel for performing in-place updates
     update_kernel: GpuUpdateCache,
 }
 
@@ -73,10 +63,7 @@ impl GpuKVCache {
         })
     }
 
-    /// Encodes a GPU command to append new key and value tensors to the cache.
-    ///
-    /// This method is the architectural equivalent of `CpuKVCache::update`. It uses a
-    /// specialized kernel to perform a fused "split-heads and copy" operation.
+    /// Encodes a GPU command to append new key and value tensors to the cache
     pub fn update(
         &self,
         encoder: &mut CommandEncoder,
@@ -116,15 +103,13 @@ impl GpuKVCache {
         self.seq_length
     }
     pub fn max_seq_len(&self) -> usize {
-        // The cache is consistent, so we can check the shape of the first k_tensor.
-        // The shape is [Batch, Heads, Capacity, HeadDim]. We want the 3rd dimension (index 2).
         if self.k_tensors.is_empty() {
             0
         } else {
             self.k_tensors[0].shape()[2]
         }
     }
-    /// Increments the internal length counter after a generation step.
+    
     pub fn increment_len(&mut self, new_tokens_len: usize) {
         let new_len = self.seq_length + new_tokens_len;
         let max = self.max_seq_len();
@@ -139,9 +124,6 @@ impl GpuKVCache {
 
         self.seq_length = new_len;
     }
-    // pub fn increment_len(&mut self, new_tokens_len: usize) {
-    //     self.seq_length += new_tokens_len;
-    // }
 }
 
 impl Cache for GpuKVCache {
@@ -149,18 +131,6 @@ impl Cache for GpuKVCache {
         self.seq_length
     }
     fn clone_box(&self) -> Box<dyn Cache> {
-        // This creates a new GpuKVCache struct on the heap.
-        // It clones the Vecs (which clones the GpuTensors inside).
-        // If GpuTensor is an Arc wrapper, this is a cheap reference count bump.
-        // The `seq_length` is copied by value.
-        // The `update_kernel` is also cheaply cloned (if it wraps an Arc).
-        // let new_cache = GpuKVCache {
-        //     k_tensors: self.k_tensors.clone(),
-        //     v_tensors: self.v_tensors.clone(),
-        //     seq_length: self.seq_length,
-        //     update_kernel: self.update_kernel.clone(), // Assuming GpuUpdateCache is Clone
-        // };
-        // Box::new(new_cache)
         let new_k_tensors = self
             .k_tensors
             .iter()

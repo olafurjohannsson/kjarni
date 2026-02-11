@@ -257,14 +257,14 @@ impl ModelType {
             Self::Phi3_5_Mini_Instruct => "phi3.5-mini",
 
             // Workhorse LLMs
-            Self::Mistral7B_v0_3_Instruct => "mistral-7b", // Changed for clarity
+            Self::Mistral7B_v0_3_Instruct => "mistral-7b",
             Self::Llama3_1_8B_Instruct => "llama3.1-8b-instruct",
             Self::DeepSeek_R1_Distill_Llama_8B => "deepseek-r1-8b",
 
             // Seq2Seq
             Self::FlanT5Base => "flan-t5-base",
             Self::FlanT5Large => "flan-t5-large",
-            Self::DistilBartCnn => "distilbart-cnn", // Changed for consistency
+            Self::DistilBartCnn => "distilbart-cnn",
             Self::BartLargeCnn => "bart-large-cnn",
             Self::WhisperSmall => "whisper-small",
             Self::WhisperLargeV3 => "whisper-large-v3",

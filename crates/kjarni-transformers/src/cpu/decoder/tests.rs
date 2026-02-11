@@ -1,21 +1,3 @@
-//! Comprehensive tests for CPU and GPU decoder generation backends.
-//!
-//! This module provides extensive test coverage for:
-//! - `CpuDecoderBackend` - CPU-based autoregressive generation
-//! - `GpuDecoderBackend` - GPU-accelerated autoregressive generation
-//! - `AnyDecoderBackend` - Type-erased unified backend
-//! - Parity tests ensuring CPU and GPU produce consistent results
-//!
-//! # Test Categories
-//!
-//! 1. **Unit Tests**: Individual method testing (new_decode_token, update_decode_token)
-//! 2. **Integration Tests**: Full prefill/decode flows
-//! 3. **Strategy Tests**: Pipelined vs Legacy autoregressive loops
-//! 4. **Error Handling**: Empty inputs, invalid states
-//! 5. **Edge Cases**: Single token, long sequences, boundary conditions
-//! 6. **GPU Tests**: GPU-specific functionality
-//! 7. **Parity Tests**: CPU vs GPU output comparison
-//! 8. **AnyDecoderBackend Tests**: Type erasure and dispatch
 
 use crate::cache::Cache;
 use crate::cpu::decoder::CpuDecoderBackend;
@@ -23,7 +5,7 @@ use crate::decoder::backend::AnyDecoderBackend;
 use crate::decoder::generator::DecoderGenerator;
 use crate::decoder::prelude::GpuDecoderBackend;
 use crate::decoder::traits::{
-    CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel, GpuDecoder,
+    CpuDecoder, CpuDecoderOps, DecoderGenerationBackend, DecoderLanguageModel,
     GpuDecoderOps,
 };
 use crate::gpu::GpuTensor;
@@ -41,12 +23,6 @@ use tokenizers::Tokenizer;
 #[cfg(test)]
 mod decoder_backend_tests {
     use super::*;
-
-    // =========================================================================
-    //  Mock Infrastructure - Shared by CPU and GPU tests
-    // =========================================================================
-
-    /// Mock KV cache for CPU testing.
     #[derive(Clone)]
     pub struct MockCpuCache {
         seq_length: usize,
@@ -411,11 +387,6 @@ mod decoder_backend_tests {
             false
         }
     }
-
-    // =========================================================================
-    //  CPU Backend Unit Tests
-    // =========================================================================
-
     mod cpu_unit_tests {
         use super::*;
 
@@ -462,10 +433,6 @@ mod decoder_backend_tests {
             assert_eq!(t2[[0, 0]], 200);
         }
     }
-
-    // =========================================================================
-    //  CPU Backend Prefill Tests
-    // =========================================================================
 
     mod cpu_prefill_tests {
         use super::*;
@@ -523,10 +490,6 @@ mod decoder_backend_tests {
         }
     }
 
-    // =========================================================================
-    //  CPU Backend Decode Tests
-    // =========================================================================
-
     mod cpu_decode_tests {
         use super::*;
 
@@ -570,15 +533,8 @@ mod decoder_backend_tests {
         }
     }
 
-    // =========================================================================
-    //  GPU Backend Tests
-    // =========================================================================
-
     mod gpu_backend_tests {
         use super::*;
-
-        /// Helper to create GPU context for tests.
-        /// Returns None if no GPU is available.
         pub async fn create_gpu_context() -> Option<Arc<WgpuContext>> {
             match WgpuContext::new().await {
                 Ok(ctx) => Some(ctx),
@@ -659,9 +615,6 @@ mod decoder_backend_tests {
 
             backend.update_decode_token(&mut token1, 100).unwrap();
             backend.update_decode_token(&mut token2, 200).unwrap();
-
-            // Both should have their own values (can't easily verify GPU buffer content,
-            // but at least verify no errors)
             assert_eq!(token1.shape(), &[1, 1]);
             assert_eq!(token2.shape(), &[1, 1]);
         }
@@ -676,9 +629,8 @@ mod decoder_backend_tests {
             let backend = GpuDecoderBackend::new(context).unwrap();
             let token = backend.new_decode_token().unwrap();
 
-            // GpuTensor should have a valid buffer
             let buffer = token.buffer();
-            assert!(buffer.size() >= 4); // At least 4 bytes for u32
+            assert!(buffer.size() >= 4);
         }
 
         #[tokio::test]
@@ -690,15 +642,9 @@ mod decoder_backend_tests {
 
             let backend = GpuDecoderBackend::new(context.clone()).unwrap();
             let ctx = backend.context();
-
-            // Should be the same context
             assert!(Arc::ptr_eq(&context, ctx));
         }
     }
-
-    // =========================================================================
-    //  AnyDecoderBackend Tests
-    // =========================================================================
 
     mod any_backend_tests {
         use super::*;
@@ -731,7 +677,6 @@ mod decoder_backend_tests {
             let backend = AnyDecoderBackend::cpu();
             let token = backend.new_decode_token().unwrap();
 
-            // Should be able to downcast to Array2<u32>
             let concrete = token.downcast_ref::<Array2<u32>>();
             assert!(concrete.is_some());
             assert_eq!(concrete.unwrap().shape(), &[1, 1]);
@@ -748,7 +693,6 @@ mod decoder_backend_tests {
             let backend = AnyDecoderBackend::gpu(gpu);
             let token = backend.new_decode_token().unwrap();
 
-            // Should be able to downcast to GpuTensor
             let concrete = token.downcast_ref::<GpuTensor>();
             assert!(concrete.is_some());
             assert_eq!(concrete.unwrap().shape(), &[1, 1]);
@@ -775,15 +719,12 @@ mod decoder_backend_tests {
             let gpu = Arc::new(GpuDecoderBackend::new(context).unwrap());
             let backend = AnyDecoderBackend::gpu(gpu);
             let mut token = backend.new_decode_token().unwrap();
-
-            // Should not error
             backend.update_decode_token(&mut token, 42).unwrap();
         }
 
         #[test]
         fn test_any_type_mismatch_error() {
             let backend = AnyDecoderBackend::cpu();
-            // Create wrong type
             let mut fake: Box<dyn Any + Send + Sync> = Box::new(String::from("fake"));
             let result = backend.update_decode_token(&mut fake, 1);
             assert!(result.is_err());
@@ -846,11 +787,6 @@ mod decoder_backend_tests {
             }
         }
     }
-
-    // =========================================================================
-    //  CPU/GPU Parity Tests (when both available)
-    // =========================================================================
-
     mod parity_tests {
         use super::*;
 
@@ -896,10 +832,6 @@ mod decoder_backend_tests {
         }
     }
 
-    // =========================================================================
-    //  Backend Trait Compliance Tests
-    // =========================================================================
-
     mod trait_compliance_tests {
         use super::*;
 
@@ -939,10 +871,6 @@ mod decoder_backend_tests {
             assert_send_sync::<<AnyDecoderBackend as DecoderGenerationBackend>::DecodeToken>();
         }
     }
-
-    // =========================================================================
-    //  Stress Tests
-    // =========================================================================
 
     mod stress_tests {
         use super::*;

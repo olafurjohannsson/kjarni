@@ -212,11 +212,6 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // Helper to create mock SearchResult
-    // =========================================================================
-
     fn mock_result(score: f32, doc_id: usize, text: &str) -> SearchResult {
         SearchResult {
             score,
@@ -239,11 +234,6 @@ mod tests {
             metadata,
         }
     }
-
-    // =========================================================================
-    // truncate_text tests
-    // =========================================================================
-
     #[test]
     fn test_truncate_text_short() {
         assert_eq!(truncate_text("hello world", 60), "hello world");
@@ -288,11 +278,6 @@ mod tests {
     fn test_truncate_text_only_newlines() {
         assert_eq!(truncate_text("\n\n\n", 60), "   ");
     }
-
-    // =========================================================================
-    // format_results_json tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_json_single() {
         let results = vec![mock_result(0.95, 1, "test document")];
@@ -343,11 +328,6 @@ mod tests {
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert!(parsed.is_empty());
     }
-
-    // =========================================================================
-    // format_results_jsonl tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_jsonl_single() {
         let results = vec![mock_result(0.95, 1, "test")];
@@ -397,11 +377,6 @@ mod tests {
         let output = format_results_jsonl(&results).unwrap();
         assert!(output.is_empty());
     }
-
-    // =========================================================================
-    // format_results_text tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_text_basic() {
         let mut metadata = HashMap::new();
@@ -419,8 +394,6 @@ mod tests {
     fn test_format_results_text_no_source() {
         let results = vec![mock_result(0.85, 1, "content")];
         let output = format_results_text(&results);
-        
-        // Should show "?" when no source metadata
         assert!(output.contains("?"));
     }
 
@@ -429,10 +402,7 @@ mod tests {
         let long_text = "a".repeat(100);
         let results = vec![mock_result(0.9, 1, &long_text)];
         let output = format_results_text(&results);
-        
-        // Should contain truncated text with "..."
         assert!(output.contains("..."));
-        // Should not contain the full text
         assert!(!output.contains(&long_text));
     }
 
@@ -459,8 +429,6 @@ mod tests {
     fn test_format_results_text_score_precision() {
         let results = vec![mock_result(0.123456789, 1, "test")];
         let output = format_results_text(&results);
-        
-        // Should have 4 decimal places
         assert!(output.contains("0.1235") || output.contains("0.1234"));
     }
 
@@ -470,11 +438,6 @@ mod tests {
         let output = format_results_text(&results);
         assert!(output.is_empty());
     }
-
-    // =========================================================================
-    // format_results_docs tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_docs_single() {
         let results = vec![mock_result(0.9, 1, "document content here")];
@@ -499,7 +462,6 @@ mod tests {
 
     #[test]
     fn test_format_results_docs_preserves_content() {
-        // Unlike text format, docs should preserve full content
         let long_text = "a".repeat(100);
         let results = vec![mock_result(0.9, 1, &long_text)];
         let output = format_results_docs(&results);
@@ -514,8 +476,6 @@ mod tests {
         
         let results = vec![mock_result_with_metadata(0.9, 1, "content only", metadata)];
         let output = format_results_docs(&results);
-        
-        // Should only have the text, not metadata
         assert_eq!(output.trim(), "content only");
         assert!(!output.contains("file.txt"));
     }
@@ -526,17 +486,10 @@ mod tests {
         let output = format_results_docs(&results);
         assert!(output.is_empty());
     }
-
-    // =========================================================================
-    // format_results dispatcher tests
-    // =========================================================================
-
     #[test]
     fn test_format_results_json_format() {
         let results = vec![mock_result(0.9, 1, "test")];
         let output = format_results(&results, "json").unwrap();
-        
-        // Should be valid JSON array
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed.len(), 1);
     }
@@ -588,11 +541,6 @@ mod tests {
         assert!(err.contains("text"));
         assert!(err.contains("docs"));
     }
-
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
     #[test]
     fn test_format_results_special_characters_in_text() {
         let results = vec![mock_result(0.9, 1, "text with \"quotes\" and\ttabs")];
@@ -636,7 +584,6 @@ mod tests {
 
     #[test]
     fn test_format_results_negative_score() {
-        // Cross-encoders can produce negative scores
         let results = vec![mock_result(-0.5, 1, "negative score doc")];
         
         let json_output = format_results_json(&results).unwrap();
@@ -660,7 +607,6 @@ mod tests {
     fn test_format_results_multiline_text_in_docs() {
         let results = vec![mock_result(0.9, 1, "line1\nline2\nline3")];
         
-        // docs format preserves newlines
         let output = format_results_docs(&results);
         assert!(output.contains("line1\nline2\nline3"));
     }
@@ -668,8 +614,6 @@ mod tests {
     #[test]
     fn test_format_results_multiline_text_in_text_format() {
         let results = vec![mock_result(0.9, 1, "line1\nline2\nline3")];
-        
-        // text format replaces newlines with spaces via truncate_text
         let output = format_results_text(&results);
         assert!(output.contains("line1 line2 line3"));
         assert!(!output.contains("line1\nline2"));

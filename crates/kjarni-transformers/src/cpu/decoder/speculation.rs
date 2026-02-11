@@ -175,9 +175,6 @@ pub async fn run_speculative_generation_loop(
             draft_tokens
         );
 
-        // =============================================================
-        // Step 2: Target verifies all tokens
-        // =============================================================
         let verify_logits = verify_batch(
             target.as_ref(),
             &draft_tokens,
@@ -185,9 +182,6 @@ pub async fn run_speculative_generation_loop(
             target_cache.as_mut(),
         )?;
 
-        // =============================================================
-        // Step 3: Accept/reject
-        // =============================================================
         let (accepted_tokens, final_logits) = if probabilistic {
             accept_probabilistic(&draft_tokens, &draft_probs, &verify_logits)
         } else {
@@ -204,9 +198,6 @@ pub async fn run_speculative_generation_loop(
             draft_tokens.len()
         );
 
-        // =============================================================
-        // Step 4: Emit accepted tokens
-        // =============================================================
         for &token in &accepted_tokens {
             all_tokens.push(token);
             stats.record_token();
@@ -232,13 +223,9 @@ pub async fn run_speculative_generation_loop(
             }
         }
 
-        // =============================================================
-        // Step 5: Sync caches
-        // =============================================================
         target_cache.set_seq_length(all_tokens.len());
         target_logits = final_logits;
 
-        // Resync draft (simple approach: re-prefill)
         draft_cache.clear();
         let resync_array = Array2::from_shape_vec((1, all_tokens.len()), all_tokens.clone())?;
         draft_logits = draft_backend
@@ -251,10 +238,6 @@ pub async fn run_speculative_generation_loop(
 }
 
 
-// Verification
-
-
-/// Runs target model on draft tokens, returns logits for all positions.
 fn verify_batch(
     model: &dyn DecoderLanguageModel,
     tokens: &[u32],
@@ -280,9 +263,6 @@ fn verify_batch(
 }
 
 
-// Acceptance Strategies
-
-
 /// Greedy acceptance: accept while target argmax matches draft.
 fn accept_greedy(draft_tokens: &[u32], verify_logits: &Array2<f32>) -> (Vec<u32>, Array1<f32>) {
     let mut accepted = Vec::new();
@@ -295,13 +275,11 @@ fn accept_greedy(draft_tokens: &[u32], verify_logits: &Array2<f32>) -> (Vec<u32>
         if target_token == draft_token {
             accepted.push(draft_token);
         } else {
-            // Reject - add target's choice and return
             accepted.push(target_token);
             return (accepted, logits_i);
         }
     }
 
-    // All accepted - sample bonus token from last position
     let last_logits = verify_logits.slice(s![-1, ..]).to_owned();
     let bonus = sample_token(
         last_logits.clone(),
@@ -313,7 +291,7 @@ fn accept_greedy(draft_tokens: &[u32], verify_logits: &Array2<f32>) -> (Vec<u32>
     (accepted, last_logits)
 }
 
-/// Probabilistic acceptance: preserves target distribution exactly.
+/// preserves target distribution exactly.
 fn accept_probabilistic(
     draft_tokens: &[u32],
     draft_probs: &[Array1<f32>],
@@ -342,8 +320,6 @@ fn accept_probabilistic(
             return (accepted, target_logits);
         }
     }
-
-    // All accepted - sample bonus
     let last_logits = verify_logits.slice(s![-1, ..]).to_owned();
     let bonus = sample_token(
         last_logits.clone(),
@@ -367,13 +343,9 @@ fn compute_residual(target: &Array1<f32>, draft: &Array1<f32>) -> Array1<f32> {
     if sum > 1e-10 {
         residual / sum
     } else {
-        // Fallback to target distribution
         target.clone()
     }
 }
-
-// Sampling Utilities
-
 
 #[inline]
 fn softmax(logits: &Array1<f32>) -> Array1<f32> {
@@ -400,19 +372,9 @@ fn sample_from_distribution(probs: &Array1<f32>) -> u32 {
 }
 
 
-// Tests
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // #[test]
-    // fn test_greedy_sampling() {
-    //     let logits = Array1::from_vec(vec![1.0, 5.0, 2.0, 3.0]);
-    //     assert_eq!(sample_greedy(&logits), 1);
-    // }
-
     #[test]
     fn test_softmax() {
         let logits = Array1::from_vec(vec![1.0, 2.0, 3.0]);
@@ -430,7 +392,6 @@ mod tests {
 
         let residual = compute_residual(&target, &draft);
 
-        // target - draft = [0.2, -0.2, 0.0] -> max(0, .) = [0.2, 0, 0]
         assert!((residual.sum() - 1.0).abs() < 1e-5);
         assert!(residual[0] > 0.9); // Should be ~1.0 after normalization
     }
@@ -439,14 +400,12 @@ mod tests {
     fn test_greedy_accept_all() {
         let draft = vec![1, 2, 3];
         let mut logits = Array2::zeros((3, 10));
-        // Make target argmax match draft
         logits[[0, 1]] = 10.0;
         logits[[1, 2]] = 10.0;
         logits[[2, 3]] = 10.0;
 
         let (accepted, _) = accept_greedy(&draft, &logits);
 
-        // All 3 accepted + 1 bonus
         assert_eq!(accepted.len(), 4);
         assert_eq!(&accepted[..3], &[1, 2, 3]);
     }

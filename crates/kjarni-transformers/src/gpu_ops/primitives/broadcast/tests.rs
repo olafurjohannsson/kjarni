@@ -1,7 +1,3 @@
-// ============================================================================
-// Tests for GpuBroadcast (broadcast.rs)
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     
@@ -16,11 +12,6 @@ mod tests {
     async fn get_test_context() -> Arc<WgpuContext> {
         WgpuContext::new().await.unwrap()
     }
-
-    // ========================================================================
-    // Construction Tests
-    // ========================================================================
-
     #[tokio::test]
     async fn test_broadcast_new() -> Result<()> {
         let context = get_test_context().await;
@@ -34,7 +25,6 @@ mod tests {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
 
-        // [1, seq, hidden] -> [4, seq, hidden]
         let src = Array3::from_shape_fn((1, 8, 64), |(_, s, h)| (s * 64 + h) as f32);
         let gpu_src = GpuTensor::from_ndarray(&context, &src)?;
         let gpu_dst = GpuTensor::zeros(&context, vec![4, 8, 64], DType::F32, "")?;
@@ -55,18 +45,11 @@ mod tests {
         Ok(())
     }
 
-
-    // ========================================================================
-    // Actual use case: Broadcast encoder states for beam search
-    // src: [1, seq, hidden] -> dst: [num_beams, seq, hidden]
-    // ========================================================================
-
     #[tokio::test]
     async fn test_broadcast_encoder_states_4_beams() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
 
-        // Simulate encoder output: [1, seq=4, hidden=8]
         let seq = 4;
         let hidden = 8;
         let num_beams = 4;
@@ -84,7 +67,6 @@ mod tests {
 
         let result: Array3<f32> = gpu_dst.to_ndarray_3d().await?;
 
-        // Each beam should have identical copy of encoder output
         for beam in 0..num_beams {
             for s in 0..seq {
                 for h in 0..hidden {
@@ -106,7 +88,6 @@ mod tests {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
 
-        // Edge case: 1 beam (should just copy)
         let src_data = Array3::from_shape_fn((1, 2, 4), |(_, s, h)| (s * 10 + h) as f32);
 
         let gpu_src = GpuTensor::from_ndarray(&context, &src_data)?;
@@ -127,8 +108,6 @@ mod tests {
     async fn test_broadcast_encoder_states_large() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
-
-        // Realistic size: [1, 128, 768] -> [4, 128, 768]
         let seq = 128;
         let hidden = 768;
         let num_beams = 4;
@@ -146,7 +125,6 @@ mod tests {
 
         let result: Array3<f32> = gpu_dst.to_ndarray_3d().await?;
 
-        // Spot check a few values
         for beam in 0..num_beams {
             assert_eq!(result[[beam, 0, 0]], src_data[[0, 0, 0]]);
             assert_eq!(result[[beam, 64, 384]], src_data[[0, 64, 384]]);
@@ -189,10 +167,6 @@ mod tests {
         Ok(())
     }
 
-    // ========================================================================
-    // Kernel reuse
-    // ========================================================================
-
     #[tokio::test]
     async fn test_broadcast_kernel_reuse() -> Result<()> {
         let context = get_test_context().await;
@@ -220,10 +194,6 @@ mod tests {
 
         Ok(())
     }
-
-    // ========================================================================
-    // Uniforms struct
-    // ========================================================================
 
     #[test]
     fn test_broadcast_uniforms_struct() {
