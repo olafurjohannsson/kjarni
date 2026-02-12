@@ -1,0 +1,70 @@
+[package]
+name = "kjarni-transformers"
+description = "Low-level transformer operations for Kjarni"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+safetensors = { workspace = true }
+
+rand = { workspace = true }
+half = { workspace = true }
+pollster = { workspace = true }
+once_cell = { workspace = true }
+dirs = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tokenizers = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
+futures-intrusive = { workspace = true }
+rand_distr = { workspace = true }
+log = { workspace = true }
+ndarray-rand = { workspace = true }
+libm = { workspace = true }
+matrixmultiply = { workspace = true }
+memmap2 = { workspace = true }
+faer = { workspace = true }
+gguf-rs = { workspace = true }
+gguf = "0.1.2"
+byteorder = "1.5.0"
+num_cpus = "1.16"
+async-stream = "0.3.6"
+#futures-core = "0.3.31"
+#futures-util = "0.3.31"
+libc = "0.2.177"
+strum = "0.26"
+rand_chacha = "0.9.0"
+strum_macros = "0.26"
+tokio-stream = "0.1.18"
+hound = "3.5"           # WAV loading (simple, no dependencies)
+rubato = "0.14"         # High-quality resampling
+ndarray = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Graphics_Dxgi"] }
+
+[dev-dependencies]
+env_logger = "0.10"
+approx = "0.5.1"
+tempfile = "3.23.0"
+
+[features]
+default = []
+profiling = []
+rubato = []
+symphonia = []
+tokio = []   # Defines the feature flag "tokio" (maybe it doesnt make sense to not hae it)
+nvidia = []  # Defines the feature flag "nvidia"

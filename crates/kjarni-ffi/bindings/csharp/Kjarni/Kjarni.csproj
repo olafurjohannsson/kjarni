@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Package metadata -->
+    <PackageId>Kjarni</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Ólafur Aron Jóhannsson</Authors>
+    <Description>AI inference for .NET — embeddings, classification, reranking, and search. No Python. No ONNX. No CUDA.</Description>
+    <PackageTags>ai;ml;embeddings;classification;reranking;rag;search;nlp;inference;transformers</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/olafurjohannsson/kjarni</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/olafurjohannsson/kjarni</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <Copyright>Copyright © 2025 Ólafur Aron Jóhannsson</Copyright>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!-- README and icon -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="icon.png" Pack="true" PackagePath="" Condition="Exists('icon.png')" />
+  </ItemGroup>
+
+  <!-- Native libraries per platform (for NuGet package) -->
+  <ItemGroup>
+    <None Include="runtimes/linux-x64/native/**" Pack="true" PackagePath="runtimes/linux-x64/native" />
+    <None Include="runtimes/linux-arm64/native/**" Pack="true" PackagePath="runtimes/linux-arm64/native" />
+    <None Include="runtimes/win-x64/native/**" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <None Include="runtimes/osx-x64/native/**" Pack="true" PackagePath="runtimes/osx-x64/native" />
+    <None Include="runtimes/osx-arm64/native/**" Pack="true" PackagePath="runtimes/osx-arm64/native" />
+  </ItemGroup>
+
+  <!-- Local dev: copy native lib to output for dotnet run/test -->
+  <PropertyGroup>
+    <NativeLibraryPath>/home/olafurj/dev/edgebert/target/release</NativeLibraryPath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('$(NativeLibraryPath)/libkjarni_ffi.so')">
+    <None Include="$(NativeLibraryPath)/libkjarni_ffi.so"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libkjarni_ffi.so"
+          Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(NativeLibraryPath)/libkjarni_ffi.dylib')">
+    <None Include="$(NativeLibraryPath)/libkjarni_ffi.dylib"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libkjarni_ffi.dylib"
+          Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(NativeLibraryPath)/kjarni_ffi.dll')">
+    <None Include="$(NativeLibraryPath)/kjarni_ffi.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="kjarni_ffi.dll"
+          Pack="false" />
+  </ItemGroup>
+</Project>

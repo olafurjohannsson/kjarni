@@ -1,221 +1,337 @@
-# EdgeBERT
+# Kjarni
 
-**A pure Rust + WASM implementation for BERT inference with minimal dependencies**
+A native library for running machine learning models.
 
-[![docs.rs](https://docs.rs/edgebert/badge.svg)](https://docs.rs/edgebert)
-[![Rust](https://github.com/olafurjohannsson/edgebert/actions/workflows/rust.yml/badge.svg)](https://github.com/olafurjohannsson/edgebert/actions/workflows/rust.yml)
+Kjarni is designed to be linked directly into your application.
+It compiles to a single shared library and runs locally, without
+Python, containers, external services, or GPU requirements.
 
----
+C# bindings are available today via [NuGet](https://www.nuget.org/packages/Kjarni).
+Go, Rust, Python, and C++ bindings are planned.
 
-## Overview
+The name is Icelandic [ˈkʰjartnɪ]. It means "core."
 
-EdgeBERT is a lightweight Rust implementation of BERT inference focused on native, edge computing and WASM deployment. Run sentence-transformers models anywhere without Python or large ML runtimes.
-
-## Status
-- ✅ MiniLM-L6-v2 inference working
-- ✅ WASM support
-- 🚧 Additional models coming soon
-
-## Contributions
-
-All contributions welcome, this is very early stages.
-
-## Components
-
-- Encoder: Run inference to turn text into embeddings
-- WordPiece tokenization: A small tokenization implementation based on WordPiece
-- Cross-Platform (WebAssembly and native)
-- No Python or C/C++ dependencies except for optional feature OpenBLAS for ndarray vectorized matrix operations
-
-**Use this if you need:**
-- Embeddings in pure Rust without Python/C++ dependencies
-- BERT in browsers or edge devices
-- Offline RAG systems
-- Small binary size over maximum speed
-
-**Don't use this if you need:**
-- Multiple model architectures (currently only MiniLM)
-- GPU acceleration
-- Production-grade performance (use ONNX Runtime instead)
-
-## Getting Started
-
-### 1. Native Rust Application
-
-For server-side or desktop applications, you can use the library directly.
-
-**`Cargo.toml`**
-```toml
-[dependencies]
-edgebert = "0.3.4"
-anyhow = "1.0"
-```
-
-**`main.rs`**
-```rust
-use anyhow::Result;
-use edgebert::{Model, ModelType};
-fn main() -> Result<()> {
-    let model = Model::from_pretrained(ModelType::MiniLML6V2BiEncoder)?;
-
-    let texts = vec!["Hello world", "How are you"];
-    let embeddings = model.encode(texts.clone(), true)?;
-
-    for (i, embedding) in embeddings.iter().enumerate() {
-        let n = embedding.len().min(10);
-        println!("Text: {} == {:?}...", texts[i], &embedding[0..n]);
-    }
-    Ok(())
-}
-```
-
-**Output:**
-```
-Text: Hello world == [-0.034439795, 0.030909885, 0.0066969804, 0.02608013, -0.03936993, -0.16037229, 0.06694216, -0.0065279473, -0.0474657, 0.014813968]...
-Text: How are you == [-0.031447295, 0.03784213, 0.0761843, 0.045665547, -0.0012263817, -0.07488511, 0.08155286, 0.010209872, -0.11220472, 0.04075747]...
-```
-
-You can see the full example under `examples/basic.rs` - to build and run:
-```bash
-cargo run --release --example basic
-```
-
-### 2. WebAssembly
+## Install
 
 ```bash
-# Install wasm-pack
-curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-# Build
-./scripts/wasm-build.sh
-
-# Serve
-cd examples && npx serve
+dotnet add package Kjarni
 ```
 
-```javascript
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>EdgeBERT WASM Test</title>
-</head>
-<body>
-<script type="module">
-    import init, { WasmModel, WasmModelType } from './pkg/edgebert.js';
+## Quick Start
 
-    async function run() {
-        await init();
+```csharp
+using Kjarni;
 
-        const model = await WasmModel.from_type(WasmModelType.MiniLML6V2BiEncoder);
-        const texts = ["Hello world", "How are you"];
-        const embeddings = model.encode(texts, true);
-
-        console.log("First 10 values:", embeddings.slice(0, 10));
-    }
-
-    run().catch(console.error);
-</script>
-</body>
-</html>
-
+using var classifier = new Classifier("roberta-sentiment");
+Console.WriteLine(classifier.Classify("I love this product!"));
+// positive (98.5%)
 ```
 
-**Output:**
-```
-First 10 values: Float32Array(10) [-0.034439802169799805, 0.03090989589691162, 0.006696964148432016, 0.02608015574514866, -0.03936990723013878, -0.16037224233150482, 0.06694218516349792, -0.006527911406010389, -0.04746570065617561, 0.014813981018960476, buffer: ArrayBuffer(40), byteLength: 40, byteOffset: 0, length: 10, Symbol(Symbol.toStringTag): 'Float32Array']
-```
+Models download on first use and are cached locally. No setup or configuration required.
 
-You can see the full example under `examples/basic.html` - to build run `scripts/wasm-build.sh` and go into `examples/` and run a local server, `npx serve` can serve wasm.
+## Examples
 
-### 3. Web Workers
+Same models, same results.
 
-You can look at `examples/worker.html` and `examples/worker.js` to see how to use web workers and web assembly, the library
-handles both when window is defined, as with `basic.html` and also when it is not, web workers.
+### Embeddings
 
-After compiling the WASM build, if you used the wasm-build.sh it should be inside examples/pkg, use npx serve
-and open `localhost:3000/worker`
+**Kjarni:**
 
-Clicking on generate embeddings after the model loads generates
-
-```
-Encoding texts: ["Hello world","How are you?"]
-Embeddings shape: [2, 384]
-'Hello world' vs 'How are you?': 0.305
-First embedding norm: 1.000000
-First 10 values: [-0.0344, 0.0309, 0.0067, 0.0261, -0.0394, -0.1604, 0.0669, -0.0065, -0.0475, 0.0148]
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+float[] vector = embedder.Encode("Hello world");
+Console.WriteLine(string.Join(", ", vector[..5]));
+// -0.034477282, 0.03102318, 0.006734989, 0.02610899, -0.03936202
 ```
 
-
-### 4. Comparison with PyTorch
-
-Small example from pytorch to encode and show similarity
+**sentence-transformers:**
 
 ```python
 from sentence_transformers import SentenceTransformer
-import torch
-import torch.nn.functional as F
-
-texts = ["Hello world", "How are you"]
-
-model = SentenceTransformer('all-MiniLM-L6-v2')
-
-embeddings = model.encode(texts, convert_to_tensor=True)
-
-for i, emb in enumerate(embeddings):
-    print(f"Text: {texts[i]}")
-    print("First 10 values:", emb[:10].tolist())
-    print()
-
-cos_sim = F.cosine_similarity(embeddings[0], embeddings[1], dim=0)
-print(f"Cosine similarity ('{texts[0]}' vs '{texts[1]}'):", cos_sim.item())
-
+model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+vector = model.encode("Hello world", normalize_embeddings=True)
+print(vector[:5])
+# [-0.03447726  0.03102319  0.00673499  0.02610895 -0.03936201]
 ```
 
-**Output from Python:**
+### Three-Class Sentiment
+
+```csharp
+using var classifier = new Classifier("roberta-sentiment");
+var result = classifier.Classify("Terrible quality, broke after one day.");
+Console.WriteLine(result.ToJson());
 ```
-Text: Hello world == ['-0.0345', '0.0310', '0.0067', '0.0261', '-0.0394', '-0.1603', '0.0669', '-0.0064', '-0.0475', '0.0148']...
-Text: How are you == ['-0.0314', '0.0378', '0.0763', '0.0457', '-0.0012', '-0.0748', '0.0816', '0.0102', '-0.1122', '0.0407']...
 
-Cosine similarity ('Hello world' vs 'How are you'): 0.3624
-
-```
-
-**EdgeBERT**
-
-```rust
-use anyhow::Result;
-use edgebert::{Model, ModelType};
-
-fn main() -> Result<()> {
-    let model = Model::from_pretrained(ModelType::MiniLML6V2BiEncoder)?;
-    let texts = vec!["Hello world", "How are you"];
-    let embeddings = model.encode(texts.clone(), true)?;
-
-    for (i, embedding) in embeddings.iter().enumerate() {
-        let n = embedding.len().min(10);
-        println!("Text: {} == {:?}...", texts[i], &embedding[0..n]);
-    }
-
-    let dot: f32 = embeddings[0].iter().zip(&embeddings[1]).map(|(a, b)| a * b).sum();
-    let norm_a: f32 = embeddings[0].iter().map(|v| v * v).sum::<f32>().sqrt();
-    let norm_b: f32 = embeddings[1].iter().map(|v| v * v).sum::<f32>().sqrt();
-    let cos_sim = dot / (norm_a * norm_b);
-
-    println!("\nCosine similarity ('{}' vs '{}'): {:.4}", texts[0], texts[1], cos_sim);
-
-    Ok(())
+```json
+{
+  "label": "negative",
+  "score": 0.9408,
+  "predictions": [
+    {"label": "negative", "score": 0.9408},
+    {"label": "neutral", "score": 0.0509},
+    {"label": "positive", "score": 0.0083}
+  ]
 }
 ```
 
-**Output**
-```rust
-Text: Hello world == [-0.034439795, 0.030909885, 0.0066969804, 0.02608013, -0.03936993, -0.16037229, 0.06694216, -0.0065279473, -0.0474657, 0.014813968]...
-Text: How are you == [-0.031447295, 0.03784213, 0.0761843, 0.045665547, -0.0012263817, -0.07488511, 0.08155286, 0.010209872, -0.11220472, 0.04075747]...
+### Multilingual Sentiment
 
-Cosine similarity ('Hello world' vs 'How are you'): 0.3623
-
+```csharp
+using var classifier = new Classifier("bert-sentiment-multilingual");
+var result = classifier.Classify("Esta es la peor compra que he hecho.");
+Console.WriteLine(result.ToJson());
 ```
 
-Cosine similarity has 0.3623 for Rust and Python 0.3624, acceptable with around 99.97% 
-accuracy, tiny discrepancy because of floating point rounding differences.
+```json
+{
+  "label": "1 star",
+  "score": 0.9407,
+  "predictions": [
+    {"label": "1 star", "score": 0.9407},
+    {"label": "2 stars", "score": 0.0514},
+    {"label": "3 stars", "score": 0.0060},
+    {"label": "5 stars", "score": 0.0015},
+    {"label": "4 stars", "score": 0.0005}
+  ]
+}
+```
+
+### Toxicity Detection
+
+```csharp
+using var classifier = new Classifier("toxic-bert");
+Console.WriteLine(classifier.Classify("You are an idiot").ToDetailedString());
+```
+
+```
+             toxic   98.61%  ███████████████████████████████████████
+            insult   96.00%  ██████████████████████████████████████
+           obscene   75.64%  ██████████████████████████████
+      severe_toxic    4.56%  █
+     identity_hate    1.41%  
+```
+
+### Emotion Detection
+
+```csharp
+using var classifier = new Classifier("distilroberta-emotion");
+var result = classifier.Classify("I just got promoted!");
+Console.WriteLine(result.ToJson());
+```
+
+```json
+{
+  "label": "surprise",
+  "score": 0.5066,
+  "predictions": [
+    {"label": "surprise", "score": 0.5066},
+    {"label": "anger", "score": 0.2376},
+    {"label": "joy", "score": 0.0980},
+    {"label": "neutral", "score": 0.0664},
+    {"label": "disgust", "score": 0.0658},
+    {"label": "sadness", "score": 0.0221},
+    {"label": "fear", "score": 0.0035}
+  ]
+}
+```
+
+### Semantic Similarity
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+Console.WriteLine(embedder.Similarity("doctor", "physician"));
+// 0.8598132
+```
+
+### Semantic Search
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+
+var docs = new[] {
+    "How do I reset my password?",
+    "What is your refund policy?",
+    "Do you ship internationally?",
+};
+var vectors = embedder.EncodeBatch(docs);
+var query = embedder.Encode("I need to change my login credentials");
+
+for (int i = 0; i < docs.Length; i++)
+{
+    var score = Embedder.CosineSimilarity(query, vectors[i]);
+    Console.WriteLine($"  {score:F4}: {docs[i]}");
+}
+//  0.5981: How do I reset my password?
+// -0.0027: What is your refund policy?
+// -0.0451: Do you ship internationally?
+```
+
+No keyword overlap between "change my login credentials" and "reset my password."
+
+### Reranking
+
+```csharp
+using var reranker = new Reranker();
+var results = reranker.Rerank(
+    "What is machine learning?",
+    new[] {
+        "Machine learning is a subset of artificial intelligence.",
+        "Deep learning uses neural networks with many layers.",
+        "The weather today is sunny.",
+    });
+
+foreach (var r in results)
+    Console.WriteLine($"  {r.Score:F4}: {r.Document}");
+//  10.5139: Machine learning is a subset of artificial intelligence.
+//  -5.5301: Deep learning uses neural networks with many layers.
+// -11.1001: The weather today is sunny.
+```
+
+### Index & Search
+
+```bash
+mkdir -p docs
+```
+
+**docs/returns.txt:**
+```
+Our return policy allows customers to return any unused item within 30 days of purchase for a full refund. Items must be in their original packaging. Shipping costs are non-refundable.
+```
+
+**docs/shipping.txt:**
+```
+We ship to all 50 US states and internationally to over 40 countries. Standard shipping takes 5-7 business days. Express shipping is available for an additional fee.
+```
+
+```csharp
+using var indexer = new Indexer(model: "minilm-l6-v2", quiet: true);
+indexer.Create("my_index", new[] { "docs/" });
+
+using var searcher = new Searcher(
+    model: "minilm-l6-v2",
+    rerankerModel: "minilm-l6-v2-cross-encoder");
+
+var results = searcher.Search("my_index", "how do returns work?",
+    mode: SearchMode.Hybrid);
+
+foreach (var r in results)
+    Console.WriteLine($"  {r.Score:F4}: {r.Text}");
+```
+
+```
+  1.3282: Our return policy allows customers to return any unused item
+          within 30 days of purchase for a full refund. Items must be in
+          their original packaging. Shipping costs are non-refundable.
+
+-11.0939: We ship to all 50 US states and internationally to over 40
+          countries. Standard shipping takes 5-7 business days. Express
+          shipping is available for an additional fee.
+```
+
+Search modes: `Semantic` (vector similarity), `Keyword` (BM25), `Hybrid` (both).
+
+### GPU
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
+```
+
+GPU inference is optional and uses WebGPU.
+Vulkan on Linux, DX12/Vulkan on Windows. CUDA is not required.
+
+## Models
+
+| Task | Model | Size |
+|------|-------|------|
+| Sentiment (3-class) | `roberta-sentiment` | 125MB |
+| Sentiment (multilingual) | `bert-sentiment-multilingual` | 168MB |
+| Sentiment (binary) | `distilbert-sentiment` | 66MB |
+| Emotion (7-class) | `distilroberta-emotion` | 82MB |
+| Emotion (28-class) | `roberta-emotions` | 125MB |
+| Toxicity | `toxic-bert` | 110MB |
+| Embeddings | `minilm-l6-v2` | 90MB |
+| Embeddings | `mpnet-base-v2` | 420MB |
+| Reranking | `minilm-l6-v2-cross-encoder` | 90MB |
+
+Models download on first use. The engine also supports Llama, Qwen2, Mistral, Phi-3, T5, BART, and Whisper.
+
+Bindings and APIs for these models are intentionally not exposed in
+the initial release and will ship in a future version.
+
+## Configuration
+
+### Cache Directory
+
+Default locations:
+- **Linux:** `~/.cache/kjarni`
+- **Windows:** `%LOCALAPPDATA%\kjarni`
+
+Override with `KJARNI_CACHE_DIR` or the constructor parameter:
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
+```
+
+### HuggingFace Token
+
+For gated models:
+
+```bash
+export HF_TOKEN=hf_your_token_here
+```
+
+### Quiet Mode
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2", quiet: true);
+```
+
+## Platform Support
+
+| Platform | CPU | GPU |
+|----------|-----|-----|
+| Linux x64 | Yes | Yes Vulkan |
+| Windows x64 | Yes | Yes DX12/Vulkan |
+| macOS ARM64 | Planned | Planned (Metal) |
+
+## How It Works
+
+Kjarni does not wrap ONNX, LibTorch, or any external inference engine.
+The runtime is written in Rust. The only system dependency is glibc 2.17.
+
+- Hand-tuned SIMD kernels (AVX2/FMA, NEON)
+- Custom WGSL compute shaders for GPU
+- Zero-copy model loading via mmap
+- BF16 compute path
+- Quantization: Q4, Q6, Q8
+
+## Why
+
+Adding machine learning to an application usually means Python, CUDA,
+containers, or an external service. Kjarni is a single `.so` or `.dll`
+that runs as part of your application, with predictable behavior and
+no external infrastructure.
+
+## Project Structure
+
+```
+crates/
+├── kjarni/              # High-level API
+├── kjarni-transformers/  # Engine — models, kernels, GPU shaders
+├── kjarni-ffi/          # C ABI + language bindings
+│   └── bindings/
+│       └── csharp/      # NuGet package
+├── kjarni-cli/          # Command-line tool
+└── kjarni-examples/     # Rust examples
+```
+
+## Building from Source
+
+```bash
+cargo build --release -p kjarni-ffi
+cargo test
+```
+
+## License
+
+MIT or Apache-2.0, at your option.

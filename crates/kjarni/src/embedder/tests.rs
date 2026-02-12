@@ -1,0 +1,810 @@
+use super::*;
+use crate::common::{DownloadPolicy, KjarniDevice};
+
+
+mod types_tests {
+    use kjarni_transformers::PoolingStrategy;
+
+    use super::*;
+
+    #[test]
+    fn test_pooling_strategy_default() {
+        let strategy = PoolingStrategy::default();
+        assert_eq!(strategy, PoolingStrategy::Mean);
+    }
+
+    #[test]
+    fn test_pooling_strategy_as_str() {
+        assert_eq!(PoolingStrategy::Mean.as_str(), "mean");
+        assert_eq!(PoolingStrategy::Max.as_str(), "max");
+        assert_eq!(PoolingStrategy::Cls.as_str(), "cls");
+        assert_eq!(PoolingStrategy::LastToken.as_str(), "last_token");
+    }
+
+    #[test]
+    fn test_pooling_strategy_display() {
+        assert_eq!(format!("{}", PoolingStrategy::Mean), "mean");
+        assert_eq!(format!("{}", PoolingStrategy::Max), "max");
+        assert_eq!(format!("{}", PoolingStrategy::Cls), "cls");
+        assert_eq!(format!("{}", PoolingStrategy::LastToken), "last_token");
+    }
+
+    #[test]
+    fn test_pooling_strategy_from_str() {
+        assert_eq!(
+            "mean".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Mean
+        );
+        assert_eq!(
+            "max".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Max
+        );
+        assert_eq!(
+            "cls".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Cls
+        );
+        assert_eq!(
+            "last_token".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "lasttoken".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "last".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::LastToken
+        );
+        assert_eq!(
+            "MEAN".parse::<PoolingStrategy>().unwrap(),
+            PoolingStrategy::Mean
+        );
+    }
+
+    #[test]
+    fn test_pooling_strategy_from_str_invalid() {
+        assert!("invalid".parse::<PoolingStrategy>().is_err());
+        assert!("".parse::<PoolingStrategy>().is_err());
+    }
+
+    #[test]
+    fn test_embedding_overrides_default() {
+        let overrides = EmbeddingOverrides::default();
+
+        assert!(overrides.pooling.is_none());
+        assert!(overrides.normalize.is_none());
+        assert!(overrides.max_length.is_none());
+    }
+}
+
+
+
+mod builder_tests {
+    use kjarni_transformers::PoolingStrategy;
+
+    use super::*;
+
+    #[test]
+    fn test_builder_default_values() {
+        let builder = EmbedderBuilder::new("test-model");
+
+        assert_eq!(builder.model, "test-model");
+        assert!(builder.model_path.is_none());
+        assert_eq!(builder.device, KjarniDevice::Cpu);
+        assert!(builder.context.is_none());
+        assert!(builder.cache_dir.is_none());
+        assert!(builder.load_config.is_none());
+        assert_eq!(builder.download_policy, DownloadPolicy::IfMissing);
+        assert!(!builder.quiet);
+    }
+
+    #[test]
+    fn test_builder_cpu() {
+        let builder = EmbedderBuilder::new("test-model").cpu();
+        assert_eq!(builder.device, KjarniDevice::Cpu);
+    }
+
+    #[test]
+    fn test_builder_gpu() {
+        let builder = EmbedderBuilder::new("test-model").gpu();
+        assert_eq!(builder.device, KjarniDevice::Gpu);
+    }
+
+    #[test]
+    fn test_builder_auto_device() {
+        let builder = EmbedderBuilder::new("test-model").auto_device();
+        assert_eq!(builder.device, KjarniDevice::Auto);
+    }
+
+    #[test]
+    fn test_builder_cache_dir() {
+        let builder = EmbedderBuilder::new("test-model").cache_dir("/tmp/test-cache");
+
+        assert_eq!(
+            builder.cache_dir,
+            Some(std::path::PathBuf::from("/tmp/test-cache"))
+        );
+    }
+
+    #[test]
+    fn test_builder_model_path() {
+        let builder = EmbedderBuilder::new("test-model").model_path("/path/to/model");
+
+        assert_eq!(
+            builder.model_path,
+            Some(std::path::PathBuf::from("/path/to/model"))
+        );
+    }
+
+    #[test]
+    fn test_builder_pooling() {
+        let builder = EmbedderBuilder::new("test-model").pooling(PoolingStrategy::Cls);
+
+        assert_eq!(builder.overrides.pooling, Some(PoolingStrategy::Cls));
+    }
+
+    #[test]
+    fn test_builder_normalize() {
+        let builder = EmbedderBuilder::new("test-model").normalize(false);
+        assert_eq!(builder.overrides.normalize, Some(false));
+    }
+
+    #[test]
+    fn test_builder_max_length() {
+        let builder = EmbedderBuilder::new("test-model").max_length(256);
+        assert_eq!(builder.overrides.max_length, Some(256));
+    }
+
+    #[test]
+    fn test_builder_offline() {
+        let builder = EmbedderBuilder::new("test-model").offline();
+        assert_eq!(builder.download_policy, DownloadPolicy::Never);
+    }
+
+    #[test]
+    fn test_builder_quiet() {
+        let builder = EmbedderBuilder::new("test-model").quiet(true);
+        assert!(builder.quiet);
+    }
+
+    #[test]
+    fn test_builder_chain() {
+        let builder = EmbedderBuilder::new("test-model")
+            .gpu()
+            .pooling(PoolingStrategy::Mean)
+            .normalize(true)
+            .max_length(512)
+            .quiet(true)
+            .offline();
+
+        assert_eq!(builder.device, KjarniDevice::Gpu);
+        assert_eq!(builder.overrides.pooling, Some(PoolingStrategy::Mean));
+        assert_eq!(builder.overrides.normalize, Some(true));
+        assert_eq!(builder.overrides.max_length, Some(512));
+        assert!(builder.quiet);
+        assert_eq!(builder.download_policy, DownloadPolicy::Never);
+    }
+
+    #[test]
+    fn test_builder_from_preset() {
+        let builder = EmbedderBuilder::from_preset(&presets::EMBEDDING_SMALL_V1);
+
+        assert_eq!(builder.model, presets::EMBEDDING_SMALL_V1.model);
+        assert_eq!(
+            builder.device,
+            presets::EMBEDDING_SMALL_V1.recommended_device
+        );
+        assert_eq!(
+            builder.overrides.pooling,
+            Some(presets::EMBEDDING_SMALL_V1.default_pooling)
+        );
+        assert_eq!(
+            builder.overrides.normalize,
+            Some(presets::EMBEDDING_SMALL_V1.normalize_default)
+        );
+    }
+
+    #[test]
+    fn test_builder_with_load_config() {
+        let builder = EmbedderBuilder::new("test-model")
+            .with_load_config(|b| b.offload_embeddings(true).max_batch_size(64));
+
+        assert!(builder.load_config.is_some());
+        let config = builder.load_config.unwrap();
+        assert!(config.inner.offload_embeddings);
+        assert_eq!(config.inner.max_batch_size, Some(64));
+    }
+}
+
+mod preset_tests {
+    use kjarni_transformers::PoolingStrategy;
+
+    use super::*;
+
+    #[test]
+    fn test_embedding_small_v1_preset() {
+        let preset = &presets::EMBEDDING_SMALL_V1;
+
+        assert_eq!(preset.name, "EMBEDDING_SMALL_V1");
+        assert_eq!(preset.model, "minilm-l6-v2");
+        assert_eq!(preset.dimension, 384);
+        assert_eq!(preset.default_pooling, PoolingStrategy::Mean);
+        assert!(preset.normalize_default);
+    }
+
+    #[test]
+    fn test_embedding_nomic_v1_preset() {
+        let preset = &presets::EMBEDDING_NOMIC_V1;
+
+        assert_eq!(preset.name, "EMBEDDING_NOMIC_V1");
+        assert_eq!(preset.model, "nomic-embed-text");
+        assert_eq!(preset.dimension, 768);
+    }
+
+    #[test]
+    fn test_find_preset_exists() {
+        let preset = presets::find_preset("EMBEDDING_SMALL_V1");
+        assert!(preset.is_some());
+        assert_eq!(preset.unwrap().name, "EMBEDDING_SMALL_V1");
+    }
+
+    #[test]
+    fn test_find_preset_case_insensitive() {
+        let preset = presets::find_preset("embedding_small_v1");
+        assert!(preset.is_some());
+    }
+
+    #[test]
+    fn test_find_preset_not_found() {
+        let preset = presets::find_preset("NONEXISTENT");
+        assert!(preset.is_none());
+    }
+
+    #[test]
+    fn test_embedder_tier_resolve() {
+        let small = presets::EmbedderTier::Small.resolve();
+        let medium = presets::EmbedderTier::Medium.resolve();
+        let large = presets::EmbedderTier::Large.resolve();
+
+        assert!(!small.model.is_empty());
+        assert!(!medium.model.is_empty());
+        assert!(!large.model.is_empty());
+    }
+
+    #[test]
+    fn test_all_presets_valid() {
+        for preset in presets::ALL_V1_PRESETS {
+            assert!(!preset.name.is_empty());
+            assert!(!preset.model.is_empty());
+            assert!(preset.dimension > 0);
+            assert!(preset.memory_mb > 0);
+            assert!(!preset.description.is_empty());
+        }
+    }
+}
+
+
+// Validation Tests
+
+
+mod validation_tests {
+    use super::*;
+    use kjarni_transformers::models::ModelType;
+
+    #[test]
+    fn test_validate_embedding_model() {
+        if let Some(model_type) = ModelType::from_cli_name("minilm-l6-v2") {
+            let result = validation::validate_for_embedding(model_type);
+            assert!(result.is_ok(), "MiniLM should be valid for embedding");
+        }
+    }
+
+    #[test]
+    fn test_validate_non_embedding_model() {
+        if let Some(model_type) = ModelType::from_cli_name("llama3.2-1b") {
+            let result = validation::validate_for_embedding(model_type);
+            assert!(result.is_err(), "Decoder should not be valid for embedding");
+        }
+    }
+
+    #[test]
+    fn test_get_embedding_models() {
+        let models = validation::get_embedding_models();
+        assert!(models.len() >= 0);
+    }
+}
+
+mod embedder_golden_values_test {
+    use super::*;
+
+    fn assert_approx_eq(actual: &[f32], expected: &[f32], tolerance: f32, label: &str) {
+        assert_eq!(actual.len(), expected.len(), "{label}: length mismatch");
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (a - e).abs() < tolerance,
+                "{label}[{i}]: expected {e:.6}, got {a:.6} (diff: {:.6})",
+                (a - e).abs()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn golden_embed_hello_dimension() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+        assert_eq!(vec.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn golden_embed_hello_normalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+
+        // Normalized output should have L2 norm ≈ 1.0
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 0.01,
+            "Expected norm ≈ 1.0, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_hello_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("hello").await.unwrap();
+
+        // HuggingFace reference (unnormalized, mean pooling)
+        let expected_first_10: [f32; 10] = [
+            -0.378313, 0.331226, 0.314387, 0.517039, -0.498711, -0.449437, 0.413166, 0.110871,
+            -0.494266, -0.225311,
+        ];
+        let expected_norm: f32 = 6.026801;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "hello");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_fox_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb
+            .embed("The quick brown fox jumps over the lazy dog")
+            .await
+            .unwrap();
+
+        let expected_first_10: [f32; 10] = [
+            0.195029, 0.336722, 0.289504, 0.388472, 0.181868, -0.168507, 0.036375, -0.336157,
+            -0.007285, 0.05849,
+        ];
+        let expected_norm: f32 = 5.494254;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "fox");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_kjarni_unnormalized() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .normalize(false)
+            .build()
+            .await
+            .unwrap();
+        let vec = emb.embed("Kjarni is the SQLite of AI").await.unwrap();
+
+        let expected_first_10: [f32; 10] = [
+            -0.300013, -0.165611, -0.500337, -0.374199, -0.059137, -0.156641, 0.762686, -0.083305,
+            -0.201395, 0.509203,
+        ];
+        let expected_norm: f32 = 6.380726;
+
+        assert_approx_eq(&vec[..10], &expected_first_10, 0.005, "kjarni");
+
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - expected_norm).abs() < 0.05,
+            "Expected norm ≈ {expected_norm}, got {norm:.6}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_king_queen() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("king", "queen").await.unwrap();
+        assert!(
+            (sim - 0.6807).abs() < 0.02,
+            "Expected cosine(king, queen) ≈ 0.6807, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_king_potato() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("king", "potato").await.unwrap();
+        assert!(
+            (sim - 0.3596).abs() < 0.02,
+            "Expected cosine(king, potato) ≈ 0.3596, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_cat_dog() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("cat", "dog").await.unwrap();
+        assert!(
+            (sim - 0.6606).abs() < 0.02,
+            "Expected cosine(cat, dog) ≈ 0.6606, got {sim:.4}"
+        );
+    }
+
+    #[tokio::test]
+    async fn golden_embed_similarity_cat_democracy() {
+        let emb = Embedder::builder("minilm-l6-v2")
+            .quiet(true)
+            .build()
+            .await
+            .unwrap();
+        let sim = emb.similarity("cat", "democracy").await.unwrap();
+        assert!(
+            (sim - 0.2668).abs() < 0.02,
+            "Expected cosine(cat, democracy) ≈ 0.2668, got {sim:.4}"
+        );
+    }
+}
+
+
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display_incompatible_model() {
+        let err = EmbedderError::IncompatibleModel {
+            model: "test-model".to_string(),
+            reason: "not an encoder".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("test-model"));
+        assert!(msg.contains("not an encoder"));
+    }
+
+    #[test]
+    fn test_error_display_not_downloaded() {
+        let err = EmbedderError::ModelNotDownloaded("test-model".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("test-model"));
+        assert!(msg.contains("not downloaded"));
+    }
+}
+
+mod convenience_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_embedding_model_unknown() {
+        let result = is_embedding_model("nonexistent-model-12345");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_available_models_returns_list() {
+        let models = available_models();
+        assert!(models.len() >= 0);
+    }
+}
+
+
+// Cosine Similarity Tests
+
+
+mod similarity_tests {
+    #[test]
+    fn test_cosine_similarity_identical() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let sim = super::model::cosine_similarity(&a, &b);
+        assert!((sim - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_cosine_similarity_orthogonal() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = super::model::cosine_similarity(&a, &b);
+        assert!(sim.abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_cosine_similarity_opposite() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![-1.0, 0.0, 0.0];
+        let sim = super::model::cosine_similarity(&a, &b);
+        assert!((sim - (-1.0)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_cosine_similarity_normalized() {
+        let a = vec![0.6, 0.8, 0.0]; // Already normalized (0.36 + 0.64 = 1)
+        let b = vec![0.6, 0.8, 0.0];
+        let sim = super::model::cosine_similarity(&a, &b);
+        assert!((sim - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let sim = super::model::cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
+    }
+}
+
+
+
+mod integration_tests {
+    use kjarni_transformers::PoolingStrategy;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_embedder_new() {
+        let embedder = Embedder::new("minilm-l6-v2").await;
+        assert!(
+            embedder.is_ok(),
+            "Failed to create embedder: {:?}",
+            embedder.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_embed_single() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let embedding = embedder
+            .embed("Hello world!")
+            .await
+            .expect("Embedding failed");
+
+        assert_eq!(embedding.len(), 384); // MiniLM dimension
+        // Check it's normalized (approximately)
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized");
+    }
+
+    #[tokio::test]
+    async fn test_embed_batch() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let texts = ["Hello world", "How are you?", "This is a test"];
+        let embeddings = embedder
+            .embed_batch(&texts)
+            .await
+            .expect("Batch embedding failed");
+
+        assert_eq!(embeddings.len(), 3);
+        for emb in &embeddings {
+            assert_eq!(emb.len(), 384);
+        }
+    }
+
+    /// Test embedding with custom pooling.
+    #[tokio::test]
+    async fn test_embed_with_config() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let overrides = EmbeddingOverrides {
+            pooling: Some(PoolingStrategy::Cls),
+            normalize: Some(true),
+            max_length: None,
+        };
+
+        let embedding = embedder
+            .embed_with_config("Test text", &overrides)
+            .await
+            .expect("Embedding with config failed");
+
+        assert_eq!(embedding.len(), 384);
+    }
+
+    /// Test unnormalized embeddings.
+    // #[tokio::test]
+    // async fn test_embed_unnormalized() {
+    //     let embedder = Embedder::builder("minilm-l6-v2")
+    //         .normalize(false)
+    //         .build()
+    //         .await
+    //         .expect("Failed to load embedder");
+
+    //     let embedding = embedder.embed("Test text").await.expect("Embedding failed");
+
+    //     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    //     assert!(embedding.len() == 384);
+    // }
+
+    #[tokio::test]
+    async fn test_similarity() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let sim = embedder
+            .similarity("The cat sat on the mat", "A feline was sitting on a rug")
+            .await
+            .expect("Similarity failed");
+
+        assert!(
+            sim > 0.5,
+            "Similar sentences should have sim > 0.5, got {}", // iffy
+            sim
+        );
+    }
+
+    #[tokio::test]
+    async fn test_similarity_dissimilar() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let sim = embedder
+            .similarity("The cat sat on the mat", "Stock prices rose today")
+            .await
+            .expect("Similarity failed");
+
+        assert!(
+            sim < 0.5,
+            "Dissimilar sentences should have sim < 0.5, got {}", // iffy
+            sim
+        );
+    }
+
+    /// Test batch similarities.
+    #[tokio::test]
+    async fn test_similarities() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let query = "What is machine learning?";
+        let docs = [
+            "Machine learning is a branch of AI",
+            "The weather is nice today",
+            "Deep learning uses neural networks",
+        ];
+
+        let similarities = embedder
+            .similarities(query, &docs)
+            .await
+            .expect("Similarities failed");
+
+        assert_eq!(similarities.len(), 3);
+        assert!(similarities[0] > similarities[1]);
+        assert!(similarities[2] > similarities[1]);
+    }
+
+    #[tokio::test]
+    async fn test_rank_by_similarity() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        let query = "What is the capital of France?";
+        let docs = [
+            "The Eiffel Tower is in Paris",
+            "Berlin is in Germany",
+            "Paris is the capital of France",
+        ];
+
+        let ranked = embedder
+            .rank_by_similarity(query, &docs)
+            .await
+            .expect("Ranking failed");
+
+        assert_eq!(ranked.len(), 3);
+        assert_eq!(ranked[0].0, 2, "Third doc should be most relevant");
+    }
+
+    #[tokio::test]
+    async fn test_embed_gpu() {
+        let embedder = Embedder::builder("minilm-l6-v2")
+            .gpu()
+            .build()
+            .await
+            .expect("Failed to load embedder on GPU");
+
+        let embedding = embedder
+            .embed("Test GPU embedding")
+            .await
+            .expect("GPU embedding failed");
+
+        assert_eq!(embedding.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn test_embedder_accessors() {
+        let embedder = Embedder::new("minilm-l6-v2")
+            .await
+            .expect("Failed to load embedder");
+
+        assert_eq!(embedder.model_name(), "minilm-l6-v2");
+        assert_eq!(embedder.dimension(), 384);
+        assert!(embedder.max_seq_length() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_embed_convenience_function() {
+        let embedding = embed("minilm-l6-v2", "Hello world")
+            .await
+            .expect("Embed function failed");
+
+        assert_eq!(embedding.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn test_similarity_convenience_function() {
+        let sim = similarity("minilm-l6-v2", "Hello", "Hi there")
+            .await
+            .expect("Similarity function failed");
+        assert!(sim >= -1.0 && sim <= 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_unknown_model_error() {
+        let result = Embedder::new("completely-fake-model-that-does-not-exist").await;
+        assert!(matches!(result, Err(EmbedderError::UnknownModel(_))));
+    }
+
+    #[tokio::test]
+    async fn test_offline_missing_model() {
+        let result = Embedder::builder("minilm-l6-v2")
+            .offline()
+            .cache_dir("/tmp/kjarni-test-empty-cache-12345")
+            .build()
+            .await;
+        assert!(result.is_err());
+    }
+}

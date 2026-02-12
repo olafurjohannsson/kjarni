@@ -1,0 +1,42 @@
+[package]
+name = "kjarni"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Kjarni: The SQLite of AI. A fast, small-footprint inference toolkit for edge, browser, and native platforms."
+
+[lib]
+name = "kjarni"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+kjarni-transformers = { path = "../kjarni-transformers" }
+kjarni-models = { path = "../kjarni-models" }
+kjarni-search = { path = "../kjarni-search" }
+kjarni-rag = { path = "../kjarni-rag" }
+anyhow = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+directories = "6.0.0"
+tokio-stream = "0.1.18"
+config = "0.15.19"
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+thiserror = "2.0.17"
+#futures-util = "0.3.31"
+toml = "0.8.10"
+walkdir = "2.5.0"
+glob-match = "0.2"
+tempfile = "3.23.0"
+log.workspace = true
+[features]
+default = []
+python = ["pyo3"]
+c-bindings = []

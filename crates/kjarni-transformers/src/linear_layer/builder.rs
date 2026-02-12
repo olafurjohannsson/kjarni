@@ -1,0 +1,319 @@
+//! Builder pattern for constructing `LinearLayer` from model weights.
+
+use crate::{
+    linear_layer::{F32MatmulStrategy, LinearData, LinearLayer},
+    tensor::{CpuTensor, DType, QuantizedMatrix},
+    weights::ModelWeights,
+};
+use anyhow::{Result, anyhow};
+use half::bf16;
+use ndarray::{Array2, Ix1, Ix2};
+use std::{borrow::Cow, sync::Arc};
+
+/// Controls how bias loading is handled.
+#[derive(Debug, Clone)]
+enum BiasLoading {
+    /// Infer bias name from weight name (default).
+    Infer,
+    /// Use an explicit bias name.
+    Explicit(String),
+    /// Skip bias loading entirely.
+    Skip,
+}
+
+/// Extracts shape from a 2D array as `[rows, cols]`.
+#[inline]
+fn array2_shape<T>(arr: &Array2<T>) -> [usize; 2] {
+    [arr.shape()[0], arr.shape()[1]]
+}
+
+/// Builder for constructing a `LinearLayer` from `ModelWeights`.
+/// # Dtype Conversion
+///
+/// The builder supports the following conversions:
+///
+/// | Source | Target | Notes |
+/// |--------|--------|-------|
+/// | F32    | F32    | Direct copy |
+/// | BF16   | BF16   | Direct copy |
+/// | BF16   | F32    | Upcasting |
+/// | F32    | BF16   | Downcasting |
+/// | Q8_0   | Q8_0   | Direct copy |
+/// | Q4_K   | Q4_K   | Direct copy |
+/// | Q6_K   | Q6_K   | Direct copy |
+/// | Any quantized | F32 | Dequantization |
+/// | F32/BF16 | Q8_0 | Quantization |
+pub struct LinearLayerBuilder<'a> {
+    weights: &'a ModelWeights,
+    weight_name: Cow<'a, str>,
+    bias_loading: BiasLoading,
+    target_dtype: Option<DType>,
+    f32_strategy: F32MatmulStrategy,
+}
+
+impl<'a> LinearLayerBuilder<'a> {
+    /// Creates a new builder for the specified weight tensor.
+    pub fn new(weights: &'a ModelWeights, weight_name: &'a str) -> Self {
+        Self {
+            weights,
+            weight_name: Cow::Borrowed(weight_name),
+            bias_loading: BiasLoading::Infer,
+            target_dtype: None,
+            f32_strategy: F32MatmulStrategy::CustomSimd,
+        }
+    }
+
+    /// Sets an explicit bias tensor name.
+    pub fn with_bias(mut self, bias_name: &str) -> Self {
+        self.bias_loading = BiasLoading::Explicit(bias_name.to_string());
+        self
+    }
+
+    /// Sets an optional bias tensor name.
+    pub fn with_optional_bias(mut self, bias_name: Option<&str>) -> Self {
+        if let Some(name) = bias_name {
+            self.bias_loading = BiasLoading::Explicit(name.to_string());
+        }
+        self
+    }
+
+    /// Skips bias loading entirely.
+    pub fn without_bias(mut self) -> Self {
+        self.bias_loading = BiasLoading::Skip;
+        self
+    }
+
+    /// Sets the target dtype for the weight matrix.
+    pub fn with_target_dtype(mut self, dtype: Option<DType>) -> Self {
+        self.target_dtype = dtype;
+        self
+    }
+
+    /// Sets the F32 matmul strategy.
+    pub fn with_f32_strategy(mut self, strategy: Option<F32MatmulStrategy>) -> Self {
+        self.f32_strategy = strategy.unwrap_or(F32MatmulStrategy::CustomSimd);
+        self
+    }
+
+    pub fn build(self) -> Result<LinearLayer> {
+        let weight_name = if self.weight_name.ends_with(".weight") {
+            self.weight_name.clone().into_owned()
+        } else {
+            format!("{}.weight", self.weight_name)
+        };
+
+        let typed_tensor = self.weights.get_typed_tensor(&weight_name)?;
+        let target_dtype = self.target_dtype.unwrap_or_else(|| typed_tensor.dtype());
+
+        let data = match (typed_tensor, target_dtype) {
+            (CpuTensor::F32(arr), DType::F32) => {
+                LinearData::F32(Arc::new(arr.into_dimensionality::<Ix2>()?))
+            }
+            (CpuTensor::BF16(arr), DType::BF16) => {
+                LinearData::BF16(Arc::new(arr.into_dimensionality::<Ix2>()?))
+            }
+            (CpuTensor::F16(arr), DType::F16) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
+            (CpuTensor::F16(arr), DType::F32) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
+            (CpuTensor::F32(arr), DType::F16) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v);
+                LinearData::F32(Arc::new(converted))
+            }
+            (CpuTensor::Q8_0(m), DType::Q8_0) => LinearData::Q8_0(Arc::new(m)),
+            (CpuTensor::Q4_K(m), DType::Q4_K) => LinearData::Q4_K(Arc::new(m)),
+            (CpuTensor::Q6_K(m), DType::Q6_K) => LinearData::Q6_K(Arc::new(m)),
+            (CpuTensor::BF16(arr), DType::F32) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(|v| v.to_f32());
+                LinearData::F32(Arc::new(converted))
+            }
+
+            (CpuTensor::F32(arr), DType::BF16) => {
+                let converted = arr.into_dimensionality::<Ix2>()?.mapv(bf16::from_f32);
+                LinearData::BF16(Arc::new(converted))
+            }
+
+            (tensor, DType::F32) if tensor.is_quantized() => {
+                LinearData::F32(Arc::new(tensor.to_array2_f32()?))
+            }
+
+            (CpuTensor::F32(arr), DType::Q8_0) => {
+                let w = arr.into_dimensionality::<Ix2>()?;
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w)?;
+                LinearData::Q8_0(Arc::new(QuantizedMatrix {
+                    blocks,
+                    shape: array2_shape(&w),
+                }))
+            }
+
+            (CpuTensor::BF16(arr), DType::Q8_0) => {
+                let w = arr.into_dimensionality::<Ix2>()?;
+                let w_f32 = w.mapv(|v| v.to_f32());
+                let blocks = crate::cpu::kernels::quantize::quantize_matrix_q8_0(&w_f32)?;
+                LinearData::Q8_0(Arc::new(QuantizedMatrix {
+                    blocks,
+                    shape: array2_shape(&w),
+                }))
+            }
+
+            (t, d) => return Err(anyhow!("Unsupported... {:?} to {:?}", t.dtype(), d)),
+        };
+
+        let bias = match &self.bias_loading {
+            BiasLoading::Skip => None,
+            BiasLoading::Explicit(name) => self.load_bias(name)?,
+            BiasLoading::Infer => {
+                let inferred_name = weight_name.replace(".weight", ".bias");
+                self.load_bias(&inferred_name)?
+            }
+        };
+
+        Ok(LinearLayer {
+            data,
+            bias,
+            f32_strategy: self.f32_strategy,
+        })
+    }
+
+    /// Loads the bias tensor if it exists, converting to F32 if necessary.
+    fn load_bias(&self, name: &str) -> Result<Option<ndarray::Array1<f32>>> {
+        if !self.weights.contains(name) {
+            return Ok(None);
+        }
+
+        match self.weights.get_typed_tensor(name)? {
+            CpuTensor::F32(b) => Ok(Some(b.into_dimensionality::<Ix1>()?)),
+            CpuTensor::BF16(b) => Ok(Some(
+                b.mapv(|val| val.to_f32()).into_dimensionality::<Ix1>()?,
+            )),
+            _ => Err(anyhow!("Bias tensor '{}' has an unsupported dtype", name)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_dummy_weights_file() -> (tempfile::TempDir, ModelWeights) {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let config_json = r#"{
+        "vocab_size": 100,
+        "hidden_size": 4,
+        "num_attention_heads": 1,
+        "num_hidden_layers": 1
+    }"#;
+        std::fs::write(dir.path().join("config.json"), config_json).unwrap();
+
+        let data_f32: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let bytes: Vec<u8> = data_f32.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let shape = vec![2, 2];
+
+        let bias_data: Vec<f32> = vec![0.5, 0.5];
+        let bias_bytes: Vec<u8> = bias_data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let bias_shape = vec![2];
+
+        use safetensors::serialize;
+        use safetensors::tensor::{Dtype, TensorView};
+        let tensors = vec![
+            (
+                "layer.weight",
+                TensorView::new(Dtype::F32, shape.clone(), &bytes).unwrap(),
+            ),
+            (
+                "layer.bias",
+                TensorView::new(Dtype::F32, bias_shape.clone(), &bias_bytes).unwrap(),
+            ),
+        ];
+
+        let tensor_map: std::collections::HashMap<String, TensorView> = tensors
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+
+        let serialized = serialize(&tensor_map, &None).unwrap();
+        std::fs::write(dir.path().join("model.safetensors"), &serialized).unwrap();
+
+        let weights = ModelWeights::new(dir.path()).expect("Failed to load ModelWeights");
+
+        (dir, weights)
+    }
+
+    #[test]
+    fn test_builder_basic() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer")
+            .build()
+            .expect("Failed to build layer");
+
+        assert_eq!(layer.dtype(), DType::F32);
+        assert_eq!(layer.shape(), [2, 2]);
+        assert!(layer.has_bias(), "Bias should be inferred by default");
+    }
+
+    #[test]
+    fn test_builder_explicit_bias() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer.weight")
+            .with_bias("layer.bias")
+            .build()
+            .unwrap();
+
+        assert!(layer.has_bias());
+        assert_eq!(layer.bias.as_ref().unwrap()[0], 0.5);
+    }
+
+    #[test]
+    fn test_builder_without_bias() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer")
+            .without_bias()
+            .build()
+            .unwrap();
+
+        assert!(!layer.has_bias());
+    }
+
+    #[test]
+    fn test_builder_dtype_conversion() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let layer = LinearLayer::builder(&weights, "layer")
+            .with_target_dtype(Some(DType::BF16))
+            .build()
+            .unwrap();
+
+        assert_eq!(layer.dtype(), DType::BF16);
+        match layer.data {
+            LinearData::BF16(_) => assert!(true),
+            _ => panic!("Expected BF16 data"),
+        }
+    }
+
+    #[test]
+    fn test_builder_name_normalization() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let l1 = LinearLayer::builder(&weights, "layer").build();
+        let l2 = LinearLayer::builder(&weights, "layer.weight").build();
+
+        assert!(l1.is_ok());
+        assert!(l2.is_ok());
+    }
+
+    #[test]
+    fn test_builder_missing_weight() {
+        let (_file, weights) = create_dummy_weights_file();
+
+        let result = LinearLayer::builder(&weights, "non_existent").build();
+        assert!(result.is_err());
+    }
+}

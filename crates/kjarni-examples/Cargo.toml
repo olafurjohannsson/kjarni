@@ -1,0 +1,11 @@
+[package]
+name = "kjarni-examples"
+version = "0.1.0"
+edition = "2021"
+description = "Examples for the Kjarni inference engine"
+publish = false
+
+[dependencies]
+kjarni = { path = "../kjarni" }
+anyhow = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

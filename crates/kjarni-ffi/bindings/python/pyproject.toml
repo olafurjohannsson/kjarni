@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kjarni"
+version = "0.1.0a1"
+description = "Kjarni - Cross-platform ML inference engine. Embeddings, classification, reranking, and RAG search."
+authors = [{name = "Ólafur Aron Jóhannsson"}]
+license = {text = "MIT or Apache-2.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+[tool.setuptools.package-data]
+kjarni = ["*.so", "*.dylib", "*.dll", "lib/*"]

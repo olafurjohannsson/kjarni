@@ -1,0 +1,29 @@
+[package]
+name = "kjarni-rag"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+kjarni-transformers = { path = "../kjarni-transformers" }
+kjarni-search = { path = "../kjarni-search" }
+log = { workspace = true }
+memmap2 = "0.9"
+walkdir = "2.5.0"
+tempfile = "3.23.0"
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+bincode = { version = "1.3", features = ["i128"] }
+console_error_panic_hook = "0.1"
+anyhow = "1.0"
+glob-match = "0.2"
+[dependencies.web-sys]
+version = "0.3"
+features = ["console"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

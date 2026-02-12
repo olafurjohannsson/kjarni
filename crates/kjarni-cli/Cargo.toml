@@ -1,0 +1,24 @@
+[package]
+name = "kjarni-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kjarni"
+path = "src/main.rs"
+
+[dependencies]
+kjarni = { path = "../kjarni" }
+anyhow = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+env_logger = "0.11"
+bincode = "1"
+walkdir = "2.5.0"
+tempfile = "3.23.0"
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

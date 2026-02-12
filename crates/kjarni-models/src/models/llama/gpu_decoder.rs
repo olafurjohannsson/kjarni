@@ -1,0 +1,336 @@
+//! GPU implementation of the Llama decoder 
+
+use anyhow::{Context, Result};
+use kjarni_transformers::{
+    WgpuContext,
+    decoder::prelude::*,
+    gpu::normalization::{
+        GpuNormalization, GpuNormalizationWeights, GpuRMSNorm, GpuRMSNormWeights,
+    },
+    gpu::{GpuTensor, GpuTensorPool, cache::GpuKVCache},
+    gpu_ops::blocks::{
+        GpuFeedForwardWeights, GpuSwiGLUFFNWeights, attention::GpuAttentionWeights, rope::GpuRoPE,
+    },
+    models::base::{ModelInput, ModelLoadConfig},
+    tensor::DType,
+    traits::{ModelLayout, ModelMetadata},
+    weights::ModelWeights,
+    {EmbeddingConfig, LoadedEmbeddings},
+};
+use std::sync::Arc;
+
+/// GPU-accelerated Llama decoder using WebGPU compute shaders
+pub struct LlamaGpuDecoder {
+    pub layers: Vec<GpuRoPEDecoderLayer>,
+    pub final_layer_norm: GpuNormalization,
+    pub final_ln_weights: GpuNormalizationWeights,
+    pub gpu_rope: Arc<GpuRoPE>,
+    context: Arc<WgpuContext>,
+    load_config: ModelLoadConfig,
+    embeddings: LoadedEmbeddings,
+    metadata: ModelMetadata,
+}
+
+impl LlamaGpuDecoder {
+    pub fn context(&self) -> &Arc<WgpuContext> {
+        &self.context
+    }
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    pub fn new(
+        context: &Arc<WgpuContext>,
+        weights: &ModelWeights,
+        meta: ModelMetadata,
+        layout: ModelLayout,
+        gpu_rope: Option<Arc<GpuRoPE>>,
+        load_config: ModelLoadConfig,
+    ) -> Result<Self> {
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
+
+        let target_dtype = load_config.target_dtype;
+        let embeddings = LoadedEmbeddings::new(
+            Some(context),
+            weights,
+            EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size),
+            false, 
+            true,  
+            target_dtype,
+        )?;
+
+        let final_norm_name = decoder_layout.final_norm_weight.as_ref().unwrap();
+        let final_layer_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, meta.norm_eps));
+        let final_ln_weights = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
+            GpuTensor::from_model_weights(
+                context,
+                weights,
+                final_norm_name,
+                load_config.target_dtype,
+                "final_norm",
+            )?,
+        )?);
+
+        let mut layers = Vec::with_capacity(meta.num_layers);
+        for i in 0..meta.num_layers {
+            let decoder_layer =
+                Self::build_layer(context.clone(), weights, &meta, &layout, i, load_config)?;
+            layers.push(decoder_layer);
+        }
+        let rope = gpu_rope.expect("Llama GPU Decoder requires GPU RoPE");
+        Ok(Self {
+            layers,
+            final_layer_norm,
+            final_ln_weights,
+            gpu_rope: rope,
+            context: context.clone(),
+            metadata: meta,
+            load_config,
+            embeddings,
+        })
+    }
+
+    fn build_layer(
+        context: Arc<WgpuContext>,
+        weights: &ModelWeights,
+        meta: &ModelMetadata,
+        layout: &ModelLayout,
+        i: usize,
+        load_config: ModelLoadConfig,
+    ) -> Result<GpuRoPEDecoderLayer> {
+        let decoder_layout = layout
+            .decoder
+            .as_ref()
+            .expect("Llama layout must have a decoder section");
+        let layer_layout = &decoder_layout.layer;
+        let self_attn_layout = &layer_layout.self_attn;
+        let ffn_layout = &layer_layout.ffn;
+
+        let idx = i.to_string();
+        let name = |template: &String| template.replace("{}", &idx);
+        let target_dt = load_config.target_dtype;
+
+        let layer_dt = target_dt;
+
+        let q_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&self_attn_layout.q_weight),
+            layer_dt,
+            "q",
+        )?;
+        let k_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&self_attn_layout.k_weight),
+            layer_dt,
+            "k",
+        )?;
+        let v_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&self_attn_layout.v_weight),
+            layer_dt,
+            "v",
+        )?;
+        let o_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&self_attn_layout.o_weight),
+            layer_dt,
+            "o",
+        )?;
+
+        // Dummy biases for Llama (logic preserved)
+        let q_bias = GpuTensor::zeros(&context, vec![meta.hidden_size], DType::F32, "q_b")?;
+        let head_dim = meta.hidden_size / meta.num_attention_heads;
+        let k_bias = GpuTensor::zeros(
+            &context,
+            vec![meta.num_kv_heads * head_dim],
+            DType::F32,
+            "k_b",
+        )?;
+
+        let self_attn_weights = GpuAttentionWeights::new(
+            q_t,
+            Some(q_bias.clone()),
+            k_t,
+            Some(k_bias.clone()),
+            v_t,
+            Some(k_bias),
+            o_t,
+            Some(q_bias),
+        )?;
+
+        let self_attn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
+            GpuTensor::from_model_weights(
+                &context,
+                weights,
+                &name(&self_attn_layout.norm_weight),
+                layer_dt,
+                "attn_norm",
+            )?,
+        )?);
+
+        let gate_name = ffn_layout
+            .gate_weight
+            .as_ref()
+            .context("SwiGLU requires gate")?;
+
+        let gate_t =
+            GpuTensor::from_model_weights(&context, weights, &name(gate_name), target_dt, "gate")?;
+
+        let up_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&ffn_layout.up_weight),
+            target_dt,
+            "up",
+        )?;
+        let down_t = GpuTensor::from_model_weights(
+            &context,
+            weights,
+            &name(&ffn_layout.down_weight),
+            target_dt,
+            "down",
+        )?;
+
+        log::info!("gate_t shape: {:?}", gate_t.shape());
+        log::info!("up_t shape: {:?}", up_t.shape());
+        log::info!("down_t shape: {:?}", down_t.shape());
+
+        let ff_weights =
+            GpuFeedForwardWeights::SwiGLU(GpuSwiGLUFFNWeights::new(gate_t, up_t, down_t)?);
+
+        let ffn_norm_w = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
+            GpuTensor::from_model_weights(
+                &context,
+                weights,
+                &name(&ffn_layout.norm_weight),
+                target_dt,
+                "ffn_norm",
+            )?,
+        )?);
+
+        GpuRoPEDecoderLayer::new(
+            &context,
+            meta.hidden_size,
+            meta.num_attention_heads,
+            meta.num_kv_heads,
+            self_attn_weights,
+            self_attn_norm_w,
+            ff_weights,
+            ffn_norm_w,
+            meta.norm_eps,
+        )
+    }
+}
+
+impl GpuDecoder for LlamaGpuDecoder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn embed(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        self.embeddings.embed(
+            encoder,
+            pool,
+            input,
+            None, // Decoders usually don't use token_type_ids
+            position_offset,
+        )
+    }
+
+    fn embed_and_normalize(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        position_offset: usize,
+    ) -> Result<GpuTensor> {
+        // Llama is Pre-Norm (Norm is inside the layer), so we just embed.
+        self.embed(encoder, pool, input, position_offset)
+    }
+
+    fn forward_layers(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        hidden_states: &GpuTensor,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        mut cache: Option<&mut GpuKVCache>,
+        start_layer: usize,
+        end_layer: usize,
+    ) -> Result<GpuTensor> {
+        let mut current_state: GpuTensor = hidden_states.clone();
+
+        for i in start_layer..end_layer {
+            let layer = &self.layers[i];
+            let layer_cache = cache.as_deref_mut();
+
+            current_state = layer.forward(
+                encoder,
+                &current_state,
+                attention_mask,
+                i,
+                position_offset,
+                layer_cache,
+                pool,
+                &self.gpu_rope, // Always passed for Llama
+            )?;
+        }
+
+        Ok(current_state)
+    }
+
+    fn num_layers(&self) -> usize {
+        self.layers.len()
+    }
+
+    fn hidden_size(&self) -> usize {
+        self.metadata.hidden_size
+    }
+
+    // Override default forward because Llama needs Final Layer Norm
+    fn forward(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pool: &mut GpuTensorPool,
+        input: ModelInput<'_>,
+        attention_mask: &GpuTensor,
+        position_offset: usize,
+        cache: Option<&mut GpuKVCache>,
+        _encoder_hidden_states: Option<&GpuTensor>,
+    ) -> Result<GpuTensor> {
+        // Embed
+        let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
+
+        // Layers
+        let mut hidden = self.forward_layers(
+            encoder,
+            pool,
+            &hidden,
+            attention_mask,
+            position_offset,
+            cache,
+            0,
+            self.num_layers(),
+        )?;
+
+        // Final Layer Norm (Llama Specific)
+        let final_ln_output = pool.get(hidden.shape().to_vec());
+        self.final_layer_norm
+            .encode(encoder, &self.final_ln_weights, &hidden, &final_ln_output);
+        hidden = final_ln_output;
+
+        Ok(hidden)
+    }
+}

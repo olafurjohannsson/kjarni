@@ -5,3 +5,6 @@ Cargo.lock
 vocab.txt
 *.json
 pkg/
+bin/
+obj/
+*.pyc
