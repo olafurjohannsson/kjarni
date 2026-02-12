@@ -1,14 +1,3 @@
-//! A generic, backend-agnostic transformer encoder implementation.
-//!
-//! This module provides `TransformerEncoder`, a reusable component that can represent
-//! various encoder-only models like BERT, RoBERTa, etc. It is designed to be
-//! backend-aware, containing either a CPU or a (future) GPU implementation.
-//!
-//! The encoder is constructed generically by relying on the `EncoderArchitecture`
-//! trait, which provides the specific weight names and hyperparameters for a
-
-//! given model, allowing for maximum code reuse.
-
 pub mod classifier;
 pub mod config;
 mod transformer_encoder;

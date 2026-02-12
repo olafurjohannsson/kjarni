@@ -46,25 +46,19 @@ async fn test_distilgpt2_generation_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_distilgpt2_architectural_properties() -> Result<()> {
-    // Load the model.
     let model = load_distilgpt2_for_test().await?;
     let config = model.concrete_config();
 
-    // Check architectural values directly from the config struct.
     assert_eq!(config.vocab_size, 50257);
     assert_eq!(config.n_embd, 768); // hidden size
     assert_eq!(config.n_layer, 6);
     assert_eq!(config.n_head, 12);
-    assert_eq!(config.n_ctx, 1024); // max_position_embeddings
-
-    // Check that the trait implementations correctly expose these values.
+    assert_eq!(config.n_ctx, 1024);
     assert_eq!(model.vocab_size(), 50257);
     assert_eq!(model.hidden_size(), 768);
     assert_eq!(model.num_layers(), 6);
     assert_eq!(model.num_heads(), 12);
     assert_eq!(model.max_length(), 1024);
-
-    // Check token IDs. GPT-2 uses the same ID for BOS, EOS, and PAD.
     assert_eq!(model.bos_token_id(), Some(50256));
     assert_eq!(model.eos_token_id(), Some(50256));
     assert_eq!(model.pad_token_id(), Some(50256));

@@ -14,9 +14,7 @@ use kjarni_transformers::{
     LanguageModel, ModelType, WgpuContext,
     audio::{AudioConvFrontend, MelConfig},
     cache::{Cache, CpuBeamKVCache},
-    common::{
-        DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults,
-    },
+    common::{DecodingStrategy, GenerationConfig, HFGenerationConfig, HFGenerationDefaults},
     cpu::{
         encoder::{CpuEncoderOps, GpuEncoderOps, prelude::*, traits::CpuEncoder},
         encoder_decoder::{
@@ -25,16 +23,15 @@ use kjarni_transformers::{
         },
     },
     encoder_decoder::traits::{
-            CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
-            GpuEncoderDecoderOps,
-        },
+        CpuCrossDecoder, CpuEncoderDecoderOps, EncoderDecoderLanguageModel, GpuCrossDecoder,
+        GpuEncoderDecoderOps,
+    },
     gpu::{GpuTensor, GpuTensorPool},
     models::base::{ModelInput, ModelLoadConfig},
     pipeline::{EncoderDecoderModelFactory, EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
     traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
-
 
 pub struct WhisperModel {
     tokenizer: Tokenizer,
@@ -236,10 +233,6 @@ impl EncoderDecoderModelFactory for WhisperModel {
     }
 }
 
-
-// Trait Implementations
-
-
 impl InferenceModel for WhisperModel {
     fn device(&self) -> Device {
         self.pipeline.plan().layers
@@ -395,10 +388,12 @@ impl GpuEncoderOps for WhisperModel {
         token_type_ids: Option<ModelInput<'_>>,
         pos: usize,
     ) -> Result<GpuTensor> {
-        unimplemented!()
-        // self.pipeline()
-        //     .embeddings()
-        //     .embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
+        let embeddings = self
+            .pipeline
+            .encoder_embeddings()
+            .expect("Expected encoder embeddings");
+
+        embeddings.embed(cmd_encoder, pool, input_ids, token_type_ids, pos)
     }
 }
 
@@ -496,7 +491,11 @@ impl EncoderDecoderLanguageModel for WhisperModel {
     }
 
     fn encoder_decoder_gpu_ops(&self) -> Option<&dyn GpuEncoderDecoderOps> {
-        None // TODO: GPU support
+        if self.pipeline.gpu_decoder().is_some() {
+            Some(self)
+        } else {
+            None
+        }
     }
 
     fn decoder_start_token_id(&self) -> u32 {
@@ -511,7 +510,7 @@ impl EncoderDecoderLanguageModel for WhisperModel {
             min_length: 0,
             no_repeat_ngram_size: 0,
             repetition_penalty: 1.0,
-            max_new_tokens: Some(448), // Whisper default
+            max_new_tokens: Some(448),
             add_bos_token: false,
             strategy: DecodingStrategy::Greedy,
             speculation: None,
@@ -519,17 +518,12 @@ impl EncoderDecoderLanguageModel for WhisperModel {
     }
 }
 
-
-// Tests
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_expected_mel_config() {
-        // Just verify the config is constructed correctly
         let mel_config = MelConfig::whisper();
         assert_eq!(mel_config.sample_rate, 16000);
         assert_eq!(mel_config.n_fft, 400);

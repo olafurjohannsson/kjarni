@@ -191,7 +191,6 @@ pub trait SentenceEncoderModel: EncoderLanguageModel {
 
     /// Encode a single text into an embedding vector.
     async fn encode(&self, text: &str, config: &EncodingConfig) -> Result<Vec<f32>> {
-        // Default implementation for single text encoding.
         let batch_result = self.encode_batch(&[text], config).await?;
         batch_result
             .into_iter()
