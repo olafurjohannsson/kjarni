@@ -162,7 +162,6 @@ impl MockDecoderModel {
     }
 }
 
-// 1. Implement LanguageModel
 impl LanguageModel for MockDecoderModel {
     fn vocab_size(&self) -> usize {
         self.vocab_size

@@ -2,14 +2,7 @@
 use crate::cpu::kernels::{q_common::BlockQ8_0, x86::common::hsum_ps_avx};
 use std::arch::x86_64::*;
 
-/// Computes a vector-matrix multiplication for Q8_0 weights using AVX2.
-///
-/// This kernel performs on-the-fly dequantization and dot product accumulation.
-/// It's designed for the "parallel-on-output" strategy where each thread computes
-/// a chunk of the final output vector.
-/// 1. Unrolled loop (4 blocks per iter) to hide FMA latency.
-/// 2. Uses 4 separate accumulators to maximize ILP.
-/// 3. Reduced pointer arithmetic overhead.
+/// Computes a vector-matrix multiplication for Q8_0 weights using AVX2
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn matmul_vec_q8_0_avx2(
     out_chunk: &mut [f32],

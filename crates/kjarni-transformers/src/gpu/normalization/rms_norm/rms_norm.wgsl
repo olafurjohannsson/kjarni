@@ -60,7 +60,7 @@ fn main(
     s_sum[tid] = sum_sq;
     workgroupBarrier();
 
-    // Binary tree reduction: 128 → 64 → 32 → 16 → 8 → 4 → 2 → 1
+    // Binary tree reduction: 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1
     for (var s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             s_sum[tid] += s_sum[tid + s];

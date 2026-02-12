@@ -1,5 +1,3 @@
-//! Fluent builder for [`Transcriber`](super::Transcriber).
-
 use std::sync::Arc;
 
 use kjarni_transformers::{Device, ModelType, WgpuContext};
@@ -11,22 +9,6 @@ use super::types::{
 };
 use super::validation;
 
-
-// Builder
-
-
-/// Constructs a [`Transcriber`] with the desired settings.
-///
-/// # Example
-///
-/// ```ignore
-/// let transcriber = Transcriber::builder("whisper-small")
-///     .cpu()
-///     .language("en")
-///     .timestamps(true)
-///     .build()
-///     .await?;
-/// ```
 pub struct TranscriberBuilder {
     model_id: String,
     model_type: Option<ModelType>,
@@ -42,9 +24,6 @@ pub struct TranscriberBuilder {
 
 impl TranscriberBuilder {
     /// Create a new builder targeting the given model identifier.
-    ///
-    /// Accepted values: `"whisper-small"`, `"whisper-large-v3"`, or any
-    /// string that maps to a [`ModelType`] via [`resolve_model_type`].
     pub fn new(model: &str) -> Self {
         Self {
             model_id: model.to_string(),
@@ -78,14 +57,13 @@ impl TranscriberBuilder {
         self
     }
 
-    /// Force a language (e.g. `"en"`, `"fr"`, `"ja"`).
-    /// Omit to auto-detect (stubbed as English for now).
+    /// Force a language
     pub fn language(mut self, lang: &str) -> Self {
         self.language = Some(lang.to_string());
         self
     }
 
-    /// Set the task to **translate** (any language → English).
+    /// Set the task to translate
     pub fn translate(mut self) -> Self {
         self.task = Task::Translate;
         self
@@ -124,9 +102,7 @@ impl TranscriberBuilder {
         self
     }
 
-    /// Build the [`Transcriber`], downloading model weights if necessary.
     pub async fn build(self) -> TranscriberResult<Transcriber> {
-        // 1. Resolve model type
         let model_type = self
             .model_type
             .or_else(|| resolve_model_type(&self.model_id))
@@ -137,10 +113,8 @@ impl TranscriberBuilder {
                 ))
             })?;
 
-        // 2. Validate config
         validation::validate_config(self.language.as_deref(), self.max_tokens_per_chunk)?;
 
-        // 3. Create GPU context if needed (not stored on Transcriber)
         let context = if self.device == Device::Wgpu {
             if let Some(ctx) = self.context {
                 Some(ctx)

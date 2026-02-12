@@ -107,7 +107,7 @@ impl GpuClsSlice {
         }
     }
 
-    /// Extract CLS token: [batch, seq_len, hidden] → [batch, hidden]
+    /// Extract CLS token: [batch, seq_len, hidden] -> [batch, hidden]
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,

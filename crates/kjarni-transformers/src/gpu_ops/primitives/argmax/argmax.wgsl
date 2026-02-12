@@ -12,7 +12,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let stride = 256u; // workgroup_size
     
-    // 1. Thread-local reduction
+    // reduction
     for (var i = global_id.x; i < vocab_size; i += stride) {
         let val = logits[i];
         if (val > max_val) {

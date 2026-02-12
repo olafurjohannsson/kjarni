@@ -54,8 +54,6 @@ fn create_output_buffer(context: &WgpuContext) -> wgpu::Buffer {
 async fn test_argmax_simple() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
-
-    // Simple case: max at index 2
     let logits = Array2::from_shape_vec((1, 5), vec![1.0, 2.0, 5.0, 3.0, 4.0])?;
     let gpu_logits = GpuTensor::from_ndarray(&context, &logits)?;
     let output_buffer = create_output_buffer(&context);

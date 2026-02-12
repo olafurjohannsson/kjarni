@@ -336,7 +336,6 @@ mod tests {
     impl CpuCrossDecoder for MockCpuCrossDecoder {
         fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             if self.has_embed_norm {
-                // Simple mock: just return clone (real impl would apply LayerNorm)
                 Ok(hidden_states.clone())
             } else {
                 Ok(hidden_states.clone())
@@ -355,7 +354,6 @@ mod tests {
             &self,
             encoder_hidden_states: &Array3<f32>,
         ) -> Result<CpuCrossAttentionKVCache> {
-            // Mock: create empty cache
             Ok(CpuCrossAttentionKVCache::default())
         }
 

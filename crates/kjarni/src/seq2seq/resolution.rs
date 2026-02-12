@@ -1,6 +1,4 @@
 //! Generation config resolution for seq2seq models.
-//!
-//! Simple approach: start with model defaults, apply only what the user explicitly set.
 
 use kjarni_transformers::common::{BeamSearchParams, DecodingStrategy, GenerationConfig};
 

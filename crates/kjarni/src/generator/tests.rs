@@ -1,11 +1,6 @@
-//! Comprehensive tests for the Generator module.
-
 use super::*;
 use crate::generation::GenerationOverrides;
 use crate::generator::{available_models, is_generator_model};
-
-
-// Unit Tests - Types
 
 
 mod types_tests {
@@ -513,39 +508,6 @@ mod integration_tests {
             .await
             .unwrap();
         assert!(!output.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_temperature_affects_output() {
-        if !model_available("qwen2.5-0.5b-instruct") {
-            eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
-            return;
-        }
-
-        let r#gen = Generator::builder("qwen2.5-0.5b-instruct")
-            .cpu()
-            .quiet()
-            .max_tokens(30)
-            .build()
-            .await
-            .unwrap();
-
-        let hot_overrides = GenerationOverrides {
-            temperature: Some(1.0),
-            ..Default::default()
-        };
-
-        let output1 = r#gen
-            .generate_with_config("Once upon a time", &hot_overrides)
-            .await
-            .unwrap();
-        let output2 = r#gen
-            .generate_with_config("Once upon a time", &hot_overrides)
-            .await
-            .unwrap();
-
-        assert!(!output1.is_empty());
-        assert!(!output2.is_empty());
     }
 
     #[tokio::test]

@@ -41,13 +41,11 @@ impl GpuTransformerEncoder {
     ) -> Result<Self> {
         let target_dt = load_cfg.target_dtype;
 
-        // 1. Layout
         let encoder_layout = layout
             .encoder
             .as_ref()
             .context("ModelLayout is missing the required 'encoder' layout")?;
 
-        // 2. Embeddings (Unified)
         let embeddings = LoadedEmbeddings::new(
             Some(&context),
             weights,
@@ -59,13 +57,11 @@ impl GpuTransformerEncoder {
             target_dt,
         )?;
 
-        // 3. Embedding Normalization (LayerNorm or RMSNorm)
-        // Nomic/BERT use LayerNorm. Future models might use RMSNorm.
         let emb_norm_w_name = encoder_layout
             .embedding_norm_weight
             .as_ref()
             .context("missing emb_norm")?;
-        let emb_norm_b_name = encoder_layout.embedding_norm_bias.as_ref(); // Optional for RMSNorm
+        let emb_norm_b_name = encoder_layout.embedding_norm_bias.as_ref();
 
         let (embedding_layer_norm, embedding_ln_weights) = match meta.normalization_strategy {
             NormalizationStrategy::LayerNorm => {
@@ -200,7 +196,6 @@ impl GpuTransformerEncoder {
 
             let is_fused_swiglu = gate_name.as_ref() == Some(&up_name);
 
-            // Construct the specific weights struct first
             let ff_weights_enum = if is_fused_swiglu {
                 let fused_w = load_transposed(&up_name)?;
                 let half_dim = fused_w.shape()[0] / 2;
@@ -335,10 +330,6 @@ impl GpuEncoder for GpuTransformerEncoder {
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
         unimplemented!()
-        // let output = pool.get(hidden_states.shape().to_vec());
-        // self.embed_layer_norm
-        //     .encode(cmd_encoder, &self.embed_ln_weights, hidden_states, &output);
-        // Ok(output)
     }
     fn embed_and_normalize(
         &self,

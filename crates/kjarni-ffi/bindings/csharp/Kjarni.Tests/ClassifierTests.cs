@@ -25,29 +25,39 @@ namespace Kjarni.Tests
         }
 
         [Theory]
-        [InlineData("I love this product, it's absolutely amazing!", "POSITIVE")]
-        [InlineData("This is the best movie I have ever seen.", "POSITIVE")]
-        [InlineData("Wonderful experience, highly recommended.", "POSITIVE")]
-        public void Classify_PositiveText(string text, string expectedLabel)
+        [InlineData("I love this product, it's absolutely amazing!", "POSITIVE", 0.9999f)]
+        [InlineData("This is the best movie I have ever seen.", "POSITIVE", 0.9998f)]
+        [InlineData("Wonderful experience, highly recommended.", "POSITIVE", 0.9999f)]
+        public void Classify_PositiveText(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
 
             Assert.Equal(expectedLabel, result.Label);
-            Assert.True(result.Score > 0.9f, $"Expected high confidence, got {result.Score:F4}");
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
         [Theory]
-        [InlineData("This is terrible, I want my money back.", "NEGATIVE")]
-        [InlineData("Worst experience of my life, absolutely awful.", "NEGATIVE")]
-        [InlineData("The food was disgusting and the service was horrible.", "NEGATIVE")]
-        public void Classify_NegativeText(string text, string expectedLabel)
+        [InlineData("This is terrible, I want my money back.", "NEGATIVE", 0.9997f)]
+        [InlineData("Worst experience of my life, absolutely awful.", "NEGATIVE", 0.9998f)]
+        [InlineData("The food was disgusting and the service was horrible.", "NEGATIVE", 0.9997f)]
+        public void Classify_NegativeText(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
 
             Assert.Equal(expectedLabel, result.Label);
-            Assert.True(result.Score > 0.9f, $"Expected high confidence, got {result.Score:F4}");
+            Assert.Equal(expectedScore, result.Score, 3);
+        }
+
+        [Fact]
+        public void Classify_AmbiguousText()
+        {
+            var result = _classifier.Classify("This is a test sentence.");
+            _output.WriteLine($"Ambiguous => {result}");
+
+            Assert.Equal("NEGATIVE", result.Label);
+            Assert.Equal(0.981f, result.Score, 3);
         }
 
         [Fact]
@@ -73,7 +83,7 @@ namespace Kjarni.Tests
         [Fact]
         public void Classify_TopKReturnsCorrectCount()
         {
-            var result = _classifier.Classify("Test sentence");
+            var result = _classifier.Classify("Great product!");
             var top1 = result.TopK(1).ToArray();
 
             Assert.Single(top1);
@@ -91,6 +101,7 @@ namespace Kjarni.Tests
             Assert.Contains("%", str);
         }
     }
+
     public class RobertaSentimentTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -111,27 +122,28 @@ namespace Kjarni.Tests
         }
 
         [Theory]
-        [InlineData("I absolutely love this! Best day ever! 🎉", "positive")]
-        [InlineData("This made my day, so happy right now", "positive")]
-        public void Classify_PositiveText(string text, string expectedLabel)
+        [InlineData("This made my day, so happy right now", "positive", 0.983f)]
+        public void Classify_PositiveText(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
             LogAllScores(result);
 
             Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
         [Theory]
-        [InlineData("This is the worst thing ever, so angry", "negative")]
-        [InlineData("Terrible service, never coming back", "negative")]
-        public void Classify_NegativeText(string text, string expectedLabel)
+        [InlineData("This is the worst thing ever, so angry", "negative", 0.951f)]
+        [InlineData("Terrible service, never coming back", "negative", 0.931f)]
+        public void Classify_NegativeText(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
             LogAllScores(result);
 
             Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
         [Fact]
@@ -141,8 +153,19 @@ namespace Kjarni.Tests
             _output.WriteLine($"Neutral test => {result}");
             LogAllScores(result);
 
-            // Neutral or at least not strongly positive/negative
-            Assert.Contains(result.Label, new[] { "neutral", "positive" });
+            Assert.Equal("neutral", result.Label);
+            Assert.Equal(0.951f, result.Score, 3);
+        }
+
+        [Fact]
+        public void Classify_ScoreOrdering()
+        {
+            var result = _classifier.Classify("Testing score distribution");
+            var labels = result.AllScores.Select(s => s.Label).ToArray();
+
+            Assert.Equal("neutral", labels[0]);
+            Assert.Equal("positive", labels[1]);
+            Assert.Equal("negative", labels[2]);
         }
 
         [Fact]
@@ -161,6 +184,7 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
+
     public class BertMultilingualSentimentTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -181,26 +205,28 @@ namespace Kjarni.Tests
         }
 
         [Theory]
-        [InlineData("This product is absolutely fantastic, I love everything about it!", "5 stars")]
-        [InlineData("Amazing quality, exceeded all my expectations", "5 stars")]
-        public void Classify_VeryPositive_5Stars(string text, string expectedLabel)
+        [InlineData("This product is absolutely fantastic, I love everything about it!", "5 stars", 0.971f)]
+        [InlineData("Amazing quality, exceeded all my expectations", "5 stars", 0.925f)]
+        public void Classify_VeryPositive_5Stars(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
             LogAllScores(result);
 
             Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
         [Theory]
-        [InlineData("Absolutely terrible, worst purchase ever, broken on arrival", "1 star")]
-        public void Classify_VeryNegative_1Star(string text, string expectedLabel)
+        [InlineData("Absolutely terrible, worst purchase ever, broken on arrival", "1 star", 0.982f)]
+        public void Classify_VeryNegative_1Star(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
             LogAllScores(result);
 
             Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
         [Fact]
@@ -210,29 +236,45 @@ namespace Kjarni.Tests
             _output.WriteLine($"German positive => {result}");
             LogAllScores(result);
 
-            // Should be 4 or 5 stars
-            Assert.Contains(result.Label, new[] { "4 stars", "5 stars" });
+            Assert.Equal("5 stars", result.Label);
+            Assert.Equal(0.882f, result.Score, 3);
         }
 
         [Fact]
         public void Classify_Multilingual_French()
         {
-            var result = _classifier.Classify("C'est terrible, je suis très déçu de cet achat.");
+            var result = _classifier.Classify("C'est terrible, je suis tres decu de cet achat.");
             _output.WriteLine($"French negative => {result}");
             LogAllScores(result);
 
-            // Should be 1 or 2 stars
-            Assert.Contains(result.Label, new[] { "1 star", "2 stars" });
+            Assert.Equal("1 star", result.Label);
+            Assert.Equal(0.846f, result.Score, 3);
         }
 
         [Fact]
         public void Classify_Multilingual_Spanish()
         {
-            var result = _classifier.Classify("¡Me encanta este producto! Es perfecto.");
+            var result = _classifier.Classify("\u00a1Me encanta este producto! Es perfecto.");
             _output.WriteLine($"Spanish positive => {result}");
             LogAllScores(result);
 
-            Assert.Contains(result.Label, new[] { "4 stars", "5 stars" });
+            Assert.Equal("5 stars", result.Label);
+            Assert.Equal(0.933f, result.Score, 3);
+        }
+
+        [Fact]
+        public void Classify_MidRange()
+        {
+            var result = _classifier.Classify("Average product, nothing special");
+            _output.WriteLine($"Mid-range => {result}");
+            LogAllScores(result);
+
+            Assert.Equal("3 stars", result.Label);
+            Assert.Equal(0.662f, result.Score, 3);
+
+            var labels = result.AllScores.Select(s => s.Label).ToArray();
+            Assert.Equal("3 stars", labels[0]);
+            Assert.Equal("2 stars", labels[1]);
         }
 
         [Fact]
@@ -272,58 +314,71 @@ namespace Kjarni.Tests
         }
 
         [Theory]
-        [InlineData("I just got promoted and I'm so happy!", "joy")]
-        [InlineData("Today is the best day of my life!", "joy")]
-        public void Classify_Joy(string text, string expectedLabel)
+        [InlineData("I just got promoted and I'm so happy!", "joy", 0.964f)]
+        [InlineData("Today is the best day of my life!", "joy", 0.981f)]
+        public void Classify_Joy(string text, string expectedLabel, float expectedScore)
         {
             var result = _classifier.Classify(text);
             _output.WriteLine($"'{text}' => {result}");
             LogAllScores(result);
 
             Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal(expectedScore, result.Score, 3);
         }
 
-        [Theory]
-        [InlineData("I'm so angry about what happened, this is unfair!", "anger")]
-        public void Classify_Anger(string text, string expectedLabel)
+        [Fact]
+        public void Classify_Anger()
         {
-            var result = _classifier.Classify(text);
-            _output.WriteLine($"'{text}' => {result}");
+            var result = _classifier.Classify("I'm so angry about what happened, this is unfair!");
+            _output.WriteLine($"Anger => {result}");
             LogAllScores(result);
 
-            Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal("anger", result.Label);
+            Assert.Equal(0.984f, result.Score, 3);
         }
 
-        [Theory]
-        [InlineData("I lost my best friend today, I'm devastated.", "sadness")]
-        public void Classify_Sadness(string text, string expectedLabel)
+        [Fact]
+        public void Classify_Sadness()
         {
-            var result = _classifier.Classify(text);
-            _output.WriteLine($"'{text}' => {result}");
+            var result = _classifier.Classify("I lost my best friend today, I'm devastated.");
+            _output.WriteLine($"Sadness => {result}");
             LogAllScores(result);
 
-            Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal("sadness", result.Label);
+            Assert.Equal(0.984f, result.Score, 3);
         }
 
-        [Theory]
-        [InlineData("There's a strange noise outside and I'm home alone.", "fear")]
-        public void Classify_Fear(string text, string expectedLabel)
+        [Fact]
+        public void Classify_Fear()
         {
-            var result = _classifier.Classify(text);
-            _output.WriteLine($"'{text}' => {result}");
+            var result = _classifier.Classify("There's a strange noise outside and I'm home alone.");
+            _output.WriteLine($"Fear => {result}");
             LogAllScores(result);
 
-            Assert.Equal(expectedLabel, result.Label);
+            Assert.Equal("fear", result.Label);
+            Assert.Equal(0.873f, result.Score, 3);
+        }
+
+        [Fact]
+        public void Classify_Neutral()
+        {
+            var result = _classifier.Classify("Just another regular day.");
+            _output.WriteLine($"Neutral => {result}");
+            LogAllScores(result);
+
+            Assert.Equal("neutral", result.Label);
+            Assert.Equal(0.923f, result.Score, 3);
         }
 
         [Fact]
         public void Classify_HasAllExpectedLabels()
         {
-            var result = _classifier.Classify("Test text for label inspection");
+            var result = _classifier.Classify("Just another regular day.");
             var labels = result.AllScores.Select(s => s.Label).OrderBy(l => l).ToArray();
 
             _output.WriteLine($"Labels: {string.Join(", ", labels)}");
 
+            Assert.Equal(7, labels.Length);
             Assert.Contains("joy", labels);
             Assert.Contains("anger", labels);
             Assert.Contains("sadness", labels);
@@ -349,6 +404,7 @@ namespace Kjarni.Tests
                 _output.WriteLine($"  {label}: {score:F6}");
         }
     }
+
     public class ToxicBertTests : IDisposable
     {
         private readonly Classifier _classifier;
@@ -369,45 +425,63 @@ namespace Kjarni.Tests
         }
 
         [Fact]
-        public void Classify_NonToxicText_LowScores()
+        public void Classify_NonToxicText()
         {
             var result = _classifier.Classify("Have a wonderful day, I hope everything goes well for you!");
             _output.WriteLine($"Non-toxic => {result}");
             LogAllScores(result);
 
-            // For non-toxic text, the top toxic label score should be low
-            // The model outputs per-label probabilities, not softmax
+            Assert.Equal("toxic", result.Label);
+            Assert.Equal(0.001f, result.Score, 3);
+
             foreach (var (label, score) in result.AllScores)
-            {
-                Assert.True(score < 0.5f, $"Non-toxic text scored {score:F4} on '{label}'");
-            }
+                Assert.True(score < 0.01f, $"Non-toxic text scored {score:F4} on '{label}'");
         }
 
         [Fact]
-        public void Classify_ToxicText_HighToxicScore()
+        public void Classify_ToxicText()
         {
             var result = _classifier.Classify("You are an absolute idiot and I hate everything about you.");
             _output.WriteLine($"Toxic => {result}");
             LogAllScores(result);
 
-            // Should flag as toxic with reasonable confidence
-            var toxicScore = result.AllScores.FirstOrDefault(s => s.Label == "toxic").Score;
-            _output.WriteLine($"Toxic score: {toxicScore:F6}");
+            var toxic = result.AllScores.First(s => s.Label == "toxic");
+            var insult = result.AllScores.First(s => s.Label == "insult");
+            var obscene = result.AllScores.First(s => s.Label == "obscene");
 
-            Assert.True(toxicScore > 0.5f, $"Expected toxic score > 0.5, got {toxicScore:F4}");
+            Assert.Equal(0.991f, toxic.Score, 3);
+            Assert.Equal(0.945f, insult.Score, 3);
+            Assert.Equal(0.714f, obscene.Score, 3);
         }
 
         [Fact]
-        public void Classify_HasAllExpectedLabels()
+        public void Classify_ScoreOrdering()
         {
-            var result = _classifier.Classify("Test text");
-            var labels = result.AllScores.Select(s => s.Label).OrderBy(l => l).ToArray();
+            var result = _classifier.Classify("Shut up you moron, nobody likes you.");
+            var labels = result.AllScores.Select(s => s.Label).ToArray();
 
-            _output.WriteLine($"Labels: {string.Join(", ", labels)}");
+            Assert.Equal("toxic", labels[0]);
+            Assert.Equal("insult", labels[1]);
+            Assert.Equal("obscene", labels[2]);
+            Assert.Equal("severe_toxic", labels[3]);
+            Assert.Equal("identity_hate", labels[4]);
+            Assert.Equal("threat", labels[5]);
+        }
 
-            Assert.Contains("toxic", labels);
-            Assert.Contains("insult", labels);
-            Assert.Contains("obscene", labels);
+        [Fact]
+        public void Classify_ToxicScores()
+        {
+            var result = _classifier.Classify("Shut up you moron, nobody likes you.");
+            _output.WriteLine($"Toxic => {result}");
+            LogAllScores(result);
+
+            var toxic = result.AllScores.First(s => s.Label == "toxic");
+            var insult = result.AllScores.First(s => s.Label == "insult");
+            var obscene = result.AllScores.First(s => s.Label == "obscene");
+
+            Assert.Equal(0.992f, toxic.Score, 3);
+            Assert.Equal(0.944f, insult.Score, 3);
+            Assert.Equal(0.787f, obscene.Score, 3);
         }
 
         [Fact]
@@ -422,8 +496,35 @@ namespace Kjarni.Tests
             _output.WriteLine($"Toxic text -> toxic score: {toxicScore:F6}");
             _output.WriteLine($"Clean text -> toxic score: {cleanScore:F6}");
 
-            Assert.True(toxicScore > cleanScore,
-                $"Toxic text ({toxicScore:F4}) should score higher than clean text ({cleanScore:F4})");
+            Assert.Equal(0.992f, toxicScore, 3);
+            Assert.Equal(0.001f, cleanScore, 3);
+        }
+
+        [Fact]
+        public void Classify_MultiLabel_ScoresDoNotSumToOne()
+        {
+            var result = _classifier.Classify("You are an absolute idiot and I hate everything about you.");
+            var sum = result.AllScores.Sum(s => s.Score);
+
+            _output.WriteLine($"Score sum: {sum:F4}");
+            Assert.True(sum > 1.0f, "Multi-label scores should sum to more than 1.0 for toxic text");
+        }
+
+        [Fact]
+        public void Classify_HasAllExpectedLabels()
+        {
+            var result = _classifier.Classify("Have a wonderful day, I hope everything goes well for you!");
+            var labels = result.AllScores.Select(s => s.Label).OrderBy(l => l).ToArray();
+
+            _output.WriteLine($"Labels: {string.Join(", ", labels)}");
+
+            Assert.Equal(6, labels.Length);
+            Assert.Contains("toxic", labels);
+            Assert.Contains("severe_toxic", labels);
+            Assert.Contains("obscene", labels);
+            Assert.Contains("threat", labels);
+            Assert.Contains("insult", labels);
+            Assert.Contains("identity_hate", labels);
         }
 
         private void LogAllScores(ClassificationResult result)
@@ -456,7 +557,7 @@ namespace Kjarni.Tests
         public void Classify_UnicodeText_DoesNotCrash()
         {
             using var classifier = new Classifier("distilbert-sentiment", quiet: true);
-            var result = classifier.Classify("日本語テスト 🌍 café résumé");
+            var result = classifier.Classify("Bonjour le monde, cafe resume");
 
             Assert.NotNull(result);
             Assert.NotNull(result.Label);

@@ -18,8 +18,41 @@ namespace Kjarni.Tests
 
         public void Dispose() => _reranker.Dispose();
 
+        [Theory]
+        [InlineData(
+            "What is machine learning?",
+            "Machine learning is a subset of artificial intelligence that enables systems to learn from data.",
+            11.063f)]
+        [InlineData(
+            "What is machine learning?",
+            "The weather today is sunny with a high of 72 degrees.",
+            -11.091f)]
+        [InlineData(
+            "query",
+            "document text",
+            -10.537f)]
+        [InlineData(
+            "deep learning neural networks",
+            "Neural networks learn hierarchical representations.",
+            0.972f)]
+        [InlineData(
+            "deep learning neural networks",
+            "Python is a programming language.",
+            -11.327f)]
+        [InlineData(
+            "deep learning neural networks",
+            "The cat sat on the mat.",
+            -11.313f)]
+        public void Score_ExactValues(string query, string document, float expected)
+        {
+            var score = _reranker.Score(query, document);
+            _output.WriteLine($"\"{query}\" / \"{document}\": {score:F6}");
+
+            Assert.Equal(expected, score, 2);
+        }
+
         [Fact]
-        public void Score_RelevantDocHigherThanIrrelevant()
+        public void Score_RelevantHigherThanIrrelevant()
         {
             var relevant = _reranker.Score(
                 "What is machine learning?",
@@ -32,8 +65,9 @@ namespace Kjarni.Tests
             _output.WriteLine($"Relevant: {relevant:F6}");
             _output.WriteLine($"Irrelevant: {irrelevant:F6}");
 
-            Assert.True(relevant > irrelevant,
-                $"Expected relevant ({relevant:F4}) > irrelevant ({irrelevant:F4})");
+            Assert.Equal(11.063f, relevant, 2);
+            Assert.Equal(-11.091f, irrelevant, 2);
+            Assert.True(relevant > irrelevant);
         }
 
         [Fact]
@@ -77,10 +111,9 @@ namespace Kjarni.Tests
             foreach (var r in results)
                 _output.WriteLine($"  [{r.Index}] {r.Score:F6} {r.Document}");
 
-            // ML-related docs should rank above unrelated ones
-            var topTwo = results.Take(2).Select(r => r.Index).ToArray();
-            Assert.Contains(1, topTwo); // "Machine learning is a branch..."
-            Assert.Contains(3, topTwo); // "Deep learning uses neural networks..."
+            // ML-related docs should be top two
+            Assert.Equal(1, results[0].Index); // "Machine learning is a branch..."
+            Assert.Equal(3, results[1].Index); // "Deep learning uses neural networks..."
         }
 
         [Fact]
@@ -95,11 +128,18 @@ namespace Kjarni.Tests
 
             var results = _reranker.Rerank("deep learning neural networks", docs);
 
+            _output.WriteLine("Scores:");
+            foreach (var r in results)
+                _output.WriteLine($"  [{r.Index}] {r.Score:F6} {r.Document}");
+
             for (int i = 0; i < results.Length - 1; i++)
             {
                 Assert.True(results[i].Score >= results[i + 1].Score,
                     $"Results not sorted: [{i}] {results[i].Score:F4} < [{i + 1}] {results[i + 1].Score:F4}");
             }
+
+            // First result should be the neural networks doc
+            Assert.Equal(1, results[0].Index);
         }
 
         [Fact]
@@ -109,9 +149,7 @@ namespace Kjarni.Tests
             var results = _reranker.Rerank("query", docs);
 
             foreach (var r in results)
-            {
                 Assert.Equal(docs[r.Index], r.Document);
-            }
         }
 
         [Fact]
@@ -144,7 +182,8 @@ namespace Kjarni.Tests
             var results = _reranker.RerankTopK("NLP transformers attention", docs, k: 1);
 
             Assert.Single(results);
-            Assert.Equal(1, results[0].Index); // Transformers doc
+            Assert.Equal(1, results[0].Index);
+            Assert.Equal(-5.181f, results[0].Score, 2);
 
             _output.WriteLine($"Top result: [{results[0].Index}] {results[0].Score:F6} {results[0].Document}");
         }
@@ -170,12 +209,13 @@ namespace Kjarni.Tests
         public void Score_UnicodeText()
         {
             var score = _reranker.Score(
-                "¿Qué es el aprendizaje automático?",
-                "El aprendizaje automático es una rama de la inteligencia artificial.");
+                "Que es el aprendizaje automatico?",
+                "El aprendizaje automatico es una rama de la inteligencia artificial.");
 
             _output.WriteLine($"Spanish query-doc score: {score:F6}");
             Assert.False(float.IsNaN(score));
         }
+
         [Fact]
         public void Score_AfterDispose_Throws()
         {

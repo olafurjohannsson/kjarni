@@ -1,49 +1,4 @@
-//! Matrix multiplication with multi-dtype support and optimized dispatch.
-//!
-//! Provides GPU-accelerated matrix multiplication supporting F32 and BF16 data types
-//! with automatic dtype-specific pipeline selection and implicit transposition handling.
-//!
-//! # Overview
-//!
-//! This module implements highly optimized matmul kernels with:
-//! - **Dtype dispatch**: Separate pipelines for F32 (standard) and BF16 (implicit transpose)
-//! - **GEMV fast path**: Optimized vector-matrix multiplication for single-row inputs
-//! - **Tiled computation**: Cooperative tiling for cache efficiency
-//! - **Implicit transpose**: BF16 weights stored transposed in VRAM for better memory access
-//!
-//! # Implicit Transpose Convention
-//!
-//! For BF16 matmul, weights are stored **physically transposed** in GPU memory:
-//! - Input A: `[M, K]` (standard row-major)
-//! - Weight B: `[N, K]` physical layout (logically `[K, N]`)
-//! - Output C: `[M, N]`
-//!
-//! This avoids explicit transpose operations and improves memory access patterns.
-//!
-//! # Performance
-//!
-//! - **F32 Tiled MatMul**: ~50 GFLOPS on modern GPUs
-//! - **BF16 Tiled MatMul**: ~80 GFLOPS (2x memory bandwidth efficiency)
-//! - **BF16 GEMV**: ~100 GFLOPS for decode phase (M=1)
-//!
-//! # Example
-//!
-//! ```ignore
-//! use kjarni_transformers::gpu_ops::primitives::matmul::GpuMatMul;
-//! use kjarni_transformers::gpu_ops::Kernel;
-//!
-//! let matmul = GpuMatMul::new(&context);
-//! let mut encoder = device.create_command_encoder(&Default::default());
-//!
-//! // Compute: output = a @ b
-//! matmul.encode(&mut encoder, &[&a, &b], &output);
-//! queue.submit([encoder.finish()]);
-//! ```
-//!
-//! # See Also
-//!
-//! - [`super::bmm`] — Batched matrix multiplication
-//! - [`super::linear`] — Fused linear layer (matmul + bias)
+//! Matrix multiplication with multi-dtype support
 
 use crate::gpu::{GpuTensor, Kernel};
 use crate::tensor::DType;
@@ -64,10 +19,7 @@ struct MatmulUniforms {
     _padding: u32,
 }
 
-/// GPU kernel for matrix multiplication with dtype dispatch.
-///
-/// Supports F32 and BF16 data types with automatic pipeline selection.
-/// For decode phase (M=1), uses optimized GEMV kernel.
+/// GPU kernel for matrix multiplication with dtype dispatch
 pub struct GpuMatMul {
     /// Pipeline for F32 matrix multiplication.
     pipeline_f32: Arc<ComputePipeline>,
@@ -82,20 +34,10 @@ pub struct GpuMatMul {
 }
 
 impl GpuMatMul {
-    /// Creates a new matmul kernel with all pipelines pre-compiled.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - WebGPU device context.
-    ///
-    /// # Returns
-    ///
-    /// A configured matmul kernel ready for encoding operations.
+    /// Creates a new matmul kernel with all pipelines pre-compiled
     pub fn new(context: &Arc<WgpuContext>) -> Self {
-        // 1. Create Layout ONCE (Reuse for all types)
         let bind_group_layout = create_bind_group_layout(&context.device);
 
-        // 2. Compile F32 Pipeline
         let shader_f32 = context
             .device
             .create_shader_module(wgpu::include_wgsl!("./matmul_tiled.wgsl"));
@@ -108,7 +50,6 @@ impl GpuMatMul {
         let shader_gemv = context
             .device
             .create_shader_module(wgpu::include_wgsl!("./gemv_bf16.wgsl"));
-        // 3. Compile BF16 Pipeline
         let shader_bf16 = context
             .device
             .create_shader_module(wgpu::include_wgsl!("./matmul_bf16.wgsl"));
@@ -144,7 +85,7 @@ impl GpuMatMul {
 }
 
 impl Kernel for GpuMatMul {
-    /// Encodes matrix multiplication operation to command encoder.
+    /// Encodes matrix multiplication operation to command encoder
     fn encode(&self, encoder: &mut CommandEncoder, inputs: &[&GpuTensor], output: &GpuTensor) {
         let a = inputs[0];
         let b = inputs[1];

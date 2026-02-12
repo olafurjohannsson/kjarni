@@ -28,10 +28,7 @@ pub fn matmul_vec_bf16_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[u16], 
 /// Computes vector-matrix product for F32 input and F32 weights.
 pub fn matmul_vec_f32_scalar(out_chunk: &mut [f32], a: &[f32], b_rows: &[f32], k: usize) {
     for (i, out_val) in out_chunk.iter_mut().enumerate() {
-        // Extract this output's weight row
         let b_row = &b_rows[i * k..(i + 1) * k];
-
-        // Simple dot product
         let sum: f32 = a.iter().zip(b_row.iter()).map(|(&x, &y)| x * y).sum();
         *out_val = sum;
     }

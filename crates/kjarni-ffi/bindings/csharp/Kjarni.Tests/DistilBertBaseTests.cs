@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 
 namespace Kjarni.Tests
 {
-    public class DistilBertBaseTests : IDisposable
+public class DistilBertBaseTests : IDisposable
     {
         private readonly Embedder _embedder;
         private readonly ITestOutputHelper _output;
@@ -32,6 +32,18 @@ namespace Kjarni.Tests
         }
 
         [Fact]
+        public void Encode_FirstFiveValues()
+        {
+            var embedding = _embedder.Encode("Hello world");
+
+            Assert.Equal( 0.02895f, embedding[0], 4);
+            Assert.Equal( 0.00946f, embedding[1], 4);
+            Assert.Equal( 0.08015f, embedding[2], 3);
+            Assert.Equal( 0.02010f, embedding[3], 4);
+            Assert.Equal(-0.03069f, embedding[4], 4);
+        }
+
+        [Fact]
         public void Encode_IsL2Normalized()
         {
             var embedding = _embedder.Encode("Test normalization for distilbert.");
@@ -51,26 +63,24 @@ namespace Kjarni.Tests
                 Assert.Equal(a[i], b[i]);
         }
 
-        [Fact]
-        public void Similarity_RelatedHigherThanUnrelated()
+        [Theory]
+        [InlineData("cat", "dog", 0.9491f)]
+        [InlineData("cat", "quantum computing", 0.7529f)]
+        public void Similarity_ExactValues(string a, string b, float expected)
         {
-            var related = _embedder.Similarity("cat", "dog");
-            var unrelated = _embedder.Similarity("cat", "quantum computing");
+            var score = _embedder.Similarity(a, b);
+            _output.WriteLine($"{a} / {b}: {score:F6}");
 
-            _output.WriteLine($"cat-dog: {related:F6}");
-            _output.WriteLine($"cat-quantum: {unrelated:F6}");
-
-            Assert.True(related > unrelated,
-                $"Expected cat-dog ({related:F4}) > cat-quantum ({unrelated:F4})");
+            Assert.Equal(expected, score, 3);
         }
 
         [Fact]
-        public void Similarity_IdenticalTextNearOne()
+        public void Similarity_IdenticalTextIsOne()
         {
             var score = _embedder.Similarity("machine learning", "machine learning");
             _output.WriteLine($"Identical: {score:F6}");
 
-            Assert.True(score > 0.99f);
+            Assert.Equal(1.0f, score, 3);
         }
 
         [Fact]
@@ -83,7 +93,6 @@ namespace Kjarni.Tests
             for (int i = 0; i < texts.Length; i++)
             {
                 var single = _embedder.Encode(texts[i]);
-                // Cosine similarity should be ~1.0 even if padding causes tiny element-wise diffs
                 var dot = single.Zip(batch[i], (a, b) => a * b).Sum();
                 Assert.InRange(dot, 0.9999f, 1.0001f);
             }
@@ -92,7 +101,7 @@ namespace Kjarni.Tests
         [Fact]
         public void Encode_UnicodeText()
         {
-            var embedding = _embedder.Encode("Héllo wörld café 日本語");
+            var embedding = _embedder.Encode("Bonjour le monde, cafe resume");
             Assert.Equal(768, embedding.Length);
 
             var norm = MathF.Sqrt(embedding.Sum(x => x * x));

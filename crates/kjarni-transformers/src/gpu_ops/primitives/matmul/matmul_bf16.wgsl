@@ -23,7 +23,7 @@ var<workgroup> b_tile: array<f32, 1056>; // 32 * 33 = 4.2KB (padded for bank con
 
 /// Manually unpacks two BF16 values from a packed u32.
 fn unpack_bf16_manual(packed: u32) -> vec2<f32> {
-    // Low 16 bits → high bits of F32
+    // Low 16 bits -> high bits of F32
     let v1 = bitcast<f32>(packed << 16u);
     // High 16 bits already in position
     let v2 = bitcast<f32>(packed & 0xFFFF0000u);

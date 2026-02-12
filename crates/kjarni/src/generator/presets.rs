@@ -37,7 +37,7 @@ pub const GENERATOR_FAST_V1: GeneratorPreset = GeneratorPreset {
     temperature: Some(0.7),
     default_max_tokens: 256,
     memory_mb: 500,
-    description: "Fast text generation with small model. Good for simple completions.",
+    description: "Fast text generation with small model.",
 };
 
 /// Balanced text generation - good quality with reasonable speed.
@@ -49,7 +49,7 @@ pub const GENERATOR_BALANCED_V1: GeneratorPreset = GeneratorPreset {
     temperature: Some(0.7),
     default_max_tokens: 512,
     memory_mb: 1500,
-    description: "Balanced speed and quality. Good for most generation tasks.",
+    description: "Balanced speed and quality.",
 };
 
 /// Quality text generation - larger model, better outputs.
@@ -61,7 +61,7 @@ pub const GENERATOR_QUALITY_V1: GeneratorPreset = GeneratorPreset {
     temperature: Some(0.7),
     default_max_tokens: 1024,
     memory_mb: 1000,
-    description: "Higher quality text generation. Better coherence and fluency.",
+    description: "Higher quality text generation.",
 };
 
 /// Creative text generation - higher temperature for variety.
@@ -73,7 +73,7 @@ pub const GENERATOR_CREATIVE_V1: GeneratorPreset = GeneratorPreset {
     temperature: Some(0.9),
     default_max_tokens: 1024,
     memory_mb: 1000,
-    description: "Creative generation with higher temperature. Good for stories and brainstorming.",
+    description: "Creative generation with higher temperature.",
 };
 
 /// Code generation preset.
@@ -96,10 +96,6 @@ pub const ALL_V1_PRESETS: &[&GeneratorPreset] = &[
     &GENERATOR_CREATIVE_V1,
     &GENERATOR_CODE_V1,
 ];
-
-
-// Legacy Presets (for backward compatibility)
-
 
 impl GeneratorPreset {
     /// GPT-2 for text completion.
@@ -139,10 +135,6 @@ impl GeneratorPreset {
     };
 }
 
-
-// Tier-based Selection
-
-
 /// Generator quality tiers for easy selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GeneratorTier {
@@ -171,10 +163,6 @@ impl GeneratorTier {
     }
 }
 
-
-// Preset Lookup
-
-
 /// Find a preset by name (case-insensitive).
 pub fn find_preset(name: &str) -> Option<&'static GeneratorPreset> {
     let name_lower = name.to_lowercase();
@@ -189,10 +177,6 @@ pub fn find_preset(name: &str) -> Option<&'static GeneratorPreset> {
 pub fn list_presets() -> Vec<&'static str> {
     ALL_V1_PRESETS.iter().map(|p| p.name).collect()
 }
-
-
-// Tests
-
 
 #[cfg(test)]
 mod tests {

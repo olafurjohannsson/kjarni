@@ -1,14 +1,4 @@
-//! Causal self-attention for decoder models.
-//!
-//! This module provides `GpuDecoderSelfAttention`, optimized for autoregressive
-//! decoding with KV caching.
-//!
-//! # Characteristics
-//!
-//! - **Causal**: Each token can only attend to previous tokens (autoregressive mask).
-//! - **KV Cache**: Caches key/value states for efficient token-by-token generation.
-//! - **No RoPE**: For models using learned or absolute positions (BART, GPT-2).
-//!
+//! Causal self-attention for decoder models
 
 use super::ops::AttentionOps;
 use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
@@ -19,11 +9,7 @@ use crate::gpu_ops::primitives::layout::slice::GpuSlice;
 use anyhow::Result;
 use std::sync::Arc;
 
-/// Causal self-attention for decoder models with KV caching.
-///
-/// This attention module is designed for autoregressive decoding where each
-/// token can only attend to itself and previous tokens. It supports KV caching
-///
+/// Causal self-attention for decoder models with KV caching
 pub struct GpuDecoderSelfAttention {
     pub ops: AttentionOps,
     concatenate: GpuConcatenate,
@@ -41,14 +27,7 @@ pub struct DecoderSelfAttentionOutput {
 }
 
 impl GpuDecoderSelfAttention {
-    /// Creates a new decoder self-attention module.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - The WGPU context for creating GPU resources.
-    /// * `hidden_size` - The model's hidden dimension.
-    /// * `num_heads` - Number of attention heads.
-    ///s
+    /// Creates a new decoder self-attention module
     pub fn new(context: &Arc<WgpuContext>, hidden_size: u32, num_heads: u32) -> Self {
         Self {
             // Decoder self-attention has equal Q and KV heads (no GQA for BART/GPT-2)
@@ -63,28 +42,7 @@ impl GpuDecoderSelfAttention {
         &self.ops
     }
 
-    /// Performs the forward pass of decoder self-attention.
-    ///
-    /// Computes causal self-attention where each token can only attend to
-    /// previous tokens. Supports KV caching for efficient autoregressive generation.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `hidden_states` - Input tensor of shape `[B, S_new, H]`.
-    /// * `weights` - The Q, K, V, and O projection weights.
-    /// * `attention_mask` - Mask of shape `[B, S_total]` for padding.
-    /// * `cached_kv` - Optional cached (K, V) tensors in 4D format `[B, H, S_cached, D]`.
-    /// * `cache_len` - Number of valid tokens in the cache.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// `DecoderSelfAttentionOutput` containing:
-    /// - `hidden_states`: Output tensor `[B, S_new, H]`
-    /// - `new_k`: New K projection `[B, S_new, H*D]` for cache update
-    /// - `new_v`: New V projection `[B, S_new, H*D]` for cache update
-    ///
+    /// Performs the forward pass of decoder self-attention
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -97,7 +55,7 @@ impl GpuDecoderSelfAttention {
     ) -> Result<DecoderSelfAttentionOutput> {
         let (_, _, _hidden_size) = hidden_states.dims3();
 
-        // 1. Project Q, K, V from input
+        // Project Q, K, V from input
         let q_proj = self.ops.project(
             encoder,
             hidden_states,
@@ -120,12 +78,12 @@ impl GpuDecoderSelfAttention {
             pool,
         );
 
-        // 2. Split heads for attention: [B, S, H*D] -> [B, H, S, D]
+        // Split heads for attention: [B, S, H*D] -> [B, H, S, D]
         let q_heads = self.ops.split_heads(encoder, &q_proj, pool);
         let k_heads_new = self.ops.split_heads(encoder, &k_proj, pool);
         let v_heads_new = self.ops.split_heads(encoder, &v_proj, pool);
 
-        // 3. Concatenate with cache if present
+        // Concatenate with cache if present
         let (full_k, full_v) = if let Some((cached_k, cached_v)) = cached_kv {
             if cache_len > 0 {
                 self.concat_with_cache(
@@ -146,7 +104,7 @@ impl GpuDecoderSelfAttention {
             (k_heads_new, v_heads_new)
         };
 
-        // 4. Compute causal attention
+        // Compute causal attention
         let context = self.ops.attention(
             encoder,
             &q_heads,
@@ -158,7 +116,7 @@ impl GpuDecoderSelfAttention {
             pool,
         );
 
-        // 5. Merge heads and output projection
+        // Merge heads and output projection
         let context_merged = self.ops.merge_heads(encoder, &context, pool);
         let output = self.ops.project(
             encoder,
@@ -176,19 +134,7 @@ impl GpuDecoderSelfAttention {
         })
     }
 
-    /// Concatenates new K/V with cached K/V.
-    ///
-    /// # Arguments
-    ///
-    /// * `k_new` - New K heads `[B, H, S_new, D]`
-    /// * `v_new` - New V heads `[B, H, S_new, D]`
-    /// * `cached_k` - Cached K `[B, H, S_cached, D]`
-    /// * `cached_v` - Cached V `[B, H, S_cached, D]`
-    /// * `cache_len` - Valid length in cache
-    ///
-    /// # Returns
-    ///
-    /// (full_k, full_v) each of shape `[B, H, S_total, D]`
+    /// Concatenates new K/V with cached K/V
     fn concat_with_cache(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -220,18 +166,7 @@ impl GpuDecoderSelfAttention {
         Ok((full_k, full_v))
     }
 
-    /// Projects only K and V (useful for cross-attention precomputation pattern).
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder.
-    /// * `hidden_states` - Input tensor `[B, S, H]`.
-    /// * `weights` - Attention weights.
-    /// * `pool` - Tensor pool.
-    ///
-    /// # Returns
-    ///
-    /// (K, V) projections, each `[B, S, H*D]`.
+    /// Projects only K and V
     pub fn project_kv(
         &self,
         encoder: &mut wgpu::CommandEncoder,

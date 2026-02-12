@@ -35,13 +35,11 @@ impl CpuTransformerEncoder {
     ) -> Result<Self> {
         let dtype = load_cfg.target_dtype;
 
-        // 1. Get Encoder Layout
         let encoder_layout = layout
             .encoder
             .as_ref()
             .context("ModelLayout is missing the required 'encoder' layout")?;
 
-        // 3. Embedding LayerNorm
         let emb_norm_w = encoder_layout
             .embedding_norm_weight
             .as_ref()
@@ -57,14 +55,11 @@ impl CpuTransformerEncoder {
             meta.norm_eps,
         );
 
-        // 4. Build Layers
         let mut layers = Vec::with_capacity(meta.num_layers);
 
         for i in 0..meta.num_layers {
             let idx = i.to_string();
             let name = |template: &String| template.replace("{}", &idx);
-
-            // Helper to resolve optional bias names safely
             let resolve_bias = |opt: &Option<String>| opt.as_ref().map(|s| name(s));
 
             let f32_strategy = F32MatmulStrategy::CustomSimd;
@@ -77,20 +72,15 @@ impl CpuTransformerEncoder {
             let k_bias = resolve_bias(&encoder_layout.layer.self_attn.k_bias);
             let v_bias = resolve_bias(&encoder_layout.layer.self_attn.v_bias);
 
-            // Check for Fused QKV (Nomic/Mosaic Style)
-            // If Q, K, and V all point to the same tensor file, we slice it.
             let (q_proj, k_proj, v_proj) = if q_name == k_name && k_name == v_name {
                 let hidden = meta.hidden_size;
 
-                // 1. Load the raw fused weights [3 * Hidden, Hidden]
                 let fused_w = weights.get_array2(&q_name)?;
 
-                // 2. Slice weights
                 let q_w = fused_w.slice(s![0..hidden, ..]).to_owned();
                 let k_w = fused_w.slice(s![hidden..2 * hidden, ..]).to_owned();
                 let v_w = fused_w.slice(s![2 * hidden..3 * hidden, ..]).to_owned();
 
-                // 3. Handle Fused Bias (if present)
                 let (q_b, k_b, v_b) = if let Some(b_name) = &q_bias {
                     let fused_b = weights.get_array1(b_name)?;
                     (
@@ -108,7 +98,6 @@ impl CpuTransformerEncoder {
                     LinearLayer::new_f32(v_w, v_b),
                 )
             } else {
-                // Standard Separate Loading (BERT/MiniLM)
                 (
                     LinearLayer::builder(weights, &q_name)
                         .with_optional_bias(q_bias.as_deref())

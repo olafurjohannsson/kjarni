@@ -346,7 +346,6 @@ mod layer_norm_tests {
     }
 
     fn create_test_input(tokens: usize, hidden: usize, seed: u64) -> Array2<f32> {
-        // Simple deterministic pseudo-random for reproducibility
         let mut val = seed as f32;
         Array2::from_shape_fn((tokens, hidden), |_| {
             val = (val * 1.1 + 0.3) % 10.0 - 5.0;

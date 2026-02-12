@@ -32,6 +32,18 @@ namespace Kjarni.Tests
         }
 
         [Fact]
+        public void Encode_FirstFiveValues()
+        {
+            var embedding = _embedder.Encode("Hello world");
+
+            Assert.Equal( 0.03161f, embedding[0], 4);
+            Assert.Equal( 0.06104f, embedding[1], 4);
+            Assert.Equal( 0.00548f, embedding[2], 4);
+            Assert.Equal(-0.02045f, embedding[3], 4);
+            Assert.Equal( 0.04734f, embedding[4], 4);
+        }
+
+        [Fact]
         public void Encode_IsL2Normalized()
         {
             var embedding = _embedder.Encode("Test normalization for mpnet.");
@@ -51,38 +63,49 @@ namespace Kjarni.Tests
                 Assert.Equal(a[i], b[i]);
         }
 
-        [Fact]
-        public void Similarity_SemanticRankingCorrect()
+        [Theory]
+        [InlineData("dog", "puppy", 0.7183f)]
+        [InlineData("dog", "cat", 0.6397f)]
+        [InlineData("dog", "car", 0.5461f)]
+        [InlineData("dog", "quantum physics", 0.3508f)]
+        public void Similarity_ExactValues(string a, string b, float expected)
         {
-            var pairs = new[]
-            {
-                ("dog", "puppy"),
-                ("dog", "cat"),
-                ("dog", "car"),
-                ("dog", "quantum physics"),
-            };
+            var score = _embedder.Similarity(a, b);
+            _output.WriteLine($"{a} / {b}: {score:F6}");
 
-            var scores = pairs.Select(p =>
-            {
-                var score = _embedder.Similarity(p.Item1, p.Item2);
-                _output.WriteLine($"{p.Item1} - {p.Item2}: {score:F6}");
-                return score;
-            }).ToArray();
-
-            for (int i = 0; i < scores.Length - 1; i++)
-            {
-                Assert.True(scores[i] > scores[i + 1],
-                    $"Expected '{pairs[i]}' ({scores[i]:F4}) > '{pairs[i + 1]}' ({scores[i + 1]:F4})");
-            }
+            Assert.Equal(expected, score, 3);
         }
 
         [Fact]
-        public void Similarity_IdenticalTextNearOne()
+        public void Similarity_IdenticalTextIsOne()
         {
             var score = _embedder.Similarity("machine learning", "machine learning");
             _output.WriteLine($"Identical: {score:F6}");
 
-            Assert.True(score > 0.99f);
+            Assert.Equal(1.0f, score, 3);
+        }
+
+        [Fact]
+        public void Similarity_SemanticPairsRankedCorrectly()
+        {
+            // dog/puppy (0.718) > dog/cat (0.640) > dog/car (0.546) > dog/quantum (0.351)
+            var scores = new[]
+            {
+                ("dog", "puppy",           _embedder.Similarity("dog", "puppy")),
+                ("dog", "cat",             _embedder.Similarity("dog", "cat")),
+                ("dog", "car",             _embedder.Similarity("dog", "car")),
+                ("dog", "quantum physics", _embedder.Similarity("dog", "quantum physics")),
+            };
+
+            foreach (var (a, b, score) in scores)
+                _output.WriteLine($"{a} / {b}: {score:F6}");
+
+            for (int i = 0; i < scores.Length - 1; i++)
+            {
+                Assert.True(scores[i].Item3 > scores[i + 1].Item3,
+                    $"Expected '{scores[i].Item1}/{scores[i].Item2}' ({scores[i].Item3:F4}) > " +
+                    $"'{scores[i + 1].Item1}/{scores[i + 1].Item2}' ({scores[i + 1].Item3:F4})");
+            }
         }
 
         [Fact]
@@ -95,7 +118,6 @@ namespace Kjarni.Tests
             for (int i = 0; i < texts.Length; i++)
             {
                 var single = _embedder.Encode(texts[i]);
-                // Cosine similarity should be ~1.0 even if padding causes tiny element-wise diffs
                 var dot = single.Zip(batch[i], (a, b) => a * b).Sum();
                 Assert.InRange(dot, 0.9999f, 1.0001f);
             }

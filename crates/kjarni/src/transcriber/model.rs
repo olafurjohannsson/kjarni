@@ -276,7 +276,7 @@ impl Transcriber {
                     return;
                 }
             }
-            // tx drops → stream ends
+            // tx drops -> stream ends
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);

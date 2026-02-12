@@ -16,11 +16,11 @@ struct MatmulInfo {
 
 /// Unpacks two BF16 values from a u32.
 fn unpack_bf16(packed: u32) -> vec2<f32> {
-    // First value (low 16 bits) → shift to high position
+    // First value (low 16 bits) -> shift to high position
     let v1_bits = packed << 16u;
     let v1 = bitcast<f32>(v1_bits);
 
-    // Second value (high 16 bits) → already in position
+    // Second value (high 16 bits) -> already in position
     let v2_bits = packed & 0xFFFF0000u;
     let v2 = bitcast<f32>(v2_bits);
 

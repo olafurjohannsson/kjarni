@@ -20,7 +20,7 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Validate input file exists
+    // Validate input file exists
     let path = Path::new(file);
     if !path.exists() {
         return Err(anyhow!("Audio file not found: {}", file));
@@ -29,12 +29,12 @@ pub async fn run(
         return Err(anyhow!("Path is not a file: {}", file));
     }
 
-    // 2. Check model_path (not yet implemented)
+    // Check model_path (not yet implemented)
     if model_path.is_some() {
         return Err(anyhow!("--model-path not yet implemented."));
     }
 
-    // 3. Build transcriber
+    // Build transcriber
     let mut builder = Transcriber::builder(model);
 
     if gpu {
@@ -65,7 +65,7 @@ pub async fn run(
 
     let transcriber = builder.build().await.map_err(|e| anyhow!("{}", e))?;
 
-    // 4. Show info
+    // Show info
     if !quiet {
         eprintln!("Model: {}", transcriber.model_name());
         eprintln!("Device: {:?}", transcriber.device());
@@ -83,7 +83,7 @@ pub async fn run(
         eprintln!();
     }
 
-    // 5. Transcribe
+    // Transcribe
     if no_stream {
         // Full result mode
         let result = transcriber

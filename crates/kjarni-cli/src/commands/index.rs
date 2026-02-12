@@ -78,7 +78,7 @@ async fn create(
         ));
     }
 
-    // 1. Load embedder (Handles download, validation, device automatically)
+    // Load embedder (Handles download, validation, device automatically)
     let embedder = load_embedder(model, gpu, quiet).await?;
     let dimension = embedder.dimension();
 
@@ -87,7 +87,7 @@ async fn create(
         eprintln!("Dimension: {}", dimension);
     }
 
-    // 2. Create index writer
+    // Create index writer
     let config = IndexConfig {
         dimension,
         max_docs_per_segment: 10_000,
@@ -97,7 +97,7 @@ async fn create(
 
     let mut writer = IndexWriter::open(output, config)?;
 
-    // 3. Process documents
+    // Process documents
     let total_indexed = process_inputs(
         &mut writer,
         &embedder,
@@ -112,7 +112,7 @@ async fn create(
         return Err(anyhow!("No documents found to index."));
     }
 
-    // 4. Commit
+    // Commit
     writer.commit()?;
 
     if !quiet {
@@ -143,7 +143,7 @@ async fn add(
         return Err(anyhow!("No input files specified."));
     }
 
-    // 1. Open existing index
+    // Open existing index
     let mut writer = IndexWriter::open_existing(index_path)?;
     let initial_count = writer.len();
     let dimension = writer.dimension();
@@ -152,7 +152,7 @@ async fn add(
         eprintln!("Opened index with {} documents", initial_count);
     }
 
-    // 2. Load embedder
+    // Load embedder
     let embedder = load_embedder(model, gpu, quiet).await?;
 
     // Verify dimension matches
@@ -166,7 +166,7 @@ async fn add(
         ));
     }
 
-    // 3. Process new documents
+    // Process new documents
     let added = process_inputs(
         &mut writer,
         &embedder,
@@ -177,7 +177,7 @@ async fn add(
     )
     .await?;
 
-    // 4. Commit
+    // Commit
     writer.commit()?;
 
     if !quiet {

@@ -425,13 +425,13 @@ mod decoder_pipeline_test {
             .build()
             .expect("Failed to build pipeline");
 
-        // 1. Verify Embeddings Loaded
+        // Verify Embeddings Loaded
         assert!(pipeline.embeddings().is_cpu());
 
-        // 2. Verify LM Head Loaded
+        // Verify LM Head Loaded
         assert!(pipeline.lm_head().has_cpu());
 
-        // 3. Verify Sharing (Pointer Equality)
+        // Verify Sharing (Pointer Equality)
         let emb_ptr = pipeline.embeddings().word_embeddings_cpu().unwrap().data;
         let head_ptr = pipeline
             .lm_head()

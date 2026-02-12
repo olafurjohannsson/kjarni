@@ -13,18 +13,18 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Resolve input
+    // Resolve input
     let text = crate::commands::util::resolve_input(input)?;
 
     // Check for batch mode
     let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
     let is_batch = lines.len() > 1;
 
-    // 2. Parse pooling strategy
+    // Parse pooling strategy
     let pooling_strategy: PoolingStrategy = pooling.parse()
         .map_err(|e: String| anyhow!("Invalid pooling strategy: {}", e))?;
 
-    // 3. Build embedder
+    // Build embedder
     let mut builder = if let Some(path) = model_path {
         Embedder::from_path(path)
     } else {
@@ -44,7 +44,7 @@ pub async fn run(
         .await
         .map_err(|e| anyhow!("Failed to load embedder: {}", e))?;
 
-    // 4. Generate embeddings
+    // Generate embeddings
     if is_batch {
         let embeddings = embedder.embed_batch(&lines).await
             .map_err(|e| anyhow!("Embedding failed: {}", e))?;

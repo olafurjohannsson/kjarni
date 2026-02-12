@@ -325,8 +325,6 @@ pub unsafe extern "C" fn kjarni_indexer_create(
         Ok(v) => v,
         Err(e) => return e,
     };
-
-    // Call the simple Rust API directly (no callbacks)
     let result = get_runtime().block_on(async {
         indexer_ref
             .create_with_options(index_path, &input_vec, force != 0)
@@ -468,8 +466,6 @@ pub unsafe extern "C" fn kjarni_indexer_add(
         Ok(v) => v,
         Err(e) => return e,
     };
-
-    // Call the simple Rust API directly (no callbacks)
     let result = get_runtime().block_on(async { indexer_ref.add(index_path, &input_vec).await });
 
     match result {

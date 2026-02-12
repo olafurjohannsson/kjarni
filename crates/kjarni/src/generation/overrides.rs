@@ -5,26 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// User- or runtime-provided overrides for text generation.
-///
-/// All fields are optional. When resolving the final configuration,
-/// these override model defaults according to precedence rules.
-///
-/// # Precedence (highest to lowest)
-///
-/// 1. Runtime overrides (per-request)
-/// 2. User overrides (set via builder)
-/// 3. Model defaults (from model or generation_config.json)
-///
-/// # Example
-///
-/// ```ignore
-/// let overrides = GenerationOverrides {
-///     temperature: Some(0.8),
-///     max_new_tokens: Some(256),
-///     ..Default::default()
-/// };
-/// ```
+/// User- or runtime-provided overrides for text generation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GenerationOverrides {
     /// Sampling temperature (0.0 = deterministic, higher = more random).

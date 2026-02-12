@@ -58,17 +58,13 @@ mod embeddings_tests {
 
     #[test]
     fn test_cpu_embeddings_math() {
-        // 1. Setup Data
+        // Setup Data
         let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // All 1.0
         let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5); // All 0.5
 
         let embeddings =
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
-
         let input_ids = Array2::<u32>::zeros((1, 2)); // [0, 0]
-
-        // 2. Run Forward
-        // 1.0 (Word) + 0.5 (Pos) = 1.5
         let output = embeddings.forward(&input_ids, None, 0, false);
 
         assert_eq!(output[[0, 0, 0]], 1.5);
@@ -77,19 +73,12 @@ mod embeddings_tests {
 
     #[test]
     fn test_position_embedding_broadcasting_batch() {
-        // Setup: word embeddings = 1.0, position embeddings = 0.5
         let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // 10 words, hidden 4
         let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5);  // 10 positions, hidden 4
-
         let embeddings =
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
-
         let input_ids = Array2::<u32>::zeros((2, 3)); // batch 2, seq 3
-
-        // Forward pass
         let output = embeddings.forward(&input_ids, None, 0, false);
-
-        // Each element = word (1.0) + pos (0.5) = 1.5
         for b in 0..2 {
             for s in 0..3 {
                 for h in 0..4 {
@@ -578,36 +567,26 @@ mod embeddings_tests {
         let output = embeddings.forward(&input_ids, None, 0, false);
 
         assert_eq!(output.shape(), &[2, 2, 32]);
-        // Check random spot in batch 1
         assert!((output[[1, 0, 0]] - 1.0).abs() < 1e-2);
     }
 
     #[test]
     fn test_cpu_embeddings_basic_math() {
-        // 1. Setup Data
         let word_emb = Array2::<f32>::from_elem((10, 4), 1.0); // All 1.0
         let pos_emb = Array2::<f32>::from_elem((10, 4), 0.5); // All 0.5
 
         let embeddings =
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
-
         let input_ids = Array2::<u32>::zeros((1, 2)); // [0, 0]
-
-        // 2. Run Forward
-        // 1.0 (Word) + 0.5 (Pos) = 1.5
         let output = embeddings.forward(&input_ids, None, 0, false);
-
         assert_eq!(output[[0, 0, 0]], 1.5);
         assert_eq!(output[[0, 1, 0]], 1.5);
     }
 
     #[test]
     fn test_scaling_and_offsets() {
-        // Gemma style: scale by sqrt(hidden)
         let hidden = 4;
         let word_emb = Array2::<f32>::ones((10, hidden)); // 1.0
-
-        // Position 0 = 0.1, Position 1 = 0.2
         let mut pos_data = Vec::new();
         pos_data.extend(vec![0.1f32; hidden]);
         pos_data.extend(vec![0.2f32; hidden]);
@@ -615,38 +594,27 @@ mod embeddings_tests {
 
         let embeddings =
             Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), Some(pos_emb), None);
-
         let input_ids = Array2::<u32>::zeros((1, 1));
-
-        // Case 1: No Scale, Offset 0 -> 1.0 + 0.1 = 1.1
         let out1 = embeddings.forward(&input_ids, None, 0, false);
         assert!((out1[[0, 0, 0]] - 1.1).abs() < 1e-6);
-
-        // Case 2: Scaled, Offset 0 -> (1.0 * 2.0) + 0.1 = 2.1
         let out2 = embeddings.forward(&input_ids, None, 0, true);
         assert!((out2[[0, 0, 0]] - 2.1).abs() < 1e-6);
-
-        // Case 3: No Scale, Offset 1 -> 1.0 + 0.2 = 1.2
         let out3 = embeddings.forward(&input_ids, None, 1, false);
         assert!((out3[[0, 0, 0]] - 1.2).abs() < 1e-6);
     }
 
     #[test]
     fn test_q8_0_lifecycle() {
-        // Test that we can load F32, quantize to Q8_0, and read back correct values
         let hidden = 32; // Multiple of 32 required
         let vocab = 2;
-        // Token 0 = 10.0, Token 1 = -5.0
         let mut data = vec![10.0f32; hidden];
         data.extend(vec![-5.0f32; hidden]);
 
         let (_dir, weights) = create_dummy_weights(vec![("w", data, vec![vocab, hidden])]);
 
-        // Force Q8_0 quantization
         let embeddings =
             Embeddings::from_weights(&weights, "w", None, None, Some(DType::Q8_0)).unwrap();
 
-        // Verify it's actually Q8
         match embeddings.word_embeddings {
             EmbeddingData::Q8_0(_) => {}
             _ => panic!("Expected Q8_0 data"),
@@ -654,8 +622,6 @@ mod embeddings_tests {
 
         let input = arr2(&[[0u32, 1]]);
         let output = embeddings.forward(&input, None, 0, false);
-
-        // Check values (Q8 has some loss, but small integers are usually exact)
         assert!((output[[0, 0, 0]] - 10.0).abs() < 0.1);
         assert!((output[[0, 1, 0]] - -5.0).abs() < 0.1);
     }
@@ -664,11 +630,8 @@ mod embeddings_tests {
     fn test_vocab_bounds() {
         let word_emb = Array2::<f32>::zeros((10, 4));
         let embeddings = Embeddings::new(EmbeddingData::F32(Arc::new(word_emb)), None, None);
-
         let bad_input = arr2(&[[100u32]]);
-        // Should NOT panic
         let output = embeddings.forward(&bad_input, None, 0, false);
-        // Verify it ignored the input (remained zeros)
         assert_eq!(output[[0, 0, 0]], 0.0);
     }
 }

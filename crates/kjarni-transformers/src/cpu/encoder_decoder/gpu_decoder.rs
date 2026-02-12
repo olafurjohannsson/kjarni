@@ -768,7 +768,6 @@ mod seq2seq_gpu_decoder_tests {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
 
-        // 1. Embeddings
         w.insert(
             "token_emb".into(),
             vec![

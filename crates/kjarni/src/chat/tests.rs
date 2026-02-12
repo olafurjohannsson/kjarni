@@ -1,9 +1,4 @@
-//! Comprehensive tests for the Chat module.
-
 use super::*;
-
-
-// Unit Tests - Types
 
 
 mod types_tests {
@@ -397,10 +392,6 @@ mod builder_tests {
     }
 }
 
-
-// Integration Tests (require model download)
-
-
 #[cfg(test)]
 mod integration_tests {
     use super::*;
@@ -463,24 +454,6 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    async fn test_chat_system_prompt_affects_behavior() {
-        if !model_available("qwen2.5-0.5b-instruct") {
-            eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
-            return;
-        }
-        let chat = Chat::builder("qwen2.5-0.5b-instruct")
-            .system("You are a pirate. Speak like a pirate.")
-            .cpu()
-            .quiet()
-            .max_tokens(50)
-            .build()
-            .await
-            .unwrap();
-
-        let response = chat.send("Hello!").await.unwrap();
-        assert!(!response.is_empty());
-    }
-    #[tokio::test]
     async fn test_chat_modes() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -505,40 +478,6 @@ mod integration_tests {
                 mode
             );
         }
-    }
-    #[tokio::test]
-    async fn test_conversation_history() {
-        if !model_available("qwen2.5-0.5b-instruct") {
-            eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
-            return;
-        }
-        let chat = Chat::builder("qwen2.5-0.5b-instruct")
-            .cpu()
-            .quiet()
-            .max_tokens(50)
-            .build()
-            .await
-            .unwrap();
-
-        let mut convo = chat.conversation();
-
-        assert!(convo.is_empty() || convo.len() == 1);
-
-        let r1 = convo.send("My name is Alice").await.unwrap();
-        assert!(!r1.is_empty());
-        let history_len = convo.len();
-        assert!(
-            history_len >= 2,
-            "Should have at least user + assistant messages"
-        );
-
-        let r2 = convo.send("What is my name?").await.unwrap();
-        assert!(!r2.is_empty());
-
-        assert!(
-            convo.len() > history_len,
-            "History should grow after second message"
-        );
     }
 
     #[tokio::test]

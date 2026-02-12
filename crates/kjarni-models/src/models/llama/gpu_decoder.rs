@@ -115,12 +115,9 @@ impl LlamaGpuDecoder {
             .as_ref()
             .expect("Llama layout must have a decoder section");
 
-        // 1. Unified Embedding Loading
-        let target_dtype = load_config.target_dtype;
-
-        // GPU decoder always loads to GPU, CPU offload is handled at model level
+        let target_dtype = load_config.target_dtype
         let embeddings = LoadedEmbeddings::new(
-            Some(context), // Option<&Arc<WgpuContext>>
+            Some(context),
             weights,
             EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size),
             false, // load_cpu - GPU decoder doesn't need CPU embeddings
@@ -128,7 +125,7 @@ impl LlamaGpuDecoder {
             target_dtype,
         )?;
 
-        // 2. Final Layer Norm
+        // Final Layer Norm
         let final_norm_name = decoder_layout.final_norm_weight.as_ref().unwrap();
         let final_layer_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, meta.norm_eps));
         let final_ln_weights = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
@@ -141,7 +138,7 @@ impl LlamaGpuDecoder {
             )?,
         )?);
 
-        // 3. Decoder Layers
+        // Decoder Layers
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
             let decoder_layer =
@@ -379,10 +376,10 @@ impl GpuDecoder for LlamaGpuDecoder {
         cache: Option<&mut GpuKVCache>,
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
-        // 1. Embed
+        // Embed
         let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
-        // 2. Layers
+        // Layers
         let mut hidden = self.forward_layers(
             encoder,
             pool,
@@ -394,7 +391,7 @@ impl GpuDecoder for LlamaGpuDecoder {
             self.num_layers(),
         )?;
 
-        // 3. Final Layer Norm (Llama Specific)
+        // Final Layer Norm (Llama Specific)
         let final_ln_output = pool.get(hidden.shape().to_vec());
         self.final_layer_norm
             .encode(encoder, &self.final_ln_weights, &hidden, &final_ln_output);

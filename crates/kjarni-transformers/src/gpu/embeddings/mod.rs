@@ -171,9 +171,6 @@ impl GpuEmbeddings {
     }
 
     /// Encodes the complete embedding generation pass into the command encoder.
-    ///
-    /// This method avoids CPU-GPU transfers by performing all lookups and additions
-    /// directly on the GPU.
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -189,7 +186,6 @@ impl GpuEmbeddings {
         let batch_size = input_ids.shape()[0];
         let seq_len = input_ids.shape()[1];
 
-        // 1. Word Embedding Lookup
         let mut hidden_states = pool.get(vec![batch_size, seq_len, hidden_size]);
         self.lookup
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
@@ -205,11 +201,9 @@ impl GpuEmbeddings {
             hidden_states = scale_out;
         }
 
-        // 2. Add Positional Embeddings (with offset)
         if let Some(pos_embeddings) = &weights.position_embeddings {
             let pos_add_out = pool.get(hidden_states.shape().to_vec());
 
-            // Use the passed extra_pos_embeddings (e.g., 2 for BART, 0 for others)
             let final_offset = position_offset + extra_pos_embeddings;
 
             self.add.encode_broadcast_offset(
@@ -222,7 +216,6 @@ impl GpuEmbeddings {
             hidden_states = pos_add_out;
         }
 
-        // 3. Add Token Type Embeddings (BERT style)
         if let Some(token_type_embeddings) = &weights.token_type_embeddings {
             let token_type_vectors = pool.get(hidden_states.shape().to_vec());
 
@@ -254,18 +247,6 @@ impl GpuEmbeddings {
             );
             hidden_states = type_add_out;
         }
-
-        // // 4. Apply Scaling (BART/T5 style)
-        // if scale_embeddings {
-        //     let scale_factor = (hidden_size as f32).sqrt();
-        //     let scale_out = pool.get(hidden_states.shape().to_vec());
-
-        //     self.scale
-        //         .encode_out_of_place(encoder, &hidden_states, &scale_out, scale_factor);
-
-        //     hidden_states = scale_out;
-        // }
-
         Ok(hidden_states)
     }
 }

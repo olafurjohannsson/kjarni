@@ -14,8 +14,6 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
     k: usize,                // Hidden dim
     bias_ptr: *const f32,    // Optional bias pointer (len 3)
 ) { unsafe {
-    // 12 Accumulators: [Row 0..3] x [Col 0..2]
-    // Always initialize to zero - bias is added AFTER horizontal sum
     let zero = _mm256_setzero_ps();
     let (mut c00, mut c01, mut c02) = (zero, zero, zero);
     let (mut c10, mut c11, mut c12) = (zero, zero, zero);
@@ -27,37 +25,31 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
     let mut a2_ptr = a_ptr.add(2 * k);
     let mut a3_ptr = a_ptr.add(3 * k);
 
-    // Weights are [Out, In], so b_ptr points to Row 0. 
-    // Row 1 is at b_ptr + k, Row 2 is at b_ptr + 2k.
     let mut b0_ptr = b_ptr;
     let mut b1_ptr = b_ptr.add(k);
     let mut b2_ptr = b_ptr.add(2 * k);
 
     let mut n = k;
 
-    // Main Loop: Process 8 floats at a time
     while n >= 8 {
-        // 1. Load 4 Input Rows (reuse these 3 times!)
         let a0 = _mm256_loadu_ps(a0_ptr);
         let a1 = _mm256_loadu_ps(a1_ptr);
         let a2 = _mm256_loadu_ps(a2_ptr);
         let a3 = _mm256_loadu_ps(a3_ptr);
 
-        // 2. Load Weight Row 0 and FMA
+        let w0 = _mm256_loadu_ps(b0_ptr);
         let w0 = _mm256_loadu_ps(b0_ptr);
         c00 = _mm256_fmadd_ps(a0, w0, c00);
         c10 = _mm256_fmadd_ps(a1, w0, c10);
         c20 = _mm256_fmadd_ps(a2, w0, c20);
         c30 = _mm256_fmadd_ps(a3, w0, c30);
 
-        // 3. Load Weight Row 1 and FMA
         let w1 = _mm256_loadu_ps(b1_ptr);
         c01 = _mm256_fmadd_ps(a0, w1, c01);
         c11 = _mm256_fmadd_ps(a1, w1, c11);
         c21 = _mm256_fmadd_ps(a2, w1, c21);
         c31 = _mm256_fmadd_ps(a3, w1, c31);
 
-        // 4. Load Weight Row 2 and FMA
         let w2 = _mm256_loadu_ps(b2_ptr);
         c02 = _mm256_fmadd_ps(a0, w2, c02);
         c12 = _mm256_fmadd_ps(a1, w2, c12);

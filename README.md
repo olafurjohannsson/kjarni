@@ -104,12 +104,11 @@ Console.WriteLine(classifier.Classify("You are an idiot").ToDetailedString());
 ```
 
 ```
-             toxic   72.32%  ████████████████████████████
-            insult   24.45%  █████████
-           obscene    3.17%  █
-      severe_toxic    0.05%  
-     identity_hate    0.01%  
-            threat    0.00%  
+             toxic   98.61%  ███████████████████████████████████████
+            insult   96.00%  ██████████████████████████████████████
+           obscene   75.64%  ██████████████████████████████
+      severe_toxic    4.56%  █
+     identity_hate    1.41%  
 ```
 
 ### Emotion Detection

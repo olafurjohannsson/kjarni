@@ -126,7 +126,7 @@ impl WhisperModel {
 
     /// Encode a mel spectrogram into encoder hidden states
     pub fn encode_mel(&self, mel: &Array2<f32>) -> Result<Array3<f32>> {
-        // [n_mels, time] → [1, n_mels, time]
+        // [n_mels, time] -> [1, n_mels, time]
         let mel_batch = mel
             .clone()
             .insert_axis(ndarray::Axis(0))
@@ -444,7 +444,7 @@ impl WhisperModel {
         (full_text, merged)
     }
 
-    /// Merge segments that meet exactly at chunk boundaries (e.g. 30.0 → 30.0).
+    /// Merge segments that meet exactly at chunk boundaries (e.g. 30.0 -> 30.0).
     fn merge_boundary_segments(segments: Vec<WhisperSegment>) -> Vec<WhisperSegment> {
         if segments.len() < 2 {
             return segments;

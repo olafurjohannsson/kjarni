@@ -120,7 +120,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         // Project to logits and extract single position
         let logits_3d = ops.project_to_logits(&decoder_output)?;
 
-        // Shape: [1, 1, vocab_size] → [vocab_size]
+        // Shape: [1, 1, vocab_size] -> [vocab_size]
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
     }
 }
@@ -152,7 +152,7 @@ impl CpuDecoderBackend {
         // Project to logits
         let logits_3d = ops.project_to_logits(&decoder_output)?;
 
-        // Extract last position: [1, seq, vocab] → [vocab]
+        // Extract last position: [1, seq, vocab] -> [vocab]
         Ok(logits_3d.slice(s![0, -1, ..]).to_owned())
     }
 
@@ -190,7 +190,7 @@ impl CpuDecoderBackend {
 
         let logits_3d = ops.project_to_logits(&decoder_output)?;
 
-        // Extract single position: [1, 1, vocab] → [vocab]
+        // Extract single position: [1, 1, vocab] -> [vocab]
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
     }
 }

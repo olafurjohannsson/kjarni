@@ -18,7 +18,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Map linear index → [batch, hidden]
+    // Map linear index -> [batch, hidden]
     let batch_idx = idx / uniforms.hidden_size;
     let hidden_idx = idx % uniforms.hidden_size;
 

@@ -259,7 +259,7 @@ pub trait CpuDecoderOps: Send + Sync {
             .forward(&hidden, attention_mask, position_offset, cache)
     }
 
-    /// Full inference path: tokens → hidden → logits.
+    /// Full inference path: tokens -> hidden -> logits.
     fn forward_to_logits(
         &self,
         tokens: &Array2<u32>,

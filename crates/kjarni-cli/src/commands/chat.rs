@@ -32,14 +32,14 @@ pub enum CommandResult {
 
 pub async fn run(
     model: &str,
-    _model_path: Option<&str>, // TODO: Handle custom model paths
+    model_path: Option<&str>, // TODO: Handle custom model paths
     system_prompt: Option<&str>,
     temperature: f32,
     max_tokens: usize,
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Initialize the Chat instance using the Builder
+    // Initialize the Chat instance using the Builder
     let mut builder = Chat::builder(model)
         .temperature(temperature)
         .max_tokens(max_tokens);

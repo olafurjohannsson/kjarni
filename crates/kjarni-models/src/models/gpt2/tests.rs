@@ -46,18 +46,18 @@ async fn test_distilgpt2_generation_parity() -> Result<()> {
 
 #[tokio::test]
 async fn test_distilgpt2_architectural_properties() -> Result<()> {
-    // 1. Arrange: Load the model.
+    // Load the model.
     let model = load_distilgpt2_for_test().await?;
     let config = model.concrete_config();
 
-    // 2. Assert: Check architectural values directly from the config struct.
+    // Check architectural values directly from the config struct.
     assert_eq!(config.vocab_size, 50257);
     assert_eq!(config.n_embd, 768); // hidden size
     assert_eq!(config.n_layer, 6);
     assert_eq!(config.n_head, 12);
     assert_eq!(config.n_ctx, 1024); // max_position_embeddings
 
-    // 3. Assert: Check that the trait implementations correctly expose these values.
+    // Check that the trait implementations correctly expose these values.
     assert_eq!(model.vocab_size(), 50257);
     assert_eq!(model.hidden_size(), 768);
     assert_eq!(model.num_layers(), 6);

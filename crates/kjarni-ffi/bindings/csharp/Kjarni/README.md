@@ -32,9 +32,11 @@ Console.WriteLine(multi.Classify("Esta es la peor compra que he hecho."));
 
 using var toxic = new Classifier("toxic-bert");
 Console.WriteLine(toxic.Classify("You are an idiot").ToDetailedString());
-//              toxic   72.32%  ████████████████████████████
-//             insult   24.45%  █████████
-//            obscene    3.17%  █
+    //          toxic   98.61%  ███████████████████████████████████████
+    //         insult   96.00%  ██████████████████████████████████████
+    //        obscene   75.64%  ██████████████████████████████
+    //   severe_toxic    4.56%  █
+    //  identity_hate    1.41%  
 
 using var emotion = new Classifier("distilroberta-emotion");
 Console.WriteLine(emotion.Classify("I just got promoted!"));

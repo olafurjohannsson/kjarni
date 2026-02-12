@@ -334,7 +334,7 @@ impl Seq2SeqGenerator {
         Ok(Box::pin(stream))
     }
 
-    /// Stream as simple strings (convenience method).
+    /// Stream text
     pub async fn stream_text(
         &self,
         input: &str,

@@ -16,21 +16,14 @@ mod sentence_encoder_loading_tests {
     fn create_dummy_bert_files() -> Result<TempDir> {
         let dir = tempfile::tempdir()?;
         let path = dir.path();
-
-        // 1. Create dummy weights
         let mut tensors = HashMap::new();
-
-        // Define data buffers first
-        // Embedding buffer (10 * 4 = 40 floats)
         let shape_emb = vec![10, 4];
         let data_emb = vec![0.0f32; 40];
         let bytes_emb: Vec<u8> = data_emb.iter().flat_map(|f| f.to_le_bytes()).collect();
 
-        // Position embedding buffer (512 * 4 = 2048 floats)
         let data_pos = vec![0.0f32; 512 * 4];
         let bytes_pos: Vec<u8> = data_pos.iter().flat_map(|f| f.to_le_bytes()).collect();
 
-        // Layer weights (4 * 4 = 16 floats)
         let shape_layer = vec![4, 4];
         let data_layer = vec![0.0f32; 16];
         let bytes_layer: Vec<u8> = data_layer.iter().flat_map(|f| f.to_le_bytes()).collect();

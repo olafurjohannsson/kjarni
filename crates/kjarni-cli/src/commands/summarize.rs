@@ -22,13 +22,13 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Resolve input
+    // Resolve input
     let text = resolve_input(input)?;
     if text.trim().is_empty() {
         return Err(anyhow!("Input text is empty. Nothing to summarize."));
     }
 
-    // 2. Build summarizer
+    // Build summarizer
     if model_path.is_some() {
         return Err(anyhow!("--model-path not yet implemented."));
     }
@@ -71,7 +71,7 @@ pub async fn run(
 
     let summarizer = builder.build().await.map_err(|e| anyhow!("{}", e))?;
 
-    // 3. Show info
+    // Show info
     if !quiet {
         eprintln!("Model: {}", summarizer.model_name());
         eprintln!("Device: {:?}", summarizer.device());
@@ -79,7 +79,7 @@ pub async fn run(
         eprintln!();
     }
 
-    // 4. Summarize
+    // Summarize
     if no_stream {
         let summary = summarizer
             .summarize(&text)

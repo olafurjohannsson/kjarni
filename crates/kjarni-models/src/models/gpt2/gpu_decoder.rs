@@ -337,10 +337,10 @@ impl GpuDecoder for Gpt2GpuDecoder {
         cache: Option<&mut GpuKVCache>,
         _encoder_hidden_states: Option<&GpuTensor>,
     ) -> Result<GpuTensor> {
-        // 1. Embed
+        // Embed
         let hidden = self.embed_and_normalize(encoder, pool, input, position_offset)?;
 
-        // 2. Layers
+        // Layers
         let hidden = self.forward_layers(
             encoder,
             pool,
@@ -352,7 +352,7 @@ impl GpuDecoder for Gpt2GpuDecoder {
             self.num_layers(),
         )?;
 
-        // 3. Final Layer Norm
+        // Final Layer Norm
         let final_ln_output = pool.get(hidden.shape().to_vec());
         self.final_layer_norm
             .encode(encoder, &self.final_ln_weights, &hidden, &final_ln_output);

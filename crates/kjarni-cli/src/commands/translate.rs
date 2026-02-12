@@ -23,13 +23,13 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Resolve input
+    // Resolve input
     let text = resolve_input(input)?;
     if text.trim().is_empty() {
         return Err(anyhow!("Input text is empty. Nothing to translate."));
     }
 
-    // 2. Validate languages
+    // Validate languages
     let source_lang = src.ok_or_else(|| {
         anyhow!("Source language is required. Use --src <language> (e.g., --src en)")
     })?;
@@ -37,7 +37,7 @@ pub async fn run(
         anyhow!("Target language is required. Use --dst <language> (e.g., --dst de)")
     })?;
 
-    // 3. Build translator
+    // Build translator
     if model_path.is_some() {
         return Err(anyhow!("--model-path not yet implemented."));
     }
@@ -76,7 +76,7 @@ pub async fn run(
 
     let translator = builder.build().await.map_err(|e| anyhow!("{}", e))?;
 
-    // 4. Show info
+    // Show info
     if !quiet {
         eprintln!("Model: {}", translator.model_name());
         eprintln!("Device: {:?}", translator.device());
@@ -85,7 +85,7 @@ pub async fn run(
         eprintln!();
     }
 
-    // 5. Translate
+    // Translate
     if no_stream {
         let translation = translator
             .translate(&text, source_lang, target_lang)

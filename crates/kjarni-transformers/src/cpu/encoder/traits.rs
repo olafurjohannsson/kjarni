@@ -257,7 +257,7 @@ pub trait CpuEncoder: CpuTransformerCore {
         })
     }
 
-    /// Full forward: layers → final_norm
+    /// Full forward: layers -> final_norm
     fn forward(
         &self,
         hidden_states: &Array3<f32>,
@@ -481,19 +481,19 @@ pub trait GpuEncoderOps: Send + Sync {
         token_type_ids: Option<ModelInput<'_>>,
         pos: usize,
     ) -> Result<GpuEncoderOutput> {
-        // 1. Embed tokens
+        // Embed tokens
         let hidden = self.embed_tokens(cmd_encoder, pool, input_ids, token_type_ids, pos)?;
 
-        // 2. Apply embedding normalization
+        // Apply embedding normalization
         let normalized = self.encoder().embed_norm(cmd_encoder, pool, &hidden)?;
 
-        // 3. Get or create attention mask
+        // Get or create attention mask
         let mask = match attention_mask {
             Some(m) => m.clone(),
             None => self.get_attention_mask(ctx, normalized.shape()[1])?,
         };
 
-        // 4. Run through encoder layers + final norm
+        // Run through encoder layers + final norm
         self.encoder().forward2(
             cmd_encoder,
             pool,

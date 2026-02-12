@@ -22,7 +22,7 @@ pub async fn run(
     if !quiet {
         eprintln!("Running {:?} on text {}", model, "");
     }
-    // 1. Resolve input text
+    // Resolve input text
     let text = if input.is_empty() {
         crate::commands::util::resolve_input(None)?
     } else {
@@ -37,7 +37,7 @@ pub async fn run(
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let is_batch = lines.len() > 1;
 
-    // 2. Build classifier
+    // Build classifier
     let mut builder = if let Some(path) = model_path {
         Classifier::from_path(path)
     } else {
@@ -95,7 +95,7 @@ pub async fn run(
         }
     }
 
-    // 3. Run classification
+    // Run classification
     if is_batch {
         if !quiet {
             eprintln!("Classifying {} texts...", lines.len());

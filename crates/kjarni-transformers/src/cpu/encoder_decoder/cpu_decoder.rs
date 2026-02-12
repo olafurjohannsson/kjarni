@@ -677,12 +677,9 @@ mod seq2seq_decoder_tests {
         Ok((weights, dir))
     }
 
-    // BART Golden Data Provider
     fn get_bart_decoder_golden_data() -> (HashMap<String, Vec<f32>>, HashMap<String, Vec<usize>>) {
         let mut w = HashMap::new();
         let mut s = HashMap::new();
-
-        // 1. Embeddings
         w.insert(
             "token_emb".into(),
             vec![
@@ -707,7 +704,6 @@ mod seq2seq_decoder_tests {
         w.insert("final_ln.bias".into(), vec![0.01; 4]);
         s.insert("final_ln.bias".into(), vec![4]);
 
-        // 2. Layer 0 - Self Attention
         w.insert(
             "l0.sa_q.weight".into(),
             vec![
@@ -1025,10 +1021,8 @@ mod seq2seq_decoder_tests {
         let mut s = HashMap::new();
         let mut count = 1;
 
-        // 1. Embeddings
         gen_weights_helper(&mut w, &mut s, "token_emb", vec![10, 4], &mut count);
 
-        // 2. Relative Position Bias
         gen_weights_helper(
             &mut w,
             &mut s,
@@ -1037,8 +1031,6 @@ mod seq2seq_decoder_tests {
             &mut count,
         );
 
-        // 3. Layer 0
-        // Self Attention
         gen_weights_helper(&mut w, &mut s, "l0.sa_q.weight", vec![4, 4], &mut count);
         gen_weights_helper(&mut w, &mut s, "l0.sa_k.weight", vec![4, 4], &mut count);
         gen_weights_helper(&mut w, &mut s, "l0.sa_v.weight", vec![4, 4], &mut count);
@@ -1091,11 +1083,8 @@ mod seq2seq_decoder_tests {
         let mut s = HashMap::new();
         let mut count = 1;
 
-        // 1. Embeddings
         gen_weights_helper(&mut w, &mut s, "token_emb", vec![10, 4], &mut count);
 
-        // 2. Layer 0
-        // Self Attention
         gen_weights_helper(&mut w, &mut s, "l0.sa_q.weight", vec![4, 4], &mut count);
         gen_weights_helper(&mut w, &mut s, "l0.sa_k.weight", vec![4, 4], &mut count);
         gen_weights_helper(&mut w, &mut s, "l0.sa_v.weight", vec![4, 4], &mut count);

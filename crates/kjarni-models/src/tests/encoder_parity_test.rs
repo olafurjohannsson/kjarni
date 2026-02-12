@@ -106,9 +106,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_model = BartModel::from_registry(model_type, None, Device::Cpu, None, None).await?;
     let gpu_model =
         BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None).await?;
-
-    // 1. Check Activation
-
     assert_eq!(
         cpu_model.meta().activation,
         gpu_model.meta().activation,
@@ -119,17 +116,12 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         activations::Activation::Gelu,
         "BART must use Gelu"
     );
-
-    // 2. Check LayerNorm Epsilon (Top Suspect for 0.0019 drift)
     assert_eq!(
         cpu_model.meta().norm_eps,
         gpu_model.meta().norm_eps,
         "Norm Epsilon mismatch"
     );
-    // Standard BART often uses 1e-12 or 1e-5 depending on the checkpoint
     log::info!("Metadata Epsilon: {}", cpu_model.meta().norm_eps);
-
-    // 3. Check Normalization Style
     assert_eq!(
         cpu_model.meta().is_prenorm,
         gpu_model.meta().is_prenorm,
@@ -140,8 +132,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         false,
         "BART must be Post-Norm (is_prenorm=false)"
     );
-
-    // 4. Check Attention Scaling
     assert_eq!(
         cpu_model.meta().head_dim,
         gpu_model.meta().head_dim,
@@ -152,8 +142,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         1024 / 16,
         "BART-Large Head Dim should be 64"
     );
-
-    // 5. Check Transposition Flags
     assert_eq!(
         cpu_model.meta().transpose_attention_weights,
         gpu_model.meta().transpose_attention_weights,
@@ -164,8 +152,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         gpu_model.meta().transpose_ffn_weights,
         "Transpose FFN mismatch"
     );
-
-    // 6. Check Position Offsets
     assert_eq!(
         cpu_model.meta().extra_pos_embeddings,
         gpu_model.meta().extra_pos_embeddings,
@@ -179,7 +165,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let layout = cpu_model.layout().clone();
     let gpu_layout = gpu_model.layout().clone();
 
-    // Get the nested layouts for both CPU and GPU models.
     let cpu_encoder_layout = layout
         .encoder
         .as_ref()
@@ -197,14 +182,12 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         .as_ref()
         .expect("GPU model requires decoder layout");
 
-    // 1. Check Shared weights
+    // Check Shared weights
     assert_eq!(
         cpu_model.layout().token_embedding,
         gpu_model.layout().token_embedding
     );
     assert_eq!(cpu_model.layout().lm_head, gpu_model.layout().lm_head);
-
-    // 2. Check for "Llama leaks" (Ensure SwiGLU isn't accidentally enabled in either encoder or decoder)
     assert!(
         cpu_encoder_layout.layer.ffn.gate_weight.is_none(),
         "BART encoder should not have a SwiGLU gate"
@@ -221,9 +204,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         gpu_decoder_layout.layer.ffn.gate_weight.is_none(),
         "BART GPU decoder should not have a SwiGLU gate"
     );
-
-    // 3. Check Attention Bias names (Ensure they aren't empty)
-    // We check one from the encoder and one from the decoder to be thorough.
     assert!(
         cpu_encoder_layout.layer.self_attn.q_bias.is_some(),
         "BART encoder requires attention biases"
@@ -232,7 +212,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         cpu_decoder_layout.layer.self_attn.norm_bias.is_some(),
         "BART decoder requires norm biases"
     );
-    // Also check the GPU side for consistency
     assert!(
         gpu_encoder_layout.layer.self_attn.q_bias.is_some(),
         "BART GPU encoder requires attention biases"
@@ -242,7 +221,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         "BART GPU decoder requires norm biases"
     );
 
-    // 4. Check Cross-Attention Templates (If used in the test)
     let cpu_cross_attn_layout = cpu_decoder_layout.layer.cross_attn.as_ref();
     let gpu_cross_attn_layout = gpu_decoder_layout.layer.cross_attn.as_ref();
 
@@ -257,8 +235,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         assert_eq!(cpu_cross.q_weight, gpu_cross.q_weight);
         assert_eq!(cpu_cross.q_bias, gpu_cross.q_bias);
     }
-
-    log::info!("✓ Metadata and Layout verified for both CPU and GPU");
 
     let tokens: Vec<u32> = vec![0, 100, 200, 300, 400, 2];
     let input_ids_cpu: Array2<u32> = Array2::from_shape_vec((1, tokens.len()), tokens.clone())?;
@@ -297,7 +273,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     }
 
     let pool = ctx.get_inference_pool();
-    println!("\n=== STEP 1: EMBEDDINGS ===");
     let cpu_embed = cpu_ops.embed_tokens(&input_ids_cpu, None, 0)?;
 
     {
@@ -318,8 +293,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         let gpu_embed_cpu = gpu_embed.to_ndarray_3d::<f32>().await?;
         assert_close(&cpu_embed, &gpu_embed_cpu, 1e-4, "Embeddings");
     }
-
-    println!("=== STEP 2: EMBED + LAYERNORM ===");
 
     let cpu_embed_ln = cpu_encoder.embed_norm(&cpu_embed)?;
 
@@ -343,7 +316,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         assert_close(&cpu_embed_ln, &gpu_embed_ln_cpu, 1e-4, "Embed+LayerNorm");
     }
 
-    println!("=== STEP 3: AFTER LAYER 0 ===");
     let h = cpu_ops.embed_tokens(&input_ids_cpu, None, 0)?;
     let h = cpu_encoder.embed_norm(&h)?;
 
@@ -370,7 +342,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         assert_close(&cpu_layer0, &gpu_layer0_cpu, 1e-4, "After Layer 0");
     }
     for n in 1..=12 {
-        println!("=== AFTER LAYER {} ===", n);
         let cpu_layer_n = cpu_encoder.forward_layers(&h, &mask_cpu, 0, n)?;
 
         {
@@ -412,11 +383,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
             }
         }
     }
-    println!("=== SANITY CHECK: debug_n_layers(12) vs forward() ===");
-
     let cpu_debug_12 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 12)?;
-
-    // let cpu_forward = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
     let cpu_forward = cpu_ops.forward_tokens(&input_ids_cpu, Some(&mask_cpu), None, 0)?;
 
     let cpu_internal_diff = cpu_debug_12
@@ -424,10 +391,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         .zip(cpu_forward.last_hidden_state.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
-    println!(
-        "CPU debug_n_layers(12) vs forward() diff: {:.6}",
-        cpu_internal_diff
-    );
     {
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&ctx, pool_guard);
@@ -460,8 +423,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
             gpu_internal_diff
         );
     }
-    println!("=== STEP 4: FULL ENCODER ===");
-    // let cpu_full = cpu_encoder.forward(&input_ids_cpu, &mask_cpu, None)?;
     let cpu_full = cpu_ops.forward_tokens(&input_ids_cpu, Some(&mask_cpu), None, 0)?;
     {
         let pool_guard = pool.lock().await;
@@ -488,7 +449,6 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
         );
     }
 
-    println!("✓ All steps passed!");
     Ok(())
 }
 
@@ -603,14 +563,8 @@ async fn test_simple_input() -> Result<()> {
     let gpu_emb = gpu_encoder.encode(simple_text).await?;
 
     let pass = compare_vectors("Simple input embedding", &cpu_emb, &gpu_emb, TOLERANCE);
-
-    if pass {
-        println!("\nSimple input test PASSED");
-        Ok(())
-    } else {
-        println!("\nSimple input test FAILED");
-        Err(anyhow::anyhow!("Simple input test failed"))
-    }
+    assert!(pass);
+    Ok(())
 }
 
 #[tokio::test]

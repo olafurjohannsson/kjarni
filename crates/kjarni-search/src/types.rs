@@ -54,7 +54,7 @@ pub struct ChunkMetadata {
 }
 
 impl ChunkMetadata {
-    /// Convert to simple HashMap for SearchIndex compatibility
+    /// Convert to HashMap for SearchIndex compatibility
     pub fn to_hashmap(&self) -> HashMap<String, String> {
         let mut map = HashMap::new();
         if let Some(ref s) = self.source {

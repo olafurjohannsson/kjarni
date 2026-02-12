@@ -96,7 +96,7 @@ mod tests {
         for seg in &result.segments {
             assert!(seg.end >= seg.start, "Segment end should be >= start");
             assert!(!seg.text.is_empty(), "Segment text should not be empty");
-            println!("[{:.2} → {:.2}] {}", seg.start, seg.end, seg.text);
+            println!("[{:.2} -> {:.2}] {}", seg.start, seg.end, seg.text);
         }
     }
 

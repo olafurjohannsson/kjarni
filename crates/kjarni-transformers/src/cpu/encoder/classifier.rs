@@ -206,7 +206,7 @@ impl CpuSequenceClassificationHead {
         ))
     }
 
-    /// Forward pass: hidden_states → logits.
+    /// Forward pass: hidden_states -> logits.
     pub fn forward(
         &self,
         encoder_hidden_states: &Array3<f32>,

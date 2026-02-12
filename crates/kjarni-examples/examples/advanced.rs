@@ -152,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     
     for (text, result) in texts.iter().zip(results.iter()) {
-        println!("{:30} → {}", text, result);
+        println!("{:30} -> {}", text, result);
     }
     
     println!("\n=== Raw Scores ===\n");

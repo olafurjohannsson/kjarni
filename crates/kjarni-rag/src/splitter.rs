@@ -41,7 +41,7 @@ impl SplitterConfig {
     }
 }
 
-/// Simple text splitter for document chunking
+/// text splitter for document chunking
 pub struct TextSplitter {
     config: SplitterConfig,
 }

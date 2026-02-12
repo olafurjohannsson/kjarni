@@ -43,7 +43,7 @@ impl EncoderDecoderGenerationBackend for CpuBackend {
         let input_ids = Array2::from_shape_vec((1, tokens.len()), tokens.to_vec())?;
         let attention_mask = Array2::ones(input_ids.dim());
 
-        // Use the new trait path: embed_tokens → embed_norm → forward (layers + final_norm)
+        // Use the new trait path: embed_tokens -> embed_norm -> forward (layers + final_norm)
         let encoder_output = encoder_ops
             .forward_tokens(&input_ids, Some(&attention_mask), None, 0)?
             .last_hidden_state;
@@ -493,11 +493,9 @@ mod tests {
     fn test_typical_generation_flow_states() {
         let backend = CpuBackend;
 
-        // 1. Create initial decoder tokens (decoder_start_token)
-        let initial_tokens = vec![2u32]; // e.g., <s> token
+        let initial_tokens = vec![2u32];
         let decoder_state = backend.create_token_tensor(&initial_tokens, 1).unwrap();
 
-        // Verify initial state
         match &decoder_state {
             CpuSeq2SeqState::U32(t) => {
                 assert_eq!(t.shape(), &[1, 1]);
@@ -506,9 +504,8 @@ mod tests {
             _ => panic!("Expected U32"),
         }
 
-        // 2. Simulate getting new tokens and updating
         let mut decoder_state = decoder_state;
-        let new_tokens = vec![100u32]; // Generated token
+        let new_tokens = vec![100u32];
         backend
             .update_token_tensor(&mut decoder_state, &new_tokens)
             .unwrap();

@@ -297,7 +297,7 @@ mod tests {
             return;
         }
 
-        // head_dim = 20 → half_dim = 10 → not divisible by 8
+        // head_dim = 20 -> half_dim = 10 -> not divisible by 8
         let head_dim = 20;
         let x: Vec<f32> = (0..head_dim).map(|i| (i as f32) * 0.1).collect();
         let cos: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).cos()).collect();
@@ -390,7 +390,7 @@ mod tests {
 
         rotate_half(&mut x, &cos, &sin);
 
-        // After 90° rotation: [1, 0] → [0, 1]
+        // After 90° rotation: [1, 0] -> [0, 1]
         // So x[0] should be ~0 and x[half_dim] should be ~1
         assert!(approx_eq(x[0], 0.0, 1e-5), "x[0] should be ~0, got {}", x[0]);
         assert!(

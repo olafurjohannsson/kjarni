@@ -52,7 +52,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let v0 = tensor_in[base_idx + dim_idx];
     let v1 = tensor_in[base_idx + dim_idx + half_dim];
 
-    // Rotate: [v0, v1] → [v0*cos - v1*sin, v1*cos + v0*sin]
+    // Rotate: [v0, v1] -> [v0*cos - v1*sin, v1*cos + v0*sin]
     tensor_out[base_idx + dim_idx]            = v0 * cos_val - v1 * sin_val;
     tensor_out[base_idx + dim_idx + half_dim] = v1 * cos_val + v0 * sin_val;
 }

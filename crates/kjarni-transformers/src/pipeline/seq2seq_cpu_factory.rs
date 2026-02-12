@@ -385,8 +385,6 @@ impl<'a> Seq2SeqFactory<'a> {
         is_prenorm: bool,
     ) -> Result<CrossDecoderLayer> {
         let layer_layout = &decoder_layout.layer;
-
-        // 1. Self-attention
         let mut self_attn = self.build_decoder_self_attention(
             &layer_layout.self_attn,
             meta.hidden_size,
@@ -405,8 +403,6 @@ impl<'a> Seq2SeqFactory<'a> {
             meta.norm_eps,
             layer_idx,
         )?;
-
-        // 2. Cross-attention (required for seq2seq)
         let cross_attn_layout = layer_layout
             .cross_attn
             .as_ref()
@@ -431,7 +427,6 @@ impl<'a> Seq2SeqFactory<'a> {
             layer_idx,
         )?;
 
-        // 3. FFN
         let feedforward = self.build_ffn(&layer_layout.ffn, meta, layer_idx)?;
 
         let ffn_layer_norm = self.build_norm_from_layout(
@@ -453,7 +448,7 @@ impl<'a> Seq2SeqFactory<'a> {
         })
     }
 
-    /// Build token embeddings.
+    /// Build token embeddings
     pub fn build_embeddings(
         &self,
         token_embedding_name: &str,

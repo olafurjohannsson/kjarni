@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     
     println!("\nBatch classification:");
     for (text, result) in reviews.iter().zip(results.iter()) {
-        println!("  {:50} → {}", text, result.label);
+        println!("  {:50} -> {}", text, result.label);
     }
     
     Ok(())

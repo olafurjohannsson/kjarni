@@ -658,7 +658,7 @@ fn convert_cpu_tensor_to_bytes(
             bytemuck::cast_slice(&bf16_data).to_vec()
         }
         other => anyhow::bail!(
-            "unsupported target dtype {:?} for CPU→GPU conversion",
+            "unsupported target dtype {:?} for CPU->GPU conversion",
             other
         ),
     };

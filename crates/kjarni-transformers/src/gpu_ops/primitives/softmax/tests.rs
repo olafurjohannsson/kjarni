@@ -53,29 +53,17 @@ async fn test_softmax_simple_case() -> Result<()> {
 
     let rows = 12 * 1; // batch * heads
     let cols = 128;
-
-    // 1. Create CPU data and GPU tensor
     let mut cpu_data = Array::random((rows, cols), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
-
-    // 2. Execute GPU kernel (simple version)
     let mut encoder = context.device.create_command_encoder(&Default::default());
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0); // scale = 1.0
     context.queue.submit(std::iter::once(encoder.finish()));
-
-    // 3. Execute CPU ground truth
     for mut row in cpu_data.axis_iter_mut(Axis(0)) {
         cpu_softmax(row.as_slice_mut().unwrap());
     }
-
-    // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array2::from_shape_vec((shape[0], shape[1]), gpu_vec)?;
-
-    println!("Verifying Softmax (Simple Case)...");
     assert_all_close_2d(&gpu_result, &cpu_data, 1e-5);
-    println!("Passed!");
-
     Ok(())
 }
 
@@ -85,10 +73,8 @@ async fn test_softmax_padded_case() -> Result<()> {
     let softmax_kernel = GpuSoftmax::new(&context);
 
     let rows = 12;
-    let physical_cols = 512; // e.g., cache_capacity
-    let logical_cols = 123; // e.g., total_seq_len (not a multiple of 256)
-
-    // 1. Create dirty CPU data with padding
+    let physical_cols = 512;
+    let logical_cols = 123;
     let mut cpu_data = Array::from_elem((rows, physical_cols), f32::NAN); // Fill padding with NaN
     let mut valid_part = Array::random((rows, logical_cols), Uniform::new(-1.0, 5.0));
     cpu_data
@@ -96,30 +82,18 @@ async fn test_softmax_padded_case() -> Result<()> {
         .assign(&valid_part);
 
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data)?;
-
-    // 2. Execute GPU kernel (padded version)
     let mut encoder = context.device.create_command_encoder(&Default::default());
     softmax_kernel.encode_padded(&mut encoder, &gpu_tensor, logical_cols as u32, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
-
-    // 3. Execute CPU ground truth ONLY on the valid part
     for mut row in valid_part.axis_iter_mut(Axis(0)) {
         cpu_softmax(row.as_slice_mut().unwrap());
-    }
-    // The rest of the CPU reference buffer should be zero
     cpu_data
         .slice_mut(s![.., 0..logical_cols])
         .assign(&valid_part);
     cpu_data.slice_mut(s![.., logical_cols..]).fill(0.0);
-
-    // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array2::from_shape_vec((shape[0], shape[1]), gpu_vec)?;
-
-    println!("Verifying Softmax (Padded Case)...");
     assert_all_close_2d(&gpu_result, &cpu_data, 1e-5);
-    println!("Passed!");
-
     Ok(())
 }
 
@@ -127,32 +101,18 @@ async fn test_softmax_padded_case() -> Result<()> {
 async fn test_softmax_simple_case2() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
-
     let batch = 1;
     let heads = 12;
     let seq_len = 128;
-
-    // 1. Create CPU data and GPU tensor
     let mut cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-1.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
-
-    // 2. Execute GPU kernel (in-place)
     let mut encoder = context.device.create_command_encoder(&Default::default());
-    // For the simple case, we use the simpler `encode` method
     softmax_kernel.encode(&mut encoder, &gpu_tensor, 1.0); // scale = 1.0
     context.queue.submit(std::iter::once(encoder.finish()));
-
-    // 3. Execute CPU ground truth
     softmax_4d_inplace(&mut cpu_scores);
-
-    // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array4::from_shape_vec(shape_4d!(shape), gpu_vec)?;
-
-    println!("Verifying Softmax (Simple Case)...");
     assert_all_close_4d(&gpu_result, &cpu_scores, 1e-5);
-    println!("Passed!");
-
     Ok(())
 }
 
@@ -167,7 +127,6 @@ async fn test_softmax_padded_case2() -> Result<()> {
     let physical_cols = 512; // e.g., cache_capacity
     let logical_cols = 123; // e.g., total_seq_len
 
-    // 1. Create dirty CPU data with padding
     let mut cpu_data_padded = Array::from_elem((batch, heads, query_len, physical_cols), f32::NAN);
     let mut valid_part = Array::random(
         (batch, heads, query_len, logical_cols),
@@ -178,28 +137,18 @@ async fn test_softmax_padded_case2() -> Result<()> {
         .assign(&valid_part);
 
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_data_padded)?;
-
-    // 2. Execute GPU kernel (padded version)
     let mut encoder = context.device.create_command_encoder(&Default::default());
     softmax_kernel.encode_padded(&mut encoder, &gpu_tensor, logical_cols as u32, 1.0);
     context.queue.submit(std::iter::once(encoder.finish()));
-
-    // 3. Execute CPU ground truth ONLY on the valid part
     softmax_4d_inplace(&mut valid_part);
     let cpu_result_valid = valid_part.clone();
     let mut cpu_result_padded = Array4::<f32>::zeros((batch, heads, query_len, physical_cols));
     cpu_result_padded
         .slice_mut(s![.., .., .., 0..logical_cols])
         .assign(&cpu_result_valid);
-
-    // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array4::from_shape_vec(shape_4d!(shape), gpu_vec)?;
-
-    println!("Verifying Softmax (Padded Case)...");
     assert_all_close_4d(&gpu_result, &cpu_result_padded, 1e-5);
-    println!("Passed!");
-
     Ok(())
 }
 
@@ -211,29 +160,19 @@ async fn test_softmax_with_scaling() -> Result<()> {
     let batch = 1;
     let heads = 12;
     let seq_len = 64;
-    let scale = 0.125; // Typical 1/sqrt(64)
+    let scale = 0.125;
 
-    // 1. Create data
     let cpu_scores = Array::random((batch, heads, seq_len, seq_len), Uniform::new(-5.0, 5.0));
     let gpu_tensor = GpuTensor::from_ndarray(&context, &cpu_scores)?;
-
-    // 2. Execute GPU
     let mut encoder = context.device.create_command_encoder(&Default::default());
     softmax_kernel.encode(&mut encoder, &gpu_tensor, scale);
     context.queue.submit(std::iter::once(encoder.finish()));
-
-    // 3. Execute CPU ground truth (apply scale before softmax)
     let mut cpu_scores_scaled = &cpu_scores * scale;
     softmax_4d_inplace(&mut cpu_scores_scaled);
     let cpu_result = cpu_scores_scaled.clone();
-    // 4. Read back and compare
     let (gpu_vec, shape) = read_gpu_tensor_to_vec::<f32>(&gpu_tensor).await?;
     let gpu_result = Array4::from_shape_vec(shape_4d!(shape), gpu_vec)?;
-
-    println!("Verifying Softmax (With Scaling)...");
     assert_all_close_4d(&gpu_result, &cpu_result, 1e-5);
-    println!("Passed!");
-
     Ok(())
 }
 

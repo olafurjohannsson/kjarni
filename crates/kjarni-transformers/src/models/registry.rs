@@ -93,7 +93,7 @@ pub enum ModelTask {
     /// Reranking
     ReRanking,
 
-    /// Text → Class label
+    /// Text -> Class label
     Classification,
 
     /// Interactive chat and instruction following
@@ -114,10 +114,10 @@ pub enum ModelTask {
     /// General text generation
     Generation,
 
-    /// Long text → Concise summary.
+    /// Long text -> Concise summary.
     Summarization,
 
-    /// Text in language A → Text in language B.
+    /// Text in language A -> Text in language B.
     Translation,
 
     /// Speech-to-text transcription.

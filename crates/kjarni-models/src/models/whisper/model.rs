@@ -93,24 +93,24 @@ impl WhisperModel {
     ) -> Result<Self> {
         let weights = ModelWeights::new(model_path)?;
 
-        // 1. Load config
+        // Load config
         let config: WhisperConfig = serde_json::from_str(&weights.config_json())?;
         let config = Arc::new(config);
         let meta = config.metadata();
         let layout = config.layout();
 
-        // 2. Load tokenizer
+        // Load tokenizer
         let tokenizer_path = model_path.join("tokenizer.json");
         let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
 
-        // 3. Load audio frontend (Whisper-specific)
+        // Load audio frontend (Whisper-specific)
         let audio_frontend = AudioConvFrontend::from_weights(
             &weights,
             "model.encoder",
             config.max_source_positions,
         )?;
 
-        // 4. Build encoder/decoder backends
+        // Build encoder/decoder backends
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = Self::build_backends(
             &weights,
             &meta,
@@ -121,7 +121,7 @@ impl WhisperModel {
             device,
         )?;
 
-        // 5. Build pipeline with audio encoder flag
+        // Build pipeline with audio encoder flag
         let mut builder = EncoderDecoderPipelineBuilder::new(&weights, config.clone())
             .with_load_config(load_config)
             .with_context(context)

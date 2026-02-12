@@ -1,14 +1,4 @@
-//! Bidirectional self-attention for encoder models.
-//!
-//! This module provides `GpuEncoderSelfAttention`, optimized for encoder-only
-//! and encoder portions of encoder-decoder models.
-//!
-//! # Characteristics
-//!
-//! - **Bidirectional**: Each token can attend to all other tokens (no causal mask).
-//! - **No KV Cache**: Processes the full sequence at once (no autoregressive decoding).
-//! - **Padding Mask**: Supports masking out padding tokens.
-//!
+//! Bidirectional self-attention for encoder models
 
 use super::ops::AttentionOps;
 use crate::gpu::{GpuTensor, GpuTensorPool};
@@ -16,24 +6,13 @@ use crate::gpu_ops::blocks::attention::GpuAttentionWeights;
 use crate::WgpuContext;
 use std::sync::Arc;
 
-/// Bidirectional self-attention for encoder models.
-///
-/// This attention module is designed for encoders where every token can attend
-/// to every other token. It does not use a KV cache since encoders process
-/// the full sequence in a single forward pass.
+/// Bidirectional self-attention for encoder models
 pub struct GpuEncoderSelfAttention {
     ops: AttentionOps,
 }
 
 impl GpuEncoderSelfAttention {
-    /// Creates a new encoder self-attention module.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - The WGPU context for creating GPU resources.
-    /// * `hidden_size` - The model's hidden dimension.
-    /// * `num_heads` - Number of attention heads.
-    ///
+    /// Creates a new encoder self-attention module
     pub fn new(context: &Arc<WgpuContext>, hidden_size: u32, num_heads: u32) -> Self {
         Self {
             // Encoder self-attention has equal Q and KV heads (no GQA)
@@ -46,23 +25,7 @@ impl GpuEncoderSelfAttention {
         &self.ops
     }
 
-    /// Performs the forward pass of encoder self-attention.
-    ///
-    /// Computes bidirectional self-attention where each token can attend to
-    /// all other tokens in the sequence.
-    ///
-    /// # Arguments
-    ///
-    /// * `encoder` - The command encoder for recording GPU operations.
-    /// * `hidden_states` - Input tensor of shape `[B, S, H]`.
-    /// * `weights` - The Q, K, V, and O projection weights.
-    /// * `padding_mask` - Optional mask of shape `[B, S]` where 1.0 = valid, 0.0 = padding.
-    /// * `pool` - Tensor pool for allocating intermediate tensors.
-    ///
-    /// # Returns
-    ///
-    /// Output tensor of shape `[B, S, H]`.
-    ///
+    /// Performs the forward pass of encoder self-attention
     pub fn forward(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -71,7 +34,7 @@ impl GpuEncoderSelfAttention {
         padding_mask: Option<&GpuTensor>,
         pool: &mut GpuTensorPool,
     ) -> GpuTensor {
-        // 1. Project Q, K, V
+        // Project Q, K, V
         let q_proj = self.ops.project(
             encoder,
             hidden_states,
@@ -94,12 +57,12 @@ impl GpuEncoderSelfAttention {
             pool,
         );
 
-        // 2. Split heads: [B, S, H*D] -> [B, H, S, D]
+        // Split heads: [B, S, H*D] -> [B, H, S, D]
         let q_heads = self.ops.split_heads(encoder, &q_proj, pool);
         let k_heads = self.ops.split_heads(encoder, &k_proj, pool);
         let v_heads = self.ops.split_heads(encoder, &v_proj, pool);
 
-        // 3. Compute attention (bidirectional, no causal mask)
+        // Compute attention (bidirectional, no causal mask)
         let context = self.ops.attention(
             encoder,
             &q_heads,
@@ -111,10 +74,10 @@ impl GpuEncoderSelfAttention {
             pool,
         );
 
-        // 4. Merge heads: [B, H, S, D] -> [B, S, H*D]
+        // Merge heads: [B, H, S, D] -> [B, S, H*D]
         let context_merged = self.ops.merge_heads(encoder, &context, pool);
 
-        // 5. Output projection
+        // Output projection
         self.ops.project(
             encoder,
             &context_merged,

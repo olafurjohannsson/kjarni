@@ -62,7 +62,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let q0 = q_in[base_idx + dim_idx];
         let q1 = q_in[base_idx + dim_idx + half_dim];
 
-        // Rotate: [q0, q1] → [q0*cos - q1*sin, q1*cos + q0*sin]
+        // Rotate: [q0, q1] -> [q0*cos - q1*sin, q1*cos + q0*sin]
         q_out[base_idx + dim_idx]            = q0 * cos_val - q1 * sin_val;
         q_out[base_idx + dim_idx + half_dim] = q1 * cos_val + q0 * sin_val;
     }
@@ -74,7 +74,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k0 = k_in[base_idx + dim_idx];
         let k1 = k_in[base_idx + dim_idx + half_dim];
 
-        // Rotate: [k0, k1] → [k0*cos - k1*sin, k1*cos + k0*sin]
+        // Rotate: [k0, k1] -> [k0*cos - k1*sin, k1*cos + k0*sin]
         k_out[base_idx + dim_idx]            = k0 * cos_val - k1 * sin_val;
         k_out[base_idx + dim_idx + half_dim] = k1 * cos_val + k0 * sin_val;
     }

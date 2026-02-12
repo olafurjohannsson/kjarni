@@ -20,8 +20,8 @@ fn test_swiglu_golden() -> Result<()> {
     let intermediate_size = 4;
 
     // LinearLayer convention: [out_features, in_features]
-    // gate/up: hidden → intermediate, so [intermediate, hidden]
-    // down: intermediate → hidden, so [hidden, intermediate]
+    // gate/up: hidden -> intermediate, so [intermediate, hidden]
+    // down: intermediate -> hidden, so [hidden, intermediate]
     let gate_weight: Array2<f32> = Array2::from_shape_vec(
         (intermediate_size, hidden_size),
         vec![

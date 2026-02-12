@@ -29,10 +29,10 @@ pub async fn run(
     no_stream: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Resolve prompt
+    // Resolve prompt
     let prompt_text = resolve_input(prompt)?;
 
-    // 2. Resolve model
+    // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
 
     if model_path.is_some() {
@@ -60,7 +60,7 @@ pub async fn run(
         }
     }
 
-    // 3. Load model
+    // Load model
     if !quiet {
         eprintln!("Loading model '{}'...", model);
     }
@@ -78,7 +78,7 @@ pub async fn run(
 
     let generator = DecoderGenerator::new(loaded_model)?;
 
-    // 4. Configure generation
+    // Configure generation
     let config = build_generation_config(
         max_tokens,
         temperature,
@@ -93,7 +93,7 @@ pub async fn run(
         eprintln!();
     }
 
-    // 5. Generate
+    // Generate
     if no_stream {
         let output = generator.generate(&prompt_text, &config, None).await?;
         println!("{}", output);

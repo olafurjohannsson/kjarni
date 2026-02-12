@@ -56,9 +56,6 @@ fn fused_gemv_bf16(
 
     if (n >= info.N) { return; }
 
-    // 1. Collaborative Dot Products (Gate & Up)
-    // Coalesced Reads: Threads read contiguous weights W[n, tid], W[n, tid+1]...
-    
     let k_pairs = info.K / 2u;
     let weight_base = n * k_pairs;
     
@@ -86,7 +83,7 @@ fn fused_gemv_bf16(
     wg_sum_up[tid] = partial_up;
     workgroupBarrier();
 
-    // 2. Parallel Reduction
+    // Parallel Reduction
     for (var s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             wg_sum_gate[tid] += wg_sum_gate[tid + s];
@@ -95,7 +92,7 @@ fn fused_gemv_bf16(
         workgroupBarrier();
     }
 
-    // 3. Activation & Write
+    // Activation & Write
     if (tid == 0u) {
         let gate_val = wg_sum_gate[0];
         let up_val = wg_sum_up[0];

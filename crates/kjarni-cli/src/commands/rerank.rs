@@ -29,7 +29,7 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
-    // 1. Resolve documents - from args or stdin
+    // Resolve documents - from args or stdin
     let docs: Vec<String> = if documents.is_empty() {
         // Read from stdin (one document per line)
         if !quiet {
@@ -49,7 +49,7 @@ pub async fn run(
         return Err(anyhow!("No documents provided. Pass as arguments or pipe via stdin."));
     }
 
-    // 2. Resolve model
+    // Resolve model
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
 
     if model_path.is_some() {
@@ -79,7 +79,7 @@ pub async fn run(
         }
     }
 
-    // 3. Load cross-encoder
+    // Load cross-encoder
     if !quiet {
         eprintln!("Loading model '{}'...", model);
     }
