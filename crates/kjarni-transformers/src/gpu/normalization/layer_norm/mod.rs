@@ -13,7 +13,6 @@ struct NormUniforms {
     _padding: u32,
 }
 
-/// Holds the weight and bias tensors for the GpuLayerNorm operation.
 pub struct GpuLayerNormWeights {
     pub(crate) gamma: GpuTensor, // scale
     pub(crate) beta: GpuTensor,  // bias
@@ -21,7 +20,6 @@ pub struct GpuLayerNormWeights {
 
 impl GpuLayerNormWeights {
     pub fn new(gamma: GpuTensor, beta: GpuTensor) -> Result<Self> {
-        // Both must be 1D (one parameter per normalized feature)
         assert_eq!(gamma.rank(), 1, "LayerNorm gamma must be 1D");
         assert_eq!(beta.rank(), 1, "LayerNorm beta must be 1D");
 

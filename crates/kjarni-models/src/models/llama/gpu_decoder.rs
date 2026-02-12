@@ -1,49 +1,4 @@
-//! GPU implementation of the Llama decoder architecture using WebGPU compute shaders.
-//!
-//! Provides high-performance GPU inference for Llama 2/3 models with optimized
-//! WGSL kernels for attention, feedforward, and normalization operations.
-//!
-//! # Architecture
-//!
-//! GPU decoder pipeline:
-//! 1. **Embedding lookup** (GPU kernel)
-//! 2. **N decoder layers** (attention + FFN, all GPU)
-//! 3. **Final RMS norm** (GPU kernel)
-//! 4. **LM head** (optional CPU offload for memory)
-//!
-//! # Performance
-//!
-//! - **Prefill (1K tokens)**: ~500 tokens/sec on RTX 3090
-//! - **Decode (single token)**: ~100 tokens/sec
-//! - BF16 provides 2x memory bandwidth vs F32 with minimal quality loss
-//!
-//! # Memory Optimization
-//!
-//! Use `ModelLoadConfig` to control VRAM usage:
-//! - `offload_embeddings` — Keep embeddings on CPU (saves 500MB-2GB)
-//! - `target_dtype` — Force BF16/Q8_0 for quantized inference
-//! - `gpu_layers` — Hybrid CPU/GPU execution
-//!
-//! # Example
-//!
-//! ```ignore
-//! let config = ModelLoadConfig::default()
-//!     .with_offload_embeddings(true)
-//!     .with_target_dtype(Some(DType::BF16));
-//!
-//! let decoder = LlamaGpuDecoder::new(&context, &weights, metadata, layout, None, config)?;
-//! ```
-//!
-//! # TODO
-//! - Implement flash attention (2-4x speedup for long contexts)
-//! - Add INT8 KV cache quantization (4x memory reduction)
-//! - Optimize GEMV kernel for decode phase (current bottleneck)
-//! - Add multi-query batching for serving workloads
-//!
-//! # See Also
-//!
-//! - [`super::LlamaCpuDecoder`] — CPU fallback implementation
-//! - [`crate::models::mistral::MistralGpuDecoder`] — Mistral variant
+//! GPU implementation of the Llama decoder 
 
 use anyhow::{Context, Result};
 use kjarni_transformers::{
@@ -64,26 +19,7 @@ use kjarni_transformers::{
 };
 use std::sync::Arc;
 
-/// GPU-accelerated Llama decoder using WebGPU compute shaders.
-///
-/// Implements the full Llama architecture on GPU with optimized memory layouts
-/// and BF16 support for efficient inference.
-///
-/// # Fields
-///
-/// * `layers` — Stack of GPU decoder layers
-/// * `final_layer_norm` — RMS normalization before LM head
-/// * `final_ln_weights` — Weights for final normalization
-/// * `gpu_rope` — Shared RoPE sin/cos tables on GPU
-/// * `context` — WebGPU device context
-/// * `load_config` — Memory/offload configuration
-/// * `embeddings` — Token embeddings (GPU or CPU based on config)
-/// * `metadata` — Model hyperparameters
-///
-/// # Performance
-///
-/// GPU decoder is 10-50x faster than CPU for prefill, 2-5x for decode.
-/// Actual speedup depends on GPU memory bandwidth and model size.
+/// GPU-accelerated Llama decoder using WebGPU compute shaders
 pub struct LlamaGpuDecoder {
     pub layers: Vec<GpuRoPEDecoderLayer>,
     pub final_layer_norm: GpuNormalization,
@@ -115,17 +51,16 @@ impl LlamaGpuDecoder {
             .as_ref()
             .expect("Llama layout must have a decoder section");
 
-        let target_dtype = load_config.target_dtype
+        let target_dtype = load_config.target_dtype;
         let embeddings = LoadedEmbeddings::new(
             Some(context),
             weights,
             EmbeddingConfig::new(&layout.token_embedding, meta.hidden_size),
-            false, // load_cpu - GPU decoder doesn't need CPU embeddings
-            true,  // load_gpu - always load to GPU for GPU decoder
+            false, 
+            true,  
             target_dtype,
         )?;
 
-        // Final Layer Norm
         let final_norm_name = decoder_layout.final_norm_weight.as_ref().unwrap();
         let final_layer_norm = GpuNormalization::RMSNorm(GpuRMSNorm::new(context, meta.norm_eps));
         let final_ln_weights = GpuNormalizationWeights::RMSNorm(GpuRMSNormWeights::new(
@@ -138,7 +73,6 @@ impl LlamaGpuDecoder {
             )?,
         )?);
 
-        // Decoder Layers
         let mut layers = Vec::with_capacity(meta.num_layers);
         for i in 0..meta.num_layers {
             let decoder_layer =

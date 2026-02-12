@@ -13,8 +13,6 @@ struct ReshapeUniforms {
     d: u32,
 }
 
-/// A specialized kernel to merge attention heads.
-/// Reshapes [B, H, S, D] back into [B, S, H*D].
 pub struct GpuUnreshape {
     pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
@@ -96,7 +94,6 @@ impl GpuUnreshape {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
 
-                // Dispatch a 3D grid that matches the shader's logic
                 let workgroups_x = (s as u32 + 15) / 16;
                 let workgroups_y = (h as u32 + 15) / 16;
                 let workgroups_z = b as u32;
@@ -108,7 +105,6 @@ impl GpuUnreshape {
 
 fn compile_unreshape_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
-    // Make sure you have an `unreshape.wgsl` file at this location
     let shader = device.create_shader_module(wgpu::include_wgsl!("./unreshape.wgsl"));
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

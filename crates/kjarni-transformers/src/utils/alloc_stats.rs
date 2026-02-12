@@ -22,7 +22,6 @@ unsafe impl GlobalAlloc for TracingAllocator {
                 }
             }
 
-            // Optional: Log allocations larger than 50MB
             if layout.size() > 50 * 1024 * 1024 {
                 log::trace!("Allocating {:.2} MB (Total: {:.2} MB)", 
                     layout.size() as f64 / 1_048_576.0,

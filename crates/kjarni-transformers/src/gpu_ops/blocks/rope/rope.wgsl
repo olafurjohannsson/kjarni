@@ -28,23 +28,15 @@ struct RoPEUniforms {
 @group(0) @binding(5) var<storage, read_write> q_out: array<f32>;
 @group(0) @binding(6) var<storage, read_write> k_out: array<f32>;
 
-/// Applies RoPE to both Q and K tensors.
-///
-/// Each thread handles one dimension in the first half of head_dim.
-/// The paired dimension (dim + head_dim/2) is rotated together.
-///
-/// # Workgroup Size
-/// 16x1x1 - Small workgroup for simplicity. Could be increased to 64 or 128.
+/// Applies RoPE to both Q and K tensors
 @compute @workgroup_size(16, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // Each thread handles one dimension in the FIRST HALF of the head_dim.
     let dim_idx = global_id.x;        // Dimension index [0, head_dim/2)
     let seq_idx = global_id.y;        // Token position [0, seq_len)
     let head_batch_idx = global_id.z; // Combined batch*heads index
 
     let half_dim = uniforms.head_dim / 2u;
 
-    // Bounds check
     if (dim_idx >= half_dim || seq_idx >= uniforms.seq_len || head_batch_idx >= uniforms.batch_size * uniforms.num_heads) {
         return;
     }

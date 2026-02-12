@@ -516,8 +516,6 @@ mod error_handling_tests {
             do_sample: Some(false),
             ..Default::default()
         };
-
-        // Stream to see each token
         let stream = generator.stream_with_config(prompt, overrides).await;
 
         match stream {

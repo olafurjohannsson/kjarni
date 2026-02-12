@@ -12,9 +12,8 @@ struct FfnUniforms {
     _padding: u32,
 };
 
-/// Pipeline constant for activation function selection.
+/// Pipeline constant for activation function selection
 ///
-/// Set at pipeline creation time (compile-time specialization):
 /// - 0: GELU (default)
 /// - 1: GELU_NEW (tanh approx)
 /// - 2: ReLU
@@ -29,11 +28,11 @@ struct FfnUniforms {
 @group(0) @binding(4) var<storage, read_write> output: array<f32>;
 
 
-// For GeluNew
+// GeluNew
 const SQRT_2_OVER_PI: f32 = 0.7978845608;
 const GELU_COEFF: f32 = 0.044715;
 
-// For Erf Approx
+// Erf Approx
 const SQRT_2_INV: f32 = 0.7071067811865476; // 1/sqrt(2)
 const A1: f32 =  0.254829592;
 const A2: f32 = -0.284496736;
@@ -44,7 +43,7 @@ const P: f32  =  0.3275911;
 
 
 
-// GELU (tanh approximation)
+// GELU 
 fn gelu_new(x: f32) -> f32 {
     let x_cubed = x * x * x;
     let inner = SQRT_2_OVER_PI * (x + GELU_COEFF * x_cubed);
@@ -84,12 +83,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum: f32 = 0.0;
 
     let input_offset = row * info.k;
-    // The weight for a given output column `col` is now a contiguous row.
     let weight_offset = col * info.k;
 
-    // Vectorized Loop using FMA
-    // We use fused multiply-add (fma) instead of dot() because it provides 
-    // higher precision (single rounding step) matching CPU BLAS implementations better.
     let k_vec = info.k / 4u;
     for (var t = 0u; t < k_vec; t = t + 1u) {
         let base = t * 4u;
@@ -101,7 +96,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             input[input_offset + base + 3u]
         );
         
-        // Read a contiguous vec4 from the transposed weight matrix.
         let weight_vec = vec4<f32>(
             fc1_weight[weight_offset + base + 0u],
             fc1_weight[weight_offset + base + 1u],
@@ -109,7 +103,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             fc1_weight[weight_offset + base + 3u]
         );
 
-        // Manual unroll of dot product using FMA for precision
         sum = fma(input_vec.x, weight_vec.x, sum);
         sum = fma(input_vec.y, weight_vec.y, sum);
         sum = fma(input_vec.z, weight_vec.z, sum);

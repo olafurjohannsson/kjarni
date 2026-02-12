@@ -412,7 +412,6 @@ mod simd_matmul_tests {
 
     #[test]
     fn test_block_4x3_small_no_bias() {
-        // k=32 - tests main SIMD loop (32 / 8 = 4 iterations)
         let k = 32;
         let m = 4;
         let n = 3;

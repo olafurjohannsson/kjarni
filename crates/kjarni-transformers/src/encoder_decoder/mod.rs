@@ -1,11 +1,4 @@
-//! A generic, backend-agnostic transformer encoder-decoder implementation.
-//!
-//! This module provides `TransformerEncoderDecoder`, a reusable component that can represent
-//! various seq2seq models like BART, T5, etc. It is designed to be
-//! backend-aware, containing either a CPU or a GPU implementation.
-//!
-//! The model is constructed generically by relying on the `EncoderDecoderArchitecture`
-//! trait, which provides the specific weight names and hyperparameters.
+//! A generic, backend-agnostic transformer encoder-decoder implementation
 
 mod beams;
 mod cpu_backend;

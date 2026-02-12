@@ -129,12 +129,10 @@ impl TranscriberBuilder {
             None
         };
 
-        // 4. Load model
         let model = WhisperModel::from_registry(model_type, None, self.device, context, None)
             .await
             .map_err(TranscriberError::ModelLoadFailed)?;
 
-        // 5. Construct Transcriber
         Ok(Transcriber::new(
             Arc::new(model),
             model_type,
@@ -150,10 +148,6 @@ impl TranscriberBuilder {
 }
 
 
-// Model Resolution
-
-
-/// Map a user-facing model identifier to a [`ModelType`].
 fn resolve_model_type(id: &str) -> Option<ModelType> {
     match id.to_lowercase().as_str() {
         "whisper-small" | "whisper_small" | "small" => Some(ModelType::WhisperSmall),

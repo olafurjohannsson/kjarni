@@ -1,57 +1,9 @@
-//! AVX2-optimized Rotary Position Embeddings (RoPE) kernels.
-//!
-//! RoPE applies rotation in the complex plane to encode positional information.
-//! The rotation formula for each pair of elements:
-//!
-//! ```text
-//! x'[i]        = x[i] * cos(θ) - x[i + half] * sin(θ)
-//! x'[i + half] = x[i] * sin(θ) + x[i + half] * cos(θ)
-//! ```
-//!
-//! This is equivalent to 2D rotation matrix applied to (x[i], x[i+half]):
-//! ```text
-//! [cos  -sin] [x0]   [x0 * cos - x1 * sin]
-//! [sin   cos] [x1] = [x0 * sin + x1 * cos]
-//! ```
-//!
-//! # Performance
-//!
-//! AVX2 processes 8 floats simultaneously, giving ~4-6x speedup over scalar
-//! for typical head dimensions (64-128).
-//!
-//! | head_dim | Scalar | AVX2 | Speedup |
-//! |----------|--------|------|---------|
-//! | 64       | ~200ns | ~40ns | 5x |
-//! | 128      | ~400ns | ~70ns | 5.7x |
+//! Rotary Position Embeddings (RoPE) kernel
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-/// Applies RoPE rotation to a single head vector in-place using AVX2.
-///
-/// # Arguments
-///
-/// * `x` - The head vector to rotate, length = `head_dim`
-/// * `cos` - Cosine values for this position, length = `head_dim`
-/// * `sin` - Sine values for this position, length = `head_dim`
-///
-/// # Safety
-///
-/// - Requires AVX2 and FMA support
-/// - `x.len()` must equal `cos.len()` and `sin.len()`
-/// - `x.len()` must be even (split into two halves)
-/// - For best performance, `x.len() / 2` should be divisible by 8
-///
-/// # Example
-///
-/// ```ignore
-/// let mut x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]; // head_dim = 8
-/// let cos = vec![0.5; 8];
-/// let sin = vec![0.866; 8];
-///
-/// unsafe { rotate_half_avx2(&mut x, &cos, &sin); }
-/// // x is now rotated
-/// ```
+/// Applies RoPE rotation to a single head vector in-place
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn rotate_half_avx2(x: &mut [f32], cos: &[f32], sin: &[f32]) {
@@ -113,20 +65,7 @@ pub unsafe fn rotate_half_avx2(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     }
 }
 
-/// Applies RoPE rotation to a batch of head vectors.
-///
-/// Processes multiple (batch, head, seq_pos) combinations efficiently.
-///
-/// # Arguments
-///
-/// * `x` - Flattened tensor data in row-major order
-/// * `cos_cache` - Cosine cache, shape [max_seq_len, head_dim]
-/// * `sin_cache` - Sine cache, shape [max_seq_len, head_dim]
-/// * `batch_size` - Batch dimension
-/// * `num_heads` - Number of attention heads
-/// * `seq_len` - Sequence length
-/// * `head_dim` - Dimension of each head
-/// * `position_offset` - Starting position for cache lookup
+/// Applies RoPE rotation to a batch of head vectors
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2", enable = "fma")]
 pub unsafe fn rotate_4d_avx2(
@@ -137,7 +76,7 @@ pub unsafe fn rotate_4d_avx2(
     num_heads: usize,
     seq_len: usize,
     head_dim: usize,
-    cache_stride: usize,  // = head_dim (row stride in cache)
+    cache_stride: usize,  // head_dim (row stride in cache)
     position_offset: usize,
 ) { unsafe {
     let _half_dim = head_dim / 2;
@@ -199,15 +138,10 @@ pub fn rotate_half(x: &mut [f32], cos: &[f32], sin: &[f32]) {
     rotate_half_scalar(x, cos, sin);
 }
 
-
-// Tests
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Reference implementation for testing
     fn rotate_half_reference(x: &[f32], cos: &[f32], sin: &[f32]) -> Vec<f32> {
         let head_dim = x.len();
         let half_dim = head_dim / 2;
@@ -239,7 +173,6 @@ mod tests {
         let head_dim = 64;
         let half_dim = head_dim / 2;
 
-        // Create test data
         let x: Vec<f32> = (0..head_dim).map(|i| (i as f32) * 0.1).collect();
         let cos: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).cos()).collect();
         let sin: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).sin()).collect();
@@ -265,16 +198,13 @@ mod tests {
             return;
         }
 
-        // Test various head dimensions
         for head_dim in [16, 32, 64, 128, 256] {
             let x: Vec<f32> = (0..head_dim).map(|i| (i as f32) * 0.1).collect();
             let cos: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).cos()).collect();
             let sin: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).sin()).collect();
 
-            // Reference
             let expected = rotate_half_reference(&x, &cos, &sin);
 
-            // AVX2
             let mut actual = x.clone();
             unsafe {
                 rotate_half_avx2(&mut actual, &cos, &sin);
@@ -336,8 +266,6 @@ mod tests {
 
     #[test]
     fn test_rotation_preserves_magnitude() {
-        // Rotation should preserve the magnitude of the complex number
-        // |x0 + i*x1| should equal |x0' + i*x1'|
         let head_dim = 8;
         let x = vec![3.0, 4.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; // [3, 1] in first half, [4, 0] in second
         let angle = std::f32::consts::PI / 4.0; // 45 degrees
@@ -390,8 +318,6 @@ mod tests {
 
         rotate_half(&mut x, &cos, &sin);
 
-        // After 90° rotation: [1, 0] -> [0, 1]
-        // So x[0] should be ~0 and x[half_dim] should be ~1
         assert!(approx_eq(x[0], 0.0, 1e-5), "x[0] should be ~0, got {}", x[0]);
         assert!(
             approx_eq(x[half_dim], 1.0, 1e-5),

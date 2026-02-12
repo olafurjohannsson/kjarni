@@ -1,27 +1,4 @@
 //! # Decoder Traits
-//!
-//! This module defines the core architectural traits for Autoregressive (Decoder-only) Language Models.
-//!
-//! ## Architecture Overview
-//!
-//! To support a wide variety of models (Llama, Mistral, Phi, Gemma, GPT-2) and hybrid CPU/GPU execution,
-//! the architecture is split into four distinct layers:
-//!
-//! 1.  **Backend Controller (`DecoderGenerationBackend`)**:
-//!     -   **Role**: Orchestrator. Manages the generation loop, KV Cache state, and Memory.
-//!     -   **Knowledge**: Agnostic to model math. Knows *when* to run a step, not *how*.
-//!
-//! 2.  **Model Container (`DecoderLanguageModel`)**:
-//!     -   **Role**: Router. Holds configuration and directs execution to the correct hardware implementation.
-//!     -   **Knowledge**: Knows which device the model is loaded on.
-//!
-//! 3.  **Operations Strategy (`CpuDecoderOps` / `GpuDecoderOps`)**:
-//!     -   **Role**: Mathematician. Handles model-specific logic that varies between architectures.
-//!     -   **Knowledge**: Knows how to generate masks (Causal vs Sliding Window), how t<o project logits (Norm vs Scaling), etc.
-//!
-//! 4.  **Compute Components (`CpuDecoder` / `GpuDecoder`)**:
-//!     -   **Role**: Engine. Executes the heavy Transformer layers.
-//!     -   **Knowledge**: Pure linear algebra. Embed -> Normalize -> Forward Layers.
 
 use std::any::Any;
 
@@ -66,7 +43,6 @@ pub trait DecoderGenerationBackend: Send + Sync {
     ) -> Result<Array1<f32>>;
 }
 
-/// Defines the asynchronous interface for a GPU-native Transformer Decoder.
 pub trait GpuDecoder: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
 
@@ -242,8 +218,7 @@ pub trait CpuDecoderOps: Send + Sync {
     /// Handles model-specific projection logic (e.g., MatMul vs Norm+MatMul).
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>>;
 
-    /// Generates the attention mask on the CPU.
-    /// Allows models to implement Sliding Window or Alibi logic.
+    /// Generates the attention mask on the CPU
     fn get_attention_mask(&self, seq_len: usize, past_len: usize) -> Result<Array2<f32>>;
 
     /// Full forward pass

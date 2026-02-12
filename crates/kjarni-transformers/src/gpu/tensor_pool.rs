@@ -14,10 +14,7 @@ struct AllocationStats {
     allocations: usize,
 }
 
-/// A frame-based memory pool for temporary GPU tensors.
-///
-/// Maximizes performance by reusing buffers across forward passes while
-/// preventing aliasing within a single frame.
+/// A frame-based memory pool for temporary GPU tensors
 pub struct GpuTensorPool {
     context: Arc<WgpuContext>,
     current_frame_ids: HashSet<u64>,
@@ -115,9 +112,7 @@ impl GpuTensorPool {
         tensor
     }
 
-    /// Advances to the next frame, making all buffers available for reuse.
-    ///
-    /// Must be called after the associated `CommandEncoder` work is submitted.
+    /// Advances to the next frame, making all buffers available for reuse
     pub fn next_frame(&mut self) {
         self.current_frame_ids.clear();
 

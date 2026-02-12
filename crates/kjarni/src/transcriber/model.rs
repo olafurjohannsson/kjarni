@@ -1,24 +1,3 @@
-//! [`Transcriber`] — high-level speech-to-text API backed by Whisper.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let transcriber = Transcriber::builder("whisper-small")
-//!     .language("en")
-//!     .build()
-//!     .await?;
-//!
-//! // Full result
-//! let result = transcriber.transcribe_file("meeting.wav")?;
-//! println!("{}", result.text);
-//!
-//! // Streaming
-//! let stream = transcriber.stream_file("meeting.wav").await?;
-//! pin_mut!(stream);
-//! while let Some(tok) = stream.next().await {
-//!     print!("{}", tok?.text);
-//! }
-//! ```
 
 use std::path::Path;
 use std::sync::Arc;

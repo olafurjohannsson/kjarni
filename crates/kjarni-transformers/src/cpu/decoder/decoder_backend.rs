@@ -96,7 +96,6 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
         let hidden_states: Array3<f32> = ops.embed(token_tensor, past_len)?;
 
         // Build attention mask
-        // Mask length varies by autoregressive loop type
         let mask_len = match model.autoregressive_loop() {
             AutoregressiveLoop::Pipelined => seq_len,
             AutoregressiveLoop::Legacy => seq_len + 1,
@@ -126,7 +125,7 @@ impl DecoderGenerationBackend for CpuDecoderBackend {
 }
 
 impl CpuDecoderBackend {
-    /// Pipelined prefill: process entire prompt in one forward pass.
+    /// Pipelined prefill
     fn prefill_pipelined(
         &self,
         ops: &dyn CpuDecoderOps,
@@ -156,7 +155,7 @@ impl CpuDecoderBackend {
         Ok(logits_3d.slice(s![0, -1, ..]).to_owned())
     }
 
-    /// Legacy prefill: two-phase for GPT-2 compatibility.
+    /// Legacy prefill
     ///
     /// This path is kept for backward compatibility with older models
     /// that have different cache semantics.
@@ -168,29 +167,20 @@ impl CpuDecoderBackend {
     ) -> Result<Array1<f32>> {
         let prompt_len = tokens.shape()[1];
 
-        // Phase 1: Fill cache with all tokens (no projection)
         let hidden_states = ops.embed(tokens, 0)?;
         let mask_full = Array2::ones((1, prompt_len));
-
         ops.decoder().forward(&hidden_states, &mask_full, 0, Some(cache))?;
-
-        // Phase 2: Re-process last token to get logits
         let last_token = tokens[[0, prompt_len - 1]];
         let last_token_array = Array2::from_elem((1, 1), last_token);
-
         let hidden_states = ops.embed(&last_token_array, prompt_len - 1)?;
         let mask_step = ops.get_attention_mask(1, prompt_len)?;
-
         let decoder_output = ops.decoder().forward(
             &hidden_states,
             &mask_step,
-            prompt_len, // Offset
+            prompt_len, 
             Some(cache),
         )?;
-
         let logits_3d = ops.project_to_logits(&decoder_output)?;
-
-        // Extract single position: [1, 1, vocab] -> [vocab]
         Ok(logits_3d.slice(s![0, 0, ..]).to_owned())
     }
 }

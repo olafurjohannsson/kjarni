@@ -20,7 +20,6 @@ fn silu(x: f32) -> f32 {
     return x / (1.0 + exp(-x));
 }
 
-/// Fast SiLU without branches
 fn silu_fast(x: f32) -> f32 {
     return x / (1.0 + exp(-x));
 }

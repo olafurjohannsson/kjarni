@@ -1425,7 +1425,7 @@ mod tests {
                 ..
             } => {
                 assert!(input.is_none());
-                assert_eq!(model, "t5-flan-base");
+                assert_eq!(model, "flan-t5-base");
                 assert!(src.is_none());
                 assert!(dst.is_none());
             }

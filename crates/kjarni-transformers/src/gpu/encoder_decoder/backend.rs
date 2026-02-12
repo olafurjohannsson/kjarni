@@ -134,7 +134,7 @@ impl EncoderDecoderGenerationBackend for GpuEncoderDecoderBackend {
             return Err(anyhow!("Invalid tensor type for encoder_state"));
         };
 
-        // 3. Prepare for GPU execution
+        // Prepare for GPU execution
         let pool = self.context.get_inference_pool();
         let pool_guard = pool.lock().await;
         let mut frame = GpuFrameContext::new(&self.context, pool_guard);

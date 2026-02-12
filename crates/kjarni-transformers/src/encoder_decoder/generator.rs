@@ -17,7 +17,6 @@ use crate::encoder_decoder::traits::{
 };
 use crate::encoder_decoder::{run_beam_search, run_beam_search_stream};
 use crate::gpu::{GpuEncoderDecoderBackend, GpuSeq2SeqState};
-use crate::models::base::LanguageModel;
 use crate::prelude::*;
 
 #[derive(Debug)]

@@ -17,8 +17,6 @@ struct ReshapeUniforms {
     _padding3: u32,
 }
 
-/// A specialized kernel to reshape and optionally transpose for multi-head attention.
-/// Splits [B, S, H*D] into [B, H, S, D] (for Q/V) or [B, H, D, S] (for K).
 pub struct GpuReshape {
     pipeline: Arc<ComputePipeline>,
     bind_group_layout: Arc<BindGroupLayout>,
@@ -108,7 +106,6 @@ impl GpuReshape {
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        // Dispatch a 3D grid that matches the shader's logic
         let workgroups_x = (s as u32 + 15) / 16;
         let workgroups_y = (h as u32 + 15) / 16;
         let workgroups_z = b as u32;
@@ -118,7 +115,6 @@ impl GpuReshape {
 
 fn compile_reshape_pipeline(context: &WgpuContext) -> (ComputePipeline, BindGroupLayout) {
     let device = &context.device;
-    // Make sure you have a `reshape.wgsl` file at this location
     let shader = device.create_shader_module(wgpu::include_wgsl!("./reshape.wgsl"));
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

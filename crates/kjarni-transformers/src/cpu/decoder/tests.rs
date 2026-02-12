@@ -461,7 +461,6 @@ mod decoder_backend_tests {
             let logits = backend.prefill(&model, &tokens, &mut cache).await.unwrap();
 
             assert_eq!(logits.shape(), &[model.vocab_size]);
-            // Legacy does two phases
             assert_eq!(model.get_ops().get_embed_calls(), 2);
         }
 

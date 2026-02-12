@@ -31,11 +31,6 @@ impl fmt::Display for Task {
     }
 }
 
-
-// Transcription Result
-
-
-/// Full transcription result returned by [`Transcriber`](super::Transcriber).
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
     /// Full stitched transcript text.

@@ -1,28 +1,4 @@
-//! A GPU-accelerated Embedding block.
-//!
-//! This module defines a `GpuEmbeddings` struct that encapsulates the logic for
-//! performing token lookups and combining them with positional and token-type
-//! embeddings, all on the GPU. It is designed for performance by minimizing
-//! CPU-GPU data transfers.
-//!
-//! # Architecture
-//!
-//! 1.  **`GpuEmbeddingWeights` struct:** A container for the embedding tables (word,
-//!     position, token type) that have been preloaded onto the GPU. Its constructor
-//!     is the gatekeeper for ensuring weights are present.
-//! 2.  **`GpuEmbeddings` struct:** The main public-facing struct. It owns the compiled
-//!     GPU kernels required for the embedding process (lookup, add, scale).
-//! 3.  **`encode` method:** The primary entry point. It orchestrates a sequence of
-//!     GPU kernels to produce the final embedding tensor.
-//! 4.  **Specialized Kernels:**
-//!     - A `lookup` kernel to translate `u32` token IDs into `f32` vectors.
-//!     - An `add` kernel (potentially with offset support) to combine embeddings.
-//!     - A `scale` kernel to apply conditional scaling.
-//!
-//! # INVARIANT
-//!
-//! The constructor for `GpuEmbeddingWeights` handles loading the weights to the GPU.
-//! The `GpuEmbeddings` struct is stateless and simply orchestrates the kernels.
+//! A GPU-accelerated Embedding block
 
 use crate::WgpuContext;
 use crate::gpu_ops::primitives::add::GpuAdd;
@@ -51,7 +27,6 @@ impl GpuEmbeddingWeights {
         type_name: Option<&str>,
         target_dtype: Option<DType>,
     ) -> Result<Self> {
-        // Use from_model_weights - it handles quantized dequantization automatically
         let word_embeddings = GpuTensor::from_model_weights(
             context,
             weights,
@@ -66,7 +41,7 @@ impl GpuEmbeddingWeights {
                     context,
                     weights,
                     name,
-                    Some(DType::F32), // Position embeddings use F32
+                    Some(DType::F32),
                     "pos_embeddings",
                 )?)
             } else {
@@ -98,8 +73,7 @@ impl GpuEmbeddingWeights {
             token_type_embeddings,
         })
     }
-    /// Creates embedding weights using pre-loaded shared word embeddings.
-    /// Only loads position and token type embeddings from weights.
+    
     pub fn with_shared_words(
         context: &Arc<WgpuContext>,
         weights: &ModelWeights,
@@ -157,10 +131,6 @@ pub struct GpuEmbeddings {
 }
 
 impl GpuEmbeddings {
-    /// Creates a new `GpuEmbeddings` block.
-    ///
-    /// This struct is stateless and holds the compiled kernels needed to perform
-    /// the embedding operations on the GPU.
     pub fn new(context: &Arc<WgpuContext>) -> Result<Self> {
         Ok(Self {
             lookup: GpuLookup2::new(context),
@@ -170,7 +140,7 @@ impl GpuEmbeddings {
         })
     }
 
-    /// Encodes the complete embedding generation pass into the command encoder.
+    /// Encodes the complete embedding generation pass into the command encoder
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -190,7 +160,6 @@ impl GpuEmbeddings {
         self.lookup
             .encode(encoder, &weights.word_embeddings, input_ids, &hidden_states);
 
-        // 4. Apply Scaling (BART/T5 style)
         if scale_embeddings {
             let scale_factor = (hidden_size as f32).sqrt();
             let scale_out = pool.get(hidden_states.shape().to_vec());
@@ -227,7 +196,6 @@ impl GpuEmbeddings {
                     &token_type_vectors,
                 );
             } else {
-                // Default to type 0 if no IDs provided
                 let zeros_cpu = ndarray::Array2::<u32>::zeros((batch_size, seq_len));
                 let zeros_gpu = GpuTensor::from_ndarray(&self.context, &zeros_cpu)?;
                 self.lookup.encode(

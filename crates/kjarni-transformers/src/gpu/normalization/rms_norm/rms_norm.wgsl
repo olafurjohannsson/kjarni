@@ -17,7 +17,6 @@ struct NormUniforms {
 @group(0) @binding(2) var<storage, read> gamma: array<u32>;  // Polymorphic: F32 or BF16
 @group(0) @binding(3) var<storage, read_write> output: array<f32>;
 
-// Shared memory for parallel reduction
 var<workgroup> s_sum: array<f32, 256>;
 
 /// Fetches gamma value, handling F32 or BF16 format.
@@ -48,19 +47,16 @@ fn main(
 
     let row_offset = row * uniforms.n;
 
-    // Each thread processes elements strided by 256
-    // TODO: Vectorize loads (vec4) for better bandwidth
     var sum_sq = 0.0;
     for (var i = tid; i < uniforms.n; i += 256u) {
         let val = input[row_offset + i];
         sum_sq += val * val;
     }
 
-    // Tree reduction in shared memory ===
     s_sum[tid] = sum_sq;
     workgroupBarrier();
 
-    // Binary tree reduction: 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1
+    // tree reduction: 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1
     for (var s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             s_sum[tid] += s_sum[tid + s];
@@ -68,7 +64,7 @@ fn main(
         workgroupBarrier();
     }
 
-    // Compute inverse RMS (single thread)
+    // Compute RMS 
     if (tid == 0u) {
         let mean = s_sum[0] / f32(uniforms.n);
         s_sum[0] = 1.0 / sqrt(mean + uniforms.eps);
@@ -78,7 +74,6 @@ fn main(
     let inv_rms = s_sum[0];
 
     // Normalize and scale
-    // TODO: Could fuse with Phase 1 using online algorithms
     for (var i = tid; i < uniforms.n; i += 256u) {
         let idx = row_offset + i;
         output[idx] = input[idx] * inv_rms * get_gamma(i);

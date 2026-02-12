@@ -1,11 +1,4 @@
-//! Whisper transcription logic: chunking, greedy decode, timestamp parsing.
-//!
-//! This module extends [`WhisperModel`] with methods for audio transcription:
-//! - Audio chunking (30-second segments, zero-padded)
-//! - Greedy decoding with special token suppression
-//! - Timestamp token parsing into timed segments
-//! - Segment stitching across chunk boundaries
-
+//! Whisper transcription logic: chunking, greedy decode, timestamp parsing
 use anyhow::{anyhow, Result};
 use ndarray::{s, Array2, Array3};
 
@@ -352,8 +345,7 @@ impl WhisperModel {
         }
     }
 
-    /// Parse a stream of token IDs that includes `<|start|>` text `<|end|>` pairs
-    /// into timed [`WhisperSegment`]s.
+    /// Parse a stream of token IDs
     fn parse_timestamp_segments(
         token_ids: &[u32],
         tokenizer: &tokenizers::Tokenizer,
