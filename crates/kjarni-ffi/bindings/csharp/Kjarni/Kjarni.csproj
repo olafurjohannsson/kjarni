@@ -8,7 +8,7 @@
 
     <!-- Package metadata -->
     <PackageId>Kjarni</PackageId>
-    <Version>0.1.0-preview.2</Version>
+    <Version>0.1.0</Version>
     <Authors>Ólafur Aron Jóhannsson</Authors>
     <Description>AI inference for .NET — embeddings, classification, reranking, and search. No Python. No ONNX. No CUDA.</Description>
     <PackageTags>ai;ml;embeddings;classification;reranking;rag;search;nlp;inference;transformers</PackageTags>
