@@ -2,22 +2,33 @@
 
 A native library for running machine learning models.
 
-Kjarni is designed to be linked directly into your application.
-It compiles to a single shared library and runs locally, without
-Python, containers, external services, or GPU requirements.
+Kjarni compiles to a single shared library and runs locally, without
+Python, containers, external services, or GPU requirements. It also
+ships as a command-line tool that reads from stdin, writes JSON, and
+pipes like any UNIX tool.
 
-C# bindings are available today via [NuGet](https://www.nuget.org/packages/Kjarni).
-Go, Rust, Python, and C++ bindings are planned.
+C# bindings are available via [NuGet](https://www.nuget.org/packages/Kjarni).
+The CLI is available as a [binary download](https://github.com/olafurjohannsson/kjarni/releases).
 
 The name is Icelandic [ˈkʰjartnɪ]. It means "core."
 
 ## Install
 
+**C# / .NET:**
+
 ```bash
 dotnet add package Kjarni
 ```
 
+**CLI (Linux x64):**
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh
+```
+
 ## Quick Start
+
+**C#:**
 
 ```csharp
 using Kjarni;
@@ -27,11 +38,59 @@ Console.WriteLine(classifier.Classify("I love this product!"));
 // positive (98.5%)
 ```
 
+**CLI:**
+
+```bash
+$ kjarni classify "I love this product!"
+positive   98.50%  ██████████████████████████████████████
+
+$ echo "Terrible quality" | kjarni classify
+negative   94.08%  █████████████████████████████████████
+```
+
 Models download on first use and are cached locally. No setup or configuration required.
 
-## Examples
+## CLI
 
-Same models, same results.
+The CLI supports the same capabilities as the C# library. It reads
+from arguments or stdin, and outputs human-readable tables or JSON.
+
+```bash
+# Sentiment analysis
+$ kjarni classify "Best purchase ever"
+positive   98.50%  ██████████████████████████████████████
+
+# Pipe from stdin
+$ echo "I hate mondays" | kjarni classify --model toxic-bert
+toxic        2.79%  █
+insult       1.14%
+obscene      0.69%
+severe       0.10%
+identity     0.08%
+threat       0.06%
+
+# JSON output for scripting
+$ echo "Great service" | kjarni classify --format json | jq '.label'
+"positive"
+
+# Semantic similarity
+$ kjarni similarity "doctor" "physician"
+0.8598
+
+# Index a folder and search it
+$ kjarni index create my-docs --inputs ./docs/
+✓ Indexed 51 documents (186 KB)
+
+$ kjarni search my-docs "password reset"
+0.0325  account.txt   To reset your password, click...
+0.0159  faq.txt       How do I change my login cred...
+
+# Generate embeddings
+$ kjarni embed "hello world" --format json | jq '.dimensions'
+384
+```
+
+## Examples
 
 ### Embeddings
 
@@ -54,48 +113,6 @@ print(vector[:5])
 # [-0.03447726  0.03102319  0.00673499  0.02610895 -0.03936201]
 ```
 
-### Three-Class Sentiment
-
-```csharp
-using var classifier = new Classifier("roberta-sentiment");
-var result = classifier.Classify("Terrible quality, broke after one day.");
-Console.WriteLine(result.ToJson());
-```
-
-```json
-{
-  "label": "negative",
-  "score": 0.9408,
-  "predictions": [
-    {"label": "negative", "score": 0.9408},
-    {"label": "neutral", "score": 0.0509},
-    {"label": "positive", "score": 0.0083}
-  ]
-}
-```
-
-### Multilingual Sentiment
-
-```csharp
-using var classifier = new Classifier("bert-sentiment-multilingual");
-var result = classifier.Classify("Esta es la peor compra que he hecho.");
-Console.WriteLine(result.ToJson());
-```
-
-```json
-{
-  "label": "1 star",
-  "score": 0.9407,
-  "predictions": [
-    {"label": "1 star", "score": 0.9407},
-    {"label": "2 stars", "score": 0.0514},
-    {"label": "3 stars", "score": 0.0060},
-    {"label": "5 stars", "score": 0.0015},
-    {"label": "4 stars", "score": 0.0005}
-  ]
-}
-```
-
 ### Toxicity Detection
 
 ```csharp
@@ -111,80 +128,12 @@ Console.WriteLine(classifier.Classify("You are an idiot").ToDetailedString());
      identity_hate    1.41%  
 ```
 
-### Emotion Detection
-
-```csharp
-using var classifier = new Classifier("distilroberta-emotion");
-var result = classifier.Classify("I just got promoted!");
-Console.WriteLine(result.ToJson());
-```
-
-```json
-{
-  "label": "surprise",
-  "score": 0.5066,
-  "predictions": [
-    {"label": "surprise", "score": 0.5066},
-    {"label": "anger", "score": 0.2376},
-    {"label": "joy", "score": 0.0980},
-    {"label": "neutral", "score": 0.0664},
-    {"label": "disgust", "score": 0.0658},
-    {"label": "sadness", "score": 0.0221},
-    {"label": "fear", "score": 0.0035}
-  ]
-}
-```
-
 ### Semantic Similarity
 
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2");
 Console.WriteLine(embedder.Similarity("doctor", "physician"));
 // 0.8598132
-```
-
-### Semantic Search
-
-```csharp
-using var embedder = new Embedder("minilm-l6-v2");
-
-var docs = new[] {
-    "How do I reset my password?",
-    "What is your refund policy?",
-    "Do you ship internationally?",
-};
-var vectors = embedder.EncodeBatch(docs);
-var query = embedder.Encode("I need to change my login credentials");
-
-for (int i = 0; i < docs.Length; i++)
-{
-    var score = Embedder.CosineSimilarity(query, vectors[i]);
-    Console.WriteLine($"  {score:F4}: {docs[i]}");
-}
-//  0.5981: How do I reset my password?
-// -0.0027: What is your refund policy?
-// -0.0451: Do you ship internationally?
-```
-
-No keyword overlap between "change my login credentials" and "reset my password."
-
-### Reranking
-
-```csharp
-using var reranker = new Reranker();
-var results = reranker.Rerank(
-    "What is machine learning?",
-    new[] {
-        "Machine learning is a subset of artificial intelligence.",
-        "Deep learning uses neural networks with many layers.",
-        "The weather today is sunny.",
-    });
-
-foreach (var r in results)
-    Console.WriteLine($"  {r.Score:F4}: {r.Document}");
-//  10.5139: Machine learning is a subset of artificial intelligence.
-//  -5.5301: Deep learning uses neural networks with many layers.
-// -11.1001: The weather today is sunny.
 ```
 
 ### Index & Search
@@ -229,15 +178,6 @@ foreach (var r in results)
 ```
 
 Search modes: `Semantic` (vector similarity), `Keyword` (BM25), `Hybrid` (both).
-
-### GPU
-
-```csharp
-using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
-```
-
-GPU inference is optional and uses WebGPU.
-Vulkan on Linux, DX12/Vulkan on Windows. CUDA is not required.
 
 ## Models
 
@@ -290,9 +230,15 @@ using var embedder = new Embedder("minilm-l6-v2", quiet: true);
 
 | Platform | CPU | GPU |
 |----------|-----|-----|
-| Linux x64 | Yes | Yes Vulkan |
-| Windows x64 | Yes | Yes DX12/Vulkan |
+| Linux x64 | Yes | Yes (Vulkan) |
+| Windows x64 | Yes | Yes (DX12/Vulkan) |
 | macOS ARM64 | Planned | Planned (Metal) |
+
+GPU inference uses WebGPU. CUDA is not required.
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
+```
 
 ## How It Works
 
@@ -329,6 +275,7 @@ crates/
 
 ```bash
 cargo build --release -p kjarni-ffi
+cargo build --release -p kjarni-cli
 cargo test
 ```
 
