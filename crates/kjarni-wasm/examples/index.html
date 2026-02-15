@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Kjarni WASM Test</title>
+    <style>
+        body { font-family: monospace; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+        #log { white-space: pre-wrap; background: #1a1a1a; color: #0f0; padding: 20px; border-radius: 8px; min-height: 300px; }
+        input { width: 100%; padding: 10px; margin: 10px 0; font-size: 16px; box-sizing: border-box; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+        .result { margin: 5px 0; padding: 8px; background: #2a2a2a; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Kjarni WASM - Quantized Encoder Test</h2>
+    
+    <div>
+        <button onclick="loadModel()">1. Load Model (~22MB)</button>
+        <button onclick="runTest()">2. Run Similarity Test</button>
+        <button onclick="encodeCustom()">3. Encode Custom Text</button>
+    </div>
+    
+    <div style="margin: 10px 0;">
+        <input type="text" id="customText" placeholder="Enter text to encode..." value="Machine learning is fascinating">
+    </div>
+
+    <div id="log">Ready. Click "Load Model" to begin.
+</div>
+
+    <script type="module">
+        // Adjust this path to match your wasm-pack output location
+        import init, { WasmModel } from './pkg/kjarni_wasm.js';
+
+        let model = null;
+
+        function log(msg) {
+            const el = document.getElementById('log');
+            el.textContent += msg + '\n';
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function cosineSimilarity(a, b) {
+            let dot = 0, normA = 0, normB = 0;
+            for (let i = 0; i < a.length; i++) {
+                dot += a[i] * b[i];
+                normA += a[i] * a[i];
+                normB += b[i] * b[i];
+            }
+            return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+        }
+
+        window.loadModel = async function() {
+            try {
+                log('Initializing WASM...');
+                await init();
+                log('WASM initialized.');
+
+                log('Fetching quantized model (model_q8.kjq)...');
+                const t0 = performance.now();
+                const response = await fetch('./all-MiniLM-L6-v2/model_q8.kjq');
+                const buffer = await response.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+                const fetchTime = ((performance.now() - t0) / 1000).toFixed(2);
+                log(`Fetched ${(bytes.length / 1024 / 1024).toFixed(1)} MB in ${fetchTime}s`);
+
+                log('Loading model (dequantizing int8 → f32)...');
+                const t1 = performance.now();
+                model = WasmModel.from_quantized(bytes);
+                const loadTime = ((performance.now() - t1) / 1000).toFixed(2);
+                log(`Model loaded in ${loadTime}s`);
+                log('Ready for encoding!\n');
+            } catch (e) {
+                log(`ERROR: ${e}`);
+                console.error(e);
+            }
+        };
+
+        window.runTest = async function() {
+            if (!model) { log('Load the model first!'); return; }
+
+            try {
+                const sentences = [
+                    "The cat sat on the mat",
+                    "A kitten was resting on the rug",
+                    "The stock market crashed yesterday",
+                    "I love programming in Rust",
+                    "Systems programming is my passion",
+                ];
+
+                log('--- Similarity Test ---');
+                log('Encoding 5 sentences...');
+                const t0 = performance.now();
+                
+                const embeddings = [];
+                const dim = 384; // MiniLM hidden size
+                
+                for (const s of sentences) {
+                    const t1 = performance.now();
+                    const flat = model.encode([s], true);
+                    const elapsed = (performance.now() - t1).toFixed(1);
+                    embeddings.push(Array.from(flat.slice(0, dim)));
+                    log(`  "${s}" → ${elapsed}ms`);
+                }
+                
+                const totalTime = ((performance.now() - t0) / 1000).toFixed(2);
+                log(`Total encoding: ${totalTime}s\n`);
+
+                log('Cosine similarities:');
+                for (let i = 0; i < sentences.length; i++) {
+                    for (let j = i + 1; j < sentences.length; j++) {
+                        const sim = cosineSimilarity(embeddings[i], embeddings[j]).toFixed(4);
+                        const bar = '█'.repeat(Math.max(0, Math.round(sim * 20)));
+                        log(`  [${i}] vs [${j}]: ${sim} ${bar}`);
+                        log(`    "${sentences[i]}"`);
+                        log(`    "${sentences[j]}"\n`);
+                    }
+                }
+            } catch (e) {
+                log(`ERROR: ${e}`);
+                console.error(e);
+            }
+        };
+
+        window.encodeCustom = async function() {
+            if (!model) { log('Load the model first!'); return; }
+
+            try {
+                const text = document.getElementById('customText').value;
+                log(`Encoding: "${text}"`);
+                
+                const t0 = performance.now();
+                const flat = model.encode([text], true);
+                const elapsed = (performance.now() - t0).toFixed(1);
+                
+                const embedding = Array.from(flat.slice(0, 384));
+                log(`  Time: ${elapsed}ms`);
+                log(`  Dims: ${embedding.length}`);
+                log(`  First 5: [${embedding.slice(0, 5).map(v => v.toFixed(4)).join(', ')}]`);
+                log(`  Norm: ${Math.sqrt(embedding.reduce((s, v) => s + v * v, 0)).toFixed(4)}\n`);
+            } catch (e) {
+                log(`ERROR: ${e}`);
+                console.error(e);
+            }
+        };
+    </script>
+</body>
+</html>
