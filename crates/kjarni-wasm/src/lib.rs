@@ -235,6 +235,50 @@ impl Model {
         }
         mean_pool(&hidden, attention_mask)
     }
+    
+    /// Forward pass returning [CLS] token hidden state (for reranking/classification)
+    fn forward_cls(
+        &self,
+        input_ids: &Array2<f32>,
+        attention_mask: &Array2<f32>,
+        token_type_ids: Option<&Array2<f32>>,
+    ) -> Result<Array2<f32>> {
+        let (batch_size, seq_len) = input_ids.dim();
+
+        let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, self.config.hidden_size));
+        for i in 0..batch_size {
+            for j in 0..seq_len {
+                let token_id = input_ids[[i, j]] as usize;
+                hidden.slice_mut(s![i, j, ..]).assign(&self.word_embeddings.row(token_id));
+            }
+        }
+
+        let pos_embeddings = self.position_embeddings.slice(s![0..seq_len, ..]);
+        hidden += &pos_embeddings;
+
+        // Use token_type_ids if provided (for pair inputs), otherwise default to 0
+        if let Some(type_ids) = token_type_ids {
+            for i in 0..batch_size {
+                for j in 0..seq_len {
+                    let type_id = type_ids[[i, j]] as usize;
+                    let type_emb = self.token_type_embeddings.row(type_id);
+                    let mut slice = hidden.slice_mut(s![i, j, ..]);
+                    slice += &type_emb;
+                }
+            }
+        } else {
+            let type_embeddings = self.token_type_embeddings.row(0);
+            hidden += &type_embeddings;
+        }
+
+        let mut hidden = apply_layer_norm_3d(&hidden, &self.layer_norm_final);
+        for layer in &self.layers {
+            hidden = layer.forward(hidden, attention_mask)?;
+        }
+
+        // Extract [CLS] token (position 0) instead of mean pooling
+        Ok(hidden.slice(s![.., 0, ..]).to_owned())
+    }
 }
 
 // Layer forward passes
@@ -636,5 +680,134 @@ impl WasmModel {
             .encode(text_refs, normalize)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(embeddings.into_iter().flatten().collect())
+    }
+}
+
+
+#[wasm_bindgen]
+pub struct WasmReranker {
+    model: Model,
+    // Classification head: score = cls_hidden @ weight^T + bias
+    head_weight: Array2<f32>, // (1, hidden_size)
+    head_bias: Array1<f32>,   // (1,)
+}
+
+#[derive(Serialize)]
+struct RerankResult {
+    index: usize,
+    score: f32,
+    text: String,
+}
+
+#[wasm_bindgen]
+impl WasmReranker {
+    #[wasm_bindgen]
+    pub fn load(data: &[u8]) -> Result<WasmReranker, JsValue> {
+        let loaded = ModelWeights::from_quantized_bytes(data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        // Extract head weights before building model
+        let head_weight = loaded.weights.get_array2("classifier.weight")
+            .map_err(|e| JsValue::from_str(&format!("Missing classifier.weight: {}", e)))?;
+        let head_bias = loaded.weights.get_array1("classifier.bias")
+            .map_err(|e| JsValue::from_str(&format!("Missing classifier.bias: {}", e)))?;
+
+        let config = loaded.weights.config.clone();
+        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = Model::from_weights(loaded.weights, tokenizer, config)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(WasmReranker { model, head_weight, head_bias })
+    }
+
+    #[wasm_bindgen]
+    pub fn rerank(
+        &self,
+        query: &str,
+        documents: Vec<String>,
+        limit: usize,
+    ) -> Result<JsValue, JsValue> {
+        if documents.is_empty() {
+            return serde_wasm_bindgen::to_value::<Vec<RerankResult>>(&vec![])
+                .map_err(|e| JsValue::from_str(&e.to_string()));
+        }
+
+        let n = documents.len();
+
+        // Tokenize all pairs
+        let mut all_ids = Vec::with_capacity(n);
+        let mut all_masks = Vec::with_capacity(n);
+        let mut all_types = Vec::with_capacity(n);
+        let mut max_len = 0;
+
+        for doc in &documents {
+            let enc = self.model.tokenizer.encode_pair(query, doc, 512)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            max_len = max_len.max(enc.ids.len());
+            all_ids.push(enc.ids);
+            all_masks.push(enc.attention_mask);
+            all_types.push(enc.token_type_ids.unwrap_or_default());
+        }
+
+        // Pad and build arrays
+        let mut input_ids = Array2::<f32>::zeros((n, max_len));
+        let mut attention_mask = Array2::<f32>::zeros((n, max_len));
+        let mut token_type_ids = Array2::<f32>::zeros((n, max_len));
+
+        for i in 0..n {
+            for j in 0..all_ids[i].len() {
+                input_ids[[i, j]] = all_ids[i][j] as f32;
+                attention_mask[[i, j]] = all_masks[i][j] as f32;
+                token_type_ids[[i, j]] = all_types[i][j] as f32;
+            }
+        }
+
+        // Forward pass → [CLS] hidden states (n, hidden_size)
+        let cls_hidden = self.model.forward_cls(&input_ids, &attention_mask, Some(&token_type_ids))
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        // Apply head: score = cls @ weight^T + bias
+        let scores_2d = cls_hidden.dot(&self.head_weight.t()) + &self.head_bias;
+
+        // Collect and sort by score descending
+        let mut results: Vec<RerankResult> = (0..n).map(|i| {
+            RerankResult {
+                index: i,
+                score: scores_2d[[i, 0]],
+                text: documents[i].clone(),
+            }
+        }).collect();
+
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+
+        serde_wasm_bindgen::to_value(&results)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn score(&self, query: &str, document: &str) -> Result<f32, JsValue> {
+        let enc = self.model.tokenizer.encode_pair(query, document, 512)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let ids = Array2::from_shape_vec((1, enc.ids.len()),
+            enc.ids.iter().map(|&x| x as f32).collect()
+        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let mask = Array2::from_shape_vec((1, enc.attention_mask.len()),
+            enc.attention_mask.iter().map(|&x| x as f32).collect()
+        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let types = enc.token_type_ids.unwrap_or_default();
+        let type_ids = Array2::from_shape_vec((1, types.len()),
+            types.iter().map(|&x| x as f32).collect()
+        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let cls = self.model.forward_cls(&ids, &mask, Some(&type_ids))
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let score = cls.dot(&self.head_weight.t()) + &self.head_bias;
+        Ok(score[[0, 0]])
     }
 }
