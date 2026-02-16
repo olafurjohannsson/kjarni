@@ -444,6 +444,72 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 // WASM bindings
 
+
+use kjarni_search::SearchIndex;
+
+#[wasm_bindgen]
+pub struct WasmSearch {
+    model: Model,
+    index: SearchIndex,
+}
+
+#[wasm_bindgen]
+impl WasmSearch {
+    #[wasm_bindgen]
+    pub fn load(model_data: &[u8], index_data: &[u8]) -> Result<WasmSearch, JsValue> {
+        let loaded = ModelWeights::from_quantized_bytes(model_data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let config = loaded.weights.config.clone();
+        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = Model::from_weights(loaded.weights, tokenizer, config)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let cursor = std::io::Cursor::new(index_data);
+        let index = SearchIndex::load_binary(cursor)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(WasmSearch { model, index })
+    }
+
+    #[wasm_bindgen]
+    pub fn search(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
+        let embedding = self.model
+            .encode(vec![query], true)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let results = self.index.search_hybrid(query, &embedding[0], limit);
+
+        serde_wasm_bindgen::to_value(&results)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn search_semantic(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
+        let embedding = self.model
+            .encode(vec![query], true)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let results = self.index.search_semantic(&embedding[0], limit);
+
+        serde_wasm_bindgen::to_value(&results)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn search_keywords(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
+        let results = self.index.search_keywords(query, limit);
+
+        serde_wasm_bindgen::to_value(&results)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn doc_count(&self) -> usize {
+        self.index.len()
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmModel {
     inner: Model,
