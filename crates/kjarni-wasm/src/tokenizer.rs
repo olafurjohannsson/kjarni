@@ -13,6 +13,7 @@ mod wasm {
     pub struct Encoding {
         pub ids: Vec<u32>,
         pub attention_mask: Vec<u32>,
+        pub token_type_ids: Option<Vec<u32>>, // None for single sequence, Some for pairs
     }
 
     impl Encoding {
@@ -162,5 +163,62 @@ mod wasm {
         pub fn encode_batch(&self, texts: Vec<&str>, max_len: usize) -> Result<Vec<Encoding>> {
             texts.iter().map(|t| self.encode(t, max_len)).collect()
         }
+        
+        /// Encode a query-document pair as "[CLS] query [SEP] document [SEP]"
+        pub fn encode_pair(&self, query: &str, document: &str, max_len: usize) -> Result<Encoding> {
+            let mut ids = vec![self.cls_token_id];
+        
+            // Tokenize query
+            let query_lower = self.preprocess(query);
+            for word in query_lower.split_whitespace() {
+                ids.extend(self.tokenize_word(word));
+            }
+            ids.push(self.sep_token_id);
+        
+            let query_len = ids.len(); // everything up to and including first [SEP]
+        
+            // Tokenize document
+            let doc_lower = self.preprocess(document);
+            for word in doc_lower.split_whitespace() {
+                ids.extend(self.tokenize_word(word));
+            }
+            ids.push(self.sep_token_id);
+        
+            // Truncate if needed (keep query intact, truncate document)
+            if ids.len() > max_len {
+                ids.truncate(max_len);
+                ids[max_len - 1] = self.sep_token_id;
+            }
+        
+            let attention_mask = vec![1u32; ids.len()];
+        
+            // Token type IDs: 0 for query (including first [SEP]), 1 for document
+            let mut token_type_ids = vec![0u32; ids.len()];
+            for i in query_len..ids.len() {
+                token_type_ids[i] = 1;
+            }
+        
+            Ok(Encoding {
+                ids,
+                attention_mask,
+                token_type_ids: Some(token_type_ids),
+            })
+        }
+        
+        /// Preprocess text for tokenization
+        fn preprocess(&self, text: &str) -> String {
+            let mut out = String::new();
+            for c in text.to_lowercase().chars() {
+                if c.is_ascii_punctuation() {
+                    out.push(' ');
+                    out.push(c);
+                    out.push(' ');
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        }
+
     }
 }
