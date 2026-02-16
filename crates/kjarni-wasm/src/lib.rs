@@ -488,8 +488,74 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 // WASM bindings
 
+use kjarni_rag::{SearchIndex, TextSplitter, SplitterConfig};
 
-use kjarni_search::SearchIndex;
+#[wasm_bindgen]
+pub struct WasmIndexBuilder {
+    model: Model,
+    index: SearchIndex,
+    splitter: TextSplitter,
+}
+
+#[wasm_bindgen]
+impl WasmIndexBuilder {
+    #[wasm_bindgen]
+    pub fn new(model_data: &[u8]) -> Result<WasmIndexBuilder, JsValue> {
+        let loaded = ModelWeights::from_quantized_bytes(model_data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let config = loaded.weights.config.clone();
+        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = Model::from_weights(loaded.weights, tokenizer, config)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(WasmIndexBuilder {
+            model,
+            index: SearchIndex::with_dimension(384),
+            splitter: TextSplitter::new(SplitterConfig::default()),
+        })
+    }
+
+    /// Add a file's content to the index. Splits internally.
+    /// Returns number of chunks added.
+    #[wasm_bindgen]
+    pub fn add_file(&mut self, text: &str, source_path: &str) -> Result<usize, JsValue> {
+        let chunks = self.splitter.split(text);
+        let n = chunks.len();
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let embedding = self.model
+                .encode(vec![chunk.as_str()], true)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+            let mut meta = std::collections::HashMap::new();
+            meta.insert("source".to_string(), source_path.to_string());
+            meta.insert("chunk_index".to_string(), i.to_string());
+
+            self.index
+                .add_document(chunk.clone(), embedding[0].clone(), Some(meta))
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+
+        Ok(n)
+    }
+
+    /// Serialize the built index to bytes (for saving to disk)
+    #[wasm_bindgen]
+    pub fn finish(&self) -> Result<Vec<u8>, JsValue> {
+        let mut buf = Vec::new();
+        self.index
+            .save_binary(&mut buf)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(buf)
+    }
+
+    /// Number of documents indexed so far
+    #[wasm_bindgen]
+    pub fn doc_count(&self) -> usize {
+        self.index.len()
+    }
+}
 
 #[wasm_bindgen]
 pub struct WasmSearch {

@@ -2,8 +2,8 @@ use crate::Config;
 use anyhow::Result;
 use ndarray::{Array1, Array2};
 use safetensors::SafeTensors;
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 pub struct ModelWeights {
     tensors: HashMap<String, Vec<f32>>,
@@ -215,6 +215,17 @@ impl ModelWeights {
                 cursor += byte_len;
 
                 f32_data
+            };
+            let name = if let Some(pos) = name.find("embeddings.") {
+                name[pos..].to_string()
+            } else if let Some(pos) = name.find("encoder.") {
+                name[pos..].to_string()
+            } else if let Some(pos) = name.find("pooler.") {
+                name[pos..].to_string()
+            } else if let Some(pos) = name.find("classifier.") {
+                name[pos..].to_string()
+            } else {
+                name
             };
 
             shapes.insert(name.clone(), shape);

@@ -100,8 +100,18 @@ mod wasm {
 
             while !remaining.is_empty() {
                 let mut found = false;
-                for i in (1..=remaining.len()).rev() {
-                    let prefix = &remaining[0..i];
+                // Collect valid char boundary positions
+                let boundaries: Vec<usize> = remaining
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .chain(std::iter::once(remaining.len()))
+                    .collect();
+
+                for &end in boundaries.iter().rev() {
+                    if end == 0 {
+                        continue;
+                    }
+                    let prefix = &remaining[0..end];
                     let token_to_check = if remaining.len() != word.len() {
                         format!("##{}", prefix)
                     } else {
@@ -110,7 +120,7 @@ mod wasm {
 
                     if let Some(id) = self.vocab.get(&token_to_check) {
                         sub_tokens.push(*id);
-                        remaining = &remaining[i..];
+                        remaining = &remaining[end..];
                         found = true;
                         break;
                     }
@@ -150,12 +160,13 @@ mod wasm {
                 ids[max_len - 1] = self.sep_token_id;
             }
 
-            // return actual token count 
+            // return actual token count
             let attention_mask = vec![1u32; ids.len()];
 
             Ok(Encoding {
                 ids,
                 attention_mask,
+                token_type_ids: None,
             })
         }
 
@@ -163,48 +174,48 @@ mod wasm {
         pub fn encode_batch(&self, texts: Vec<&str>, max_len: usize) -> Result<Vec<Encoding>> {
             texts.iter().map(|t| self.encode(t, max_len)).collect()
         }
-        
+
         /// Encode a query-document pair as "[CLS] query [SEP] document [SEP]"
         pub fn encode_pair(&self, query: &str, document: &str, max_len: usize) -> Result<Encoding> {
             let mut ids = vec![self.cls_token_id];
-        
+
             // Tokenize query
             let query_lower = self.preprocess(query);
             for word in query_lower.split_whitespace() {
                 ids.extend(self.tokenize_word(word));
             }
             ids.push(self.sep_token_id);
-        
+
             let query_len = ids.len(); // everything up to and including first [SEP]
-        
+
             // Tokenize document
             let doc_lower = self.preprocess(document);
             for word in doc_lower.split_whitespace() {
                 ids.extend(self.tokenize_word(word));
             }
             ids.push(self.sep_token_id);
-        
+
             // Truncate if needed (keep query intact, truncate document)
             if ids.len() > max_len {
                 ids.truncate(max_len);
                 ids[max_len - 1] = self.sep_token_id;
             }
-        
+
             let attention_mask = vec![1u32; ids.len()];
-        
+
             // Token type IDs: 0 for query (including first [SEP]), 1 for document
             let mut token_type_ids = vec![0u32; ids.len()];
             for i in query_len..ids.len() {
                 token_type_ids[i] = 1;
             }
-        
+
             Ok(Encoding {
                 ids,
                 attention_mask,
                 token_type_ids: Some(token_type_ids),
             })
         }
-        
+
         /// Preprocess text for tokenization
         fn preprocess(&self, text: &str) -> String {
             let mut out = String::new();
@@ -219,6 +230,5 @@ mod wasm {
             }
             out
         }
-
     }
 }
