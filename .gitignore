@@ -8,3 +8,4 @@ pkg/
 bin/
 obj/
 *.pyc
+node_modules/
