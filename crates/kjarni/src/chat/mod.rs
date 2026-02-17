@@ -65,12 +65,12 @@
 //! }
 //! ```
 
-mod builder;
+pub mod builder;
 pub mod conversation;
-mod model;
+pub mod model;
 pub mod presets;
-mod types;
-mod validation;
+pub mod types;
+pub mod validation;
 
 // Re-exports
 pub use crate::common::DownloadPolicy;

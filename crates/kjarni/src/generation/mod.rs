@@ -6,7 +6,7 @@
 pub mod overrides;
 pub mod resolved;
 
-mod resolution;
+pub mod resolution;
 
 pub use overrides::GenerationOverrides;
 pub use resolution::resolve_generation_config;
