@@ -1,12 +1,11 @@
 /// <reference lib="webworker" />
-
 // encoder-worker.ts — lightweight encoding worker
 // Multiple instances run in parallel during indexing.
 // Only does: split text → encode chunks → return embeddings.
 // Terminated after indexing completes.
 
 // @ts-ignore
-import init, { WasmEncoder } from "../../pkg/kjarni_wasm.js";
+import init, { WasmEncoder, set_debug_logging } from "../../pkg/kjarni_wasm.js";
 
 let encoder: any = null;
 
@@ -41,6 +40,10 @@ async function processQueue() {
 					break;
 				case "encode_batch":
 					handleEncodeBatch(msg);
+					break;
+				case "set_logging":
+					set_debug_logging(msg.enabled);
+					send({ type: "logging_set", id: msg.id });
 					break;
 				default:
 					send({ type: "error", id: msg.id, error: `Unknown: ${msg.type}` });
