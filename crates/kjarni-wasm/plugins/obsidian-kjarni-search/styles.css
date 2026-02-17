@@ -122,3 +122,10 @@
 .kjarni-status.kjarni-refined {
 	color: var(--text-accent);
 }
+
+.kjarni-highlight {
+    background: rgba(var(--text-accent-rgb, 124, 77, 255), 0.15);
+    color: var(--text-normal);
+    border-radius: 2px;
+    padding: 0 2px;
+}

@@ -552,7 +552,10 @@ impl WasmIndexBuilder {
         let model = Model::from_weights(loaded.weights, tokenizer, config)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        klog!("WasmIndexBuilder::new: loaded model in {:.1}ms", now_ms() - t0);
+        klog!(
+            "WasmIndexBuilder::new: loaded model in {:.1}ms",
+            now_ms() - t0
+        );
 
         Ok(WasmIndexBuilder {
             model,
@@ -812,6 +815,20 @@ impl WasmSearch {
             results.len(),
             now_ms() - t0
         );
+
+        // Log top results
+        for (i, r) in results.iter().take(5).enumerate() {
+            let source = r.metadata.get("source").map(|s| s.as_str()).unwrap_or("?");
+            let snippet: String = r.text.chars().take(60).collect();
+            let snippet = snippet.replace('\n', " ");
+            klog!(
+                "  result[{}]: score={:.4} source=\"{}\" \"{}...\"",
+                i,
+                r.score,
+                source,
+                snippet
+            );
+        }
 
         serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -1226,6 +1243,19 @@ impl WasmReranker {
             score_ms,
             now_ms() - t0
         );
+
+        // Log reranked results
+        for (i, r) in results.iter().enumerate() {
+            let snippet: String = r.text.chars().take(60).collect();
+            let snippet = snippet.replace('\n', " ");
+            klog!(
+                "  reranked[{}]: idx={} score={:.4} \"{}...\"",
+                i,
+                r.index,
+                r.score,
+                snippet
+            );
+        }
 
         serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
