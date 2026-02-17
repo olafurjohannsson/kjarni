@@ -560,7 +560,6 @@ impl WasmIndexBuilder {
             splitter: TextSplitter::new(SplitterConfig::default()),
         })
     }
-
     #[wasm_bindgen]
     pub fn add_chunk(
         &mut self,

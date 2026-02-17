@@ -622,6 +622,151 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName)]
         public static extern float kjarni_cosine_similarity(float[] a, float[] b, nuint len);
 
+
+
+[StructLayout(LayoutKind.Sequential)]
+        public struct KjarniChatConfig
+        {
+            public KjarniDevice Device;
+            public IntPtr CacheDir;
+            public IntPtr ModelName;
+            public IntPtr ModelPath;
+            public IntPtr SystemPrompt;
+            public int Mode;
+            public int Quiet;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KjarniGenerationConfig
+        {
+            public float Temperature;
+            public int TopK;
+            public float TopP;
+            public float MinP;
+            public float RepetitionPenalty;
+            public int MaxNewTokens;
+            public int DoSample;
+        }
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        public delegate bool KjarniStreamCallback(IntPtr text, IntPtr userData);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniChatConfig kjarni_chat_config_default();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniGenerationConfig kjarni_generation_config_default();
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_chat_new(
+            ref KjarniChatConfig config,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_chat_free(IntPtr handle);
+
+        // Send with nullable gen_config (pass IntPtr.Zero for defaults)
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_send")]
+        public static extern KjarniErrorCode kjarni_chat_send(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            out IntPtr result);
+
+        // Send with explicit gen_config
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_send")]
+        public static extern KjarniErrorCode kjarni_chat_send_config(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            out IntPtr result);
+
+        // Stream with nullable gen_config
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_stream")]
+        public static extern KjarniErrorCode kjarni_chat_stream(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
+
+        // Stream with explicit gen_config
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_stream")]
+        public static extern KjarniErrorCode kjarni_chat_stream_config(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
+
+        // Send with history
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_chat_send_with_history(
+            IntPtr handle,
+            int[] roles,
+            IntPtr[] contents,
+            UIntPtr historyLen,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            out IntPtr result);
+
+        // Conversation
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_chat_conversation_new(
+            IntPtr chat,
+            out IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_chat_conversation_free(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_conversation_send")]
+        public static extern KjarniErrorCode kjarni_chat_conversation_send(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_conversation_send")]
+        public static extern KjarniErrorCode kjarni_chat_conversation_send_config(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            out IntPtr result);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_conversation_stream")]
+        public static extern KjarniErrorCode kjarni_chat_conversation_stream(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_conversation_stream")]
+        public static extern KjarniErrorCode kjarni_chat_conversation_stream_config(
+            IntPtr handle,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern UIntPtr kjarni_chat_conversation_len(IntPtr handle);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void kjarni_chat_conversation_clear(IntPtr handle, int keepSystem);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern UIntPtr kjarni_chat_model_name(IntPtr handle, IntPtr buf, UIntPtr bufLen);
+
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern UIntPtr kjarni_chat_context_size(IntP
+
+
         public static void CheckError(KjarniErrorCode err)
         {
             if (err != KjarniErrorCode.Ok)
