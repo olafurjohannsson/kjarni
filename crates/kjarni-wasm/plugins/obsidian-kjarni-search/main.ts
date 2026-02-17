@@ -27,7 +27,7 @@ const MODELS = {
 	},
 };
 
-const ENCODER_WORKER_COUNT = 4;
+const ENCODER_WORKER_COUNT = 2;
 const FILE_UPDATE_DEBOUNCE_MS = 3000;
 const DELETE_DEBOUNCE_MS = 5000;
 
@@ -38,6 +38,7 @@ interface KjarniSettings {
 	chunkOverlap: number;
 	searchLimit: number;
 	rerankerEnabled: boolean;
+	debugLogging: boolean;
 }
 
 const DEFAULT_SETTINGS: KjarniSettings = {
@@ -45,6 +46,7 @@ const DEFAULT_SETTINGS: KjarniSettings = {
 	chunkOverlap: 200,
 	searchLimit: 10,
 	rerankerEnabled: true,
+	debugLogging: false,
 };
 
 interface SearchResultItem {
@@ -209,6 +211,14 @@ export default class KjarniSearchPlugin extends Plugin {
 
 	// ─── Search Worker ───────────────────────────────────────────
 
+	async setWorkerLogging(enabled: boolean) {
+		try {
+			await this.postToSearch({ type: "set_logging", enabled });
+		} catch (e) {
+			// Non-critical
+		}
+	}
+
 	private startSearchWorker() {
 		this.searchWorker = this.createBlobWorker("worker.js");
 
@@ -280,6 +290,14 @@ export default class KjarniSearchPlugin extends Plugin {
 				wasmBytes: wasmCopy,
 				encoderBytes: encoderCopy,
 			}, [wasmCopy, encoderCopy]);
+
+			// Apply logging setting
+			if (this.settings.debugLogging) {
+				await this.postToEncoder(worker, {
+					type: "set_logging",
+					enabled: true,
+				});
+			}
 
 			this.encoderWorkers.push(worker);
 		}
@@ -407,6 +425,9 @@ export default class KjarniSearchPlugin extends Plugin {
 
 			const result = await this.postToSearch(initMsg, transferList);
 			this.hasReranker = result.hasReranker;
+
+			// Apply logging setting
+			await this.setWorkerLogging(this.settings.debugLogging);
 
 			if (result.hasIndex) {
 				this.indexReady = true;
@@ -998,6 +1019,23 @@ class KjarniSettingTab extends PluginSettingTab {
 				button.setButtonText("Reindex").onClick(async () => {
 					await this.plugin.reindexVault();
 				})
+			);
+
+		containerEl.createEl("h3", { text: "Developer" });
+
+		new Setting(containerEl)
+			.setName("Debug logging")
+			.setDesc(
+				"Log detailed timing info to the developer console. Enable when filing bug reports."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.debugLogging)
+					.onChange(async (value) => {
+						this.plugin.settings.debugLogging = value;
+						await this.plugin.saveSettings();
+						await this.plugin.setWorkerLogging(value);
+					})
 			);
 	}
 }

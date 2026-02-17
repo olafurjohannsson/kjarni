@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
-
+// worker.ts — search/index worker
 // Single instance, stays alive for the plugin's lifetime.
 // Builds index from pre-encoded chunks (sent by encoder workers).
 // Handles search, rerank, incremental updates.
 
 // @ts-ignore
-import init, { WasmIndexBuilder, WasmSearch, WasmReranker } from "../../pkg/kjarni_wasm.js";
+import init, { WasmIndexBuilder, WasmSearch, WasmReranker, set_debug_logging } from "../../pkg/kjarni_wasm.js";
 
 let search: any = null;
 let reranker: any = null;
@@ -64,6 +64,10 @@ async function processQueue() {
 					break;
 				case "save_index":
 					handleSaveIndex(msg);
+					break;
+				case "set_logging":
+					set_debug_logging(msg.enabled);
+					send({ type: "logging_set", id: msg.id });
 					break;
 				default:
 					send({ type: "error", id: msg.id, error: `Unknown: ${msg.type}` });
