@@ -62,6 +62,9 @@ pub struct Bm25Index {
 
     /// Token to index mapping for faster lookups
     token_to_docs: HashMap<String, HashSet<usize>>,
+
+    #[serde(default)]
+    total_length: usize,
 }
 
 impl Bm25Index {
@@ -74,6 +77,7 @@ impl Bm25Index {
             inverted_index: HashMap::new(),
             params: Bm25Params::default(),
             token_to_docs: HashMap::new(),
+            total_length: 0,
         }
     }
 
@@ -128,8 +132,10 @@ impl Bm25Index {
         }
 
         self.total_docs = self.total_docs.max(doc_id + 1);
-        self.avg_doc_length =
-            self.doc_lengths.iter().sum::<usize>() as f32 / self.total_docs as f32;
+        self.total_length += doc_length;
+        self.avg_doc_length = self.total_length as f32 / self.total_docs as f32;
+        // self.avg_doc_length =
+        //     self.doc_lengths.iter().sum::<usize>() as f32 / self.total_docs as f32;
     }
     /// Calculate BM25 score for a document given query terms
     fn calculate_score(&self, query_tokens: &[String], doc_id: usize) -> f32 {

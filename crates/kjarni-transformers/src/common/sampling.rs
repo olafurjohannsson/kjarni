@@ -155,8 +155,7 @@ pub fn top_p_filtering(mut logits: Array1<f32>, p: f32) -> Array1<f32> {
     let mut indices: Vec<usize> = (0..logits.len()).collect();
     indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
     
-    softmax_1d_inplace(&mut logits);
-    let probs = logits.clone();
+    let probs = softmax_1d(&logits);
 
     let mut cumulative = 0.0;
     for (i, &idx) in indices.iter().enumerate() {

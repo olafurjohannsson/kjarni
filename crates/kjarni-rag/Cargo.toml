@@ -5,7 +5,6 @@ edition = "2024"
 
 
 [dependencies]
-kjarni-transformers = { path = "../kjarni-transformers" }
 kjarni-search = { path = "../kjarni-search" }
 log = { workspace = true }
 memmap2 = "0.9"

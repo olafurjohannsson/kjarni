@@ -11,7 +11,7 @@ members = [
 
 resolver = "2"
 
-exclude = ["crates/kjarni-examples"]
+exclude = ["crates/kjarni-examples", "crates/kjarni-wasm"]
 
 
 [workspace.package]

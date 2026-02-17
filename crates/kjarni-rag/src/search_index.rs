@@ -1,12 +1,13 @@
 //! Unified search index combining BM25 and vector search
-use kjarni_search::{bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore};
 use anyhow::Result;
+use bincode;
+use kjarni_search::{
+    bm25::Bm25Index, hybrid::hybrid_search, types::SearchResult, vector::VectorStore,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use bincode;
-use std::io::{BufReader, BufWriter, Read, Write};
 use std::fs::File;
-
+use std::io::{BufReader, BufWriter, Read, Write};
 
 /// Complete search index with BM25 and semantic search
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +37,47 @@ impl SearchIndex {
             documents: Vec::new(),
             metadata: Vec::new(),
         }
+    }
+
+    /// Remove all chunks with matching source metadata and compact the index
+    pub fn remove_by_source(&mut self, source: &str) -> usize {
+        // Find indices to keep
+        let keep: Vec<bool> = self
+            .metadata
+            .iter()
+            .map(|meta| meta.get("source").map(|s| s.as_str()) != Some(source))
+            .collect();
+
+        let removed = keep.iter().filter(|&&k| !k).count();
+        if removed == 0 {
+            return 0;
+        }
+
+        // Filter documents, embeddings, metadata
+        let mut new_docs = Vec::new();
+        let mut new_embeddings = Vec::new();
+        let mut new_metadata = Vec::new();
+
+        for (i, &keep_it) in keep.iter().enumerate() {
+            if keep_it {
+                new_docs.push(std::mem::take(&mut self.documents[i]));
+                new_embeddings.push(std::mem::take(&mut self.vectors.embeddings[i]));
+                new_metadata.push(std::mem::take(&mut self.metadata[i]));
+            }
+        }
+
+        // Rebuild BM25 from scratch
+        let mut bm25 = Bm25Index::new();
+        for (i, doc) in new_docs.iter().enumerate() {
+            bm25.add_document(i, doc);
+        }
+
+        self.documents = new_docs;
+        self.vectors.embeddings = new_embeddings;
+        self.metadata = new_metadata;
+        self.bm25 = bm25;
+
+        removed
     }
 
     /// Build index from documents and their embeddings
@@ -98,7 +140,7 @@ impl SearchIndex {
     pub fn save_to_file(&self, path: &str) -> Result<()> {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
-        
+
         if path.ends_with(".json") {
             let json = self.save_json()?;
             std::fs::write(path, json)?;
@@ -473,14 +515,8 @@ mod tests {
 
     #[test]
     fn test_search_semantic() {
-        let documents = vec![
-            "first document".to_string(),
-            "second document".to_string(),
-        ];
-        let embeddings = vec![
-            vec![1.0, 0.0, 0.0, 0.0],
-            vec![0.0, 1.0, 0.0, 0.0],
-        ];
+        let documents = vec!["first document".to_string(), "second document".to_string()];
+        let embeddings = vec![vec![1.0, 0.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0]];
 
         let index = SearchIndex::build(documents, embeddings, vec![]).unwrap();
 
@@ -572,14 +608,27 @@ mod tests {
         let semantic_results = vec![(2, 0.9), (0, 0.7), (3, 0.5)];
 
         // Equal weights
-        let results = hybrid_search_weighted(keyword_results.clone(), semantic_results.clone(), 10, 1.0, 1.0);
+        let results = hybrid_search_weighted(
+            keyword_results.clone(),
+            semantic_results.clone(),
+            10,
+            1.0,
+            1.0,
+        );
         assert!(!results.is_empty());
 
         // Keyword-heavy
-        let keyword_heavy = hybrid_search_weighted(keyword_results.clone(), semantic_results.clone(), 10, 2.0, 0.5);
+        let keyword_heavy = hybrid_search_weighted(
+            keyword_results.clone(),
+            semantic_results.clone(),
+            10,
+            2.0,
+            0.5,
+        );
 
         // Semantic-heavy
-        let semantic_heavy = hybrid_search_weighted(keyword_results, semantic_results, 10, 0.5, 2.0);
+        let semantic_heavy =
+            hybrid_search_weighted(keyword_results, semantic_results, 10, 0.5, 2.0);
 
         // With keyword weight, doc 0 (rank 1 in keywords) should score higher
         // With semantic weight, doc 2 (rank 1 in semantic) should score higher
