@@ -6,6 +6,7 @@ mod classifier;
 mod reranker;
 mod indexer;
 mod searcher;
+mod chat;
 
 
 pub use callback::*;

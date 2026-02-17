@@ -76,7 +76,7 @@ impl Chat {
     }
 
     /// Internal: construct from builder.
-    pub(crate) async fn from_builder(builder: ChatBuilder) -> ChatResult<Self> {
+    pub async fn from_builder(builder: ChatBuilder) -> ChatResult<Self> {
         // Resolve model type
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| ChatError::UnknownModel(builder.model.clone()))?;
@@ -171,7 +171,7 @@ impl Chat {
     }
 
     /// Format a conversation using the chat template.
-    pub(crate) fn format_prompt(&self, conversation: &Conversation) -> String {
+    pub fn format_prompt(&self, conversation: &Conversation) -> String {
         self.chat_template().apply(conversation)
     }
 
@@ -190,7 +190,7 @@ impl Chat {
     }
 
     /// Convert History to Conversation.
-    pub(crate) fn history_to_conversation(&self, history: &History) -> Conversation {
+    pub fn history_to_conversation(&self, history: &History) -> Conversation {
         let mut conversation = Conversation::new();
         let mut has_system = false;
 
@@ -327,7 +327,7 @@ impl Chat {
     }
 
     /// Generate using the inner generator.
-    pub(crate) async fn generate(
+    pub async fn generate(
         &self,
         prompt: &str,
         runtime_overrides: &GenerationOverrides,
@@ -351,7 +351,7 @@ impl Chat {
     }
 
     /// Generate streaming using channel approach.
-    pub(crate) async fn generate_stream(
+    pub async fn generate_stream(
         &self,
         prompt: String,
         runtime_overrides: GenerationOverrides,
