@@ -128,22 +128,22 @@ pub struct KjarniStringArray {
 
 /// Free a float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_array_free(arr: KjarniFloatArray) {
+pub unsafe extern "C" fn kjarni_float_array_free(arr: *const KjarniFloatArray) {
+    if arr.is_null() { return; }
+    let arr = &*arr;
     if !arr.data.is_null() && arr.len > 0 {
-        unsafe {
-            let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, arr.len));
-        }
+        let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, arr.len));
     }
 }
 
 /// Free a 2D float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: KjarniFloat2DArray) {
+pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: *const KjarniFloat2DArray) {
+    if arr.is_null() { return; }
+    let arr = &*arr;
     if !arr.data.is_null() && arr.rows > 0 && arr.cols > 0 {
         let total = arr.rows * arr.cols;
-        unsafe {
-            let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, total));
-        }
+        let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, total));
     }
 }
 
@@ -159,17 +159,17 @@ pub unsafe extern "C" fn kjarni_string_free(s: *mut std::ffi::c_char) {
 
 /// Free a string array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_string_array_free(arr: KjarniStringArray) {
+pub unsafe extern "C" fn kjarni_string_array_free(arr: *const KjarniStringArray) {
+    if arr.is_null() { return; }
+    let arr = &*arr;
     if !arr.strings.is_null() && arr.len > 0 {
-        unsafe {
-            let strings = std::slice::from_raw_parts_mut(arr.strings, arr.len);
-            for s in strings.iter() {
-                if !s.is_null() {
-                    let _ = std::ffi::CString::from_raw(*s);
-                }
+        let strings = std::slice::from_raw_parts_mut(arr.strings, arr.len);
+        for s in strings.iter() {
+            if !s.is_null() {
+                let _ = std::ffi::CString::from_raw(*s);
             }
-            let _ = Box::from_raw(strings.as_mut_ptr());
         }
+        let _ = Box::from_raw(strings.as_mut_ptr());
     }
 }
 
@@ -262,7 +262,7 @@ mod ffi_bridge_tests {
         let arr = KjarniFloatArray::from_vec(vec![]);
         
         assert_eq!(arr.len, 0);
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -275,7 +275,7 @@ mod ffi_bridge_tests {
         let value = unsafe { *arr.data };
         assert!((value - 3.14159).abs() < f32::EPSILON);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, arr.len) };
         assert_eq!(slice, &original[..]);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -305,7 +305,7 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, arr.len) };
         assert_eq!(slice, &original[..]);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod ffi_bridge_tests {
         assert_eq!(slice[6], f32::NEG_INFINITY);
         assert!(slice[7].is_nan());
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod ffi_bridge_tests {
         assert_eq!(arr.len, 0);
         
         // Should be safe to free an empty array
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod ffi_bridge_tests {
             data: std::ptr::null_mut(),
             len: 0,
         };
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -363,7 +363,7 @@ mod ffi_bridge_tests {
             data: std::ptr::null_mut(),
             len: 100,
         };
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -374,7 +374,7 @@ mod ffi_bridge_tests {
         assert_eq!(arr.rows, 0);
         assert_eq!(arr.cols, 0);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -389,7 +389,7 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, arr.rows * arr.cols) };
         assert_eq!(slice, &[1.0, 2.0, 3.0]);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -409,7 +409,7 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, 9) };
         assert_eq!(slice, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -432,7 +432,7 @@ mod ffi_bridge_tests {
         assert_eq!(slice[embedding_dim], embedding_dim as f32); // First element of second row
         assert_eq!(slice[2 * embedding_dim], (2 * embedding_dim) as f32); // First element of third row
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -447,7 +447,7 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, 6) };
         assert_eq!(slice, &flat[..]);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -468,7 +468,7 @@ mod ffi_bridge_tests {
         let value = unsafe { *arr.data };
         assert_eq!(value, 42.0);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -479,7 +479,7 @@ mod ffi_bridge_tests {
         assert_eq!(arr.rows, 0);
         assert_eq!(arr.cols, 0);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -489,7 +489,7 @@ mod ffi_bridge_tests {
             rows: 0,
             cols: 0,
         };
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -500,14 +500,14 @@ mod ffi_bridge_tests {
             rows: 10,
             cols: 10,
         };
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
     fn test_float_2d_array_free_zero_rows() {
         // Edge case: valid pointer but rows = 0
         let arr = KjarniFloat2DArray::from_vecs(vec![]);
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -516,7 +516,7 @@ mod ffi_bridge_tests {
             strings: std::ptr::null_mut(),
             len: 0,
         };
-        unsafe { kjarni_string_array_free(arr); }
+        unsafe { kjarni_string_array_free(&arr); }
     }
 
     #[test]
@@ -525,7 +525,7 @@ mod ffi_bridge_tests {
             strings: std::ptr::null_mut(),
             len: 5,
         };
-        unsafe { kjarni_string_array_free(arr); }
+        unsafe { kjarni_string_array_free(&arr); }
     }
 
     #[test]
@@ -566,7 +566,7 @@ mod ffi_bridge_tests {
         
         assert_eq!(original, roundtrip);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -585,7 +585,7 @@ mod ffi_bridge_tests {
             assert_eq!(row, &original[row_idx][..]);
         }
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod ffi_bridge_tests {
             assert_eq!(*arr.data.add(1 * arr.cols + 1), 4.0); // [1][1]
         }
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod ffi_bridge_tests {
         // f32 requires 4-byte alignment
         assert_eq!(arr.data as usize % std::mem::align_of::<f32>(), 0);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -621,7 +621,7 @@ mod ffi_bridge_tests {
         
         assert_eq!(arr.data as usize % std::mem::align_of::<f32>(), 0);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -696,7 +696,7 @@ mod ffi_bridge_tests {
                     let slice = unsafe { std::slice::from_raw_parts(arr.data, arr.len) };
                     assert_eq!(slice, &data[..]);
                     
-                    unsafe { kjarni_float_array_free(arr); }
+                    unsafe { kjarni_float_array_free(&arr); }
                 })
             })
             .collect();
@@ -710,7 +710,7 @@ mod ffi_bridge_tests {
         // Simulate many small embedding returns
         for _ in 0..1000 {
             let arr = KjarniFloatArray::from_vec(vec![1.0, 2.0, 3.0]);
-            unsafe { kjarni_float_array_free(arr); }
+            unsafe { kjarni_float_array_free(&arr); }
         }
     }
 
@@ -725,7 +725,7 @@ mod ffi_bridge_tests {
         assert_eq!(arr.rows, 1000);
         assert_eq!(arr.cols, 1024);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -738,12 +738,12 @@ mod ffi_bridge_tests {
             
             if i % 3 == 0 && !arrays.is_empty() {
                 let arr = arrays.remove(0);
-                unsafe { kjarni_float_array_free(arr); }
+                unsafe { kjarni_float_array_free(&arr); }
             }
         }
         
         for arr in arrays {
-            unsafe { kjarni_float_array_free(arr); }
+            unsafe { kjarni_float_array_free(&arr); }
         }
     }
 
@@ -755,7 +755,7 @@ mod ffi_bridge_tests {
         
         assert_eq!(arr.len, 0);
         
-        unsafe { kjarni_float_array_free(arr); }
+        unsafe { kjarni_float_array_free(&arr); }
     }
 
     #[test]
@@ -766,7 +766,7 @@ mod ffi_bridge_tests {
         assert_eq!(arr.rows, 1);
         assert_eq!(arr.cols, 0);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 
     #[test]
@@ -777,6 +777,6 @@ mod ffi_bridge_tests {
         let slice = unsafe { std::slice::from_raw_parts(arr.data, 4) };
         assert_eq!(slice, &[1.0, 2.0, 3.0, 4.0]);
         
-        unsafe { kjarni_float_2d_array_free(arr); }
+        unsafe { kjarni_float_2d_array_free(&arr); }
     }
 }

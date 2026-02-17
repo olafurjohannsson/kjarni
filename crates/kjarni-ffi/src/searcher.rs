@@ -96,11 +96,10 @@ impl KjarniSearchResults {
 /// # Safety
 /// Must only be called once per `KjarniSearchResults` returned from search functions.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_search_results_free(results: KjarniSearchResults) {
+pub unsafe extern "C" fn kjarni_search_results_free(results: *const KjarniSearchResults) {
+    if results.is_null() { return; }
+    let results = &*results;
     if !results.results.is_null() && results.len > 0 {
-        // SAFETY: results.results was allocated by from_results() using Vec::into_raw_parts
-        // pattern (as_mut_ptr + forget). We have exclusive ownership since this is the free
-        // function and caller guarantees single call. Length is tracked in results.len.
         unsafe {
             let slice = std::slice::from_raw_parts_mut(results.results, results.len);
             for result in slice.iter_mut() {

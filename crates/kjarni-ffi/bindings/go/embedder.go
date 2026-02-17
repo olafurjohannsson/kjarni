@@ -221,13 +221,13 @@ func float2DArrayToSlice(arr ffiFloat2DArray) [][]float32 {
 }
 
 func freeFloatArray(arr ffiFloatArray) {
-	if _floatArrayFreeSym != 0 {
-		purego.SyscallN(_floatArrayFreeSym, arr.Data, arr.Len)
-	}
+    if _floatArrayFreeSym != 0 {
+        purego.SyscallN(_floatArrayFreeSym, uintptr(unsafe.Pointer(&arr)))
+    }
 }
 
 func freeFloat2DArray(arr ffiFloat2DArray) {
-	if _float2DArrayFreeSym != 0 {
-		purego.SyscallN(_float2DArrayFreeSym, arr.Data, arr.Rows, arr.Cols)
-	}
+    if _float2DArrayFreeSym != 0 {
+        purego.SyscallN(_float2DArrayFreeSym, uintptr(unsafe.Pointer(&arr)))
+    }
 }
