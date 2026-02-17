@@ -10,13 +10,16 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-// encode text into vector embeddings
+// Embedder encodes text into vector embeddings for similarity and search.
 type Embedder struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
+// NewEmbedder creates an embedder for the given model.
+// Available models: minilm-l6-v2 (384d), mpnet-base-v2 (768d), distilbert-base (768d).
+// Models download automatically on first use and are cached locally.
 func NewEmbedder(model string, opts ...Option) (*Embedder, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -50,7 +53,7 @@ func NewEmbedder(model string, opts ...Option) (*Embedder, error) {
 	return &Embedder{handle: handle}, nil
 }
 
-// return the embedding vector for the given text
+// Encode returns the embedding vector for the given text.
 func (e *Embedder) Encode(text string) ([]float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -80,7 +83,7 @@ func (e *Embedder) Encode(text string) ([]float32, error) {
 	return vec, nil
 }
 
-// encodes multiple texts 
+// EncodeBatch encodes multiple texts and returns their embedding vectors.
 func (e *Embedder) EncodeBatch(texts []string) ([][]float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -124,7 +127,7 @@ func (e *Embedder) EncodeBatch(texts []string) ([][]float32, error) {
 	return vecs, nil
 }
 
-// returns the cosine similarity between two texts
+// Similarity returns the cosine similarity between two texts, computed by the engine.
 func (e *Embedder) Similarity(a, b string) (float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -155,14 +158,14 @@ func (e *Embedder) Similarity(a, b string) (float32, error) {
 	return result, nil
 }
 
-// return the dimensionality of the embedding model
+// Dim returns the dimensionality of the embedding model.
 func (e *Embedder) Dim() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return int(_embedderDim(e.handle))
 }
 
-// release the embedder resources
+// Close releases the embedder resources. Safe to call multiple times.
 func (e *Embedder) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -176,7 +179,7 @@ func (e *Embedder) Close() error {
 	return nil
 }
 
-// compute cosine similarity between two vectors
+// CosineSimilarity computes cosine similarity between two vectors in Go.
 func CosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0

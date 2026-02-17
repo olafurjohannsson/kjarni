@@ -9,21 +9,22 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-//  single reranked document
+// RerankResult holds a single reranked document with its relevance score.
 type RerankResult struct {
 	Index    int
 	Score    float32
 	Document string
 }
 
-// score query-document relevance using a cross-encoder
+// Reranker scores query-document relevance using a cross-encoder model.
 type Reranker struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
-// new reranker
+// NewReranker creates a reranker using the default cross-encoder model.
+// The model downloads automatically on first use and is cached locally.
 func NewReranker(opts ...Option) (*Reranker, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -52,7 +53,7 @@ func NewReranker(opts ...Option) (*Reranker, error) {
 	return &Reranker{handle: handle}, nil
 }
 
-// return relevance score for a query-document pair
+// Score returns the relevance score for a single query-document pair.
 func (r *Reranker) Score(query, document string) (float32, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -83,7 +84,7 @@ func (r *Reranker) Score(query, document string) (float32, error) {
 	return result, nil
 }
 
-//rerank scores and sort documents by relevance to the query
+// Rerank scores all documents and returns them sorted by relevance to the query.
 func (r *Reranker) Rerank(query string, documents []string) ([]RerankResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -129,7 +130,7 @@ func (r *Reranker) Rerank(query string, documents []string) ([]RerankResult, err
 	return parseRerankResults(results, documents), nil
 }
 
-// scores documents and returns the top k 
+// RerankTopK scores all documents and returns the top k sorted by relevance.
 func (r *Reranker) RerankTopK(query string, documents []string, k int) ([]RerankResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -176,7 +177,7 @@ func (r *Reranker) RerankTopK(query string, documents []string, k int) ([]Rerank
 	return parseRerankResults(results, documents), nil
 }
 
-// release resources
+// Close releases the reranker resources. Safe to call multiple times.
 func (r *Reranker) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

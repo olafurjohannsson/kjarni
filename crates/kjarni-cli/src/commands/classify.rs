@@ -1,8 +1,11 @@
-//! Text classification command using the high-level Classifier API.
+//! Classification command with colored terminal output.
 
 use anyhow::{anyhow, Result};
+use colored::*;
 use kjarni::DType;
 use kjarni::classifier::{Classifier, ClassificationResult};
+
+use crate::commands::display;
 
 pub async fn run(
     input: &[String],
@@ -19,9 +22,6 @@ pub async fn run(
     dtype: Option<&str>,
     quiet: bool,
 ) -> Result<()> {
-    if !quiet {
-        eprintln!("Running {:?} on text {}", model, "");
-    }
     // Resolve input text
     let text = if input.is_empty() {
         crate::commands::util::resolve_input(None)?
@@ -44,38 +44,27 @@ pub async fn run(
         Classifier::builder(model)
     };
 
-    // Apply options
-    builder = builder
-        .top_k(top_k)
-        .quiet(quiet);
+    builder = builder.top_k(top_k).quiet(quiet);
 
     if let Some(t) = threshold {
         builder = builder.threshold(t);
     }
-
     if let Some(max_len) = max_length {
         builder = builder.max_length(max_len);
     }
-
     if let Some(bs) = batch_size {
         builder = builder.batch_size(bs);
     }
-
     if multi_label {
         builder = builder.multi_label();
     }
-
     if gpu {
         builder = builder.gpu();
     }
-
-    // Parse dtype
     if let Some(dt) = dtype {
         let dtype_enum = parse_dtype(dt)?;
         builder = builder.dtype(dtype_enum);
     }
-
-    // Parse labels
     if let Some(labels_str) = labels {
         builder = builder.labels_str(labels_str);
     }
@@ -85,20 +74,22 @@ pub async fn run(
         .await
         .map_err(|e| anyhow!("Failed to load classifier: {}", e))?;
 
-    // Show info
     if !quiet {
-        eprintln!("Model: {}", classifier.model_name());
-        eprintln!("Device: {:?}", classifier.device());
-        eprintln!("Labels: {:?}", classifier.labels().unwrap_or_default());
-        if multi_label {
-            eprintln!("Mode: multi-label (sigmoid)");
-        }
+        eprintln!(
+            "{}",
+            format!(
+                "Model: {}  Device: {:?}",
+                classifier.model_name(),
+                classifier.device()
+            )
+            .dimmed()
+        );
     }
 
     // Run classification
     if is_batch {
         if !quiet {
-            eprintln!("Classifying {} texts...", lines.len());
+            eprintln!("{}", format!("Classifying {} texts...", lines.len()).dimmed());
         }
         let results = classifier
             .classify_batch(&lines)
@@ -159,19 +150,56 @@ fn format_single_result(
             if quiet {
                 Ok(format!("{}\n", result.label))
             } else {
-                let mut output = String::new();
-                output.push('\n');
-                for (label, score) in &result.all_scores {
-                    let bar_len = (score * 40.0) as usize;
-                    let bar = "█".repeat(bar_len);
-                    output.push_str(&format!("  {:>16}  {:>6.2}%  {}\n", label, score * 100.0, bar));
-                }
-                output.push('\n');
-                Ok(output)
+                Ok(format_pretty_single(text, result))
             }
         }
-        _ => Err(anyhow!("Unknown format: '{}'. Use: json, jsonl, text", format)),
+        _ => Err(anyhow!(
+            "Unknown format: '{}'. Use: json, jsonl, text",
+            format
+        )),
     }
+}
+
+fn format_pretty_single(text: &str, result: &ClassificationResult) -> String {
+    let mut output = String::new();
+
+    // Input text
+    let truncated = truncate_clean(text, 60);
+    output.push_str(&format!(
+        "\n  {} \"{}\"\n\n",
+        "Input".dimmed(),
+        truncated.white()
+    ));
+
+    // Find the top label
+    let top_label = &result.label;
+
+    // All predictions with bars
+    for (label, score) in &result.all_scores {
+        let is_top = label == top_label;
+        let prefix = if is_top {
+            "✓".green().bold()
+        } else {
+            " ".normal()
+        };
+
+        let bar = display::score_bar(*score, 20);
+        let pct = display::score_pct(*score);
+
+        let label_str = if is_top {
+            format!("{:>14}", label).white().bold()
+        } else {
+            format!("{:>14}", label).dimmed()
+        };
+
+        output.push_str(&format!(
+            "  {} {}  {}  {}\n",
+            prefix, label_str, bar, pct
+        ));
+    }
+
+    output.push('\n');
+    output
 }
 
 fn format_batch_results(
@@ -212,27 +240,52 @@ fn format_batch_results(
             Ok(result_str)
         }
         "text" => {
-            let mut output = String::new();
             if quiet {
+                let mut output = String::new();
                 for result in results {
                     output.push_str(&format!("{}\n", result.label));
                 }
+                Ok(output)
             } else {
+                let mut output = String::new();
+                output.push('\n');
                 for (text, result) in texts.iter().zip(results.iter()) {
-                    let truncated = truncate_text(text, 50);
+                    let truncated = truncate_clean(text, 40);
+                    let bar = display::score_bar(result.score, 15);
+                    let pct = display::score_pct(result.score);
+                    let label_colored = display::colorize_by_score(
+                        &format!("{:>14}", result.label),
+                        result.score,
+                    );
+
                     output.push_str(&format!(
-                        "{:>16} ({:.1}%)  {}\n",
-                        result.label,
-                        result.score * 100.0,
-                        truncated
+                        "  {}  {}  {}  \"{}\"\n",
+                        label_colored,
+                        bar,
+                        pct,
+                        truncated.dimmed()
                     ));
                 }
+                output.push('\n');
+                Ok(output)
             }
-            Ok(output)
         }
-        _ => Err(anyhow!("Unknown format: '{}'. Use: json, jsonl, text", format)),
+        _ => Err(anyhow!(
+            "Unknown format: '{}'. Use: json, jsonl, text",
+            format
+        )),
     }
 }
+
+fn truncate_clean(text: &str, max_len: usize) -> String {
+    let clean = text.replace('\n', " ").replace('\r', "");
+    if clean.len() <= max_len {
+        clean
+    } else {
+        format!("{}…", &clean[..max_len - 1])
+    }
+}
+
 
 fn truncate_text(text: &str, max_len: usize) -> String {
     if text.len() > max_len {

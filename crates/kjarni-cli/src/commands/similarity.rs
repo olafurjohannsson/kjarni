@@ -3,6 +3,8 @@
 use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::Path;
+use colored::*;
+use crate::commands::display;
 
 use kjarni::{Device, ModelArchitecture, ModelType, SentenceEncoder, registry};
 
@@ -11,6 +13,7 @@ pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) 
     let content2 = resolve_text(text2)?;
 
     let device = if gpu { Device::Wgpu } else { Device::Cpu };
+
     let model_type =
         ModelType::from_cli_name(model).ok_or_else(|| anyhow!("Unknown model: '{}'", model))?;
 
@@ -20,46 +23,67 @@ pub async fn run(text1: &str, text2: &str, model: &str, gpu: bool, quiet: bool) 
 
     if !registry::is_model_downloaded(model)? {
         if !quiet {
-            eprintln!("Downloading model '{}'...", model);
+            eprintln!("{}", format!("Downloading model '{}'...", model).dimmed());
         }
         registry::download_model(model, false, quiet).await?;
     }
 
     if !quiet {
-        eprintln!("Loading encoder '{}'...", model);
-    }
-
-    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
-
-    if !quiet {
-        eprintln!("Computing similarity...");
+        eprintln!("{}", format!("Loading encoder '{}'...", model).dimmed());
+        eprintln!("{}", "Computing similarity...".dimmed());
         eprintln!();
     }
 
+    let encoder = SentenceEncoder::from_registry(model_type, None, device, None, None).await?;
     let embeddings = encoder.encode_batch(&[&content1, &content2]).await?;
-
     let similarity = cosine_similarity(&embeddings[0], &embeddings[1]);
-    let output = format_output(similarity, &content1, &content2, quiet);
-    print!("{}", output);
+
+    if quiet {
+        print!("{:.6}\n", similarity);
+    } else {
+        print!("{}", format_pretty(similarity, &content1, &content2));
+    }
 
     Ok(())
 }
 
-fn format_output(similarity: f32, text1: &str, text2: &str, quiet: bool) -> String {
-    if quiet {
-        format!("{:.6}\n", similarity)
+fn format_pretty(score: f32, text1: &str, text2: &str) -> String {
+    let mut output = String::new();
+
+    // Main result: bar + percentage + label
+    let bar = display::score_bar(score, 20);
+    let pct = display::score_pct(score);
+    let label = display::similarity_label(score);
+
+    output.push_str(&format!(
+        "  {}  {}  {}\n\n",
+        bar, pct, label
+    ));
+
+    // Texts being compared
+    let t1 = truncate_clean(text1, 60);
+    let t2 = truncate_clean(text2, 60);
+
+    output.push_str(&format!(
+        "  {} \"{}\"\n",
+        "↔".dimmed(),
+        t1.white()
+    ));
+    output.push_str(&format!(
+        "  {} \"{}\"\n",
+        "↔".dimmed(),
+        t2.white()
+    ));
+
+    output
+}
+
+fn truncate_clean(s: &str, max_len: usize) -> String {
+    let clean = s.replace('\n', " ").replace('\r', "");
+    if clean.len() <= max_len {
+        clean
     } else {
-        let mut output = String::new();
-        output.push_str(&format!("Similarity: {:.4}\n", similarity));
-        output.push('\n');
-        output.push_str(&format!(
-            "Interpretation: {}\n",
-            interpret_similarity(similarity)
-        ));
-        output.push('\n');
-        output.push_str(&format!("Text 1: {}\n", truncate(text1, 50)));
-        output.push_str(&format!("Text 2: {}\n", truncate(text2, 50)));
-        output
+        format!("{}…", &clean[..max_len - 1])
     }
 }
 
@@ -91,28 +115,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / denom
 }
 
-fn interpret_similarity(score: f32) -> &'static str {
-    if score > 0.9 {
-        "Very similar / near duplicate"
-    } else if score > 0.7 {
-        "Highly similar"
-    } else if score > 0.5 {
-        "Moderately similar"
-    } else if score > 0.3 {
-        "Somewhat related"
-    } else {
-        "Not similar"
-    }
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    let s = s.replace('\n', " ");
-    if s.len() <= max_len {
-        s
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -222,107 +224,6 @@ mod tests {
     }
 
     #[test]
-    fn test_interpret_similarity_very_similar() {
-        assert_eq!(interpret_similarity(0.95), "Very similar / near duplicate");
-        assert_eq!(interpret_similarity(0.91), "Very similar / near duplicate");
-        assert_eq!(interpret_similarity(1.0), "Very similar / near duplicate");
-    }
-
-    #[test]
-    fn test_interpret_similarity_highly_similar() {
-        assert_eq!(interpret_similarity(0.9), "Highly similar");
-        assert_eq!(interpret_similarity(0.8), "Highly similar");
-        assert_eq!(interpret_similarity(0.71), "Highly similar");
-    }
-
-    #[test]
-    fn test_interpret_similarity_moderately_similar() {
-        assert_eq!(interpret_similarity(0.7), "Moderately similar");
-        assert_eq!(interpret_similarity(0.6), "Moderately similar");
-        assert_eq!(interpret_similarity(0.51), "Moderately similar");
-    }
-
-    #[test]
-    fn test_interpret_similarity_somewhat_related() {
-        assert_eq!(interpret_similarity(0.5), "Somewhat related");
-        assert_eq!(interpret_similarity(0.4), "Somewhat related");
-        assert_eq!(interpret_similarity(0.31), "Somewhat related");
-    }
-
-    #[test]
-    fn test_interpret_similarity_not_similar() {
-        assert_eq!(interpret_similarity(0.3), "Not similar");
-        assert_eq!(interpret_similarity(0.1), "Not similar");
-        assert_eq!(interpret_similarity(0.0), "Not similar");
-        assert_eq!(interpret_similarity(-0.5), "Not similar");
-    }
-
-    #[test]
-    fn test_interpret_similarity_boundary_values() {
-        assert_eq!(interpret_similarity(0.9), "Highly similar"); 
-        assert_eq!(
-            interpret_similarity(0.90001),
-            "Very similar / near duplicate"
-        ); 
-        assert_eq!(interpret_similarity(0.7), "Moderately similar"); 
-        assert_eq!(interpret_similarity(0.70001), "Highly similar"); 
-        assert_eq!(interpret_similarity(0.5), "Somewhat related"); 
-        assert_eq!(interpret_similarity(0.50001), "Moderately similar"); 
-        assert_eq!(interpret_similarity(0.3), "Not similar"); 
-        assert_eq!(interpret_similarity(0.30001), "Somewhat related"); 
-    }
-
-    #[test]
-    fn test_truncate_short_string() {
-        assert_eq!(truncate("hello", 50), "hello");
-        assert_eq!(truncate("short text", 20), "short text");
-    }
-
-    #[test]
-    fn test_truncate_exact_length() {
-        let text = "a".repeat(50);
-        assert_eq!(truncate(&text, 50), text);
-    }
-
-    #[test]
-    fn test_truncate_long_string() {
-        let text = "a".repeat(100);
-        let result = truncate(&text, 50);
-        assert_eq!(result.len(), 50);
-        assert!(result.ends_with("..."));
-    }
-
-    #[test]
-    fn test_truncate_replaces_newlines() {
-        assert_eq!(truncate("hello\nworld", 50), "hello world");
-        assert_eq!(truncate("line1\nline2\nline3", 50), "line1 line2 line3");
-    }
-
-    #[test]
-    fn test_truncate_newlines_then_truncate() {
-        let text = "line one\nline two\nline three\nline four\nline five";
-        let result = truncate(text, 30);
-        assert_eq!(result.len(), 30);
-        assert!(result.ends_with("..."));
-        assert!(!result.contains('\n'));
-    }
-
-    #[test]
-    fn test_truncate_empty() {
-        assert_eq!(truncate("", 50), "");
-    }
-
-    #[test]
-    fn test_truncate_only_newlines() {
-        assert_eq!(truncate("\n\n\n", 50), "   ");
-    }
-
-    #[test]
-    fn test_truncate_minimum_length() {
-        assert_eq!(truncate("hello", 4), "h...");
-    }
-
-    #[test]
     fn test_resolve_text_literal() {
         let result = resolve_text("hello world").unwrap();
         assert_eq!(result, "hello world");
@@ -370,79 +271,7 @@ mod tests {
         let result = resolve_text("").unwrap();
         assert_eq!(result, "");
     }
-    #[test]
-    fn test_format_output_quiet() {
-        let output = format_output(0.85, "text one", "text two", true);
-        assert_eq!(output.trim(), "0.850000");
-    }
-
-    #[test]
-    fn test_format_output_quiet_precision() {
-        let output = format_output(0.123456789, "a", "b", true);
-        assert!(output.contains("0.123457")); 
-    }
-
-    #[test]
-    fn test_format_output_verbose() {
-        let output = format_output(0.85, "text one", "text two", false);
-
-        assert!(output.contains("Similarity: 0.8500"));
-        assert!(output.contains("Interpretation: Highly similar"));
-        assert!(output.contains("Text 1: text one"));
-        assert!(output.contains("Text 2: text two"));
-    }
-
-    #[test]
-    fn test_format_output_verbose_truncates_long_text() {
-        let long_text = "a".repeat(100);
-        let output = format_output(0.5, &long_text, "short", false);
-
-        assert!(output.contains("..."));
-        assert!(!output.contains(&long_text));
-    }
-
-    #[test]
-    fn test_format_output_very_similar() {
-        let output = format_output(0.95, "a", "b", false);
-        assert!(output.contains("Very similar / near duplicate"));
-    }
-
-    #[test]
-    fn test_format_output_not_similar() {
-        let output = format_output(0.1, "a", "b", false);
-        assert!(output.contains("Not similar"));
-    }
-
-    #[test]
-    fn test_format_output_negative_similarity() {
-        let output = format_output(-0.5, "a", "b", false);
-        assert!(output.contains("-0.5000"));
-        assert!(output.contains("Not similar"));
-    }
-
-    #[test]
-    fn test_format_output_perfect_similarity() {
-        let output = format_output(1.0, "a", "b", false);
-        assert!(output.contains("1.0000"));
-        assert!(output.contains("Very similar / near duplicate"));
-    }
-
-
-    #[test]
-    fn test_full_workflow_literal_texts() {
-        let text1 = "The quick brown fox jumps over the lazy dog";
-        let text2 = "A fast auburn fox leaps above a sleepy canine";
-
-        let content1 = resolve_text(text1).unwrap();
-        let content2 = resolve_text(text2).unwrap();
-
-        assert_eq!(content1, text1);
-        assert_eq!(content2, text2);
-        let similarity = 0.75;
-        let output = format_output(similarity, &content1, &content2, false);
-        assert!(output.contains("Highly similar"));
-    }
-
+   
     #[test]
     fn test_full_workflow_file_and_literal() {
         let mut temp_file = NamedTempFile::new().unwrap();
@@ -490,32 +319,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_output_unicode_text() {
-        let output = format_output(0.8, "日本語テキスト", "中文文本", false);
-        assert!(output.contains("日本語テキスト"));
-        assert!(output.contains("中文文本"));
-    }
-
-    #[test]
-    fn test_format_output_newlines_in_text() {
-        let output = format_output(0.8, "line1\nline2", "other\ntext", false);
-        assert!(output.contains("line1 line2"));
-        assert!(output.contains("other text"));
-    }
-
-    #[test]
     fn test_resolve_text_whitespace_only() {
         let result = resolve_text("   ").unwrap();
         assert_eq!(result, "   ");
     }
 
-    #[test]
-    fn test_interpret_similarity_edge_negative() {
-        assert_eq!(interpret_similarity(-1.0), "Not similar");
-    }
-
-    #[test]
-    fn test_interpret_similarity_edge_over_one() {
-        assert_eq!(interpret_similarity(1.001), "Very similar / near duplicate");
-    }
 }

@@ -9,16 +9,19 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-// search strategy hybrid, semantic, keyword(bm25)
+// SearchMode determines the search strategy.
 type SearchMode int
 
 const (
-	Keyword  SearchMode = 0
+	// Keyword uses BM25 term matching.
+	Keyword SearchMode = 0
+	// Semantic uses vector similarity.
 	Semantic SearchMode = 1
-	Hybrid   SearchMode = 2
+	// Hybrid combines BM25 and vector similarity.
+	Hybrid SearchMode = 2
 )
 
-// single search result
+// SearchResult holds a single search result with its relevance score.
 type SearchResult struct {
 	Score float32
 	Text  string
@@ -38,14 +41,14 @@ type ffiSearcherConfig struct {
 }
 
 type ffiSearchOptions struct {
-	Mode         int32
-	_            int32 // padding
-	TopK         uintptr
-	UseReranker  int32
-	Threshold    float32
+	Mode          int32
+	_             int32 // padding
+	TopK          uintptr
+	UseReranker   int32
+	Threshold     float32
 	SourcePattern uintptr
-	FilterKey    uintptr
-	FilterValue  uintptr
+	FilterKey     uintptr
+	FilterValue   uintptr
 }
 
 type ffiSearchResult struct {
@@ -61,14 +64,16 @@ type ffiSearchResults struct {
 	Len     uintptr
 }
 
-// Searcher queries indexes created by Indexer
+// Searcher queries indexes created by an Indexer.
 type Searcher struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
-// new searcher
+// NewSearcher creates a searcher using the given embedding model.
+// Pass a non-empty rerankerModel to enable cross-encoder reranking of results.
+// Pass an empty string to disable reranking.
 func NewSearcher(model string, rerankerModel string, opts ...Option) (*Searcher, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -110,7 +115,7 @@ func NewSearcher(model string, rerankerModel string, opts ...Option) (*Searcher,
 	return &Searcher{handle: handle}, nil
 }
 
-//queries the index with the given mode
+// Search queries the index at indexPath and returns results using the given mode.
 func (s *Searcher) Search(indexPath string, query string, mode SearchMode) ([]SearchResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,7 +153,7 @@ func (s *Searcher) Search(indexPath string, query string, mode SearchMode) ([]Se
 	return parseSearchResults(results), nil
 }
 
-// releases  resources
+// Close releases the searcher resources. Safe to call multiple times.
 func (s *Searcher) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
