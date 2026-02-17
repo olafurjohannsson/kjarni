@@ -4,47 +4,42 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WASM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-echo "=== Kjarni Obsidian Plugin Setup ==="
-echo "WASM root: $WASM_ROOT"
-echo "Plugin dir: $SCRIPT_DIR"
+echo "=== Kjarni Obsidian Plugin Build ==="
 
-# 1. Build WASM
-echo ""
-echo "--- Building WASM ---"
+# 1. Build WASM (web target)
+echo "--- Building WASM (--target web) ---"
 cd "$WASM_ROOT"
-RUSTFLAGS="-C target-feature=+simd128" wasm-pack build --release --target nodejs -- --no-default-features
-echo "WASM built."
+RUSTFLAGS="-C target-feature=+simd128" wasm-pack build --release --target web -- --no-default-features
 
-# 2. Build plugin
-echo ""
+# 2. Build plugin (main.js + worker.js + encoder-worker.js)
 echo "--- Building plugin ---"
 cd "$SCRIPT_DIR"
 npm install --silent
 npm run build
-echo "Plugin built."
 
-# 3. Copy WASM pkg
-echo ""
-echo "--- Copying WASM files ---"
-mkdir -p "$SCRIPT_DIR/pkg"
-cp "$WASM_ROOT/pkg/kjarni_wasm.js" "$SCRIPT_DIR/pkg/"
-cp "$WASM_ROOT/pkg/kjarni_wasm_bg.wasm" "$SCRIPT_DIR/pkg/"
-echo "Copied pkg/"
+# 3. Package for release
+echo "--- Creating release package ---"
+RELEASE_DIR="$SCRIPT_DIR/release"
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR/kjarni-search/pkg"
 
-# 4. Copy models
-echo ""
-echo "--- Copying models ---"
-mkdir -p "$SCRIPT_DIR/models"
-cp "$WASM_ROOT/examples/all-MiniLM-L6-v2/model_q8.kjq" "$SCRIPT_DIR/models/encoder.kjq"
-cp "$WASM_ROOT/examples/ms-marco-MiniLM-L-6-v2/model_q8.kjq" "$SCRIPT_DIR/models/reranker.kjq"
-echo "Copied models/"
+cp "$SCRIPT_DIR/main.js"            "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/worker.js"          "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/encoder-worker.js"  "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/manifest.json"      "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/styles.css"         "$RELEASE_DIR/kjarni-search/"
+cp "$WASM_ROOT/pkg/kjarni_wasm_bg.wasm" "$RELEASE_DIR/kjarni-search/pkg/"
 
-# 5. Summary
+cd "$RELEASE_DIR"
+tar -czf "$SCRIPT_DIR/kjarni-search.tar.gz" kjarni-search/
+cd "$SCRIPT_DIR"
+rm -rf "$RELEASE_DIR"
+
 echo ""
 echo "=== Done ==="
+ls -lh "$SCRIPT_DIR/kjarni-search.tar.gz"
 echo ""
-echo "Plugin contents:"
-du -sh "$SCRIPT_DIR/main.js" "$SCRIPT_DIR/pkg/"* "$SCRIPT_DIR/models/"*
+echo "Contents:"
+tar -tzf "$SCRIPT_DIR/kjarni-search.tar.gz"
 echo ""
-echo "To install into a vault:"
-echo "  ./install.sh /path/to/your/vault"
+echo "Models auto-download from kjarni.ai on first launch."

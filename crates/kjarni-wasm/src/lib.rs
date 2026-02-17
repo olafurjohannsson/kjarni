@@ -1,12 +1,12 @@
-mod wasm_simd;
 mod tokenizer;
+mod wasm_simd;
 mod weights;
 
 use anyhow::Result;
 use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Window, WorkerGlobalScope};
 
@@ -33,7 +33,7 @@ struct BertLayer {
 }
 
 struct MultiHeadAttention {
-    query_weight: Array2<f32>,   // (out, in) = (384, 384)
+    query_weight: Array2<f32>, // (out, in) = (384, 384)
     query_bias: Array1<f32>,
     key_weight: Array2<f32>,
     key_bias: Array1<f32>,
@@ -47,9 +47,9 @@ struct MultiHeadAttention {
 }
 
 struct FeedForward {
-    dense1_weight: Array2<f32>,  // (1536, 384)
+    dense1_weight: Array2<f32>, // (1536, 384)
     dense1_bias: Array1<f32>,
-    dense2_weight: Array2<f32>,  // (384, 1536)
+    dense2_weight: Array2<f32>, // (384, 1536)
     dense2_bias: Array1<f32>,
 }
 
@@ -96,8 +96,7 @@ impl Model {
                 query_weight: weights
                     .get_array2(&format!("{}.attention.self.query.weight", prefix))?,
                 query_bias: weights.get_array1(&format!("{}.attention.self.query.bias", prefix))?,
-                key_weight: weights
-                    .get_array2(&format!("{}.attention.self.key.weight", prefix))?,
+                key_weight: weights.get_array2(&format!("{}.attention.self.key.weight", prefix))?,
                 key_bias: weights.get_array1(&format!("{}.attention.self.key.bias", prefix))?,
                 value_weight: weights
                     .get_array2(&format!("{}.attention.self.value.weight", prefix))?,
@@ -116,8 +115,7 @@ impl Model {
                 dense1_weight: weights
                     .get_array2(&format!("{}.intermediate.dense.weight", prefix))?,
                 dense1_bias: weights.get_array1(&format!("{}.intermediate.dense.bias", prefix))?,
-                dense2_weight: weights
-                    .get_array2(&format!("{}.output.dense.weight", prefix))?,
+                dense2_weight: weights.get_array2(&format!("{}.output.dense.weight", prefix))?,
                 dense2_bias: weights.get_array1(&format!("{}.output.dense.bias", prefix))?,
             };
 
@@ -202,7 +200,10 @@ impl Model {
             embeddings
         };
 
-        Ok(final_embeddings.outer_iter().map(|row| row.to_vec()).collect())
+        Ok(final_embeddings
+            .outer_iter()
+            .map(|row| row.to_vec())
+            .collect())
     }
 
     /// Forward pass
@@ -235,7 +236,7 @@ impl Model {
         }
         mean_pool(&hidden, attention_mask)
     }
-    
+
     /// Forward pass returning [CLS] token hidden state (for reranking/classification)
     fn forward_cls(
         &self,
@@ -249,7 +250,9 @@ impl Model {
         for i in 0..batch_size {
             for j in 0..seq_len {
                 let token_id = input_ids[[i, j]] as usize;
-                hidden.slice_mut(s![i, j, ..]).assign(&self.word_embeddings.row(token_id));
+                hidden
+                    .slice_mut(s![i, j, ..])
+                    .assign(&self.word_embeddings.row(token_id));
             }
         }
 
@@ -358,7 +361,13 @@ impl FeedForward {
 fn matmul_3d_2d(a: &Array3<f32>, w: &Array2<f32>) -> Array3<f32> {
     let (batch, m, k) = a.dim();
     let n = w.shape()[0];
-    assert_eq!(k, w.shape()[1], "Dimension mismatch: a[k]={} != w[in]={}", k, w.shape()[1]);
+    assert_eq!(
+        k,
+        w.shape()[1],
+        "Dimension mismatch: a[k]={} != w[in]={}",
+        k,
+        w.shape()[1]
+    );
 
     let a_cont = a.as_standard_layout();
     let w_cont = w.as_standard_layout();
@@ -429,10 +438,7 @@ fn softmax(scores: &Array4<f32>) -> Array4<f32> {
 
 #[inline(always)]
 fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
-    let mask_expanded = mask
-        .clone()
-        .insert_axis(Axis(1))
-        .insert_axis(Axis(2));
+    let mask_expanded = mask.clone().insert_axis(Axis(1)).insert_axis(Axis(2));
 
     if let Some(broadcast_mask) = mask_expanded.broadcast(scores.dim()) {
         Zip::from(&mut scores)
@@ -488,7 +494,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 // WASM bindings
 
-use kjarni_rag::{SearchIndex, TextSplitter, SplitterConfig};
+use kjarni_rag::{SearchIndex, SplitterConfig, TextSplitter};
 
 #[wasm_bindgen]
 pub struct WasmIndexBuilder {
@@ -515,29 +521,52 @@ impl WasmIndexBuilder {
             splitter: TextSplitter::new(SplitterConfig::default()),
         })
     }
+    
+    #[wasm_bindgen]
+    pub fn add_chunk(
+        &mut self,
+        text: String,
+        embedding: Vec<f32>,
+        source: String,
+        chunk_index: usize,
+    ) -> Result<(), JsValue> {
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("source".to_string(), source);
+        meta.insert("chunk_index".to_string(), chunk_index.to_string());
+
+        self.index
+            .add_document(text, embedding, Some(meta))
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(())
+    }
 
     /// Add a file's content to the index. Splits internally.
     /// Returns number of chunks added.
     #[wasm_bindgen]
     pub fn add_file(&mut self, text: &str, source_path: &str) -> Result<usize, JsValue> {
         let chunks = self.splitter.split(text);
-        let n = chunks.len();
+        if chunks.is_empty() {
+            return Ok(0);
+        }
 
-        for (i, chunk) in chunks.iter().enumerate() {
-            let embedding = self.model
-                .encode(vec![chunk.as_str()], true)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // Batch encode all chunks at once
+        let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
+        let embeddings = self
+            .model
+            .encode(chunk_refs, true)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
+        for (i, (chunk, embedding)) in chunks.iter().zip(embeddings).enumerate() {
             let mut meta = std::collections::HashMap::new();
             meta.insert("source".to_string(), source_path.to_string());
             meta.insert("chunk_index".to_string(), i.to_string());
 
             self.index
-                .add_document(chunk.clone(), embedding[0].clone(), Some(meta))
+                .add_document(chunk.clone(), embedding, Some(meta))
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
         }
 
-        Ok(n)
+        Ok(chunks.len())
     }
 
     /// Serialize the built index to bytes (for saving to disk)
@@ -561,10 +590,30 @@ impl WasmIndexBuilder {
 pub struct WasmSearch {
     model: Model,
     index: SearchIndex,
+    splitter: TextSplitter,
 }
 
 #[wasm_bindgen]
 impl WasmSearch {
+    /// Add a pre-encoded chunk (embedding already computed by encoder worker)
+    #[wasm_bindgen]
+    pub fn add_chunk(
+        &mut self,
+        text: String,
+        embedding: Vec<f32>,
+        source: String,
+        chunk_index: usize,
+    ) -> Result<(), JsValue> {
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("source".to_string(), source);
+        meta.insert("chunk_index".to_string(), chunk_index.to_string());
+
+        self.index
+            .add_document(text, embedding, Some(meta))
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(())
+    }
+
     #[wasm_bindgen]
     pub fn load(model_data: &[u8], index_data: &[u8]) -> Result<WasmSearch, JsValue> {
         let loaded = ModelWeights::from_quantized_bytes(model_data)
@@ -576,42 +625,89 @@ impl WasmSearch {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let cursor = std::io::Cursor::new(index_data);
-        let index = SearchIndex::load_binary(cursor)
+        let index =
+            SearchIndex::load_binary(cursor).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(WasmSearch {
+            model,
+            index,
+            splitter: TextSplitter::new(SplitterConfig::default()),
+        })
+    }
+    /// Remove all chunks for a source file, re-add with new content, return new chunk count
+    #[wasm_bindgen]
+    pub fn update_file(&mut self, text: &str, source_path: &str) -> Result<usize, JsValue> {
+        self.index.remove_by_source(source_path);
+
+        let chunks = self.splitter.split(text);
+        if chunks.is_empty() {
+            return Ok(0);
+        }
+
+        let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
+        let embeddings = self
+            .model
+            .encode(chunk_refs, true)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        Ok(WasmSearch { model, index })
+        for (i, (chunk, embedding)) in chunks.iter().zip(embeddings).enumerate() {
+            let mut meta = std::collections::HashMap::new();
+            meta.insert("source".to_string(), source_path.to_string());
+            meta.insert("chunk_index".to_string(), i.to_string());
+
+            self.index
+                .add_document(chunk.clone(), embedding, Some(meta))
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+
+        Ok(chunks.len())
+    }
+
+    /// Remove all chunks for a source file
+    #[wasm_bindgen]
+    pub fn remove_file(&mut self, source_path: &str) -> usize {
+        self.index.remove_by_source(source_path)
+    }
+
+    /// Serialize current index state to bytes (for saving to disk)
+    #[wasm_bindgen]
+    pub fn save_index(&self) -> Result<Vec<u8>, JsValue> {
+        let mut buf = Vec::new();
+        self.index
+            .save_binary(&mut buf)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(buf)
     }
 
     #[wasm_bindgen]
     pub fn search(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
-        let embedding = self.model
+        let embedding = self
+            .model
             .encode(vec![query], true)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let results = self.index.search_hybrid(query, &embedding[0], limit);
 
-        serde_wasm_bindgen::to_value(&results)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
     pub fn search_semantic(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
-        let embedding = self.model
+        let embedding = self
+            .model
             .encode(vec![query], true)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let results = self.index.search_semantic(&embedding[0], limit);
 
-        serde_wasm_bindgen::to_value(&results)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
     pub fn search_keywords(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
         let results = self.index.search_keywords(query, limit);
 
-        serde_wasm_bindgen::to_value(&results)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
@@ -749,6 +845,68 @@ impl WasmModel {
     }
 }
 
+#[wasm_bindgen]
+pub struct WasmEncoder {
+    model: Model,
+    splitter: TextSplitter,
+}
+
+#[wasm_bindgen]
+impl WasmEncoder {
+    #[wasm_bindgen]
+    pub fn new(model_data: &[u8]) -> Result<WasmEncoder, JsValue> {
+        let loaded = ModelWeights::from_quantized_bytes(model_data)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let config = loaded.weights.config.clone();
+        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = Model::from_weights(loaded.weights, tokenizer, config)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        Ok(WasmEncoder {
+            model,
+            splitter: TextSplitter::new(SplitterConfig::default()),
+        })
+    }
+
+    /// Split text and encode all chunks. Returns JSON array of {text, embedding, chunk_index}
+    #[wasm_bindgen]
+    pub fn encode_file(&self, text: &str, source_path: &str) -> Result<JsValue, JsValue> {
+        let chunks = self.splitter.split(text);
+        if chunks.is_empty() {
+            return serde_wasm_bindgen::to_value::<Vec<EncodedChunk>>(&vec![])
+                .map_err(|e| JsValue::from_str(&e.to_string()));
+        }
+
+        let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
+        let embeddings = self
+            .model
+            .encode(chunk_refs, true)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let results: Vec<EncodedChunk> = chunks
+            .iter()
+            .zip(embeddings)
+            .enumerate()
+            .map(|(i, (text, embedding))| EncodedChunk {
+                text: text.clone(),
+                embedding,
+                source: source_path.to_string(),
+                chunk_index: i,
+            })
+            .collect();
+
+        serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+#[derive(Serialize)]
+struct EncodedChunk {
+    text: String,
+    embedding: Vec<f32>,
+    source: String,
+    chunk_index: usize,
+}
 
 #[wasm_bindgen]
 pub struct WasmReranker {
@@ -773,9 +931,13 @@ impl WasmReranker {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         // Extract head weights before building model
-        let head_weight = loaded.weights.get_array2("classifier.weight")
+        let head_weight = loaded
+            .weights
+            .get_array2("classifier.weight")
             .map_err(|e| JsValue::from_str(&format!("Missing classifier.weight: {}", e)))?;
-        let head_bias = loaded.weights.get_array1("classifier.bias")
+        let head_bias = loaded
+            .weights
+            .get_array1("classifier.bias")
             .map_err(|e| JsValue::from_str(&format!("Missing classifier.bias: {}", e)))?;
 
         let config = loaded.weights.config.clone();
@@ -784,7 +946,11 @@ impl WasmReranker {
         let model = Model::from_weights(loaded.weights, tokenizer, config)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        Ok(WasmReranker { model, head_weight, head_bias })
+        Ok(WasmReranker {
+            model,
+            head_weight,
+            head_bias,
+        })
     }
 
     #[wasm_bindgen]
@@ -808,7 +974,10 @@ impl WasmReranker {
         let mut max_len = 0;
 
         for doc in &documents {
-            let enc = self.model.tokenizer.encode_pair(query, doc, 512)
+            let enc = self
+                .model
+                .tokenizer
+                .encode_pair(query, doc, 512)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             max_len = max_len.max(enc.ids.len());
             all_ids.push(enc.ids);
@@ -830,47 +999,61 @@ impl WasmReranker {
         }
 
         // Forward pass → [CLS] hidden states (n, hidden_size)
-        let cls_hidden = self.model.forward_cls(&input_ids, &attention_mask, Some(&token_type_ids))
+        let cls_hidden = self
+            .model
+            .forward_cls(&input_ids, &attention_mask, Some(&token_type_ids))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         // Apply head: score = cls @ weight^T + bias
         let scores_2d = cls_hidden.dot(&self.head_weight.t()) + &self.head_bias;
 
         // Collect and sort by score descending
-        let mut results: Vec<RerankResult> = (0..n).map(|i| {
-            RerankResult {
+        let mut results: Vec<RerankResult> = (0..n)
+            .map(|i| RerankResult {
                 index: i,
                 score: scores_2d[[i, 0]],
                 text: documents[i].clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
 
-        serde_wasm_bindgen::to_value(&results)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
     pub fn score(&self, query: &str, document: &str) -> Result<f32, JsValue> {
-        let enc = self.model.tokenizer.encode_pair(query, document, 512)
+        let enc = self
+            .model
+            .tokenizer
+            .encode_pair(query, document, 512)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let ids = Array2::from_shape_vec((1, enc.ids.len()),
-            enc.ids.iter().map(|&x| x as f32).collect()
-        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let ids = Array2::from_shape_vec(
+            (1, enc.ids.len()),
+            enc.ids.iter().map(|&x| x as f32).collect(),
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let mask = Array2::from_shape_vec((1, enc.attention_mask.len()),
-            enc.attention_mask.iter().map(|&x| x as f32).collect()
-        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let mask = Array2::from_shape_vec(
+            (1, enc.attention_mask.len()),
+            enc.attention_mask.iter().map(|&x| x as f32).collect(),
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let types = enc.token_type_ids.unwrap_or_default();
-        let type_ids = Array2::from_shape_vec((1, types.len()),
-            types.iter().map(|&x| x as f32).collect()
-        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let type_ids =
+            Array2::from_shape_vec((1, types.len()), types.iter().map(|&x| x as f32).collect())
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let cls = self.model.forward_cls(&ids, &mask, Some(&type_ids))
+        let cls = self
+            .model
+            .forward_cls(&ids, &mask, Some(&type_ids))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let score = cls.dot(&self.head_weight.t()) + &self.head_bias;

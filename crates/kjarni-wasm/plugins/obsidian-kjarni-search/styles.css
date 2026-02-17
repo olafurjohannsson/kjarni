@@ -1,5 +1,3 @@
-/* Kjarni Search Modal */
-
 .kjarni-search-modal .modal-content {
 	padding: 0;
 }
@@ -101,4 +99,26 @@
 	color: var(--text-faint);
 	text-align: right;
 	border-top: 1px solid var(--background-modifier-border);
+	transition: color 0.3s;
+}
+
+.kjarni-status.kjarni-refining::after {
+	content: "";
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--text-accent);
+	margin-left: 6px;
+	vertical-align: middle;
+	animation: kjarni-pulse 1s ease-in-out infinite;
+}
+
+@keyframes kjarni-pulse {
+	0%, 100% { opacity: 0.3; }
+	50% { opacity: 1; }
+}
+
+.kjarni-status.kjarni-refined {
+	color: var(--text-accent);
 }

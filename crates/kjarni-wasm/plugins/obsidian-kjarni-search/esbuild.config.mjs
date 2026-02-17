@@ -3,8 +3,7 @@ import process from "process";
 
 const prod = process.argv[2] === "production";
 
-const context = await esbuild.context({
-	entryPoints: ["main.ts"],
+const mainShared = {
 	bundle: true,
 	platform: "node",
 	external: [
@@ -27,13 +26,48 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
 	minify: prod,
+};
+
+const workerShared = {
+	bundle: true,
+	platform: "browser",
+	format: "iife",
+	target: "es2018",
+	logLevel: "info",
+	sourcemap: prod ? false : "inline",
+	treeShaking: true,
+	minify: prod,
+	define: {
+		"import.meta.url": "''",
+	},
+};
+
+const mainContext = await esbuild.context({
+	...mainShared,
+	entryPoints: ["main.ts"],
+	outfile: "main.js",
+});
+
+const workerContext = await esbuild.context({
+	...workerShared,
+	entryPoints: ["worker.ts"],
+	outfile: "worker.js",
+});
+
+const encoderContext = await esbuild.context({
+	...workerShared,
+	entryPoints: ["encoder-worker.ts"],
+	outfile: "encoder-worker.js",
 });
 
 if (prod) {
-	await context.rebuild();
+	await mainContext.rebuild();
+	await workerContext.rebuild();
+	await encoderContext.rebuild();
 	process.exit(0);
 } else {
-	await context.watch();
+	await mainContext.watch();
+	await workerContext.watch();
+	await encoderContext.watch();
 }
