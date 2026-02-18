@@ -162,9 +162,13 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build CLI (release)
+        env:
+          RUSTFLAGS: "-C linker=lld-link"
         run: cargo build --release --package kjarni-cli --target x86_64-pc-windows-msvc
 
       - name: Build FFI (release)
+        env:
+          RUSTFLAGS: "-C linker=lld-link"
         run: cargo build --release --package kjarni-ffi --target x86_64-pc-windows-msvc
 
       - name: Prepare artifacts

@@ -201,8 +201,9 @@ async fn process_inputs(
         splitter: SplitterConfig {
             chunk_size,
             chunk_overlap,
-            separator: "\n\n".to_string(),
+            clean_markdown: true,
         },
+        quiet,
         ..Default::default()
     };
     let loader = Arc::new(DocumentLoader::new(loader_config));

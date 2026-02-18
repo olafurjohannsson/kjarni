@@ -29,6 +29,7 @@ pub struct LoaderConfig {
     pub exclude_patterns: Vec<String>, 
     pub include_hidden: bool,
     pub max_file_size: Option<usize>,   
+    pub quiet: bool,
 }
 
 impl LoaderConfig {
@@ -62,6 +63,7 @@ impl Default for LoaderConfig {
             exclude_patterns: vec![],
             include_hidden: false,
             max_file_size: None,
+            quiet: false,
         }
     }
 }
@@ -85,10 +87,13 @@ impl DocumentLoader {
     /// Load chunks from a single file
     pub fn load_file(&self, path: &Path) -> Result<Vec<Chunk>> {
         let content = fs::read_to_string(path)?;
-        
-        eprintln!("Splitting file: {} (Size: {} bytes)", path.display(), content.len());
+        if !self.config.quiet {
+            eprintln!("Splitting file: {} (Size: {} bytes)", path.display(), content.len());
+        }
         let texts = self.splitter.split(&content);
-        eprintln!("  -> Generated {} chunks", texts.len());
+        if !self.config.quiet {
+            eprintln!("  -> Generated {} chunks", texts.len());
+        }
         let total = texts.len();
 
         let chunks: Vec<Chunk> = texts
