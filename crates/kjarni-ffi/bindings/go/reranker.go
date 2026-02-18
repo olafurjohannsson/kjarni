@@ -218,7 +218,7 @@ func parseRerankResults(results ffiRerankResults, documents []string) []RerankRe
 }
 
 func freeRerankResults(results ffiRerankResults) {
-	if _rerankResultsFreeSym != 0 {
-		purego.SyscallN(_rerankResultsFreeSym, results.Results, results.Len)
-	}
+    if _rerankResultsFreeSym != 0 {
+        purego.SyscallN(_rerankResultsFreeSym, uintptr(unsafe.Pointer(&results)))
+    }
 }

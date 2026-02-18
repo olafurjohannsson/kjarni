@@ -53,7 +53,9 @@ impl KjarniClassResults {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_class_results_free(results: KjarniClassResults) {
+pub unsafe extern "C" fn kjarni_class_results_free(results: *const KjarniClassResults) {
+    if results.is_null() { return; }
+    let results = &*results;
     if !results.results.is_null() && results.len > 0 {
         let slice = std::slice::from_raw_parts_mut(results.results, results.len);
         for result in slice.iter_mut() {
