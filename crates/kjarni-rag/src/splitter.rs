@@ -136,22 +136,17 @@ pub fn clean_markdown(text: &str) -> String {
     text
 }
 
-/// Remove YAML frontmatter (--- ... ---)
 fn strip_frontmatter(text: &str) -> String {
     let trimmed = text.trim_start();
     if !trimmed.starts_with("---") {
         return text.to_string();
     }
 
-    // Find the closing ---
     let after_first = &trimmed[3..];
     if let Some(end_pos) = after_first.find("\n---") {
-        // Skip past the closing --- and any trailing newline
         let rest = &after_first[end_pos + 4..];
-        let rest = rest.strip_prefix('\n').unwrap_or(rest);
-        rest.to_string()
+        rest.trim_start_matches('\n').to_string() 
     } else {
-        // No closing --- found, return as-is
         text.to_string()
     }
 }
