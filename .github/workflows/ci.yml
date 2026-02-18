@@ -56,14 +56,14 @@ jobs:
         run: |
           mkdir -p dist
           cp target/x86_64-unknown-linux-gnu/release/kjarni dist/
-          cp target/x86_64-unknown-linux-gnu/release/libkjarni.so dist/
+          cp target/x86_64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
           cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
 
           # Verify glibc requirement
           echo "=== GLIBC symbols ==="
           objdump -T dist/kjarni | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq
           echo "=== GLIBC symbols (FFI) ==="
-          objdump -T dist/libkjarni.so | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq
+          objdump -T dist/libkjarni_ffi.so | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq
 
       - uses: actions/upload-artifact@v4
         with:
@@ -135,7 +135,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/aarch64-apple-darwin/release/kjarni dist/
-          cp target/aarch64-apple-darwin/release/libkjarni.dylib dist/
+          cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
           cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
@@ -159,6 +159,8 @@ jobs:
         with:
           key: windows-x86_64
 
+      - uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build CLI (release)
         run: cargo build --release --package kjarni-cli --target x86_64-pc-windows-msvc
 
@@ -170,8 +172,8 @@ jobs:
         run: |
           mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
-          cp target/x86_64-pc-windows-msvc/release/kjarni.dll dist/ 2>/dev/null || true
-          cp target/x86_64-pc-windows-msvc/release/kjarni.dll.lib dist/ 2>/dev/null || true
+          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/ 2>/dev/null || true
+          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll.lib dist/ 2>/dev/null || true
           cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
@@ -201,7 +203,8 @@ jobs:
       - name: Build WASM
         run: |
           cd crates/kjarni-wasm
-          wasm-pack build --target web --release
+          RUSTFLAGS="-C target-feature=+simd128" \
+           wasm-pack build --release --target web -- --no-default-features
 
       - uses: actions/upload-artifact@v4
         with:
