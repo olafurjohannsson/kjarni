@@ -11,23 +11,26 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-// output of a classification
+// ClassifyResult holds the output of a classification. Label and Score
+// contain the top prediction. AllScores contains scores for every label.
 type ClassifyResult struct {
 	Label     string
 	Score     float32
 	AllScores []LabelScore
 }
 
-// single label with score
+// LabelScore is a single label with its confidence score.
 type LabelScore struct {
 	Label string
 	Score float32
 }
 
+// String returns the result as "label (score%)".
 func (r *ClassifyResult) String() string {
 	return fmt.Sprintf("%s (%.1f%%)", r.Label, r.Score*100)
 }
 
+// ToJSON returns the result as a JSON string.
 func (r *ClassifyResult) ToJSON() string {
 	var sb strings.Builder
 	sb.WriteString("{\n")
@@ -45,12 +48,17 @@ func (r *ClassifyResult) ToJSON() string {
 	return sb.String()
 }
 
+// Classifier runs text classification using a pre-trained model.
 type Classifier struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
+// NewClassifier creates a classifier for the given model.
+// Available models: distilbert-sentiment, roberta-sentiment,
+// bert-sentiment-multilingual, distilroberta-emotion, roberta-emotions, toxic-bert.
+// Models download automatically on first use and are cached locally.
 func NewClassifier(model string, opts ...Option) (*Classifier, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -83,7 +91,7 @@ func NewClassifier(model string, opts ...Option) (*Classifier, error) {
 	return &Classifier{handle: handle}, nil
 }
 
-// run classifier
+// Classify runs the model on the given text and returns scored labels.
 func (c *Classifier) Classify(text string) (*ClassifyResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -112,14 +120,14 @@ func (c *Classifier) Classify(text string) (*ClassifyResult, error) {
 	return parseClassResults(results), nil
 }
 
-// return the number of labels the model supports
+// NumLabels returns the number of labels the model supports.
 func (c *Classifier) NumLabels() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return int(_classifierNumLabels(c.handle))
 }
 
-// Close resources
+// Close releases the classifier resources. Safe to call multiple times.
 func (c *Classifier) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

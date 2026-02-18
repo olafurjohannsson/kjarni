@@ -10,7 +10,7 @@ import (
 
 	"github.com/ebitengine/purego"
 )
-
+//go:embed lib/*
 var libFS embed.FS
 
 var (

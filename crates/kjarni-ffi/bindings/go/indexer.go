@@ -9,7 +9,7 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-// statistics from an indexing operation.
+// IndexStats holds statistics from an indexing operation.
 type IndexStats struct {
 	DocumentsIndexed int
 	ChunksCreated    int
@@ -21,20 +21,20 @@ type IndexStats struct {
 }
 
 type ffiIndexerConfig struct {
-	Device         int32
-	_              int32 // padding
-	CacheDir       uintptr
-	ModelName      uintptr
-	ChunkSize      uintptr
-	ChunkOverlap   uintptr
-	BatchSize      uintptr
-	Extensions     uintptr
+	Device          int32
+	_               int32 // padding
+	CacheDir        uintptr
+	ModelName       uintptr
+	ChunkSize       uintptr
+	ChunkOverlap    uintptr
+	BatchSize       uintptr
+	Extensions      uintptr
 	ExcludePatterns uintptr
-	Recursive      int32
-	IncludeHidden  int32
-	MaxFileSize    uintptr
-	Quiet          int32
-	_2             int32 // padding
+	Recursive       int32
+	IncludeHidden   int32
+	MaxFileSize     uintptr
+	Quiet           int32
+	_2              int32 // padding
 }
 
 type ffiIndexStats struct {
@@ -47,14 +47,15 @@ type ffiIndexStats struct {
 	ElapsedMs        uint64
 }
 
-// create search indexes from files
+// Indexer creates search indexes from files in a directory.
 type Indexer struct {
 	handle uintptr
 	mu     sync.Mutex
 	closed bool
 }
 
-//  new indexer
+// NewIndexer creates an indexer using the given embedding model.
+// The model is used to generate vectors for each text chunk during indexing.
 func NewIndexer(model string, opts ...Option) (*Indexer, error) {
 	var initErr error
 	ffiOnce.Do(func() { initErr = initFFI() })
@@ -91,7 +92,8 @@ func NewIndexer(model string, opts ...Option) (*Indexer, error) {
 	return &Indexer{handle: handle}, nil
 }
 
-// build a new index from the given dirs
+// Create builds a new search index at indexPath from the given input directories.
+// Files are chunked, embedded, and stored for later retrieval with a Searcher.
 func (idx *Indexer) Create(indexPath string, inputs []string) (*IndexStats, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -141,7 +143,7 @@ func (idx *Indexer) Create(indexPath string, inputs []string) (*IndexStats, erro
 	}, nil
 }
 
-// releases resources
+// Close releases the indexer resources. Safe to call multiple times.
 func (idx *Indexer) Close() error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

@@ -72,6 +72,26 @@ interface EncodedChunk {
 type PendingResolve = (value: any) => void;
 type PendingReject = (reason: any) => void;
 
+// ─── Helpers ──────────────────────────────────────────────────────
+
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+function highlightTerms(html: string, terms: string[]): string {
+	if (terms.length === 0) return html;
+
+	// Build regex matching any query term (word boundary)
+	const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+	const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+
+	return html.replace(regex, '<mark class="kjarni-highlight">$1</mark>');
+}
+
 // ─── Plugin ──────────────────────────────────────────────────────
 
 export default class KjarniSearchPlugin extends Plugin {
@@ -812,6 +832,7 @@ class SearchModal extends Modal {
 	debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	searchVersion: number = 0;
 	lastDisplayed: SearchResultItem[] = [];
+	rerankTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(app: App, plugin: KjarniSearchPlugin) {
 		super(app);
@@ -843,7 +864,7 @@ class SearchModal extends Modal {
 
 		this.inputEl.addEventListener("input", () => {
 			if (this.debounceTimer) clearTimeout(this.debounceTimer);
-			this.debounceTimer = setTimeout(() => this.runSearch(), 150);
+			this.debounceTimer = setTimeout(() => this.runSearch(), 300);
 		});
 
 		this.inputEl.addEventListener("keydown", (e) => {
@@ -856,7 +877,7 @@ class SearchModal extends Modal {
 
 	async runSearch() {
 		const query = this.inputEl?.value?.trim();
-		if (!query || !this.resultsEl) {
+		if (!query || query.length < 3 || !this.resultsEl) {
 			if (this.resultsEl) this.resultsEl.empty();
 			if (this.statusEl) this.statusEl.textContent = "";
 			return;
@@ -865,7 +886,10 @@ class SearchModal extends Modal {
 		this.searchVersion++;
 		const version = this.searchVersion;
 
-		// Phase 1: Hybrid search
+		// Cancel any pending rerank
+		if (this.rerankTimer) clearTimeout(this.rerankTimer);
+
+		// Phase 1: Hybrid search — runs immediately
 		const t0 = performance.now();
 		const results = await this.plugin.doSearch(
 			query,
@@ -879,39 +903,54 @@ class SearchModal extends Modal {
 		this.lastDisplayed = displayResults;
 		this.renderResults(displayResults);
 
-		// Phase 2: Async rerank top 5
-		if (this.plugin.hasReranker && displayResults.length > 0) {
-			if (this.statusEl) {
-				this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms · refining...`;
-				this.statusEl.addClass("kjarni-refining");
-			}
+		if (this.statusEl) {
+			this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms`;
+			this.statusEl.removeClass("kjarni-refining");
+		}
 
-			const topDocs = displayResults.slice(0, 5).map((r) => r.text);
-			const t1 = performance.now();
-			const reranked = await this.plugin.doRerank(query, topDocs, 5);
-			const rerankMs = performance.now() - t1;
+		// Phase 2: Rerank — only after user stops typing for 1s
+		if (this.plugin.hasReranker && displayResults.length > 0 && query.length >= 5) {
+			this.rerankTimer = setTimeout(() => {
+				this.doRerank(query, displayResults, version, searchMs);
+			}, 1000);
+		}
+	}
 
-			if (this.searchVersion !== version) return;
+	async doRerank(
+		query: string,
+		displayResults: SearchResultItem[],
+		version: number,
+		searchMs: number
+	) {
+		if (this.searchVersion !== version) return;
 
-			if (reranked.length > 0) {
-				const reorderedTop = reranked.map((r) => displayResults[r.index]);
-				const rerankedIndices = new Set(reranked.map((r) => r.index));
-				const rest = displayResults.filter((_, i) => i >= 5 || !rerankedIndices.has(i));
-				this.lastDisplayed = [...reorderedTop, ...rest];
-				this.renderResults(this.lastDisplayed);
-			}
+		if (this.statusEl) {
+			this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms · refining...`;
+			this.statusEl.addClass("kjarni-refining");
+		}
 
-			if (this.statusEl) {
-				this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms search · ${rerankMs.toFixed(0)}ms rerank · refined`;
-				this.statusEl.removeClass("kjarni-refining");
-				this.statusEl.addClass("kjarni-refined");
-				setTimeout(() => this.statusEl?.removeClass("kjarni-refined"), 2000);
-			}
-		} else {
-			if (this.statusEl) {
-				this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms`;
-				this.statusEl.removeClass("kjarni-refining");
-			}
+		const topDocs = displayResults.slice(0, 5).map((r) => r.text);
+		const t1 = performance.now();
+		const reranked = await this.plugin.doRerank(query, topDocs, 5);
+		const rerankMs = performance.now() - t1;
+
+		if (this.searchVersion !== version) return;
+
+		if (reranked.length > 0) {
+			const reorderedTop = reranked.map((r) => displayResults[r.index]);
+			const rerankedIndices = new Set(reranked.map((r) => r.index));
+			const rest = displayResults.filter(
+				(_, i) => i >= 5 || !rerankedIndices.has(i)
+			);
+			this.lastDisplayed = [...reorderedTop, ...rest];
+			this.renderResults(this.lastDisplayed);
+		}
+
+		if (this.statusEl) {
+			this.statusEl.textContent = `${displayResults.length} results · ${searchMs.toFixed(0)}ms search · ${rerankMs.toFixed(0)}ms rerank · refined`;
+			this.statusEl.removeClass("kjarni-refining");
+			this.statusEl.addClass("kjarni-refined");
+			setTimeout(() => this.statusEl?.removeClass("kjarni-refined"), 2000);
 		}
 	}
 
@@ -924,17 +963,28 @@ class SearchModal extends Modal {
 			return;
 		}
 
+		const query = this.inputEl?.value?.trim() || "";
+		const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+
+		// Normalize scores to percentages
+		const maxScore = Math.max(...results.map(r => r.score), 0.001);
+
 		results.forEach((r, i) => {
-			const snippet = r.text.length > 200 ? r.text.slice(0, 200) + "..." : r.text;
+			const snippet = r.text.length > 200 ? r.text.slice(0, 200) + "…" : r.text;
+			const pct = Math.round((r.score / maxScore) * 100);
 
 			const el = this.resultsEl!.createDiv({ cls: "kjarni-result" });
 			el.addEventListener("click", () => this.openResult(i));
 
-			const title = el.createDiv({ cls: "kjarni-result-title" });
-			title.createEl("span", { text: r.source.replace(/\.md$/, "") });
-			title.createEl("span", { cls: "kjarni-score", text: r.score.toFixed(3) });
+			// Title row: source name + percentage
+			const titleRow = el.createDiv({ cls: "kjarni-result-title" });
+			titleRow.createEl("span", { text: r.source.replace(/\.md$/, "") });
+			const scoreEl = titleRow.createEl("span", { cls: "kjarni-score" });
+			scoreEl.textContent = `${pct}%`;
 
-			el.createDiv({ cls: "kjarni-result-text", text: snippet });
+			// Highlighted snippet
+			const textEl = el.createDiv({ cls: "kjarni-result-text" });
+			textEl.innerHTML = highlightTerms(escapeHtml(snippet), queryTerms);
 		});
 	}
 
@@ -952,6 +1002,7 @@ class SearchModal extends Modal {
 	onClose() {
 		this.searchVersion++;
 		if (this.debounceTimer) clearTimeout(this.debounceTimer);
+		if (this.rerankTimer) clearTimeout(this.rerankTimer);
 		this.contentEl.empty();
 	}
 }
@@ -1026,7 +1077,7 @@ class KjarniSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Debug logging")
 			.setDesc(
-				"Log detailed timing info to the developer console. Enable when filing bug reports."
+				"Log detailed timing info to the developer console. Requires Obsidian restart."
 			)
 			.addToggle((toggle) =>
 				toggle

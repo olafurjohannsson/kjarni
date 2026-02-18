@@ -5,14 +5,17 @@ type options struct {
 	device string // "cpu" || "gpu"
 }
 
+// Option configures a classifier, embedder, or other kjarni component.
 type Option func(*options)
 
+// WithQuiet suppresses log output during model loading and inference.
 func WithQuiet(quiet bool) Option {
 	return func(o *options) {
 		o.quiet = quiet
 	}
 }
 
+// WithDevice sets the compute device. Supported values: "cpu", "gpu".
 func WithDevice(device string) Option {
 	return func(o *options) {
 		o.device = device
