@@ -101,7 +101,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
-          cp target/aarch64-unknown-linux-gnu/release/libkjarni.so dist/
+          cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
           cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
@@ -145,45 +145,40 @@ jobs:
 
   # ─── Windows ─────────────────────────────────────────────────────
   build-windows:
-    name: Build (Windows x86_64)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+      name: Build (Windows x86_64)
+      runs-on: windows-latest
+      steps:
+        - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.91.1"
-          targets: x86_64-pc-windows-msvc
+        - uses: ilammy/msvc-dev-cmd@v1
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-x86_64
+        - uses: dtolnay/rust-toolchain@master
+          with:
+            toolchain: "1.91.1"
 
-      - uses: ilammy/msvc-dev-cmd@v1
+        - uses: Swatinem/rust-cache@v2
+          with:
+            key: windows-x86_64
 
-      - name: Build CLI (release)
-        env:
-          RUSTFLAGS: "-C linker=lld-link"
-        run: cargo build --release --package kjarni-cli --target x86_64-pc-windows-msvc
+        - name: Build CLI (release)
+          run: cargo build --release --package kjarni-cli
 
-      - name: Build FFI (release)
-        env:
-          RUSTFLAGS: "-C linker=lld-link"
-        run: cargo build --release --package kjarni-ffi --target x86_64-pc-windows-msvc
+        - name: Build FFI (release)
+          run: cargo build --release --package kjarni-ffi
 
-      - name: Prepare artifacts
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
-          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/ 2>/dev/null || true
-          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll.lib dist/ 2>/dev/null || true
-          cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
+        - name: Prepare artifacts
+          shell: bash
+          run: |
+            mkdir -p dist
+            cp target/release/kjarni.exe dist/
+            cp target/release/kjarni_ffi.dll dist/ 2>/dev/null || true
+            cp target/release/kjarni_ffi.dll.lib dist/ 2>/dev/null || true
+            cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kjarni-x86_64-windows
-          path: dist/
+        - uses: actions/upload-artifact@v4
+          with:
+            name: kjarni-x86_64-windows
+            path: dist/
 
   # ─── WASM ───────────────────────────────────────────────────────
   build-wasm:
@@ -207,8 +202,8 @@ jobs:
       - name: Build WASM
         run: |
           cd crates/kjarni-wasm
-          RUSTFLAGS="-C target-feature=+simd128" \
-           wasm-pack build --release --target web -- --no-default-features
+          RUSTFLAGS='-C target-feature=+simd128 --cfg getrandom_backend="wasm_js"' \
+            wasm-pack build --release --target web -- --no-default-features
 
       - uses: actions/upload-artifact@v4
         with:

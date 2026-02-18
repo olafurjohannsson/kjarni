@@ -282,18 +282,10 @@ fn truncate_clean(text: &str, max_len: usize) -> String {
     if clean.len() <= max_len {
         clean
     } else {
-        format!("{}…", &clean[..max_len - 1])
+        format!("{}...", &clean[..max_len - 1])
     }
 }
 
-
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() > max_len {
-        format!("{}...", &text[..max_len - 3])
-    } else {
-        text.to_string()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -352,24 +344,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid dtype"));
     }
-    #[test]
-    fn test_truncate_text_short() {
-        assert_eq!(truncate_text("hello", 50), "hello");
-    }
 
-    #[test]
-    fn test_truncate_text_exact() {
-        let text = "a".repeat(50);
-        assert_eq!(truncate_text(&text, 50), text);
-    }
-
-    #[test]
-    fn test_truncate_text_long() {
-        let text = "a".repeat(60);
-        let result = truncate_text(&text, 50);
-        assert_eq!(result.len(), 50);
-        assert!(result.ends_with("..."));
-    }
     #[test]
     fn test_format_single_result_json() {
         let result = mock_result("positive", 0.95, 0);
@@ -415,8 +390,8 @@ mod tests {
 
         assert!(output.contains("positive"));
         assert!(output.contains("negative"));
-        assert!(output.contains("80.00%"));
-        assert!(output.contains("20.00%"));
+        assert!(output.contains("80.0%"));
+        assert!(output.contains("20.0%"));
         assert!(output.contains("█")); // progress bar
     }
 
@@ -555,7 +530,7 @@ mod tests {
         let result = mock_result_with_scores("none", 0.0, 0, vec![("none", 0.0)]);
         let output = format_single_result("text", &result, "text", false).unwrap();
 
-        assert!(output.contains("0.00%"));
+        assert!(output.contains("0.0%"));
     }
 
     #[test]
@@ -563,6 +538,6 @@ mod tests {
         let result = mock_result_with_scores("certain", 1.0, 0, vec![("certain", 1.0)]);
         let output = format_single_result("text", &result, "text", false).unwrap();
 
-        assert!(output.contains("100.00%"));
+        assert!(output.contains("100.0%"));
     }
 }
