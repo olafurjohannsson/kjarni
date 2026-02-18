@@ -8,7 +8,6 @@ use ndarray::{Array1, Array3, ArrayView2, ArrayView3, ArrayViewMut2, Axis, Ix1};
 
 use crate::tensor::CpuTensor;
 
-
 /// Layer normalization
 pub struct LayerNorm {
     pub weight: Array1<f32>,
@@ -30,8 +29,6 @@ unsafe fn hsum_avx(v: __m256) -> f32 {
 }
 
 impl LayerNorm {
-
-
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2", enable = "fma")]
     pub unsafe fn forward_2d_noalloc_simd(
@@ -158,10 +155,18 @@ impl LayerNorm {
         Ok(Self { weight, bias, eps })
     }
 
+    // Fix:
     #[inline]
     pub fn forward_2d_noalloc(&self, input: &ArrayView2<f32>, output: &mut ArrayViewMut2<f32>) {
+        #[cfg(target_arch = "x86_64")]
         unsafe {
             self.forward_2d_noalloc_simd(input, output);
+        }
+
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            self.forward_2d_noalloc_scalar(input, output);
+            // or whatever your non-SIMD fallback is
         }
     }
 
@@ -369,7 +374,6 @@ mod layer_norm_tests {
         unsafe {
             ln.forward_2d_noalloc_simd(&input.view(), &mut output_simd.view_mut());
         }
-        
 
         ln.forward_2d_noalloc_scalar(&input.view(), &mut output_scalar.view_mut());
 
@@ -409,7 +413,7 @@ mod layer_norm_tests {
     #[test]
     fn test_simd_scalar_equivalence_hidden_384_minilm() {
         let hidden = 384;
-        let tokens = 120; 
+        let tokens = 120;
 
         let weight = Array1::from_vec((0..hidden).map(|i| 0.9 + (i as f32) * 0.001).collect());
         let bias = Array1::from_vec((0..hidden).map(|i| -0.5 + (i as f32) * 0.002).collect());
