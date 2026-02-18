@@ -1,4 +1,4 @@
-#[cfg(target_arch = "x86_64")]
+
 use crate::cpu::kernels::q_common::BlockQ6_K;
 use crate::cpu::kernels::{
     self,
@@ -817,7 +817,6 @@ pub fn matmul_2d_cpu_q6_k2(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Ar
 }
 
 /// Computes `C = A @ B^T` for F32 input `A` and Q6_K quantized weight matrix `B`.
-#[cfg(target_arch = "x86_64")]
 pub fn matmul_2d_cpu_q6_k(input: &ArrayView2<f32>, weights: &[BlockQ6_K]) -> Array2<f32> {
     let (m, k) = input.dim();
 
