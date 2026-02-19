@@ -1,0 +1,59 @@
+name: Sync Go Bindings
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync-go:
+    name: Sync to kjarni-go
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download ${{ github.event.release.tag_name }} \
+            --dir release-assets
+
+      - name: Prepare Go repo content
+        run: |
+          mkdir -p go-push/lib/linux-amd64
+          mkdir -p go-push/lib/linux-arm64
+          mkdir -p go-push/lib/darwin-arm64
+          mkdir -p go-push/lib/windows-amd64
+
+          # Extract platform binaries
+          tar -xzf release-assets/kjarni-x86_64-linux.tar.gz -C go-push/lib/linux-amd64
+          tar -xzf release-assets/kjarni-aarch64-linux.tar.gz -C go-push/lib/linux-arm64
+          tar -xzf release-assets/kjarni-aarch64-macos.tar.gz -C go-push/lib/darwin-arm64
+          unzip -o release-assets/kjarni-x86_64-windows.zip -d go-push/lib/windows-amd64
+
+          # Copy Go source files from monorepo
+          cp crates/kjarni-ffi/go/*.go go-push/
+          cp crates/kjarni-ffi/go/go.mod go-push/
+          cp crates/kjarni-ffi/go/go.sum go-push/ 2>/dev/null || true
+          cp crates/kjarni-ffi/kjarni.h go-push/
+
+      - name: Push to kjarni-go
+        env:
+          GO_REPO_TOKEN: ${{ secrets.GO_REPO_PAT }}
+        run: |
+          DEST=$(mktemp -d)
+          git clone https://x-access-token:${GO_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-go.git "$DEST"
+          cd "$DEST"
+
+          # Overwrite Go source + binaries, keep README/LICENSE
+          cp -r $GITHUB_WORKSPACE/go-push/* .
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync from kjarni ${{ github.event.release.tag_name }}" || echo "No changes"
+          git tag "${{ github.event.release.tag_name }}" 2>/dev/null || true
+          git push origin main --tags

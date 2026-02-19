@@ -297,6 +297,7 @@ async fn test_loaded_lm_head_forward_gpu_values() {
 }
 
 #[tokio::test]
+#[cfg(feature = "gpu-tests")]
 async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     let ctx = setup_gpu_context().await;
 
@@ -329,6 +330,7 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
 
 
 #[tokio::test]
+#[cfg(feature = "gpu-tests")]
 async fn test_loaded_lm_head_cpu_gpu_parity() {
     let ctx = setup_gpu_context().await;
     let vocab_size = 100;

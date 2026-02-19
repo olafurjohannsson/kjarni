@@ -105,7 +105,10 @@ unsafe fn compute_chunk_neon(
         let mut n = k;
 
         while n >= 16 {
-            _mm_prefetch(a_ptr.add(64) as *const i8, _MM_HINT_T0);
+            // #[cfg(target_arch = "aarch64")]
+            // {
+            //     std::arch::aarch64::_prefetch(b_ptr.add(128) as *const i8, 0, 3);
+            // }
 
             let a0 = vld1q_f32(a_ptr);
             let a1 = vld1q_f32(a_ptr.add(4));

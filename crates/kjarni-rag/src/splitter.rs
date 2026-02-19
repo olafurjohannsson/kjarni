@@ -1,5 +1,6 @@
-//! Simple text splitting utilities for document chunking
+//! Text splitting with markdown-aware chunking and preprocessing
 use std::collections::HashMap;
+use text_splitter::MarkdownSplitter;
 
 /// Configuration for text splitting
 #[derive(Debug, Clone)]
@@ -8,8 +9,8 @@ pub struct SplitterConfig {
     pub chunk_size: usize,
     /// Overlap between chunks in characters
     pub chunk_overlap: usize,
-    /// Separator to use for splitting
-    pub separator: String,
+    /// Whether to clean markdown syntax before chunking
+    pub clean_markdown: bool,
 }
 
 impl Default for SplitterConfig {
@@ -17,7 +18,7 @@ impl Default for SplitterConfig {
         Self {
             chunk_size: 1000,
             chunk_overlap: 200,
-            separator: "\n\n".to_string(),
+            clean_markdown: true,
         }
     }
 }
@@ -26,10 +27,11 @@ impl SplitterConfig {
     pub fn with_chunk_size(chunk_size: usize) -> Self {
         Self {
             chunk_size,
-            chunk_overlap: chunk_size / 5, // 20% overlap
-            separator: "\n\n".to_string(),
+            chunk_overlap: chunk_size / 5,
+            clean_markdown: true,
         }
     }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.chunk_size == 0 {
             return Err("chunk_size must be greater than 0");
@@ -41,7 +43,7 @@ impl SplitterConfig {
     }
 }
 
-/// text splitter for document chunking
+/// Markdown-aware text splitter
 pub struct TextSplitter {
     config: SplitterConfig,
 }
@@ -65,105 +67,30 @@ impl TextSplitter {
         &self.config
     }
 
-    /// Split text into chunks
+    /// Split text into chunks using markdown-aware boundaries
     pub fn split(&self, text: &str) -> Vec<String> {
-        // Handle empty text
         if text.is_empty() {
             return vec![];
         }
 
-        let mut chunks = Vec::new();
-        let sections: Vec<&str> = text.split(&self.config.separator).collect();
-        let mut current_chunk = String::new();
+        // Preprocess: clean markdown noise
+        let cleaned = if self.config.clean_markdown {
+            clean_markdown(text)
+        } else {
+            text.to_string()
+        };
 
-        for section in sections {
-            // Skip empty sections
-            if section.is_empty() {
-                continue;
-            }
-
-            if section.len() > self.config.chunk_size {
-                if !current_chunk.is_empty() {
-                    chunks.push(current_chunk.clone());
-                    current_chunk.clear();
-                }
-                chunks.extend(self.split_large_text(section));
-                continue;
-            }
-
-            let would_be_size = if current_chunk.is_empty() {
-                section.len()
-            } else {
-                current_chunk.len() + self.config.separator.len() + section.len()
-            };
-
-            if would_be_size > self.config.chunk_size && !current_chunk.is_empty() {
-                chunks.push(current_chunk.clone());
-
-                if self.config.chunk_overlap > 0 {
-                    current_chunk = self.get_overlap_suffix(&current_chunk);
-                } else {
-                    current_chunk.clear();
-                }
-            }
-
-            if !current_chunk.is_empty() {
-                current_chunk.push_str(&self.config.separator);
-            }
-            current_chunk.push_str(section);
+        if cleaned.trim().is_empty() {
+            return vec![];
         }
 
-        if !current_chunk.is_empty() {
-            chunks.push(current_chunk);
-        }
+        let splitter = MarkdownSplitter::new(self.config.chunk_size);
 
-        chunks
-    }
-
-    fn get_overlap_suffix(&self, text: &str) -> String {
-        let chars: Vec<char> = text.chars().collect();
-
-        if chars.len() <= self.config.chunk_overlap {
-            return text.to_string();
-        }
-
-        let start_idx = chars.len() - self.config.chunk_overlap;
-        chars[start_idx..].iter().collect()
-    }
-
-    fn split_large_text(&self, text: &str) -> Vec<String> {
-        let mut chunks = Vec::new();
-        let chars: Vec<char> = text.chars().collect();
-
-        if chars.is_empty() {
-            return chunks;
-        }
-
-        let mut start = 0;
-
-        while start < chars.len() {
-            let end = (start + self.config.chunk_size).min(chars.len());
-            let chunk: String = chars[start..end].iter().collect();
-            chunks.push(chunk);
-
-            if end >= chars.len() {
-                break;
-            }
-
-            let step = if self.config.chunk_overlap > 0 && self.config.chunk_overlap < self.config.chunk_size {
-                self.config.chunk_size - self.config.chunk_overlap
-            } else {
-                self.config.chunk_size
-            };
-
-            start = if start + step > start {
-                start + step
-            } else {
-                start + 1
-            };
-        }
-
-        chunks
+        splitter
+            .chunks(&cleaned)
+            .map(|chunk| chunk.to_string())
+            .filter(|chunk| !chunk.trim().is_empty())
+            .collect()
     }
 
     /// Split text into chunks with metadata
@@ -192,15 +119,283 @@ impl TextSplitter {
         if text.is_empty() {
             return 0;
         }
+        let effective = self.config.chunk_size.saturating_sub(self.config.chunk_overlap).max(1);
+        let char_count = text.chars().count();
+        (char_count + effective - 1) / effective
+    }
+}
 
-        let effective_chunk_size = self.config.chunk_size - self.config.chunk_overlap;
-        if effective_chunk_size == 0 {
-            return 1;
+pub fn clean_markdown(text: &str) -> String {
+    let text = strip_frontmatter(text);
+    let text = strip_noisy_lines(&text);
+    let text = clean_wikilinks(&text);
+    let text = clean_markdown_images(&text);
+    let text = clean_markdown_links(&text);
+    let text = strip_html_tags(&text);
+    let text = collapse_whitespace(&text);
+    text
+}
+
+fn strip_frontmatter(text: &str) -> String {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("---") {
+        return text.to_string();
+    }
+
+    let after_first = &trimmed[3..];
+    if let Some(end_pos) = after_first.find("\n---") {
+        let rest = &after_first[end_pos + 4..];
+        rest.trim_start_matches('\n').to_string() 
+    } else {
+        text.to_string()
+    }
+}
+
+/// Remove lines that are pure noise for embeddings
+fn strip_noisy_lines(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Skip badge/shield image lines
+        if trimmed.contains("img.shields.io")
+            || trimmed.contains("badgen.net")
+            || trimmed.contains("badge.fury.io")
+        {
+            continue;
         }
 
-        let char_count = text.chars().count();
-        (char_count + effective_chunk_size - 1) / effective_chunk_size
+        // Skip pure URL lines
+        if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+            && !trimmed.contains(' ')
+        {
+            continue;
+        }
+
+        // Skip empty heading lines (e.g., just "##")
+        if trimmed.starts_with('#') && trimmed.trim_start_matches('#').trim().is_empty() {
+            continue;
+        }
+
+        // Skip horizontal rules
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            continue;
+        }
+
+        result.push_str(line);
+        result.push('\n');
     }
+
+    result
+}
+
+/// Convert [[wiki-links]] to plain text
+///
+/// - `[[page]]` → `page`
+/// - `[[page|display]]` → `display`
+/// - `[[path/to/page]]` → `page`
+/// - `[[path/to/page|display]]` → `display`
+fn clean_wikilinks(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for [[
+        if i + 1 < len && chars[i] == '[' && chars[i + 1] == '[' {
+            i += 2; // skip [[
+
+            // Collect everything until ]]
+            let mut link_content = String::new();
+            let mut found_close = false;
+
+            while i + 1 < len {
+                if chars[i] == ']' && chars[i + 1] == ']' {
+                    i += 2; // skip ]]
+                    found_close = true;
+                    break;
+                }
+                link_content.push(chars[i]);
+                i += 1;
+            }
+
+            if found_close {
+                // Use display text (after |) if present
+                let display = if let Some(pipe_pos) = link_content.rfind('|') {
+                    &link_content[pipe_pos + 1..]
+                } else if let Some(slash_pos) = link_content.rfind('/') {
+                    // Use filename part of path
+                    &link_content[slash_pos + 1..]
+                } else {
+                    &link_content
+                };
+                result.push_str(display);
+            } else {
+                // Malformed — output as-is
+                result.push_str("[[");
+                result.push_str(&link_content);
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Convert markdown images to just alt text
+///
+/// `![alt text](url)` → `alt text`
+/// `![](url)` → (removed)
+fn clean_markdown_images(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        if i + 1 < len && chars[i] == '!' && chars[i + 1] == '[' {
+            i += 2; // skip ![
+
+            // Collect alt text until ]
+            let mut alt = String::new();
+            while i < len && chars[i] != ']' {
+                alt.push(chars[i]);
+                i += 1;
+            }
+
+            if i < len {
+                i += 1; // skip ]
+            }
+
+            // Skip (url) if present
+            if i < len && chars[i] == '(' {
+                i += 1;
+                let mut depth = 1;
+                while i < len && depth > 0 {
+                    if chars[i] == '(' {
+                        depth += 1;
+                    } else if chars[i] == ')' {
+                        depth -= 1;
+                    }
+                    i += 1;
+                }
+            }
+
+            // Keep alt text if non-empty
+            if !alt.trim().is_empty() {
+                result.push_str(alt.trim());
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Convert markdown links to just display text
+///
+/// `[display](url)` → `display`
+fn clean_markdown_links(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // [display](url) — but not ![image](url) which is already handled
+        if chars[i] == '[' && (i == 0 || chars[i - 1] != '!') {
+            i += 1; // skip [
+
+            // Collect display text until ]
+            let mut display = String::new();
+            let mut depth = 1;
+            while i < len && depth > 0 {
+                if chars[i] == '[' {
+                    depth += 1;
+                } else if chars[i] == ']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                display.push(chars[i]);
+                i += 1;
+            }
+
+            if i < len {
+                i += 1; // skip ]
+            }
+
+            // Check if followed by (url)
+            if i < len && chars[i] == '(' {
+                i += 1; // skip (
+                let mut paren_depth = 1;
+                while i < len && paren_depth > 0 {
+                    if chars[i] == '(' {
+                        paren_depth += 1;
+                    } else if chars[i] == ')' {
+                        paren_depth -= 1;
+                    }
+                    i += 1;
+                }
+                // Output just the display text
+                result.push_str(&display);
+            } else {
+                // Not a link, output as-is
+                result.push('[');
+                result.push_str(&display);
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Strip HTML tags, keep inner text
+fn strip_html_tags(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut in_tag = false;
+
+    for ch in text.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(ch);
+        }
+    }
+
+    result
+}
+
+/// Collapse multiple blank lines into at most two newlines
+fn collapse_whitespace(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut consecutive_newlines = 0;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            consecutive_newlines += 1;
+            if consecutive_newlines <= 2 {
+                result.push(ch);
+            }
+        } else {
+            consecutive_newlines = 0;
+            result.push(ch);
+        }
+    }
+
+    result.trim().to_string()
 }
 
 #[cfg(test)]
@@ -208,522 +403,225 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_config_default() {
-        let config = SplitterConfig::default();
-
-        assert_eq!(config.chunk_size, 1000);
-        assert_eq!(config.chunk_overlap, 200);
-        assert_eq!(config.separator, "\n\n");
+    fn test_strip_frontmatter() {
+        let input = "---\ntitle: Hello\ntags: [a, b]\n---\n\nActual content here.";
+        let result = strip_frontmatter(input);
+        assert_eq!(result, "Actual content here.");
     }
 
     #[test]
-    fn test_config_with_chunk_size() {
-        let config = SplitterConfig::with_chunk_size(500);
-
-        assert_eq!(config.chunk_size, 500);
-        assert_eq!(config.chunk_overlap, 100); // 20% of 500
+    fn test_strip_frontmatter_no_frontmatter() {
+        let input = "Just regular text";
+        assert_eq!(strip_frontmatter(input), input);
     }
 
     #[test]
-    fn test_config_validate_valid() {
-        let config = SplitterConfig::default();
-        assert!(config.validate().is_ok());
+    fn test_strip_frontmatter_unclosed() {
+        let input = "---\ntitle: Hello\nNo closing marker";
+        assert_eq!(strip_frontmatter(input), input);
     }
 
     #[test]
-    fn test_config_validate_zero_chunk_size() {
-        let config = SplitterConfig {
-            chunk_size: 0,
-            chunk_overlap: 0,
-            separator: "\n".to_string(),
-        };
-        assert!(config.validate().is_err());
+    fn test_strip_noisy_lines_badges() {
+        let input = "Some text\n![badge](https://img.shields.io/github/stars/foo)\nMore text";
+        let result = strip_noisy_lines(input);
+        assert!(result.contains("Some text"));
+        assert!(result.contains("More text"));
+        assert!(!result.contains("shields.io"));
     }
 
     #[test]
-    fn test_config_validate_overlap_too_large() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 100, 
-            separator: "\n".to_string(),
-        };
-        assert!(config.validate().is_err());
-
-        let config2 = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 150, 
-            separator: "\n".to_string(),
-        };
-        assert!(config2.validate().is_err());
+    fn test_strip_noisy_lines_pure_urls() {
+        let input = "Text before\nhttps://example.com/some/page\nText after";
+        let result = strip_noisy_lines(input);
+        assert!(result.contains("Text before"));
+        assert!(result.contains("Text after"));
+        assert!(!result.contains("https://example.com"));
     }
 
     #[test]
-    fn test_config_clone() {
-        let config = SplitterConfig::default();
-        let cloned = config.clone();
-
-        assert_eq!(config.chunk_size, cloned.chunk_size);
-        assert_eq!(config.chunk_overlap, cloned.chunk_overlap);
-        assert_eq!(config.separator, cloned.separator);
+    fn test_strip_noisy_lines_url_in_sentence() {
+        let input = "Visit https://example.com for more info";
+        let result = strip_noisy_lines(input);
+        // URL in a sentence should be kept
+        assert!(result.contains("https://example.com"));
     }
-    
+
     #[test]
-    fn test_splitter_with_defaults() {
+    fn test_clean_wikilinks_simple() {
+        assert_eq!(clean_wikilinks("See [[My Page]] for details"), "See My Page for details");
+    }
+
+    #[test]
+    fn test_clean_wikilinks_display_text() {
+        assert_eq!(
+            clean_wikilinks("Check [[path/to/page|the page]]"),
+            "Check the page"
+        );
+    }
+
+    #[test]
+    fn test_clean_wikilinks_path() {
+        assert_eq!(
+            clean_wikilinks("See [[folder/subfolder/Note]]"),
+            "See Note"
+        );
+    }
+
+    #[test]
+    fn test_clean_markdown_images() {
+        assert_eq!(
+            clean_markdown_images("Before ![alt text](http://example.com/img.png) after"),
+            "Before alt text after"
+        );
+    }
+
+    #[test]
+    fn test_clean_markdown_images_no_alt() {
+        assert_eq!(
+            clean_markdown_images("Before ![](http://example.com/img.png) after"),
+            "Before  after"
+        );
+    }
+
+    #[test]
+    fn test_clean_markdown_links() {
+        assert_eq!(
+            clean_markdown_links("Click [here](https://example.com) now"),
+            "Click here now"
+        );
+    }
+
+    #[test]
+    fn test_strip_html_tags() {
+        assert_eq!(strip_html_tags("Hello <b>world</b>!"), "Hello world!");
+    }
+
+    #[test]
+    fn test_collapse_whitespace() {
+        assert_eq!(collapse_whitespace("a\n\n\n\n\nb"), "a\n\nb");
+    }
+
+    #[test]
+    fn test_clean_markdown_full() {
+        let input = r#"---
+title: Test Doc
+tags: [test]
+---
+
+# My Document
+
+Check out [[some/path/Cool Plugin|Cool Plugin]] for more.
+
+![badge](https://img.shields.io/github/stars/user/repo)
+
+Here is a [link](https://example.com) to the docs.
+
+https://standalone-url.com/page
+
+The actual content that matters is here."#;
+
+        let result = clean_markdown(input);
+
+        // Frontmatter removed
+        assert!(!result.contains("title: Test Doc"));
+        // Badge removed
+        assert!(!result.contains("shields.io"));
+        // Wiki-link cleaned
+        assert!(result.contains("Cool Plugin"));
+        assert!(!result.contains("[["));
+        // Markdown link cleaned
+        assert!(result.contains("link"));
+        assert!(!result.contains("https://example.com"));
+        // Standalone URL removed
+        assert!(!result.contains("standalone-url.com"));
+        // Content preserved
+        assert!(result.contains("actual content that matters"));
+    }
+
+    // ── Splitter Tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_split_empty() {
         let splitter = TextSplitter::with_defaults();
-        assert_eq!(splitter.config().chunk_size, 1000);
-    }
-
-    #[test]
-    #[should_panic(expected = "chunk_size must be greater than 0")]
-    fn test_splitter_invalid_config_panics() {
-        let config = SplitterConfig {
-            chunk_size: 0,
-            chunk_overlap: 0,
-            separator: "\n".to_string(),
-        };
-        TextSplitter::new(config);
-    }
-
-    #[test]
-    fn test_split_empty_text() {
-        let splitter = TextSplitter::with_defaults();
-        let chunks = splitter.split("");
-
-        assert!(chunks.is_empty());
+        assert!(splitter.split("").is_empty());
     }
 
     #[test]
     fn test_split_short_text() {
         let splitter = TextSplitter::with_defaults();
-        let text = "This is a short text.";
-        let chunks = splitter.split(text);
-
+        let chunks = splitter.split("Hello world.");
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], text);
+        assert!(chunks[0].contains("Hello world"));
     }
 
     #[test]
-    fn test_split_on_separator() {
+    fn test_split_respects_chunk_size() {
         let config = SplitterConfig {
             chunk_size: 100,
             chunk_overlap: 0,
-            separator: "\n\n".to_string(),
+            clean_markdown: false,
         };
         let splitter = TextSplitter::new(config);
-
-        let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
-        let chunks = splitter.split(text);
-
-        // All paragraphs fit in one chunk (total ~55 chars)
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].contains("First"));
-        assert!(chunks[0].contains("Second"));
-        assert!(chunks[0].contains("Third"));
-    }
-
-    #[test]
-    fn test_split_exceeds_chunk_size() {
-        let config = SplitterConfig {
-            chunk_size: 30,
-            chunk_overlap: 0,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
-        let chunks = splitter.split(text);
-
-        // Each paragraph should be its own chunk
-        assert!(chunks.len() >= 3);
-    }
-
-    #[test]
-    fn test_split_with_overlap() {
-        let config = SplitterConfig {
-            chunk_size: 20,
-            chunk_overlap: 5,
-            separator: " ".to_string(),
-        };
-        let separator = config.separator.clone();
-        let chunk_size = config.chunk_size;
-        let splitter = TextSplitter::new(config);
-
-        let text = "word1 word2 word3 word4 word5";
-        let chunks = splitter.split(text);
-
-        // With overlap, consecutive chunks should share some text
-        assert!(chunks.len() > 1);
-
-        // Verify chunks don't exceed max size
-        for chunk in &chunks {
-            assert!(chunk.len() <= chunk_size + separator.len());
-        }
-    }
-
-    #[test]
-    fn test_split_large_section() {
-        let config = SplitterConfig {
-            chunk_size: 20,
-            chunk_overlap: 5,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        // A single long section with no separators
-        let text = "abcdefghijklmnopqrstuvwxyz0123456789";
-        let chunks = splitter.split(text);
-
-        assert!(chunks.len() > 1);
-
-        // Verify all text is covered
-        let total_chars: usize = chunks.iter().map(|c| c.len()).sum();
-        // With overlap, total chars should be >= original length
-        assert!(total_chars >= text.len());
-    }
-
-    #[test]
-    fn test_split_custom_separator() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 0,
-            separator: "|||".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "section1|||section2|||section3";
-        let chunks = splitter.split(text);
-
-        // All sections fit in one chunk
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].contains("section1"));
-    }
-
-    #[test]
-    fn test_split_no_separator_in_text() {
-        let config = SplitterConfig {
-            chunk_size: 50,
-            chunk_overlap: 10,
-            separator: "|||".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "This text has no triple pipe separators anywhere";
-        let chunks = splitter.split(text);
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], text);
-    }
-
-    #[test]
-    fn test_split_utf8_characters() {
-        let config = SplitterConfig {
-            chunk_size: 10,
-            chunk_overlap: 2,
-            separator: " ".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "Hello 🌍 World 你好 世界";
-        let chunks = splitter.split(text);
+        let text = "A ".repeat(200); // 400 chars
+        let chunks = splitter.split(&text);
 
         for chunk in &chunks {
-            assert!(chunk.is_ascii() || chunk.chars().count() > 0);
-            for _ in chunk.chars() {}
+            assert!(chunk.len() <= 200, "Chunk too large: {} chars", chunk.len());
         }
-    }
-
-    #[test]
-    fn test_split_emoji_heavy_text() {
-        let config = SplitterConfig {
-            chunk_size: 5,
-            chunk_overlap: 1,
-            separator: " ".to_string(),
-        };
-        let chunk_size = config.chunk_size;
-        let splitter = TextSplitter::new(config);
-
-        let text = "🎉🎊🎈🎁🎀 🌟🌙🌈☀️⭐";
-        let chunks = splitter.split(text);
-
-        assert!(!chunks.is_empty());
-        // Each chunk should be valid UTF-8
-        for chunk in chunks {
-            assert!(chunk.chars().count() <= chunk_size);
-        }
-    }
-
-    #[test]
-    fn test_split_multibyte_characters() {
-        let config = SplitterConfig {
-            chunk_size: 8,
-            chunk_overlap: 2,
-            separator: " ".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        // Mix of 1-byte, 2-byte, 3-byte, and 4-byte UTF-8 characters
-        let text = "a é 中 🎉 b";
-        let chunks = splitter.split(text);
-
-        for chunk in chunks {
-            // Verify valid UTF-8 by attempting to iterate
-            let _: Vec<char> = chunk.chars().collect();
-        }
-    }
-
-    #[test]
-    fn test_overlap_preserves_context() {
-        let config = SplitterConfig {
-            chunk_size: 15,
-            chunk_overlap: 5,
-            separator: " ".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "The quick brown fox jumps over the lazy dog";
-        let chunks = splitter.split(text);
-        for i in 0..chunks.len().saturating_sub(1) {
-            let current = &chunks[i];
-            let next = &chunks[i + 1];
-            println!("Chunk {}: '{}'", i, current);
-            println!("Chunk {}: '{}'", i + 1, next);
-        }
-
         assert!(chunks.len() > 1);
     }
 
     #[test]
-    fn test_zero_overlap() {
+    fn test_split_with_metadata() {
+        let splitter = TextSplitter::with_defaults();
+        let mut meta = HashMap::new();
+        meta.insert("source".to_string(), "test.md".to_string());
+
+        let results = splitter.split_with_metadata("Hello world.", meta);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1["source"], "test.md");
+        assert_eq!(results[0].1["chunk_index"], "0");
+        assert_eq!(results[0].1["total_chunks"], "1");
+    }
+
+    #[test]
+    fn test_split_markdown_aware() {
         let config = SplitterConfig {
-            chunk_size: 10,
+            chunk_size: 200,
             chunk_overlap: 0,
-            separator: " ".to_string(),
+            clean_markdown: false,
         };
         let splitter = TextSplitter::new(config);
 
-        let text = "one two three four five six";
+        let text = "# Header One\n\nFirst paragraph with some content.\n\n# Header Two\n\nSecond paragraph with different content.";
         let chunks = splitter.split(text);
 
-        assert!(!chunks.is_empty());
-    }
-    #[test]
-    fn test_split_with_metadata_empty() {
-        let splitter = TextSplitter::with_defaults();
-        let metadata = HashMap::new();
-        let results = splitter.split_with_metadata("", metadata);
-
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_split_with_metadata_single_chunk() {
-        let splitter = TextSplitter::with_defaults();
-        let mut metadata = HashMap::new();
-        metadata.insert("source".to_string(), "test.txt".to_string());
-
-        let results = splitter.split_with_metadata("Short text", metadata);
-
-        assert_eq!(results.len(), 1);
-        let (text, meta) = &results[0];
-
-        assert_eq!(text, "Short text");
-        assert_eq!(meta.get("source"), Some(&"test.txt".to_string()));
-        assert_eq!(meta.get("chunk_index"), Some(&"0".to_string()));
-        assert_eq!(meta.get("total_chunks"), Some(&"1".to_string()));
-    }
-
-    #[test]
-    fn test_split_with_metadata_multiple_chunks() {
-        let config = SplitterConfig {
-            chunk_size: 20,
-            chunk_overlap: 0,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let mut metadata = HashMap::new();
-        metadata.insert("author".to_string(), "Test Author".to_string());
-        metadata.insert("doc_id".to_string(), "123".to_string());
-
-        let text = "First chunk text.\n\nSecond chunk text.\n\nThird chunk text.";
-        let results = splitter.split_with_metadata(text, metadata);
-
-        assert_eq!(results.len(), 3);
-
-        for (i, (_, meta)) in results.iter().enumerate() {
-            assert_eq!(meta.get("author"), Some(&"Test Author".to_string()));
-            assert_eq!(meta.get("doc_id"), Some(&"123".to_string()));
-
-            assert_eq!(meta.get("chunk_index"), Some(&i.to_string()));
-            assert_eq!(meta.get("total_chunks"), Some(&"3".to_string()));
+        // Should split at markdown boundaries, not mid-sentence
+        assert!(chunks.len() >= 1);
+        // Each chunk should be coherent
+        for chunk in &chunks {
+            assert!(!chunk.trim().is_empty());
         }
     }
 
     #[test]
-    fn test_split_with_metadata_preserves_all_base_metadata() {
-        let splitter = TextSplitter::with_defaults();
-
-        let mut metadata = HashMap::new();
-        metadata.insert("key1".to_string(), "value1".to_string());
-        metadata.insert("key2".to_string(), "value2".to_string());
-        metadata.insert("key3".to_string(), "value3".to_string());
-
-        let results = splitter.split_with_metadata("Some text", metadata);
-
-        assert_eq!(results.len(), 1);
-        let (_, meta) = &results[0];
-
-        assert_eq!(meta.get("key1"), Some(&"value1".to_string()));
-        assert_eq!(meta.get("key2"), Some(&"value2".to_string()));
-        assert_eq!(meta.get("key3"), Some(&"value3".to_string()));
+    fn test_config_validation() {
+        assert!(SplitterConfig { chunk_size: 0, chunk_overlap: 0, clean_markdown: true }.validate().is_err());
+        assert!(SplitterConfig { chunk_size: 100, chunk_overlap: 100, clean_markdown: true }.validate().is_err());
+        assert!(SplitterConfig { chunk_size: 100, chunk_overlap: 50, clean_markdown: true }.validate().is_ok());
     }
 
     #[test]
-    fn test_estimate_chunks_empty() {
-        let splitter = TextSplitter::with_defaults();
-        assert_eq!(splitter.estimate_chunks(""), 0);
-    }
-
-    #[test]
-    fn test_estimate_chunks_short_text() {
-        let splitter = TextSplitter::with_defaults();
-        assert_eq!(splitter.estimate_chunks("Short"), 1);
-    }
-
-    #[test]
-    fn test_estimate_chunks_long_text() {
-        let config = SplitterConfig {
+    fn test_estimate_chunks() {
+        let splitter = TextSplitter::new(SplitterConfig {
             chunk_size: 100,
             chunk_overlap: 20,
-            separator: "\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "a".repeat(500);
+            clean_markdown: true,
+        });
+        // 400 chars, effective size 80 → ~5 chunks
+        let text = "x".repeat(400);
         let estimate = splitter.estimate_chunks(&text);
-
-        assert!(estimate >= 5 && estimate <= 10);
-    }
-
-    #[test]
-    fn test_split_only_separators() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 10,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "\n\n\n\n\n\n";
-        let chunks = splitter.split(text);
-
-        assert!(chunks.is_empty());
-    }
-
-    #[test]
-    fn test_split_single_char() {
-        let splitter = TextSplitter::with_defaults();
-        let chunks = splitter.split("X");
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], "X");
-    }
-
-    #[test]
-    fn test_split_exact_chunk_size() {
-        let config = SplitterConfig {
-            chunk_size: 10,
-            chunk_overlap: 0,
-            separator: "|".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "1234567890"; // Exactly 10 chars
-        let chunks = splitter.split(text);
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], text);
-    }
-
-    #[test]
-    fn test_split_one_char_over_chunk_size() {
-        let config = SplitterConfig {
-            chunk_size: 10,
-            chunk_overlap: 0,
-            separator: "|".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "12345678901"; // 11 chars
-        let chunks = splitter.split(text);
-
-        assert!(chunks.len() >= 2);
-    }
-
-    #[test]
-    fn test_split_with_trailing_separator() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 0,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "Content here\n\n";
-        let chunks = splitter.split(text);
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], "Content here");
-    }
-
-    #[test]
-    fn test_split_with_leading_separator() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 0,
-            separator: "\n\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "\n\nContent here";
-        let chunks = splitter.split(text);
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], "Content here");
-    }
-
-    #[test]
-    fn test_no_infinite_loop_large_overlap() {
-        let config = SplitterConfig {
-            chunk_size: 100,
-            chunk_overlap: 50,
-            separator: "\n".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "a".repeat(1000);
-        let chunks = splitter.split(&text);
-
-        assert!(!chunks.is_empty());
-    }
-
-    #[test]
-    fn test_split_large_text_makes_progress() {
-        let config = SplitterConfig {
-            chunk_size: 10,
-            chunk_overlap: 8, // Large overlap relative to chunk size
-            separator: "|".to_string(),
-        };
-        let splitter = TextSplitter::new(config);
-
-        let text = "a".repeat(100);
-        let chunks = splitter.split(&text);
-
-        // Should eventually complete
-        assert!(!chunks.is_empty());
-
-        // Should cover all content (with overlap, total > original)
-        let total_len: usize = chunks.iter().map(|c| c.len()).sum();
-        assert!(total_len >= text.len());
+        assert!(estimate >= 4 && estimate <= 6, "estimate was {}", estimate);
     }
 }

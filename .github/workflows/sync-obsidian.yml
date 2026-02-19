@@ -1,0 +1,103 @@
+name: Sync Obsidian Plugin
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync-obsidian:
+    name: Build & Sync Obsidian Plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          wasm-pack build --target web --release
+
+      - name: Build Obsidian plugin JS
+        run: |
+          cd crates/kjarni-wasm/obsidian
+          npm ci
+          npm run build
+
+      - name: Prepare plugin package
+        run: |
+          mkdir -p plugin-push/pkg
+
+          # JS bundles
+          cp crates/kjarni-wasm/obsidian/dist/main.js plugin-push/
+          cp crates/kjarni-wasm/obsidian/dist/worker.js plugin-push/
+          cp crates/kjarni-wasm/obsidian/dist/encoder-worker.js plugin-push/
+          cp crates/kjarni-wasm/obsidian/dist/styles.css plugin-push/
+
+          # WASM binary
+          cp crates/kjarni-wasm/pkg/kjarni_wasm_bg.wasm plugin-push/pkg/
+
+          # Manifest
+          cp crates/kjarni-wasm/obsidian/manifest.json plugin-push/
+
+      - name: Push to obsidian plugin repo
+        env:
+          OBSIDIAN_REPO_TOKEN: ${{ secrets.OBSIDIAN_REPO_PAT }}
+        run: |
+          DEST=$(mktemp -d)
+
+          # Clone or init
+          git clone https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/obsidian-kjarni-search.git "$DEST" 2>/dev/null || {
+            mkdir -p "$DEST"
+            cd "$DEST"
+            git init
+            git remote add origin https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/obsidian-kjarni-search.git
+            git checkout -b main
+          }
+
+          cd "$DEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Overwrite build artifacts, keep README/LICENSE
+          cp -r $GITHUB_WORKSPACE/plugin-push/* .
+          git add -A
+          git commit -m "Build from kjarni ${{ github.event.release.tag_name }}" || echo "No changes"
+          git tag "${{ github.event.release.tag_name }}" 2>/dev/null || true
+          git push origin main --tags
+
+      - name: Create plugin release
+        env:
+          GH_TOKEN: ${{ secrets.OBSIDIAN_REPO_PAT }}
+        run: |
+          # Package for one-liner install
+          mkdir -p release-pkg/kjarni-search/pkg
+          cp plugin-push/main.js plugin-push/worker.js plugin-push/encoder-worker.js \
+             plugin-push/styles.css plugin-push/manifest.json release-pkg/kjarni-search/
+          cp plugin-push/pkg/kjarni_wasm_bg.wasm release-pkg/kjarni-search/pkg/
+
+          cd release-pkg
+          tar -czf kjarni-search.tar.gz kjarni-search/
+
+          gh release create "${{ github.event.release.tag_name }}" \
+            --repo olafurjohannsson/obsidian-kjarni-search \
+            --title "${{ github.event.release.tag_name }}" \
+            --generate-notes \
+            kjarni-search.tar.gz

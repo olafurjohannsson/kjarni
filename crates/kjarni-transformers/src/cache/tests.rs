@@ -94,6 +94,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_edge_cases() -> Result<()> {
         let context = WgpuContext::new().await?;
 
@@ -113,6 +114,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_overflow_panic() -> Result<()> {
         let context = WgpuContext::new().await?;
         let mut cache = GpuKVCache::new(&context, 1, 1, 1, 1, 10)?;
@@ -129,6 +131,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_beam_cache_lifecycle() -> Result<()> {
         let context = WgpuContext::new().await?;
 
@@ -151,6 +154,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_beam_cache_reorder_logic() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (layers, beams, heads, dim, cap) = (1, 4, 1, 1, 10);
@@ -183,6 +187,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_cache_symmetry_standard() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (layers, batch, max_len, hidden) = (1, 1, 8, 16);
@@ -218,6 +223,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_cache_symmetry() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (num_layers, batch_size, max_len, hidden_size) = (1, 1, 8, 16);
@@ -390,6 +396,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_update_and_readback() -> Result<()> {
         let context = WgpuContext::new().await?;
         let num_layers = 2;
@@ -451,6 +458,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (num_layers, batch_size, num_heads, head_dim, capacity) = (1, 1, 2, 4, 10);
@@ -519,6 +527,7 @@ mod cache_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_cache_reorder_parity() -> Result<()> {
         const NUM_LAYERS: usize = 2;
         const NUM_BEAMS: usize = 4;

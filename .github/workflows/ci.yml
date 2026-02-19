@@ -2,17 +2,32 @@ name: CI
 
 on:
   push:
-    branches: [kjarni5]
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches: [kjarni5]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
   RUSTUP_TOOLCHAIN: "1.91.1"
 
 jobs:
+  # Lint
   clippy:
     name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets 2>&1 || true
+
+  # Linux (zigbuild → glibc 2.17)
+  build-linux:
+    name: Build (Linux x86_64, glibc 2.17)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,28 +35,228 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.1"
-          components: clippy
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-x86_64
 
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets 2>&1 || true
+      - name: Install cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
 
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+      - name: Build CLI (release, glibc 2.17)
+        run: cargo zigbuild --release --package kjarni-cli --target x86_64-unknown-linux-gnu.2.17
+
+      - name: Build FFI (release, glibc 2.17)
+        run: cargo zigbuild --release --package kjarni-ffi --target x86_64-unknown-linux-gnu.2.17
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/kjarni dist/
+          cp target/x86_64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
+          cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
+
+          # Verify glibc requirement
+          echo "=== GLIBC symbols ==="
+          objdump -T dist/kjarni | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq
+          echo "=== GLIBC symbols (FFI) ==="
+          objdump -T dist/libkjarni_ffi.so | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-x86_64-linux
+          path: dist/
+
+  # Linux aarch64 (zigbuild → glibc 2.17)
+  build-linux-arm:
+    name: Build (Linux aarch64, glibc 2.17)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.1"
+          targets: aarch64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-aarch64
 
-      - name: Build
-        run: cargo check --workspace
+      - name: Install cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build CLI (release, glibc 2.17)
+        run: cargo zigbuild --release --package kjarni-cli --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Build FFI (release, glibc 2.17)
+        run: cargo zigbuild --release --package kjarni-ffi --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
+          cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
+          cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-aarch64-linux
+          path: dist/
+
+  # macOS
+  build-macos:
+    name: Build (macOS aarch64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-aarch64
+
+      - name: Build CLI (release)
+        run: cargo build --release --package kjarni-cli --target aarch64-apple-darwin
+
+      - name: Build FFI (release)
+        run: cargo build --release --package kjarni-ffi --target aarch64-apple-darwin
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/kjarni dist/
+          cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
+          cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-aarch64-macos
+          path: dist/
+
+  # Windows
+  build-windows:
+      name: Build (Windows x86_64)
+      runs-on: windows-latest
+      steps:
+        - uses: actions/checkout@v4
+
+        - uses: ilammy/msvc-dev-cmd@v1
+
+        - uses: dtolnay/rust-toolchain@master
+          with:
+            toolchain: "1.91.1"
+
+        - uses: Swatinem/rust-cache@v2
+          with:
+            key: windows-x86_64
+
+        - name: Build CLI (release)
+          run: cargo build --release --package kjarni-cli
+
+        - name: Build FFI (release)
+          run: cargo build --release --package kjarni-ffi
+
+        - name: Prepare artifacts
+          shell: bash
+          run: |
+            mkdir -p dist
+            cp target/release/kjarni.exe dist/
+            cp target/release/kjarni_ffi.dll dist/ 2>/dev/null || true
+            cp target/release/kjarni_ffi.dll.lib dist/ 2>/dev/null || true
+            cp crates/kjarni-ffi/kjarni.h dist/ 2>/dev/null || true
+
+        - uses: actions/upload-artifact@v4
+          with:
+            name: kjarni-x86_64-windows
+            path: dist/
+
+  # WASM
+  build-wasm:
+    name: Build (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-wasm
+          path: crates/kjarni-wasm/pkg/
+
+  # ─── Release ────────────────────────────────────────────────────
+  release:
+    name: Release
+    needs: [build-linux, build-linux-arm, build-macos, build-windows, build-wasm]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Package archives
+        run: |
+          cd artifacts
+
+          # Linux x86_64
+          tar -czf kjarni-x86_64-linux.tar.gz \
+            -C kjarni-x86_64-linux .
+
+          # Linux aarch64
+          tar -czf kjarni-aarch64-linux.tar.gz \
+            -C kjarni-aarch64-linux .
+
+          # macOS
+          tar -czf kjarni-aarch64-macos.tar.gz \
+            -C kjarni-aarch64-macos .
+
+          # Windows
+          (cd kjarni-x86_64-windows && zip -r ../kjarni-x86_64-windows.zip .)
+
+          # WASM
+          tar -czf kjarni-wasm.tar.gz \
+            -C kjarni-wasm .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/kjarni-x86_64-linux.tar.gz
+            artifacts/kjarni-aarch64-linux.tar.gz
+            artifacts/kjarni-aarch64-macos.tar.gz
+            artifacts/kjarni-x86_64-windows.zip
+            artifacts/kjarni-wasm.tar.gz
