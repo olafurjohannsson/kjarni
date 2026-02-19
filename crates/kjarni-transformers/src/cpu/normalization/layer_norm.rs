@@ -166,7 +166,6 @@ impl LayerNorm {
         #[cfg(not(target_arch = "x86_64"))]
         {
             self.forward_2d_noalloc_scalar(input, output);
-            // or whatever your non-SIMD fallback is
         }
     }
 

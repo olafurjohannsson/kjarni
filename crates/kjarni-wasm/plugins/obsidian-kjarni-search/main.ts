@@ -34,19 +34,23 @@ const DELETE_DEBOUNCE_MS = 5000;
 // ─── Types ───────────────────────────────────────────────────────
 
 interface KjarniSettings {
-	chunkSize: number;
-	chunkOverlap: number;
-	searchLimit: number;
-	rerankerEnabled: boolean;
-	debugLogging: boolean;
+    chunkSize: number;
+    chunkOverlap: number;
+    searchLimit: number;
+    rerankerEnabled: boolean;
+    debugLogging: boolean;
+    similarPanelOnStartup: boolean;  // ADD
+    similarAutoUpdate: boolean;       // ADD
 }
 
 const DEFAULT_SETTINGS: KjarniSettings = {
-	chunkSize: 1000,
-	chunkOverlap: 200,
-	searchLimit: 10,
-	rerankerEnabled: true,
-	debugLogging: false,
+    chunkSize: 1000,
+    chunkOverlap: 200,
+    searchLimit: 10,
+    rerankerEnabled: true,
+    debugLogging: false,
+    similarPanelOnStartup: false,     // ADD
+    similarAutoUpdate: true,          // ADD
 };
 
 interface SearchResultItem {

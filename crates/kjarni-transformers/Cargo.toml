@@ -66,6 +66,7 @@ tempfile = "3.23.0"
 
 [features]
 default = []
+gpu-tests = []
 profiling = []
 rubato = []
 symphonia = []
