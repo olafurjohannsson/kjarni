@@ -30,6 +30,8 @@ export class SimilarNotesView extends ItemView {
 	private searchVersion: number = 0;
 	private results: SearchResultItem[] = [];
 
+	private MIN_SCORE: 0.2
+
 	constructor(leaf: WorkspaceLeaf, plugin: KjarniSearchPlugin) {
 		super(leaf);
 		this.plugin = plugin;
@@ -180,13 +182,45 @@ export class SimilarNotesView extends ItemView {
 				}
 			}
 
-			this.results = Array.from(bySource.values())
+			let finalResults = Array.from(bySource.values())
 				.sort((a, b) => b.score - a.score)
+				// .filter(r => r.score > this.MIN_SCORE)
 				.slice(0, this.plugin.settings.searchLimit);
+
+			this.results = finalResults;
 
 			if (this.searchVersion !== version) return;
 
+			// Phase 1: Show results immediately
 			this.renderResults(file.basename, this.results, searchMs);
+
+			// Phase 2: Rerank in background
+			if (this.plugin.hasReranker && finalResults.length > 1) {
+				const statusEl = this.getStatusEl();
+				if (statusEl) {
+					statusEl.textContent = `${finalResults.length} similar notes · ${searchMs.toFixed(0)}ms · refining...`;
+					statusEl.addClass("kjarni-refining");
+				}
+
+				const topDocs = finalResults.map(r => r.text);
+				const t1 = performance.now();
+				const reranked = await this.plugin.doRerank(
+					queryText, topDocs, finalResults.length
+				);
+				const rerankMs = performance.now() - t1;
+
+				if (this.searchVersion !== version) return;
+
+				if (reranked.length > 0) {
+					this.results = reranked.map(r => finalResults[r.index]);
+					this.renderResults(file.basename, this.results, searchMs);
+				}
+
+				if (statusEl) {
+					statusEl.textContent = `${this.results.length} similar notes · ${searchMs.toFixed(0)}ms · ${rerankMs.toFixed(0)}ms rerank`;
+					statusEl.removeClass("kjarni-refining");
+				}
+			}
 		} catch (e) {
 			console.error("Kjarni: Similar notes search failed:", e);
 			this.renderEmpty("Search failed");
@@ -244,10 +278,11 @@ export class SimilarNotesView extends ItemView {
 		}
 
 		// Normalize scores for display
-		const maxScore = Math.max(...results.map((r) => r.score), 0.001);
+		// const maxScore = Math.max(...results.map((r) => r.score), 0.001);
 
 		for (const result of results) {
-			const pct = Math.round((result.score / maxScore) * 100);
+			// const pct = Math.round((result.score / maxScore) * 100);
+			const pct = Math.round(Math.max(0, Math.min(100, result.score * 100)));
 			const item = el.createDiv({ cls: "kjarni-similar-item" });
 
 			// Click to open
