@@ -1923,6 +1923,7 @@ mod classifier_tests {
         use super::*;
 
         #[tokio::test]
+        #[ignore = "requires GPU"]
         async fn test_gpu_classification() {
             let classifier = Classifier::builder("distilbert-sentiment")
                 .gpu()
@@ -1939,6 +1940,7 @@ mod classifier_tests {
         }
 
         #[tokio::test]
+        #[ignore = "requires GPU"]
         async fn test_gpu_cpu_parity() {
             let gpu_classifier = Classifier::builder("distilbert-sentiment")
                 .gpu()

@@ -25,7 +25,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets 2>&1 || true
 
-  # ─── Test (CPU only) ───────────────────────────────────────────
+  # ─── Test (CPU only, models cached) ────────────────────────────
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -35,7 +35,26 @@ jobs:
         with:
           toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --exclude kjarni-wasm 2>&1 || true
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-v1
+
+      - name: Download test models
+        run: |
+          cargo run --package kjarni-cli -- model download distilbert-sentiment
+          cargo run --package kjarni-cli -- model download roberta-sentiment
+          cargo run --package kjarni-cli -- model download bert-sentiment-multilingual
+          cargo run --package kjarni-cli -- model download roberta-emotions
+          cargo run --package kjarni-cli -- model download toxic-bert
+          cargo run --package kjarni-cli -- model download distilroberta-emotion
+          cargo run --package kjarni-cli -- model download minilm-l6-v2
+          cargo run --package kjarni-cli -- model download gpt2
+
+      - name: Run tests
+        run: cargo test --workspace --exclude kjarni-wasm
 
   # ─── Linux x86_64 ──────────────────────────────────────────────
   build-linux:
@@ -74,79 +93,10 @@ jobs:
           name: kjarni-x86_64-linux
           path: dist/
 
-  # ─── Linux aarch64 ─────────────────────────────────────────────
-  build-linux-arm:
-    name: Build (Linux aarch64)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.91.1"
-          targets: aarch64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: linux-aarch64
-
-      - name: Install cargo-zigbuild
-        run: |
-          pip3 install ziglang
-          cargo install cargo-zigbuild
-
-      - name: Build CLI
-        run: cargo zigbuild --release --package kjarni-cli --target aarch64-unknown-linux-gnu.2.17
-
-      - name: Build FFI
-        run: cargo zigbuild --release --package kjarni-ffi --target aarch64-unknown-linux-gnu.2.17
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p dist
-          cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
-          cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kjarni-aarch64-linux
-          path: dist/
-
-  # ─── macOS aarch64 ─────────────────────────────────────────────
-  build-macos:
-    name: Build (macOS aarch64)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.91.1"
-          targets: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: macos-aarch64
-
-      - name: Build CLI
-        run: cargo build --release --package kjarni-cli --target aarch64-apple-darwin
-
-      - name: Build FFI
-        run: cargo build --release --package kjarni-ffi --target aarch64-apple-darwin
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p dist
-          cp target/aarch64-apple-darwin/release/kjarni dist/
-          cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kjarni-aarch64-macos
-          path: dist/
-
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-linux-arm, build-macos]
+    needs: [build-linux]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -163,15 +113,8 @@ jobs:
       - name: Package archives
         run: |
           cd artifacts
-
           tar -czf kjarni-x86_64-linux.tar.gz \
             -C kjarni-x86_64-linux .
-
-          tar -czf kjarni-aarch64-linux.tar.gz \
-            -C kjarni-aarch64-linux .
-
-          tar -czf kjarni-aarch64-macos.tar.gz \
-            -C kjarni-aarch64-macos .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -179,5 +122,3 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/kjarni-x86_64-linux.tar.gz
-            artifacts/kjarni-aarch64-linux.tar.gz
-            artifacts/kjarni-aarch64-macos.tar.gz
