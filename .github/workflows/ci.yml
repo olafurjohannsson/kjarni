@@ -42,16 +42,26 @@ jobs:
           path: ~/.cache/kjarni
           key: kjarni-models-v1
 
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
       - name: Download test models
         run: |
-          cargo run --package kjarni-cli -- model download distilbert-sentiment
-          cargo run --package kjarni-cli -- model download roberta-sentiment
-          cargo run --package kjarni-cli -- model download bert-sentiment-multilingual
-          cargo run --package kjarni-cli -- model download roberta-emotions
-          cargo run --package kjarni-cli -- model download toxic-bert
-          cargo run --package kjarni-cli -- model download distilroberta-emotion
-          cargo run --package kjarni-cli -- model download minilm-l6-v2
-          cargo run --package kjarni-cli -- model download gpt2
+          CLI=./target/release/kjarni
+          $CLI model download distilbert-sentiment
+          $CLI model download roberta-sentiment
+          $CLI model download bert-sentiment-multilingual
+          $CLI model download roberta-emotions
+          $CLI model download toxic-bert
+          $CLI model download distilroberta-emotion
+          $CLI model download minilm-l6-v2
+          $CLI model download gpt2
+          $CLI model download minilm-l6-v2-cross-encoder
+          $CLI model download distilbert-base
+          $CLI model download qwen2.5-0.5b-instruct
+          $CLI model download flan-t5-base
+          $CLI model download flan-t5-large
+          $CLI model download distilbart-cnn
 
       - name: Run tests
         run: cargo test --workspace --exclude kjarni-wasm
