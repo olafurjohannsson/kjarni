@@ -30,7 +30,7 @@ export class SimilarNotesView extends ItemView {
 	private searchVersion: number = 0;
 	private results: SearchResultItem[] = [];
 
-	private MIN_SCORE: 0.2
+	private MIN_SCORE = 0.005
 
 	constructor(leaf: WorkspaceLeaf, plugin: KjarniSearchPlugin) {
 		super(leaf);
@@ -73,6 +73,9 @@ export class SimilarNotesView extends ItemView {
 
 		// Status
 		container.createDiv({ cls: "kjarni-similar-status" });
+
+		const footer = container.createDiv({ cls: "kjarni-similar-footer" });
+		footer.innerHTML = `<a href="https://kjarni.ai">Powered by Kjarni</a>`;
 
 		// Show initial state
 		this.renderEmpty("Open a note to see similar notes");
@@ -161,7 +164,12 @@ export class SimilarNotesView extends ItemView {
 
 			// Use the note text as a search query
 			// Truncate to first ~500 chars for the query to keep it focused
-			const queryText = text.slice(0, 500);
+			let content = text;
+			const fmMatch = content.match(/^---\n[\s\S]*?\n---\n/);
+			if (fmMatch) {
+				content = content.slice(fmMatch[0].length);
+			}
+			const queryText = content.slice(0, 500);
 
 			const t0 = performance.now();
 			const results = await this.plugin.doSearch(queryText, 20);
@@ -184,7 +192,7 @@ export class SimilarNotesView extends ItemView {
 
 			let finalResults = Array.from(bySource.values())
 				.sort((a, b) => b.score - a.score)
-				// .filter(r => r.score > this.MIN_SCORE)
+				.filter(r => r.score > this.MIN_SCORE)
 				.slice(0, this.plugin.settings.searchLimit);
 
 			this.results = finalResults;
@@ -195,7 +203,7 @@ export class SimilarNotesView extends ItemView {
 			this.renderResults(file.basename, this.results, searchMs);
 
 			// Phase 2: Rerank in background
-			if (this.plugin.hasReranker && finalResults.length > 1) {
+			if (this.plugin.hasReranker && this.plugin.settings.similarRerankerEnabled && finalResults.length > 1) {
 				const statusEl = this.getStatusEl();
 				if (statusEl) {
 					statusEl.textContent = `${finalResults.length} similar notes · ${searchMs.toFixed(0)}ms · refining...`;
@@ -212,7 +220,10 @@ export class SimilarNotesView extends ItemView {
 				if (this.searchVersion !== version) return;
 
 				if (reranked.length > 0) {
-					this.results = reranked.map(r => finalResults[r.index]);
+					this.results = reranked.map(r => ({
+						...finalResults[r.index],
+						score: r.score,
+					}));
 					this.renderResults(file.basename, this.results, searchMs);
 				}
 
@@ -278,11 +289,12 @@ export class SimilarNotesView extends ItemView {
 		}
 
 		// Normalize scores for display
-		// const maxScore = Math.max(...results.map((r) => r.score), 0.001);
+		const minScore = Math.min(...results.map(r => r.score));
+		const maxScore = Math.max(...results.map(r => r.score), 0.001);
+		const range = maxScore - minScore || 1;
 
 		for (const result of results) {
-			// const pct = Math.round((result.score / maxScore) * 100);
-			const pct = Math.round(Math.max(0, Math.min(100, result.score * 100)));
+			const pct = Math.round(((result.score - minScore) / range) * 100);
 			const item = el.createDiv({ cls: "kjarni-similar-item" });
 
 			// Click to open
