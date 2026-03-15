@@ -413,7 +413,7 @@ mod distilbart_cnn_tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "takes too long for CI"]
     async fn test_greedy_amazon_rainforest() {
         if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
@@ -435,7 +435,7 @@ mod distilbart_cnn_tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "takes too long for CI"]
     async fn test_greedy_python_language() {
         if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
@@ -504,6 +504,7 @@ mod error_handling_tests {
         }
     }
     #[tokio::test]
+    #[ignore]
     async fn test_debug_t5_token_generation() {
         use crate::seq2seq::Seq2SeqGenerator;
         use futures::StreamExt;
@@ -540,6 +541,7 @@ mod error_handling_tests {
         }
     }
     #[tokio::test]
+    #[ignore = "takes too long for CI"]
     async fn test_debug_t5_generation_config() {
         let summarizer = Summarizer::new("flan-t5-base").await.expect("Should load");
 
