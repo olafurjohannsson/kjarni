@@ -58,9 +58,8 @@ jobs:
           $CLI model download gpt2
           $CLI model download minilm-l6-v2-cross-encoder
           $CLI model download distilbert-base
-          $CLI model download qwen2.5-0.5b-instruct
           $CLI model download flan-t5-base
-          $CLI model download distilbart-cnnf
+          $CLI model download distilbart-cnn
 
       - name: Run tests
         run: cargo test --workspace --exclude kjarni-wasm
