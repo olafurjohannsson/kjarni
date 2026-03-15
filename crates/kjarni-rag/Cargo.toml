@@ -7,6 +7,7 @@ edition = "2024"
 [dependencies]
 kjarni-search = { path = "../kjarni-search" }
 log = { workspace = true }
+text-splitter = { version = "0.27", features = ["markdown"] }
 memmap2 = "0.9"
 walkdir = "2.5.0"
 tempfile = "3.23.0"

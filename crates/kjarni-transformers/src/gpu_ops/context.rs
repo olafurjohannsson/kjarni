@@ -258,7 +258,7 @@ log::info!(
 
     #[cfg(target_os = "macos")]
     fn query_gpu_memory(_adapter: &Adapter) -> Option<u64> {
-        use sysinfo::{System, SystemExt};
+        use sysinfo::System;
 
         let mut sys = System::new_all();
         sys.refresh_memory();

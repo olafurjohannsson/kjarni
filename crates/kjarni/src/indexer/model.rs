@@ -71,6 +71,7 @@ impl Indexer {
             exclude_patterns: builder.exclude_patterns.clone(),
             include_hidden: builder.include_hidden,
             max_file_size: builder.max_file_size,
+            quiet: builder.quiet,
         };
 
         Ok(Self {

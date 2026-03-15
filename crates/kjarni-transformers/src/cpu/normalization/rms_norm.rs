@@ -1,8 +1,8 @@
 //! Root Mean Square Layer Normalization
 
-use ndarray::{Array1, Array2, Array3, Axis};
-
+#[cfg(target_arch = "x86_64")]
 use crate::cpu::kernels::x86::rms_norm::rms_norm_avx2;
+use ndarray::{Array1, Array2, Array3, Axis};
 
 /// Root Mean Square Layer Normalization
 #[derive(Clone)]
@@ -52,24 +52,24 @@ impl RMSNormSIMD {
     #[inline]
     fn apply_row(&self, row: &mut [f32]) {
         let w = self.weight.as_slice().expect("weight must be contiguous");
-
         debug_assert_eq!(row.len(), w.len());
 
-        if cfg!(target_arch = "x86_64")
-            && std::is_x86_feature_detected!("avx2")
-            && std::is_x86_feature_detected!("fma")
+        #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                rms_norm_avx2(row, w, self.eps);
+            if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+                unsafe {
+                    rms_norm_avx2(row, w, self.eps);
+                }
+                return;
             }
-        } else {
-            let sum_sq: f32 = row.iter().map(|v| v * v).sum();
-            let mean = sum_sq / row.len() as f32;
-            let scale = 1.0 / (mean + self.eps).sqrt();
+        }
 
-            for (x, w) in row.iter_mut().zip(w.iter()) {
-                *x = *x * scale * *w;
-            }
+        // Scalar fallback
+        let sum_sq: f32 = row.iter().map(|v| v * v).sum();
+        let mean = sum_sq / row.len() as f32;
+        let scale = 1.0 / (mean + self.eps).sqrt();
+        for (x, w) in row.iter_mut().zip(w.iter()) {
+            *x = *x * scale * *w;
         }
     }
 
@@ -311,7 +311,7 @@ mod tests {
                 7.0, 8.0, // batch 1, pos 1
             ],
         )
-            .unwrap();
+        .unwrap();
 
         let output = rms_norm.forward_3d(&hidden);
         let rms_00 = ((1.0_f32.powi(2) + 2.0_f32.powi(2)) / 2.0).sqrt();
