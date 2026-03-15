@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-v1
+          key: kjarni-models-v2
 
       - name: Build CLI for model downloads
         run: cargo build --release --package kjarni-cli
@@ -60,8 +60,7 @@ jobs:
           $CLI model download distilbert-base
           $CLI model download qwen2.5-0.5b-instruct
           $CLI model download flan-t5-base
-          $CLI model download flan-t5-large
-          $CLI model download distilbart-cnn
+          $CLI model download distilbart-cnnf
 
       - name: Run tests
         run: cargo test --workspace --exclude kjarni-wasm
