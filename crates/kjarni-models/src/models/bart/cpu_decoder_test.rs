@@ -12,7 +12,7 @@ use crate::models::bart::config::BartConfig;
 #[cfg(test)]
 mod cpu_seq2seq_decoder_test {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use kjarni_transformers::cpu::encoder_decoder::{Seq2SeqCPUDecoder, Seq2SeqCPUEncoder};
     use kjarni_transformers::encoder_decoder::config::{
@@ -25,11 +25,11 @@ mod cpu_seq2seq_decoder_test {
 
 
     fn model_cache_dir(model_dir: &str) -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
-}
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
+    }
 
     const DISTILBART_DIR: &str = "olafuraron_distilbart-cnn-12-6";
 
