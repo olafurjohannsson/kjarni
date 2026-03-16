@@ -31,7 +31,7 @@ mod cpu_seq2seq_decoder_test {
         PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
     }
 
-    const DISTILBART_DIR: &str = "olafuraron_distilbart-cnn-12-6";
+    const DISTILBART_PATH: &str = "olafuraron_distilbart-cnn-12-6";
 
     mod golden {
         pub const ENCODER_HIDDEN: [f32; 10] = [
