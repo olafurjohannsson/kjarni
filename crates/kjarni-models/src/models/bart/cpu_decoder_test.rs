@@ -24,7 +24,14 @@ mod cpu_seq2seq_decoder_test {
     use kjarni_transformers::traits::CpuTransformerCore;
 
 
-    const DISTILBART_PATH: &str = "~/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
+    fn model_cache_dir(model_dir: &str) -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
+}
+
+    const DISTILBART_DIR: &str = "olafuraron_distilbart-cnn-12-6";
 
     mod golden {
         pub const ENCODER_HIDDEN: [f32; 10] = [
