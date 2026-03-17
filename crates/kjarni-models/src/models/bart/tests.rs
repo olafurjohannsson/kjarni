@@ -23,6 +23,7 @@ async fn load_bart_large_cnn() -> Result<BartModel> {
     .await
 }
 
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_greedy_generation_news() -> Result<()> {
     let model = BartModel::from_registry(
@@ -67,7 +68,7 @@ async fn test_bart_large_cnn_greedy_generation_news() -> Result<()> {
     Ok(())
 }
 
-
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_greedy_generation_ai() -> Result<()> {
     let model = BartModel::from_registry(
@@ -120,6 +121,7 @@ async fn test_bart_large_cnn_greedy_generation_ai() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_decoder_start_token() -> Result<()> {
     let model = BartModel::from_registry(
@@ -202,6 +204,7 @@ fn test_bart_large_cnn_config_parsing() {
     assert!(summary.early_stopping);
 }
 
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_architectural_properties() -> Result<()> {
     let model = load_bart_large_cnn().await?;
@@ -233,6 +236,7 @@ async fn test_bart_large_cnn_architectural_properties() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_trait_config_consistency() -> Result<()> {
     let model = load_bart_large_cnn().await?;
@@ -264,6 +268,7 @@ async fn test_bart_large_cnn_trait_config_consistency() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires bart-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_generation_config_does_not_override_token_ids() -> Result<()> {
     let model = load_bart_large_cnn().await?;
@@ -288,6 +293,7 @@ async fn test_bart_large_cnn_generation_config_does_not_override_token_ids() -> 
     Ok(())
 }
 
+#[ignore = "Required barge-large-cnn not in CI"]
 #[tokio::test]
 async fn test_bart_large_cnn_default_generation_config() -> Result<()> {
     let model = load_bart_large_cnn().await?;
