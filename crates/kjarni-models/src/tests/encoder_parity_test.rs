@@ -537,6 +537,7 @@ async fn test_encoder_cpu_gpu_parity() -> Result<()> {
     }
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_simple_input() -> Result<()> {
     println!("Testing Simple Input: Single Word");

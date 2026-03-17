@@ -1,5 +1,6 @@
 mod tokenizer;
 mod wasm_simd;
+mod wasm_feedforward;
 mod weights;
 
 use anyhow::Result;
