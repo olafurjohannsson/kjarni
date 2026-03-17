@@ -8,6 +8,7 @@ use kjarni_transformers::{LanguageModel, WgpuContext};
 
 use crate::models::bart::model::BartModel;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_beam_search_4_beams() -> Result<()> {
     let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;

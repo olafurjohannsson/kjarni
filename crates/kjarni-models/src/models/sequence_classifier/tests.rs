@@ -9,6 +9,7 @@ mod cross_encoder_tests {
     
 
     use super::*;
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_torch_cross_encoder_predict() -> Result<()> {
         {
@@ -79,6 +80,8 @@ mod cross_encoder_tests {
         );
         Ok(())
     }
+
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_cross_encoder_rerank_torch_parity() -> Result<()> {
         let query = "machine learning algorithms";
@@ -119,6 +122,7 @@ mod cross_encoder_tests {
 
         Ok(())
     }
+    
     #[tokio::test]
     async fn test_rerank_returns_scores() -> Result<()> {
         let encoder = CrossEncoder::from_registry(

@@ -201,6 +201,7 @@ async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
