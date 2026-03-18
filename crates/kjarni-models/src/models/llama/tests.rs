@@ -37,7 +37,7 @@ async fn load_llama_8b_for_test() -> Result<LlamaModel> {
     )
 }
 
-//
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama3_8b_architectural_properties() -> Result<()> {
     if std::path::Path::new("meta-llama_Llama-3.2-8B-Instruct").exists()
@@ -87,6 +87,7 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama_trait_config_consistency() -> Result<()> {
     let model_1b = load_llama_for_test().await?;
