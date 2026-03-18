@@ -125,8 +125,6 @@ async fn test_fc2_kernel_parity() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "GPU required"]
 async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
     let context = get_test_context().await;
 
