@@ -548,6 +548,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_any_decoder_backend_gpu_type() {
         let ctx = WgpuContext::new().await.expect("Failed to create context");
         let gpu_backend = Arc::new(GpuDecoderBackend::new(ctx).unwrap());

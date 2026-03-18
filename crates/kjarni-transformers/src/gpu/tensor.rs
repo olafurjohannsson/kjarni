@@ -759,6 +759,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     #[should_panic(expected = "cannot view tensor")]
     async fn test_invalid_view() {
         let ctx = setup_context().await;

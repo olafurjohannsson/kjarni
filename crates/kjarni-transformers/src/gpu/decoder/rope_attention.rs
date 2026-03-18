@@ -323,6 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_attention_prefill_no_cache() {
         let ctx = setup().await;
 
@@ -372,6 +373,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_attention_decode_with_cache() {
         let ctx = setup().await;
 

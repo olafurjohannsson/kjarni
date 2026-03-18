@@ -207,12 +207,14 @@ async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_ffn_parity_with_transpose_true() -> Result<()> {
     run_ffn_test(true).await?;
     Ok(())
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_ffn_parity_with_transpose_false() -> Result<()> {
     run_ffn_test(false).await?;
     Ok(())

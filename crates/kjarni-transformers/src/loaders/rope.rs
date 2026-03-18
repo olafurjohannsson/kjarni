@@ -92,6 +92,7 @@ mod loaded_rope {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_loaded_rope_gpu_init() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
         let meta = dummy_metadata();
@@ -122,6 +123,7 @@ mod loaded_rope {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_gpu_cpu_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
         let meta = dummy_metadata();
@@ -163,6 +165,7 @@ mod loaded_rope {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_gpu_offset_parity() -> Result<()> {
         let ctx = WgpuContext::new().await?;
         let meta = dummy_metadata();
