@@ -122,7 +122,10 @@ impl WasmFeedForward {
         let exp_sum: f32 = logits.iter().map(|x| (x - max_logit).exp()).sum();
         let probs: Vec<f32> = logits.iter().map(|x| (x - max_logit).exp() / exp_sum).collect();
 
-        let label = if probs[1] > probs[0] { 1 } else { 0 };
+        let label = probs.iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap().0;
         let confidence = probs[label];
 
         let result = WasmFeedForwardResult {
