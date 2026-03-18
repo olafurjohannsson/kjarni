@@ -6,9 +6,11 @@ use anyhow::Result;
 use common::assert_tensors_are_close_4d;
 use ndarray::Array;
 use ndarray_rand::{rand_distr::Uniform, RandomExt};
+
 #[path = "../../../tests/common.rs"]
 mod common;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_rope_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

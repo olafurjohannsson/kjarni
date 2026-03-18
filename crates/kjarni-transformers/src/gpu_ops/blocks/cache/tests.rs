@@ -22,6 +22,7 @@ async fn read_gpu_tensor_4d(tensor: &GpuTensor) -> Result<Array4<f32>> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_update_cache_kernel() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuUpdateCache::new(&context);

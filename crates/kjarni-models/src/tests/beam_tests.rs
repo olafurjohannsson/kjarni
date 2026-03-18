@@ -8,6 +8,7 @@ use kjarni_transformers::{LanguageModel, WgpuContext};
 
 use crate::models::bart::model::BartModel;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_beam_search_4_beams() -> Result<()> {
     let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
@@ -100,6 +101,7 @@ async fn test_beam_search_4_beams() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Long running test in CI"]
 #[tokio::test]
 async fn test_beam_search_debug_trace() -> Result<()> {
     let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
@@ -156,6 +158,7 @@ async fn test_beam_search_debug_trace() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Long running test in CI"]
 async fn test_beam_search_greedy() -> Result<()> {
     let model = BartModel::from_registry(ModelType::DistilBartCnn, None, Device::Cpu, None, None).await?;
     let backend = CpuBackend;

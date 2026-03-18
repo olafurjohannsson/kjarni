@@ -47,6 +47,7 @@ fn assert_arrays_are_close_3d(a: &Array3<f32>, b: &Array3<f32>, epsilon: f32) {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_add_broadcast_offset() -> Result<()> {
     let context = WgpuContext::new().await?;
 
@@ -89,6 +90,7 @@ async fn test_gpu_add_broadcast_offset() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_add_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
     let gpu_add = GpuAdd::new(&context);

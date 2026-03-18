@@ -1,0 +1,74 @@
+name: Sync NuGet
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish-nuget:
+    name: Pack & Publish to NuGet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download ${{ github.event.release.tag_name }} \
+            --dir release-assets
+
+      - name: Place native libraries
+        run: |
+          CSHARP_DIR=crates/kjarni-ffi/bindings/csharp/Kjarni
+          rm -rf $CSHARP_DIR/runtimes
+
+          # Linux x86_64
+          mkdir -p /tmp/linux-x64 $CSHARP_DIR/runtimes/linux-x64/native
+          tar -xzf release-assets/kjarni-x86_64-linux.tar.gz -C /tmp/linux-x64
+          cp /tmp/linux-x64/libkjarni_ffi.so $CSHARP_DIR/runtimes/linux-x64/native/
+
+          # Linux aarch64
+          mkdir -p /tmp/linux-arm64 $CSHARP_DIR/runtimes/linux-arm64/native
+          tar -xzf release-assets/kjarni-aarch64-linux.tar.gz -C /tmp/linux-arm64
+          cp /tmp/linux-arm64/libkjarni_ffi.so $CSHARP_DIR/runtimes/linux-arm64/native/
+
+          # macOS aarch64
+          mkdir -p /tmp/macos-arm64 $CSHARP_DIR/runtimes/osx-arm64/native
+          tar -xzf release-assets/kjarni-aarch64-macos.tar.gz -C /tmp/macos-arm64
+          cp /tmp/macos-arm64/libkjarni_ffi.dylib $CSHARP_DIR/runtimes/osx-arm64/native/
+
+      - name: Set version from tag
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Pack
+        run: |
+          cd crates/kjarni-ffi/bindings/csharp/Kjarni
+          dotnet pack -c Release -p:Version=${{ env.PACKAGE_VERSION }} -o nupkg
+
+      - name: Verify package contents
+        run: |
+          cd crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg
+          echo "=== Package ==="
+          ls -lh *.nupkg
+          echo "=== Contents ==="
+          unzip -l *.nupkg | grep -E "(runtimes|lib/)" | head -20
+
+      - name: Push to NuGet
+        run: |
+          cd crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg
+          dotnet nuget push *.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

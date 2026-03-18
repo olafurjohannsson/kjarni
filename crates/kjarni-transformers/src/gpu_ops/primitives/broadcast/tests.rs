@@ -13,6 +13,7 @@ mod tests {
         WgpuContext::new().await.unwrap()
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_new() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -21,6 +22,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_encoder_states_for_beam_search() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -46,6 +48,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_encoder_states_4_beams() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -84,6 +87,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_encoder_states_single_beam() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -105,6 +109,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_encoder_states_large() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -135,6 +140,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_encoder_states_8_beams() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;
@@ -168,6 +174,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_broadcast_kernel_reuse() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuBroadcast::new(&context)?;

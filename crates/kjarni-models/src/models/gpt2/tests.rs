@@ -21,6 +21,7 @@ async fn load_distilgpt2_for_test() -> Result<Gpt2Model> {
 }
 
 #[tokio::test]
+#[ignore = "DistilGPT not loaded in CI"]
 async fn test_distilgpt2_generation_parity() -> Result<()> {
     // This test verifies deterministic (greedy) generation output.
     let model = load_distilgpt2_for_test().await?;
@@ -45,6 +46,7 @@ async fn test_distilgpt2_generation_parity() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "DistilGPT not loaded in CI"]
 async fn test_distilgpt2_architectural_properties() -> Result<()> {
     let model = load_distilgpt2_for_test().await?;
     let config = model.concrete_config();
@@ -91,6 +93,7 @@ async fn test_distilgpt2_generation_parity_2() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires GPU"]
 #[tokio::test]
 async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
     let model_type = ModelType::DistilGpt2;

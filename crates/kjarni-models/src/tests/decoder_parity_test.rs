@@ -21,6 +21,7 @@ use crate::models::llama::cpu_decoder::LlamaCpuDecoder;
 use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
 use crate::models::llama::LlamaModel;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_full_text_generation_parity() -> Result<()> {
     let model_type = ModelType::DistilGpt2;
@@ -93,6 +94,7 @@ fn assert_close_3d(cpu: &Array3<f32>, gpu: &Array3<f32>, atol: f32, name: &str) 
     );
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_rms_norm_isolated_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;
@@ -164,6 +166,7 @@ async fn test_rms_norm_isolated_parity() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_rms_norm_bf16_gamma_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;
@@ -430,16 +433,19 @@ async fn test_layer0_attention_vs_ffn_isolation(dtype: DType) -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_layer0_attention_vs_ffn_isolation_bf16() -> Result<()> {
     test_layer0_attention_vs_ffn_isolation(DType::BF16).await
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_llama_cpu_gpu_step_by_step_parity_bf16() -> Result<()> {
     test_llama_cpu_gpu_step_by_step_parity(DType::BF16).await
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_llama_cpu_gpu_step_by_step_parity_f32() -> Result<()> {
     test_llama_cpu_gpu_step_by_step_parity(DType::F32).await
@@ -850,6 +856,7 @@ async fn test_llama_cpu_gpu_step_by_step_parity(dtype: DType) -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_rope_cpu_gpu_parity() -> Result<()> {
     use kjarni_transformers::gpu_ops::blocks::rope::GpuRoPE;
@@ -917,6 +924,7 @@ async fn test_rope_cpu_gpu_parity() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gqa_expansion_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;

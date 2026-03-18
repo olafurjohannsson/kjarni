@@ -908,6 +908,7 @@ mod seq2seq_gpu_encoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_scenario_a_bart_postnorm() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_golden_data();
@@ -980,6 +981,7 @@ mod seq2seq_gpu_encoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_embed_norm_only() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_golden_data();
@@ -1056,6 +1058,7 @@ mod seq2seq_gpu_encoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_forward_layers_range() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_golden_data();
@@ -1128,6 +1131,7 @@ mod seq2seq_gpu_encoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_no_embed_norm() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_golden_data();
@@ -1192,6 +1196,7 @@ mod seq2seq_gpu_encoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_cpu_parity_bart() -> Result<()> {
         use crate::cpu::encoder_decoder::Seq2SeqCPUEncoder;
 
@@ -1264,6 +1269,7 @@ mod seq2seq_gpu_encoder_tests {
         Ok(())
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_scenario_b_whisper_prenorm() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_whisper_golden_data();
@@ -1339,6 +1345,7 @@ mod seq2seq_gpu_encoder_tests {
         Ok(())
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_cpu_parity_whisper() -> Result<()> {
         use crate::cpu::encoder_decoder::Seq2SeqCPUEncoder;
 

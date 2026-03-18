@@ -13,6 +13,7 @@ use common::{read_gpu_tensor_to_vec, assert_arrays_are_close_2d, get_test_contex
 
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_add_bias_parity() -> Result<()> {
     let context = get_test_context().await;
     let add_bias_kernel = GpuAddBias::new(&context);

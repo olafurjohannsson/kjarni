@@ -82,6 +82,7 @@ fn create_gpu_attention(
     (attention, weights)
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_attention_encoder_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -121,6 +122,7 @@ async fn test_attention_encoder_parity() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_attention_decoder_generation_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

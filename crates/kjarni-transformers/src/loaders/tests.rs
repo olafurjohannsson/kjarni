@@ -213,6 +213,7 @@ async fn create_gpu_lm_head(
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_loaded_lm_head_gpu_only() {
     let ctx = setup_gpu_context().await;
     let head = create_gpu_lm_head(&ctx, 1000, 256).await;
@@ -224,6 +225,7 @@ async fn test_loaded_lm_head_gpu_only() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_loaded_lm_head_forward_gpu_shape() {
     let ctx = setup_gpu_context().await;
     let vocab_size = 1000;
@@ -249,6 +251,7 @@ async fn test_loaded_lm_head_forward_gpu_shape() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_loaded_lm_head_forward_gpu_values() {
     let ctx = setup_gpu_context().await;
     let vocab_size = 4;
@@ -297,6 +300,7 @@ async fn test_loaded_lm_head_forward_gpu_values() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     let ctx = setup_gpu_context().await;
 
@@ -327,7 +331,7 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     );
 }
 
-
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_loaded_lm_head_cpu_gpu_parity() {
     let ctx = setup_gpu_context().await;

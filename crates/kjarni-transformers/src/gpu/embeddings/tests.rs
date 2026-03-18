@@ -132,6 +132,7 @@ fn make_embeddings(
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_word_embedding_lookup_only() -> Result<()> {
     let ctx = Arc::new(WgpuContext::new().await?);
 
@@ -188,6 +189,7 @@ async fn test_word_embedding_lookup_only() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_word_plus_position_embeddings() -> Result<()> {
     let ctx = Arc::new(WgpuContext::new().await?);
 
@@ -255,6 +257,7 @@ async fn test_word_plus_position_embeddings() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_embeddings_with_position_offset() -> Result<()> {
     let ctx = Arc::new(WgpuContext::new().await?);
 
@@ -325,6 +328,7 @@ async fn test_embeddings_with_position_offset() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_embeddings_with_scaling() -> Result<()> {
     let ctx = Arc::new(WgpuContext::new().await?);
 

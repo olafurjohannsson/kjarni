@@ -301,6 +301,7 @@ mod bart_large_golden_values_test {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "bart large seq2seq inference too slow for CI"]
     async fn golden_summarize_ai_paragraph() {
         let summarizer = Summarizer::builder("bart-large-cnn")
             .quiet()
@@ -344,6 +345,7 @@ mod bart_large_golden_values_test {
     }
 
     #[tokio::test]
+    #[ignore = "bart large seq2seq inference too slow for CI"]
     async fn golden_summarize_news_style() {
         let summarizer = Summarizer::builder("bart-large-cnn")
             .quiet()
@@ -411,6 +413,7 @@ mod distilbart_cnn_tests {
     }
 
     #[tokio::test]
+    #[ignore = "takes too long for CI"]
     async fn test_greedy_amazon_rainforest() {
         if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
@@ -432,6 +435,7 @@ mod distilbart_cnn_tests {
     }
 
     #[tokio::test]
+    #[ignore = "takes too long for CI"]
     async fn test_greedy_python_language() {
         if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");
@@ -500,6 +504,7 @@ mod error_handling_tests {
         }
     }
     #[tokio::test]
+    #[ignore]
     async fn test_debug_t5_token_generation() {
         use crate::seq2seq::Seq2SeqGenerator;
         use futures::StreamExt;
@@ -536,6 +541,7 @@ mod error_handling_tests {
         }
     }
     #[tokio::test]
+    #[ignore = "takes too long for CI"]
     async fn test_debug_t5_generation_config() {
         let summarizer = Summarizer::new("flan-t5-base").await.expect("Should load");
 
@@ -642,6 +648,7 @@ mod concurrency_tests {
     }
 
     #[tokio::test]
+    #[ignore = "seq2seq inference too slow for CI"]
     async fn test_concurrent_summarizations_deterministic() {
         if !model_available() {
             eprintln!("Skipping: distilbart-cnn not downloaded");

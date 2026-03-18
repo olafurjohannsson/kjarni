@@ -9,6 +9,7 @@ use ndarray::{Array1, Array3, Axis};
 mod common;
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_layernorm_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize

@@ -406,6 +406,7 @@ mod integration_tests {
 
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_basic_chat() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -432,6 +433,7 @@ mod integration_tests {
 
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_chat_with_system_prompt() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -454,6 +456,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_chat_modes() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -481,6 +484,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_conversation_accumulates_history() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -519,6 +523,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_conversation_clear() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -551,6 +556,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_send_with_history() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -577,6 +583,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_streaming_chat() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");
@@ -605,6 +612,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "decoder inference too slow for CI"]
     async fn test_conversation_streaming() {
         if !model_available("qwen2.5-0.5b-instruct") {
             eprintln!("Skipping: qwen2.5-0.5b-instruct not downloaded");

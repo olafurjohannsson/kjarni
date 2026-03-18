@@ -650,6 +650,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_generator_new_gpu_with_context() {
         let context = WgpuContext::new().await.expect("Failed to create context");
 

@@ -17,7 +17,7 @@ async fn get_test_context() -> Arc<WgpuContext> {
     WgpuContext::new().await.unwrap()
 }
 
-/// Helper function to run a single BMM test case.
+
 async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) -> Result<()> {
     let context = get_test_context().await;
     let bmm_kernel = GpuBatchedMatMul::new(&context);
@@ -48,7 +48,9 @@ async fn run_bmm_test(batch: usize, heads: usize, m: usize, k: usize, n: usize) 
     assert_all_close_4d(&gpu_result_4d, &cpu_result_4d, 1e-4);
     Ok(())
 }
+
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_q_k_scores() -> Result<()> {
     // Simulates a typical Q @ K^T operation in attention
     let batch_size = 1;
@@ -59,6 +61,7 @@ async fn test_bmm_q_k_scores() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_scores_v() -> Result<()> {
     let batch_size = 1;
     let num_heads = 12;
@@ -68,6 +71,7 @@ async fn test_bmm_scores_v() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_non_tile_aligned() -> Result<()> {
     let batch_size = 1;
     let num_heads = 7; // Odd number of heads
@@ -77,6 +81,7 @@ async fn test_bmm_non_tile_aligned() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_large_batch() -> Result<()> {
     let batch_size = 8;
     let num_heads = 12;
@@ -86,6 +91,7 @@ async fn test_bmm_large_batch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_single_token_generation() -> Result<()> {
     let batch_size = 1;
     let num_heads = 12;
@@ -96,6 +102,7 @@ async fn test_bmm_single_token_generation() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_multi_token_generation() -> Result<()> {
     let batch_size = 1;
     let num_heads = 12;
@@ -106,6 +113,7 @@ async fn test_bmm_multi_token_generation() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_odd_head_dim() -> Result<()> {
     let batch_size = 1;
     let num_heads = 8;
@@ -115,6 +123,7 @@ async fn test_bmm_odd_head_dim() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bmm_broadcast_3d_2d() -> Result<()> {
     let context = get_test_context().await;
     let bmm_kernel = GpuBatchedMatMul::new(&context);

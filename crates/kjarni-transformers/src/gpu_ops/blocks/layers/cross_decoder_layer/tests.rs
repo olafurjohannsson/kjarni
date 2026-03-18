@@ -231,6 +231,7 @@ mod gpu_cross_decoder_test {
         })
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_cpu_layer_consistency() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -294,6 +295,7 @@ mod gpu_cross_decoder_test {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_layer_subcomponent_parity() -> Result<()> {
         let context = WgpuContext::new().await?;

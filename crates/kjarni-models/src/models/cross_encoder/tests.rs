@@ -140,6 +140,7 @@ mod cross_encoder_tests {
         Ok(())
     }
 
+    #[ignore = "Requires GPU"]
     #[tokio::test]
     async fn test_cross_encoder_gpu() -> Result<()> {
         let context = WgpuContext::new().await?;

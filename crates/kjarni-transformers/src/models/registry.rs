@@ -982,3 +982,11 @@ pub fn format_size(mb: usize) -> String {
         format!("{} MB", mb)
     }
 }
+
+// /get model cache dir ~/.cache/kjarni/<model_dir>
+pub fn model_cache_dir(model_dir: &str) -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".cache").join("kjarni").join(model_dir)
+}

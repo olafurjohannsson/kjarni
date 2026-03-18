@@ -4,7 +4,6 @@ use crate::gpu_ops::primitives::layout::concatenate::GpuConcatenate;
 use anyhow::Result;
 use ndarray::{Array, Array4, Axis};
 
-// You will need a `read_gpu_tensor` helper in this test module.
 // Helper to read a GPU tensor back to a generic ndarray for comparison.
 async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Array<f32, D>> {
     let shape = tensor.shape().to_vec();
@@ -15,6 +14,7 @@ async fn read_gpu_tensor<D: ndarray::Dimension>(tensor: &GpuTensor) -> Result<Ar
         .unwrap())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_concatenate_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

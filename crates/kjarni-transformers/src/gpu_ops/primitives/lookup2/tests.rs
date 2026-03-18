@@ -8,7 +8,7 @@ use wgpu::util::DeviceExt;
 #[path = "../../../tests/common.rs"]
 mod common;
 
-
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_lookup() -> Result<()> {
     let context = WgpuContext::new().await?;
