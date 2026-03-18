@@ -4,7 +4,10 @@ use std::f32::consts::PI;
 
 use ndarray::{Array1, Array2, Array3, Array4};
 
+#[cfg(target_arch = "x86_64")]
 use crate::cpu::kernels::x86::rope_avx2;
+
+
 use crate::models::base::RopeScalingConfig;
 
 pub struct RoPE {

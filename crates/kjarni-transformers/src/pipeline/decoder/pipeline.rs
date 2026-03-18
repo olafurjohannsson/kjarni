@@ -510,6 +510,7 @@ mod decoder_pipeline_test {
 
     #[ignore = "GPU required"]
     #[tokio::test]
+    #[cfg(feature = "gpu-tests")]
     async fn test_builder_gpu_plan() -> Result<()> {
         let context = WgpuContext::new().await?;
         let hidden = 32;

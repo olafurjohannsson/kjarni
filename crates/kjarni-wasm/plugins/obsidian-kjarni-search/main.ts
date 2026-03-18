@@ -1,3 +1,7 @@
+// @ts-ignore
+import WORKER_SOURCE from "inline:worker.js";
+// @ts-ignore
+import ENCODER_WORKER_SOURCE from "inline:encoder-worker.js";
 import {
 	App,
 	Modal,
@@ -8,6 +12,7 @@ import {
 	TFile,
 	requestUrl,
 } from "obsidian";
+import { SimilarNotesView, SIMILAR_VIEW_TYPE } from "./similar-view";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -15,6 +20,11 @@ import * as path from "path";
 
 const MODEL_BASE_URL = "https://kjarni.ai/models";
 const MODELS = {
+	wasm: {
+        filename: "kjarni_wasm_bg.wasm",
+        url: `${MODEL_BASE_URL}/kjarni_wasm_bg.wasm`,
+        size: "4.6 MB",
+    },
 	encoder: {
 		filename: "encoder.kjq",
 		url: `${MODEL_BASE_URL}/all-MiniLM-L6-v2-q8.kjq`,
@@ -39,6 +49,9 @@ interface KjarniSettings {
 	searchLimit: number;
 	rerankerEnabled: boolean;
 	debugLogging: boolean;
+	similarPanelOnStartup: boolean;  
+	similarAutoUpdate: boolean;      
+	similarRerankerEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: KjarniSettings = {
@@ -47,9 +60,12 @@ const DEFAULT_SETTINGS: KjarniSettings = {
 	searchLimit: 10,
 	rerankerEnabled: true,
 	debugLogging: false,
+	similarPanelOnStartup: false,    
+	similarAutoUpdate: true,         
+	similarRerankerEnabled: true,
 };
 
-interface SearchResultItem {
+export interface SearchResultItem {
 	score: number;
 	text: string;
 	source: string;
@@ -123,6 +139,19 @@ export default class KjarniSearchPlugin extends Plugin {
 	private wasmBytesCache: ArrayBuffer | null = null;
 	private encoderBytesCache: ArrayBuffer | null = null;
 
+	async activateSimilarView() {
+		const existing = this.app.workspace.getLeavesOfType(SIMILAR_VIEW_TYPE);
+		if (existing.length) {
+			this.app.workspace.revealLeaf(existing[0]);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (leaf) {
+			await leaf.setViewState({ type: SIMILAR_VIEW_TYPE, active: true });
+			this.app.workspace.revealLeaf(leaf);
+		}
+	}
+
 	async onload() {
 		await this.loadSettings();
 
@@ -133,6 +162,16 @@ export default class KjarniSearchPlugin extends Plugin {
 		this.pluginDir = path.join(
 			basePath, ".obsidian", "plugins", "kjarni-search"
 		);
+		this.registerView(
+			SIMILAR_VIEW_TYPE,
+			(leaf) => new SimilarNotesView(leaf, this)
+		);
+
+		this.addCommand({
+			id: "open-similar-notes",
+			name: "Show similar notes",
+			callback: () => this.activateSimilarView(),
+		});
 
 		this.addCommand({
 			id: "open-search",
@@ -187,13 +226,13 @@ export default class KjarniSearchPlugin extends Plugin {
 		this.stopEncoderPool();
 		this.searchWorker?.terminate();
 		this.searchWorker = null;
+		this.app.workspace.detachLeavesOfType(SIMILAR_VIEW_TYPE);
 	}
 
 	// ─── Worker Helpers ──────────────────────────────────────────
 
-	private createBlobWorker(filename: string): Worker {
-		const filePath = path.join(this.pluginDir, filename);
-		const code = fs.readFileSync(filePath, "utf8");
+	private createBlobWorker(type: "search" | "encoder"): Worker {
+		const code = type === "search" ? WORKER_SOURCE : ENCODER_WORKER_SOURCE;
 		const blob = new Blob([code], { type: "application/javascript" });
 		const url = URL.createObjectURL(blob);
 		return new Worker(url);
@@ -240,7 +279,7 @@ export default class KjarniSearchPlugin extends Plugin {
 	}
 
 	private startSearchWorker() {
-		this.searchWorker = this.createBlobWorker("worker.js");
+		this.searchWorker = this.createBlobWorker("search");
 
 		this.searchWorker.onmessage = (e: MessageEvent) => {
 			const msg = e.data;
@@ -275,7 +314,7 @@ export default class KjarniSearchPlugin extends Plugin {
 		this.encoderWorkers = [];
 
 		for (let i = 0; i < ENCODER_WORKER_COUNT; i++) {
-			const worker = this.createBlobWorker("encoder-worker.js");
+			const worker = this.createBlobWorker("encoder");
 
 			worker.onmessage = (e: MessageEvent) => {
 				const msg = e.data;
@@ -358,6 +397,7 @@ export default class KjarniSearchPlugin extends Plugin {
 	async ensureModels(): Promise<boolean> {
 		const modelsDir = path.join(this.pluginDir, "models");
 		try {
+			await this.downloadModel(MODELS.wasm, modelsDir);
 			await this.downloadModel(MODELS.encoder, modelsDir);
 			if (this.settings.rerankerEnabled) {
 				await this.downloadModel(MODELS.reranker, modelsDir);
@@ -375,14 +415,13 @@ export default class KjarniSearchPlugin extends Plugin {
 
 	async initializeAsync() {
 		try {
-			if (!this.checkFiles()) return;
 			if (!(await this.ensureModels())) return;
 
 			this.statusBarEl?.setText("Kjarni: loading engine...");
 
 			// Read bytes once, cache for encoder pool
 			const wasmBuf = fs.readFileSync(
-				path.join(this.pluginDir, "pkg", "kjarni_wasm_bg.wasm")
+				path.join(this.pluginDir, "models", "kjarni_wasm_bg.wasm")
 			);
 			const encoderBuf = fs.readFileSync(
 				path.join(this.pluginDir, "models", "encoder.kjq")
@@ -462,26 +501,6 @@ export default class KjarniSearchPlugin extends Plugin {
 			new Notice(`Kjarni: Failed to initialize — ${e}`);
 			this.statusBarEl?.setText("Kjarni: init failed");
 		}
-	}
-
-	checkFiles(): boolean {
-		const wasmBin = path.join(this.pluginDir, "pkg", "kjarni_wasm_bg.wasm");
-		const workerJs = path.join(this.pluginDir, "worker.js");
-		const encoderJs = path.join(this.pluginDir, "encoder-worker.js");
-
-		const missing: string[] = [];
-		if (!fs.existsSync(wasmBin)) missing.push("pkg/kjarni_wasm_bg.wasm");
-		if (!fs.existsSync(workerJs)) missing.push("worker.js");
-		if (!fs.existsSync(encoderJs)) missing.push("encoder-worker.js");
-
-		if (missing.length > 0) {
-			new Notice(
-				`Kjarni: Missing files:\n${missing.join("\n")}\n\nReinstall the plugin.`,
-				10000
-			);
-			return false;
-		}
-		return true;
 	}
 
 	// ─── Full Index Build (Parallel) ─────────────────────────────
@@ -937,12 +956,11 @@ class SearchModal extends Modal {
 		if (this.searchVersion !== version) return;
 
 		if (reranked.length > 0) {
-			const reorderedTop = reranked.map((r) => displayResults[r.index]);
-			const rerankedIndices = new Set(reranked.map((r) => r.index));
-			const rest = displayResults.filter(
-				(_, i) => i >= 5 || !rerankedIndices.has(i)
-			);
-			this.lastDisplayed = [...reorderedTop, ...rest];
+			const reorderedTop = reranked.map(r => ({
+				...displayResults[r.index],
+				score: r.score,
+			}));
+			this.lastDisplayed = reorderedTop;
 			this.renderResults(this.lastDisplayed);
 		}
 
@@ -967,11 +985,13 @@ class SearchModal extends Modal {
 		const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
 
 		// Normalize scores to percentages
+		const minScore = Math.min(...results.map(r => r.score));
 		const maxScore = Math.max(...results.map(r => r.score), 0.001);
+		const range = maxScore - minScore || 1;
 
 		results.forEach((r, i) => {
 			const snippet = r.text.length > 200 ? r.text.slice(0, 200) + "…" : r.text;
-			const pct = Math.round((r.score / maxScore) * 100);
+			const pct = Math.round(((r.score - minScore) / range) * 100);
 
 			const el = this.resultsEl!.createDiv({ cls: "kjarni-result" });
 			el.addEventListener("click", () => this.openResult(i));
@@ -1037,13 +1057,25 @@ class KjarniSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Reranker")
+			.setName("Rerank search")
 			.setDesc("Use cross-encoder reranking for better result quality")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.rerankerEnabled)
 					.onChange(async (value) => {
 						this.plugin.settings.rerankerEnabled = value;
+						await this.plugin.saveSettings();
+					})
+			);
+		
+		new Setting(containerEl)
+			.setName("Rerank similar notes")
+			.setDesc("Use cross-encoder reranking in the similar notes sidebar")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.similarRerankerEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.similarRerankerEnabled = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -1088,5 +1120,10 @@ class KjarniSettingTab extends PluginSettingTab {
 						await this.plugin.setWorkerLogging(value);
 					})
 			);
+
+		containerEl.createEl("div", {
+			cls: "kjarni-settings-footer",
+			attr: { style: "margin-top: 2em; font-size: 0.85em; opacity: 0.6;" },
+		}).innerHTML = 'Powered by <a href="https://kjarni.ai">Kjarni</a> — local ML inference engine';
 	}
 }

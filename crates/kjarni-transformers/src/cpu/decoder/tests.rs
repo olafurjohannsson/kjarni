@@ -545,6 +545,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_backend_creation() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -556,6 +557,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_new_decode_token_shape() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -569,6 +571,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_update_decode_token() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -585,6 +588,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_update_decode_token_sequence() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -601,6 +605,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_multiple_tokens_independent() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -619,6 +624,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_tensor_buffer_exists() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -633,6 +639,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_gpu_context_accessor() {
             let Some(context) = create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -657,6 +664,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_any_gpu_is_gpu() {
             let Some(context) = super::gpu_backend_tests::create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -682,6 +690,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_any_gpu_new_decode_token() {
             let Some(context) = super::gpu_backend_tests::create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
@@ -709,6 +718,7 @@ mod decoder_backend_tests {
         }
 
         #[tokio::test]
+        #[cfg(feature = "gpu-tests")]
         async fn test_any_gpu_update_decode_token() {
             let Some(context) = super::gpu_backend_tests::create_gpu_context().await else {
                 eprintln!("Skipping: no GPU");
