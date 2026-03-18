@@ -42,6 +42,7 @@ fn assert_all_close_2d(a: &Array2<f32>, b: &Array2<f32>, tolerance: f32) {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_simple_case() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
@@ -63,6 +64,7 @@ async fn test_softmax_simple_case() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_padded_case() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
@@ -100,6 +102,7 @@ async fn test_softmax_padded_case() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_simple_case2() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
@@ -119,6 +122,7 @@ async fn test_softmax_simple_case2() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_padded_case2() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
@@ -155,6 +159,7 @@ async fn test_softmax_padded_case2() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_with_scaling() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);
@@ -179,6 +184,7 @@ async fn test_softmax_with_scaling() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_softmax_numerical_stability() -> Result<()> {
     let context = get_test_context().await;
     let softmax_kernel = GpuSoftmax::new(&context);

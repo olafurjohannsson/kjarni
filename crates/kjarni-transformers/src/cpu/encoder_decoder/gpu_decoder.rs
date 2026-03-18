@@ -868,6 +868,7 @@ mod seq2seq_gpu_decoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_construction_bart() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_decoder_golden_data();
@@ -912,6 +913,7 @@ mod seq2seq_gpu_decoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_embed_norm() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_decoder_golden_data();
@@ -970,6 +972,7 @@ mod seq2seq_gpu_decoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_no_embed_norm() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_decoder_golden_data();
@@ -1033,6 +1036,7 @@ mod seq2seq_gpu_decoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_cpu_decoder_parity_bart() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_decoder_golden_data();
@@ -1094,6 +1098,7 @@ mod seq2seq_gpu_decoder_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_precompute_cross_kv() -> Result<()> {
         let ctx = get_test_context().await;
         let (weights_map, shapes) = get_bart_decoder_golden_data();

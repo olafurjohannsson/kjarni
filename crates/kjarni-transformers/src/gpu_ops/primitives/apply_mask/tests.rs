@@ -30,6 +30,7 @@ fn generate_expected_scores(
     Ok(current_scores)
 }
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_mask_encoder_case() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
@@ -64,6 +65,7 @@ async fn test_mask_encoder_case() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_mask_decoder_prompt_case() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
@@ -97,6 +99,7 @@ async fn test_mask_decoder_prompt_case() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_mask_decoder_generation_case() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
@@ -139,6 +142,7 @@ async fn test_mask_decoder_generation_case() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
@@ -178,6 +182,7 @@ async fn test_mask_decoder_generation_offset_zero() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_mask_decoder_generation_batched() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuApplyMask::new(&context);
@@ -218,6 +223,7 @@ async fn test_mask_decoder_generation_batched() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_apply_mask_causal_with_offset() -> anyhow::Result<()> {
     let context = get_test_context().await;
     let apply_mask_kernel = GpuApplyMask::new(&context);

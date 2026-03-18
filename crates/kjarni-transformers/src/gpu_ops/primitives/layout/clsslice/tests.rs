@@ -14,6 +14,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_new() {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -23,6 +24,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_simple() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -58,6 +60,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_batch_size_1() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -88,6 +91,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_batched() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -120,6 +124,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_large_batch() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -152,6 +157,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_bert_base_hidden() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -188,6 +194,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_minilm_hidden() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -225,6 +232,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_seq_len_1() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -249,6 +257,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_hidden_size_1() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -278,6 +287,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_single_element() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -299,6 +309,7 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_negative_values() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -342,6 +353,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_matches_cpu() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);
@@ -373,6 +385,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_cls_slice_kernel_reuse() -> Result<()> {
         let context = get_test_context().await;
         let kernel = GpuClsSlice::new(&context);

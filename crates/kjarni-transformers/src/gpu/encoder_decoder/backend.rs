@@ -250,6 +250,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_seq2seq_state_token_ids() {
         let ctx = get_test_context().await;
         let tokens = Array2::from_shape_vec((1, 3), vec![1u32, 2, 3]).unwrap();
@@ -266,6 +267,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_seq2seq_state_encoder_output() {
         let ctx = get_test_context().await;
         let hidden: Array3<f32> = Array3::zeros((1, 10, 64));
@@ -290,6 +292,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_seq2seq_state_debug() {
         let ctx = get_test_context().await;
         let tokens = Array2::from_shape_vec((1, 2), vec![1u32, 2]).unwrap();
@@ -302,6 +305,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_backend_new() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone());
@@ -310,6 +314,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_backend_debug() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx).unwrap();
@@ -319,6 +324,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_token_tensor_single_beam() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -340,6 +346,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_token_tensor_multiple_beams() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -365,6 +372,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_token_tensor_zero_beams() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -384,6 +392,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_update_token_tensor_basic() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -410,6 +419,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_update_token_tensor_wrong_type() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -478,6 +488,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_reorder_cache_basic() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -498,6 +509,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_reorder_cache_identity() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -518,6 +530,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_reorder_cache_duplicate_indices() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -538,6 +551,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_reorder_cache_after_multiple_tokens() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -581,6 +595,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_beam_search_flow_states() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -618,6 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_typical_generation_flow_states() {
         let ctx = get_test_context().await;
         let backend = GpuEncoderDecoderBackend::new(ctx.clone()).unwrap();
@@ -648,6 +664,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_wgpu_context_debug() {
         let ctx = get_test_context().await;
         let debug_str = format!("{:?}", ctx);

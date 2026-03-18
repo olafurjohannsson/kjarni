@@ -13,6 +13,7 @@ use ndarray_rand::rand_distr::Uniform;
 use crate::tests::common::{assert_all_close, assert_tensors_are_close, get_test_context};
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_fc1_kernel_parity() -> Result<()> {
     let context = get_test_context().await;
 
@@ -66,6 +67,7 @@ async fn test_fc1_kernel_parity() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_fc2_kernel_parity() -> Result<()> {
     let context = get_test_context().await;
 
@@ -123,6 +125,8 @@ async fn test_fc2_kernel_parity() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+#[ignore = "GPU required"]
 async fn run_ffn_test(transpose_weights: bool) -> Result<()> {
     let context = get_test_context().await;
 

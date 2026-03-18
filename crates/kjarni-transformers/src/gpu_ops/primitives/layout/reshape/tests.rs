@@ -9,8 +9,8 @@ mod common;
 
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_reshape_q_v_path() -> Result<()> {
-    println!("\n--- Testing GpuReshape (Q/V Path) ---");
     let context = get_test_context().await;
     let gpu_reshape = GpuReshape::new(&context);
     let (b, s, h, d) = (2, 7, 4, 5); // Batch, SeqLen, NumHeads, HeadDim
@@ -40,8 +40,8 @@ async fn test_reshape_q_v_path() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_reshape_k_transpose_path() -> Result<()> {
-    println!("\n--- Testing GpuReshape (K^T Path) ---");
     let context = get_test_context().await;
     let gpu_reshape = GpuReshape::new(&context);
     let (b, s, h, d) = (2, 7, 4, 5);

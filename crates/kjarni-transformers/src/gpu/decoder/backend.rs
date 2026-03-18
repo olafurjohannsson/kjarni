@@ -346,6 +346,7 @@ mod tests {
     }
     
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_backend_new() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx);
@@ -354,6 +355,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_backend_with_timeout() {
         let ctx = get_test_context().await;
         let timeout_config = GpuTimeoutConfig {
@@ -370,6 +372,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_decoder_backend_context_getter() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx.clone()).unwrap();
@@ -378,6 +381,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_new_decode_token() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -390,6 +394,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_new_decode_token_initial_value() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -400,6 +405,7 @@ mod tests {
         assert_eq!(downloaded[[0, 0]], 0);
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_update_decode_token() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -415,6 +421,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_update_decode_token_multiple_times() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -431,6 +438,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_update_decode_token_max_value() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -443,6 +451,7 @@ mod tests {
         assert_eq!(downloaded[[0, 0]], u32::MAX);
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_get_or_create_staging_buffer_creates_new() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -453,6 +462,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_get_or_create_staging_buffer_reuses_same_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -465,6 +475,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_get_or_create_staging_buffer_recreates_different_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -477,6 +488,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_get_or_create_staging_buffer_size_tracking() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -509,6 +521,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_model_input_size_extraction_tokens_gpu() {
         let ctx = get_test_context().await;
         let tokens = Array2::from_shape_vec((1, 7), vec![1u32, 2, 3, 4, 5, 6, 7]).unwrap();
@@ -544,6 +557,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_model_input_size_extraction_hidden_gpu() {
         let ctx = get_test_context().await;
         let hidden = ndarray::Array3::from_shape_vec(
@@ -579,6 +593,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_default_timeout_config() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -589,6 +604,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_custom_timeout_config_preserved() {
         let ctx = get_test_context().await;
         let config = GpuTimeoutConfig {
@@ -603,6 +619,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_staging_buffer_small_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -612,6 +629,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_staging_buffer_large_size() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();
@@ -621,6 +639,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_multiple_backends_independent() {
         let ctx = get_test_context().await;
         
@@ -639,6 +658,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_decode_token_sequence() {
         let ctx = get_test_context().await;
         let backend = GpuDecoderBackend::new(ctx).unwrap();

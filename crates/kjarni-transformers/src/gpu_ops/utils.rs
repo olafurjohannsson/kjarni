@@ -275,6 +275,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_uniform_buffer_basic() {
         let context = get_test_context().await;
 
@@ -292,6 +293,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_uniform_buffer_single_f32() {
         let context = get_test_context().await;
 
@@ -302,6 +304,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_uniform_buffer_single_u32() {
         let context = get_test_context().await;
 
@@ -318,6 +321,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_create_uniform_buffer_larger_struct() {
         let context = get_test_context().await;
 
@@ -331,6 +335,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_simple() -> Result<()> {
         let context = get_test_context().await;
 
@@ -355,6 +360,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_single_row() -> Result<()> {
         let context = get_test_context().await;
 
@@ -376,6 +382,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_single_column() -> Result<()> {
         let context = get_test_context().await;
 
@@ -397,6 +404,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_single_element() -> Result<()> {
         let context = get_test_context().await;
 
@@ -416,6 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_large() -> Result<()> {
         let context = get_test_context().await;
 
@@ -442,6 +451,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_negative_values() -> Result<()> {
         let context = get_test_context().await;
 
@@ -463,6 +473,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_zeros() -> Result<()> {
         let context = get_test_context().await;
 
@@ -485,6 +496,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_simple() -> Result<()> {
         let context = get_test_context().await;
 
@@ -514,6 +526,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_batch_1() -> Result<()> {
         let context = get_test_context().await;
 
@@ -540,6 +553,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_single_element() -> Result<()> {
         let context = get_test_context().await;
 
@@ -559,6 +573,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_transformer_shape() -> Result<()> {
         let context = get_test_context().await;
 
@@ -587,6 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_large() -> Result<()> {
         let context = get_test_context().await;
 
@@ -613,6 +629,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_3d_negative_values() -> Result<()> {
         let context = get_test_context().await;
 
@@ -632,6 +649,7 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_roundtrip_2d() -> Result<()> {
         let context = get_test_context().await;
 
@@ -652,6 +670,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_roundtrip_3d() -> Result<()> {
         let context = get_test_context().await;
 
@@ -674,6 +693,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_read_buffer_2d_special_floats() -> Result<()> {
         let context = get_test_context().await;
 
@@ -702,6 +722,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_multiple_reads_same_buffer() -> Result<()> {
         let context = get_test_context().await;
 

@@ -669,6 +669,7 @@ pub async fn get_test_context() -> Arc<WgpuContext> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_to_gpu_f32() {
     let ctx = get_test_context().await;
     let layer = make_f32_layer(64, 32);
@@ -678,6 +679,7 @@ async fn test_to_gpu_f32() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_to_gpu_bf16() {
     let ctx = get_test_context().await;
     let layer = make_bf16_layer(64, 32);
@@ -687,6 +689,7 @@ async fn test_to_gpu_bf16() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_to_gpu_f16() {
     let ctx = get_test_context().await;
     let weights = Array2::<half::f16>::zeros((64, 32));
@@ -701,6 +704,7 @@ async fn test_to_gpu_f16() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_to_gpu_q8_0() {
     let ctx = get_test_context().await;
     let layer = make_f32_layer(64, 32).to_quantized(DType::Q8_0).unwrap();
@@ -710,6 +714,7 @@ async fn test_to_gpu_q8_0() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bias_to_gpu() {
     let ctx = get_test_context().await;
     let layer = make_f32_layer_with_bias(64, 32);
@@ -720,6 +725,7 @@ async fn test_bias_to_gpu() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_bias_to_gpu_none() {
     let ctx = get_test_context().await;
     let layer = make_f32_layer(64, 32);
@@ -729,6 +735,7 @@ async fn test_bias_to_gpu_none() {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_to_gpu_tensor_with_label() {
     let ctx = get_test_context().await;
     let layer = make_f32_layer(64, 32);
