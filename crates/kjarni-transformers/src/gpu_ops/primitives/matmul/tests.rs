@@ -52,31 +52,37 @@ async fn run_matmul_test(m: usize, k: usize, n: usize) -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_small_square() -> Result<()> {
     run_matmul_test(64, 64, 64).await
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_large_square() -> Result<()> {
     run_matmul_test(512, 512, 512).await
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_rectangular_tall() -> Result<()> {
     run_matmul_test(1024, 256, 64).await
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_rectangular_wide() -> Result<()> {
     run_matmul_test(64, 256, 1024).await
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_non_tile_aligned() -> Result<()> {
     run_matmul_test(50, 100, 70).await
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_transformer_ffn_up() -> Result<()> {
     let batch_size = 1;
     let seq_len = 128;
@@ -86,6 +92,7 @@ async fn test_matmul_transformer_ffn_up() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_matmul_transformer_ffn_down() -> Result<()> {
     let batch_size = 1;
     let seq_len = 128;

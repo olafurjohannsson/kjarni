@@ -22,8 +22,8 @@ async fn read_gpu_tensor_3d(tensor: &GpuTensor) -> Result<Array3<f32>> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_unreshape() -> Result<()> {
-    println!("\n--- Testing GpuUnreshape (Merge Heads) ---");
     let context = get_test_context().await;
     let gpu_unreshape = GpuUnreshape::new(&context);
 

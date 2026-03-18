@@ -9,10 +9,10 @@ use kjarni_transformers::feedforward::FeedForward;
 use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::utils::linear_algebra::{apply_attention_mask, matmul_4d};
 use kjarni_transformers::weights::ModelWeights;
-
+use kjarni_transformers::models::registry::model_cache_dir;
 use crate::models::bart::config::BartConfig;
 
-const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
+const DISTILBART_PATH: &str = "olafuraron_distilbart-cnn-12-6";
 
 #[cfg(test)]
 mod tests {
@@ -150,7 +150,8 @@ mod tests {
     }
 
     fn setup_encoder() -> Result<(Seq2SeqCPUEncoder, Array3<f32>)> {
-        let path = Path::new(DISTILBART_PATH);
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
         if !path.exists() {
             anyhow::bail!("weights not found at {}", DISTILBART_PATH);
         }

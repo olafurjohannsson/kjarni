@@ -376,6 +376,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "DistilGPT not loaded in CI"]
     async fn test_distilgpt2_architectural_properties() -> Result<()> {
         {
             let model = load_distilgpt2_for_test().await?;
@@ -402,6 +403,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "DistilGPT not loaded in CI"]
     async fn test_distilgpt2_generation_parity_2() -> Result<()> {
         let model_type = ModelType::DistilGpt2;
         let prompt = "The field of Artificial Intelligence has seen a lot of progress";
@@ -429,6 +431,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore = "Requires GPU"]
     #[tokio::test]
     async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
         let model_type = ModelType::DistilGpt2;

@@ -749,6 +749,7 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires GPU"]
     async fn test_embed_gpu() {
         let embedder = Embedder::builder("minilm-l6-v2")
             .gpu()

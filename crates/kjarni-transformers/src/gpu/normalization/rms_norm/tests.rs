@@ -12,6 +12,7 @@ use rand_distr::Uniform;
 mod common;
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_rmsnorm_parity_with_cpu_impl() -> Result<()> {
     let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize
@@ -32,6 +33,7 @@ async fn test_gpu_rmsnorm_parity_with_cpu_impl() -> Result<()> {
     Ok(())
 }
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_rmsnorm_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
     let (b, s, h) = (4, 64, 256); // Batch, SeqLen, HiddenSize

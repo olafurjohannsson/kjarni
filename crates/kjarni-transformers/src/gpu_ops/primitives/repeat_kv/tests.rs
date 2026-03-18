@@ -7,6 +7,7 @@ mod common;
 
 use common::assert_tensors_are_close_4d;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_repeat_kv() -> Result<()> {
     let context = WgpuContext::new().await?;

@@ -12,6 +12,7 @@ use ndarray_rand::rand_distr::Uniform;
 
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_gpu_scale_out_of_place() -> Result<()> {
     let context = get_test_context().await;
     let scale_kernel = GpuScale::new(&context);
@@ -33,6 +34,7 @@ async fn test_gpu_scale_out_of_place() -> Result<()> {
     Ok(())
 }
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_scale_parity() -> Result<()> {
     let context = get_test_context().await;
     let scale_kernel = GpuScale::new(&context);

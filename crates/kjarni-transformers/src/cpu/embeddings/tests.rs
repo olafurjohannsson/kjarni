@@ -106,6 +106,7 @@ mod embeddings_tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_scenario_hybrid_gpu_weights() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (_dir, weights) = create_dummy_weights(vec![("w", vec![2.0; 64], vec![64, 1])]);
@@ -219,11 +220,9 @@ mod embeddings_tests {
     }
 
 
-    // Scenario 1: Pure GPU
-    // Weights: GPU
-    // Input:   ModelInput::TokensGpu
-    // Action:  Compute on GPU
+    
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_scenario_pure_gpu() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (_dir, weights) = create_dummy_weights(vec![("w", vec![1.0; 100], vec![100, 1])]);
@@ -253,11 +252,8 @@ mod embeddings_tests {
         Ok(())
     }
 
-    // Scenario 2: Hybrid Upload
-    // Weights: GPU
-    // Input:   ModelInput::TokensCpu
-    // Action:  Upload Tokens -> Compute on GPU
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_scenario_hybrid_upload() -> Result<()> {
         let context = WgpuContext::new().await?;
         let (_dir, weights) = create_dummy_weights(vec![("w", vec![2.0; 100], vec![100, 1])]);
@@ -285,10 +281,7 @@ mod embeddings_tests {
         Ok(())
     }
 
-    // Scenario 3: CPU Offload
-    // Weights: CPU (No GPU weights loaded!)
-    // Input:   ModelInput::TokensCpu
-    // Action:  Compute on CPU -> Upload Result to GPU
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_scenario_cpu_offload() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -324,10 +317,7 @@ mod embeddings_tests {
         Ok(())
     }
 
-    // Scenario 4: Hidden State Passthrough (Optimization)
-    // Weights: Irrelevant
-    // Input:   ModelInput::HiddenGpu
-    // Action:  Return as is
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_scenario_hidden_passthrough() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -350,16 +340,12 @@ mod embeddings_tests {
             0,
         )?;
 
-        // Should return the exact same tensor ID/Buffer if optimized,
-        // or at least same data
         let output = result.to_ndarray_3d::<f32>().await?;
         assert_eq!(output[[0, 0, 0]], 99.0);
         Ok(())
     }
 
-    // Scenario 5: Full BERT (Token Types)
-    // Weights: GPU
-    // Input:   TokensGpu + TypesGpu
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_scenario_token_types() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -407,6 +393,8 @@ mod embeddings_tests {
         assert_eq!(output[[0, 0, 0]], 7.0);
         Ok(())
     }
+
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_cpu_parity_bert() -> Result<()> {
         let context = WgpuContext::new().await?;

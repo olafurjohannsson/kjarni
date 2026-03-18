@@ -25,8 +25,8 @@ fn assert_all_close<D: ndarray::Dimension>(a: &Array<f32, D>, b: &Array<f32, D>,
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_permute_2d_transpose() -> Result<()> {
-    println!("\n--- Testing GpuPermute (2D Transpose) ---");
     let context = get_test_context().await;
     let permute_kernel = GpuPermute::new(&context);
 
@@ -49,8 +49,8 @@ async fn test_permute_2d_transpose() -> Result<()> {
 
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_permute_4d_attention_reshape() -> Result<()> {
-    println!("\n--- Testing GpuPermute (Attention Q/V Reshape) ---");
     let context = get_test_context().await;
     let permute_kernel = GpuPermute::new(&context);
 
@@ -77,8 +77,8 @@ async fn test_permute_4d_attention_reshape() -> Result<()> {
 
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_permute_4d_attention_k_transpose() -> Result<()> {
-    println!("\n--- Testing GpuPermute (Attention K Transpose) ---");
     let context = get_test_context().await;
     let permute_kernel = GpuPermute::new(&context);
 

@@ -324,6 +324,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_swiglu_ffn_parity() -> Result<()> {
         let context = get_test_context().await;
         let hidden_size = 128;
@@ -388,6 +389,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_llama_layer_step_by_step() -> Result<()> {
         let _ = env_logger::builder().is_test(true).try_init();
         let context = get_test_context().await;
@@ -693,6 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_gpu_repeat_kv_kernel_parity() -> Result<()> {
         let context = get_test_context().await;
 
@@ -870,6 +873,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_parity_single_token() -> Result<()> {
         let context = get_test_context().await;
         let head_dim = 64;
@@ -918,6 +922,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_rope_parity_multiple_tokens() -> Result<()> {
         let context = get_test_context().await;
         let head_dim = 128;

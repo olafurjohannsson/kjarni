@@ -101,6 +101,7 @@ fn get_model_cache_dir(repo_id: &str) -> std::path::PathBuf {
         .join(repo_id.replace('/', "_"))
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
@@ -138,6 +139,7 @@ async fn test_cpu_gpu_parity_single_sentence() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_cpu_gpu_parity_batch() -> Result<()> {
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
@@ -178,6 +180,7 @@ async fn test_cpu_gpu_parity_batch() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";
@@ -215,6 +218,7 @@ async fn test_cpu_gpu_parity_varied_lengths() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_cpu_gpu_parity_large_batch() -> Result<()> {
     let model_repo = "sentence-transformers/all-MiniLM-L6-v2";

@@ -7,11 +7,17 @@ use kjarni_transformers::models::LanguageModel;
 use kjarni_transformers::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
+use kjarni_transformers::models::registry::model_cache_dir;
+
+const LLAMA_32_1B: &str = "meta-llama_Llama-3.2-1B";
+const LLAMA_32_8B: &str = "meta-llama_Llama-3.2-8B-Instruct";
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
+    let p = model_cache_dir(LLAMA_32_1B);
+    let path = p.as_path();
     LlamaModel::from_pretrained(
-        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+        path,
         Device::Cpu,
         None,
         None,
@@ -20,8 +26,10 @@ async fn load_llama_for_test() -> Result<LlamaModel> {
 }
 
 async fn load_llama_8b_for_test() -> Result<LlamaModel> {
+    let p = model_cache_dir(LLAMA_32_8B);
+    let path = p.as_path();
     LlamaModel::from_pretrained(
-        Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-8B-Instruct"),
+        path,
         Device::Cpu,
         None,
         None,
@@ -29,10 +37,10 @@ async fn load_llama_8b_for_test() -> Result<LlamaModel> {
     )
 }
 
-//
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama3_8b_architectural_properties() -> Result<()> {
-    if std::path::Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-8B-Instruct").exists()
+    if std::path::Path::new("meta-llama_Llama-3.2-8B-Instruct").exists()
         == false
     {
         log::warn!("Skipping Llama-3.2-8B test since model files not found in cache.");
@@ -79,6 +87,7 @@ async fn test_llama3_8b_architectural_properties() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama_trait_config_consistency() -> Result<()> {
     let model_1b = load_llama_for_test().await?;
@@ -173,6 +182,7 @@ fn test_llama_config_parsing_1b() {
     assert_eq!(config.get_kv_dim(), 512); // 8 * 64
 }
 
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     {
@@ -201,6 +211,7 @@ async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_llama3_2_1b_generation_parity() -> Result<()> {
     let prompt = "The field of Artificial Intelligence has seen a lot of progress";
@@ -214,17 +225,20 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
         add_bos_token: true,     
         ..Default::default()
     };
+    let p = model_cache_dir(LLAMA_32_1B);
+    let path = p.as_path();
     {
         let llama_model = LlamaModel::from_pretrained(
-            Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+            path,
             Device::Cpu,
             None,
             None,
             None,
         )?;
-
+        let pp = model_cache_dir(LLAMA_32_1B);
+        let path22 = p.as_path();
         let llama_gpu = LlamaModel::from_pretrained(
-            Path::new("/home/olafurj/.cache/kjarni/meta-llama_Llama-3.2-1B"),
+            path22,
             Device::Wgpu,
             Some(WgpuContext::new().await?),
             None,

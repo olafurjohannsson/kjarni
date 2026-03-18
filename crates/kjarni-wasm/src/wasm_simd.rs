@@ -1,13 +1,5 @@
-// wasm_simd.rs — WASM SIMD128 kernels for encoder matmul
-//
-// Two matmul variants:
-//   wasm_matmul_2d:    C = A @ B^T  (B is (n, k) row-major — weight matrix layout)
-//   wasm_matmul_2d_nn: C = A @ B    (B is (k, n) row-major — standard matmul)
-
 use std::arch::wasm32::*;
 
-/// Dot product of two f32 slices using WASM SIMD128.
-/// 4x unrolled (16 floats per iteration) to hide latency.
 #[target_feature(enable = "simd128")]
 pub unsafe fn wasm_dot_product(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
@@ -69,9 +61,6 @@ pub unsafe fn wasm_dot_product(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
-/// C = A @ B^T where A is (m, k), B is (n, k), C is (m, n).
-/// B rows are contiguous — each output is a dot product of an A row with a B row.
-/// This is the layout for weight matrices stored as (out_features, in_features).
 #[target_feature(enable = "simd128")]
 pub unsafe fn wasm_matmul_2d(
     out: &mut [f32],
@@ -113,7 +102,5 @@ pub unsafe fn wasm_matmul_2d_nn(
             b_t[j * k + i] = b[i * n + j];
         }
     }
-
-    // Now use the fast A @ B^T path
     wasm_matmul_2d(out, a, &b_t, m, n, k);
 }

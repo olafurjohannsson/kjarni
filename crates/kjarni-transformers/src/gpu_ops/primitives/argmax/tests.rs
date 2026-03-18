@@ -51,6 +51,7 @@ fn create_output_buffer(context: &WgpuContext) -> wgpu::Buffer {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_simple() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -69,6 +70,7 @@ async fn test_argmax_simple() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_first_element() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -89,6 +91,7 @@ async fn test_argmax_first_element() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_last_element() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -109,6 +112,7 @@ async fn test_argmax_last_element() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_with_negative_values() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -129,6 +133,7 @@ async fn test_argmax_with_negative_values() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_mixed_positive_negative() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -148,6 +153,7 @@ async fn test_argmax_mixed_positive_negative() -> Result<()> {
     Ok(())
 }
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_single_element() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -168,6 +174,7 @@ async fn test_argmax_single_element() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_two_elements() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -188,6 +195,7 @@ async fn test_argmax_two_elements() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_equal_values_returns_first() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -208,6 +216,7 @@ async fn test_argmax_equal_values_returns_first() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_zeros() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -228,6 +237,7 @@ async fn test_argmax_zeros() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_large_vocab() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -254,6 +264,7 @@ async fn test_argmax_large_vocab() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_gpt2_vocab_size() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -280,6 +291,7 @@ async fn test_argmax_gpt2_vocab_size() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_llama_vocab_size() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -306,6 +318,7 @@ async fn test_argmax_llama_vocab_size() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_very_close_values() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -329,6 +342,7 @@ async fn test_argmax_very_close_values() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_large_magnitude() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -349,6 +363,7 @@ async fn test_argmax_large_magnitude() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_small_magnitude() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -378,6 +393,7 @@ fn cpu_argmax(logits: &[f32]) -> u32 {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_matches_cpu_random_small() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -404,6 +420,7 @@ async fn test_argmax_matches_cpu_random_small() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_matches_cpu_random_large() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -430,6 +447,7 @@ async fn test_argmax_matches_cpu_random_large() -> Result<()> {
     Ok(())
 }
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_softmax_like_distribution() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -457,6 +475,7 @@ async fn test_argmax_softmax_like_distribution() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_ascending_values() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -478,6 +497,7 @@ async fn test_argmax_ascending_values() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_descending_values() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);
@@ -500,6 +520,7 @@ async fn test_argmax_descending_values() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "GPU required"]
 async fn test_argmax_kernel_reuse() -> Result<()> {
     let context = get_test_context().await;
     let kernel = GpuArgMax::new(&context);

@@ -93,6 +93,7 @@ mod cache_tests {
         assert_eq!(ck[[0, 0, 0]], 1.0);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_edge_cases() -> Result<()> {
@@ -113,6 +114,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_overflow_panic() -> Result<()> {
@@ -130,6 +132,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_beam_cache_lifecycle() -> Result<()> {
@@ -153,6 +156,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_beam_cache_reorder_logic() -> Result<()> {
@@ -186,6 +190,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_cache_symmetry_standard() -> Result<()> {
@@ -222,6 +227,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_cache_symmetry() -> Result<()> {
@@ -395,6 +401,7 @@ mod cache_tests {
         }
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_kv_cache_update_and_readback() -> Result<()> {
@@ -457,6 +464,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
@@ -526,6 +534,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     #[cfg(feature = "gpu-tests")]
     async fn test_cache_reorder_parity() -> Result<()> {

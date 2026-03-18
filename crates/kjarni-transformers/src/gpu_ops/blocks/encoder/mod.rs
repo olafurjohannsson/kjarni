@@ -192,6 +192,7 @@ mod tests {
     use crate::gpu::normalization::{GpuLayerNormWeights};
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_bart_weights_loading_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
 
@@ -303,6 +304,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "GPU required"]
     async fn test_encoder_layer_cpu_vs_gpu_parity() -> Result<()> {
         let ctx = Arc::new(WgpuContext::new().await?);
 

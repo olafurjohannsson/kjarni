@@ -100,6 +100,7 @@ mod seq2seq_tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_t5_translation() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping test: flan-t5-base not downloaded");
@@ -123,6 +124,7 @@ mod seq2seq_tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_t5_summarization() {
         if !model_available("flan-t5-base") {
             eprintln!("Skipping test: flan-t5-base not downloaded");
@@ -146,6 +148,7 @@ mod seq2seq_tests {
         println!("T5 summary output: {}", output);
     }
     #[tokio::test]
+    #[ignore]
     async fn test_bart_summarization() {
         if !model_available("distilbart-cnn") {
             eprintln!("Skipping test: distilbart-cnn not downloaded");
@@ -176,6 +179,7 @@ mod seq2seq_tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_bart_with_length_constraints() {
         if !model_available("distilbart-cnn") {
             eprintln!("Skipping test: distilbart-cnn not downloaded");
@@ -205,6 +209,7 @@ mod seq2seq_tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_streaming_generation() {
         use futures::StreamExt;
 

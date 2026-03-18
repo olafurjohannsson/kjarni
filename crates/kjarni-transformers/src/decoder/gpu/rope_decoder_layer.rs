@@ -266,6 +266,7 @@ mod rope_decoder_gpu_test {
         )
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_rope_decoder_layer_parity() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -338,6 +339,7 @@ mod rope_decoder_gpu_test {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_rope_layer_subcomponents() -> Result<()> {
         let context = WgpuContext::new().await?;

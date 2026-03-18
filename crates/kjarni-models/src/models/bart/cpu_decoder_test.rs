@@ -5,14 +5,14 @@ use kjarni_transformers::models::base::ModelLoadConfig;
 use kjarni_transformers::traits::{ModelConfig, ModelMetadata};
 use kjarni_transformers::weights::ModelWeights;
 use kjarni_transformers::Embeddings;
-
+use kjarni_transformers::models::registry::model_cache_dir;
 use crate::models::bart::config::BartConfig;
 
 
 #[cfg(test)]
 mod cpu_seq2seq_decoder_test {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use kjarni_transformers::cpu::encoder_decoder::{Seq2SeqCPUDecoder, Seq2SeqCPUEncoder};
     use kjarni_transformers::encoder_decoder::config::{
@@ -24,7 +24,9 @@ mod cpu_seq2seq_decoder_test {
     use kjarni_transformers::traits::CpuTransformerCore;
 
 
-    const DISTILBART_PATH: &str = "/home/olafurj/.cache/kjarni/olafuraron_distilbart-cnn-12-6/";
+    
+
+    const DISTILBART_PATH: &str = "olafuraron_distilbart-cnn-12-6";
 
     mod golden {
         pub const ENCODER_HIDDEN: [f32; 10] = [
@@ -90,7 +92,8 @@ mod cpu_seq2seq_decoder_test {
         Embeddings,
         ModelMetadata,
     )> {
-        let path = Path::new(DISTILBART_PATH);
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
         if !path.exists() {
             anyhow::bail!("weights not found");
         }
@@ -129,7 +132,9 @@ mod cpu_seq2seq_decoder_test {
     #[tokio::test]
     async fn test_beam_search_step0() -> Result<()> {
         let (encoder, decoder, _config, embeddings, model_metadata) = setup()?;
-        let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
+        let weights = ModelWeights::new(path)?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight").build()?;
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
@@ -184,7 +189,9 @@ mod cpu_seq2seq_decoder_test {
     #[tokio::test]
     async fn test_greedy_generation_step_by_step() -> Result<()> {
         let (encoder, decoder, _config, embeddings, model_metadata) = setup()?;
-        let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
+        let weights = ModelWeights::new(path)?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
             .with_optional_bias(None)
@@ -250,10 +257,13 @@ mod cpu_seq2seq_decoder_test {
         Ok(())
     }
 
+    #[ignore = "Long running test in CI"]
     #[tokio::test]
     async fn test_generation_step_by_step_vs_python() -> Result<()> {
-        let (encoder, decoder, _config, embeddings, model_metadata) = setup()?;
-        let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
+        let (encoder, decoder, _config, embeddings, _) = setup()?;
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
+        let weights = ModelWeights::new(path)?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
             .with_optional_bias(None)
@@ -261,9 +271,10 @@ mod cpu_seq2seq_decoder_test {
         let final_logits_bias = weights.get_array2("final_logits_bias")?.row(0).to_owned();
 
         let text = "Rust is a multi-paradigm, general-purpose programming language that emphasizes performance, type safety, and concurrency. It enforces memory safety—meaning that all references point to valid memory—without using a garbage collector. To simultaneously enforce memory safety and prevent data races, its \"borrow checker\" tracks the object lifetime of all references in a program during compilation. Rust was influenced by languages like C++, Haskell, and Erlang.";
-
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
         let tokenizer =
-            tokenizers::Tokenizer::from_file(format!("{}/tokenizer.json", DISTILBART_PATH))
+            tokenizers::Tokenizer::from_file(format!("{}/tokenizer.json", path.as_os_str().to_str().unwrap()))
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
         let encoding = tokenizer
             .encode(text, true)
@@ -411,7 +422,9 @@ mod cpu_seq2seq_decoder_test {
     #[tokio::test]
     async fn test_decoder_step0_logits() -> Result<()> {
         let (encoder, decoder, _config, embeddings, model_metadata) = setup()?;
-        let weights = ModelWeights::new(Path::new(DISTILBART_PATH))?;
+        let p = model_cache_dir(DISTILBART_PATH);
+        let path = p.as_path();
+        let weights = ModelWeights::new(path)?;
 
         let lm_head = LinearLayer::builder(&weights, "model.shared.weight")
             .with_optional_bias(None)
