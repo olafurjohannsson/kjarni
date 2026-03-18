@@ -207,6 +207,7 @@ mod sentence_encoder_loading_tests {
 
     const TOLERANCE: f32 = 1e-3;
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_torch_sentence_encoder_golden_values() -> Result<()> {
         let cpu_encoder =
@@ -251,6 +252,7 @@ mod sentence_encoder_loading_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_torch_sentence_encoder_cls_golden_values() -> Result<()> {
         let cpu_encoder =

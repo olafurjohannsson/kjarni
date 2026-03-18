@@ -8,6 +8,7 @@ use ndarray::{Array4, s};
 #[path = "../../../../tests/common.rs"]
 mod common;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_slice_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

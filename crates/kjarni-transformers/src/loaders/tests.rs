@@ -327,7 +327,7 @@ async fn test_loaded_lm_head_forward_gpu_no_weights_error() {
     );
 }
 
-
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_loaded_lm_head_cpu_gpu_parity() {
     let ctx = setup_gpu_context().await;

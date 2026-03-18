@@ -93,6 +93,7 @@ mod cache_tests {
         assert_eq!(ck[[0, 0, 0]], 1.0);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_kv_cache_edge_cases() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -112,6 +113,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_kv_cache_overflow_panic() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -128,6 +130,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_beam_cache_lifecycle() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -150,6 +153,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_beam_cache_reorder_logic() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -182,6 +186,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_cache_symmetry_standard() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -217,6 +222,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_cache_symmetry() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -389,6 +395,7 @@ mod cache_tests {
         }
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_kv_cache_update_and_readback() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -450,6 +457,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_gpu_cache_stateful_update_simulation() -> Result<()> {
         let context = WgpuContext::new().await?;
@@ -518,6 +526,7 @@ mod cache_tests {
         Ok(())
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_cache_reorder_parity() -> Result<()> {
         const NUM_LAYERS: usize = 2;

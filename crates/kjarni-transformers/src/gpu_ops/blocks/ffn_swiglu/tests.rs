@@ -12,6 +12,7 @@ use ndarray_rand::{rand_distr::Uniform, RandomExt};
 #[path = "../../../tests/common.rs"]
 mod common;
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_swiglu_ffn_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

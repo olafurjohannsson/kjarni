@@ -429,6 +429,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore = "Requires GPU"]
     #[tokio::test]
     async fn test_distilgpt2_generation_parity_cpu_gpu() -> Result<()> {
         let model_type = ModelType::DistilGpt2;

@@ -216,6 +216,7 @@ async fn test_ffn_parity_with_transpose_false() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_parity_encode() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -270,6 +271,8 @@ async fn test_gpu_ffn_parity_encode() -> Result<()> {
 
     Ok(())
 }
+
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -338,6 +341,8 @@ async fn test_gpu_ffn_fc1_isolated_parity() -> Result<()> {
 
     Ok(())
 }
+
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc1_isolated_relu() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -400,6 +405,7 @@ async fn test_gpu_ffn_fc1_isolated_relu() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc1_isolated_silu() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -461,6 +467,7 @@ async fn test_gpu_ffn_fc1_isolated_silu() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc1_isolated_tanh() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -521,6 +528,8 @@ async fn test_gpu_ffn_fc1_isolated_tanh() -> Result<()> {
     .await;
     Ok(())
 }
+
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -657,6 +666,8 @@ pub async fn assert_tensors_are_close_relative(
         );
     }
 }
+
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
     let context = WgpuContext::new().await?;
@@ -699,6 +710,7 @@ async fn test_gpu_ffn_fc2_pass_parity() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_ffn_fc1_pass_parity() -> Result<()> {
     let context = WgpuContext::new().await?;

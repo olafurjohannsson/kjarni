@@ -98,6 +98,7 @@ fn compare_vectors(name: &str, cpu: &[f32], gpu: &[f32], tolerance: f32) -> bool
     }
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;
@@ -452,6 +453,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_encoder_cpu_gpu_parity() -> Result<()> {
     println!("Testing CPU vs GPU Encoder Parity");
@@ -568,6 +570,7 @@ async fn test_simple_input() -> Result<()> {
     Ok(())
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_identical_sentences() -> Result<()> {
     println!("Testing Identical Sentences");
@@ -631,6 +634,7 @@ async fn test_identical_sentences() -> Result<()> {
     }
 }
 
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
     let ctx = WgpuContext::new().await?;

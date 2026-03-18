@@ -6,7 +6,7 @@ use ndarray::{arr2, arr3, Array2, Array3};
 #[path = "../../../tests/common.rs"]
 mod common;
 
-
+#[ignore = "GPU required"]
 #[tokio::test]
 async fn test_gpu_lookup() -> Result<()> {
     let context = WgpuContext::new().await?;

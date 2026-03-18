@@ -675,6 +675,7 @@ mod tests {
         WgpuContext::new().await.unwrap()
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_tensor_creation() {
         let ctx = setup_context().await;
@@ -685,6 +686,7 @@ mod tests {
         assert_eq!(tensor.num_elements(), 24);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_from_ndarray() {
         let ctx = setup_context().await;
@@ -697,6 +699,7 @@ mod tests {
         assert_eq!(result, arr);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_view_operations() {
         let ctx = setup_context().await;
@@ -707,6 +710,7 @@ mod tests {
         assert_eq!(viewed.num_elements(), 24);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_view_4d_to_3d() {
         let ctx = setup_context().await;
@@ -716,6 +720,7 @@ mod tests {
         assert_eq!(viewed.shape(), &[8, 8, 64]);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_view_3d_to_4d() {
         let ctx = setup_context().await;
@@ -725,6 +730,7 @@ mod tests {
         assert_eq!(viewed.shape(), &[2, 4, 10, 64]);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_dims_helpers() {
         let ctx = setup_context().await;
@@ -739,6 +745,7 @@ mod tests {
         assert_eq!(t4d.dims4(), (1, 2, 3, 4));
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_roundtrip_cpu_gpu() {
         let ctx = setup_context().await;
@@ -765,6 +772,7 @@ mod tests {
         assert_eq!(DType::U32.size_of(), 4);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_buffer_id_uniqueness() {
         let ctx = setup_context().await;
@@ -775,6 +783,7 @@ mod tests {
         assert_ne!(t1.buffer_id(), t2.buffer_id());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_view_keeps_buffer_id() {
         let ctx = setup_context().await;
@@ -785,6 +794,7 @@ mod tests {
         assert_eq!(original.buffer_id(), viewed.buffer_id());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_deep_clone_gets_new_id() {
         let ctx = setup_context().await;
@@ -797,6 +807,7 @@ mod tests {
         assert_eq!(original.dtype(), cloned.dtype());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_clone_keeps_buffer_id() {
         let ctx = setup_context().await;
@@ -807,6 +818,7 @@ mod tests {
         assert_eq!(original.buffer_id(), shallow.buffer_id());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_from_bytes_validation() {
         let ctx = setup_context().await;
@@ -820,6 +832,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_linear_layer_dims() {
         let ctx = setup_context().await;
@@ -831,6 +844,7 @@ mod tests {
         assert_eq!(out_feat, 768);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_dtype_as_str() {
         let ctx = setup_context().await;
@@ -839,6 +853,7 @@ mod tests {
         assert_eq!(f32_tensor.dtype_as_str(), "f32");
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_permute_axes_metadata() {
         let ctx = setup_context().await;
@@ -850,6 +865,7 @@ mod tests {
         assert_eq!(tensor.buffer_id(), permuted.buffer_id());
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_uninitialized_tensor() {
         let ctx = setup_context().await;
@@ -860,6 +876,7 @@ mod tests {
         assert_eq!(tensor.num_elements(), 10000);
     }
 
+    #[ignore = "GPU required"]
     #[tokio::test]
     async fn test_debug_format() {
         let ctx = setup_context().await;
