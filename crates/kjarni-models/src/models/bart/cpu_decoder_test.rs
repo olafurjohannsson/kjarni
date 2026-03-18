@@ -257,6 +257,7 @@ mod cpu_seq2seq_decoder_test {
         Ok(())
     }
 
+    #[ignore = "Long running test in CI"]
     #[tokio::test]
     async fn test_generation_step_by_step_vs_python() -> Result<()> {
         let (encoder, decoder, _config, embeddings, _) = setup()?;

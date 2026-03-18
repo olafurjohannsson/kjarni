@@ -64,6 +64,7 @@ mod t5_generation_test {
     use kjarni_transformers::{Device, ModelType, encoder_decoder::EncoderDecoderGenerator};
 
     #[tokio::test]
+    #[ignore = "Long running test in CI"]
     async fn test_t5_full_generation() -> Result<()> {
         let input_text = "translate English to German: How old are you?";
         let model_type = ModelType::FlanT5Large;

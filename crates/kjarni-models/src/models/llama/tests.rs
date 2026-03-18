@@ -14,7 +14,7 @@ const LLAMA_32_8B: &str = "meta-llama_Llama-3.2-8B-Instruct";
 
 /// Helper function to load the Llama model for testing.
 async fn load_llama_for_test() -> Result<LlamaModel> {
-    let p = model_cache_dir(LLAMA_32_8B);
+    let p = model_cache_dir(LLAMA_32_1B);
     let path = p.as_path();
     LlamaModel::from_pretrained(
         path,
@@ -182,6 +182,7 @@ fn test_llama_config_parsing_1b() {
     assert_eq!(config.get_kv_dim(), 512); // 8 * 64
 }
 
+#[ignore = "Requires large model"]
 #[tokio::test]
 async fn test_llama3_2_1b_architectural_properties() -> Result<()> {
     {
