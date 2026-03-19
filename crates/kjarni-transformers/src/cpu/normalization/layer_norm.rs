@@ -160,8 +160,13 @@ impl LayerNorm {
 
     #[inline]
     pub fn forward_2d_noalloc(&self, input: &ArrayView2<f32>, output: &mut ArrayViewMut2<f32>) {
+        #[cfg(target_arch = "x86_64")]
         unsafe {
             self.forward_2d_noalloc_simd(input, output);
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            self.forward_2d_noalloc_scalar(input, output);
         }
     }
 

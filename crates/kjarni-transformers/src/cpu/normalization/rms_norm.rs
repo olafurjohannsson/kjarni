@@ -55,20 +55,22 @@ impl RMSNormSIMD {
 
         debug_assert_eq!(row.len(), w.len());
 
-        if cfg!(target_arch = "x86_64")
-            && std::is_x86_feature_detected!("avx2")
-            && std::is_x86_feature_detected!("fma")
+        #[cfg(target_arch = "x86_64")]
         {
-            unsafe {
-                rms_norm_avx2(row, w, self.eps);
+            if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+                unsafe {
+                    rms_norm_avx2(row, w, self.eps);
+                }
+                return;
             }
-        } else {
-            let sum_sq: f32 = row.iter().map(|v| v * v).sum();
-            let mean = sum_sq / row.len() as f32;
-            let scale = 1.0 / (mean + self.eps).sqrt();
+        }
 
-            for (x, w) in row.iter_mut().zip(w.iter()) {
-                *x = *x * scale * *w;
+        // Scalar fallback
+        let sum_sq: f32 = row.iter().map(|v| v * v).sum();
+        let mean = sum_sq / row.len() as f32;
+        let scale = 1.0 / (mean + self.eps).sqrt();
+        for (x, w) in row.iter_mut().zip(w.iter()) {
+            *x = *x * scale * *w;
             }
         }
     }

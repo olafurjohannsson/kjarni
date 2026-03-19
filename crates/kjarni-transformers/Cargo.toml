@@ -56,6 +56,9 @@ ndarray = { workspace = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Win32_Graphics_Dxgi"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+sysinfo = "0.32"
+
 [dev-dependencies]
 env_logger = "0.10"
 approx = "0.5.1"
