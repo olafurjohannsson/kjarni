@@ -2,6 +2,7 @@
 
 use ndarray::{Array1, Array2, Array3, Axis};
 
+#[cfg(target_arch = "x86_64")]
 use crate::cpu::kernels::x86::rms_norm::rms_norm_avx2;
 
 /// Root Mean Square Layer Normalization
