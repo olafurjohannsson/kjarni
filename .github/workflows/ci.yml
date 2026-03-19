@@ -201,7 +201,7 @@ jobs:
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-linux-arm, build-macos, build-windows, build-wasm]
+    needs: [build-linux, build-linux-arm, build-macos, build-wasm]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -224,7 +224,6 @@ jobs:
             -C kjarni-aarch64-linux .
           tar -czf kjarni-aarch64-macos.tar.gz \
             -C kjarni-aarch64-macos .
-          (cd kjarni-x86_64-windows && zip -r ../kjarni-x86_64-windows.zip .)
           tar -czf kjarni-wasm.tar.gz \
             -C kjarni-wasm .
 
@@ -236,5 +235,4 @@ jobs:
             artifacts/kjarni-x86_64-linux.tar.gz
             artifacts/kjarni-aarch64-linux.tar.gz
             artifacts/kjarni-aarch64-macos.tar.gz
-            artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
