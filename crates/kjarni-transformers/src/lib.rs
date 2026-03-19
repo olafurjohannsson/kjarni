@@ -9,13 +9,23 @@ pub mod activations;
 pub mod audio;
 pub mod cache;
 pub mod chat;
-pub mod common;
+
 pub mod cpu;
-pub mod decoder;
-pub mod encoder_decoder;
+
+
 pub mod execution;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decoder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod encoder_decoder;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_ops;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod common;
+
 pub mod linear_layer;
 pub mod loaders;
 pub mod models;

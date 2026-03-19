@@ -863,6 +863,7 @@ impl ModelType {
 // Download Utilities
 
 /// Downloads all required files for a model to the specified directory.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn download_model_files(
     model_dir: &Path,
     paths: &ModelPaths,
@@ -895,6 +896,7 @@ pub async fn download_model_files(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool) -> Result<()> {
     let local_path = model_dir.join(filename);
     if local_path.exists() {
@@ -921,6 +923,7 @@ async fn download_file(model_dir: &Path, filename: &str, url: &str, quiet: bool)
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn download_sharded_weights(model_dir: &Path, index_url: &str, quiet: bool) -> Result<()> {
     download_file(model_dir, "model.safetensors.index.json", index_url, quiet).await?;
 

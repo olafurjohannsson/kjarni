@@ -1,6 +1,6 @@
 use crate::cpu::kernels::q_common::{BlockQ4_K, BlockQ6_K, QK_K};
 use crate::cpu::kernels::quantize::quantize_matrix_q8_0;
-use crate::cpu::ops::matmul::{
+use crate::cpu::ops::matmul_native::{
     matmul_2d_cpu_bf16, matmul_2d_cpu_f32, matmul_2d_cpu_q4_k, matmul_2d_cpu_q6_k,
     matmul_2d_cpu_q8_0,
 };

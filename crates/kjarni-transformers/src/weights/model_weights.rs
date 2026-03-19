@@ -77,6 +77,18 @@ impl ModelWeights {
         Err(anyhow!("no supported weight format found at {:?}", path))
     }
 
+    /// Load from raw safetensors bytes + config JSON (for WASM)
+    pub fn from_safetensors_bytes(data: &[u8], config_json: &str) -> Result<Self> {
+        let loader = SafeTensorsLoader::from_bytes(data)?;
+        Ok(Self {
+            inner: Arc::new(ModelWeightsInner {
+                loader: Box::new(loader),
+                config_json: config_json.to_string(),
+                is_gguf: false,
+            }),
+        })
+    }
+
     /// Creates ModelWeights from a specific file.
     pub fn from_file(path: &Path) -> Result<Self> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
