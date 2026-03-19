@@ -170,39 +170,6 @@ jobs:
           name: kjarni-aarch64-macos
           path: dist/
 
-  # ─── Windows x86_64 ────────────────────────────────────────────
-  build-windows:
-    name: Build (Windows x86_64)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.91.1"
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-x86_64
-
-      - name: Build CLI
-        run: cargo build --release --package kjarni-cli
-
-      - name: Build FFI
-        run: cargo build --release --package kjarni-ffi
-
-      - name: Prepare artifacts
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp target/release/kjarni.exe dist/
-          cp target/release/kjarni_ffi.dll dist/ 2>/dev/null || true
-          cp target/release/kjarni_ffi.dll.lib dist/ 2>/dev/null || true
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kjarni-x86_64-windows
-          path: dist/
-
   # ─── WASM ──────────────────────────────────────────────────────
   build-wasm:
     name: Build (WASM)
