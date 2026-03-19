@@ -61,6 +61,7 @@ pub use audio::{
     create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::{
     chat::templates::{ChatTemplate, Conversation, Message, Role},
     cpu::{
@@ -78,11 +79,22 @@ pub use crate::{
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 
+#[cfg(target_arch = "wasm32")]
+pub mod prelude {
+    pub use crate::cache::{Cache, CpuKVCache};
+    pub use crate::models::LanguageModel;
+    pub use crate::traits::Device;
+}
+
 pub use cache::{Cache, CpuKVCache};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use gpu_ops::context::WgpuContext;
+
 pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache};
     pub use crate::gpu::cache::{GpuKVCache, GpuBeamKVCache};

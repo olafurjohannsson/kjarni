@@ -166,10 +166,10 @@ impl LinearLayer {
 
                     if m < Self::BATCH_KERNEL_THRESHOLD {
                         // Vec kernel: better for decode and small batches
-                        ops::matmul_native::matmul_2d_f32_noalloc(input, &w.view(), bias, output);
+                        ops::matmul::matmul_2d_f32_noalloc(input, &w.view(), bias, output);
                     } else {
                         // 4x3 block kernel: better for large batches
-                        ops::matmul_native::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
+                        ops::matmul::matmul_2d_f32_batched_noalloc(input, &w.view(), bias, output);
                     }
                 }
                 F32MatmulStrategy::Faer | F32MatmulStrategy::FaerOutIn => {
@@ -201,7 +201,7 @@ impl LinearLayer {
                     let (m, _) = input.dim();
                     if m == 1 {
                         // Decode path - add bias manually after
-                        let mut result = ops::matmul_native::matmul_2d_cpu_f32(input, &w.view());
+                        let mut result = ops::matmul::matmul_2d_cpu_f32(input, &w.view());
                         if let Some(b) = &self.bias {
                             // Single row, just add directly
                             let out = result.as_slice_mut().unwrap();
@@ -213,7 +213,7 @@ impl LinearLayer {
                         result
                     } else {
                         // Batch path - pass bias to kernel (fused, faster)
-                        ops::matmul_native::matmul_2d_cpu_f32_batched(
+                        ops::matmul::matmul_2d_cpu_f32_batched(
                             input,
                             &w.view(),
                             self.bias.as_ref().map(|b| b.as_slice().unwrap()),
@@ -230,7 +230,7 @@ impl LinearLayer {
                     result
                 }
                 F32MatmulStrategy::FaerOutIn => {
-                    let mut result = ops::matmul_native::matmul_2d_cpu_f32_faer(input, &w.view());
+                    let mut result = ops::matmul::matmul_2d_cpu_f32_faer(input, &w.view());
                     if let Some(b) = &self.bias {
                         for mut row in result.rows_mut() {
                             row += b;
@@ -240,7 +240,7 @@ impl LinearLayer {
                 }
             },
             LinearData::BF16(w) => {
-                let mut result = ops::matmul_native::matmul_2d_cpu_bf16(input, &w.view());
+                let mut result = ops::matmul::matmul_2d_cpu_bf16(input, &w.view());
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -252,7 +252,7 @@ impl LinearLayer {
                 unimplemented!("F16 LinearLayer matmul not implemented yet");
             }
             LinearData::Q8_0(w) => {
-                let mut result = ops::matmul_native::matmul_2d_cpu_q8_0(input, &w.blocks);
+                let mut result = ops::matmul::matmul_2d_cpu_q8_0(input, &w.blocks);
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -261,7 +261,7 @@ impl LinearLayer {
                 result
             }
             LinearData::Q6_K(w) => {
-                let mut result = ops::matmul_native::matmul_2d_cpu_q6_k(input, &w.blocks);
+                let mut result = ops::matmul::matmul_2d_cpu_q6_k(input, &w.blocks);
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
@@ -270,7 +270,7 @@ impl LinearLayer {
                 result
             }
             LinearData::Q4_K(w) => {
-                let mut result = ops::matmul_native::matmul_2d_cpu_q4_k(input, &w.blocks);
+                let mut result = ops::matmul::matmul_2d_cpu_q4_k(input, &w.blocks);
                 if let Some(b) = &self.bias {
                     for mut row in result.rows_mut() {
                         row += b;
