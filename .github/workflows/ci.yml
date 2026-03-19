@@ -170,10 +170,38 @@ jobs:
           name: kjarni-aarch64-macos
           path: dist/
 
+  # ─── WASM ──────────────────────────────────────────────────────
+  build-wasm:
+    name: Build (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-wasm
+          path: crates/kjarni-wasm/pkg/
+
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-linux-arm, build-macos]
+    needs: [build-linux, build-linux-arm, build-macos, build-wasm]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -196,6 +224,8 @@ jobs:
             -C kjarni-aarch64-linux .
           tar -czf kjarni-aarch64-macos.tar.gz \
             -C kjarni-aarch64-macos .
+          tar -czf kjarni-wasm.tar.gz \
+            -C kjarni-wasm .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -205,3 +235,4 @@ jobs:
             artifacts/kjarni-x86_64-linux.tar.gz
             artifacts/kjarni-aarch64-linux.tar.gz
             artifacts/kjarni-aarch64-macos.tar.gz
+            artifacts/kjarni-wasm.tar.gz

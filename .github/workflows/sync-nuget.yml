@@ -46,6 +46,11 @@ jobs:
           tar -xzf release-assets/kjarni-aarch64-macos.tar.gz -C /tmp/macos-arm64
           cp /tmp/macos-arm64/libkjarni_ffi.dylib $CSHARP_DIR/runtimes/osx-arm64/native/
 
+          # Windows x86_64
+          mkdir -p /tmp/windows-x64 $CSHARP_DIR/runtimes/win-x64/native
+          unzip -o release-assets/kjarni-x86_64-windows.zip -d /tmp/windows-x64
+          cp /tmp/windows-x64/kjarni_ffi.dll $CSHARP_DIR/runtimes/win-x64/native/
+
       - name: Set version from tag
         run: |
           VERSION="${{ github.event.release.tag_name }}"
