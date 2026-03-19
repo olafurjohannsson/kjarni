@@ -71,7 +71,6 @@ impl RMSNormSIMD {
         let scale = 1.0 / (mean + self.eps).sqrt();
         for (x, w) in row.iter_mut().zip(w.iter()) {
             *x = *x * scale * *w;
-            }
         }
     }
 
