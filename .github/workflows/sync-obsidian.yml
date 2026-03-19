@@ -1,0 +1,109 @@
+name: Sync Obsidian Plugin
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync-obsidian:
+    name: Build & Sync Obsidian Plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features
+
+      - name: Build Obsidian plugin
+        run: |
+          cd crates/kjarni-wasm/plugins/obsidian-kjarni-search
+          npm ci
+          npm run build
+
+      - name: Prepare plugin files
+        run: |
+          PLUGIN_DIR=crates/kjarni-wasm/plugins/obsidian-kjarni-search
+          mkdir -p plugin-push
+
+          # Workers are inlined into main.js, only 3 files needed
+          cp $PLUGIN_DIR/main.js plugin-push/
+          cp $PLUGIN_DIR/manifest.json plugin-push/
+          cp $PLUGIN_DIR/styles.css plugin-push/
+
+      - name: Push to obsidian plugin repo
+        env:
+          OBSIDIAN_REPO_TOKEN: ${{ secrets.OBSIDIAN_REPO_PAT }}
+        run: |
+          DEST=$(mktemp -d)
+          git clone https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-obsidian.git "$DEST" 2>/dev/null || {
+            mkdir -p "$DEST"
+            cd "$DEST"
+            git init
+            git remote add origin https://x-access-token:${OBSIDIAN_REPO_TOKEN}@github.com/olafurjohannsson/kjarni-obsidian.git
+            git checkout -b main
+          }
+          cd "$DEST"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Overwrite build artifacts, keep README/LICENSE
+          cp $GITHUB_WORKSPACE/plugin-push/main.js .
+          cp $GITHUB_WORKSPACE/plugin-push/manifest.json .
+          cp $GITHUB_WORKSPACE/plugin-push/styles.css .
+
+          git add -A
+          git commit -m "Build from kjarni ${{ github.event.release.tag_name }}" || echo "No changes"
+          git tag "${{ github.event.release.tag_name }}" 2>/dev/null || true
+          git push origin main --tags
+
+      - name: Create plugin release with individual assets
+        env:
+          GH_TOKEN: ${{ secrets.OBSIDIAN_REPO_PAT }}
+        run: |
+          # BRAT and Obsidian community installer expect individual assets
+          gh release create "${{ github.event.release.tag_name }}" \
+            --repo olafurjohannsson/kjarni-obsidian \
+            --title "${{ github.event.release.tag_name }}" \
+            --generate-notes \
+            plugin-push/main.js \
+            plugin-push/manifest.json \
+            plugin-push/styles.css
+
+      - name: Push WASM binary to kjarni.ai
+        env:
+          SITE_REPO_TOKEN: ${{ secrets.SITE_REPO_PAT }}
+        run: |
+          DEST=$(mktemp -d)
+          git clone https://x-access-token:${SITE_REPO_TOKEN}@github.com/olafurjohannsson/web.kjarni.ai.git "$DEST"
+          cd "$DEST"
+
+          # Update WASM binary
+          cp $GITHUB_WORKSPACE/crates/kjarni-wasm/pkg/kjarni_wasm_bg.wasm models/
+
+          git add models/kjarni_wasm_bg.wasm
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update WASM binary from kjarni ${{ github.event.release.tag_name }}" || echo "No changes"
+          git push origin main
