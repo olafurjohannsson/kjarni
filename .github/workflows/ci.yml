@@ -176,10 +176,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.91.1-x86_64-pc-windows-msvc"
+          toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
         with:
           key: windows-x86_64
