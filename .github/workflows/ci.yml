@@ -171,7 +171,7 @@ jobs:
           path: dist/
 
   # ─── Windows x86_64 ────────────────────────────────────────────
-build-windows:
+  build-windows:
     name: Build (Windows x86_64)
     runs-on: windows-2022
     steps:
