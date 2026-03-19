@@ -101,6 +101,43 @@ jobs:
           name: kjarni-x86_64-linux
           path: dist/
 
+  # ─── Linux aarch64 ─────────────────────────────────────────────
+  build-linux-arm:
+    name: Build (Linux aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-aarch64
+
+      - name: Install cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build CLI
+        run: cargo zigbuild --release --package kjarni-cli --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Build FFI
+        run: cargo zigbuild --release --package kjarni-ffi --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
+          cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
+          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-aarch64-linux
+          path: dist/
+
   # ─── macOS aarch64 ─────────────────────────────────────────────
   build-macos:
     name: Build (macOS aarch64)
@@ -136,7 +173,7 @@ jobs:
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-macos]
+    needs: [build-linux, build-linux-arm, build-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -155,6 +192,8 @@ jobs:
           cd artifacts
           tar -czf kjarni-x86_64-linux.tar.gz \
             -C kjarni-x86_64-linux .
+          tar -czf kjarni-aarch64-linux.tar.gz \
+            -C kjarni-aarch64-linux .
           tar -czf kjarni-aarch64-macos.tar.gz \
             -C kjarni-aarch64-macos .
 
@@ -164,4 +203,5 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/kjarni-x86_64-linux.tar.gz
+            artifacts/kjarni-aarch64-linux.tar.gz
             artifacts/kjarni-aarch64-macos.tar.gz
