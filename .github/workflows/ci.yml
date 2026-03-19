@@ -171,12 +171,14 @@ jobs:
           path: dist/
 
   # ─── Windows x86_64 ────────────────────────────────────────────
-  build-windows:
+build-windows:
     name: Build (Windows x86_64)
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.1"
