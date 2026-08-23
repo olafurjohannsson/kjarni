@@ -1,11 +1,8 @@
 name: CI
 
-# TEMPORARY: stripped down to just the Windows build job while getting
-# it working. Restore the rest of the jobs from main before merging.
-
 on:
   push:
-    branches: [main, windows-ci]
+    branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
@@ -15,6 +12,181 @@ env:
   RUSTUP_TOOLCHAIN: "1.91.1"
 
 jobs:
+  # ─── Lint ───────────────────────────────────────────────────────
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets 2>&1 || true
+
+  # ─── Test (CPU only, models cached) ────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-v2
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download test models
+        run: |
+          CLI=./target/release/kjarni
+          $CLI model download distilbert-sentiment
+          $CLI model download roberta-sentiment
+          $CLI model download bert-sentiment-multilingual
+          $CLI model download roberta-emotions
+          $CLI model download toxic-bert
+          $CLI model download distilroberta-emotion
+          $CLI model download minilm-l6-v2
+          $CLI model download gpt2
+          $CLI model download minilm-l6-v2-cross-encoder
+          $CLI model download distilbert-base
+          $CLI model download flan-t5-base
+          $CLI model download distilbart-cnn
+
+      - name: Run tests
+        run: cargo test --workspace --exclude kjarni-wasm
+
+  # ─── WASM check (kjarni-transformers engine) ────────────────────
+  wasm-check:
+    name: WASM check (kjarni-transformers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-check
+
+      - name: Check kjarni-transformers for wasm32
+        run: cargo check -p kjarni-transformers --target wasm32-unknown-unknown --no-default-features
+
+  # ─── Linux x86_64 ──────────────────────────────────────────────
+  build-linux:
+    name: Build (Linux x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-x86_64
+
+      - name: Install cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build CLI
+        run: cargo zigbuild --release --package kjarni-cli --target x86_64-unknown-linux-gnu.2.17
+
+      - name: Build FFI
+        run: cargo zigbuild --release --package kjarni-ffi --target x86_64-unknown-linux-gnu.2.17
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/kjarni dist/
+          cp target/x86_64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
+          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-x86_64-linux
+          path: dist/
+
+  # ─── Linux aarch64 ─────────────────────────────────────────────
+  build-linux-arm:
+    name: Build (Linux aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-aarch64
+
+      - name: Install cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build CLI
+        run: cargo zigbuild --release --package kjarni-cli --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Build FFI
+        run: cargo zigbuild --release --package kjarni-ffi --target aarch64-unknown-linux-gnu.2.17
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
+          cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
+          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-aarch64-linux
+          path: dist/
+
+  # ─── macOS aarch64 ─────────────────────────────────────────────
+  build-macos:
+    name: Build (macOS aarch64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-aarch64
+
+      - name: Build CLI
+        run: cargo build --release --package kjarni-cli --target aarch64-apple-darwin
+
+      - name: Build FFI
+        run: cargo build --release --package kjarni-ffi --target aarch64-apple-darwin
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/kjarni dist/
+          cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
+          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-aarch64-macos
+          path: dist/
+
   # ─── Windows x86_64 ─────────────────────────────────────────────
   build-windows:
     name: Build (Windows x86_64)
@@ -47,3 +219,73 @@ jobs:
         with:
           name: kjarni-x86_64-windows
           path: dist/
+
+  # ─── WASM ──────────────────────────────────────────────────────
+  build-wasm:
+    name: Build (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-wasm
+          path: crates/kjarni-wasm/pkg/
+
+  # ─── Release ────────────────────────────────────────────────────
+  release:
+    name: Release
+    needs: [build-linux, build-linux-arm, build-macos, build-windows, build-wasm]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Package archives
+        run: |
+          cd artifacts
+          tar -czf kjarni-x86_64-linux.tar.gz \
+            -C kjarni-x86_64-linux .
+          tar -czf kjarni-aarch64-linux.tar.gz \
+            -C kjarni-aarch64-linux .
+          tar -czf kjarni-aarch64-macos.tar.gz \
+            -C kjarni-aarch64-macos .
+          tar -czf kjarni-x86_64-windows.tar.gz \
+            -C kjarni-x86_64-windows .
+          tar -czf kjarni-wasm.tar.gz \
+            -C kjarni-wasm .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/kjarni-x86_64-linux.tar.gz
+            artifacts/kjarni-aarch64-linux.tar.gz
+            artifacts/kjarni-aarch64-macos.tar.gz
+            artifacts/kjarni-x86_64-windows.tar.gz
+            artifacts/kjarni-wasm.tar.gz
