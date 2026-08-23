@@ -187,6 +187,39 @@ jobs:
           name: kjarni-aarch64-macos
           path: dist/
 
+  # ─── Windows x86_64 ─────────────────────────────────────────────
+  build-windows:
+    name: Build (Windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x86_64
+
+      - name: Build CLI
+        run: cargo build --release --package kjarni-cli --target x86_64-pc-windows-msvc
+
+      - name: Build FFI
+        run: cargo build --release --package kjarni-ffi --target x86_64-pc-windows-msvc
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
+          cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/
+          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kjarni-x86_64-windows
+          path: dist/
+
   # ─── WASM ──────────────────────────────────────────────────────
   build-wasm:
     name: Build (WASM)
@@ -218,7 +251,7 @@ jobs:
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-linux-arm, build-macos, build-wasm]
+    needs: [build-linux, build-linux-arm, build-macos, build-windows, build-wasm]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -241,6 +274,8 @@ jobs:
             -C kjarni-aarch64-linux .
           tar -czf kjarni-aarch64-macos.tar.gz \
             -C kjarni-aarch64-macos .
+          tar -czf kjarni-x86_64-windows.tar.gz \
+            -C kjarni-x86_64-windows .
           tar -czf kjarni-wasm.tar.gz \
             -C kjarni-wasm .
 
@@ -252,4 +287,5 @@ jobs:
             artifacts/kjarni-x86_64-linux.tar.gz
             artifacts/kjarni-aarch64-linux.tar.gz
             artifacts/kjarni-aarch64-macos.tar.gz
+            artifacts/kjarni-x86_64-windows.tar.gz
             artifacts/kjarni-wasm.tar.gz
