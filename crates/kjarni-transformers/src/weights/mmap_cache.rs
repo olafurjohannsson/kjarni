@@ -63,39 +63,40 @@ mod tests {
 
     #[test]
     fn test_mmap_cache_deduplication() {
+        // MMAP_CACHE is a process-wide global, and cargo runs tests in
+        // parallel, so other tests elsewhere in the crate (anything that
+        // constructs a ModelWeights/SafeTensorsLoader from a path) can
+        // insert or clear entries concurrently. Assert on our own
+        // request's behavior (same Arc returned => cache hit) rather
+        // than on the cache's total size, which isn't ours to own.
         let mut temp = NamedTempFile::new().unwrap();
         temp.write_all(b"test data for mmap").unwrap();
         temp.flush().unwrap();
         let path = temp.path();
 
-        clear_mmap_cache();
-
         let mmap1 = get_or_create_mmap(path).unwrap();
-        let (count1, _) = mmap_cache_stats();
-        assert_eq!(count1, 1);
-
         let mmap2 = get_or_create_mmap(path).unwrap();
-        let (count2, _) = mmap_cache_stats();
-        assert_eq!(count2, 1);
 
         assert!(Arc::ptr_eq(&mmap1, &mmap2));
-
-        clear_mmap_cache();
     }
 
     #[test]
     fn test_mmap_cache_clear() {
+        // Same reasoning as test_mmap_cache_deduplication: don't assert
+        // on the shared global's total size. Instead check that our own
+        // path gets a fresh mapping (a new Arc) after a clear, which is
+        // the directly-observable effect of "clear" on the entry we own.
         let mut temp = NamedTempFile::new().unwrap();
         temp.write_all(b"test").unwrap();
         temp.flush().unwrap();
+        let path = temp.path();
 
-        let _ = get_or_create_mmap(temp.path()).unwrap();
-        let (count, _) = mmap_cache_stats();
-        assert!(count >= 1);
+        let mmap1 = get_or_create_mmap(path).unwrap();
 
         clear_mmap_cache();
 
-        let (count_after, _) = mmap_cache_stats();
-        assert_eq!(count_after, 0);
+        let mmap2 = get_or_create_mmap(path).unwrap();
+
+        assert!(!Arc::ptr_eq(&mmap1, &mmap2));
     }
 }
