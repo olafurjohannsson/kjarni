@@ -16,8 +16,9 @@ use tokenizers::Tokenizer;
 use kjarni_transformers::{
     WgpuContext,
     activations::softmax_inplace,
+    gpu::encoder::GpuTransformerEncoder,
     cpu::encoder::{
-        CpuTransformerEncoder, GpuTransformerEncoder,
+        CpuTransformerEncoder, 
         classifier::CpuSequenceClassificationHead,
         config::PoolingStrategy,
         traits::{CpuEncoder, CpuEncoderOps, EncoderLanguageModel, GpuEncoder, GpuEncoderOps},

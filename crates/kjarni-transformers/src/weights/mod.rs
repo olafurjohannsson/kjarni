@@ -1,7 +1,11 @@
 //! Weight loading
 
 mod gguf_conversion;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod gguf_loader;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod mmap_cache;
 mod model_weights;
 mod safetensors_loader;
@@ -13,7 +17,11 @@ use anyhow::Result;
 use crate::tensor::raw_tensor::TensorView;
 
 pub use gguf_conversion::{cast_or_copy, raw_to_typed_gguf};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use gguf_loader::{GgufHfMapper, GgufLoader};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use mmap_cache::{clear_mmap_cache, mmap_cache_stats};
 pub use model_weights::{AttentionLayout, ModelWeights, raw_to_typed};
 pub use safetensors_loader::SafeTensorsLoader;

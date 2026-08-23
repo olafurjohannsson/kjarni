@@ -46,18 +46,7 @@ impl DType {
             DType::Q8_0 | DType::Q4_K | DType::Q5_K | DType::Q6_K => None,
         }
     }
-    
-
-    pub fn from_gguf(dtype: gguf::GGMLType) -> Result<Self> {
-        match dtype {
-            gguf::GGMLType::F32 => Ok(DType::F32),
-            gguf::GGMLType::F16 => Ok(DType::F16),
-            gguf::GGMLType::Q8_0 => Ok(DType::Q8_0),
-            gguf::GGMLType::Q4K => Ok(DType::Q4_K),
-            gguf::GGMLType::Q6K => Ok(DType::Q6_K),
-            _ => Err(anyhow!("Unsupported or unknown GGUF DType: {:?}", dtype)),
-        }
-    }
+ 
     pub fn size_in_bytes(&self) -> usize {
         match self {
             DType::F32 => 4,

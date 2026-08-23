@@ -8,12 +8,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::weights::mmap_cache::get_or_create_mmap;
+
 use safetensors::SafeTensors;
 
 use crate::tensor::DType;
 use crate::tensor::raw_tensor::TensorView;
-use crate::weights::mmap_cache::get_or_create_mmap;
+
+
 use crate::weights::WeightLoader;
 
 /// A loader for `.safetensors` files with mmap caching
@@ -25,11 +32,21 @@ pub struct SafeTensorsLoader {
 
 #[derive(Debug)]
 struct ShardInfo {
-    #[allow(dead_code)]
-    mmap: Arc<Mmap>,
+    /// Keeps the backing memory alive (mmap or owned bytes)
+    _backing: BackingMemory,
     // The 'static lifetime is ecause the mmap is owned by Arc
     // and stored alongside tensors, ensuring it outlives the SafeTensors
     tensors: SafeTensors<'static>,
+}
+
+
+
+
+#[derive(Debug)]
+enum BackingMemory {
+    #[cfg(not(target_arch = "wasm32"))]
+    Mmap(Arc<Mmap>),
+    Owned(Arc<Vec<u8>>),
 }
 
 impl SafeTensorsLoader {
@@ -37,6 +54,7 @@ impl SafeTensorsLoader {
     ///
     /// Accepts either a direct file path or a directory containing
     /// `model.safetensors` or `model.safetensors.index.json` + shards.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(path: &Path) -> Result<Self> {
         if path.is_file() {
             return Self::load_single(path).map(|(shards, map)| Self {
@@ -62,6 +80,33 @@ impl SafeTensorsLoader {
         })
     }
 
+    /// Load from raw bytes 
+    pub fn from_bytes(data: &[u8]) -> Result<Self> {
+        let owned: Arc<Vec<u8>> = Arc::new(data.to_vec());
+        let static_slice: &'static [u8] =
+            unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&owned[..]) };
+
+        let tensors = SafeTensors::deserialize(static_slice)
+            .context("failed to parse safetensors bytes")?;
+
+        let tensor_to_shard = tensors
+            .names()
+            .into_iter()
+            .map(|name| (name.to_string(), 0))
+            .collect();
+
+        let shard = ShardInfo {
+            _backing: BackingMemory::Owned(owned),
+            tensors,
+        };
+
+        Ok(Self {
+            shards: vec![shard],
+            tensor_to_shard,
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_single(path: &Path) -> Result<(Vec<ShardInfo>, HashMap<String, usize>)> {
         let shard = Self::load_shard(path)?;
         let tensor_to_shard = shard
@@ -80,6 +125,7 @@ impl SafeTensorsLoader {
         Ok((vec![shard], tensor_to_shard))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_sharded(path: &Path) -> Result<(Vec<ShardInfo>, HashMap<String, usize>)> {
         let index_path = path.join("model.safetensors.index.json");
         let index_content = fs::read_to_string(&index_path)
@@ -128,6 +174,7 @@ impl SafeTensorsLoader {
         Ok((shards, tensor_to_shard))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_shard(path: &Path) -> Result<ShardInfo> {
         let mmap = get_or_create_mmap(path)?;
         let static_slice: &'static [u8] =
@@ -136,7 +183,10 @@ impl SafeTensorsLoader {
         let tensors = SafeTensors::deserialize(static_slice)
             .with_context(|| format!("failed to parse safetensors: {:?}", path))?;
 
-        Ok(ShardInfo { mmap, tensors })
+        Ok(ShardInfo {
+            _backing: BackingMemory::Mmap(mmap),
+            tensors,
+        })
     }
 
     /// Returns all tensor names in this model.

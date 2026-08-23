@@ -1,14 +1,15 @@
 //! CPU-based linear layer with multi-dtype support.
 
-use crate::{
-    cpu::{
-        kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
-        ops,
-    },
-    tensor::raw_tensor::TensorView,
+use crate::cpu::{
+    kernels::q_common::{BlockQ4_K, BlockQ6_K, BlockQ8_0},
+    ops,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::tensor::raw_tensor::TensorView;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::WgpuContext;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::GpuTensor;
 use crate::linear_layer::LinearLayerBuilder;
 use crate::tensor::{DType, QuantizedMatrix};
@@ -17,6 +18,7 @@ use crate::weights::ModelWeights;
 use anyhow::{Result, anyhow};
 use half::bf16;
 use ndarray::{Array1, Array2, ArrayView2};
+#[cfg(not(target_arch = "wasm32"))]
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -403,6 +405,7 @@ impl LinearLayer {
     }
 
     /// Uploads the bias tensor (if present) to the GPU.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn bias_to_gpu(
         &self,
         ctx: &Arc<crate::WgpuContext>,
@@ -416,11 +419,13 @@ impl LinearLayer {
     }
 
     /// Uploads the weight matrix to the GPU.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn to_gpu(&self, ctx: &Arc<WgpuContext>) -> Result<GpuTensor> {
         self.to_gpu_tensor(ctx, "to_gpu")
     }
 
     /// Converts the linear layer's weight matrix to a `GpuTensor`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn to_gpu_tensor(&self, ctx: &Arc<WgpuContext>, label: &str) -> Result<GpuTensor> {
         match &self.data {
             LinearData::F32(arr) => {

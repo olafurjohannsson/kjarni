@@ -3,16 +3,20 @@
 //! This module provides high-level, user-facing traits that abstract over
 //! the low-level architecture traits in `traits.rs`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 use crate::cpu::encoder::buffers::EncoderBuffers;
 use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::cpu::strategy::ComputeStrategy;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use crate::models::base::{LanguageModel, ModelInput};
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;
-use crate::{WgpuContext, last_token_pool, max_pool};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WgpuContext;
+use crate::{last_token_pool, max_pool};
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -34,11 +38,14 @@ pub enum ClassificationMode {
 pub trait EncoderLanguageModel: LanguageModel {
     fn encoder_cpu_ops(&self) -> Option<&dyn CpuEncoderOps>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps>;
 
     fn dimension(&self) -> usize {
         self.hidden_size()
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn encoder_dimensions(&self) -> usize {
         // either GPU or CPU
         match self.device() {
@@ -57,12 +64,21 @@ pub trait EncoderLanguageModel: LanguageModel {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn encoder_dimensions(&self) -> usize {
+        let ops = self
+            .encoder_cpu_ops()
+            .expect("CPU ops not implemented for this model");
+        ops.encoder().hidden_size()
+    }
+
     /// Get hidden states for input text
     async fn get_hidden_states(&self, text: &str) -> Result<Array3<f32>> {
         let (batch_hidden_states, _) = self.get_hidden_states_batch(&[text]).await?;
         Ok(batch_hidden_states)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get_hidden_states_batch_from_ids(
         &self,
         input_ids: &Array2<u32>,
@@ -133,6 +149,40 @@ pub trait EncoderLanguageModel: LanguageModel {
             return Err(anyhow!(
                 "No available CPU or GPU encoder implementation for this model."
             ));
+        };
+
+        Ok((hidden_states, attention_mask_f32))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn get_hidden_states_batch_from_ids(
+        &self,
+        input_ids: &Array2<u32>,
+        attention_mask: &Array2<u32>,
+    ) -> Result<(Array3<f32>, Array2<f32>)> {
+        let attention_mask_f32 = attention_mask.mapv(|x| x as f32);
+        let (batch_size, seq_len) = input_ids.dim();
+        let tokens = batch_size * seq_len;
+        let hidden = self.hidden_size();
+        let compute_strategy = ComputeStrategy::select(tokens, hidden);
+
+        let ops = self
+            .encoder_cpu_ops()
+            .ok_or_else(|| anyhow!("No available CPU encoder implementation for this model."))?;
+        let encoder: &dyn CpuEncoder = ops.encoder();
+
+        let hidden: Array3<f32> = ops.embed_tokens(input_ids, None, 0)?;
+        let normalized_hidden: Array3<f32> = encoder.embed_norm(&hidden)?;
+
+        let hidden_states = if compute_strategy.use_scratch_buffers == false {
+            encoder
+                .forward(&normalized_hidden, &attention_mask_f32)?
+                .last_hidden_state
+        } else {
+            let mut buffers = encoder.create_buffers(batch_size, seq_len);
+            encoder
+                .forward_with_buffers(&normalized_hidden, &attention_mask_f32, &mut buffers)?
+                .last_hidden_state
         };
 
         Ok((hidden_states, attention_mask_f32))
@@ -333,6 +383,7 @@ pub trait CpuEncoderOps: Send + Sync {
 }
 
 /// Output from GPU encoder.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct GpuEncoderOutput {
     /// Final hidden states on GPU: `[batch_size, sequence_length, hidden_size]`
@@ -340,6 +391,7 @@ pub struct GpuEncoderOutput {
 }
 
 
+#[cfg(not(target_arch = "wasm32"))]
 pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only 
     fn embed(
@@ -440,6 +492,7 @@ pub trait GpuEncoder: Send + Sync {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub trait GpuEncoderOps: Send + Sync {
     /// Access the underlying encoder (transformer layers)
     fn encoder(&self) -> &dyn GpuEncoder;

@@ -9,16 +9,27 @@ pub mod activations;
 pub mod audio;
 pub mod cache;
 pub mod chat;
-pub mod common;
+
 pub mod cpu;
-pub mod decoder;
-pub mod encoder_decoder;
+
+
 pub mod execution;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decoder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod encoder_decoder;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_ops;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod common;
+
 pub mod linear_layer;
 pub mod loaders;
 pub mod models;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pipeline;
 pub mod pooling;
 pub mod stats;
@@ -60,19 +71,34 @@ pub use crate::{
     },
     execution::ExecutionPlan,
     feedforward::FeedForward,
+    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::{
     loaders::{
         EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
         LoadedLMHead,
     },
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 
+#[cfg(target_arch = "wasm32")]
+pub mod prelude {
+    pub use crate::cache::{Cache, CpuKVCache};
+    pub use crate::models::LanguageModel;
+    pub use crate::traits::Device;
+}
+
 pub use cache::{Cache, CpuKVCache};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use gpu_ops::context::WgpuContext;
+
 pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prelude {
     pub use crate::cache::{Cache, CpuKVCache};
     pub use crate::gpu::cache::{GpuKVCache, GpuBeamKVCache};

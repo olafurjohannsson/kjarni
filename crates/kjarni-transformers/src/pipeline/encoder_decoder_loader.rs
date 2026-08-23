@@ -92,7 +92,9 @@ impl Seq2SeqLoader {
         let layout: ModelLayout = config.layout();
 
         let tokenizer_path: PathBuf = model_path.join("tokenizer.json");
-        let tokenizer: Tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow!(e))?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+
 
         // Build Backends
         let (cpu_enc, gpu_enc, cpu_dec, gpu_dec) = M::build_backends(

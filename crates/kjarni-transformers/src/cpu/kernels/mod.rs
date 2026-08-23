@@ -10,3 +10,6 @@ pub(crate) mod x86;
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod aarch64;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm32;

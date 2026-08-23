@@ -1,3 +1,5 @@
+#![cfg(target_arch = "wasm32")]
+
 mod tokenizer;
 mod wasm_simd;
 mod wasm_feedforward;

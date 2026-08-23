@@ -1,7 +1,9 @@
 //! Pooling traits and implementations for encoder outputs
 
 use super::config::PoolingStrategy;
-use crate::{cls_pool, gpu::{GpuTensor, GpuTensorPool}, last_token_pool, max_pool, mean_pool};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::gpu::{GpuTensor, GpuTensorPool};
+use crate::{cls_pool, last_token_pool, max_pool, mean_pool};
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
@@ -17,6 +19,7 @@ pub trait CpuPooler: Send + Sync {
 }
 
 /// GPU pooling head - reduces sequence to single vector.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait GpuPooler: Send + Sync {
     /// Pool hidden states to a single vector per batch item.
     fn pool(

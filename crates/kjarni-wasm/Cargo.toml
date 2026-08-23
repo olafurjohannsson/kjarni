@@ -73,7 +73,3 @@ opt-level = 2
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
-
-[[bin]]
-path = "bin/native.rs"
-name = "native"

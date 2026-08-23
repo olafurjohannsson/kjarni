@@ -1,20 +1,29 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use tokenizers::Tokenizer;
 
-use crate::{Device, ModelType, WgpuContext, cpu::encoder::{
-    classifier::CpuSequenceClassificationHead,
-    config::PoolingStrategy,
-    traits::{CpuEncoder, GpuEncoder},
-}, models::{base::ModelLoadConfig, download_model_files, registry::WeightsFormat}, pipeline::encoder::{EncoderPipeline, EncoderPipelineBuilder}, traits::{ModelConfig, ModelLayout, ModelMetadata}, weights::ModelWeights};
-use anyhow::{anyhow, Result};
-
+use crate::{
+    Device, ModelType, WgpuContext,
+    cpu::encoder::{
+        classifier::CpuSequenceClassificationHead,
+        config::PoolingStrategy,
+        traits::{CpuEncoder, GpuEncoder},
+    },
+    models::{base::ModelLoadConfig, download_model_files, registry::WeightsFormat},
+    pipeline::encoder::{EncoderPipeline, EncoderPipelineBuilder},
+    traits::{ModelConfig, ModelLayout, ModelMetadata},
+    weights::ModelWeights,
+};
+use anyhow::{Result, anyhow};
 
 /// Factory trait for encoder-based models.
 pub trait EncoderModelFactory: Sized {
     /// Load the model config from weights
     fn load_config(weights: &ModelWeights) -> Result<Arc<dyn ModelConfig>>;
-    
+
     /// Build the encoder backend(s).
     fn build_backends(
         weights: &ModelWeights,
@@ -24,7 +33,7 @@ pub trait EncoderModelFactory: Sized {
         context: Option<&Arc<WgpuContext>>,
         device: Device,
     ) -> Result<(Option<Box<dyn CpuEncoder>>, Option<Box<dyn GpuEncoder>>)>;
-    
+
     /// Build the classification head
     fn build_head(
         weights: &ModelWeights,
@@ -32,12 +41,12 @@ pub trait EncoderModelFactory: Sized {
     ) -> Result<Option<CpuSequenceClassificationHead>> {
         Ok(None)
     }
-    
+
     /// Get the pooling strategy for this model type.
     fn pooling_strategy() -> PoolingStrategy {
         PoolingStrategy::Mean
     }
-    
+
     /// Construct the model from a loaded pipeline.
     fn new_from_pipeline(
         pipeline: EncoderPipeline,
@@ -46,7 +55,6 @@ pub trait EncoderModelFactory: Sized {
         model_type: Option<ModelType>,
     ) -> Self;
 }
-
 
 pub struct EncoderLoader;
 
@@ -65,20 +73,20 @@ impl EncoderLoader {
                 .join("kjarni")
         });
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
-        
+
         // Download model files
         download_model_files(&model_dir, &info.paths, WeightsFormat::SafeTensors, true).await?;
-        
+
         // Create GPU context if needed
         let context = if device.is_gpu() && context.is_none() {
             Some(WgpuContext::new().await?)
         } else {
             context
         };
-        
+
         Self::load_from_pretrained::<M>(&model_dir, device, context, load_config, Some(model_type))
     }
-    
+
     pub fn load_from_pretrained<M: EncoderModelFactory>(
         model_path: &Path,
         device: Device,
@@ -87,15 +95,15 @@ impl EncoderLoader {
         model_type: Option<ModelType>,
     ) -> Result<M> {
         log::info!("Loading encoder from {:?}", model_path);
-        
+
         let weights = ModelWeights::new(model_path)?;
         let load_config = load_config.unwrap_or_default();
-        
+
         // Load model-specific config
         let config = M::load_config(&weights)?;
         let meta = config.metadata();
         let layout = config.layout();
-        
+
         // Load tokenizer
         let tokenizer_path = model_path.join("tokenizer.json");
         if !tokenizer_path.exists() {
@@ -103,7 +111,7 @@ impl EncoderLoader {
         }
         let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
-        
+
         // Configure truncation and padding
         let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
             max_length: meta.max_seq_len,
@@ -113,7 +121,7 @@ impl EncoderLoader {
             strategy: tokenizers::PaddingStrategy::BatchLongest,
             ..Default::default()
         }));
-        
+
         // Build backends
         let (cpu_encoder, gpu_encoder) = M::build_backends(
             &weights,
@@ -123,10 +131,10 @@ impl EncoderLoader {
             context.as_ref(),
             device,
         )?;
-        
+
         // Build head (if any)
         let cpu_head = M::build_head(&weights, &load_config)?;
-        
+
         // Build pipeline
         let pipeline = EncoderPipelineBuilder::new(&weights, config.clone())
             .with_load_config(load_config)
@@ -135,8 +143,62 @@ impl EncoderLoader {
             .with_pooling_strategy(M::pooling_strategy())
             .with_context(context)
             .build()?;
-        
+
         // Construct the model
-        Ok(M::new_from_pipeline(pipeline, tokenizer, config, model_type))
+        Ok(M::new_from_pipeline(
+            pipeline, tokenizer, config, model_type,
+        ))
+    }
+
+    /// Load from raw bytes (for WASM)
+    pub fn load_from_bytes<M: EncoderModelFactory>(
+        safetensors_data: &[u8],
+        config_json: &str,
+        tokenizer_json: &[u8],
+        device: Device,
+        load_config: Option<ModelLoadConfig>,
+        model_type: Option<ModelType>,
+    ) -> Result<M> {
+        let weights = ModelWeights::from_safetensors_bytes(safetensors_data, config_json)?;
+        let load_config = load_config.unwrap_or_default();
+
+        let config = M::load_config(&weights)?;
+        let meta = config.metadata();
+        let layout = config.layout();
+
+        let mut tokenizer = Tokenizer::from_bytes(tokenizer_json)
+            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+
+        let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
+            max_length: meta.max_seq_len,
+            ..Default::default()
+        }));
+        tokenizer.with_padding(Some(tokenizers::PaddingParams {
+            strategy: tokenizers::PaddingStrategy::BatchLongest,
+            ..Default::default()
+        }));
+
+        // WASM is always CPU, no GPU context
+        let (cpu_encoder, gpu_encoder) = M::build_backends(
+            &weights,
+            &meta,
+            &layout,
+            load_config.clone(),
+            None,
+            Device::Cpu,
+        )?;
+
+        let cpu_head = M::build_head(&weights, &load_config)?;
+
+        let pipeline = EncoderPipelineBuilder::new(&weights, config.clone())
+            .with_load_config(load_config)
+            .with_backends(cpu_encoder, gpu_encoder)
+            .with_head(cpu_head)
+            .with_pooling_strategy(M::pooling_strategy())
+            .build()?;
+
+        Ok(M::new_from_pipeline(
+            pipeline, tokenizer, config, model_type,
+        ))
     }
 }
