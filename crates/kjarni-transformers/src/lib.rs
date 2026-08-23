@@ -29,6 +29,7 @@ pub mod common;
 pub mod linear_layer;
 pub mod loaders;
 pub mod models;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pipeline;
 pub mod pooling;
 pub mod stats;
@@ -61,7 +62,6 @@ pub use audio::{
     create_sine_wave, load_audio, load_audio_bytes, load_audio_for_whisper,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use crate::{
     chat::templates::{ChatTemplate, Conversation, Message, Role},
     cpu::{
@@ -71,12 +71,16 @@ pub use crate::{
     },
     execution::ExecutionPlan,
     feedforward::FeedForward,
+    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::{
     loaders::{
         EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
         LoadedLMHead,
     },
     pipeline::{DecoderPipeline, DecoderPipelineConfig},
-    pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 
 #[cfg(target_arch = "wasm32")]

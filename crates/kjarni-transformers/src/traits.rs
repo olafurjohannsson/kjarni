@@ -6,8 +6,10 @@ use crate::activations::Activation;
 pub use crate::cache::Cache;
 use crate::cpu::encoder::traits::ClassificationMode;
 use crate::models::base::RopeScalingConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::WgpuContext;
 use std::any::Any;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 /// Compute backend for model inference.
@@ -35,6 +37,7 @@ pub trait InferenceModel: Send + Sync {
     fn device(&self) -> Device;
 
     /// Returns the GPU context, if running on WebGPU.
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         None
     }

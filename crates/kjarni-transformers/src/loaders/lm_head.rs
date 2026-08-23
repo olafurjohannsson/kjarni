@@ -1,13 +1,17 @@
 //! Unified LM head supporting both CPU and GPU execution.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, s};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::WgpuContext;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuTensor, GpuTensorPool};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::linear::GpuLinearLayer;
 use crate::linear_layer::LinearLayer;
 use crate::tensor::DType;
@@ -33,16 +37,20 @@ impl LMHeadConfig {
 /// Unified LM head supporting both CPU and GPU execution.
 pub struct LoadedLMHead {
     pub cpu_weights: Option<LinearLayer>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub gpu_weights: Option<GpuTensor>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub gpu_kernel: Option<GpuLinearLayer>,
     pub bias: Option<Array2<f32>>,
     pub vocab_size: usize,
     pub hidden_size: usize,
+    #[cfg(not(target_arch = "wasm32"))]
     pub context: Option<Arc<WgpuContext>>,
 }
 
 impl LoadedLMHead {
     /// Loads LM head from model weights.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         ctx: Option<&Arc<WgpuContext>>,
         weights: &ModelWeights,
@@ -92,7 +100,31 @@ impl LoadedLMHead {
         })
     }
 
+    /// Loads LM head from model weights (CPU-only).
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(
+        weights: &ModelWeights,
+        bias: Option<Array2<f32>>,
+        config: LMHeadConfig,
+        target_dtype: Option<DType>,
+    ) -> Result<Self> {
+        log::info!("loading LM head to CPU");
+        let cpu_weights = Some(
+            LinearLayer::builder(weights, &config.weight_name)
+                .with_target_dtype(target_dtype)
+                .build()?,
+        );
+
+        Ok(Self {
+            cpu_weights,
+            bias,
+            vocab_size: config.vocab_size,
+            hidden_size: config.hidden_size,
+        })
+    }
+
     /// Creates an LM head by aliasing existing weights (for tied embedding models).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_shared_weights(
         ctx: Option<&Arc<WgpuContext>>,
         cpu_weights: Option<LinearLayer>,
@@ -144,6 +176,7 @@ impl LoadedLMHead {
         self.cpu_weights.is_some()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn has_gpu(&self) -> bool {
         self.gpu_weights.is_some()
     }
@@ -190,6 +223,7 @@ impl LoadedLMHead {
     }
 
     /// Projects hidden states to logits on GPU.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn forward_gpu(
         &self,
         encoder: &mut wgpu::CommandEncoder,

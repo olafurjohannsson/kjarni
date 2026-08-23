@@ -1,8 +1,12 @@
 //! Concrete classification heads for encoder models.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::add::GpuAdd;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::layout::slice::GpuSlice;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu_ops::primitives::{linear::GpuLinearLayer, tanh::GpuTanh};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuTensor};
 use crate::linear_layer::LinearLayer;
 use crate::models::base::ModelLoadConfig;
@@ -279,6 +283,7 @@ impl CpuSequenceClassificationHead {
 }
 
 /// A GPU-accelerated head for sequence classification tasks.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct GpuSequenceClassificationHead {
     // Kernels for operations
     slicer: GpuSlice,
@@ -291,6 +296,7 @@ pub struct GpuSequenceClassificationHead {
     classifier_bias: GpuTensor,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuSequenceClassificationHead {
     pub fn new(
         context: &std::sync::Arc<crate::WgpuContext>,

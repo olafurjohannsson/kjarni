@@ -23,6 +23,12 @@ fn set_thread_affinity(num_cores: usize) {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn configure_threading() {
+    // No thread pool to configure in a wasm32 (single-threaded) environment.
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn configure_threading() {
     let physical_cores = num_cpus::get_physical();
     let logical_cores = num_cpus::get();

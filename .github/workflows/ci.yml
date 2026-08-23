@@ -64,6 +64,23 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --exclude kjarni-wasm
 
+  # ─── WASM check (kjarni-transformers engine) ────────────────────
+  wasm-check:
+    name: WASM check (kjarni-transformers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-check
+
+      - name: Check kjarni-transformers for wasm32
+        run: cargo check -p kjarni-transformers --target wasm32-unknown-unknown --no-default-features
+
   # ─── Linux x86_64 ──────────────────────────────────────────────
   build-linux:
     name: Build (Linux x86_64)

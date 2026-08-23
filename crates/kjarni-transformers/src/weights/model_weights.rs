@@ -1,13 +1,16 @@
 //! High-level interface for loading model weights.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, ArrayD, IxDyn};
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::json;
 
 use super::WeightLoader;
+#[cfg(not(target_arch = "wasm32"))]
 use super::gguf_loader::GgufLoader;
 use super::safetensors_loader::SafeTensorsLoader;
 use crate::tensor::raw_tensor::TensorView;
@@ -42,6 +45,7 @@ impl Clone for ModelWeights {
 
 impl ModelWeights {
     /// Creates a new ModelWeights from a path.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(path: &Path) -> Result<Self> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
             return Self::from_gguf_file(path);
@@ -90,6 +94,7 @@ impl ModelWeights {
     }
 
     /// Creates ModelWeights from a specific file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path) -> Result<Self> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("gguf") {
             return Self::from_gguf_file(path);
@@ -114,6 +119,7 @@ impl ModelWeights {
         Self::new(path)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn from_gguf_file(path: &Path) -> Result<Self> {
         let loader = GgufLoader::new(path)?;
 
@@ -132,6 +138,7 @@ impl ModelWeights {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn synthesize_config_from_gguf(loader: &GgufLoader) -> Result<String> {
         let arch = loader.get_string("general.architecture").unwrap_or("llama");
 
@@ -240,6 +247,7 @@ impl ModelWeights {
     }
 
     /// Returns a typed CPU tensor. Prefer `with_raw_tensor` for large tensors.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
         self.with_raw_tensor(name, |raw| {
             if self.inner.is_gguf {
@@ -254,6 +262,12 @@ impl ModelWeights {
                 raw_to_typed(raw)
             }
         })
+    }
+
+    /// Returns a typed CPU tensor. Prefer `with_raw_tensor` for large tensors.
+    #[cfg(target_arch = "wasm32")]
+    pub fn get_typed_tensor(&self, name: &str) -> Result<CpuTensor> {
+        self.with_raw_tensor(name, |raw| raw_to_typed(raw))
     }
 
     /// Returns a 1D f32 array. Only use for small tensors like biases.

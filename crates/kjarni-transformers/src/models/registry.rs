@@ -958,6 +958,7 @@ async fn download_sharded_weights(model_dir: &Path, index_url: &str, quiet: bool
 }
 
 /// Returns the default cache directory for Kjarni models.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_default_cache_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("KJARNI_CACHE_DIR") {
         PathBuf::from(dir)
@@ -966,6 +967,15 @@ pub fn get_default_cache_dir() -> PathBuf {
             .expect("No cache directory found on system")
             .join("kjarni")
     }
+}
+
+/// Returns the default cache directory for Kjarni models.
+///
+/// There is no filesystem cache dir on wasm32; callers there use
+/// in-memory or browser-provided storage instead.
+#[cfg(target_arch = "wasm32")]
+pub fn get_default_cache_dir() -> PathBuf {
+    PathBuf::from("/kjarni-cache")
 }
 
 /// Formats parameter count in human-readable form.

@@ -177,8 +177,8 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
 
 /// Q6_K scalar fallback for WASM.
 pub fn matmul_2d_cpu_q6_k(a: &ArrayView2<f32>, b_weights: &[BlockQ6_K]) -> Array2<f32> {
+    use crate::cpu::kernels::quantize::quantize_row_q8_k;
     use crate::cpu::kernels::scalar::vec_dot_q6k_q8k_scalar;
-    use crate::cpu::ops::matmul_common::quantize_row_q8_k;
 
     let (m, k) = a.dim();
     let num_blocks_per_row = k / 256;
