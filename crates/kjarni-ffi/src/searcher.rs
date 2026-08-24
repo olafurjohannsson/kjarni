@@ -96,9 +96,7 @@ impl KjarniSearchResults {
 /// # Safety
 /// Must only be called once per `KjarniSearchResults` returned from search functions.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_search_results_free(results: *const KjarniSearchResults) { unsafe {
-    if results.is_null() { return; }
-    let results = &*results;
+pub unsafe extern "C" fn kjarni_search_results_free(results: KjarniSearchResults) { unsafe {
     if !results.results.is_null() && results.len > 0 {
         unsafe {
             let slice = std::slice::from_raw_parts_mut(results.results, results.len);

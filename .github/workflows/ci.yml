@@ -64,6 +64,58 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --exclude kjarni-wasm
 
+  # ─── C# binding tests (the shipped NuGet surface) ───────────────
+  csharp-test:
+    name: Test (C# binding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: csharp-test
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-csharp-v1
+
+      - name: Build native FFI library
+        run: cargo build --release --package kjarni-ffi
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download models used by the C# tests
+        run: |
+          CLI=./target/release/kjarni
+          $CLI model download minilm-l6-v2
+          $CLI model download minilm-l6-v2-cross-encoder
+          $CLI model download mpnet-base-v2
+          $CLI model download distilbert-base
+          $CLI model download distilbert-sentiment
+          $CLI model download roberta-sentiment
+          $CLI model download bert-sentiment-multilingual
+          $CLI model download distilroberta-emotion
+          $CLI model download toxic-bert
+
+      # Runs both Kjarni.Tests and Kjarni.Extensions.AI.Tests via the solution.
+      # GPU tests self-skip via SkippableFact when no adapter is present,
+      # so the whole suite runs on a CPU-only runner.
+      - name: Run C# tests
+        run: >
+          dotnet test
+          crates/kjarni-ffi/bindings/csharp/Kjarni.sln
+          --configuration Release
+          --logger "console;verbosity=normal"
+
   # ─── WASM check (kjarni-transformers engine) ────────────────────
   wasm-check:
     name: WASM check (kjarni-transformers)
@@ -251,7 +303,16 @@ jobs:
   # ─── Release ────────────────────────────────────────────────────
   release:
     name: Release
-    needs: [build-linux, build-linux-arm, build-macos, build-windows, build-wasm]
+    needs:
+      [
+        test,
+        csharp-test,
+        build-linux,
+        build-linux-arm,
+        build-macos,
+        build-windows,
+        build-wasm,
+      ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -274,8 +335,9 @@ jobs:
             -C kjarni-aarch64-linux .
           tar -czf kjarni-aarch64-macos.tar.gz \
             -C kjarni-aarch64-macos .
-          tar -czf kjarni-x86_64-windows.tar.gz \
-            -C kjarni-x86_64-windows .
+          # Windows ships as .zip — sync-nuget.yml and sync-go.yml both unzip
+          # this asset. Producing a .tar.gz here silently breaks both syncs.
+          (cd kjarni-x86_64-windows && zip -qr ../kjarni-x86_64-windows.zip .)
           tar -czf kjarni-wasm.tar.gz \
             -C kjarni-wasm .
 
@@ -287,5 +349,5 @@ jobs:
             artifacts/kjarni-x86_64-linux.tar.gz
             artifacts/kjarni-aarch64-linux.tar.gz
             artifacts/kjarni-aarch64-macos.tar.gz
-            artifacts/kjarni-x86_64-windows.tar.gz
+            artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz

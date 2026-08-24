@@ -36,9 +36,11 @@
     <None Include="runtimes/osx-arm64/native/**" Pack="true" PackagePath="runtimes/osx-arm64/native" />
   </ItemGroup>
 
-  <!-- Local dev: copy native lib to output for dotnet run/test -->
+  <!-- Local dev / CI: copy native lib to output for dotnet run/test.
+       Defaults to the workspace target dir, five levels up from this file.
+       Override with -p:NativeLibraryPath=... for cross-compiled output. -->
   <PropertyGroup>
-    <NativeLibraryPath>/home/olafurj/dev/edgebert/target/release</NativeLibraryPath>
+    <NativeLibraryPath Condition="'$(NativeLibraryPath)' == ''">$(MSBuildThisFileDirectory)../../../../../target/release</NativeLibraryPath>
   </PropertyGroup>
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('$(NativeLibraryPath)/libkjarni_ffi.so')">
