@@ -18,17 +18,25 @@ npm install --silent
 npm run build
 
 # 3. Package for release
-echo "--- Creating release package ---"
+# echo "--- Creating release package ---"
+# RELEASE_DIR="$SCRIPT_DIR/release"
+# rm -rf "$RELEASE_DIR"
+# mkdir -p "$RELEASE_DIR/kjarni-search/pkg"
+
+# cp "$SCRIPT_DIR/main.js"            "$RELEASE_DIR/kjarni-search/"
+# cp "$SCRIPT_DIR/worker.js"          "$RELEASE_DIR/kjarni-search/"
+# cp "$SCRIPT_DIR/encoder-worker.js"  "$RELEASE_DIR/kjarni-search/"
+# cp "$SCRIPT_DIR/manifest.json"      "$RELEASE_DIR/kjarni-search/"
+# cp "$SCRIPT_DIR/styles.css"         "$RELEASE_DIR/kjarni-search/"
+# cp "$WASM_ROOT/pkg/kjarni_wasm_bg.wasm" "$RELEASE_DIR/kjarni-search/pkg/"
+
+# 3. Package for release
 RELEASE_DIR="$SCRIPT_DIR/release"
 rm -rf "$RELEASE_DIR"
-mkdir -p "$RELEASE_DIR/kjarni-search/pkg"
-
-cp "$SCRIPT_DIR/main.js"            "$RELEASE_DIR/kjarni-search/"
-cp "$SCRIPT_DIR/worker.js"          "$RELEASE_DIR/kjarni-search/"
-cp "$SCRIPT_DIR/encoder-worker.js"  "$RELEASE_DIR/kjarni-search/"
-cp "$SCRIPT_DIR/manifest.json"      "$RELEASE_DIR/kjarni-search/"
-cp "$SCRIPT_DIR/styles.css"         "$RELEASE_DIR/kjarni-search/"
-cp "$WASM_ROOT/pkg/kjarni_wasm_bg.wasm" "$RELEASE_DIR/kjarni-search/pkg/"
+mkdir -p "$RELEASE_DIR/kjarni-search"
+cp "$SCRIPT_DIR/main.js"        "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/manifest.json"  "$RELEASE_DIR/kjarni-search/"
+cp "$SCRIPT_DIR/styles.css"     "$RELEASE_DIR/kjarni-search/"
 
 cd "$RELEASE_DIR"
 tar -czf "$SCRIPT_DIR/kjarni-search.tar.gz" kjarni-search/
