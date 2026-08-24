@@ -57,22 +57,47 @@ jobs:
           VERSION="${VERSION#v}"
           echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
 
+      # Guards against publishing a package that does not work. The C# suite
+      # exercises the native library placed above, so this tests the artifact
+      # that is about to ship rather than a locally-built one.
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-csharp-v1
+
+      - name: Test before publishing
+        run: |
+          dotnet test crates/kjarni-ffi/bindings/csharp/Kjarni.sln \
+            --configuration Release \
+            --logger "console;verbosity=minimal"
+
       - name: Pack
         run: |
           cd crates/kjarni-ffi/bindings/csharp/Kjarni
           dotnet pack -c Release -p:Version=${{ env.PACKAGE_VERSION }} -o nupkg
+          cd ../Kjarni.Extensions.AI
+          dotnet pack -c Release -p:Version=${{ env.PACKAGE_VERSION }} -o nupkg
 
       - name: Verify package contents
         run: |
-          cd crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg
-          echo "=== Package ==="
-          ls -lh *.nupkg
-          echo "=== Contents ==="
-          unzip -l *.nupkg | grep -E "(runtimes|lib/)" | head -20
+          for dir in Kjarni Kjarni.Extensions.AI; do
+            cd "$GITHUB_WORKSPACE/crates/kjarni-ffi/bindings/csharp/$dir/nupkg"
+            echo "=== $dir ==="
+            ls -lh *.nupkg
+            unzip -l *.nupkg | grep -E "(runtimes|lib/)" | head -20
+          done
 
+      # Kjarni is pushed first: Kjarni.Extensions.AI depends on it, and NuGet
+      # rejects a package whose dependency is not yet indexed.
       - name: Push to NuGet
         run: |
           cd crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg
+          dotnet nuget push *.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+          cd "$GITHUB_WORKSPACE/crates/kjarni-ffi/bindings/csharp/Kjarni.Extensions.AI/nupkg"
           dotnet nuget push *.nupkg \
             --api-key ${{ secrets.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \

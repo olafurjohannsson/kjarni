@@ -49,9 +49,7 @@ impl KjarniRerankResults {
 
 /// Free rerank results
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_rerank_results_free(results: *const KjarniRerankResults) { unsafe {
-    if results.is_null() { return; }
-    let results = &*results;
+pub unsafe extern "C" fn kjarni_rerank_results_free(results: KjarniRerankResults) { unsafe {
     if !results.results.is_null() && results.len > 0 {
         let _ = Vec::from_raw_parts(results.results, results.len, results.len);
     }

@@ -764,8 +764,7 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         public static extern UIntPtr kjarni_chat_model_name(IntPtr handle, IntPtr buf, UIntPtr bufLen);
 
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern UIntPtr kjarni_chat_context_size(IntP
-
+        public static extern UIntPtr kjarni_chat_context_size(IntPtr handle);
 
         public static void CheckError(KjarniErrorCode err)
         {

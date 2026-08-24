@@ -128,9 +128,7 @@ pub struct KjarniStringArray {
 
 /// Free a float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_array_free(arr: *const KjarniFloatArray) { unsafe {
-    if arr.is_null() { return; }
-    let arr = &*arr;
+pub unsafe extern "C" fn kjarni_float_array_free(arr: KjarniFloatArray) { unsafe {
     if !arr.data.is_null() && arr.len > 0 {
         let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, arr.len));
     }
@@ -138,9 +136,7 @@ pub unsafe extern "C" fn kjarni_float_array_free(arr: *const KjarniFloatArray) {
 
 /// Free a 2D float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: *const KjarniFloat2DArray) { unsafe {
-    if arr.is_null() { return; }
-    let arr = &*arr;
+pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: KjarniFloat2DArray) { unsafe {
     if !arr.data.is_null() && arr.rows > 0 && arr.cols > 0 {
         let total = arr.rows * arr.cols;
         let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, total));
@@ -159,9 +155,7 @@ pub unsafe extern "C" fn kjarni_string_free(s: *mut std::ffi::c_char) {
 
 /// Free a string array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_string_array_free(arr: *const KjarniStringArray) { unsafe {
-    if arr.is_null() { return; }
-    let arr = &*arr;
+pub unsafe extern "C" fn kjarni_string_array_free(arr: KjarniStringArray) { unsafe {
     if !arr.strings.is_null() && arr.len > 0 {
         let strings = std::slice::from_raw_parts_mut(arr.strings, arr.len);
         for s in strings.iter() {
