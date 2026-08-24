@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Package metadata -->
+    <PackageId>Kjarni.Extensions.AI</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Ólafur Aron Jóhannsson</Authors>
+    <Description>Microsoft.Extensions.AI provider for Kjarni — local embedding generation for .NET with no Python, no ONNX, and no cloud. Plugs into Semantic Kernel and any IEmbeddingGenerator consumer.</Description>
+    <PackageTags>ai;ml;embeddings;semantic-kernel;microsoft-extensions-ai;rag;search;nlp;inference;local;offline</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/olafurjohannsson/kjarni</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/olafurjohannsson/kjarni</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <Copyright>Copyright © 2026 Ólafur Aron Jóhannsson</Copyright>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="../Kjarni/icon.png" Pack="true" PackagePath="" Condition="Exists('../Kjarni/icon.png')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Kjarni/Kjarni.csproj" />
+  </ItemGroup>
+</Project>
