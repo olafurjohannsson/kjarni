@@ -80,7 +80,7 @@ impl GpuEmbeddingWeights {
         shared_word_embeddings: GpuTensor,
         pos_name: Option<&str>,
         type_name: Option<&str>,
-        target_dtype: Option<DType>,
+        _target_dtype: Option<DType>,
     ) -> Result<Self> {
         let position_embeddings = if let Some(name) = pos_name {
             if weights.contains(name) {

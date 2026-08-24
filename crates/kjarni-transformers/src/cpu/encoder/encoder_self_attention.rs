@@ -384,14 +384,14 @@ pub fn matmul_4d_into(
 fn permute_merge_heads_into(
     context: &ndarray::ArrayView4<f32>,
     output: &mut ndarray::ArrayViewMut2<f32>,
-    batch: usize,
+    _batch: usize,
     seq_len: usize,
     num_heads: usize,
     head_dim: usize,
 ) {
     use rayon::prelude::*;
 
-    let hidden = num_heads * head_dim;
+    let _hidden = num_heads * head_dim;
 
     // Parallel over tokens
     output

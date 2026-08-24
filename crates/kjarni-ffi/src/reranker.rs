@@ -4,7 +4,7 @@ use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use kjarni::Reranker;
 use kjarni::reranker::RerankerError;
-use std::ffi::{CStr, CString, c_char, c_float};
+use std::ffi::{CStr, c_char, c_float};
 use std::ptr;
 
 /// Single rerank result
@@ -49,13 +49,13 @@ impl KjarniRerankResults {
 
 /// Free rerank results
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_rerank_results_free(results: *const KjarniRerankResults) {
+pub unsafe extern "C" fn kjarni_rerank_results_free(results: *const KjarniRerankResults) { unsafe {
     if results.is_null() { return; }
     let results = &*results;
     if !results.results.is_null() && results.len > 0 {
         let _ = Vec::from_raw_parts(results.results, results.len, results.len);
     }
-}
+}}
 
 /// Configuration for Reranker
 #[repr(C)]
@@ -89,7 +89,7 @@ pub struct KjarniReranker {
 pub unsafe extern "C" fn kjarni_reranker_new(
     config: *const KjarniRerankerConfig,
     out: *mut *mut KjarniReranker,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -158,15 +158,15 @@ pub unsafe extern "C" fn kjarni_reranker_new(
         }
         Err(e) => e,
     }
-}
+}}
 
 /// Free a Reranker
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_reranker_free(reranker: *mut KjarniReranker) {
+pub unsafe extern "C" fn kjarni_reranker_free(reranker: *mut KjarniReranker) { unsafe {
     if !reranker.is_null() {
         let _ = Box::from_raw(reranker);
     }
-}
+}}
 
 /// Score a single query-document pair
 #[unsafe(no_mangle)]
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn kjarni_reranker_score(
     query: *const c_char,
     document: *const c_char,
     out: *mut c_float,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if reranker.is_null() || query.is_null() || document.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -205,7 +205,7 @@ pub unsafe extern "C" fn kjarni_reranker_score(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Rerank documents by relevance to query
 #[unsafe(no_mangle)]
@@ -215,7 +215,7 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
     documents: *const *const c_char,
     num_docs: usize,
     out: *mut KjarniRerankResults,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if reranker.is_null() || query.is_null() || documents.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn kjarni_reranker_rerank(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Rerank and return top-k results
 #[unsafe(no_mangle)]
@@ -272,7 +272,7 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
     num_docs: usize,
     top_k: usize,
     out: *mut KjarniRerankResults,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if reranker.is_null() || query.is_null() || documents.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -319,4 +319,4 @@ pub unsafe extern "C" fn kjarni_reranker_rerank_top_k(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}

@@ -233,7 +233,7 @@ impl Seq2SeqCPUDecoder {
                 cross_kv_for_layer,
                 position_bias.as_ref(),
             )?;
-            let post_mean = hidden.mean().unwrap_or(0.0);
+            let _post_mean = hidden.mean().unwrap_or(0.0);
             hidden = new_hidden;
             new_self_attn_kvs.push(new_kv);
         }

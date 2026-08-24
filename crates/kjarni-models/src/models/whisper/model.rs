@@ -179,7 +179,7 @@ impl EncoderDecoderModelFactory for WhisperModel {
 
     fn build_backends(
         weights: &ModelWeights,
-        meta: &ModelMetadata,
+        _meta: &ModelMetadata,
         _layout: &ModelLayout,
         config: &Arc<WhisperConfig>,
         load_config: &ModelLoadConfig,
@@ -220,11 +220,11 @@ impl EncoderDecoderModelFactory for WhisperModel {
     }
 
     fn new_from_pipeline(
-        pipeline: EncoderDecoderPipeline,
-        tokenizer: Tokenizer,
-        config: Arc<WhisperConfig>,
+        _pipeline: EncoderDecoderPipeline,
+        _tokenizer: Tokenizer,
+        _config: Arc<WhisperConfig>,
         _: Option<HFGenerationDefaults>,
-        generation_config: HFGenerationConfig,
+        _generation_config: HFGenerationConfig,
     ) -> Self {
         panic!(
             "WhisperModel::new_from_pipeline is not supported. \

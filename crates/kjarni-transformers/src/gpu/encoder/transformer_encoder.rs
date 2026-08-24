@@ -325,9 +325,9 @@ impl GpuEncoder for GpuTransformerEncoder {
     }
     fn embed_norm(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
-        hidden_states: &GpuTensor,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }

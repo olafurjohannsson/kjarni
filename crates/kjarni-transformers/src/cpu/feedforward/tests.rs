@@ -252,7 +252,7 @@ fn test_swiglu_pytorch_parity() -> Result<()> {
 fn test_swiglu_nonlinearity() -> std::result::Result<(), anyhow::Error> {
     // Test that SwiGLU is actually non-linear
     let hidden_size = 4;
-    let intermediate_size = 4;
+    let _intermediate_size = 4;
 
     let gate_weight: Array2<f32> = Array2::eye(hidden_size);
     let up_weight: Array2<f32> = Array2::eye(hidden_size);

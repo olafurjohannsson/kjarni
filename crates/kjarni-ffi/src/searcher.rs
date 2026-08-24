@@ -96,7 +96,7 @@ impl KjarniSearchResults {
 /// # Safety
 /// Must only be called once per `KjarniSearchResults` returned from search functions.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_search_results_free(results: *const KjarniSearchResults) {
+pub unsafe extern "C" fn kjarni_search_results_free(results: *const KjarniSearchResults) { unsafe {
     if results.is_null() { return; }
     let results = &*results;
     if !results.results.is_null() && results.len > 0 {
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn kjarni_search_results_free(results: *const KjarniSearch
             let _ = Vec::from_raw_parts(results.results, results.len, results.len);
         }
     }
-}
+}}
 
 #[repr(C)]
 pub struct KjarniSearchOptions {
@@ -429,7 +429,7 @@ pub unsafe extern "C" fn kjarni_searcher_model_name(
     searcher: *const KjarniSearcher,
     buf: *mut c_char,
     buf_len: usize,
-) -> usize {
+) -> usize { unsafe {
     if searcher.is_null() {
         return 0;
     }
@@ -453,7 +453,7 @@ pub unsafe extern "C" fn kjarni_searcher_model_name(
     }
 
     required
-}
+}}
 
 /// Get reranker model name into caller-provided buffer
 #[unsafe(no_mangle)]
@@ -461,7 +461,7 @@ pub unsafe extern "C" fn kjarni_searcher_reranker_model(
     searcher: *const KjarniSearcher,
     buf: *mut c_char,
     buf_len: usize,
-) -> usize {
+) -> usize { unsafe {
     if searcher.is_null() {
         return 0;
     }
@@ -488,4 +488,4 @@ pub unsafe extern "C" fn kjarni_searcher_reranker_model(
         *buf.add(copy_len) = 0;
     }
     required
-}
+}}

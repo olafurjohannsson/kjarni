@@ -1,7 +1,7 @@
 //! Progress reporting for indexing operations
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Progress stage during indexing
 #[repr(C)]

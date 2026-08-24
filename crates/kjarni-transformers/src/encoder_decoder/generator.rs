@@ -231,7 +231,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use ndarray::Array4;
+    
     use tokenizers::Tokenizer;
 
     use super::*;

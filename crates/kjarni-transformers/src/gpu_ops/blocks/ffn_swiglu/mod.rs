@@ -51,7 +51,7 @@ impl GpuSwiGLUFFN {
         let device = &context.device;
 
 
-        let elementwise_bind_group_layout =
+        let _elementwise_bind_group_layout =
             context
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -237,7 +237,7 @@ impl GpuSwiGLUFFN {
             })
         };
 
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let _buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("SwiGLU Dummy"),
             size: 4,
             usage: wgpu::BufferUsages::STORAGE,

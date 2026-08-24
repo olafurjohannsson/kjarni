@@ -82,14 +82,14 @@ impl KjarniIndexInfo {
 
 /// Free memory allocated for index info strings
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) {
+pub unsafe extern "C" fn kjarni_index_info_free(info: KjarniIndexInfo) { unsafe {
     if !info.path.is_null() {
         let _ = CString::from_raw(info.path);
     }
     if !info.embedding_model.is_null() {
         let _ = CString::from_raw(info.embedding_model);
     }
-}
+}}
 
 /// Configuration for creating an Indexer
 #[repr(C)]
@@ -151,7 +151,7 @@ pub struct KjarniIndexer {
 pub unsafe extern "C" fn kjarni_indexer_new(
     config: *const KjarniIndexerConfig,
     out: *mut *mut KjarniIndexer,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -240,15 +240,15 @@ pub unsafe extern "C" fn kjarni_indexer_new(
         }
         Err(e) => e,
     }
-}
+}}
 
 /// Free an Indexer handle
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) {
+pub unsafe extern "C" fn kjarni_indexer_free(indexer: *mut KjarniIndexer) { unsafe {
     if !indexer.is_null() {
         let _ = Box::from_raw(indexer);
     }
-}
+}}
 
 
 /// Convert Rust ProgressStage to FFI KjarniProgressStage
@@ -281,7 +281,7 @@ fn indexer_error_to_code(e: &IndexerError) -> KjarniErrorCode {
 unsafe fn parse_inputs<'a>(
     inputs: *const *const c_char,
     num_inputs: usize,
-) -> Result<Vec<&'a str>, KjarniErrorCode> {
+) -> Result<Vec<&'a str>, KjarniErrorCode> { unsafe {
     let mut input_vec = Vec::with_capacity(num_inputs);
     for i in 0..num_inputs {
         let input_ptr = *inputs.add(i);
@@ -294,7 +294,7 @@ unsafe fn parse_inputs<'a>(
         }
     }
     Ok(input_vec)
-}
+}}
 
 
 /// Create a new index from files/directories
@@ -306,7 +306,7 @@ pub unsafe extern "C" fn kjarni_indexer_create(
     num_inputs: usize,
     force: i32,
     out: *mut KjarniIndexStats,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     // Validate pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
@@ -341,7 +341,7 @@ pub unsafe extern "C" fn kjarni_indexer_create(
             indexer_error_to_code(&e)
         }
     }
-}
+}}
 
 /// Create a new index with progress callback and cancellation support.
 #[unsafe(no_mangle)]
@@ -355,7 +355,7 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     out: *mut KjarniIndexStats,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     // Validate required pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
@@ -430,7 +430,7 @@ pub unsafe extern "C" fn kjarni_indexer_create_with_callback(
             indexer_error_to_code(&e)
         }
     }
-}
+}}
 
 
 /// Add documents to an existing index 
@@ -441,7 +441,7 @@ pub unsafe extern "C" fn kjarni_indexer_add(
     inputs: *const *const c_char,
     num_inputs: usize,
     documents_added: *mut usize,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     // Validate pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
         return KjarniErrorCode::NullPointer;
@@ -479,7 +479,7 @@ pub unsafe extern "C" fn kjarni_indexer_add(
             indexer_error_to_code(&e)
         }
     }
-}
+}}
 
 /// Add documents to an existing index with progress callback and cancellation support.
 #[unsafe(no_mangle)]
@@ -492,7 +492,7 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
     documents_added: *mut usize,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     // Validate required pointers
     if indexer.is_null() || index_path.is_null() || inputs.is_null() || documents_added.is_null() {
         return KjarniErrorCode::NullPointer;
@@ -573,7 +573,7 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
             indexer_error_to_code(&e)
         }
     }
-}
+}}
 
 
 /// Get information about an existing index
@@ -581,7 +581,7 @@ pub unsafe extern "C" fn kjarni_indexer_add_with_callback(
 pub unsafe extern "C" fn kjarni_index_info(
     index_path: *const c_char,
     out: *mut KjarniIndexInfo,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if index_path.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -601,11 +601,11 @@ pub unsafe extern "C" fn kjarni_index_info(
             KjarniErrorCode::ModelNotFound
         }
     }
-}
+}}
 
 /// Delete an index.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode {
+pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> KjarniErrorCode { unsafe {
     if index_path.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -622,7 +622,7 @@ pub unsafe extern "C" fn kjarni_index_delete(index_path: *const c_char) -> Kjarn
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 
 /// Get the embedding model name used by the indexer.
@@ -658,18 +658,18 @@ pub unsafe extern "C" fn kjarni_indexer_model_name(
 
 /// Get the embedding dimension used by the indexer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize {
+pub unsafe extern "C" fn kjarni_indexer_dimension(indexer: *const KjarniIndexer) -> usize { unsafe {
     if indexer.is_null() {
         return 0;
     }
     (*indexer).inner.dimension()
-}
+}}
 
 /// Get the chunk size configured for the indexer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize {
+pub unsafe extern "C" fn kjarni_indexer_chunk_size(indexer: *const KjarniIndexer) -> usize { unsafe {
     if indexer.is_null() {
         return 0;
     }
     (*indexer).inner.chunk_size()
-}
+}}

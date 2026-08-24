@@ -36,8 +36,8 @@ pub trait EncoderModelFactory: Sized {
 
     /// Build the classification head
     fn build_head(
-        weights: &ModelWeights,
-        load_config: &ModelLoadConfig,
+        _weights: &ModelWeights,
+        _load_config: &ModelLoadConfig,
     ) -> Result<Option<CpuSequenceClassificationHead>> {
         Ok(None)
     }
@@ -155,7 +155,7 @@ impl EncoderLoader {
         safetensors_data: &[u8],
         config_json: &str,
         tokenizer_json: &[u8],
-        device: Device,
+        _device: Device,
         load_config: Option<ModelLoadConfig>,
         model_type: Option<ModelType>,
     ) -> Result<M> {

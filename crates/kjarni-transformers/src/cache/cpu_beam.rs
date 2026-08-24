@@ -142,7 +142,7 @@ impl CpuBeamKVCache {
         Ok(())
     }
 
-    pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<f32>, ArrayView3<f32>)> {
+    pub fn get(&self, layer_idx: usize) -> Option<(ArrayView3<'_, f32>, ArrayView3<'_, f32>)> {
         if layer_idx >= self.layers_k.len() {
             return None;
         }

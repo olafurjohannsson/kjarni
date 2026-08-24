@@ -64,7 +64,7 @@ pub async fn run(action: IndexCommands) -> Result<()> {
 /// Create a new index from documents
 async fn create(
     output: &str,
-    from_chunks: Option<String>,
+    _from_chunks: Option<String>,
     inputs: &[String],
     chunk_size: usize,
     chunk_overlap: usize,

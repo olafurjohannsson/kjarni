@@ -4,7 +4,7 @@ use crate::callback::{is_cancelled, KjarniCancelToken};
 use crate::error::set_last_error;
 use crate::{KjarniDevice, KjarniErrorCode, get_runtime};
 use futures::StreamExt;
-use kjarni::chat::{Chat, ChatBuilder};
+use kjarni::chat::Chat;
 use kjarni::chat::types::{ChatError, ChatMode};
 use kjarni::generation::GenerationOverrides;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -178,7 +178,7 @@ pub struct KjarniChatConversation {
 pub unsafe extern "C" fn kjarni_chat_new(
     config: *const KjarniChatConfig,
     out: *mut *mut KjarniChat,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -248,15 +248,15 @@ pub unsafe extern "C" fn kjarni_chat_new(
         }
         Err(e) => e,
     }
-}
+}}
 
 /// Free a Chat instance.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_free(chat: *mut KjarniChat) {
+pub unsafe extern "C" fn kjarni_chat_free(chat: *mut KjarniChat) { unsafe {
     if !chat.is_null() {
         let _ = Box::from_raw(chat);
     }
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Chat: send (blocking)
@@ -275,7 +275,7 @@ pub unsafe extern "C" fn kjarni_chat_send(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if chat.is_null() || message.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn kjarni_chat_send(
             chat_error_to_code(&e)
         }
     }
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Chat: stream (callback per token)
@@ -339,7 +339,7 @@ pub unsafe extern "C" fn kjarni_chat_stream(
     callback: KjarniStreamCallbackFn,
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if chat.is_null() || message.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -398,7 +398,7 @@ pub unsafe extern "C" fn kjarni_chat_stream(
             chat_error_to_code(&e)
         }
     }
-}
+}}
 /// Send a message with explicit history. Does not modify the history
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_send_with_history(
@@ -409,7 +409,7 @@ pub unsafe extern "C" fn kjarni_chat_send_with_history(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if chat.is_null() || message.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -481,14 +481,14 @@ pub unsafe extern "C" fn kjarni_chat_send_with_history(
             chat_error_to_code(&e)
         }
     }
-}
+}}
 
 /// Create a new stateful conversation from a Chat instance
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_new(
     chat: *mut KjarniChat,
     out: *mut *mut KjarniChatConversation,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if chat.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -508,15 +508,15 @@ pub unsafe extern "C" fn kjarni_chat_conversation_new(
 
     *out = Box::into_raw(handle);
     KjarniErrorCode::Ok
-}
+}}
 
 /// Free a ChatConversation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_conversation_free(convo: *mut KjarniChatConversation) {
+pub unsafe extern "C" fn kjarni_chat_conversation_free(convo: *mut KjarniChatConversation) { unsafe {
     if !convo.is_null() {
         let _ = Box::from_raw(convo);
     }
-}
+}}
 /// Send a message in a conversation and get the response
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_send(
@@ -524,7 +524,7 @@ pub unsafe extern "C" fn kjarni_chat_conversation_send(
     message: *const c_char,
     gen_config: *const KjarniGenerationConfig,
     out: *mut *mut c_char,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if convo.is_null() || message.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -582,7 +582,7 @@ pub unsafe extern "C" fn kjarni_chat_conversation_send(
             chat_error_to_code(&e)
         }
     }
-}
+}}
 
 // ---------------------------------------------------------------------------
 // ChatConversation: stream (callback per token)
@@ -604,7 +604,7 @@ pub unsafe extern "C" fn kjarni_chat_conversation_stream(
     callback: KjarniStreamCallbackFn,
     user_data: *mut c_void,
     cancel_token: *const KjarniCancelToken,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if convo.is_null() || message.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -688,7 +688,7 @@ pub unsafe extern "C" fn kjarni_chat_conversation_stream(
             chat_error_to_code(&e)
         }
     }
-}
+}}
 
 // ---------------------------------------------------------------------------
 // ChatConversation: history management
@@ -698,12 +698,12 @@ pub unsafe extern "C" fn kjarni_chat_conversation_stream(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_len(
     convo: *const KjarniChatConversation,
-) -> usize {
+) -> usize { unsafe {
     if convo.is_null() {
         return 0;
     }
     (*convo).history.len()
-}
+}}
 
 /// Clear the conversation history.
 ///
@@ -712,11 +712,11 @@ pub unsafe extern "C" fn kjarni_chat_conversation_len(
 pub unsafe extern "C" fn kjarni_chat_conversation_clear(
     convo: *mut KjarniChatConversation,
     keep_system: i32,
-) {
+) { unsafe {
     if !convo.is_null() {
         (*convo).history.clear(keep_system != 0);
     }
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Chat: info
@@ -730,7 +730,7 @@ pub unsafe extern "C" fn kjarni_chat_model_name(
     chat: *const KjarniChat,
     buf: *mut c_char,
     buf_len: usize,
-) -> usize {
+) -> usize { unsafe {
     if chat.is_null() {
         return 0;
     }
@@ -747,13 +747,13 @@ pub unsafe extern "C" fn kjarni_chat_model_name(
     *buf.add(copy_len) = 0; // null terminate
 
     copy_len
-}
+}}
 
 /// Get the context window size.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_chat_context_size(chat: *const KjarniChat) -> usize {
+pub unsafe extern "C" fn kjarni_chat_context_size(chat: *const KjarniChat) -> usize { unsafe {
     if chat.is_null() {
         return 0;
     }
     (*chat).inner.context_size()
-}
+}}

@@ -89,7 +89,7 @@ impl DecoderModelFactory for LlamaModel {
         pipeline: DecoderPipeline,
         tokenizer: Tokenizer,
         config: Arc<LlamaConfig>,
-        model_type: Option<ModelType>,
+        _model_type: Option<ModelType>,
         generation_defaults: Option<HFGenerationDefaults>,
         chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self {

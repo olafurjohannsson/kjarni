@@ -214,7 +214,7 @@ async fn test_word_plus_position_embeddings() -> Result<()> {
     };
     let gpu_embed = GpuEmbeddings::new(&ctx)?;
 
-    let config = MockEmbedConfig {
+    let _config = MockEmbedConfig {
         hidden_size,
         vocab_size,
         max_position: max_pos,
@@ -283,7 +283,7 @@ async fn test_embeddings_with_position_offset() -> Result<()> {
     };
     let gpu_embed = GpuEmbeddings::new(&ctx)?;
 
-    let config = MockEmbedConfig {
+    let _config = MockEmbedConfig {
         hidden_size,
         vocab_size,
         max_position: max_pos,

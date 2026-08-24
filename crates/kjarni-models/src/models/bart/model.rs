@@ -97,7 +97,7 @@ impl EncoderDecoderModelFactory for BartModel {
 
     fn build_backends(
         weights: &ModelWeights,
-        meta: &ModelMetadata,
+        _meta: &ModelMetadata,
         _layout: &ModelLayout,
         config: &Arc<BartConfig>,
         load_config: &ModelLoadConfig,
@@ -162,7 +162,7 @@ impl EncoderDecoderModelFactory for BartModel {
         tokenizer: Tokenizer,
         config: Arc<BartConfig>,
         generation_defaults: Option<HFGenerationDefaults>,
-        generation_config: HFGenerationConfig,
+        _generation_config: HFGenerationConfig,
     ) -> Self {
         Self {
             pipeline,
@@ -347,12 +347,12 @@ impl CpuEncoderDecoderOps for BartModel {
     }
     fn embed_decoder_tokens(
         &self,
-        input_ids: &Array2<u32>,
-        position_offset: usize,
+        _input_ids: &Array2<u32>,
+        _position_offset: usize,
     ) -> Result<Array3<f32>> {
         unimplemented!()
     }
-    fn get_decoder_mask(&self, seq_len: usize, past_len: usize) -> Option<Array2<f32>> {
+    fn get_decoder_mask(&self, _seq_len: usize, _past_len: usize) -> Option<Array2<f32>> {
         None
     }
     fn broadcast_encoder_states(

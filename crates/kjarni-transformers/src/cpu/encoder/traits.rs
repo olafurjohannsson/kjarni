@@ -297,7 +297,7 @@ pub trait CpuEncoder: CpuTransformerCore {
         &self,
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        buffers: &mut EncoderBuffers,
+        _buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
         // Default: ignore buffers, call regular forward
         let hidden = self.forward_layers(hidden_states, attention_mask, 0, self.num_layers());
@@ -333,7 +333,7 @@ pub trait CpuEncoderOps: Send + Sync {
     ) -> Result<Array3<f32>>;
 
     /// Embed audio -> hidden states, no normalization happens
-    fn embed_audio(&self, mel: &Array3<f32>) -> Result<Array3<f32>> {
+    fn embed_audio(&self, _mel: &Array3<f32>) -> Result<Array3<f32>> {
         Err(anyhow!("Audio embedding not supported for this model"))
     }
 
@@ -433,8 +433,8 @@ pub trait GpuEncoder: Send + Sync {
     /// Apply final layer normalization (T5/Whisper have this, BART doesn't)
     fn final_norm(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
         hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
         // Default: no final norm (BART)
@@ -615,7 +615,7 @@ mod tests_trait {
         fn hidden_size(&self) -> usize {
             self.hidden_size
         }
-        fn final_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        fn final_norm(&self, _hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             unimplemented!()
         }
         fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
@@ -632,7 +632,7 @@ mod tests_trait {
         }
     }
     impl CpuEncoder for MockCpuEncoder {
-        fn create_buffers(&self, max_batch: usize, max_seq: usize) -> EncoderBuffers {
+        fn create_buffers(&self, _max_batch: usize, _max_seq: usize) -> EncoderBuffers {
             unimplemented!()
         }
         fn forward_layers(
@@ -711,8 +711,8 @@ mod tests_trait {
         fn embed_tokens(
             &self,
             input_ids: &Array2<u32>,
-            token_type_ids: Option<&Array2<u32>>,
-            pos: usize,
+            _token_type_ids: Option<&Array2<u32>>,
+            _pos: usize,
         ) -> Result<Array3<f32>> {
             Ok(Array3::zeros((
                 input_ids.dim().0,

@@ -933,7 +933,7 @@ impl GpuAttention {
         encoder: &mut wgpu::CommandEncoder,
         scores: &GpuTensor,
         mask: &GpuTensor,
-        pool: &mut GpuTensorPool,
+        _pool: &mut GpuTensorPool,
         position_offset: u32,
         logical_key_len: u32,
     ) {

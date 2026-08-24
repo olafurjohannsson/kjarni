@@ -230,10 +230,10 @@ mod decoder_pipeline_test {
         }
         fn embed(
             &self,
-            encoder: &mut wgpu::CommandEncoder,
-            pool: &mut GpuTensorPool,
-            input: ModelInput<'_>,
-            position_offset: usize,
+            _encoder: &mut wgpu::CommandEncoder,
+            _pool: &mut GpuTensorPool,
+            _input: ModelInput<'_>,
+            _position_offset: usize,
         ) -> Result<GpuTensor> {
             unimplemented!()
         }
@@ -243,10 +243,10 @@ mod decoder_pipeline_test {
         }
         fn embed_and_normalize(
             &self,
-            encoder: &mut wgpu::CommandEncoder,
-            pool: &mut GpuTensorPool,
-            input: ModelInput<'_>,
-            position_offset: usize,
+            _encoder: &mut wgpu::CommandEncoder,
+            _pool: &mut GpuTensorPool,
+            _input: ModelInput<'_>,
+            _position_offset: usize,
         ) -> Result<GpuTensor> {
             unimplemented!()
         }

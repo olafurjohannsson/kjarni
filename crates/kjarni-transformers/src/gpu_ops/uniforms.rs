@@ -38,7 +38,7 @@ impl GpuUniformBuffer {
     pub fn write<T: bytemuck::Pod>(&self, queue: &wgpu::Queue, data: &T) -> u32 {
         let size = std::mem::size_of::<T>() as u64;
         let current = self.cursor.load(Ordering::Relaxed);
-        let aligned_start = (current + self.alignment - 1) / self.alignment * self.alignment;
+        let _aligned_start = (current + self.alignment - 1) / self.alignment * self.alignment;
         let allocation_size = (size + self.alignment - 1) / self.alignment * self.alignment;
         let offset = self.cursor.fetch_add(allocation_size, Ordering::Relaxed);
 

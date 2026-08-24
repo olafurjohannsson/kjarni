@@ -247,7 +247,7 @@ impl CpuDecoderOps for MockDecoderModel {
     fn decoder(&self) -> &dyn CpuDecoder {
         &self.decoder
     }
-    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
+    fn embed(&self, _tokens: &Array2<u32>, _pos: usize) -> Result<Array3<f32>> {
         Ok(Array3::zeros((1, 1, self.hidden_size())))
     }
     fn project_to_logits(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
@@ -285,9 +285,9 @@ impl CpuDecoder for MockCpuDecoder {
     fn forward(
             &self,
             hidden_states: &Array3<f32>,
-            attention_mask: &Array2<f32>,
-            position_offset: usize,
-            cache: Option<&mut dyn Cache>,
+            _attention_mask: &Array2<f32>,
+            _position_offset: usize,
+            _cache: Option<&mut dyn Cache>,
         ) -> Result<Array3<f32>> {
         // Just pass through
         Ok(hidden_states.clone())
@@ -295,9 +295,9 @@ impl CpuDecoder for MockCpuDecoder {
     fn forward_all_layers(
             &self,
             hidden_states: &Array3<f32>,
-            attention_mask: &Array2<f32>,
-            position_offset: usize,
-            cache: Option<&mut dyn Cache>,
+            _attention_mask: &Array2<f32>,
+            _position_offset: usize,
+            _cache: Option<&mut dyn Cache>,
         ) -> Result<Array3<f32>> {
         // Just pass through
         Ok(hidden_states.clone())

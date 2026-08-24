@@ -92,7 +92,7 @@ impl StdFeedForward {
     pub fn forward_noalloc(&self, hidden: &ArrayView2<f32>, buffers: &mut EncoderBuffers) {
         let tokens = hidden.shape()[0];
         let intermediate_dim = self.fc1.out_features();
-        let hidden_dim = self.fc2.out_features();
+        let _hidden_dim = self.fc2.out_features();
 
         #[cfg(debug_assertions)]
         {

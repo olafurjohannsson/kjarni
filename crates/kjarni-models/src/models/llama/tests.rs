@@ -5,7 +5,6 @@ use kjarni_transformers::common::{DecodingStrategy, GenerationConfig};
 use kjarni_transformers::decoder::prelude::*;
 use kjarni_transformers::models::LanguageModel;
 use kjarni_transformers::prelude::*;
-use std::path::Path;
 use std::sync::Arc;
 use kjarni_transformers::models::registry::model_cache_dir;
 
@@ -235,7 +234,7 @@ async fn test_llama3_2_1b_generation_parity() -> Result<()> {
             None,
             None,
         )?;
-        let pp = model_cache_dir(LLAMA_32_1B);
+        let _pp = model_cache_dir(LLAMA_32_1B);
         let path22 = p.as_path();
         let llama_gpu = LlamaModel::from_pretrained(
             path22,

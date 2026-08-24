@@ -561,7 +561,7 @@ async fn test_gpu_ffn_fc2_isolated_parity() -> Result<()> {
         activation,
     );
     let gpu_ffn = GpuFeedForwardStd::new(&context, activation)?;
-    let fc2_w_gpu_transposed = GpuTensor::from_ndarray(&context, &fc2_w_cpu.t().to_owned())?;
+    let _fc2_w_gpu_transposed = GpuTensor::from_ndarray(&context, &fc2_w_cpu.t().to_owned())?;
 
     let gpu_weights = GpuFeedForwardWeights::from_ndarrays(
         &context, &fc1_w_cpu, &fc1_b_cpu, &fc2_w_cpu, &fc2_b_cpu,

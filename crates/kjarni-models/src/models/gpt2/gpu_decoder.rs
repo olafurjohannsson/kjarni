@@ -125,7 +125,7 @@ impl Gpt2GpuDecoder {
         meta: &ModelMetadata,
         layout: &ModelLayout,
         layer_idx: usize,
-        load_config: ModelLoadConfig,
+        _load_config: ModelLoadConfig,
     ) -> Result<GpuPreNormDecoderLayer> {
         let decoder_layout = layout
             .decoder

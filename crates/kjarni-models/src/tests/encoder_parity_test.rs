@@ -387,7 +387,7 @@ async fn test_bart_encoder_step_by_step_parity() -> Result<()> {
     let cpu_debug_12 = cpu_encoder.forward_layers(&h, &mask_cpu, 0, 12)?;
     let cpu_forward = cpu_ops.forward_tokens(&input_ids_cpu, Some(&mask_cpu), None, 0)?;
 
-    let cpu_internal_diff = cpu_debug_12
+    let _cpu_internal_diff = cpu_debug_12
         .iter()
         .zip(cpu_forward.last_hidden_state.iter())
         .map(|(a, b)| (a - b).abs())
@@ -645,7 +645,7 @@ async fn test_bart_decoder_step_by_step_parity() -> Result<()> {
             BartModel::from_registry(model_type, None, Device::Wgpu, Some(ctx.clone()), None)
                 .await?;
 
-        let gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
+        let _gpu_encoder = gpu_model.pipeline.gpu_encoder().expect("No GPU encoder");
         let cpu_decoder = cpu_model.pipeline.cpu_decoder().expect("No CPU decoder");
         let gpu_decoder = gpu_model.pipeline.gpu_decoder().expect("No GPU decoder");
 

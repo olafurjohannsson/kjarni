@@ -37,7 +37,7 @@ pub(crate) unsafe fn matmul_block_4x3_f32(
         let a2 = _mm256_loadu_ps(a2_ptr);
         let a3 = _mm256_loadu_ps(a3_ptr);
 
-        let w0 = _mm256_loadu_ps(b0_ptr);
+        let _w0 = _mm256_loadu_ps(b0_ptr);
         let w0 = _mm256_loadu_ps(b0_ptr);
         c00 = _mm256_fmadd_ps(a0, w0, c00);
         c10 = _mm256_fmadd_ps(a1, w0, c10);
@@ -186,7 +186,7 @@ pub(crate) unsafe fn matmul_vec_f32(
 #[cfg(test)]
 mod simd_matmul_tests {
     use super::*;
-    use std::time::Instant;
+    
 
     fn scalar_dot(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len());

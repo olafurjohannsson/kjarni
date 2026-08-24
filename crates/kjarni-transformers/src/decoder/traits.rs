@@ -48,17 +48,17 @@ pub trait GpuDecoder: Send + Sync {
 
     fn embed_norm(
         &self,
-        cmd_encoder: &mut CommandEncoder,
-        pool: &mut GpuTensorPool,
-        hidden_states: &GpuTensor,
+        _cmd_encoder: &mut CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }
     fn final_norm(
         &self,
-        cmd_encoder: &mut CommandEncoder,
-        pool: &mut GpuTensorPool,
-        hidden_states: &GpuTensor,
+        _cmd_encoder: &mut CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _hidden_states: &GpuTensor,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }
@@ -93,25 +93,25 @@ pub trait GpuDecoder: Send + Sync {
 
     fn forward_layers2(
         &self,
-        cmd_encoder: &mut CommandEncoder,
-        pool: &mut GpuTensorPool,
-        hidden_states: &GpuTensor,
-        encoder_hidden_states: &GpuTensor,
-        self_attention_mask: Option<&GpuTensor>,
-        cross_attention_mask: Option<&GpuTensor>,
-        cache: Option<&mut GpuKVCache>,
-        cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
-        start_layer: usize,
-        end_layer: usize,
+        _cmd_encoder: &mut CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _hidden_states: &GpuTensor,
+        _encoder_hidden_states: &GpuTensor,
+        _self_attention_mask: Option<&GpuTensor>,
+        _cross_attention_mask: Option<&GpuTensor>,
+        _cache: Option<&mut GpuKVCache>,
+        _cross_kv_cache: Option<&GpuCrossAttentionKVCache>,
+        _start_layer: usize,
+        _end_layer: usize,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }
 
     fn precompute_cross_attention_kv(
         &self,
-        cmd_encoder: &mut CommandEncoder,
-        pool: &mut GpuTensorPool,
-        encoder_hidden_states: &GpuTensor,
+        _cmd_encoder: &mut CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _encoder_hidden_states: &GpuTensor,
     ) -> Result<GpuCrossAttentionKVCache> {
         unimplemented!()
     }

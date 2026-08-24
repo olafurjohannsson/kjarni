@@ -213,7 +213,7 @@ mod cache_tests {
 
         assert_eq!(cpu.get_seq_length(), gpu.get_seq_length());
 
-        let (ck, _) = cpu.get(0).unwrap();
+        let (_ck, _) = cpu.get(0).unwrap();
         let (gk, _) = gpu.get(0).unwrap();
         let gk_cpu = gk.to_ndarray_4d::<f32>().await?;
 
