@@ -320,7 +320,7 @@ impl LoadedEmbeddings {
         &self,
         token_ids: &Array2<u32>,
         token_type_ids: Option<&Array2<u32>>,
-        position_offset: usize,
+        _position_offset: usize,
     ) -> Result<ndarray::Array3<f32>> {
         let cpu_layer = self
             .cpu

@@ -82,7 +82,7 @@ impl DecoderModelFactory for QwenModel {
         pipeline: DecoderPipeline,
         tokenizer: Tokenizer,
         config: Arc<QwenConfig>,
-        model_type: Option<ModelType>,
+        _model_type: Option<ModelType>,
         generation_defaults: Option<HFGenerationDefaults>,
         chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self {

@@ -225,7 +225,7 @@ mod tests {
     impl CpuEncoder for MockCpuEncoder {
         fn forward(
             &self,
-            hidden_states: &Array3<f32>,
+            _hidden_states: &Array3<f32>,
             attention_mask: &Array2<f32>,
         ) -> Result<CpuEncoderOutput> {
             let (batch, seq) = attention_mask.dim();
@@ -288,16 +288,16 @@ mod tests {
     }
 
     impl CpuCrossDecoder for MockCpuDecoder {
-        fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
+        fn embed(&self, _decoder_input_ids: &Array2<u32>, _position_offset: usize) -> Array3<f32> {
             unimplemented!()
         }
         fn precompute_cross_attention_kv(
             &self,
-            encoder_hidden_states: &Array3<f32>,
+            _encoder_hidden_states: &Array3<f32>,
         ) -> Result<crate::encoder_decoder::traits::CpuCrossAttentionKVCache> {
             unimplemented!()
         }
-        fn embed_norm(&self, hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
+        fn embed_norm(&self, _hidden_states: &Array3<f32>) -> Result<Array3<f32>> {
             unimplemented!()
         }
 
@@ -308,13 +308,13 @@ mod tests {
         fn forward_layers(
             &self,
             hidden_states: &Array3<f32>,
-            encoder_hidden_states: &Array3<f32>,
-            decoder_padding_mask: Option<&Array2<f32>>,
-            encoder_padding_mask: Option<&Array2<f32>>,
-            cache: Option<&mut dyn Cache>,
-            cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
-            start_layer: usize,
-            end_layer: usize,
+            _encoder_hidden_states: &Array3<f32>,
+            _decoder_padding_mask: Option<&Array2<f32>>,
+            _encoder_padding_mask: Option<&Array2<f32>>,
+            _cache: Option<&mut dyn Cache>,
+            _cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+            _start_layer: usize,
+            _end_layer: usize,
         ) -> Result<CpuCrossDecoderOutput> {
             Ok(CpuCrossDecoderOutput {
                 last_hidden_state: hidden_states.clone(),

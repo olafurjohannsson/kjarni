@@ -1,6 +1,6 @@
 //! Embedder FFI bindings
 
-use crate::error::{map_result, set_last_error};
+use crate::error::set_last_error;
 use crate::{KjarniErrorCode, KjarniFloat2DArray, KjarniFloatArray, get_runtime};
 use kjarni::Embedder;
 use kjarni::embedder::EmbedderError;
@@ -57,7 +57,7 @@ pub struct KjarniEmbedder {
 pub unsafe extern "C" fn kjarni_embedder_new(
     config: *const KjarniEmbedderConfig,
     out: *mut *mut KjarniEmbedder,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -128,15 +128,15 @@ pub unsafe extern "C" fn kjarni_embedder_new(
         }
         Err(e) => e,
     }
-}
+}}
 
 /// Free an Embedder instance.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) {
+pub unsafe extern "C" fn kjarni_embedder_free(embedder: *mut KjarniEmbedder) { unsafe {
     if !embedder.is_null() {
         let _ = Box::from_raw(embedder);
     }
-}
+}}
 
 /// Encode a single text to an embedding vector.
 #[unsafe(no_mangle)]
@@ -144,7 +144,7 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
     embedder: *mut KjarniEmbedder,
     text: *const c_char,
     out: *mut KjarniFloatArray,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if embedder.is_null() || text.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn kjarni_embedder_encode(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Encode multiple texts to embedding vectors.
 #[unsafe(no_mangle)]
@@ -177,7 +177,7 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
     texts: *const *const c_char,
     num_texts: usize,
     out: *mut KjarniFloat2DArray,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if embedder.is_null() || texts.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn kjarni_embedder_encode_batch(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Compute cosine similarity between two texts.
 #[unsafe(no_mangle)]
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
     text1: *const c_char,
     text2: *const c_char,
     out: *mut c_float,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if embedder.is_null() || text1.is_null() || text2.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -260,11 +260,11 @@ pub unsafe extern "C" fn kjarni_embedder_similarity(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Get the embedding dimension.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) -> usize {
+pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) -> usize { unsafe {
     if embedder.is_null() {
         return 0;
     }
@@ -272,4 +272,4 @@ pub unsafe extern "C" fn kjarni_embedder_dim(embedder: *const KjarniEmbedder) ->
     let embedder_ref = &(*embedder).inner;
 
     get_runtime().block_on(async { embedder_ref.dimension() })
-}
+}}

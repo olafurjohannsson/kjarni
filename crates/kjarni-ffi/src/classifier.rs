@@ -53,7 +53,7 @@ impl KjarniClassResults {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_class_results_free(results: *const KjarniClassResults) {
+pub unsafe extern "C" fn kjarni_class_results_free(results: *const KjarniClassResults) { unsafe {
     if results.is_null() { return; }
     let results = &*results;
     if !results.results.is_null() && results.len > 0 {
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn kjarni_class_results_free(results: *const KjarniClassRe
         }
         let _ = Box::from_raw(slice.as_mut_ptr());
     }
-}
+}}
 
 #[repr(C)]
 pub struct KjarniClassifierConfig {
@@ -117,7 +117,7 @@ pub struct KjarniClassifier {
 pub unsafe extern "C" fn kjarni_classifier_new(
     config: *const KjarniClassifierConfig,
     out: *mut *mut KjarniClassifier,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -205,15 +205,15 @@ pub unsafe extern "C" fn kjarni_classifier_new(
         }
         Err(e) => e,
     }
-}
+}}
 
 /// Free a Classifier.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_classifier_free(classifier: *mut KjarniClassifier) {
+pub unsafe extern "C" fn kjarni_classifier_free(classifier: *mut KjarniClassifier) { unsafe {
     if !classifier.is_null() {
         let _ = Box::from_raw(classifier);
     }
-}
+}}
 
 /// Classify a single text.
 #[unsafe(no_mangle)]
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn kjarni_classifier_classify(
     classifier: *mut KjarniClassifier,
     text: *const c_char,
     out: *mut KjarniClassResults,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if classifier.is_null() || text.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -246,14 +246,14 @@ pub unsafe extern "C" fn kjarni_classifier_classify(
             KjarniErrorCode::InferenceFailed
         }
     }
-}
+}}
 
 /// Get the classifier's labels.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_labels(
     classifier: *const KjarniClassifier,
     out: *mut KjarniStringArray,
-) -> KjarniErrorCode {
+) -> KjarniErrorCode { unsafe {
     if classifier.is_null() || out.is_null() {
         return KjarniErrorCode::NullPointer;
     }
@@ -283,15 +283,15 @@ pub unsafe extern "C" fn kjarni_classifier_labels(
             KjarniErrorCode::Ok
         }
     }
-}
+}}
 
 /// Get number of labels.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_classifier_num_labels(
     classifier: *const KjarniClassifier,
-) -> usize {
+) -> usize { unsafe {
     if classifier.is_null() {
         return 0;
     }
     (*classifier).inner.num_labels()
-}
+}}

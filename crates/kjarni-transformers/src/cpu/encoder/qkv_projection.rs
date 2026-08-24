@@ -365,7 +365,7 @@ mod tests {
         let input = Array2::from_elem((tokens, hidden), 0.5f32);
 
         // Forward with allocation
-        let (q_alloc, k_alloc, v_alloc) = qkv.forward(&input.view());
+        let (q_alloc, _k_alloc, _v_alloc) = qkv.forward(&input.view());
 
         // Forward without allocation
         qkv.forward_noalloc(&input.view(), &mut buffers);

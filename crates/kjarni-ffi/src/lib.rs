@@ -128,24 +128,24 @@ pub struct KjarniStringArray {
 
 /// Free a float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_array_free(arr: *const KjarniFloatArray) {
+pub unsafe extern "C" fn kjarni_float_array_free(arr: *const KjarniFloatArray) { unsafe {
     if arr.is_null() { return; }
     let arr = &*arr;
     if !arr.data.is_null() && arr.len > 0 {
         let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, arr.len));
     }
-}
+}}
 
 /// Free a 2D float array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: *const KjarniFloat2DArray) {
+pub unsafe extern "C" fn kjarni_float_2d_array_free(arr: *const KjarniFloat2DArray) { unsafe {
     if arr.is_null() { return; }
     let arr = &*arr;
     if !arr.data.is_null() && arr.rows > 0 && arr.cols > 0 {
         let total = arr.rows * arr.cols;
         let _ = Box::from_raw(std::slice::from_raw_parts_mut(arr.data, total));
     }
-}
+}}
 
 /// Free a string allocated by Kjarni.
 #[unsafe(no_mangle)]
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn kjarni_string_free(s: *mut std::ffi::c_char) {
 
 /// Free a string array allocated by Kjarni.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kjarni_string_array_free(arr: *const KjarniStringArray) {
+pub unsafe extern "C" fn kjarni_string_array_free(arr: *const KjarniStringArray) { unsafe {
     if arr.is_null() { return; }
     let arr = &*arr;
     if !arr.strings.is_null() && arr.len > 0 {
@@ -171,21 +171,21 @@ pub unsafe extern "C" fn kjarni_string_array_free(arr: *const KjarniStringArray)
         }
         let _ = Box::from_raw(strings.as_mut_ptr());
     }
-}
+}}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_cosine_similarity(
     a: *const f32,
     b: *const f32,
     len: usize,
-) -> f32 {
+) -> f32 { unsafe {
     if a.is_null() || b.is_null() || len == 0 {
         return 0.0;
     }
     let a = std::slice::from_raw_parts(a, len);
     let b = std::slice::from_raw_parts(b, len);
     cosine_similarity(a, b)
-}
+}}
 
 #[cfg(test)]
 mod ffi_bridge_tests {

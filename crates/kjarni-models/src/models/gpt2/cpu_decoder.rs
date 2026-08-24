@@ -290,7 +290,7 @@ impl CpuDecoder for Gpt2CpuDecoder {
         &self,
         hidden_states: &Array3<f32>,
         attention_mask: &Array2<f32>,
-        position_offset: usize,
+        _position_offset: usize,
         cache: Option<&mut dyn Cache>,
         start_layer: usize,
         end_layer: usize,

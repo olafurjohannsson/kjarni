@@ -37,27 +37,27 @@ pub struct GpuCrossDecoderOutput {
 #[async_trait]
 pub trait CpuCrossDecoder: Send + Sync {
     #[deprecated]
-    fn embed(&self, decoder_input_ids: &Array2<u32>, position_offset: usize) -> Array3<f32> {
+    fn embed(&self, _decoder_input_ids: &Array2<u32>, _position_offset: usize) -> Array3<f32> {
         unimplemented!()
     }
 
     #[deprecated]
     fn embed_and_normalize(
         &self,
-        input_ids: &Array2<u32>,
-        position_offset: usize,
+        _input_ids: &Array2<u32>,
+        _position_offset: usize,
     ) -> Result<Array3<f32>> {
         unimplemented!()
     }
     #[deprecated]
     fn forward(
         &self,
-        decoder_input_ids: &Array2<u32>,
-        encoder_hidden_states: &Array3<f32>,
-        decoder_padding_mask: Option<&Array2<f32>>, 
-        encoder_padding_mask: Option<&Array2<f32>>, 
-        cache: Option<&mut dyn Cache>,
-        cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
+        _decoder_input_ids: &Array2<u32>,
+        _encoder_hidden_states: &Array3<f32>,
+        _decoder_padding_mask: Option<&Array2<f32>>, 
+        _encoder_padding_mask: Option<&Array2<f32>>, 
+        _cache: Option<&mut dyn Cache>,
+        _cross_kv_cache: Option<&CpuCrossAttentionKVCache>,
     ) -> Result<CpuCrossDecoderOutput> {
         unimplemented!()
     }
@@ -316,7 +316,7 @@ mod tests {
     }
 
     impl MockCpuCrossDecoder {
-        fn new(num_layers: usize, hidden_size: usize) -> Self {
+        fn new(_num_layers: usize, hidden_size: usize) -> Self {
             Self {
                 layers: Vec::new(),
                 hidden_size,
@@ -352,7 +352,7 @@ mod tests {
 
         fn precompute_cross_attention_kv(
             &self,
-            encoder_hidden_states: &Array3<f32>,
+            _encoder_hidden_states: &Array3<f32>,
         ) -> Result<CpuCrossAttentionKVCache> {
             Ok(CpuCrossAttentionKVCache::default())
         }

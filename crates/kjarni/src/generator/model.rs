@@ -49,7 +49,7 @@ impl Generator {
         let model_type = ModelType::from_cli_name(&builder.model)
             .ok_or_else(|| GeneratorError::UnknownModel(builder.model.clone()))?;
 
-        let validation = validate_for_generation(model_type)?;
+        let _validation = validate_for_generation(model_type)?;
 
         // if !builder.quiet && !builder.allow_warnings {
         //     for warning in &validation.warnings {

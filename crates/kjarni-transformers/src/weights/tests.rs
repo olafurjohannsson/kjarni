@@ -52,13 +52,13 @@ mod tests {
 
         let input = ndarray::Array1::<f32>::ones(2048);
 
-        let st_out: f32 = st_q
+        let _st_out: f32 = st_q
             .row(0)
             .iter()
             .zip(input.iter())
             .map(|(a, b)| a * b)
             .sum();
-        let gguf_out: f32 = gguf_q
+        let _gguf_out: f32 = gguf_q
             .row(0)
             .iter()
             .zip(input.iter())
@@ -123,7 +123,7 @@ mod tests {
 
         let gguf_weights = ModelWeights::new(Path::new(GGUF_PATH)).unwrap();
 
-        let raw = gguf_weights.loader()
+        let _raw = gguf_weights.loader()
             .get_raw("model.layers.0.self_attn.q_proj.weight")
             .unwrap();
 
@@ -432,7 +432,7 @@ mod tests {
             return;
         }
 
-        let loader = GgufLoader::new(Path::new(GGUF_PATH)).unwrap();
+        let _loader = GgufLoader::new(Path::new(GGUF_PATH)).unwrap();
 
         let probe_names = [
             "token_embd.weight",

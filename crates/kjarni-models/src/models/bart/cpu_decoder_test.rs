@@ -12,7 +12,7 @@ use crate::models::bart::config::BartConfig;
 #[cfg(test)]
 mod cpu_seq2seq_decoder_test {
     use super::*;
-    use std::path::{Path, PathBuf};
+    
 
     use kjarni_transformers::cpu::encoder_decoder::{Seq2SeqCPUDecoder, Seq2SeqCPUEncoder};
     use kjarni_transformers::encoder_decoder::config::{

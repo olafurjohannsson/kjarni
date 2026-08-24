@@ -65,11 +65,11 @@ impl EncoderDecoderModelFactory for T5Model {
 
     fn build_backends(
         weights: &ModelWeights,
-        meta: &ModelMetadata,
+        _meta: &ModelMetadata,
         _layout: &ModelLayout,
         config: &Arc<T5Config>,
         load_config: &ModelLoadConfig,
-        context: Option<&Arc<WgpuContext>>,
+        _context: Option<&Arc<WgpuContext>>,
         device: Device,
     ) -> Result<(
         Option<Box<dyn CpuEncoder>>,
@@ -241,11 +241,11 @@ impl GpuEncoderOps for T5Model {
     }
     fn embed_tokens(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
-        input_ids: ModelInput<'_>,
-        token_type_ids: Option<ModelInput<'_>>,
-        pos: usize,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _input_ids: ModelInput<'_>,
+        _token_type_ids: Option<ModelInput<'_>>,
+        _pos: usize,
     ) -> Result<GpuTensor> {
         unimplemented!()
         // self.pipeline()

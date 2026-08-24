@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_rotate_half_scalar_matches_reference() {
         let head_dim = 64;
-        let half_dim = head_dim / 2;
+        let _half_dim = head_dim / 2;
 
         let x: Vec<f32> = (0..head_dim).map(|i| (i as f32) * 0.1).collect();
         let cos: Vec<f32> = (0..head_dim).map(|i| ((i as f32) * 0.05).cos()).collect();

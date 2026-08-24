@@ -204,7 +204,7 @@ impl SentenceEncoder {
 
         let mut pooled = kjarni_transformers::mean_pool(&hidden_states, &attention_mask)?;
 
-        let config = EncodingConfig {
+        let _config = EncodingConfig {
             normalize: false,
             pooling_strategy: self.pipeline.pooling_strategy(),
         };

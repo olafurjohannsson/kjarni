@@ -267,10 +267,10 @@ impl CpuTransformerEncoder {
     /// Full forward pass with external buffer (caller owns buffers).
     pub fn forward_noalloc(
         &self,
-        input_ids: &Array2<u32>,
-        attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<u32>>,
-        buffers: &mut EncoderBuffers,
+        _input_ids: &Array2<u32>,
+        _attention_mask: &Array2<f32>,
+        _token_type_ids: Option<&Array2<u32>>,
+        _buffers: &mut EncoderBuffers,
     ) -> Result<CpuEncoderOutput> {
         unimplemented!()
     }
@@ -355,7 +355,7 @@ impl CpuEncoder for CpuTransformerEncoder {
     ) -> Result<Array3<f32>> {
         let mut hidden = hidden_states.clone();
         let is_prenorm = self.metadata.is_prenorm;
-        for (i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
+        for (_i, layer) in self.layers[start_layer..end_layer].iter().enumerate() {
             hidden = layer.forward(
                 hidden,
                 attention_mask,

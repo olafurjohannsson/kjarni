@@ -53,7 +53,7 @@ mod gpu_cross_decoder_test {
         num_heads: usize,
     ) -> CpuDecoderLayer {
         let gen_weight =
-            |shape, scale| Array2::from_shape_fn(shape, |(i, j)| ((i + j) as f32 * scale));
+            |shape, scale| Array2::from_shape_fn(shape, |(i, j)| (i + j) as f32 * scale);
         let gen_bias = |size, val| Array1::from_elem(size, val);
 
         let self_attn = DecoderSelfAttention::new(

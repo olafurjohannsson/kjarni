@@ -623,7 +623,7 @@ mod cross_decoder_layer_tests {
         let decoder_hidden = Array3::from_shape_vec((1, 1, 4), layer_test6_decoder_hidden)?;
         let encoder_hidden = Array3::from_shape_vec((1, 3, 4), layer_test6_encoder_hidden)?;
 
-        let (output, (new_k, new_v)) = layer.forward(
+        let (output, (_new_k, _new_v)) = layer.forward(
             &decoder_hidden,
             &encoder_hidden,
             None,

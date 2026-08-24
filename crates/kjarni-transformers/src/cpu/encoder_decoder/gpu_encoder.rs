@@ -424,19 +424,19 @@ impl Seq2SeqGPUEncoder {
 impl GpuEncoder for Seq2SeqGPUEncoder {
     fn embed(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
-        input: crate::models::base::ModelInput<'_>,
-        token_type_ids: Option<crate::models::base::ModelInput<'_>>,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _input: crate::models::base::ModelInput<'_>,
+        _token_type_ids: Option<crate::models::base::ModelInput<'_>>,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }
     fn embed_and_normalize(
         &self,
-        cmd_encoder: &mut wgpu::CommandEncoder,
-        pool: &mut GpuTensorPool,
-        input: crate::models::base::ModelInput<'_>,
-        token_type_ids: Option<crate::models::base::ModelInput<'_>>,
+        _cmd_encoder: &mut wgpu::CommandEncoder,
+        _pool: &mut GpuTensorPool,
+        _input: crate::models::base::ModelInput<'_>,
+        _token_type_ids: Option<crate::models::base::ModelInput<'_>>,
     ) -> Result<GpuTensor> {
         unimplemented!()
     }

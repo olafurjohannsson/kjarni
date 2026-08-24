@@ -81,7 +81,7 @@ impl DecoderModelFactory for MistralModel {
         pipeline: DecoderPipeline,
         tokenizer: Tokenizer,
         config: Arc<MistralConfig>,
-        model_type: Option<ModelType>,
+        _model_type: Option<ModelType>,
         generation_defaults: Option<HFGenerationDefaults>,
         chat_template: Option<Box<dyn ChatTemplate>>,
     ) -> Self {
@@ -265,7 +265,7 @@ impl CpuDecoderOps for MistralModel {
             1, seq,
         ))
     }
-    fn embed(&self, tokens: &Array2<u32>, pos: usize) -> Result<Array3<f32>> {
+    fn embed(&self, _tokens: &Array2<u32>, _pos: usize) -> Result<Array3<f32>> {
         unimplemented!()
     }
 }

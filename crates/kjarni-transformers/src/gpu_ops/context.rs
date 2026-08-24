@@ -74,7 +74,7 @@ impl WgpuContext {
             })
             .await?;
 
-        let adapter_info = adapter.get_info();
+        let _adapter_info = adapter.get_info();
         let adapter_limits = adapter.limits();
 
 log::info!(

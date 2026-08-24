@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_cancellation_token_not_cancelled() {
-        let (token, handle) = CancellationToken::new();
+        let (token, _handle) = CancellationToken::new();
         assert!(!token.is_cancelled());
     }
 

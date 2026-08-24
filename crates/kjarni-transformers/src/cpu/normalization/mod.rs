@@ -21,7 +21,7 @@ impl Normalization {
     pub fn forward_2d_noalloc(&self, input: &ArrayView2<f32>, output: &mut ArrayViewMut2<f32>) {
         match self {
             Normalization::LayerNorm(ln) => ln.forward_2d_noalloc(input, output),
-            Normalization::RMSNorm(rms) => panic!("RMSNorm does not support noalloc 2D forward"),
+            Normalization::RMSNorm(_rms) => panic!("RMSNorm does not support noalloc 2D forward"),
         }
     }
     pub fn as_rms_norm(&self) -> Option<&RMSNorm> {

@@ -188,7 +188,7 @@ mod rope_decoder_gpu_test {
         kv_heads: usize,
         intermediate: usize,
     ) -> CpuRoPEDecoderLayer {
-        let gen_w = |shape, scale| Array2::from_shape_fn(shape, |(i, j)| ((i + j) as f32 * scale));
+        let gen_w = |shape, scale| Array2::from_shape_fn(shape, |(i, j)| (i + j) as f32 * scale);
         let gen_norm = |size| Array1::from_elem(size, 1.0);
 
         let attention = DecoderAttention::new(

@@ -110,7 +110,7 @@ impl GpuSlice {
         assert_eq!(src.rank(), 4, "This slice is specialized for 4D tensors.");
         assert_eq!(dst.rank(), 4, "This slice is specialized for 4D tensors.");
 
-        let (src_b, src_h, src_s, src_d) = src.dims4();
+        let (_src_b, src_h, src_s, src_d) = src.dims4();
         let (dst_b, dst_h, dst_s, dst_d) = dst.dims4();
 
         // Calculate standard C-contiguous strides for 4D tensors

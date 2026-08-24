@@ -250,7 +250,7 @@ impl LinearLayer {
                 }
                 result
             }
-            LinearData::F16(w) => {
+            LinearData::F16(_w) => {
                 unimplemented!("F16 LinearLayer matmul not implemented yet");
             }
             LinearData::Q8_0(w) => {
@@ -289,7 +289,7 @@ impl LinearLayer {
     }
 
     /// Get a view of the weights [out_features, in_features]
-    pub fn weights_view(&self) -> ArrayView2<f32> {
+    pub fn weights_view(&self) -> ArrayView2<'_, f32> {
         match self.data {
             crate::linear_layer::LinearData::F32(ref w) => w.view(),
             _ => panic!("Only f32 LinearLayer supported in optimized path"),

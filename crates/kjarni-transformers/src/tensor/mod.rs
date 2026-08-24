@@ -43,7 +43,7 @@ pub trait Dequantizable {
     fn dequantize_blocks(
         blocks: &[Self],
         output: &mut Array2<f32>,
-        rows: usize,
+        _rows: usize,
         cols: usize,
     ) -> Result<()>
     where
