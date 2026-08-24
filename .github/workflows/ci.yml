@@ -241,7 +241,7 @@ jobs:
         run: |
           cd crates/kjarni-wasm
           RUSTFLAGS='-C target-feature=+simd128' \
-            wasm-pack build --release --target web -- --no-default-features
+            wasm-pack build --release --target web -- --no-default-features --locked
 
       - uses: actions/upload-artifact@v4
         with:
