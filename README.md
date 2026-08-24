@@ -1,222 +1,132 @@
 # Kjarni
 
-A native library for running machine learning models.
+[![NuGet](https://img.shields.io/nuget/v/Kjarni?logo=nuget&label=NuGet)](https://www.nuget.org/packages/Kjarni)
+[![Go Reference](https://pkg.go.dev/badge/github.com/olafurjohannsson/kjarni-go.svg)](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
+[![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-Kjarni compiles to a single shared library and runs locally, without
-Python, containers, external services, or GPU requirements. It also
-ships as a command-line tool that reads from stdin, writes JSON, and
-pipes like any UNIX tool.
+**Local embeddings, semantic search, classification, and reranking in C#, Go, Rust, and Python — no Python runtime, no ONNX, no cloud.**
 
-C# bindings are available via [NuGet](https://www.nuget.org/packages/Kjarni).
-Go bindings are available at [kjarni-go](https://github.com/olafurjohannsson/kjarni-go).
-The CLI is available as a [binary download](https://github.com/olafurjohannsson/kjarni/releases).
+Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine — on a laptop, in a container, or inside an air-gapped network.
 
-The name is Icelandic [ˈkʰjartnɪ]. It means "core."
-
-## Install
-
-**C# / .NET:**
 ```bash
-dotnet add package Kjarni
+dotnet add package Kjarni                             # C# / .NET
+go get github.com/olafurjohannsson/kjarni-go@latest   # Go
+curl -fsSL https://kjarni.ai/install.sh | sh          # CLI
 ```
 
-**Go:**
-```bash
-go get github.com/olafurjohannsson/kjarni-go@latest
-```
-
-**CLI (Linux x64):**
-```bash
-curl -fsSL https://kjarni.ai/install.sh | sh
-```
-
-## Quick Start
-
-**C#:**
 ```csharp
 using Kjarni;
 
-using var classifier = new Classifier("distilbert-sentiment");
-Console.WriteLine(classifier.Classify("I love this product!"));
-// POSITIVE (100.0%)
-```
-
-**Go:**
-```go
-import "github.com/olafurjohannsson/kjarni-go"
-
-c, _ := kjarni.NewClassifier("distilbert-sentiment")
-defer c.Close()
-
-result, _ := c.Classify("I love this product!")
-fmt.Printf("%s: %.1f%%\n", result.Label, result.Score*100)
-// POSITIVE: 100.0%
-```
-
-**CLI:**
-```bash
-$ kjarni classify "I love this product!"
-  ✓       POSITIVE  ████████████████████  100.0%
-          NEGATIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
-
-$ echo "Terrible quality" | kjarni classify
-  ✓       NEGATIVE  ████████████████████  100.0%
-          POSITIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
-```
-
-Models download on first use and are cached locally. No setup or configuration required.
-
-## CLI
-
-The CLI supports the same capabilities as the C# and Go libraries. It reads
-from arguments or stdin, and outputs human-readable tables or JSON.
-```bash
-# Sentiment analysis
-$ kjarni classify "Best purchase ever"
-  ✓       POSITIVE  ████████████████████  100.0%
-          NEGATIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
-
-# Toxicity detection
-$ kjarni classify "You are the worst cook ever" --model toxic-bert
-  ✓          toxic  ███████████████████░   92.8%
-            insult  ██████████████░░░░░░   72.3%
-           obscene  ██░░░░░░░░░░░░░░░░░░    7.6%
-     identity_hate  ░░░░░░░░░░░░░░░░░░░░    0.5%
-      severe_toxic  ░░░░░░░░░░░░░░░░░░░░    0.3%
-
-# Pipe from stdin
-$ echo "I hate mondays" | kjarni classify
-  ✓       NEGATIVE  ████████████████████  100.0%
-          POSITIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
-
-# JSON output for scripting
-$ echo "Great service" | kjarni classify --format json | jq '.label'
-"POSITIVE"
-
-# Semantic similarity
-$ kjarni similarity "doctor" "physician"
-  █████████████████░░░   86.0%  highly similar
-  ↔ "doctor"
-  ↔ "physician"
-
-# Index a folder and search it
-$ kjarni index create my-docs docs/*
-✓ Indexed 15 documents (39.52 KB)
-
-$ kjarni search my-docs "keeping data safe" --top-k 3
-  1. cryptocraphy.txt
-     ████████████████████  100.0%
-     "Symmetric and asymmetric cryptography protect digital communications by…"
-
-  2. tcpip.txt
-     ██████████░░░░░░░░░░   49.2%
-     "TCP/IP is a layered protocol suite that enables reliable data transmiss…"
-
-  3. neuralnetworks.txt
-     ░░░░░░░░░░░░░░░░░░░░    0.0%
-     "Neural networks consist of interconnected layers of artificial neurons …"
-
-# Search with reranking
-$ kjarni search my-docs "keeping data safe" --top-k 3 --rerank-model minilm-l6-v2-cross-encoder
-
-# Generate embeddings
-$ kjarni embed "hello world" --format json | head -n 5
-{
-  "dim": 384,
-  "embedding": [
-    0.17644444,
-    0.03936597,
-```
-
-## Examples
-
-### Sentiment Analysis
-
-**C#:**
-```csharp
-using var classifier = new Classifier("distilbert-sentiment");
-Console.WriteLine(classifier.Classify("Best purchase I've ever made!"));
-// POSITIVE (100.0%)
-```
-
-**Go:**
-```go
-c, _ := kjarni.NewClassifier("distilbert-sentiment")
-defer c.Close()
-
-result, _ := c.Classify("Best purchase I've ever made!")
-fmt.Printf("%s: %.1f%%\n", result.Label, result.Score*100)
-// POSITIVE: 100.0%
-```
-
-### Toxicity Detection
-
-**C#:**
-```csharp
-using var classifier = new Classifier("toxic-bert");
-Console.WriteLine(classifier.Classify("You are an idiot").ToDetailedString());
-```
-
-**Go:**
-```go
-c, _ := kjarni.NewClassifier("toxic-bert")
-defer c.Close()
-
-result, _ := c.Classify("You are an idiot")
-for _, s := range result.AllScores {
-    fmt.Printf("  %s: %.2f%%\n", s.Label, s.Score*100)
-}
-```
-```
-  ✓          toxic  ███████████████████░   92.8%
-            insult  ██████████████░░░░░░   72.3%
-           obscene  ██░░░░░░░░░░░░░░░░░░    7.6%
-     identity_hate  ░░░░░░░░░░░░░░░░░░░░    0.5%
-      severe_toxic  ░░░░░░░░░░░░░░░░░░░░    0.3%
-```
-
-### Embeddings
-
-**C#:**
-```csharp
-using var embedder = new Embedder("minilm-l6-v2");
-float[] vector = embedder.Encode("Hello world");
-Console.WriteLine(string.Join(", ", vector[..5]));
-// -0.034477282, 0.03102318, 0.006734989, 0.02610899, -0.03936202
-```
-
-**Go:**
-```go
-e, _ := kjarni.NewEmbedder("minilm-l6-v2")
-defer e.Close()
-
-vector, _ := e.Embed("Hello world")
-fmt.Printf("Dimensions: %d\n", len(vector))
-fmt.Printf("First 5: %v\n", vector[:5])
-```
-
-### Semantic Similarity
-
-**C#:**
-```csharp
 using var embedder = new Embedder("minilm-l6-v2");
 Console.WriteLine(embedder.Similarity("doctor", "physician"));
 // 0.8598132
 ```
 
-**Go:**
+That is the whole setup. No model export step, no `pip install torch`, no inference server, no API key.
+
+The name is Icelandic [ˈkʰjartnɪ]. It means "core."
+
+---
+
+## Why Kjarni exists
+
+Adding semantic search or classification to a .NET or Go application usually means standing up a Python service, shipping a 2GB PyTorch image, or exporting models to ONNX and hand-writing the tokenization and pooling around them. If your data cannot leave the building — legal, healthcare, defense, finance — the hosted-API path is closed to you entirely.
+
+Kjarni is a single `.so`/`.dll`/`.dylib` that runs inside your process, with predictable behavior and no external infrastructure.
+
+## How it compares
+
+|                              | **Kjarni** | ONNX Runtime | sentence-transformers | fastembed |
+| ---------------------------- | ---------- | ------------ | --------------------- | --------- |
+| Setup steps                  | 1 (add package) | Runtime + export each model | Python + PyTorch + model | Python + onnxruntime |
+| Python runtime required      | **No**     | No           | Yes                   | Yes       |
+| Model conversion step        | **None**   | `.onnx` export required | None        | None      |
+| First-class C# API           | **Yes**    | Low-level tensors only | No             | No        |
+| First-class Go API           | **Yes**    | Third-party cgo wrappers | No           | No        |
+| Tokenization included        | **Yes**    | Bring your own | Yes                  | Yes       |
+| Pooling / normalization      | **Yes**    | Bring your own | Yes                  | Yes       |
+| Built-in hybrid search (BM25 + vector) | **Yes** | No | No                | No        |
+| Built-in cross-encoder rerank | **Yes**   | No           | Separate model plumbing | Limited |
+| Runs in the browser (WASM)   | **Yes**    | Yes (ort-web) | No                   | No        |
+| GPU                          | WebGPU (Vulkan / DX12 / Metal) | CUDA, DirectML, others | CUDA | No |
+| Runtime dependency footprint | glibc 2.17 | ONNX Runtime native libs | ~2 GB       | onnxruntime |
+| License                      | MIT / Apache-2.0 | MIT     | Apache-2.0            | Apache-2.0 |
+
+ONNX Runtime is a general-purpose tensor executor and does that job well. Kjarni is task-level: you ask for an embedding or a ranking, not for a graph execution. That is the difference the table is describing.
+
+## Verified against PyTorch
+
+Kjarni's outputs are tested for numerical parity against PyTorch/HuggingFace golden values, and its GPU path is tested for parity against its own CPU path — encoders, cross-encoders, decoders, RoPE, RMSNorm, and full generation traces:
+
+```
+test models::sentence_encoder::...::test_torch_sentence_encoder_golden_values ... ok
+test models::sequence_classifier::...::test_cross_encoder_rerank_torch_parity ... ok
+test tests::encoder_parity_test::test_encoder_cpu_gpu_parity                   ... ok
+test tests::decoder_parity_test::test_full_text_generation_parity              ... ok
+
+test result: ok. 44 passed; 0 failed
+```
+
+A reimplemented engine is only worth using if it agrees with the reference implementation. These tests are how that claim is kept honest.
+
+## Install
+
+**C# / .NET** — [nuget.org/packages/Kjarni](https://www.nuget.org/packages/Kjarni)
+
+```bash
+dotnet add package Kjarni
+```
+
+**Go** — [pkg.go.dev/github.com/olafurjohannsson/kjarni-go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
+
+```bash
+go get github.com/olafurjohannsson/kjarni-go@latest
+```
+
+**CLI**
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh    # Linux / macOS
+irm https://kjarni.ai/install.ps1 | iex         # Windows
+```
+
+**Python** *(pre-release)*
+
+```bash
+pip install --pre kjarni
+```
+
+**Rust** *(pre-release)*
+
+```bash
+cargo add kjarni@0.0.1-alpha.1
+```
+
+Models download on first use and are cached in `~/.cache/kjarni` (`%LOCALAPPDATA%\kjarni` on Windows). No configuration required.
+
+## What it does
+
+### Embeddings
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+float[] vector = embedder.Encode("Hello world");        // 384 dims
+float[][] batch = embedder.EncodeBatch(documents);
+float sim      = embedder.Similarity("doctor", "physician");
+```
+
 ```go
 e, _ := kjarni.NewEmbedder("minilm-l6-v2")
 defer e.Close()
-
-sim, _ := e.Similarity("doctor", "physician")
-fmt.Printf("Similarity: %.1f%%\n", sim*100)
-// Similarity: 86.0%
+vector, _ := e.Embed("Hello world")
+sim, _    := e.Similarity("doctor", "physician")
 ```
 
-### Index & Search
+### Semantic search over your own documents
 
-**C#:**
+Indexing and hybrid retrieval are built in — there is no separate vector database to run.
+
 ```csharp
 using var indexer = new Indexer(model: "minilm-l6-v2", quiet: true);
 indexer.Create("my_index", new[] { "docs/" });
@@ -225,127 +135,174 @@ using var searcher = new Searcher(
     model: "minilm-l6-v2",
     rerankerModel: "minilm-l6-v2-cross-encoder");
 
-var results = searcher.Search("my_index", "how do returns work?",
-    mode: SearchMode.Hybrid);
-
-foreach (var r in results)
-    Console.WriteLine($"  {r.Score:F4}: {r.Text}");
+foreach (var r in searcher.Search("my_index", "how do returns work?", mode: SearchMode.Hybrid))
+    Console.WriteLine($"{r.Score:F4}  {r.Text}");
 ```
 
-**Go:**
-```go
-idx, _ := kjarni.NewIndexer("minilm-l6-v2")
-defer idx.Close()
-idx.Create("./my-index", []string{"./docs"})
+Search modes: `Semantic` (vector), `Keyword` (BM25), `Hybrid` (both, fused).
 
-s, _ := kjarni.NewSearcher("minilm-l6-v2", "minilm-l6-v2-cross-encoder")
-defer s.Close()
-results, _ := s.Search("./my-index", "how do returns work?", kjarni.Hybrid)
+### Reranking
 
-for _, r := range results {
-    fmt.Printf("%.3f: %s\n", r.Score, r.Text)
-}
-```
-
-Search modes: `Semantic` (vector similarity), `Keyword` (BM25), `Hybrid` (both).
-
-## Models
-
-| Task | Model | Size |
-|------|-------|------|
-| Sentiment (3-class) | `roberta-sentiment` | 125MB |
-| Sentiment (multilingual) | `bert-sentiment-multilingual` | 168MB |
-| Sentiment (binary) | `distilbert-sentiment` | 66MB |
-| Emotion (7-class) | `distilroberta-emotion` | 82MB |
-| Emotion (28-class) | `roberta-emotions` | 125MB |
-| Toxicity | `toxic-bert` | 110MB |
-| Embeddings | `minilm-l6-v2` | 90MB |
-| Embeddings | `mpnet-base-v2` | 420MB |
-| Reranking | `minilm-l6-v2-cross-encoder` | 90MB |
-
-Models download on first use. The engine also supports Llama, Qwen2, Mistral, Phi-3, T5, BART, and Whisper.
-
-Bindings and APIs for these models are intentionally not exposed in
-the initial release and will ship in a future version.
-
-## Configuration
-
-### Cache Directory
-
-Default locations:
-- **Linux:** `~/.cache/kjarni`
-- **Windows:** `%LOCALAPPDATA%\kjarni`
-
-Override with `KJARNI_CACHE_DIR` or the constructor parameter:
 ```csharp
-using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
+using var reranker = new Reranker("minilm-l6-v2-cross-encoder");
+var ranked = reranker.Rank(query, candidates);
 ```
 
-### HuggingFace Token
+### Classification
 
-For gated models:
+```csharp
+using var classifier = new Classifier("roberta-sentiment");
+Console.WriteLine(classifier.Classify("I love this product!"));
+// positive (98.5%)
+
+using var toxic = new Classifier("toxic-bert");
+Console.WriteLine(toxic.Classify("You are an idiot").ToDetailedString());
+```
+
+### From the command line
+
+The CLI exposes the same capabilities, reads from stdin, and writes JSON — so it pipes like any UNIX tool.
+
 ```bash
-export HF_TOKEN=hf_your_token_here
+$ kjarni classify "Best purchase ever"
+  ✓       POSITIVE  ████████████████████  100.0%
+          NEGATIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
+
+$ echo "Great service" | kjarni classify --format json | jq -r '.label'
+POSITIVE
+
+$ kjarni index create my-docs docs/*
+✓ Indexed 15 documents (39.52 KB)
+
+$ kjarni search my-docs "keeping data safe" --top-k 3
+  1. cryptography.txt
+     ████████████████████  100.0%
+     "Symmetric and asymmetric cryptography protect digital communications by…"
+
+  2. tcpip.txt
+     ██████████░░░░░░░░░░   49.2%
+     "TCP/IP is a layered protocol suite that enables reliable data transmiss…"
+
+$ kjarni similarity "doctor" "physician"
+  █████████████████░░░   86.0%  highly similar
 ```
 
-### Quiet Mode
-```csharp
-using var embedder = new Embedder("minilm-l6-v2", quiet: true);
-```
+## Supported models
 
-## Platform Support
+Referenced by short name; the underlying HuggingFace model is listed for searchability. Models download on first use.
 
-| Platform | CPU | GPU |
-|----------|-----|-----|
-| Linux x64 | Yes | Yes (Vulkan) |
-| Windows x64 | Yes | Yes (DX12/Vulkan) |
-| macOS ARM64 | Planned | Planned (Metal) |
+| Task | Kjarni name | HuggingFace model | Size |
+| ---- | ----------- | ----------------- | ---- |
+| Embeddings | `minilm-l6-v2` | `sentence-transformers/all-MiniLM-L6-v2` | 22 MB |
+| Embeddings | `mpnet-base-v2` | `sentence-transformers/all-mpnet-base-v2` | 110 MB |
+| Embeddings | `nomic-embed-text` | `nomic-ai/nomic-embed-text-v1.5` | 137 MB |
+| Embeddings (multilingual) | `bge-m3` | `BAAI/bge-m3` | 567 MB |
+| Question answering | `distilbert-base` | `distilbert-base-cased-distilled-squad` | 66 MB |
+| Reranking | `minilm-l6-v2-cross-encoder` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 22 MB |
+| Sentiment (binary) | `distilbert-sentiment` | `distilbert/distilbert-base-uncased-finetuned-sst-2-english` | 66 MB |
+| Sentiment (3-class) | `roberta-sentiment` | `cardiffnlp/twitter-roberta-base-sentiment-latest` \* | 125 MB |
+| Sentiment (multilingual, 5-star) | `bert-sentiment-multilingual` | `nlptown/bert-base-multilingual-uncased-sentiment` \* | 168 MB |
+| Toxicity | `toxic-bert` | `unitary/toxic-bert` \* | 110 MB |
+| Emotion (7-class) | `distilroberta-emotion` | `j-hartmann/emotion-english-distilroberta-base` \* | 82 MB |
+| Emotion (28-class) | `roberta-emotions` | `SamLowe/roberta-base-go_emotions` | 125 MB |
+| Speech-to-text | `whisper-small` | `openai/whisper-small` | 244 MB |
+| Speech-to-text | `whisper-large-v3` | `openai/whisper-large-v3` | 1.6 GB |
+| Summarization | `distilbart-cnn` | `sshleifer/distilbart-cnn-12-6` \* | 306 MB |
+| Summarization | `bart-large-cnn` | `facebook/bart-large-cnn` | 406 MB |
+| Instruction / seq2seq | `flan-t5-base` | `google/flan-t5-base` | 250 MB |
+| Instruction / seq2seq | `flan-t5-large` | `google/flan-t5-large` | 780 MB |
 
-GPU inference uses WebGPU. CUDA is not required.
-```csharp
-using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
-```
+\* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron); the upstream model and its license are unchanged.
 
-## How It Works
+`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation works but is not the focus of this release — for local chat, [llama.cpp](https://github.com/ggerganov/llama.cpp) is the more mature choice. Kjarni's lane is encoders: embeddings, search, reranking, and classification.
 
-Kjarni does not wrap ONNX, LibTorch, or any external inference engine.
-The runtime is written in Rust. The only system dependency is glibc 2.17.
+## FAQ
+
+### Does it need Python?
+
+No. Kjarni is a Rust library compiled to a native shared object. There is no Python interpreter, no PyTorch, and no `transformers` package involved at any point. The optional Python *binding* lets you call Kjarni from Python — it does not make Python a dependency of the engine.
+
+### Does it work offline or air-gapped?
+
+Yes. Models are downloaded once and cached on disk; after that, nothing touches the network. For a fully air-gapped install, pre-populate the cache directory (or point `KJARNI_CACHE_DIR` at it) and the engine never attempts a connection. No telemetry is collected.
+
+### Is a GPU required?
+
+No. Every capability runs on CPU with hand-tuned SIMD kernels (AVX2/FMA on x86, NEON on ARM). GPU acceleration is optional and uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. CUDA is not required and not used.
+
+### How does it compare to ONNX Runtime?
+
+ONNX Runtime executes a computation graph; you supply the tokenization, the pooling, the normalization, and an exported `.onnx` file for every model. Kjarni is task-level: `Encode(text)` returns a finished, normalized embedding, and models are referenced by name with no export step. Kjarni also includes indexing, BM25, hybrid fusion, and cross-encoder reranking, which ONNX Runtime leaves to you. If you need to run arbitrary models from arbitrary frameworks, use ONNX Runtime. If you need embeddings and search in a .NET or Go application, Kjarni is considerably less work.
+
+### Can I use it as a vector database?
+
+For small to medium corpora, yes — the built-in index handles storage, BM25, vector search, and hybrid fusion with no separate service. It is designed as the SQLite of local semantic search, not as a replacement for a distributed vector store at hundreds of millions of vectors.
+
+### Does it run in the browser?
+
+Yes. The encoder path compiles to WebAssembly and runs client-side, which means text never leaves the user's machine — it powers the [Obsidian semantic-search plugin](https://github.com/olafurjohannsson/kjarni), which does all of its indexing and querying locally in the browser runtime.
+
+### Which platforms are supported?
+
+| Platform | CPU | GPU | Status |
+| -------- | --- | --- | ------ |
+| Linux x64 | Yes | Yes (Vulkan) | Tested in CI |
+| Linux ARM64 | Yes | Yes (Vulkan) | Built in CI |
+| Windows x64 | Yes | Yes (DX12 / Vulkan) | Built in CI |
+| macOS ARM64 | Yes | Metal | Binaries published; test coverage in progress |
+| WebAssembly | Yes | — | Encoder path |
+
+The only system dependency on Linux is glibc 2.17 or newer.
+
+### What license is it under?
+
+MIT or Apache-2.0, at your option — including commercial and on-premise use.
+
+## How it works
+
+Kjarni does not wrap ONNX, LibTorch, or any external inference engine. The runtime is written in Rust from scratch.
 
 - Hand-tuned SIMD kernels (AVX2/FMA, NEON)
-- Custom WGSL compute shaders for GPU
+- Custom WGSL compute shaders for GPU inference
 - Zero-copy model loading via mmap
 - BF16 compute path
 - Quantization: Q4, Q6, Q8
+- Single shared library, no runtime linkage beyond libc
 
-## Why
+## Project structure
 
-Adding machine learning to an application usually means Python, CUDA,
-containers, or an external service. Kjarni is a single `.so` or `.dll`
-that runs as part of your application, with predictable behavior and
-no external infrastructure.
-
-## Project Structure
 ```
 crates/
-├── kjarni/              # High-level API
-├── kjarni-transformers/  # Engine — models, kernels, GPU shaders
-├── kjarni-ffi/          # C ABI + language bindings
+├── kjarni/               # High-level task API (Embedder, Classifier, Searcher…)
+├── kjarni-transformers/  # Engine — kernels, attention, GPU shaders, tokenizer
+├── kjarni-models/        # Per-architecture models (BERT, T5, BART, Llama, Whisper…)
+├── kjarni-search/        # BM25, vector, hybrid fusion
+├── kjarni-rag/           # Index writer/reader, chunking, document loading
+├── kjarni-ffi/           # C ABI + C#, Go, Python bindings
 │   └── bindings/
-│       ├── csharp/      # NuGet package
-│       └── go/          # Go module (published to kjarni-go)
-├── kjarni-cli/          # Command-line tool
-└── kjarni-examples/     # Rust examples
+├── kjarni-cli/           # Command-line tool
+└── kjarni-wasm/          # WebAssembly build
 ```
 
-The Go module is auto-published from this monorepo to
-[kjarni-go](https://github.com/olafurjohannsson/kjarni-go) via CI.
+The Go module and NuGet package are published from this monorepo by CI on release.
 
-## Building from Source
+## Building from source
+
 ```bash
 cargo build --release -p kjarni-ffi
 cargo build --release -p kjarni-cli
-cargo test
+cargo test --workspace
 ```
+
+Requires Rust 1.91.1 or newer.
+
+## Documentation
+
+- [kjarni.ai](https://kjarni.ai) — quickstarts, guides, and the browser demo
+- [Semantic Search in C# — Without a Vector Database](https://kjarni.ai/blog/semanticsearch/)
+- [Build a Document Search Engine in C#](https://kjarni.ai/blog/documentsearchengine/)
+- [Sentiment Analysis in C# — Without Python or External APIs](https://kjarni.ai/blog/sentimentanalysis/)
+- [Why I Built a Native ML Inference Engine in Rust](https://kjarni.ai/blog/nativeinference/)
 
 ## License
 
