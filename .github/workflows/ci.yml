@@ -354,3 +354,82 @@ jobs:
             artifacts/kjarni-aarch64-macos.tar.gz
             artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
+
+  # ─── Publish to NuGet ───────────────────────────────────────────
+  # This lives here, not in a release-triggered workflow, because GitHub does
+  # not trigger workflows from events raised by GITHUB_TOKEN. The release above
+  # is authored by github-actions[bot], so `on: release: [published]` never
+  # fires — which is why v0.1.1 and v0.1.2 never reached NuGet. Depending on
+  # `release` via `needs` keeps it in-run, where no event delivery is involved.
+  #
+  # sync-nuget.yml still exists as a manual (workflow_dispatch) re-publish path.
+  publish-nuget:
+    name: Publish to NuGet
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # The same artifacts the release job published, taken directly from the
+      # run rather than re-downloaded from the release.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Place native libraries
+        run: |
+          CSHARP_DIR=crates/kjarni-ffi/bindings/csharp/Kjarni
+          # Tracked as a symlink to ../runtimes; replace it with real directories.
+          rm -rf "$CSHARP_DIR/runtimes"
+          mkdir -p "$CSHARP_DIR"/runtimes/{linux-x64,linux-arm64,osx-arm64,win-x64}/native
+
+          cp artifacts/kjarni-x86_64-linux/libkjarni_ffi.so    "$CSHARP_DIR/runtimes/linux-x64/native/"
+          cp artifacts/kjarni-aarch64-linux/libkjarni_ffi.so   "$CSHARP_DIR/runtimes/linux-arm64/native/"
+          cp artifacts/kjarni-aarch64-macos/libkjarni_ffi.dylib "$CSHARP_DIR/runtimes/osx-arm64/native/"
+          cp artifacts/kjarni-x86_64-windows/kjarni_ffi.dll    "$CSHARP_DIR/runtimes/win-x64/native/"
+
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Publishing version $VERSION"
+
+      - name: Pack
+        run: |
+          cd crates/kjarni-ffi/bindings/csharp/Kjarni
+          dotnet pack -c Release -p:Version=${{ env.PACKAGE_VERSION }} -o nupkg
+          cd ../Kjarni.Extensions.AI
+          dotnet pack -c Release -p:Version=${{ env.PACKAGE_VERSION }} -o nupkg
+
+      # Fails the job before publishing if a native library is missing from the
+      # package, which is otherwise only discoverable by a user at runtime.
+      - name: Verify package contents
+        run: |
+          PKG=$(ls crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg/*.nupkg)
+          unzip -l "$PKG"
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
+            unzip -l "$PKG" | grep -q "runtimes/$rid/native/" \
+              || { echo "::error::missing native library for $rid"; exit 1; }
+          done
+          echo "All four native libraries present."
+
+      # Kjarni is pushed first: Kjarni.Extensions.AI depends on it, and NuGet
+      # rejects a package whose dependency is not yet indexed.
+      - name: Push to NuGet
+        run: |
+          cd crates/kjarni-ffi/bindings/csharp/Kjarni/nupkg
+          dotnet nuget push *.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+          cd "$GITHUB_WORKSPACE/crates/kjarni-ffi/bindings/csharp/Kjarni.Extensions.AI/nupkg"
+          dotnet nuget push *.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

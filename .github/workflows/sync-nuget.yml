@@ -1,8 +1,21 @@
-name: Sync NuGet
+name: Sync NuGet (manual)
 
+# Manual re-publish for an existing release. The automatic path is the
+# `publish-nuget` job in ci.yml — it must live there because GitHub does not
+# trigger workflows from events raised by GITHUB_TOKEN, so `on: release` never
+# fires for a release created by the bot.
+#
+# Use this to republish a tag whose CI publish step failed, or to publish a
+# release cut before that job existed. Remember NuGet versions are immutable:
+# --skip-duplicate means re-running on an already-published version exits
+# green without publishing anything.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v0.1.3-preview.1"
+        required: true
+        type: string
 
 jobs:
   publish-nuget:
@@ -12,7 +25,11 @@ jobs:
       contents: read
 
     steps:
+      # Check out the tag being published, not the default branch, so the
+      # packed README and csproj match what that release was built from.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -23,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
-          gh release download ${{ github.event.release.tag_name }} \
+          gh release download ${{ inputs.tag }} \
             --dir release-assets
 
       - name: Place native libraries
@@ -53,7 +70,7 @@ jobs:
 
       - name: Set version from tag
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${{ inputs.tag }}"
           VERSION="${VERSION#v}"
           echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
 
