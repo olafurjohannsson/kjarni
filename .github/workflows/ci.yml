@@ -345,6 +345,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # A tag with a hyphen is a SemVer prerelease (v0.1.3-preview.1).
+          # Without this it would be published as "Latest release".
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             artifacts/kjarni-x86_64-linux.tar.gz
             artifacts/kjarni-aarch64-linux.tar.gz
