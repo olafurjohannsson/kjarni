@@ -57,20 +57,11 @@ jobs:
           VERSION="${VERSION#v}"
           echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
 
-      # Guards against publishing a package that does not work. The C# suite
-      # exercises the native library placed above, so this tests the artifact
-      # that is about to ship rather than a locally-built one.
-      - name: Cache models
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/kjarni
-          key: kjarni-models-csharp-v1
-
-      - name: Test before publishing
-        run: |
-          dotnet test crates/kjarni-ffi/bindings/csharp/Kjarni.sln \
-            --configuration Release \
-            --logger "console;verbosity=minimal"
+      # No test step here. ci.yml gates the release job on `csharp-test`, so
+      # these assets only exist if the full C# suite passed at this commit.
+      # Testing here would additionally need a cargo build (the DllImport
+      # resolver looks for target/release/libkjarni_ffi.so) and a model
+      # download — neither of which this workflow does.
 
       - name: Pack
         run: |
