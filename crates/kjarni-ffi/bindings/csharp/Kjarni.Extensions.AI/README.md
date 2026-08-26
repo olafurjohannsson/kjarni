@@ -48,10 +48,16 @@ public class SearchService(IEmbeddingGenerator<string, Embedding<float>> embeddi
 If you already hold a Kjarni `Embedder` — because you also use it for similarity or search — wrap it rather than loading the model twice:
 
 ```csharp
+using Kjarni;
+using Microsoft.Extensions.AI;
+
 using var embedder = new Embedder("minilm-l6-v2");
 
 var generator = embedder.AsEmbeddingGenerator("minilm-l6-v2");
 ```
+
+`AsEmbeddingGenerator` and `AddKjarniEmbeddingGenerator` live in the `Microsoft.Extensions.AI`
+namespace, so they light up alongside the abstractions themselves — no extra `using` to discover.
 
 By default the generator **borrows** the embedder: disposing the generator leaves the embedder alive, since you created it. Pass `ownsEmbedder: true` to transfer ownership.
 
@@ -83,12 +89,12 @@ var embeddings = await generator.GenerateAsync(documents);
 
 Any Kjarni embedding model works. `minilm-l6-v2` is the default — smallest and fastest.
 
-| Model | Dimensions | Size |
-| ----- | ---------- | ---- |
-| `minilm-l6-v2` | 384 | 22 MB |
-| `mpnet-base-v2` | 768 | 110 MB |
-| `nomic-embed-text` | 768 | 137 MB |
-| `bge-m3` (multilingual) | 1024 | 567 MB |
+| Model | Dimensions | On disk |
+| ----- | ---------- | ------- |
+| `minilm-l6-v2` | 384 | 88 MB |
+| `mpnet-base-v2` | 768 | 419 MB |
+| `nomic-embed-text` | 768 | 523 MB |
+| `bge-m3` (multilingual) | 1024 | ~2 GB |
 
 ```csharp
 var generator = new KjarniEmbeddingGenerator("mpnet-base-v2");
@@ -111,4 +117,4 @@ GPU inference uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal 
 
 ## License
 
-MIT or Apache-2.0, at your option.
+MIT.

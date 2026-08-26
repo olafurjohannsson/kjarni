@@ -1,8 +1,14 @@
 using System;
-using Microsoft.Extensions.AI;
+using Kjarni;
+using Kjarni.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kjarni.Extensions.AI
+// Deliberately in the Microsoft.Extensions.AI namespace, not Kjarni.Extensions.AI.
+// Consumers already write `using Kjarni;` and `using Microsoft.Extensions.AI;`, so
+// AsEmbeddingGenerator/AddKjarniEmbeddingGenerator light up without a third using
+// that nobody would guess — and which IntelliSense cannot suggest, because Embedder
+// is already in scope. This is the convention other providers follow.
+namespace Microsoft.Extensions.AI
 {
     /// <summary>
     /// Extension methods for exposing a Kjarni <see cref="Embedder"/> as an
