@@ -4,6 +4,37 @@
 mod tests {
     use super::super::*;
 
+    /// A phrase that must appear in the transcription of the fixture.
+    ///
+    /// Asserting on content rather than `!is_empty()` is the point: a decode
+    /// that silently produces fluent nonsense — the failure mode a broken
+    /// kernel or a mis-loaded weight actually produces — passes an emptiness
+    /// check and fails this one.
+    const EXPECTED_PHRASE: &str = "ask not what your country can do for you";
+
+    /// Absolute path to the spoken-word fixture used by the `#[ignore]`d
+    /// integration tests.
+    ///
+    /// Resolved from CARGO_MANIFEST_DIR rather than a relative path: the old
+    /// `../../crates/kjarni-models/examples/...` silently depended on the
+    /// directory cargo happened to run the test binary from, and pointed at a
+    /// file that was never committed.
+    fn speech_fixture() -> std::path::PathBuf {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/speech.wav");
+
+        assert!(
+            path.exists(),
+            "missing speech fixture at {}\n\
+             These tests transcribe real speech, so they need a short \
+             spoken-word WAV (16 kHz mono is ideal).\n\
+             Add one at that path, then re-run with `cargo test -- --ignored`.",
+            path.display()
+        );
+
+        path
+    }
+
     #[test]
     fn test_task_display() {
         assert_eq!(Task::Transcribe.to_string(), "transcribe");
@@ -65,10 +96,14 @@ mod tests {
         assert_eq!(transcriber.device(), kjarni_transformers::Device::Cpu);
 
         let result = transcriber
-            .transcribe_file("../../crates/kjarni-models/examples/hideyowife.wav")
+            .transcribe_file(speech_fixture())
             .expect("Transcription failed");
 
-        assert!(!result.text.is_empty(), "Transcription should not be empty");
+        assert!(
+            result.text.to_lowercase().contains(EXPECTED_PHRASE),
+            "transcription did not contain the expected phrase.\n  expected: {EXPECTED_PHRASE}\n  got: {}",
+            result.text
+        );
         assert_eq!(result.language, "en");
         assert!(result.duration_secs > 0.0);
 
@@ -88,10 +123,22 @@ mod tests {
             .expect("Failed to build transcriber");
 
         let result = transcriber
-            .transcribe_file("../../crates/kjarni-models/examples/hideyowife.wav")
+            .transcribe_file(speech_fixture())
             .expect("Transcription failed");
 
         assert!(!result.segments.is_empty(), "Should have timed segments");
+
+        let joined = result
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        assert!(
+            joined.contains(EXPECTED_PHRASE),
+            "segments did not reconstruct the expected phrase.\n  expected: {EXPECTED_PHRASE}\n  got: {joined}"
+        );
 
         for seg in &result.segments {
             assert!(seg.end >= seg.start, "Segment end should be >= start");
@@ -114,7 +161,7 @@ mod tests {
             .expect("Failed to build transcriber");
 
         let stream = transcriber
-            .stream_file("../../crates/kjarni-models/examples/hideyowife.wav")
+            .stream_file(speech_fixture())
             .await
             .expect("Stream failed");
 
@@ -132,7 +179,10 @@ mod tests {
         }
 
         assert!(token_count > 0, "Should have received tokens");
-        assert!(!text.is_empty(), "Should have received text");
+        assert!(
+            text.to_lowercase().contains(EXPECTED_PHRASE),
+            "streamed text did not contain the expected phrase.\n  expected: {EXPECTED_PHRASE}\n  got: {text}"
+        );
         println!("Streamed {} tokens: {}", token_count, text);
     }
 
@@ -156,7 +206,7 @@ mod tests {
             .expect("Failed to build transcriber");
 
         let _ = transcriber
-            .transcribe_file("../../crates/kjarni-models/examples/hideyowife.wav")
+            .transcribe_file(speech_fixture())
             .expect("Transcription failed");
 
         let stages = stages_seen.lock().unwrap();
