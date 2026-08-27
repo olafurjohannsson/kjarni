@@ -32,6 +32,7 @@ use kjarni_transformers::{
     traits::{Device, InferenceModel, ModelConfig as _, ModelLayout, ModelMetadata},
     weights::ModelWeights,
 };
+use kjarni_transformers::models::get_default_cache_dir;
 
 pub struct WhisperModel {
     tokenizer: Tokenizer,
@@ -51,11 +52,7 @@ impl WhisperModel {
         load_config: Option<ModelLoadConfig>,
     ) -> Result<Self> {
         let info = model_type.info();
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory")
-                .join("kjarni")
-        });
+        let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download model files

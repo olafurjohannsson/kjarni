@@ -23,6 +23,7 @@ use super::builder::Seq2SeqGeneratorBuilder;
 use super::resolution::apply_overrides;
 use super::types::{Seq2SeqError, Seq2SeqOverrides, Seq2SeqResult, Seq2SeqToken};
 use super::validation::validate_for_seq2seq;
+use kjarni_transformers::models::get_default_cache_dir;
 
 /// Generic text-to-text generator for encoder-decoder models
 pub struct Seq2SeqGenerator {
@@ -79,11 +80,7 @@ impl Seq2SeqGenerator {
         }
 
         // Determine cache directory
-        let cache_dir = builder.cache_dir.clone().unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("no cache directory found")
-                .join("kjarni")
-        });
+        let cache_dir = builder.cache_dir.clone().unwrap_or_else(get_default_cache_dir);
 
         // Check if model is downloaded
         let is_downloaded = model_type.is_downloaded(&cache_dir);

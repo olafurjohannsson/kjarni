@@ -10,7 +10,10 @@ use crate::{
     common::HFGenerationDefaults,
     cpu::encoder::{CpuEncoder, GpuEncoder},
     encoder_decoder::traits::{CpuCrossDecoder, GpuCrossDecoder},
-    models::{ModelType, base::ModelLoadConfig, download_model_files, registry::WeightsFormat},
+    models::{
+        ModelType, base::ModelLoadConfig, download_model_files, get_default_cache_dir,
+        registry::WeightsFormat,
+    },
     pipeline::{EncoderDecoderPipeline, EncoderDecoderPipelineBuilder},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
@@ -56,11 +59,7 @@ impl Seq2SeqLoader {
         load_config: Option<ModelLoadConfig>,
     ) -> Result<M> {
         let info = model_type.info();
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory")
-                .join("kjarni")
-        });
+        let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         let generation_config = HFGenerationConfig::load_or_default(&model_dir);

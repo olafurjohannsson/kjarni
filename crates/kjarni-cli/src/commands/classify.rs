@@ -22,6 +22,10 @@ pub async fn run(
     dtype: Option<&str>,
     quiet: bool,
 ) -> Result<()> {
+    // Fail on an unknown model here, with suggestions, rather than letting the
+    // builder report it without context.
+    let _ = crate::commands::util::resolve_model(model, Some("classifier"))?;
+
     // Resolve input text
     let text = if input.is_empty() {
         crate::commands::util::resolve_input(None)?

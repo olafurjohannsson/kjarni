@@ -7,10 +7,13 @@ use kjarni_transformers::models::{download_model_files, registry::WeightsFormat,
 use super::{DownloadPolicy, KjarniError, KjarniResult};
 
 /// Get the default cache directory.
+///
+/// Delegates rather than re-deriving the path, so `KJARNI_CACHE_DIR` is honoured
+/// here too. This used to inline the platform default, which meant
+/// `kjarni model download` (which does read the variable) wrote to one directory
+/// while inference looked in another.
 pub fn default_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .expect("No cache directory found")
-        .join("kjarni")
+    kjarni_transformers::models::get_default_cache_dir()
 }
 
 /// Resolve the cache directory, using the provided path or the default.

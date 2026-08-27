@@ -189,7 +189,9 @@ using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
 using var quiet    = new Embedder("minilm-l6-v2", quiet: true);
 ```
 
-`KJARNI_CACHE_DIR` overrides the default cache location. `HF_TOKEN` is used for gated models.
+The `cacheDir` parameter is the reliable way to relocate model storage; pass it per
+instance as above. `HF_TOKEN` is read from the environment and is required for gated
+Hugging Face repositories, such as any `meta-llama/*` model.
 
 ## Platform support
 

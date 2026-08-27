@@ -25,6 +25,7 @@ use kjarni_transformers::{
 use crate::models::gpt2::{
     config::Gpt2Config, cpu_decoder::Gpt2CpuDecoder, gpu_decoder::Gpt2GpuDecoder,
 };
+use kjarni_transformers::models::get_default_cache_dir;
 
 pub struct Gpt2Model {
     cpu_decoder: Option<Gpt2CpuDecoder>,
@@ -81,11 +82,7 @@ impl Gpt2Model {
             }
         }
 
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory found")
-                .join("kjarni")
-        });
+        let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         download_model_files(

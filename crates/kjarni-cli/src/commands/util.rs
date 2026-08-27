@@ -37,6 +37,22 @@ pub fn resolve_input(input: Option<&str>) -> Result<String> {
     }
 }
 
+/// Resolve a CLI model name, or fail with a message that suggests near matches.
+///
+/// Every command should go through this before building anything. Previously only
+/// `generate` validated up front; `chat`, `classify`, `embed`, `translate` and
+/// `summarize` passed the name straight to their builder, so a typo surfaced as
+/// whatever the builder happened to say. For chat that was
+/// `Failed to initialize chat: <name>`, which does not even reveal that the name
+/// was the problem, while `generate` offered a "did you mean?" for the same typo.
+///
+/// `arch_hint` is the `kjarni model list --arch <hint>` value for the command, so
+/// the error can point at the right subset of the registry.
+pub fn resolve_model(name: &str, arch_hint: Option<&str>) -> anyhow::Result<ModelType> {
+    ModelType::from_cli_name(name)
+        .ok_or_else(|| anyhow::anyhow!(model_not_found_error(name, arch_hint)))
+}
+
 /// Create a helpful error message with "did you mean?" suggestions
 pub fn model_not_found_error(name: &str, arch_hint: Option<&str>) -> String {
     let mut msg = format!("Unknown model: '{}'.", name);

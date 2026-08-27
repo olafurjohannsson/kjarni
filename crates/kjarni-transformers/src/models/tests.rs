@@ -258,9 +258,72 @@ fn test_get_default_cache_dir() {
     let path = get_default_cache_dir();
     assert!(path.is_absolute());
 
-    if cfg!(unix) {
+    // Only meaningful when the caller has not redirected the cache.
+    if cfg!(unix) && std::env::var("KJARNI_CACHE_DIR").is_err() {
         assert!(path.to_string_lossy().contains("kjarni"));
     }
+}
+
+/// No module may re-derive the cache path for itself.
+///
+/// `get_default_cache_dir` is the only place that consults `KJARNI_CACHE_DIR`.
+/// Nine call sites across the loaders had instead inlined
+/// `dirs::cache_dir().expect(..).join("kjarni")`, so the variable was honoured by
+/// `kjarni model download` and ignored by every inference path: weights landed in
+/// the chosen directory and were then looked for in the platform default.
+///
+/// Asserted over the sources rather than over behaviour because the failure is a
+/// copied expression, and because an env-var test would have to mutate global
+/// state shared with every other test in the binary.
+#[test]
+fn no_module_inlines_the_cache_path() {
+    use std::path::Path;
+
+    fn scan(dir: &Path, hits: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path, hits);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                // Tests and examples may pin an explicit directory.
+                if name == "tests.rs" || path.components().any(|c| {
+                    matches!(c.as_os_str().to_str(), Some("tests") | Some("examples"))
+                }) {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                for (i, line) in text.lines().enumerate() {
+                    if line.contains("dirs::cache_dir()")
+                        && !text.contains("pub fn get_default_cache_dir")
+                    {
+                        hits.push(format!("{}:{}", path.display(), i + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    // CARGO_MANIFEST_DIR is crates/kjarni-transformers; walk the whole workspace.
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate dir has a parent");
+
+    let mut hits = Vec::new();
+    scan(crates_dir, &mut hits);
+
+    assert!(
+        hits.is_empty(),
+        "these call sites bypass get_default_cache_dir(), so KJARNI_CACHE_DIR \
+         will be ignored there:\n  {}\n\
+         Call kjarni_transformers::models::get_default_cache_dir() instead.",
+        hits.join("\n  ")
+    );
 }
 
 #[test]
