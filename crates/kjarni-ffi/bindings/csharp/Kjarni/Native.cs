@@ -706,12 +706,49 @@ public static extern KjarniErrorCode kjarni_indexer_add_with_callback(
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
         public static extern KjarniErrorCode kjarni_chat_send_with_history(
             IntPtr handle,
-            int[] roles,
-            IntPtr[] contents,
+            int[]? roles,
+            IntPtr[]? contents,
             UIntPtr historyLen,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
             IntPtr genConfig,
             out IntPtr result);
+
+        // Send with history and an explicit generation config
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_send_with_history")]
+        public static extern KjarniErrorCode kjarni_chat_send_with_history_config(
+            IntPtr handle,
+            int[]? roles,
+            IntPtr[]? contents,
+            UIntPtr historyLen,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            out IntPtr result);
+
+        // Stream with history
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern KjarniErrorCode kjarni_chat_stream_with_history(
+            IntPtr handle,
+            int[]? roles,
+            IntPtr[]? contents,
+            UIntPtr historyLen,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            IntPtr genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
+
+        // Stream with history and an explicit generation config
+        [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "kjarni_chat_stream_with_history")]
+        public static extern KjarniErrorCode kjarni_chat_stream_with_history_config(
+            IntPtr handle,
+            int[]? roles,
+            IntPtr[]? contents,
+            UIntPtr historyLen,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+            ref KjarniGenerationConfig genConfig,
+            KjarniStreamCallback callback,
+            IntPtr userData,
+            IntPtr cancelToken);
 
         // Conversation
         [DllImport(LibName, CallingConvention = CallingConvention.Cdecl)]

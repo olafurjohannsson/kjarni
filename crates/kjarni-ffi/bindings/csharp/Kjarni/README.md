@@ -43,16 +43,17 @@ Pass whole collections to `EncodeBatch` rather than looping — Kjarni batches n
 
 ### Microsoft.Extensions.AI and Semantic Kernel
 
-The companion package implements `IEmbeddingGenerator<string, Embedding<float>>`, so Kjarni drops
-into the standard .NET AI abstractions — including Semantic Kernel — with no cloud call and no
-Ollama daemon:
+The companion package implements `IEmbeddingGenerator<string, Embedding<float>>` and
+`IChatClient`, so Kjarni drops into the standard .NET AI abstractions — including Semantic
+Kernel — with no cloud call and no Ollama daemon:
 
 ```bash
 dotnet add package Kjarni.Extensions.AI
 ```
 
-```csharp
+```cs
 builder.Services.AddKjarniEmbeddingGenerator("minilm-l6-v2");
+builder.Services.AddKjarniChatClient("llama3.2-3b-instruct");
 ```
 
 See [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI).

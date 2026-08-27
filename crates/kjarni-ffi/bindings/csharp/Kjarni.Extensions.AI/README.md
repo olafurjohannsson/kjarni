@@ -1,8 +1,8 @@
 # Kjarni.Extensions.AI
 
-**Local embeddings for .NET through `Microsoft.Extensions.AI` — no Python, no ONNX, no cloud.**
+**Local embeddings and chat for .NET through `Microsoft.Extensions.AI` — no Python, no ONNX, no Ollama, no cloud.**
 
-Implements `IEmbeddingGenerator<string, Embedding<float>>` on top of the [Kjarni](https://www.nuget.org/packages/Kjarni) inference engine, so anything built against the Microsoft.Extensions.AI abstractions — including **Semantic Kernel** — can run embeddings entirely in-process.
+Implements `IEmbeddingGenerator<string, Embedding<float>>` and `IChatClient` on top of the [Kjarni](https://www.nuget.org/packages/Kjarni) inference engine, so anything built against the Microsoft.Extensions.AI abstractions — including **Semantic Kernel** — can run embeddings and language models entirely in-process.
 
 ```bash
 dotnet add package Kjarni.Extensions.AI
@@ -24,6 +24,85 @@ The model downloads on first use and is cached on disk. After that, nothing touc
 ## Why
 
 Every other `IEmbeddingGenerator` provider calls a hosted service. This one doesn't call anything — inference runs inside your process against a native library. That makes it the option that works when data cannot leave the building: air-gapped deployments, regulated environments, on-premise installs, or a laptop on a plane.
+
+## Chat
+
+`IChatClient` runs a local decoder model — Llama, Qwen or Phi — in your process. No daemon on
+`localhost:11434`, no API key.
+
+```cs
+using Kjarni.Extensions.AI;
+using Microsoft.Extensions.AI;
+
+using IChatClient client = new KjarniChatClient("llama3.2-3b-instruct");
+
+var response = await client.GetResponseAsync("Explain retrieval-augmented generation in one sentence.");
+Console.WriteLine(response.Text);
+```
+
+Multi-turn works the way `IChatClient` expects — you own the transcript and replay it:
+
+```cs
+List<ChatMessage> conversation =
+[
+    new(ChatRole.System, "You are a terse assistant."),
+    new(ChatRole.User,   "My name is Olafur."),
+];
+
+var reply = await client.GetResponseAsync(conversation);
+conversation.Add(new ChatMessage(ChatRole.Assistant, reply.Text));
+
+conversation.Add(new ChatMessage(ChatRole.User, "What is my name?"));
+Console.WriteLine((await client.GetResponseAsync(conversation)).Text);   // Olafur.
+```
+
+Streaming:
+
+```cs
+await foreach (var update in client.GetStreamingResponseAsync("Write a haiku about Reykjavik."))
+    Console.Write(update.Text);
+```
+
+Registration is the same shape as embeddings:
+
+```cs
+builder.Services.AddKjarniChatClient("llama3.2-3b-instruct");
+```
+
+And an existing `Chat` can be wrapped rather than loading the model twice:
+
+```cs
+using var chat = new Chat("llama3.2-3b-instruct");
+var client = chat.AsChatClient();
+```
+
+### Chat models
+
+| Model | Notes |
+| ----- | ----- |
+| `qwen2.5-0.5b-instruct` | smallest; simple structured tasks |
+| `llama3.2-1b-instruct` | fast on modest hardware |
+| **`llama3.2-3b-instruct`** | the sweet spot on CPU |
+| `phi3.5-mini` | reasoning-leaning, 3.8B |
+
+### What maps, and what doesn't
+
+`ChatOptions` is honoured where Kjarni's sampler has an equivalent: `Temperature` (0 selects
+greedy decoding), `TopP`, `TopK` and `MaxOutputTokens`.
+
+Everything else is deliberately explicit rather than silently ignored:
+
+- **`Tools` throws `NotSupportedException`.** Tool calling is not implemented, and accepting the
+  option would leave you believing your functions had been offered to the model.
+- **`ResponseFormat = Json` throws.** There is no constrained decoding; ask for JSON in the
+  prompt and validate the result.
+- **`ChatRole.Tool` throws.** Folding tool output in as user text would misrepresent the transcript.
+- **`Seed`, `StopSequences`, `FrequencyPenalty` and `PresencePenalty` are ignored.** Mapping a
+  frequency penalty onto Kjarni's repetition penalty would change output in ways you did not ask for.
+
+Generation is compute-bound and the native model is not re-entrant, so calls are serialized per
+instance: concurrent requests queue rather than overlap. One instance per model, shared as a
+singleton, is the intended shape.
 
 ## Dependency injection
 
@@ -113,7 +192,8 @@ GPU inference uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal 
 - **Generation is synchronous under the hood.** Inference is compute-bound, not I/O-bound, so the work runs on the calling thread and returns a completed task. There is no hidden thread-pool hop.
 - **One model per instance.** Kjarni loads a single model per embedder. Passing an `EmbeddingGenerationOptions.ModelId` that differs from the instance's model throws `NotSupportedException` rather than silently ignoring it. Construct a second generator instead.
 - **Fixed dimensions.** These models don't support Matryoshka truncation, so `EmbeddingGenerationOptions.Dimensions` throws if it doesn't match the model's native size.
-- **Metadata** is available through `GetService(typeof(EmbeddingGeneratorMetadata))`, reporting provider name `kjarni`, the model id, and its dimension count.
+- **Metadata** is available through `GetService(typeof(EmbeddingGeneratorMetadata))` and `GetService(typeof(ChatClientMetadata))`, reporting provider name `kjarni` and the model id.
+- **Unwrapping.** `GetService(typeof(Embedder))` and `GetService(typeof(Chat))` return the underlying Kjarni objects when you need the native API directly.
 
 ## License
 
