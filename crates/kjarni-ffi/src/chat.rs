@@ -483,6 +483,118 @@ pub unsafe extern "C" fn kjarni_chat_send_with_history(
     }
 }}
 
+/// Stream a response with explicit history. Does not modify the history.
+///
+/// The counterpart to `kjarni_chat_send_with_history`. `IChatClient` and other
+/// stateless APIs hand back the whole transcript on every call, so streaming has
+/// to accept a history the same way sending does; without this, a streaming
+/// caller could only ever produce single-turn replies.
+///
+/// Roles follow the same encoding as `kjarni_chat_send_with_history`:
+/// 0 = system, 1 = user, 2 = assistant.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kjarni_chat_stream_with_history(
+    chat: *mut KjarniChat,
+    roles: *const i32,
+    contents: *const *const c_char,
+    history_len: usize,
+    message: *const c_char,
+    gen_config: *const KjarniGenerationConfig,
+    callback: KjarniStreamCallbackFn,
+    user_data: *mut c_void,
+    cancel_token: *const KjarniCancelToken,
+) -> KjarniErrorCode { unsafe {
+    if chat.is_null() || message.is_null() {
+        return KjarniErrorCode::NullPointer;
+    }
+
+    if history_len > 0 && (roles.is_null() || contents.is_null()) {
+        return KjarniErrorCode::NullPointer;
+    }
+
+    let cb = match callback {
+        Some(cb) => cb,
+        None => return KjarniErrorCode::NullPointer,
+    };
+
+    let chat_ref = &(*chat).inner;
+
+    let message = match CStr::from_ptr(message).to_str() {
+        Ok(s) => s,
+        Err(_) => return KjarniErrorCode::InvalidUtf8,
+    };
+
+    let mut history = kjarni::chat::types::History::new();
+    for i in 0..history_len {
+        let role = *roles.add(i);
+        let content_ptr = *contents.add(i);
+        if content_ptr.is_null() {
+            return KjarniErrorCode::NullPointer;
+        }
+        let content = match CStr::from_ptr(content_ptr).to_str() {
+            Ok(s) => s,
+            Err(_) => return KjarniErrorCode::InvalidUtf8,
+        };
+
+        match role {
+            0 => {
+                // System - rebuild history with system prompt
+                history = kjarni::chat::types::History::with_system(content);
+            }
+            1 => history.push_user(content),
+            2 => history.push_assistant(content),
+            _ => {
+                set_last_error(format!("Invalid role: {}", role));
+                return KjarniErrorCode::InvalidConfig;
+            }
+        }
+    }
+
+    let result = get_runtime().block_on(async {
+        let stream_result = if gen_config.is_null() {
+            chat_ref.stream_with_history(&history, message).await
+        } else {
+            let mut conversation = chat_ref.history_to_conversation(&history);
+            conversation.push_user(message);
+            let prompt = chat_ref.format_prompt(&conversation);
+            let overrides = to_overrides(&*gen_config);
+            chat_ref.generate_stream(prompt, overrides).await
+        };
+
+        let mut stream = stream_result?;
+
+        while let Some(token_result) = stream.next().await {
+            if is_cancelled(cancel_token) {
+                break;
+            }
+
+            match token_result {
+                Ok(text) => {
+                    if let Ok(cstr) = CString::new(text) {
+                        let should_continue = cb(cstr.as_ptr(), user_data);
+                        if !should_continue {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => KjarniErrorCode::Ok,
+        Err(e) => {
+            set_last_error(e.to_string());
+            chat_error_to_code(&e)
+        }
+    }
+}}
+
 /// Create a new stateful conversation from a Chat instance
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kjarni_chat_conversation_new(
