@@ -40,10 +40,14 @@ fn try_load_from_path(path: impl AsRef<Path>) -> Result<Option<KjarniConfig>> {
 }
 
 /// Get the cache directory, respecting config.
+///
+/// Precedence is explicit config, then `KJARNI_CACHE_DIR`, then the platform
+/// default. An entry someone wrote in their config file is a deliberate choice
+/// and outranks an environment variable that may have been inherited.
 pub fn get_cache_dir(config: &KjarniConfig) -> PathBuf {
-    config.cache.dir.clone().unwrap_or_else(|| {
-        dirs::cache_dir()
-            .expect("No cache directory found")
-            .join("kjarni")
-    })
+    config
+        .cache
+        .dir
+        .clone()
+        .unwrap_or_else(kjarni_transformers::models::get_default_cache_dir)
 }

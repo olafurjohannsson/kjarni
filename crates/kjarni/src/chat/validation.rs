@@ -152,17 +152,31 @@ pub fn is_instruct_model(model_type: ModelType) -> bool {
     model_type.is_instruct_model()
 }
 
-/// Get suggested models for chat.
+/// Get suggested models for chat, smallest first.
+///
+/// A curated shortlist rather than everything [`crate::chat::available_models`]
+/// returns, since the point is to give someone a starting point rather than a
+/// catalogue.
+///
+/// Written as [`ModelType`] variants, not string literals, on purpose. This list
+/// used to be hardcoded names and four of its seven entries had gone stale —
+/// `llama3.2-1b`, `llama3.2-3b`, `llama3.1-8b` and `qwen2.5-0.5b` all lost out to
+/// an `-instruct` suffix at some point, so following a suggestion produced a
+/// second "unknown model" error. Naming variants makes the compiler reject a
+/// rename, and `cli_name()` keeps the strings in sync by construction.
 pub fn suggest_chat_models() -> Vec<&'static str> {
-    vec![
-        "llama3.2-1b",
-        "llama3.2-3b",
-        "llama3.1-8b",
-        "qwen2.5-0.5b",
-        "qwen2.5-1.5b",
-        "mistral-7b",
-        "phi3.5-mini",
+    [
+        ModelType::Qwen2_5_0_5B_Instruct,
+        ModelType::Llama3_2_1B_Instruct,
+        ModelType::Llama3_2_3B_Instruct,
+        ModelType::Phi3_5_Mini_Instruct,
+        ModelType::Mistral7B_v0_3_Instruct,
+        ModelType::Llama3_1_8B_Instruct,
     ]
+    .into_iter()
+    .filter(|m| validate_for_chat(*m).is_ok())
+    .map(|m| m.cli_name())
+    .collect()
 }
 
 #[cfg(test)]

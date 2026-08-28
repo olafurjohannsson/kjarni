@@ -39,6 +39,10 @@ pub async fn run(
     gpu: bool,
     quiet: bool,
 ) -> Result<()> {
+    // Fail on an unknown model here, with suggestions, rather than letting the
+    // builder report it without context.
+    let _ = crate::commands::util::resolve_model(model, Some("decoder"))?;
+
     // Initialize the Chat instance using the Builder
     let mut builder = Chat::builder(model)
         .temperature(temperature)

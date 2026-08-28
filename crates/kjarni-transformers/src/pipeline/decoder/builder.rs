@@ -70,7 +70,7 @@ impl<'a> DecoderPipelineBuilder<'a> {
             .ok_or_else(|| anyhow!("Pipeline requires a DecoderLayout in ModelLayout"))?;
 
         let start_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
-        println!("  [Builder] Pre-Embeddings RAM: {:.2} MB", start_ram);
+        log::debug!("[Builder] Pre-Embeddings RAM: {:.2} MB", start_ram);
 
         // Load Embeddings
         let mut emb_builder = EmbeddingConfig::builder(&layout.token_embedding, meta.hidden_size);
@@ -98,13 +98,13 @@ impl<'a> DecoderPipelineBuilder<'a> {
         )?;
 
         let mid_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
-        println!(
-            "  [Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)",
+        log::debug!(
+            "[Builder] Post-Embeddings RAM: {:.2} MB (Delta: {:.2} MB)",
             mid_ram,
             mid_ram - start_ram
         );
 
-        log::warn!("FORCING LM HEAD TO USE Q8_0 QUANTIZATION FOR PERFORMANCE TEST");
+        log::debug!("LM head quantization: {:?}", self.load_config.quantize_lm_head);
 
         let lm_head = if tied_weights {
             log::info!("Using tied weights between embeddings and LM head");
@@ -128,8 +128,8 @@ impl<'a> DecoderPipelineBuilder<'a> {
             )?
         };
         let end_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
-        println!(
-            "  [Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)",
+        log::debug!(
+            "[Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)",
             end_ram,
             end_ram - mid_ram
         );

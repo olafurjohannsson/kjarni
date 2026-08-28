@@ -57,7 +57,7 @@ pub async fn run(
     }
 
     let model_type = ModelType::from_cli_name(model).ok_or_else(|| {
-        anyhow!(model_not_found_error(model))
+        anyhow!(super::util::model_not_found_error(model, Some("reranker")))
     })?;
 
     // Validate it's a cross-encoder
@@ -116,18 +116,6 @@ pub async fn run(
     print!("{}", output);
 
     Ok(())
-}
-
-fn model_not_found_error(model: &str) -> String {
-    let mut msg = format!("Unknown model: '{}'.", model);
-    let suggestions = ModelType::find_similar(model);
-    if !suggestions.is_empty() {
-        msg.push_str("\n\nDid you mean?");
-        for (name, _) in suggestions {
-            msg.push_str(&format!("\n  - {}", name));
-        }
-    }
-    msg
 }
 
 fn format_results(results: &[RerankResult], format: &str) -> Result<String> {
@@ -263,22 +251,29 @@ mod tests {
         assert_eq!(truncate("hello", 4), "h...");
     }
 
+    // These moved onto the shared helper in `util` when the copy that used to live
+    // in this file was deleted. Same coverage, one implementation.
+
     #[test]
     fn test_model_not_found_error_basic() {
-        let error = model_not_found_error("unknown-model");
+        let error = crate::commands::util::model_not_found_error("unknown-model", Some("reranker"));
         assert!(error.contains("Unknown model: 'unknown-model'"));
+        assert!(error.contains("--arch reranker"));
     }
 
     #[test]
     fn test_model_not_found_error_with_suggestions() {
-        let error = model_not_found_error("minilm");
+        let error = crate::commands::util::model_not_found_error("minilm", Some("reranker"));
         assert!(error.contains("Unknown model"));
+        // "minilm" is close to several real names, so it must offer at least one.
+        assert!(error.contains("Did you mean?"), "no suggestion offered:\n{error}");
     }
 
     #[test]
     fn test_model_not_found_error_close_match() {
-        let error = model_not_found_error("minilm-l6");
+        let error = crate::commands::util::model_not_found_error("minilm-l6", Some("reranker"));
         assert!(error.contains("Unknown model"));
+        assert!(error.contains("minilm-l6-v2"), "expected a near match:\n{error}");
     }
     #[test]
     fn test_format_json_single() {

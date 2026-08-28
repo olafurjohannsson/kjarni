@@ -18,6 +18,7 @@ use crate::{
     weights::ModelWeights,
 };
 use anyhow::{Result, anyhow};
+use crate::models::get_default_cache_dir;
 
 /// Factory trait for encoder-based models.
 pub trait EncoderModelFactory: Sized {
@@ -67,11 +68,7 @@ impl EncoderLoader {
         load_config: Option<ModelLoadConfig>,
     ) -> Result<M> {
         let info = model_type.info();
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory")
-                .join("kjarni")
-        });
+        let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         // Download model files

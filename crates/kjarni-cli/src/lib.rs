@@ -1,5 +1,17 @@
 use clap::{Parser, Subcommand};
 
+/// Default model for `kjarni chat`.
+///
+/// Must be a CLI name that `ModelType::from_cli_name` resolves. Both this and
+/// [`DEFAULT_GENERATE_MODEL`] previously named models that do not exist
+/// (`llama-3.2-8b-instruct`, `llama-3.2-1b`), so the bare `kjarni chat` and
+/// `kjarni generate` commands failed for everyone. `tests::default_models_exist`
+/// now fails the build if either drifts from the registry again.
+pub const DEFAULT_CHAT_MODEL: &str = "llama3.2-3b-instruct";
+
+/// Default model for `kjarni generate`.
+pub const DEFAULT_GENERATE_MODEL: &str = "llama3.2-1b-instruct";
+
 #[derive(Parser)]
 #[command(name = "kjarni")]
 #[command(about = "Kjarni: The SQLite of AI", long_about = None)]
@@ -26,7 +38,7 @@ pub enum Commands {
         /// The prompt (or file path, or stdin if not provided)
         prompt: Option<String>,
 
-        #[arg(short, long, default_value = "llama-3.2-1b")]
+        #[arg(short, long, default_value = DEFAULT_GENERATE_MODEL)]
         model: String,
 
         #[arg(long)]
@@ -334,7 +346,7 @@ pub enum Commands {
 
     /// Interactive chat mode
     Chat {
-        #[arg(short, long, default_value = "llama-3.2-8b-instruct")]
+        #[arg(short, long, default_value = DEFAULT_CHAT_MODEL)]
         model: String,
 
         #[arg(long)]
@@ -540,6 +552,54 @@ pub fn verbosity_to_log_level(verbose: u8) -> &'static str {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    /// Every model name hardcoded outside the registry must actually resolve.
+    ///
+    /// This exists because three separate lists had drifted from the registry at
+    /// once: both CLI defaults, and four of the seven entries in
+    /// `kjarni::chat::suggest_chat_models`. Each was presumably correct when
+    /// written and went stale when models gained an `-instruct` suffix, with
+    /// nothing to notice. A name that does not resolve is a user-facing failure
+    /// on the very first command someone types, so it should break the build
+    /// instead.
+    #[test]
+    fn hardcoded_model_names_resolve() {
+        use kjarni::ModelType;
+
+        let mut bad = Vec::new();
+
+        for name in [DEFAULT_CHAT_MODEL, DEFAULT_GENERATE_MODEL] {
+            if ModelType::from_cli_name(name).is_none() {
+                bad.push(format!("CLI default '{name}'"));
+            }
+        }
+
+        for name in kjarni::chat::suggested_models() {
+            if ModelType::from_cli_name(name).is_none() {
+                bad.push(format!("chat suggestion '{name}'"));
+            }
+        }
+
+        assert!(
+            bad.is_empty(),
+            "these names are not in the model registry, so anyone who uses them \
+             gets an error:\n  {}\n\
+             Run `kjarni model list` for the valid names.",
+            bad.join("\n  ")
+        );
+    }
+
+    /// The chat default must be usable for chat, not merely a real model.
+    ///
+    /// `kjarni chat` with no arguments should work; defaulting to an embedding
+    /// model would resolve fine here and still fail at runtime.
+    #[test]
+    fn default_chat_model_is_a_chat_model() {
+        assert!(
+            kjarni::chat::is_chat_model(DEFAULT_CHAT_MODEL).is_ok(),
+            "DEFAULT_CHAT_MODEL '{DEFAULT_CHAT_MODEL}' cannot be used for chat"
+        );
+    }
     fn parse_args(args: &[&str]) -> Result<Cli, clap::Error> {
         let mut full_args = vec!["kjarni"];
         full_args.extend(args);
@@ -588,7 +648,7 @@ mod tests {
                 ..
             } => {
                 assert!(prompt.is_none());
-                assert_eq!(model, "llama-3.2-1b");
+                assert_eq!(model, DEFAULT_GENERATE_MODEL);
                 assert_eq!(max_tokens, 100);
                 assert!((temperature - 0.7).abs() < 0.001);
                 assert!(!greedy);
@@ -786,7 +846,7 @@ mod tests {
                 quiet,
                 ..
             } => {
-                assert_eq!(model, "llama-3.2-8b-instruct");
+                assert_eq!(model, DEFAULT_CHAT_MODEL);
                 assert!(system.is_none());
                 assert!((temperature - 0.7).abs() < 0.001);
                 assert_eq!(max_tokens, 512);

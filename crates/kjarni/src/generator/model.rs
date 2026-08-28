@@ -20,6 +20,7 @@ use crate::{DecoderGenerator, DecoderLanguageModel, TokenType};
 use super::builder::GeneratorBuilder;
 use super::types::{GeneratedToken, GeneratorError, GeneratorResult};
 use super::validation::validate_for_generation;
+use kjarni_transformers::models::get_default_cache_dir;
 
 /// Raw text generator for decoder language models.
 ///
@@ -57,11 +58,7 @@ impl Generator {
         //     }
         // }
 
-        let cache_dir = builder.cache_dir.clone().unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("no cache directory found")
-                .join("kjarni")
-        });
+        let cache_dir = builder.cache_dir.clone().unwrap_or_else(get_default_cache_dir);
 
         let is_downloaded = model_type.is_downloaded(&cache_dir);
 

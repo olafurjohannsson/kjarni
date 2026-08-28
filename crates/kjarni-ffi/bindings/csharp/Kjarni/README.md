@@ -43,16 +43,17 @@ Pass whole collections to `EncodeBatch` rather than looping — Kjarni batches n
 
 ### Microsoft.Extensions.AI and Semantic Kernel
 
-The companion package implements `IEmbeddingGenerator<string, Embedding<float>>`, so Kjarni drops
-into the standard .NET AI abstractions — including Semantic Kernel — with no cloud call and no
-Ollama daemon:
+The companion package implements `IEmbeddingGenerator<string, Embedding<float>>` and
+`IChatClient`, so Kjarni drops into the standard .NET AI abstractions — including Semantic
+Kernel — with no cloud call and no Ollama daemon:
 
 ```bash
 dotnet add package Kjarni.Extensions.AI
 ```
 
-```csharp
+```cs
 builder.Services.AddKjarniEmbeddingGenerator("minilm-l6-v2");
+builder.Services.AddKjarniChatClient("llama3.2-3b-instruct");
 ```
 
 See [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI).
@@ -188,7 +189,9 @@ using var embedder = new Embedder("minilm-l6-v2", cacheDir: "/my/models");
 using var quiet    = new Embedder("minilm-l6-v2", quiet: true);
 ```
 
-`KJARNI_CACHE_DIR` overrides the default cache location. `HF_TOKEN` is used for gated models.
+The `cacheDir` parameter is the reliable way to relocate model storage; pass it per
+instance as above. `HF_TOKEN` is read from the environment and is required for gated
+Hugging Face repositories, such as any `meta-llama/*` model.
 
 ## Platform support
 

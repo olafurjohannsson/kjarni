@@ -18,6 +18,7 @@ use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;
 use crate::{ChatTemplate, WgpuContext};
+use crate::models::get_default_cache_dir;
 
 pub trait DecoderModelFactory: Sized {
     type Config: ModelConfig + 'static;
@@ -54,11 +55,7 @@ impl DecoderLoader {
         load_config: Option<ModelLoadConfig>,
     ) -> Result<M> {
         let info = model_type.info();
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            dirs::cache_dir()
-                .expect("No cache directory")
-                .join("kjarni")
-        });
+        let cache_dir = cache_dir.unwrap_or_else(get_default_cache_dir);
         let model_dir = cache_dir.join(model_type.repo_id().replace('/', "_"));
 
         let config = load_config.clone().unwrap_or_default();
