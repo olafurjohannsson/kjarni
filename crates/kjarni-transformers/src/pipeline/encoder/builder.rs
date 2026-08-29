@@ -114,6 +114,9 @@ impl<'a> EncoderPipelineBuilder<'a> {
         let emb_load_cpu = plan.embeddings == Device::Cpu;
         let emb_load_gpu = plan.embeddings == Device::Wgpu;
 
+        // The wasm constructor takes no context and no device flags, since there is
+        // only ever the CPU path there.
+        #[cfg(not(target_arch = "wasm32"))]
         let embeddings = LoadedEmbeddings::new(
             ctx,
             self.weights,
@@ -122,6 +125,11 @@ impl<'a> EncoderPipelineBuilder<'a> {
             emb_load_gpu,
             target_dtype,
         )?;
+        #[cfg(target_arch = "wasm32")]
+        let embeddings = {
+            let _ = (emb_load_cpu, emb_load_gpu);
+            LoadedEmbeddings::new(self.weights, emb_builder.build(), target_dtype)?
+        };
 
         //  Build pipeline config
         let pipeline_config = EncoderPipelineConfig {

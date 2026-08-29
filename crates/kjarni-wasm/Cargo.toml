@@ -16,10 +16,18 @@ openblas = ["dep:blas-src", "dep:openblas-src", "ndarray/blas"]
 [dependencies]
 kjarni-rag = { path = "../kjarni-rag" }
 kjarni-search = { path = "../kjarni-search" }
+# The engine. This crate used to carry its own tokenizer, feedforward, SIMD and
+# weight-loading code; those are being replaced by the real implementations so a
+# browser build and a native build run the same inference path.
+kjarni-transformers = { path = "../kjarni-transformers" }
+kjarni-models = { path = "../kjarni-models" }
 serde-wasm-bindgen = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
+futures = "0.3.31"
+# The generation loop communicates over a tokio mpsc channel.
+tokio = { version = "1", features = ["sync"] }
 safetensors = "0.6.2"
 wasm-bindgen = "0.2.100"
 reqwest = { version = "0.12.23", features = ["blocking", "rustls-tls"], default-features = false }
@@ -46,7 +54,6 @@ web-sys = { version = "0.3.77", features = ["console"] }
 getrandom = { version = "0.2", features = ["js"] }
 getrandom3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 ndarray = "0.16.1"
-futures = "0.3.31"
 console_error_panic_hook = "0.1.7"
 
 [lib]
@@ -73,4 +80,6 @@ inherits = "dev"
 opt-level = 2
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+# Size matters here: the engine is a far larger codebase than the hand-rolled stack
+# it replaced, and this bundle is downloaded by every visitor.
+wasm-opt = ["-Os", "--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

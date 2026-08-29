@@ -24,18 +24,33 @@ pub struct DecoderGenerator {
 }
 
 impl DecoderGenerator {
+    /// The decode backend this generator was built with.
+    ///
+    /// Exposed so callers that cannot use the streaming API — the wasm bindings,
+    /// which have no blocking pool for `spawn_blocking` — can drive
+    /// `run_generation_loop` themselves.
+    pub fn backend(&self) -> AnyDecoderBackend {
+        self.backend.clone()
+    }
+
     pub fn new(model: Arc<dyn DecoderLanguageModel + Send + Sync>) -> Result<Self> {
         let backend = match model.device() {
             Device::Cpu => {
                 debug!("initializing cpu decoder backend");
                 AnyDecoderBackend::Cpu(CpuDecoderBackend)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Device::Wgpu => {
                 debug!("initializing gpu decoder backend");
                 let context = model
                     .context()
                     .ok_or_else(|| anyhow!("gpu model requires WgpuContext"))?;
                 AnyDecoderBackend::Gpu(Arc::new(GpuDecoderBackend::new(context)?))
+            }
+            // No GPU backend is reachable in wasm: no context can be constructed.
+            #[cfg(target_arch = "wasm32")]
+            Device::Wgpu => {
+                return Err(anyhow!("GPU generation is not available in WebAssembly"));
             }
         };
 

@@ -1,14 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 // Reuse Llama Decoders
-use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder};
+use crate::models::llama::{cpu_decoder::LlamaCpuDecoder};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
 use crate::models::mistral::config::MistralConfig;
 
 use kjarni_transformers::{
@@ -16,7 +20,6 @@ use kjarni_transformers::{
     cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
@@ -60,17 +63,20 @@ impl DecoderModelFactory for MistralModel {
                 rope.cpu.clone(),
                 load_config.target_dtype,
             )?) as Box<dyn CpuDecoder>);
-        } else if let Some(ctx) = context
-            && device.is_gpu()
-        {
-            gpu = Some(Box::new(LlamaGpuDecoder::new(
-                ctx,
-                weights,
-                meta.clone(),
-                layout.clone(),
-                rope.gpu.clone(),
-                load_config,
-            )?) as Box<dyn GpuDecoder>);
+        } else if device.is_gpu() {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(ctx) = context {
+                gpu = Some(Box::new(LlamaGpuDecoder::new(
+                    ctx,
+                    weights,
+                    meta.clone(),
+                    layout.clone(),
+                    rope.gpu.clone(),
+                    load_config,
+                )?) as Box<dyn GpuDecoder>);
+            }
+            #[cfg(target_arch = "wasm32")]
+            return Err(anyhow!("GPU decoding is not available in WebAssembly"));
         } else {
         }
 
@@ -96,6 +102,8 @@ impl DecoderModelFactory for MistralModel {
 }
 
 impl MistralModel {
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -112,6 +120,8 @@ impl MistralModel {
         )
         .await
     }
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
@@ -138,6 +148,7 @@ impl InferenceModel for MistralModel {
     fn device(&self) -> Device {
         self.pipeline.plan().layers
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.pipeline.context().cloned()
     }
@@ -159,6 +170,8 @@ impl LanguageModel for MistralModel {
                     kv,
                 )))
             }
+            // No GPU cache without a GPU context, which wasm cannot build.
+            #[cfg(not(target_arch = "wasm32"))]
             Device::Wgpu => {
                 let ctx = self.context().unwrap();
                 Ok(Box::new(GpuKVCache::new(
@@ -170,6 +183,10 @@ impl LanguageModel for MistralModel {
                     max_len,
                 )?))
             }
+            #[cfg(target_arch = "wasm32")]
+            Device::Wgpu => Err(anyhow!(
+                "GPU cache is not available in WebAssembly"
+            )),
         }
     }
     fn tokenizer(&self) -> &Tokenizer {
@@ -219,6 +236,7 @@ impl DecoderLanguageModel for MistralModel {
             None
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
         if self.pipeline.gpu_decoder().is_some() {
             Some(self)
@@ -270,6 +288,7 @@ impl CpuDecoderOps for MistralModel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuDecoderOps for MistralModel {
     fn decoder(&self) -> &dyn GpuDecoder {
         self.pipeline.gpu_decoder().unwrap()

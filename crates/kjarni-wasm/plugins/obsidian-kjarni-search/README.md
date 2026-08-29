@@ -1,6 +1,6 @@
 # Kjarni Search — Obsidian Plugin
 
-Hybrid semantic + keyword search with cross-encoder reranking. Fully local, no API keys, no cloud.
+Hybrid semantic and keyword search with cross-encoder reranking, running inside Obsidian. Your notes are indexed and searched on your own machine.
 
 ## Setup
 

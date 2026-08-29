@@ -15,7 +15,6 @@ pub mod cpu;
 
 pub mod execution;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod decoder;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod encoder_decoder;
@@ -23,13 +22,11 @@ pub mod encoder_decoder;
 pub mod gpu;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_ops;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod common;
 
 pub mod linear_layer;
 pub mod loaders;
 pub mod models;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod pipeline;
 pub mod pooling;
 pub mod stats;
@@ -74,14 +71,15 @@ pub use crate::{
     pooling::{PoolingStrategy, cls_pool, last_token_pool, max_pool, mean_pool},
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use crate::{
-    loaders::{
-        EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
-        LoadedLMHead,
-    },
-    pipeline::{DecoderPipeline, DecoderPipelineConfig},
+// `loaders` itself builds on wasm; only the decoder pipeline does not. Re-exporting
+// them separately is what lets the encoder pipeline compile for the browser.
+pub use crate::loaders::{
+    EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingInput, LMHeadConfig, LoadedEmbeddings,
+    LoadedLMHead,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::pipeline::{DecoderPipeline, DecoderPipelineConfig};
 
 #[cfg(target_arch = "wasm32")]
 pub mod prelude {
@@ -94,6 +92,15 @@ pub use cache::{Cache, CpuKVCache};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu_ops::context::WgpuContext;
+
+/// Placeholder GPU context for wasm builds.
+///
+/// Uninhabited on purpose: the encoder pipeline stores `Option<Arc<WgpuContext>>`,
+/// and an empty enum lets that field exist while making a `Some(..)` value
+/// impossible to construct. See `cpu::encoder::traits::GpuEncoder` for the same
+/// reasoning applied to the encoder traits.
+#[cfg(target_arch = "wasm32")]
+pub enum WgpuContext {}
 
 pub use traits::Device;
 pub use models::{LanguageModel, ModelArchitecture, ModelType};

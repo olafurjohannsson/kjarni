@@ -1,19 +1,23 @@
 # Kjarni
 
-**Local AI inference for .NET. No Python, no ONNX Runtime, no CUDA, no cloud.**
+**Local AI inference for .NET. One package, running inside your process.**
 
-Embeddings, classification, semantic search, reranking, and local LLM chat — running in your
-process against a native library. The only runtime dependency is glibc.
+Sentiment analysis, embeddings, semantic search, reranking and local LLM chat, on the CPU you
+already have. Add the package, name a model, call a method. Models download on first use and
+everything after that works offline.
+
+The package has no dependencies and the native library links only against glibc.
 
 ```bash
 dotnet add package Kjarni
 ```
 
 Native binaries for `linux-x64`, `linux-arm64`, `win-x64` and `osx-arm64` ship inside the package
-and are selected automatically. There is no second install step, no model server to run, and no
-API key.
+and are selected automatically. Installing the package is the whole setup.
 
 ## Quick start
+
+Read the sentiment of a customer message in three lines:
 
 ```csharp
 using Kjarni;
@@ -23,9 +27,12 @@ Console.WriteLine(classifier.Classify("I love this product!"));
 // positive (98.5%)
 ```
 
-Models download on first use and are cached locally. After that, nothing touches the network.
+That is the shape of the whole library. Every task is a class you construct with a model name.
 
-## Embeddings
+## Embeddings and semantic similarity
+
+Find text that means the same thing, even when it shares no words. This is what powers
+"related articles", duplicate detection, and matching a question to an FAQ entry.
 
 ```csharp
 using var embedder = new Embedder("minilm-l6-v2");
@@ -39,13 +46,14 @@ var query = embedder.Encode("I need to change my login credentials");
 var score = Embedder.CosineSimilarity(query, vectors[0]);        // 0.5981
 ```
 
-Pass whole collections to `EncodeBatch` rather than looping — Kjarni batches natively.
+Pass whole collections to `EncodeBatch` rather than looping. It runs the batch as a single
+forward pass, which is substantially faster than the same texts one at a time.
 
 ### Microsoft.Extensions.AI and Semantic Kernel
 
 The companion package implements `IEmbeddingGenerator<string, Embedding<float>>` and
-`IChatClient`, so Kjarni drops into the standard .NET AI abstractions — including Semantic
-Kernel — with no cloud call and no Ollama daemon:
+`IChatClient`, so Kjarni drops into the standard .NET AI abstractions, Semantic Kernel included.
+If your code already targets those interfaces, this is a registration change and nothing else:
 
 ```bash
 dotnet add package Kjarni.Extensions.AI
@@ -58,7 +66,10 @@ builder.Services.AddKjarniChatClient("llama3.2-3b-instruct");
 
 See [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI).
 
-## Classification
+## Classification: sentiment, emotion and toxicity
+
+Sort text into categories without training anything. Route support tickets by tone, flag abusive
+comments before they post, or measure how customers feel about a release.
 
 ```csharp
 using var classifier = new Classifier("roberta-sentiment");
@@ -82,9 +93,10 @@ Console.WriteLine(emotion.Classify("I just got promoted!"));
 // surprise (50.7%)
 ```
 
-## Chat
+## Chat and text generation
 
-Local LLM chat, in-process. No daemon, no API key.
+Run a language model inside your application. Useful when the text cannot leave the building, or
+when you want an assistant feature that keeps working without a network.
 
 ```csharp
 using var chat = new Chat("llama3.2-3b-instruct");
@@ -119,7 +131,11 @@ chat.Send("Summarise this changelog.", config);
 
 `GenerationConfig.Greedy()` and `GenerationConfig.Creative()` are provided as presets.
 
-## Reranking
+## Reranking: better search results
+
+Your search returns twenty results and the right one is at position eleven. A cross-encoder
+rescores the shortlist by reading query and document together, which lifts the right answer to
+the top.
 
 ```csharp
 using var reranker = new Reranker();
@@ -131,10 +147,14 @@ var results = reranker.Rerank("What is machine learning?", new[] {
 // -11.1001: The weather today is sunny.
 ```
 
-Cross-encoder reranking scores query and document together, which is markedly more accurate than
-comparing embeddings — worth applying to the top ~50 results of a search.
+This is markedly more accurate than comparing embeddings, and slow enough that you want it on a
+shortlist rather than a whole corpus. Applying it to the top 50 results is the usual pattern, and
+it works just as well on results from Elasticsearch or a SQL query as on Kjarni's own.
 
-## Index and search
+## Index and search your own documents
+
+Point it at a directory, then query by keyword, by meaning, or both. The index is a folder on
+your disk, so there is no database to run and no service to keep alive.
 
 ```csharp
 using var indexer = new Indexer(model: "minilm-l6-v2", quiet: true);
@@ -170,8 +190,9 @@ Sizes are what the model occupies on disk after download.
 Chat models range from `qwen2.5-0.5b-instruct` up through `llama3.2-3b-instruct`, `phi3.5-mini`,
 `mistral-7b` and `deepseek-r1-8b`. Run `kjarni model list` with the CLI for the full registry.
 
-Start with `minilm-l6-v2` for embeddings — at 384 dimensions it is fast on CPU and the quality gap
-against much larger models is smaller than people expect.
+Start with `minilm-l6-v2` for embeddings. At 384 dimensions it is fast on CPU and the quality gap
+against much larger models is smaller than people expect. Note that it truncates at 256 tokens, so
+chunk long documents rather than feeding them whole.
 
 ## GPU
 
@@ -179,8 +200,8 @@ against much larger models is smaller than people expect.
 using var embedder = new Embedder("minilm-l6-v2", device: "gpu");
 ```
 
-GPU inference uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. CUDA is
-not required and is not used.
+GPU inference uses WebGPU: Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. It uses
+whichever adapter the platform already provides, so there is no toolkit to install.
 
 ## Configuration
 
@@ -202,12 +223,12 @@ Hugging Face repositories, such as any `meta-llama/*` model.
 | Windows x64 | Yes | DX12 / Vulkan |
 | macOS arm64 | Yes | Metal |
 
-The native library links only against glibc — no CUDA, no BLAS, no ONNX Runtime, no Python.
+The native library links only against glibc, so it runs on anything from a modern distribution back to CentOS 7.
 
 ## Links
 
 - [Source and issues](https://github.com/olafurjohannsson/kjarni)
-- [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI) — Microsoft.Extensions.AI provider
+- [Kjarni.Extensions.AI](https://www.nuget.org/packages/Kjarni.Extensions.AI): Microsoft.Extensions.AI provider
 - [kjarni.ai](https://kjarni.ai)
 
 MIT licensed.

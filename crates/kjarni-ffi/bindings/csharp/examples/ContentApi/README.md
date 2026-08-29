@@ -1,6 +1,6 @@
 # Content API — AI-Powered Moderation & Search
 
-A production-ready ASP.NET Minimal API with sentiment analysis, content moderation, and semantic search. No Python, no cloud APIs, no API keys.
+A production-ready ASP.NET Minimal API with sentiment analysis, content moderation, and semantic search, all running inside the API process. User content is classified without ever being sent anywhere.
 
 ## Run
 
@@ -84,7 +84,7 @@ curl -X POST http://localhost:5000/index \
 
 - **Three AI models** running simultaneously on CPU, no GPU required
 - **Sub-10ms inference** per request after model warmup
-- **Zero external dependencies** — no API keys, no cloud calls, no Python
+- **Zero dependencies.** The `Kjarni` package has no `PackageReference` entries of its own
 - **Production patterns** — health checks, batch endpoints, semantic search with dynamic indexing
 
 ## Cost Comparison

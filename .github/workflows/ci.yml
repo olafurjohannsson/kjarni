@@ -60,9 +60,59 @@ jobs:
           $CLI model download distilbert-base
           $CLI model download flan-t5-base
           $CLI model download distilbart-cnn
+          $CLI model download qwen2.5-0.5b-instruct
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install quantizer dependencies
+        run: pip install -r crates/kjarni-wasm/scripts/requirements.txt
+
+      # Both the kjarni-models and kjarni-wasm .kjq suites look for fixtures in a
+      # sibling website checkout that CI does not have. All of them skipped and
+      # passed green while testing nothing. Export the fixtures here from the
+      # weights already cached above; KJARNI_KJQ_DIR makes a missing one fail loudly.
+      - name: Export .kjq fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kjq
+          Q="python3 crates/kjarni-wasm/scripts/quantize_model.py"
+          C="$HOME/.cache/kjarni"
+          $Q --model-dir "$C/sentence-transformers_all-MiniLM-L6-v2"                   --output /tmp/kjq/all-MiniLM-L6-v2-q8.kjq
+          $Q --model-dir "$C/cross-encoder_ms-marco-MiniLM-L-6-v2"                     --output /tmp/kjq/ms-marco-MiniLM-L-6-v2-q8.kjq
+          $Q --model-dir "$C/distilbert_distilbert-base-uncased-finetuned-sst-2-english" --output /tmp/kjq/distilbert-sentiment-q8.kjq
+          $Q --model-dir "$C/Qwen_Qwen2.5-0.5B-Instruct"                               --output /tmp/kjq/qwen05b-q8.kjq
+          ls -la /tmp/kjq
+
+      # Run from the scripts directory: `discover -s <nested/path>` fails with
+      # "Start directory is not importable" unless the tree is a package.
+      - name: Test the quantizer itself
+        working-directory: crates/kjarni-wasm/scripts
+        run: python3 -m unittest discover -p "test_*.py" -v
+
+      # kjarni-wasm was excluded because the crate was `#![cfg(target_arch = "wasm32")]`
+      # and could not build natively. Browser-only code now lives in a gated module,
+      # so its 18 binding tests compile and run here like any other crate.
       - name: Run tests
-        run: cargo test --workspace --exclude kjarni-wasm
+        env:
+          KJARNI_KJQ_DIR: /tmp/kjq
+        run: cargo test --workspace
+
+      # Decoder generation is ignored in the debug run above because an unoptimised
+      # decode loop is roughly twenty times slower: one generation test measured
+      # 110s debug against 5s release, and the whole job was being cancelled at 54
+      # minutes because of it. Skipping them outright would leave the decode loop,
+      # the sampler and the KV cache with no CI coverage at all, so they run here
+      # optimised instead. The main run stays in debug to keep the engine's 47
+      # `debug_assert!`s live, which a wholesale switch to --release would silence.
+      - name: Run generation tests (optimised)
+        env:
+          KJARNI_KJQ_DIR: /tmp/kjq
+        # Not `-- --ignored`: the gate is `cfg_attr(debug_assertions, ignore)`, so in
+        # a release build these tests are not ignored at all and `--ignored` filters
+        # them out, running the unconditionally-ignored GPU parity suite instead.
+        run: cargo test --release -p kjarni-models -p kjarni-wasm
 
   # ─── C# binding tests (the shipped NuGet surface) ───────────────
   csharp-test:
@@ -115,6 +165,108 @@ jobs:
           crates/kjarni-ffi/bindings/csharp/Kjarni.sln
           --configuration Release
           --logger "console;verbosity=normal"
+
+  # ─── C++ binding tests (the shipped C ABI and header) ───────────
+  #
+  # Until this job existed, nothing built C++ at all: kjarni.h shipped in every
+  # release archive without ever being compiled, and kjarni.hpp had no coverage.
+  # The header had in fact been broken for months without anyone noticing.
+  #
+  # The sync check below is the important one. A stale header is the failure mode
+  # that actually bites consumers, and it is silent: the library exports a symbol
+  # the header does not declare, or declares one that no longer exists.
+  cpp-test:
+    name: Test (C++ binding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cpp-test
+
+      # ubuntu-latest defaults to GCC 13, which has std::expected but not <print>.
+      - name: Install GCC 14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-14 g++-14
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-cpp-v1
+
+      - name: Build native FFI library
+        run: cargo build --release --package kjarni-ffi
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
+
+      # Regenerate and diff rather than just compiling. Compiling proves the header
+      # is valid; only the diff proves it still matches the library beside it.
+      - name: Verify kjarni.h is in sync with the FFI source
+        working-directory: crates/kjarni-ffi
+        run: |
+          cbindgen --config cbindgen.toml --crate kjarni-ffi --output /tmp/kjarni.regen.h
+          if ! diff -u include/kjarni.h /tmp/kjarni.regen.h; then
+            echo "::error::kjarni.h is stale. Regenerate it:"
+            echo "  cd crates/kjarni-ffi && cbindgen --config cbindgen.toml --crate kjarni-ffi --output include/kjarni.h"
+            exit 1
+          fi
+          diff -u include/kjarni.h dist/include/kjarni.h || {
+            echo "::error::dist/include/kjarni.h differs from include/kjarni.h"; exit 1; }
+
+      # The C ABI has to stay usable from C, not only from C++.
+      - name: Compile kjarni.h as C
+        run: |
+          echo '#include "kjarni.h"' > /tmp/abi.c
+          echo 'int main(void) { return kjarni_version() == 0; }' >> /tmp/abi.c
+          gcc-14 -std=c11 -Wall -Wextra -Werror \
+            -Icrates/kjarni-ffi/include /tmp/abi.c \
+            -Ltarget/release -lkjarni_ffi -o /tmp/abi
+
+      - name: Build CLI for model downloads
+        run: cargo build --release --package kjarni-cli
+
+      - name: Download models used by the C++ tests
+        run: |
+          CLI=./target/release/kjarni
+          $CLI model download minilm-l6-v2
+          $CLI model download minilm-l6-v2-cross-encoder
+          $CLI model download distilbert-sentiment
+
+      - name: Build C++ tests
+        working-directory: crates/kjarni-ffi/tests/cpp
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DKJARNI_SANITIZE=ON \
+            -DKJARNI_LIB_DIR=${{ github.workspace }}/target/release
+          cmake --build build
+
+      - name: Run C++ tests
+        working-directory: crates/kjarni-ffi/tests/cpp
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build --output-on-failure
+
+      # Compiled but not run: the chat section needs llama3.2-1b-instruct, and a
+      # 2.5GB download on every CI run is not worth what it proves here. The test
+      # suite above already exercises the wrapper against real models.
+      - name: Compile the C++ example
+        working-directory: crates/kjarni-ffi/examples/cpp
+        env:
+          CXX: g++-14
+        run: |
+          cmake -B build -DKJARNI_LIB_DIR=${{ github.workspace }}/target/release
+          cmake --build build
 
   # ─── WASM check (kjarni-transformers engine) ────────────────────
   wasm-check:

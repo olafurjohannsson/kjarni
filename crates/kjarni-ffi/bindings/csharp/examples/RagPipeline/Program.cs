@@ -1,5 +1,6 @@
-// RAG Pipeline in C# — Index documents, search by meaning, rerank results
-// No Python. No vector database. No cloud APIs.
+// RAG pipeline in C#: index documents, search them by meaning, rerank the hits,
+// and answer from what you found. Every stage runs on this machine, and the index
+// is a folder on disk rather than a service to keep alive.
 using Kjarni;
 
 // ─── Step 1: Create some sample documents ───

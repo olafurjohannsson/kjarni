@@ -1,22 +1,32 @@
-#![cfg(target_arch = "wasm32")]
+// This crate used to be `#![cfg(target_arch = "wasm32")]`, compiling to nothing on
+// the host. Combined with being excluded from the workspace, that meant no
+// `cargo test` invocation could reach it — which is how it accumulated a second copy
+// of the encoder stack that silently drifted from the engine. The bindings are still
+// wasm-only, but the crate now builds natively so its behaviour can be tested.
 
-mod tokenizer;
-mod wasm_simd;
-mod wasm_feedforward;
-mod weights;
 
 use anyhow::Result;
-use ndarray::{Array1, Array2, Array3, Array4, Axis, Zip, s};
-use serde::{Deserialize, Serialize};
-use wasm_bindgen::JsCast;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
 use web_sys::{Response, Window, WorkerGlobalScope};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokenizer::WordPieceTokenizer;
-use weights::ModelWeights;
+// The shared engine. Everything below that used to run on this crate's own copy of
+// the encoder stack is being moved onto these.
+use kjarni_models::{CrossEncoder, SentenceEncoder, SequenceClassifier};
+use kjarni_transformers::pipeline::EncoderLoader;
+use kjarni_transformers::traits::Device as EngineDevice;
+use kjarni_transformers::decoder::generator::DecoderGenerator;
+use kjarni_transformers::decoder::traits::DecoderLanguageModel;
+use kjarni_transformers::weights::kjq;
+
 
 // ─── Debug Logging ───────────────────────────────────────────────
 
@@ -30,496 +40,30 @@ pub fn set_debug_logging(enabled: bool) {
 macro_rules! klog {
     ($($arg:tt)*) => {
         if DEBUG_LOGGING.load(Ordering::Relaxed) {
+            #[cfg(target_arch = "wasm32")]
             web_sys::console::log_1(&format!("[kjarni] {}", format!($($arg)*)).into());
+            #[cfg(not(target_arch = "wasm32"))]
+            println!("[kjarni] {}", format!($($arg)*));
         }
     };
 }
 
+#[cfg(target_arch = "wasm32")]
 fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
-// ─── Model ───────────────────────────────────────────────────────
-
-pub struct Model {
-    word_embeddings: Array2<f32>,
-    position_embeddings: Array2<f32>,
-    token_type_embeddings: Array2<f32>,
-    layers: Vec<BertLayer>,
-    layer_norm_final: LayerNorm,
-    config: Config,
-    tokenizer: WordPieceTokenizer,
+/// Host builds have no `Date.now()`; timings only feed debug logging.
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    0.0
 }
 
-struct BertLayer {
-    attention: MultiHeadAttention,
-    intermediate: FeedForward,
-    layer_norm1: LayerNorm,
-    layer_norm2: LayerNorm,
-}
-
-struct MultiHeadAttention {
-    query_weight: Array2<f32>,
-    query_bias: Array1<f32>,
-    key_weight: Array2<f32>,
-    key_bias: Array1<f32>,
-    value_weight: Array2<f32>,
-    value_bias: Array1<f32>,
-    output_weight: Array2<f32>,
-    output_bias: Array1<f32>,
-    num_heads: usize,
-    head_dim: usize,
-    scale_factor: f32,
-}
-
-struct FeedForward {
-    dense1_weight: Array2<f32>,
-    dense1_bias: Array1<f32>,
-    dense2_weight: Array2<f32>,
-    dense2_bias: Array1<f32>,
-}
-
-struct LayerNorm {
-    weight: Array1<f32>,
-    bias: Array1<f32>,
-    eps: f32,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct Config {
-    pub hidden_size: usize,
-    pub num_attention_heads: usize,
-    pub num_hidden_layers: usize,
-    pub max_position_embeddings: usize,
-    pub vocab_size: usize,
-    pub intermediate_size: usize,
-    pub layer_norm_eps: f32,
-    pub hidden_act: String,
-    pub model_type: String,
-}
-
-const SQRT_2_OVER_PI: f32 = 0.7978845608_f32;
-const GELU_COEFF: f32 = 0.044715_f32;
-
-// ─── Model Loading ───────────────────────────────────────────────
-
-impl Model {
-    pub fn from_weights(
-        weights: ModelWeights,
-        tokenizer: WordPieceTokenizer,
-        config: Config,
-    ) -> Result<Self> {
-        let word_embeddings = weights.get_array2("embeddings.word_embeddings.weight")?;
-        let position_embeddings = weights.get_array2("embeddings.position_embeddings.weight")?;
-        let token_type_embeddings =
-            weights.get_array2("embeddings.token_type_embeddings.weight")?;
-
-        let mut layers = Vec::new();
-        for i in 0..config.num_hidden_layers {
-            let prefix = format!("encoder.layer.{}", i);
-
-            let attention = MultiHeadAttention {
-                query_weight: weights
-                    .get_array2(&format!("{}.attention.self.query.weight", prefix))?,
-                query_bias: weights.get_array1(&format!("{}.attention.self.query.bias", prefix))?,
-                key_weight: weights.get_array2(&format!("{}.attention.self.key.weight", prefix))?,
-                key_bias: weights.get_array1(&format!("{}.attention.self.key.bias", prefix))?,
-                value_weight: weights
-                    .get_array2(&format!("{}.attention.self.value.weight", prefix))?,
-                value_bias: weights.get_array1(&format!("{}.attention.self.value.bias", prefix))?,
-                output_weight: weights
-                    .get_array2(&format!("{}.attention.output.dense.weight", prefix))?,
-                output_bias: weights
-                    .get_array1(&format!("{}.attention.output.dense.bias", prefix))?,
-                num_heads: config.num_attention_heads,
-                head_dim: config.hidden_size / config.num_attention_heads,
-                scale_factor: 1.0
-                    / ((config.hidden_size / config.num_attention_heads) as f32).sqrt(),
-            };
-
-            let intermediate = FeedForward {
-                dense1_weight: weights
-                    .get_array2(&format!("{}.intermediate.dense.weight", prefix))?,
-                dense1_bias: weights.get_array1(&format!("{}.intermediate.dense.bias", prefix))?,
-                dense2_weight: weights.get_array2(&format!("{}.output.dense.weight", prefix))?,
-                dense2_bias: weights.get_array1(&format!("{}.output.dense.bias", prefix))?,
-            };
-
-            let layer_norm1 = LayerNorm {
-                weight: weights
-                    .get_array1(&format!("{}.attention.output.LayerNorm.weight", prefix))?,
-                bias: weights.get_array1(&format!("{}.attention.output.LayerNorm.bias", prefix))?,
-                eps: config.layer_norm_eps,
-            };
-
-            let layer_norm2 = LayerNorm {
-                weight: weights.get_array1(&format!("{}.output.LayerNorm.weight", prefix))?,
-                bias: weights.get_array1(&format!("{}.output.LayerNorm.bias", prefix))?,
-                eps: config.layer_norm_eps,
-            };
-
-            layers.push(BertLayer {
-                attention,
-                intermediate,
-                layer_norm1,
-                layer_norm2,
-            });
-        }
-
-        let layer_norm_final = LayerNorm {
-            weight: weights.get_array1("embeddings.LayerNorm.weight")?,
-            bias: weights.get_array1("embeddings.LayerNorm.bias")?,
-            eps: config.layer_norm_eps,
-        };
-
-        Ok(Self {
-            word_embeddings,
-            position_embeddings,
-            token_type_embeddings,
-            layers,
-            layer_norm_final,
-            config,
-            tokenizer,
-        })
-    }
-
-    // ─── Encoding ────────────────────────────────────────────────
-
-    pub fn encode(&self, texts: Vec<&str>, normalize_embeddings: bool) -> Result<Vec<Vec<f32>>> {
-        if texts.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let t_tok = now_ms();
-        let mut encodings = Vec::with_capacity(texts.len());
-        for text in &texts {
-            encodings.push(self.tokenizer.encode(text, 512)?);
-        }
-        let tok_ms = now_ms() - t_tok;
-
-        let batch_size = encodings.len();
-        let max_len = encodings.iter().map(|e| e.len()).max().unwrap();
-
-        klog!(
-            "encode: batch_size={}, max_seq_len={}, tokenize={:.1}ms",
-            batch_size,
-            max_len,
-            tok_ms
-        );
-
-        let mut input_ids = Array2::<f32>::zeros((batch_size, max_len));
-        let mut attention_mask = Array2::<f32>::zeros((batch_size, max_len));
-
-        for (i, encoding) in encodings.iter().enumerate() {
-            let ids = encoding.get_ids();
-            let mask = encoding.get_attention_mask();
-            for j in 0..ids.len() {
-                input_ids[[i, j]] = ids[j] as f32;
-                attention_mask[[i, j]] = mask[j] as f32;
-            }
-        }
-
-        let t_fwd = now_ms();
-        let embeddings = self.forward(&input_ids, &attention_mask)?;
-        let fwd_ms = now_ms() - t_fwd;
-
-        let t_norm = now_ms();
-        let final_embeddings = if normalize_embeddings {
-            let norms = embeddings.mapv(|x| x.powi(2)).sum_axis(Axis(1));
-            let norms = norms.mapv(|x| x.sqrt().max(1e-12));
-            let norms_expanded = norms.insert_axis(Axis(1));
-            embeddings / &norms_expanded
-        } else {
-            embeddings
-        };
-        let norm_ms = now_ms() - t_norm;
-
-        klog!(
-            "encode: forward={:.1}ms, normalize={:.1}ms, total={:.1}ms",
-            fwd_ms,
-            norm_ms,
-            tok_ms + fwd_ms + norm_ms
-        );
-
-        Ok(final_embeddings
-            .outer_iter()
-            .map(|row| row.to_vec())
-            .collect())
-    }
-
-    /// Forward pass (mean pooling for bi-encoder)
-    fn forward(
-        &self,
-        input_ids: &Array2<f32>,
-        attention_mask: &Array2<f32>,
-    ) -> Result<Array2<f32>> {
-        let (batch_size, seq_len) = input_ids.dim();
-
-        let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, self.config.hidden_size));
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                let word_emb = self.word_embeddings.row(token_id);
-                hidden.slice_mut(s![i, j, ..]).assign(&word_emb);
-            }
-        }
-
-        let pos_embeddings = self.position_embeddings.slice(s![0..seq_len, ..]);
-        hidden += &pos_embeddings;
-
-        let type_embeddings = self.token_type_embeddings.row(0);
-        hidden += &type_embeddings;
-
-        let mut hidden = apply_layer_norm_3d(&hidden, &self.layer_norm_final);
-        for layer in &self.layers {
-            hidden = layer.forward(hidden, attention_mask)?;
-        }
-        mean_pool(&hidden, attention_mask)
-    }
-
-    /// Forward pass returning [CLS] token hidden state (for reranking/classification)
-    fn forward_cls(
-        &self,
-        input_ids: &Array2<f32>,
-        attention_mask: &Array2<f32>,
-        token_type_ids: Option<&Array2<f32>>,
-    ) -> Result<Array2<f32>> {
-        let (batch_size, seq_len) = input_ids.dim();
-
-        let mut hidden = Array3::<f32>::zeros((batch_size, seq_len, self.config.hidden_size));
-        for i in 0..batch_size {
-            for j in 0..seq_len {
-                let token_id = input_ids[[i, j]] as usize;
-                hidden
-                    .slice_mut(s![i, j, ..])
-                    .assign(&self.word_embeddings.row(token_id));
-            }
-        }
-
-        let pos_embeddings = self.position_embeddings.slice(s![0..seq_len, ..]);
-        hidden += &pos_embeddings;
-
-        if let Some(type_ids) = token_type_ids {
-            for i in 0..batch_size {
-                for j in 0..seq_len {
-                    let type_id = type_ids[[i, j]] as usize;
-                    let type_emb = self.token_type_embeddings.row(type_id);
-                    let mut slice = hidden.slice_mut(s![i, j, ..]);
-                    slice += &type_emb;
-                }
-            }
-        } else {
-            let type_embeddings = self.token_type_embeddings.row(0);
-            hidden += &type_embeddings;
-        }
-
-        let mut hidden = apply_layer_norm_3d(&hidden, &self.layer_norm_final);
-        for layer in &self.layers {
-            hidden = layer.forward(hidden, attention_mask)?;
-        }
-
-        Ok(hidden.slice(s![.., 0, ..]).to_owned())
-    }
-}
-
-// ─── Layer Forward Passes ────────────────────────────────────────
-
-impl BertLayer {
-    fn forward(&self, input: Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array3<f32>> {
-        let mut attention_out = self.attention.forward(&input, attention_mask)?;
-        attention_out += &input;
-        let attention_out = apply_layer_norm_3d(&attention_out, &self.layer_norm1);
-
-        let mut ff_out = self.intermediate.forward(&attention_out)?;
-        ff_out += &attention_out;
-        Ok(apply_layer_norm_3d(&ff_out, &self.layer_norm2))
-    }
-}
-
-impl MultiHeadAttention {
-    fn forward(&self, hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array3<f32>> {
-        let batch_size = hidden.shape()[0];
-        let seq_len = hidden.shape()[1];
-
-        let mut q = matmul_3d_2d(hidden, &self.query_weight);
-        q += &self.query_bias;
-
-        let mut k = matmul_3d_2d(hidden, &self.key_weight);
-        k += &self.key_bias;
-
-        let mut v = matmul_3d_2d(hidden, &self.value_weight);
-        v += &self.value_bias;
-
-        let q = q
-            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        let k = k
-            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        let v = v
-            .into_shape_with_order((batch_size, seq_len, self.num_heads, self.head_dim))?
-            .permuted_axes([0, 2, 1, 3]);
-
-        let mut scores = matmul_4d(&q, &k.permuted_axes([0, 1, 3, 2]));
-        scores *= self.scale_factor;
-
-        let scores = apply_attention_mask(scores, attention_mask);
-        let weights = softmax(&scores);
-        let context = matmul_4d(&weights, &v);
-
-        let context = context.permuted_axes([0, 2, 1, 3]);
-        let context = context
-            .as_standard_layout()
-            .into_shape_with_order((batch_size, seq_len, self.num_heads * self.head_dim))?
-            .to_owned();
-
-        let mut output = matmul_3d_2d(&context, &self.output_weight);
-        output += &self.output_bias;
-
-        Ok(output)
-    }
-}
-
-impl FeedForward {
-    fn forward(&self, hidden: &Array3<f32>) -> Result<Array3<f32>> {
-        let mut intermediate = matmul_3d_2d(hidden, &self.dense1_weight);
-        intermediate += &self.dense1_bias;
-        gelu(&mut intermediate);
-
-        let mut output = matmul_3d_2d(&intermediate, &self.dense2_weight);
-        output += &self.dense2_bias;
-        Ok(output)
-    }
-}
-
-// ─── Math Helpers ────────────────────────────────────────────────
-
-#[inline(always)]
-fn matmul_3d_2d(a: &Array3<f32>, w: &Array2<f32>) -> Array3<f32> {
-    let (batch, m, k) = a.dim();
-    let n = w.shape()[0];
-    assert_eq!(
-        k,
-        w.shape()[1],
-        "Dimension mismatch: a[k]={} != w[in]={}",
-        k,
-        w.shape()[1]
-    );
-
-    let a_cont = a.as_standard_layout();
-    let w_cont = w.as_standard_layout();
-    let mut c = Array3::<f32>::zeros((batch, m, n));
-
-    let a_slice = a_cont.as_slice().expect("A contiguous");
-    let w_slice = w_cont.as_slice().expect("W contiguous");
-    let c_slice = c.as_slice_mut().expect("C contiguous");
-
-    for batch_idx in 0..batch {
-        let a_batch = &a_slice[batch_idx * m * k..(batch_idx + 1) * m * k];
-        let c_batch = &mut c_slice[batch_idx * m * n..(batch_idx + 1) * m * n];
-        unsafe {
-            wasm_simd::wasm_matmul_2d(c_batch, a_batch, w_slice, m, n, k);
-        }
-    }
-
-    c
-}
-
-#[inline(always)]
-fn matmul_4d(a: &Array4<f32>, b: &Array4<f32>) -> Array4<f32> {
-    assert_eq!(a.shape()[0], b.shape()[0], "Batch mismatch");
-    assert_eq!(a.shape()[1], b.shape()[1], "Heads mismatch");
-    assert_eq!(a.shape()[3], b.shape()[2], "Dim mismatch");
-
-    let (batch, heads, seq1, dim) = a.dim();
-    let seq2 = b.shape()[3];
-
-    let a_cont = a.as_standard_layout();
-    let b_cont = b.as_standard_layout();
-
-    let total = batch * heads;
-    let mut output = Array3::<f32>::zeros((total, seq1, seq2));
-
-    let a_slice = a_cont.as_slice().expect("A contiguous");
-    let b_slice = b_cont.as_slice().expect("B contiguous");
-    let out_slice = output.as_slice_mut().expect("output contiguous");
-
-    for i in 0..total {
-        let a_mat = &a_slice[i * seq1 * dim..(i + 1) * seq1 * dim];
-        let b_mat = &b_slice[i * dim * seq2..(i + 1) * dim * seq2];
-        let c_mat = &mut out_slice[i * seq1 * seq2..(i + 1) * seq1 * seq2];
-        unsafe {
-            wasm_simd::wasm_matmul_2d_nn(c_mat, a_mat, b_mat, seq1, dim, seq2);
-        }
-    }
-
-    output
-        .into_shape_with_order((batch, heads, seq1, seq2))
-        .unwrap()
-}
-
-#[inline(always)]
-fn softmax(scores: &Array4<f32>) -> Array4<f32> {
-    let max_vals = scores.fold_axis(Axis(3), f32::NEG_INFINITY, |&acc, &x| acc.max(x));
-    let max_expanded = max_vals.insert_axis(Axis(3));
-
-    let mut result = scores - &max_expanded;
-    result.mapv_inplace(f32::exp);
-
-    let sum_exp = result.sum_axis(Axis(3)).insert_axis(Axis(3));
-    result /= &sum_exp;
-    result
-}
-
-#[inline(always)]
-fn apply_attention_mask(mut scores: Array4<f32>, mask: &Array2<f32>) -> Array4<f32> {
-    let mask_expanded = mask.clone().insert_axis(Axis(1)).insert_axis(Axis(2));
-
-    if let Some(broadcast_mask) = mask_expanded.broadcast(scores.dim()) {
-        Zip::from(&mut scores)
-            .and(&broadcast_mask)
-            .for_each(|s, &m| {
-                if m == 0.0 {
-                    *s = f32::NEG_INFINITY;
-                }
-            });
-    }
-    scores
-}
-
-#[inline(always)]
-fn gelu(x: &mut Array3<f32>) {
-    x.mapv_inplace(|val| {
-        let val_cubed = val * val * val;
-        let inner = SQRT_2_OVER_PI * (val + GELU_COEFF * val_cubed);
-        val * 0.5 * (1.0 + inner.tanh())
-    });
-}
-
-#[inline(always)]
-fn apply_layer_norm_3d(hidden: &Array3<f32>, ln: &LayerNorm) -> Array3<f32> {
-    let mean = hidden.mean_axis(Axis(2)).unwrap();
-    let var = hidden.var_axis(Axis(2), 0.0);
-    let mean_expanded = mean.insert_axis(Axis(2));
-    let var_expanded = var.insert_axis(Axis(2));
-
-    let inv_std = (&var_expanded + ln.eps).mapv(|x| 1.0 / x.sqrt());
-    (hidden - &mean_expanded) * &inv_std * &ln.weight + &ln.bias
-}
-
-fn mean_pool(hidden: &Array3<f32>, attention_mask: &Array2<f32>) -> Result<Array2<f32>> {
-    let mask_expanded = attention_mask.clone().insert_axis(Axis(2));
-    let masked_hidden = hidden * &mask_expanded;
-    let sum = masked_hidden.sum_axis(Axis(1));
-    let count = attention_mask
-        .sum_axis(Axis(1))
-        .mapv(|x| x.max(1.0))
-        .insert_axis(Axis(1));
-
-    Ok(sum / &count)
-}
+// The encoder stack that used to live here — Model, BertLayer, MultiHeadAttention,
+// FeedForward, LayerNorm, Config and their matmul/softmax/pooling helpers — was a
+// second implementation of what kjarni-transformers already does. It existed only
+// because the engine did not build for wasm32. It does now, so the bindings below
+// call the engine and this copy is gone.
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
@@ -533,11 +77,37 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 use kjarni_rag::{SearchIndex, SplitterConfig, TextSplitter};
 
+/// Load a `.kjq` container into the engine's sentence encoder.
+///
+/// Replaces this crate's own weight parsing and tokenizer, so the browser runs the
+/// same code path as a native build.
+fn load_kjq_encoder(model_data: &[u8]) -> Result<SentenceEncoder, JsValue> {
+    let unpacked = kjq::unpack(model_data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    EncoderLoader::load_from_bytes::<SentenceEncoder>(
+        &unpacked.safetensors,
+        &unpacked.config_json,
+        unpacked.tokenizer_json.as_bytes(),
+        EngineDevice::Cpu,
+        None,
+        None,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Encode a batch with L2 normalization, driving the engine's async API to
+/// completion.
+///
+/// The wasm CPU encode path contains no `.await`, so the future is ready on its
+/// first poll and this never parks the browser's main thread. See `WasmModel::encode`.
+fn encode_all(model: &SentenceEncoder, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+    futures::executor::block_on(model.encode_batch(texts))
+}
+
 // ─── WasmIndexBuilder ────────────────────────────────────────────
 
 #[wasm_bindgen]
 pub struct WasmIndexBuilder {
-    model: Model,
+    model: SentenceEncoder,
     index: SearchIndex,
     splitter: TextSplitter,
 }
@@ -547,13 +117,7 @@ impl WasmIndexBuilder {
     #[wasm_bindgen]
     pub fn new(model_data: &[u8]) -> Result<WasmIndexBuilder, JsValue> {
         let t0 = now_ms();
-        let loaded = ModelWeights::from_quantized_bytes(model_data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let config = loaded.weights.config.clone();
-        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(loaded.weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = load_kjq_encoder(model_data)?;
 
         klog!(
             "WasmIndexBuilder::new: loaded model in {:.1}ms",
@@ -595,9 +159,7 @@ impl WasmIndexBuilder {
 
         let t_enc = now_ms();
         let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
-        let embeddings = self
-            .model
-            .encode(chunk_refs, true)
+        let embeddings = encode_all(&self.model, &chunk_refs)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
@@ -651,7 +213,7 @@ impl WasmIndexBuilder {
 
 #[wasm_bindgen]
 pub struct WasmSearch {
-    model: Model,
+    model: SentenceEncoder,
     index: SearchIndex,
     splitter: TextSplitter,
 }
@@ -681,13 +243,7 @@ impl WasmSearch {
         let t0 = now_ms();
 
         let t_model = now_ms();
-        let loaded = ModelWeights::from_quantized_bytes(model_data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let config = loaded.weights.config.clone();
-        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(loaded.weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = load_kjq_encoder(model_data)?;
         let model_ms = now_ms() - t_model;
 
         let t_idx = now_ms();
@@ -733,9 +289,7 @@ impl WasmSearch {
 
         let t_enc = now_ms();
         let chunk_refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
-        let embeddings = self
-            .model
-            .encode(chunk_refs, true)
+        let embeddings = encode_all(&self.model, &chunk_refs)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
@@ -799,9 +353,7 @@ impl WasmSearch {
         let t0 = now_ms();
 
         let t_enc = now_ms();
-        let embedding = self
-            .model
-            .encode(vec![query], true)
+        let embedding = encode_all(&self.model, &[query])
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t_enc;
 
@@ -839,9 +391,7 @@ impl WasmSearch {
     #[wasm_bindgen]
     pub fn search_semantic(&self, query: &str, limit: usize) -> Result<JsValue, JsValue> {
         let t0 = now_ms();
-        let embedding = self
-            .model
-            .encode(vec![query], true)
+        let embedding = encode_all(&self.model, &[query])
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let enc_ms = now_ms() - t0;
 
@@ -884,7 +434,7 @@ impl WasmSearch {
 
 #[wasm_bindgen]
 pub struct WasmEncoder {
-    model: Model,
+    model: SentenceEncoder,
     splitter: TextSplitter,
 }
 
@@ -893,13 +443,7 @@ impl WasmEncoder {
     #[wasm_bindgen]
     pub fn new(model_data: &[u8]) -> Result<WasmEncoder, JsValue> {
         let t0 = now_ms();
-        let loaded = ModelWeights::from_quantized_bytes(model_data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let config = loaded.weights.config.clone();
-        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(loaded.weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let model = load_kjq_encoder(model_data)?;
 
         klog!("WasmEncoder::new: loaded in {:.1}ms", now_ms() - t0);
 
@@ -934,9 +478,7 @@ impl WasmEncoder {
         for (batch_idx, batch) in chunks.chunks(max_batch).enumerate() {
             let t_batch = now_ms();
             let chunk_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-            let embeddings = self
-                .model
-                .encode(chunk_refs, true)
+            let embeddings = encode_all(&self.model, &chunk_refs)
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             let batch_ms = now_ms() - t_batch;
 
@@ -978,102 +520,409 @@ struct EncodedChunk {
     chunk_index: usize,
 }
 
+// ─── WasmClassifier ──────────────────────────────────────────────
+
+/// One label and its score.
+/// One label and its score.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct ClassifyResult {
+    /// The predicted label.
+    pub label: String,
+    /// Model confidence.
+    pub score: f32,
+    /// Index of the label in `labels()`.
+    pub index: usize,
+}
+
+/// Sequence classification: sentiment, emotion, toxicity.
+///
+/// New to the browser. Classification was always in the engine but never had a
+/// binding here, because this crate previously carried its own encoder and nobody
+/// wrote a second classifier head for it.
+#[wasm_bindgen]
+pub struct WasmClassifier {
+    inner: SequenceClassifier,
+}
+
+#[wasm_bindgen]
+impl WasmClassifier {
+    /// Load a classifier from a `.kjq` container.
+    #[wasm_bindgen]
+    pub fn load(data: &[u8]) -> Result<WasmClassifier, JsValue> {
+        WasmClassifier::load_core(data).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Classify one text, returning every label with its score, highest first.
+    ///
+    /// Serializing to a `JsValue` panics outside wasm32, so the work lives in
+    /// [`WasmClassifier::classify_core`] and this is only the conversion. That is
+    /// what makes the behaviour testable on the host.
+    #[wasm_bindgen]
+    pub fn classify(&self, text: &str) -> Result<JsValue, JsValue> {
+        let out = self
+            .classify_core(text)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Classify a batch, returning the single best label for each input.
+    ///
+    /// One result per input, in input order, so the caller can line them up with
+    /// whatever it passed in.
+    #[wasm_bindgen]
+    pub fn classify_batch(&self, texts: Vec<String>) -> Result<JsValue, JsValue> {
+        let out = self
+            .classify_batch_core(&texts)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// The labels this model predicts, in index order.
+    #[wasm_bindgen]
+    pub fn labels(&self) -> Vec<String> {
+        self.inner
+            .labels()
+            .map(|l| l.to_vec())
+            .unwrap_or_default()
+    }
+
+    /// How many labels the model predicts.
+    #[wasm_bindgen]
+    pub fn num_labels(&self) -> usize {
+        self.inner.num_labels()
+    }
+}
+
+/// The classifier's logic, in plain Rust.
+///
+/// Kept out of the `#[wasm_bindgen]` impl deliberately: those methods speak
+/// `JsValue`, and both constructing and serializing one panics outside wasm32, so
+/// nothing in them can be asserted from a normal test.
+impl WasmClassifier {
+    /// Load a classifier from a `.kjq` container, reporting failure as a plain
+    /// Rust error so the failure path can be asserted on the host.
+    pub fn load_core(data: &[u8]) -> anyhow::Result<WasmClassifier> {
+        let t0 = now_ms();
+        let unpacked = kjq::unpack(data)?;
+
+        let inner = EncoderLoader::load_from_bytes::<SequenceClassifier>(
+            &unpacked.safetensors,
+            &unpacked.config_json,
+            unpacked.tokenizer_json.as_bytes(),
+            EngineDevice::Cpu,
+            None,
+            None,
+        )?;
+
+        klog!("WasmClassifier::load: {:.1}ms", now_ms() - t0);
+        Ok(WasmClassifier { inner })
+    }
+
+    /// Every label with its score, highest first.
+    pub fn classify_core(&self, text: &str) -> anyhow::Result<Vec<ClassifyResult>> {
+        let k = self.inner.num_labels();
+        let results = futures::executor::block_on(self.inner.classify_top_k(text, k))?;
+        Ok(results
+            .into_iter()
+            .map(|r| ClassifyResult {
+                label: r.label,
+                score: r.score,
+                index: r.index,
+            })
+            .collect())
+    }
+
+    /// The single best label for each input, in input order.
+    pub fn classify_batch_core(&self, texts: &[String]) -> anyhow::Result<Vec<ClassifyResult>> {
+        let refs: Vec<&str> = texts.iter().map(|t| t.as_str()).collect();
+        let batches = futures::executor::block_on(self.inner.classify_batch(&refs, 1))?;
+        let labels = self.inner.labels().map(|l| l.to_vec()).unwrap_or_default();
+
+        Ok(batches
+            .into_iter()
+            .map(|mut ranked| {
+                let (label, score) = if ranked.is_empty() {
+                    (String::new(), 0.0)
+                } else {
+                    ranked.remove(0)
+                };
+                let index = labels.iter().position(|l| *l == label).unwrap_or(0);
+                ClassifyResult { label, score, index }
+            })
+            .collect())
+    }
+}
+
+// ─── WasmChat ────────────────────────────────────────────────────
+
+/// A local language model running in the browser.
+///
+/// Text generation is synchronous here, and deliberately so. The engine's streaming
+/// path builds a background task with `tokio::task::spawn_blocking`, and wasm has no
+/// blocking pool for that to run on — it compiles but would fail at runtime. Calling
+/// the generation loop directly and draining the channel afterwards avoids the
+/// problem entirely.
+///
+/// The cost is that a call blocks until the whole response is ready, which for a few
+/// hundred tokens is seconds, not milliseconds. Run it in a Web Worker; on the main
+/// thread it will freeze the tab.
+#[wasm_bindgen]
+pub struct WasmChat {
+    generator: DecoderGenerator,
+}
+
+#[wasm_bindgen]
+impl WasmChat {
+    /// Load a decoder model from a `.kjq` container.
+    ///
+    /// `model_id` selects the chat template, e.g. `qwen2.5-0.5b-instruct`. Without
+    /// one the model still generates, but its turn markers will not be applied.
+    #[wasm_bindgen]
+    pub fn load(data: &[u8], model_id: Option<String>) -> Result<WasmChat, JsValue> {
+        WasmChat::load_core(data, model_id.as_deref())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Generate a completion for `prompt`.
+    #[wasm_bindgen]
+    pub fn generate(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+    ) -> Result<String, JsValue> {
+        self.generate_core(prompt, max_new_tokens, temperature)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// The model's context window, in tokens.
+    #[wasm_bindgen]
+    pub fn context_size(&self) -> usize {
+        self.generator.model.context_size()
+    }
+}
+
+impl WasmChat {
+    /// Load a decoder model, reporting failure as a plain Rust error.
+    pub fn load_core(data: &[u8], model_id: Option<&str>) -> anyhow::Result<WasmChat> {
+        use kjarni_transformers::models::ModelType;
+        use kjarni_transformers::pipeline::DecoderLoader;
+
+        let t0 = now_ms();
+        let unpacked = kjq::unpack(data)?;
+        let model_type = model_id.and_then(ModelType::from_cli_name);
+
+        // Architecture decides which concrete model type parses the weights. The
+        // config's own `model_type` field is the source of truth, not the caller.
+        let arch: String = serde_json::from_str::<serde_json::Value>(&unpacked.config_json)
+            .ok()
+            .and_then(|v| v.get("model_type").and_then(|m| m.as_str().map(String::from)))
+            .unwrap_or_default();
+
+        let model: std::sync::Arc<dyn DecoderLanguageModel + Send + Sync> = match arch.as_str() {
+            "qwen2" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+                kjarni_models::models::qwen::QwenModel,
+            >(
+                &unpacked.safetensors,
+                &unpacked.config_json,
+                unpacked.tokenizer_json.as_bytes(),
+                None,
+                model_type,
+            )?),
+            "llama" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+                kjarni_models::models::llama::LlamaModel,
+            >(
+                &unpacked.safetensors,
+                &unpacked.config_json,
+                unpacked.tokenizer_json.as_bytes(),
+                None,
+                model_type,
+            )?),
+            "mistral" => std::sync::Arc::new(DecoderLoader::load_from_bytes::<
+                kjarni_models::models::mistral::MistralModel,
+            >(
+                &unpacked.safetensors,
+                &unpacked.config_json,
+                unpacked.tokenizer_json.as_bytes(),
+                None,
+                model_type,
+            )?),
+            other => {
+                return Err(anyhow::anyhow!(
+                    "unsupported architecture '{other}' for browser chat. \
+                     Supported: llama, qwen2, mistral."
+                ));
+            }
+        };
+
+        let generator = DecoderGenerator::new(model)?;
+        klog!("WasmChat::load: {:.1}ms", now_ms() - t0);
+        Ok(WasmChat { generator })
+    }
+
+    /// Generate a completion, in plain Rust so it can be tested on the host.
+    pub fn generate_core(
+        &self,
+        prompt: &str,
+        max_new_tokens: usize,
+        temperature: f32,
+    ) -> anyhow::Result<String> {
+        use kjarni_transformers::common::{
+            DecodingStrategy, GenerationConfig, SamplingParams, TokenType,
+        };
+        use kjarni_transformers::decoder::generator::run_generation_loop;
+
+        let config = GenerationConfig {
+            max_new_tokens: Some(max_new_tokens),
+            strategy: if temperature <= 0.0 {
+                DecodingStrategy::Greedy
+            } else {
+                DecodingStrategy::Sample(SamplingParams {
+                    temperature,
+                    top_k: Some(40),
+                    top_p: Some(0.95),
+                    min_p: None,
+                })
+            },
+            ..Default::default()
+        };
+
+        let tokens = self.generator.encode(prompt, &config)?;
+
+        // Sized to hold the whole response: nothing drains this channel while the
+        // loop runs, so a smaller one would deadlock rather than back-pressure.
+        let (tx, mut rx) = tokio::sync::mpsc::channel(max_new_tokens + tokens.len() + 16);
+
+        futures::executor::block_on(run_generation_loop(
+            self.generator.model.clone(),
+            self.generator.backend(),
+            tokens,
+            config,
+            tx,
+            None,
+        ))?;
+
+        let mut out = String::new();
+        while let Ok(item) = rx.try_recv() {
+            let token = item?;
+            if token.token_type == TokenType::Generated {
+                out.push_str(&token.text);
+            }
+        }
+        Ok(out)
+    }
+}
+
 // ─── WasmModel (standalone) ─────────────────────────────────────
 
 #[wasm_bindgen]
 pub struct WasmModel {
-    inner: Model,
+    inner: SentenceEncoder,
 }
 
-#[wasm_bindgen(start)]
-pub fn init() {
-    console_error_panic_hook::set_once();
-}
+// Browser-only: panic hooks, `globalThis` and `fetch` have no host equivalent.
+// Everything above and below this block builds natively so it can be tested.
+#[cfg(target_arch = "wasm32")]
+mod browser_only {
+    use super::*;
 
-#[wasm_bindgen]
-pub enum WasmModelType {
-    MiniLML6V2,
-}
-
-enum Global {
-    Window(Window),
-    Worker(WorkerGlobalScope),
-}
-
-fn get_global() -> Result<Global, String> {
-    let g = js_sys::global();
-    if let Ok(win) = g.clone().dyn_into::<Window>() {
-        Ok(Global::Window(win))
-    } else if let Ok(worker) = g.clone().dyn_into::<WorkerGlobalScope>() {
-        Ok(Global::Worker(worker))
-    } else {
-        Err("Unknown global scope".to_string())
+    #[wasm_bindgen(start)]
+    pub fn init() {
+        console_error_panic_hook::set_once();
     }
-}
 
-async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
-    let global = get_global()?;
-    let resp_js = match global {
-        Global::Window(win) => JsFuture::from(win.fetch_with_str(url)).await,
-        Global::Worker(worker) => JsFuture::from(worker.fetch_with_str(url)).await,
+    #[wasm_bindgen]
+    pub enum WasmModelType {
+        MiniLML6V2,
     }
-    .map_err(|e| format!("Fetch error: {:?}", e))?;
 
-    let resp: Response = resp_js.dyn_into().map_err(|_| "Response cast failed")?;
-    let array_buffer = JsFuture::from(resp.array_buffer().map_err(|_| "ArrayBuffer error")?)
-        .await
-        .map_err(|e| format!("ArrayBuffer await failed: {:?}", e))?;
-
-    Ok(js_sys::Uint8Array::new(&array_buffer).to_vec())
-}
-
-async fn fetch_text(url: &str) -> Result<String, String> {
-    let global = get_global()?;
-    let resp_js = match global {
-        Global::Window(win) => JsFuture::from(win.fetch_with_str(url)).await,
-        Global::Worker(worker) => JsFuture::from(worker.fetch_with_str(url)).await,
+    enum Global {
+        Window(Window),
+        Worker(WorkerGlobalScope),
     }
-    .map_err(|e| format!("Fetch error: {:?}", e))?;
 
-    let resp: Response = resp_js.dyn_into().map_err(|_| "Response cast failed")?;
-    let text_js = JsFuture::from(resp.text().map_err(|_| "Text conversion failed")?)
-        .await
-        .map_err(|e| format!("Text await failed: {:?}", e))?;
+    pub(crate) fn get_global() -> Result<Global, String> {
+        let g = js_sys::global();
+        if let Ok(win) = g.clone().dyn_into::<Window>() {
+            Ok(Global::Window(win))
+        } else if let Ok(worker) = g.clone().dyn_into::<WorkerGlobalScope>() {
+            Ok(Global::Worker(worker))
+        } else {
+            Err("Unknown global scope".to_string())
+        }
+    }
 
-    Ok(text_js.as_string().ok_or("Failed to convert text")?)
+    pub(crate) async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+        let global = get_global()?;
+        let resp_js = match global {
+            Global::Window(win) => JsFuture::from(win.fetch_with_str(url)).await,
+            Global::Worker(worker) => JsFuture::from(worker.fetch_with_str(url)).await,
+        }
+        .map_err(|e| format!("Fetch error: {:?}", e))?;
+
+        let resp: Response = resp_js.dyn_into().map_err(|_| "Response cast failed")?;
+        let array_buffer = JsFuture::from(resp.array_buffer().map_err(|_| "ArrayBuffer error")?)
+            .await
+            .map_err(|e| format!("ArrayBuffer await failed: {:?}", e))?;
+
+        Ok(js_sys::Uint8Array::new(&array_buffer).to_vec())
+    }
+
+    pub(crate) async fn fetch_text(url: &str) -> Result<String, String> {
+        let global = get_global()?;
+        let resp_js = match global {
+            Global::Window(win) => JsFuture::from(win.fetch_with_str(url)).await,
+            Global::Worker(worker) => JsFuture::from(worker.fetch_with_str(url)).await,
+        }
+        .map_err(|e| format!("Fetch error: {:?}", e))?;
+
+        let resp: Response = resp_js.dyn_into().map_err(|_| "Response cast failed")?;
+        let text_js = JsFuture::from(resp.text().map_err(|_| "Text conversion failed")?)
+            .await
+            .map_err(|e| format!("Text await failed: {:?}", e))?;
+
+        Ok(text_js.as_string().ok_or("Failed to convert text")?)
+    }
+
 }
+
+#[cfg(target_arch = "wasm32")]
+pub use browser_only::*;
 
 #[wasm_bindgen]
 impl WasmModel {
+    /// Load from raw safetensors plus its config and tokenizer.
     #[wasm_bindgen(constructor)]
     pub fn new(
         weights_data: &[u8],
         config_json: &str,
         tokenizer_json: &str,
     ) -> Result<WasmModel, JsValue> {
-        let weights = ModelWeights::from_bytes(weights_data, config_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let tokenizer = WordPieceTokenizer::from_json_str(tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let config =
-            serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(WasmModel { inner: model })
+        let inner = EncoderLoader::load_from_bytes::<SentenceEncoder>(
+            weights_data,
+            config_json,
+            tokenizer_json.as_bytes(),
+            EngineDevice::Cpu,
+            None,
+            None,
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(WasmModel { inner })
     }
 
+    /// Load from a `.kjq` container: config, tokenizer and int8 tensors in one file.
     #[wasm_bindgen]
     pub fn from_quantized(data: &[u8]) -> Result<WasmModel, JsValue> {
-        let loaded = ModelWeights::from_quantized_bytes(data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let config = loaded.weights.config.clone();
-        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(loaded.weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(WasmModel { inner: model })
+        let unpacked = kjq::unpack(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        WasmModel::new(
+            &unpacked.safetensors,
+            &unpacked.config_json,
+            &unpacked.tokenizer_json,
+        )
     }
 
+    /// Fetch a model straight from Hugging Face. Browser-only: it uses `fetch`.
+    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen]
     pub async fn from_type(model_type: WasmModelType) -> Result<WasmModel, JsValue> {
         let (weights_url, config_url, tokenizer_url) = match model_type {
@@ -1098,13 +947,27 @@ impl WasmModel {
         WasmModel::new(&weights, &config, &tokenizer)
     }
 
+    /// Encode a batch, returning every vector concatenated into one flat array.
+    ///
+    /// The engine's encode is `async` because the GPU path awaits buffer readback.
+    /// There is no GPU path here, and the wasm CPU implementation contains no await
+    /// at all, so the future is always ready on its first poll and `block_on`
+    /// returns without ever parking the browser's main thread.
     #[wasm_bindgen]
     pub fn encode(&self, texts: Vec<String>, normalize: bool) -> Result<Vec<f32>, JsValue> {
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        let embeddings = self
-            .inner
-            .encode(text_refs, normalize)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        // These two differ only in the normalize flag, and both take the pooling
+        // strategy from the loaded pipeline rather than assuming one.
+        let embeddings = futures::executor::block_on(async {
+            if normalize {
+                self.inner.encode_batch(&text_refs).await
+            } else {
+                self.inner.encode_batch_raw(&text_refs).await
+            }
+        })
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
         Ok(embeddings.into_iter().flatten().collect())
     }
 }
@@ -1113,9 +976,7 @@ impl WasmModel {
 
 #[wasm_bindgen]
 pub struct WasmReranker {
-    model: Model,
-    head_weight: Array2<f32>,
-    head_bias: Array1<f32>,
+    inner: CrossEncoder,
 }
 
 #[derive(Serialize)]
@@ -1128,36 +989,31 @@ struct RerankResult {
 #[wasm_bindgen]
 impl WasmReranker {
     #[wasm_bindgen]
+    /// Load a cross-encoder from a `.kjq` container.
+    ///
+    /// The classifier head used to be pulled out of the weights by hand here; the
+    /// engine's `CrossEncoder` loads it as part of the model.
     pub fn load(data: &[u8]) -> Result<WasmReranker, JsValue> {
         let t0 = now_ms();
-        let loaded = ModelWeights::from_quantized_bytes(data)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let unpacked = kjq::unpack(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let head_weight = loaded
-            .weights
-            .get_array2("classifier.weight")
-            .map_err(|e| JsValue::from_str(&format!("Missing classifier.weight: {}", e)))?;
-        let head_bias = loaded
-            .weights
-            .get_array1("classifier.bias")
-            .map_err(|e| JsValue::from_str(&format!("Missing classifier.bias: {}", e)))?;
-
-        let config = loaded.weights.config.clone();
-        let tokenizer = WordPieceTokenizer::from_json_str(&loaded.tokenizer_json)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let model = Model::from_weights(loaded.weights, tokenizer, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let inner = EncoderLoader::load_from_bytes::<CrossEncoder>(
+            &unpacked.safetensors,
+            &unpacked.config_json,
+            unpacked.tokenizer_json.as_bytes(),
+            EngineDevice::Cpu,
+            None,
+            None,
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         klog!("WasmReranker::load: {:.1}ms", now_ms() - t0);
-
-        Ok(WasmReranker {
-            model,
-            head_weight,
-            head_bias,
-        })
+        Ok(WasmReranker { inner })
     }
 
     #[wasm_bindgen]
+    /// Score every document against the query and return the best `limit`,
+    /// highest first. Scores are raw logits, so negative values are normal.
     pub fn rerank(
         &self,
         query: &str,
@@ -1171,139 +1027,32 @@ impl WasmReranker {
                 .map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
-        let n = documents.len();
-
-        // Tokenize all pairs
-        let t_tok = now_ms();
-        let mut all_ids = Vec::with_capacity(n);
-        let mut all_masks = Vec::with_capacity(n);
-        let mut all_types = Vec::with_capacity(n);
-        let mut max_len = 0;
-
-        for doc in &documents {
-            let enc = self
-                .model
-                .tokenizer
-                .encode_pair(query, doc, 512)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            max_len = max_len.max(enc.ids.len());
-            all_ids.push(enc.ids);
-            all_masks.push(enc.attention_mask);
-            all_types.push(enc.token_type_ids.unwrap_or_default());
-        }
-        let tok_ms = now_ms() - t_tok;
-
-        // Build arrays
-        let t_pad = now_ms();
-        let mut input_ids = Array2::<f32>::zeros((n, max_len));
-        let mut attention_mask = Array2::<f32>::zeros((n, max_len));
-        let mut token_type_ids = Array2::<f32>::zeros((n, max_len));
-
-        for i in 0..n {
-            for j in 0..all_ids[i].len() {
-                input_ids[[i, j]] = all_ids[i][j] as f32;
-                attention_mask[[i, j]] = all_masks[i][j] as f32;
-                token_type_ids[[i, j]] = all_types[i][j] as f32;
-            }
-        }
-        let pad_ms = now_ms() - t_pad;
-
-        // Forward pass
-        let t_fwd = now_ms();
-        let cls_hidden = self
-            .model
-            .forward_cls(&input_ids, &attention_mask, Some(&token_type_ids))
+        let doc_refs: Vec<&str> = documents.iter().map(|d| d.as_str()).collect();
+        let ranked = futures::executor::block_on(self.inner.rerank_top_k(query, &doc_refs, limit))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let fwd_ms = now_ms() - t_fwd;
 
-        // Scoring + sort
-        let t_score = now_ms();
-        let scores_2d = cls_hidden.dot(&self.head_weight.t()) + &self.head_bias;
-
-        let mut results: Vec<RerankResult> = (0..n)
-            .map(|i| RerankResult {
-                index: i,
-                score: scores_2d[[i, 0]],
-                text: documents[i].clone(),
+        let results: Vec<RerankResult> = ranked
+            .into_iter()
+            .map(|(index, score)| RerankResult {
+                index,
+                score,
+                text: documents[index].clone(),
             })
             .collect();
 
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        results.truncate(limit);
-        let score_ms = now_ms() - t_score;
-
         klog!(
-            "rerank: {} docs, max_seq_len={}, tokenize={:.1}ms, pad={:.1}ms, forward={:.1}ms, score={:.1}ms, total={:.1}ms",
-            n,
-            max_len,
-            tok_ms,
-            pad_ms,
-            fwd_ms,
-            score_ms,
+            "WasmReranker::rerank: {} documents in {:.1}ms",
+            documents.len(),
             now_ms() - t0
         );
-
-        // Log reranked results
-        for (i, r) in results.iter().enumerate() {
-            let snippet: String = r.text.chars().take(60).collect();
-            let snippet = snippet.replace('\n', " ");
-            klog!(
-                "  reranked[{}]: idx={} score={:.4} \"{}...\"",
-                i,
-                r.index,
-                r.score,
-                snippet
-            );
-        }
 
         serde_wasm_bindgen::to_value(&results).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
+    /// Score a single query-document pair.
     pub fn score(&self, query: &str, document: &str) -> Result<f32, JsValue> {
-        let t0 = now_ms();
-
-        let enc = self
-            .model
-            .tokenizer
-            .encode_pair(query, document, 512)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let ids = Array2::from_shape_vec(
-            (1, enc.ids.len()),
-            enc.ids.iter().map(|&x| x as f32).collect(),
-        )
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let mask = Array2::from_shape_vec(
-            (1, enc.attention_mask.len()),
-            enc.attention_mask.iter().map(|&x| x as f32).collect(),
-        )
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let types = enc.token_type_ids.unwrap_or_default();
-        let type_ids =
-            Array2::from_shape_vec((1, types.len()), types.iter().map(|&x| x as f32).collect())
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let cls = self
-            .model
-            .forward_cls(&ids, &mask, Some(&type_ids))
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let score = cls.dot(&self.head_weight.t()) + &self.head_bias;
-
-        klog!(
-            "score: seq_len={}, score={:.4}, {:.1}ms",
-            enc.ids.len(),
-            score[[0, 0]],
-            now_ms() - t0
-        );
-
-        Ok(score[[0, 0]])
+        futures::executor::block_on(self.inner.predict_pair(query, document))
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

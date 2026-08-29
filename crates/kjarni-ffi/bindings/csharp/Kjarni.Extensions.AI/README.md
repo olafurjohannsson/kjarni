@@ -1,8 +1,8 @@
 # Kjarni.Extensions.AI
 
-**Local embeddings and chat for .NET through `Microsoft.Extensions.AI` — no Python, no ONNX, no Ollama, no cloud.**
+**Local embeddings and chat for .NET through `Microsoft.Extensions.AI`, running in your process.**
 
-Implements `IEmbeddingGenerator<string, Embedding<float>>` and `IChatClient` on top of the [Kjarni](https://www.nuget.org/packages/Kjarni) inference engine, so anything built against the Microsoft.Extensions.AI abstractions — including **Semantic Kernel** — can run embeddings and language models entirely in-process.
+Implements `IEmbeddingGenerator<string, Embedding<float>>` and `IChatClient` on top of the [Kjarni](https://www.nuget.org/packages/Kjarni) inference engine. Anything already written against the Microsoft.Extensions.AI abstractions, **Semantic Kernel** included, keeps working unchanged: you swap the registration and the model runs locally instead of over the network.
 
 ```bash
 dotnet add package Kjarni.Extensions.AI
@@ -21,14 +21,17 @@ Console.WriteLine(embeddings[0].Vector.Length);   // 384
 
 The model downloads on first use and is cached on disk. After that, nothing touches the network.
 
-## Why
+## When you would reach for this
 
-Every other `IEmbeddingGenerator` provider calls a hosted service. This one doesn't call anything — inference runs inside your process against a native library. That makes it the option that works when data cannot leave the building: air-gapped deployments, regulated environments, on-premise installs, or a laptop on a plane.
+Every other `IEmbeddingGenerator` provider is a client for a hosted service. This one loads the model into your process and runs it there, which makes it the option that survives conditions the others cannot: air-gapped deployments, regulated data that cannot leave the building, on-premise installs at customer sites, CI runs with no secrets, or a laptop on a plane.
+
+It is also the cheapest option at volume, since embedding a million documents costs CPU time rather than per-token billing.
 
 ## Chat
 
-`IChatClient` runs a local decoder model — Llama, Qwen or Phi — in your process. No daemon on
-`localhost:11434`, no API key.
+`IChatClient` runs a local decoder model (Llama, Qwen or Phi) in your process. The model is loaded
+directly by your application, so there is nothing listening on a port and nothing to keep running
+alongside it.
 
 ```cs
 using Kjarni.Extensions.AI;
@@ -40,7 +43,7 @@ var response = await client.GetResponseAsync("Explain retrieval-augmented genera
 Console.WriteLine(response.Text);
 ```
 
-Multi-turn works the way `IChatClient` expects — you own the transcript and replay it:
+Multi-turn works the way `IChatClient` expects: you own the transcript and replay it.
 
 ```cs
 List<ChatMessage> conversation =
@@ -110,7 +113,7 @@ singleton, is the intended shape.
 builder.Services.AddKjarniEmbeddingGenerator("minilm-l6-v2");
 ```
 
-Registered as a singleton — weights load once, and the generator serializes concurrent calls internally, so one instance is safe to share across requests.
+Registered as a singleton, so the weights load once. The generator serializes concurrent calls internally, which makes one instance safe to share across requests.
 
 Then inject it anywhere:
 
@@ -124,7 +127,7 @@ public class SearchService(IEmbeddingGenerator<string, Embedding<float>> embeddi
 
 ## Wrapping an existing Embedder
 
-If you already hold a Kjarni `Embedder` — because you also use it for similarity or search — wrap it rather than loading the model twice:
+If you already hold a Kjarni `Embedder`, because you also use it for similarity or search, wrap it rather than loading the model twice:
 
 ```csharp
 using Kjarni;
@@ -136,7 +139,7 @@ var generator = embedder.AsEmbeddingGenerator("minilm-l6-v2");
 ```
 
 `AsEmbeddingGenerator` and `AddKjarniEmbeddingGenerator` live in the `Microsoft.Extensions.AI`
-namespace, so they light up alongside the abstractions themselves — no extra `using` to discover.
+namespace, so they appear alongside the abstractions themselves without a further `using` to find.
 
 By default the generator **borrows** the embedder: disposing the generator leaves the embedder alive, since you created it. Pass `ownsEmbedder: true` to transfer ownership.
 
@@ -151,7 +154,7 @@ builder.Services.AddKjarniEmbeddingGenerator("minilm-l6-v2");
 var kernel = builder.Build();
 ```
 
-Any SK component that resolves `IEmbeddingGenerator<string, Embedding<float>>` — memory stores, vector connectors, RAG pipelines — now runs against local inference.
+Any SK component that resolves `IEmbeddingGenerator<string, Embedding<float>>`, such as memory stores, vector connectors and RAG pipelines, now runs against local inference.
 
 ## Batching
 
@@ -166,7 +169,7 @@ var embeddings = await generator.GenerateAsync(documents);
 
 ## Models
 
-Any Kjarni embedding model works. `minilm-l6-v2` is the default — smallest and fastest.
+Any Kjarni embedding model works. `minilm-l6-v2` is the default, being the smallest and fastest. It truncates at 256 tokens, so chunk long documents rather than passing them whole.
 
 | Model | Dimensions | On disk |
 | ----- | ---------- | ------- |
@@ -185,7 +188,7 @@ var generator = new KjarniEmbeddingGenerator("mpnet-base-v2");
 var generator = new KjarniEmbeddingGenerator("minilm-l6-v2", device: "gpu");
 ```
 
-GPU inference uses WebGPU — Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. CUDA is not required.
+GPU inference uses WebGPU: Vulkan on Linux, DX12 or Vulkan on Windows, Metal on macOS. It uses whichever adapter the platform already provides, so there is no toolkit to install.
 
 ## Behavior notes
 

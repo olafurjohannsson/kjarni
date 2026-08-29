@@ -6,6 +6,9 @@ header = """
  */
 """
 include_guard = "KJARNI_FFI_H"
+# Emit `extern "C"` guards. Without these a C++ translation unit name-mangles every
+# declaration and linking fails, which made the header C-only in practice.
+cpp_compat = true
 no_includes = true
 sys_includes = ["stdint.h", "stddef.h", "stdbool.h"]
 
@@ -13,11 +16,18 @@ sys_includes = ["stdint.h", "stddef.h", "stdbool.h"]
 "feature = c-bindings" = "KJARNI_FFI"
 
 [export]
-prefix = "Kjarni"
+# No prefix: every exported type is already named `Kjarni*` in Rust, so adding one
+# produced `KjarniKjarniEmbedder` and `KjarniKjarniErrorCode` in the generated
+# header. Fixing it is a breaking change for C consumers, done now while there are
+# none rather than later.
 
 [enum]
 rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
 
 [fn]
-prefix = "kjarni_"
+# No prefix. In cbindgen `[fn] prefix` emits a token *before the return type* — it is
+# meant for export macros like `EXPORT_API`, not for naming. Set to "kjarni_" it
+# produced `kjarni_ enum KjarniErrorCode kjarni_embedder_new(...)`, which is not
+# valid C, so the published header never compiled. The functions are already named
+# `kjarni_*` in Rust.

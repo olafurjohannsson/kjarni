@@ -8,6 +8,8 @@
 
 mod config;
 mod model;
+// No GPU backend on wasm.
+#[cfg(not(target_arch = "wasm32"))]
 mod gpu_decoder;
 mod cpu_decoder;
 

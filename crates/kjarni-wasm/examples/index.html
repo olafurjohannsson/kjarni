@@ -1,0 +1,288 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kjarni in the browser</title>
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --border:#30363d;
+          --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:32px; background:var(--bg); color:var(--text);
+         font:15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; }
+  h1 { font-size:28px; margin:0 0 4px; }
+  p.lede { color:var(--muted); margin:0 0 28px; }
+  section { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+            padding:20px; margin-bottom:18px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted);
+       margin:0 0 12px; }
+  button { background:#1f6feb; color:#fff; border:0; border-radius:6px; padding:9px 16px;
+           font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  input, textarea { width:100%; background:var(--bg); color:var(--text);
+                    border:1px solid var(--border); border-radius:6px; padding:9px 11px;
+                    font:13px/1.6 ui-monospace, monospace; margin-bottom:8px; }
+  textarea { min-height:88px; resize:vertical; }
+  pre { background:var(--bg); border:1px solid var(--border); border-radius:6px;
+        padding:12px; font-size:12.5px; overflow-x:auto; white-space:pre-wrap;
+        margin:10px 0 0; min-height:1.6em; }
+  .status { font:12.5px ui-monospace, monospace; color:var(--muted); margin-top:10px; }
+  .err { color:#f85149; }
+</style>
+
+<main>
+<h1>Kjarni in the browser</h1>
+<p class="lede">
+  Every capability below runs in this tab via WebAssembly. Models download once;
+  after that nothing leaves your machine and no request is made.
+</p>
+
+<section>
+  <h2>1 · Load the encoder</h2>
+  <button id="load">Load model (23 MB)</button>
+  <div class="status" id="load-status"></div>
+</section>
+
+<section>
+  <h2>2 · Embeddings — rank by meaning</h2>
+  <input id="sim-query" value="How do I get my money back?">
+  <textarea id="sim-docs">What is your refund policy?
+The delivery arrived three days late.
+Our office is open until 5pm on weekdays.</textarea>
+  <button id="sim-run" disabled>Rank</button>
+  <pre id="sim-out"></pre>
+</section>
+
+<section>
+  <h2>3 · Reranking — cross-encoder</h2>
+  <button id="rr-load" disabled>Load cross-encoder (23 MB)</button>
+  <div class="status" id="rr-status"></div>
+  <input id="rr-query" value="how do I cancel my subscription">
+  <textarea id="rr-docs">To end your plan, go to Settings and choose Close account.
+Cancellation of orders is handled by the warehouse team.
+Our office is open until 5pm on weekdays.</textarea>
+  <button id="rr-run" disabled>Rerank</button>
+  <pre id="rr-out"></pre>
+</section>
+
+<section>
+  <h2>4 · Classification — sentiment</h2>
+  <button id="cl-load" disabled>Load classifier (68 MB)</button>
+  <div class="status" id="cl-status"></div>
+  <input id="cl-text" value="This is absolutely wonderful.">
+  <button id="cl-run" disabled>Classify</button>
+  <pre id="cl-out"></pre>
+</section>
+
+<section>
+  <h2>5 · Search — keyword vs semantic vs hybrid</h2>
+  <textarea id="s-docs">Rotate the signing key from the admin console under Security.
+The error ERR_SIGNING_KEY_EXPIRED means the key passed its rotation window.
+Refunds are available within 30 days of purchase.
+Our support hours are 9am to 5pm on weekdays.</textarea>
+  <input id="s-query" value="ERR_SIGNING_KEY_EXPIRED">
+  <button id="s-run" disabled>Search three ways</button>
+  <pre id="s-out"></pre>
+</section>
+
+<section>
+  <h2>6 · Chat — a language model, locally</h2>
+  <button id="chat-load" disabled>Load Qwen 0.5B (501 MB)</button>
+  <div class="status" id="chat-status"></div>
+  <input id="chat-prompt" value="The capital of Iceland is">
+  <button id="chat-run" disabled>Generate</button>
+  <pre id="chat-out"></pre>
+</section>
+</main>
+
+<script type="module">
+// Built with:
+//   RUSTFLAGS='-C target-feature=+simd128' \
+//     wasm-pack build --release --target web -- --no-default-features
+import init, {
+  WasmModel, WasmReranker, WasmClassifier, WasmChat, WasmIndexBuilder, WasmSearch,
+} from "../pkg/kjarni_wasm.js";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+
+// Inference blocks the thread, so let the pending state paint before starting. For
+// anything long-running - chat especially - use a Web Worker instead.
+const yieldToPaint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+const lines = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
+const say = (id, msg, isErr = false) => {
+  const el = $(id);
+  el.textContent = msg;
+  el.className = isErr ? "status err" : "status";
+};
+
+async function fetchModel(url, statusId, label) {
+  say(statusId, `Downloading ${label}…`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+let wasm = null, model = null, reranker = null, classifier = null, chat = null, modelBytes = null;
+
+const MODELS = {
+  embed:    "../../../../web.kjarni.ai/src/static/models/all-MiniLM-L6-v2-q8.kjq",
+  rerank:   "../../../../web.kjarni.ai/src/static/models/ms-marco-MiniLM-L-6-v2-q8.kjq",
+  classify: "../../../../web.kjarni.ai/src/static/models/distilbert-sentiment-q8.kjq",
+  chat:     "../../../../web.kjarni.ai/src/static/models/qwen05b-q8.kjq",
+};
+
+// ── 1. Load the encoder ─────────────────────────────────────────
+$("load").onclick = async () => {
+  $("load").disabled = true;
+  try {
+    say("load-status", "Loading WebAssembly…");
+    wasm = await init();
+
+    modelBytes = await fetchModel(MODELS.embed, "load-status", "all-MiniLM-L6-v2");
+    say("load-status", "Initialising…");
+    await yieldToPaint();
+
+    const t0 = performance.now();
+    model = WasmModel.from_quantized(modelBytes);
+    say("load-status", `Ready in ${Math.round(performance.now() - t0)} ms.`);
+
+    for (const id of ["sim-run", "s-run", "rr-load", "cl-load", "chat-load"]) $(id).disabled = false;
+    $("load").textContent = "Model loaded";
+  } catch (e) {
+    say("load-status", `Failed: ${e.message ?? e}`, true);
+    $("load").disabled = false;
+  }
+};
+
+// ── 2. Embeddings ───────────────────────────────────────────────
+const cosine = (a, b) => {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+};
+
+$("sim-run").onclick = () => {
+  const docs = lines("sim-docs");
+  const texts = [$("sim-query").value, ...docs];
+
+  const t0 = performance.now();
+  const flat = model.encode(texts, true);          // one flat Float32Array
+  const ms = performance.now() - t0;
+
+  const dim = flat.length / texts.length;
+  const vec = (i) => flat.subarray(i * dim, (i + 1) * dim);
+
+  const ranked = docs
+    .map((text, i) => ({ text, score: cosine(vec(0), vec(i + 1)) }))
+    .sort((a, b) => b.score - a.score);
+
+  $("sim-out").textContent =
+    ranked.map((r) => `${r.score.toFixed(4)}  ${r.text}`).join("\n") +
+    `\n\n${texts.length} sentences, ${dim} dims, ${ms.toFixed(1)} ms`;
+};
+
+// ── 3. Reranking ────────────────────────────────────────────────
+$("rr-load").onclick = async () => {
+  $("rr-load").disabled = true;
+  try {
+    const bytes = await fetchModel(MODELS.rerank, "rr-status", "ms-marco cross-encoder");
+    await yieldToPaint();
+    reranker = WasmReranker.load(bytes);
+    say("rr-status", "Cross-encoder ready.");
+    $("rr-run").disabled = false;
+  } catch (e) {
+    say("rr-status", `Failed: ${e.message ?? e}`, true);
+    $("rr-load").disabled = false;
+  }
+};
+
+$("rr-run").onclick = async () => {
+  const docs = lines("rr-docs");
+  await yieldToPaint();
+  const results = reranker.rerank($("rr-query").value, docs, docs.length);
+  $("rr-out").textContent =
+    results.map((r) => `${r.score.toFixed(2).padStart(8)}  ${r.text}`).join("\n") +
+    "\n\nRaw logits: negative is normal, only the ordering means anything.";
+};
+
+// ── 4. Classification ───────────────────────────────────────────
+$("cl-load").onclick = async () => {
+  $("cl-load").disabled = true;
+  try {
+    const bytes = await fetchModel(MODELS.classify, "cl-status", "distilbert-sentiment");
+    await yieldToPaint();
+    classifier = WasmClassifier.load(bytes);
+    say("cl-status", `Ready. Labels: ${classifier.labels().join(", ")}`);
+    $("cl-run").disabled = false;
+  } catch (e) {
+    say("cl-status", `Failed: ${e.message ?? e}`, true);
+    $("cl-load").disabled = false;
+  }
+};
+
+$("cl-run").onclick = () => {
+  const results = classifier.classify($("cl-text").value);
+  $("cl-out").textContent = results
+    .map((r) => `${r.label.padEnd(10)} ${r.score.toFixed(4)}`)
+    .join("\n");
+};
+
+// ── 5. Search ───────────────────────────────────────────────────
+$("s-run").onclick = async () => {
+  const docs = lines("s-docs");
+  const query = $("s-query").value;
+  $("s-out").textContent = "Building index…";
+  await yieldToPaint();
+
+  try {
+    // Embed every chunk, hand each vector to the builder, then load the finished
+    // index into a searcher.
+    const flat = model.encode(docs, true);
+    const dim = flat.length / docs.length;
+
+    const builder = WasmIndexBuilder.new(modelBytes);
+    docs.forEach((text, i) => {
+      builder.add_chunk(text, Array.from(flat.subarray(i * dim, (i + 1) * dim)), "inline", i);
+    });
+    const searcher = WasmSearch.load(modelBytes, builder.finish());
+
+    const show = (title, hits) =>
+      `${title}\n` + (hits.length
+        ? hits.map((h) => `  ${Number(h.score ?? 0).toFixed(4)}  ${h.text}`).join("\n")
+        : "  no matches");
+
+    $("s-out").textContent = [
+      show("keyword (BM25)", searcher.search_keywords(query, 2)),
+      show("semantic", searcher.search_semantic(query, 2)),
+      show("hybrid (default)", searcher.search(query, 2)),
+    ].join("\n\n");
+  } catch (e) {
+    $("s-out").textContent = `Search failed: ${e.message ?? e}`;
+  }
+};
+
+// ── 6. Chat ─────────────────────────────────────────────────────
+$("chat-load").onclick = async () => {
+  $("chat-load").disabled = true;
+  try {
+    const bytes = await fetchModel(MODELS.chat, "chat-status", "Qwen 0.5B — this one is large");
+    say("chat-status", "Initialising…");
+    await yieldToPaint();
+    chat = WasmChat.load(bytes, "qwen2.5-0.5b-instruct");
+    say("chat-status", `Ready. Context window: ${chat.context_size()} tokens.`);
+    $("chat-run").disabled = false;
+  } catch (e) {
+    say("chat-status", `Failed: ${e.message ?? e}`, true);
+    $("chat-load").disabled = false;
+  }
+};
+
+$("chat-run").onclick = async () => {
+  $("chat-out").textContent = "Generating… (this blocks the tab; a Web Worker is the fix)";
+  await yieldToPaint();
+
+  const t0 = performance.now();
+  const out = chat.generate($("chat-prompt").value, 32, 0.0);
+  $("chat-out").textContent = `${out.trim()}\n\n${((performance.now() - t0) / 1000).toFixed(1)}s`;
+};
+</script>

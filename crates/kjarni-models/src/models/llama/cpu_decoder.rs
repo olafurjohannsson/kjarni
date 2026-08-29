@@ -102,6 +102,7 @@ impl InferenceModel for LlamaCpuDecoder {
         Device::Cpu
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         None
     }

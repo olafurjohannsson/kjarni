@@ -1,0 +1,4 @@
+# Dependencies for quantize_model.py. Not Kjarni dependencies - install them into a
+# throwaway virtualenv rather than globally. See README.md.
+numpy>=1.24
+safetensors>=0.4

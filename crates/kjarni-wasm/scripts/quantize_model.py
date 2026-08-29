@@ -73,6 +73,30 @@ def quantize_tensor(tensor: np.ndarray) -> tuple[np.ndarray, float]:
     return quantized, float(scale)
 
 
+def _read_bfloat16(safetensors_path, name):
+    """Read one bfloat16 tensor and widen it to float32.
+
+    bfloat16 shares float32's exponent and simply truncates the mantissa, so
+    placing the 16 bits in the high half of a 32-bit word reconstructs the value
+    exactly. No rounding is involved.
+    """
+    import json as _json
+    import struct as _struct
+
+    with open(safetensors_path, "rb") as fh:
+        header_len = _struct.unpack("<Q", fh.read(8))[0]
+        header = _json.loads(fh.read(header_len))
+        meta = header[name]
+        start, end = meta["data_offsets"]
+        fh.seek(8 + header_len + start)
+        raw = fh.read(end - start)
+
+    lo = np.zeros(len(raw) // 2, dtype=np.uint16)
+    hi = np.frombuffer(raw, dtype=np.uint16)
+    widened = np.stack([lo, hi], axis=1).reshape(-1).view(np.float32)
+    return widened.reshape(meta["shape"]).astype(np.float32)
+
+
 def quantize_model(model_dir: Path, output_path: Path):
     """Read safetensors + config.json, write quantized .kjq file."""
     
@@ -90,8 +114,34 @@ def quantize_model(model_dir: Path, output_path: Path):
         print(f"Error: {tokenizer_path} not found")
         sys.exit(1)
     
-    # Load config
-    config_json = config_path.read_text(encoding="utf-8")
+    # Load config, folding in the sequence length the model was actually tuned for.
+    #
+    # A .kjq is loaded in the browser, where there is no filesystem, so the packed
+    # config is the only channel through which this can travel. Without it the WASM
+    # loader falls back to max_position_embeddings and truncates MiniLM at 512 while
+    # every native binding truncates at 256, producing different embeddings for the
+    # same model and text.
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    sbert_path = model_dir / "sentence_bert_config.json"
+    max_seq_length = None
+    if sbert_path.exists():
+        # A present-but-unreadable file is a truncated or redirected download, not a
+        # reason to abandon the quantisation. Fall back the way a missing file does.
+        try:
+            sbert = json.loads(sbert_path.read_text(encoding="utf-8"))
+            candidate = sbert.get("max_seq_length")
+            if isinstance(candidate, int) and candidate > 0:
+                max_seq_length = candidate
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            print(f"  Warning: ignoring unreadable {sbert_path.name}: {e}")
+
+    if max_seq_length is not None:
+        config["max_seq_length"] = max_seq_length
+        print(f"  Sequence length:          {max_seq_length} (from sentence_bert_config.json)")
+    else:
+        print("  Sequence length:          not specified; loader will use the model config")
+
+    config_json = json.dumps(config)
     config_bytes = config_json.encode("utf-8")
     
     # Load tokenizer
@@ -99,10 +149,26 @@ def quantize_model(model_dir: Path, output_path: Path):
     tokenizer_bytes = tokenizer_json.encode("utf-8")
     
     # Load tensors
+    #
+    # numpy has no bfloat16, and safetensors' numpy framework refuses to hand one
+    # back, so a bf16 checkpoint fails outright. Most modern chat models ship bf16
+    # (Qwen and Llama among them), which made this script unusable for exactly the
+    # models people want in a browser. Read those tensors raw and widen them: bf16
+    # is the top 16 bits of an f32, so the conversion is a shift, not an
+    # approximation.
     tensors = {}
     with safe_open(str(safetensors_path), framework="numpy") as f:
-        for name in f.keys():
-            tensors[name] = f.get_tensor(name)
+        keys = list(f.keys())
+        for name in keys:
+            try:
+                tensors[name] = f.get_tensor(name)
+            except TypeError as e:
+                if "bfloat16" not in str(e):
+                    raise
+                tensors[name] = _read_bfloat16(safetensors_path, name)
+
+    if not tensors:
+        raise SystemExit(f"No tensors could be read from {safetensors_path}")
     
     print(f"Loaded {len(tensors)} tensors from {safetensors_path}")
     

@@ -11,8 +11,9 @@ using Microsoft.Extensions.AI;
 namespace Kjarni.Extensions.AI
 {
     /// <summary>
-    /// An <see cref="IChatClient"/> backed by a local Kjarni <see cref="Chat"/>. Runs
-    /// entirely in-process: no HTTP, no daemon, no Python, no cloud.
+    /// An <see cref="IChatClient"/> backed by a local Kjarni <see cref="Chat"/>. The model
+    /// is loaded directly by your application, so prompts and responses stay on the machine
+    /// and there is nothing listening on a port to keep running alongside it.
     /// </summary>
     /// <remarks>
     /// <para>
