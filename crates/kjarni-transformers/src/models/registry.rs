@@ -874,6 +874,7 @@ pub async fn download_model_files(
 
     download_file(model_dir, "tokenizer.json", paths.tokenizer_url, quiet).await?;
     download_file(model_dir, "config.json", paths.config_url, quiet).await?;
+    download_sentence_bert_config(model_dir, paths.config_url).await;
 
     let use_gguf = matches!(format, WeightsFormat::GGUF) && paths.gguf_url.is_some();
 
@@ -895,6 +896,30 @@ pub async fn download_model_files(
         }
     }
 }
+
+/// Fetches `sentence_bert_config.json` beside the model config, if it exists.
+///
+/// This is the file the encoder loader reads to decide where to truncate. Only
+/// sentence-transformers exports carry it, so a 404 is the normal outcome for most
+/// models and is not an error. Its URL is derived from `config_url` rather than
+/// stored per model, so every registry entry gets the behaviour without thirty new
+/// string literals to keep in sync.
+#[cfg(not(target_arch = "wasm32"))]
+async fn download_sentence_bert_config(model_dir: &Path, config_url: &str) {
+    let Some(base) = config_url.strip_suffix("config.json") else {
+        return;
+    };
+    let url = format!("{base}sentence_bert_config.json");
+
+    // Deliberately ignoring the result: absence is expected, and a network blip
+    // here must not fail a download whose required files already succeeded.
+    if let Err(e) = download_file(model_dir, "sentence_bert_config.json", &url, true).await {
+        log::debug!("no sentence_bert_config.json for this model ({e})");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn download_sentence_bert_config(_model_dir: &Path, _config_url: &str) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn download_file(model_dir: &Path, filename: &str, url: &str, _quiet: bool) -> Result<()> {

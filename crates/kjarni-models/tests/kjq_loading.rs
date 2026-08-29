@@ -5,8 +5,13 @@
 //! `kjarni-wasm` could read it, using its own copy of the encoder stack. These tests
 //! cover the engine reading the same file, which is what lets that duplicate go.
 //!
-//! They skip rather than fail when the model file is absent, so a checkout without
-//! the website repo alongside it still runs green.
+//! Fixtures come from `KJARNI_KJQ_DIR` when set (CI exports them from the cached
+//! weights with `scripts/quantize_model.py`), otherwise from the sibling website
+//! checkout. They skip rather than fail when neither is present, so a bare checkout
+//! still runs green.
+//!
+//! Do not let the skip lull you: before CI exported the fixtures, all four of these
+//! passed green in CI while testing nothing at all.
 
 use kjarni_models::SentenceEncoder;
 use kjarni_transformers::pipeline::EncoderLoader;
@@ -18,6 +23,25 @@ const KJQ: &str = "../../../web.kjarni.ai/src/static/models/all-MiniLM-L6-v2-q8.
 
 /// Full-precision weights for the same model, if they have been fetched.
 const F32_CACHE: &str = "sentence-transformers_all-MiniLM-L6-v2";
+
+/// Reads a `.kjq` fixture.
+///
+/// `KJARNI_KJQ_DIR` wins when set: CI has no sibling website checkout, so it exports
+/// the fixtures from cached weights with `scripts/quantize_model.py` and points the
+/// variable at that directory. A fixture missing from an explicitly configured
+/// directory is a broken CI step, not an absent optional file, so it fails loudly
+/// instead of skipping.
+fn fixture(rel: &str) -> Option<Vec<u8>> {
+    if let Ok(dir) = std::env::var("KJARNI_KJQ_DIR") {
+        let name = std::path::Path::new(rel).file_name().expect("fixture name");
+        let path = std::path::Path::new(&dir).join(name);
+        return match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => panic!("KJARNI_KJQ_DIR is set but {} could not be read: {e}", path.display()),
+        };
+    }
+    std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).ok()
+}
 
 const TEXTS: [&str; 4] = [
     "Hello world",
@@ -37,8 +61,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 }
 
 fn kjq_bytes() -> Option<Vec<u8>> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(KJQ);
-    std::fs::read(path).ok()
+    fixture(KJQ)
 }
 
 fn load_from_kjq(bytes: &[u8]) -> SentenceEncoder {
@@ -151,8 +174,7 @@ async fn decoder_loads_from_kjq_bytes_and_generates() {
     // only a manual run, which is how a loader silently regresses.
     use kjarni_transformers::pipeline::DecoderLoader;
 
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(CHAT_KJQ);
-    let Ok(bytes) = std::fs::read(&path) else {
+    let Some(bytes) = fixture(CHAT_KJQ) else {
         eprintln!("skipping: {CHAT_KJQ} not present");
         return;
     };

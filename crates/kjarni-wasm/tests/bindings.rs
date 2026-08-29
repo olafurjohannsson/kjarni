@@ -21,7 +21,22 @@ const EMBED_KJQ: &str = "../../../web.kjarni.ai/src/static/models/all-MiniLM-L6-
 const RERANK_KJQ: &str = "../../../web.kjarni.ai/src/static/models/ms-marco-MiniLM-L-6-v2-q8.kjq";
 const CLASSIFY_KJQ: &str = "../../../web.kjarni.ai/src/static/models/distilbert-sentiment-q8.kjq";
 
+/// Reads a `.kjq` fixture.
+///
+/// `KJARNI_KJQ_DIR` wins when set: CI has no sibling website checkout, so it exports
+/// the fixtures from cached weights with `scripts/quantize_model.py` and points the
+/// variable at that directory. A fixture missing from an explicitly configured
+/// directory is a broken CI step, not an absent optional file, so it fails loudly
+/// instead of skipping.
 fn model_bytes(rel: &str) -> Option<Vec<u8>> {
+    if let Ok(dir) = std::env::var("KJARNI_KJQ_DIR") {
+        let name = std::path::Path::new(rel).file_name().expect("fixture name");
+        let path = std::path::Path::new(&dir).join(name);
+        return match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => panic!("KJARNI_KJQ_DIR is set but {} could not be read: {e}", path.display()),
+        };
+    }
     std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).ok()
 }
 

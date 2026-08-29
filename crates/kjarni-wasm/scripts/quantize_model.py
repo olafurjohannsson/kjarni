@@ -114,8 +114,34 @@ def quantize_model(model_dir: Path, output_path: Path):
         print(f"Error: {tokenizer_path} not found")
         sys.exit(1)
     
-    # Load config
-    config_json = config_path.read_text(encoding="utf-8")
+    # Load config, folding in the sequence length the model was actually tuned for.
+    #
+    # A .kjq is loaded in the browser, where there is no filesystem, so the packed
+    # config is the only channel through which this can travel. Without it the WASM
+    # loader falls back to max_position_embeddings and truncates MiniLM at 512 while
+    # every native binding truncates at 256, producing different embeddings for the
+    # same model and text.
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    sbert_path = model_dir / "sentence_bert_config.json"
+    max_seq_length = None
+    if sbert_path.exists():
+        # A present-but-unreadable file is a truncated or redirected download, not a
+        # reason to abandon the quantisation. Fall back the way a missing file does.
+        try:
+            sbert = json.loads(sbert_path.read_text(encoding="utf-8"))
+            candidate = sbert.get("max_seq_length")
+            if isinstance(candidate, int) and candidate > 0:
+                max_seq_length = candidate
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            print(f"  Warning: ignoring unreadable {sbert_path.name}: {e}")
+
+    if max_seq_length is not None:
+        config["max_seq_length"] = max_seq_length
+        print(f"  Sequence length:          {max_seq_length} (from sentence_bert_config.json)")
+    else:
+        print("  Sequence length:          not specified; loader will use the model config")
+
+    config_json = json.dumps(config)
     config_bytes = config_json.encode("utf-8")
     
     # Load tokenizer

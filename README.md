@@ -5,9 +5,9 @@
 [![CI](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml/badge.svg)](https://github.com/olafurjohannsson/kjarni/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-**Local embeddings, semantic search, classification, and reranking in C#, Go, Rust, and Python — no Python runtime, no ONNX, no cloud.**
+**Local embeddings, semantic search, classification, reranking and chat for C#, Go, Rust, Python, C++ and the command line.**
 
-Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine — on a laptop, in a container, or inside an air-gapped network.
+Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine: on a laptop, in a container, or inside an air-gapped network.
 
 ```bash
 dotnet add package Kjarni                             # C# / .NET
@@ -23,7 +23,7 @@ Console.WriteLine(embedder.Similarity("doctor", "physician"));
 // 0.8598132
 ```
 
-That is the whole setup. No model export step, no `pip install torch`, no inference server, no API key.
+That is the whole setup. Add the package, name a model, call a method. The model downloads on first use and everything after that works offline.
 
 The name is Icelandic [ˈkʰjartnɪ]. It means "core."
 
@@ -214,7 +214,7 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 
 \* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron); the upstream model and its license are unchanged.
 
-`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation works but is not the focus of this release — for local chat, [llama.cpp](https://github.com/ggerganov/llama.cpp) is the more mature choice. Kjarni's lane is encoders: embeddings, search, reranking, and classification.
+`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation works but is not the focus of this release — for local chat, [llama.cpp](https://github.com/ggerganov/llama.cpp) is the more mature choice. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
 
 ## FAQ
 

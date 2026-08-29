@@ -13,6 +13,12 @@ bincode = { version = "1.3", features = ["i128"] }
 console_error_panic_hook = "0.1"
 anyhow = "1.0"
 glob-match = "0.2"
+# The parallel scan in `vector.rs`. Native only: rayon on wasm32-unknown-unknown
+# needs wasm-bindgen-rayon and a threaded build, and this crate is compiled for the
+# browser, where `search` falls back to the serial path.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { workspace = true }
+
 [dependencies.web-sys]
 version = "0.3"
 features = ["console"]
