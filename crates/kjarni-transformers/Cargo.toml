@@ -54,6 +54,9 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+# ReceiverStream only needs tokio::sync::mpsc, which is in the wasm-safe feature
+# set, and `generate` is built on top of the streaming path.
+tokio-stream = { version = "0.1.18", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }

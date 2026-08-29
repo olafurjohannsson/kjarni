@@ -7,7 +7,11 @@ use kjarni_transformers::Device;
 use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
-use crate::models::llama::{cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder};
+use crate::models::llama::{cpu_decoder::LlamaCpuDecoder};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
 use crate::models::qwen::config::QwenConfig;
 
 use kjarni_transformers::{
@@ -16,7 +20,6 @@ use kjarni_transformers::{
     cache::{Cache, CpuKVCache},
     common::{DecodingStrategy, GenerationConfig, HFGenerationDefaults, SamplingParams},
     decoder::prelude::*,
-    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderModelFactory, DecoderPipeline},
@@ -60,17 +63,20 @@ impl DecoderModelFactory for QwenModel {
                 rope.cpu.clone(),
                 load_config.target_dtype,
             )?) as Box<dyn CpuDecoder>);
-        } else if let Some(ctx) = context
-            && device.is_gpu()
-        {
-            gpu = Some(Box::new(LlamaGpuDecoder::new(
-                ctx,
-                weights,
-                meta.clone(),
-                layout.clone(),
-                rope.gpu.clone(),
-                load_config,
-            )?) as Box<dyn GpuDecoder>);
+        } else if device.is_gpu() {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(ctx) = context {
+                gpu = Some(Box::new(LlamaGpuDecoder::new(
+                    ctx,
+                    weights,
+                    meta.clone(),
+                    layout.clone(),
+                    rope.gpu.clone(),
+                    load_config,
+                )?) as Box<dyn GpuDecoder>);
+            }
+            #[cfg(target_arch = "wasm32")]
+            return Err(anyhow!("GPU decoding is not available in WebAssembly"));
         } else {
             log::error!("Invalid device in QwenModel");
         }
@@ -97,6 +103,8 @@ impl DecoderModelFactory for QwenModel {
 }
 
 impl QwenModel {
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -113,6 +121,8 @@ impl QwenModel {
         )
         .await
     }
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_pretrained(
         model_path: &Path,
         device: kjarni_transformers::prelude::Device,
@@ -141,6 +151,7 @@ impl InferenceModel for QwenModel {
     fn device(&self) -> kjarni_transformers::prelude::Device {
         self.pipeline.plan().layers
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.pipeline.context().cloned()
     }
@@ -167,6 +178,8 @@ impl LanguageModel for QwenModel {
                     kv_dim,
                 )))
             }
+            // No GPU cache without a GPU context, which wasm cannot build.
+            #[cfg(not(target_arch = "wasm32"))]
             kjarni_transformers::prelude::Device::Wgpu => {
                 let ctx = self
                     .context()
@@ -180,6 +193,10 @@ impl LanguageModel for QwenModel {
                     max_len,
                 )?))
             }
+            #[cfg(target_arch = "wasm32")]
+            kjarni_transformers::prelude::Device::Wgpu => Err(anyhow!(
+                "GPU cache is not available in WebAssembly"
+            )),
         }
     }
 
@@ -245,6 +262,7 @@ impl DecoderLanguageModel for QwenModel {
             None
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
         if self.pipeline.gpu_decoder().is_some() {
             Some(self)
@@ -300,6 +318,7 @@ impl CpuDecoderOps for QwenModel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuDecoderOps for QwenModel {
     fn decoder(&self) -> &dyn GpuDecoder {
         self.pipeline.gpu_decoder().unwrap()

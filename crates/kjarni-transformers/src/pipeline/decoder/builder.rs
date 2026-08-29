@@ -85,6 +85,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
             plan.embeddings == Device::Cpu || (tied_weights && plan.lm_head == Device::Cpu);
         let emb_load_gpu =
             plan.embeddings == Device::Wgpu || (tied_weights && plan.lm_head == Device::Wgpu);
+        // The wasm constructor takes no context and no device flags: CPU is the only
+        // path there.
+        #[cfg(not(target_arch = "wasm32"))]
         let embeddings = LoadedEmbeddings::new(
             ctx,
             self.weights,
@@ -96,6 +99,18 @@ impl<'a> DecoderPipelineBuilder<'a> {
             emb_load_gpu,
             target_dt,
         )?;
+        #[cfg(target_arch = "wasm32")]
+        let embeddings = {
+            let _ = (emb_load_cpu, emb_load_gpu);
+            LoadedEmbeddings::new(
+                self.weights,
+                emb_builder
+                    .position_offset(meta.extra_pos_embeddings)
+                    .scale_embeddings(meta.scale_embeddings)
+                    .build(),
+                target_dt,
+            )?
+        };
 
         let mid_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
         log::debug!(
@@ -106,6 +121,9 @@ impl<'a> DecoderPipelineBuilder<'a> {
 
         log::debug!("LM head quantization: {:?}", self.load_config.quantize_lm_head);
 
+        // Tied weights alias the embedding tensors, which needs the GPU-aware
+        // constructor; on wasm the head is simply loaded from the weights.
+        #[cfg(not(target_arch = "wasm32"))]
         let lm_head = if tied_weights {
             log::info!("Using tied weights between embeddings and LM head");
             LoadedLMHead::from_shared_weights(
@@ -127,6 +145,13 @@ impl<'a> DecoderPipelineBuilder<'a> {
                 self.load_config.quantize_lm_head,
             )?
         };
+        #[cfg(target_arch = "wasm32")]
+        let lm_head = LoadedLMHead::new(
+            self.weights,
+            None,
+            LMHeadConfig::new(&layout.lm_head, meta.vocab_size, meta.hidden_size),
+            target_dt,
+        )?;
         let end_ram = crate::utils::alloc_stats::get_current_ram_usage_mb();
         log::debug!(
             "[Builder] Post-LMHead RAM: {:.2} MB (Delta: {:.2} MB)",

@@ -24,7 +24,6 @@ half = { workspace = true }
 pollster = { workspace = true }
 once_cell = { workspace = true }
 dirs = { workspace = true }
-tokio = { workspace = true }
 async-trait = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
@@ -42,11 +41,18 @@ tempfile = "3.23.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+# The workspace tokio asks for rt-multi-thread and fs, neither of which exists on
+# wasm, so the crate failed to build for wasm32 before reaching any of its own code.
+# This mirrors the split kjarni-transformers already uses.
+tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 env_logger = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # Unique deps

@@ -391,6 +391,21 @@ pub struct GpuEncoderOutput {
 }
 
 
+/// Placeholder GPU encoder for wasm builds.
+///
+/// There is no GPU backend on wasm, but the encoder pipeline still carries
+/// `Option<Box<dyn GpuEncoder>>` fields and the `EncoderModelFactory` trait still
+/// mentions the type in its signature. Declaring an empty trait keeps every one of
+/// those signatures compiling against a value that can only ever be `None`, which
+/// is far less invasive than threading `#[cfg]` through the pipeline. Nothing can
+/// implement it usefully, so no GPU path can be reached by accident.
+#[cfg(target_arch = "wasm32")]
+pub trait GpuEncoder: Send + Sync {}
+
+/// Placeholder GPU encoder ops for wasm builds. See [`GpuEncoder`].
+#[cfg(target_arch = "wasm32")]
+pub trait GpuEncoderOps: Send + Sync {}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub trait GpuEncoder: Send + Sync {
     /// Compute embeddings only 

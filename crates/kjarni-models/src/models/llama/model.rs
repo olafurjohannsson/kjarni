@@ -16,15 +16,18 @@ use ndarray::{Array2, Array3};
 use tokenizers::Tokenizer;
 
 use crate::models::llama::{
-    config::LlamaConfig, cpu_decoder::LlamaCpuDecoder, gpu_decoder::LlamaGpuDecoder,
+    config::LlamaConfig, cpu_decoder::LlamaCpuDecoder,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::llama::gpu_decoder::LlamaGpuDecoder;
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
 
 use kjarni_transformers::{
     WgpuContext,
     cache::{Cache, CpuKVCache},
     decoder::prelude::*,
     execution::ExecutionPlan,
-    gpu::{GpuTensor, GpuFrameContext, cache::GpuKVCache},
     models::base::{AutoregressiveLoop, ModelLoadConfig},
     models::{LanguageModel, ModelType},
     pipeline::{DecoderPipeline},
@@ -68,17 +71,20 @@ impl DecoderModelFactory for LlamaModel {
                 rope.cpu.clone(),
                 load_config.target_dtype,
             )?) as Box<dyn CpuDecoder>);
-        } else if let Some(ctx) = context
-            && device.is_gpu()
-        {
-            gpu = Some(Box::new(LlamaGpuDecoder::new(
-                ctx,
-                weights,
-                meta.clone(),
-                layout.clone(),
-                rope.gpu.clone(),
-                load_config,
-            )?) as Box<dyn GpuDecoder>);
+        } else if device.is_gpu() {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(ctx) = context {
+                gpu = Some(Box::new(LlamaGpuDecoder::new(
+                    ctx,
+                    weights,
+                    meta.clone(),
+                    layout.clone(),
+                    rope.gpu.clone(),
+                    load_config,
+                )?) as Box<dyn GpuDecoder>);
+            }
+            #[cfg(target_arch = "wasm32")]
+            return Err(anyhow!("GPU decoding is not available in WebAssembly"));
         } else {
             log::error!("Invalid device");
         }
@@ -104,6 +110,8 @@ impl DecoderModelFactory for LlamaModel {
 }
 
 impl LlamaModel {
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -120,6 +128,8 @@ impl LlamaModel {
         )
         .await
     }
+    /// Native only: loading from disk or the registry needs a filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
@@ -171,6 +181,7 @@ impl InferenceModel for LlamaModel {
         self.pipeline.plan().layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.pipeline.context().cloned()
     }
@@ -206,6 +217,8 @@ impl LanguageModel for LlamaModel {
                     kv_dim,
                 )))
             }
+            // No GPU cache without a GPU context, which wasm cannot build.
+            #[cfg(not(target_arch = "wasm32"))]
             Device::Wgpu => {
                 let context = self
                     .context()
@@ -220,6 +233,10 @@ impl LanguageModel for LlamaModel {
                     effective_max_len,
                 )?))
             }
+            #[cfg(target_arch = "wasm32")]
+            Device::Wgpu => Err(anyhow::anyhow!(
+                "GPU cache is not available in WebAssembly"
+            )),
         }
     }
 
@@ -299,6 +316,7 @@ impl CpuDecoderOps for LlamaModel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuDecoderOps for LlamaModel {
     fn decoder(&self) -> &dyn GpuDecoder {
         self.pipeline
@@ -356,6 +374,7 @@ impl DecoderLanguageModel for LlamaModel {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
         if self.pipeline.gpu_decoder().is_some() {
             Some(self)

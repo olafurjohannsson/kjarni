@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, cache::GpuKVCache};
+use kjarni_transformers::gpu_ops::primitives::linear::GpuLinearLayer;
 use kjarni_transformers::{
     WgpuContext,
     decoder::prelude::*,
-    gpu::{GpuFrameContext, GpuTensor},
-    gpu_ops::primitives::linear::GpuLinearLayer,
     linear_layer::LinearLayer,
     models::{
         LanguageModel, ModelArchitecture, ModelType, base::AutoregressiveLoop, download_model_files,
@@ -184,6 +184,7 @@ impl InferenceModel for Gpt2Model {
     fn device(&self) -> Device {
         self.device
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         let ctx = self.context.clone();
         ctx
@@ -293,6 +294,7 @@ impl CpuDecoderOps for Gpt2Model {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuDecoderOps for Gpt2Model {
     fn decoder(&self) -> &dyn GpuDecoder {
         self.gpu_decoder
@@ -346,6 +348,7 @@ impl DecoderLanguageModel for Gpt2Model {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps> {
         if self.device == Device::Wgpu {
             Some(self)

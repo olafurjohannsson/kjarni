@@ -9,8 +9,9 @@ use crate::chat::mistral::MistralChatTemplate;
 use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::models::base::ModelLoadConfig;
-use crate::models::registry::WeightsFormat;
-use crate::models::{download_model_files, ModelArchitecture, ModelType};
+use crate::models::{ModelArchitecture, ModelType};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::{download_model_files, registry::WeightsFormat};
 use crate::pipeline::decoder::DecoderPipelineBuilder;
 use crate::pipeline::{DecoderPipeline};
 use crate::loaders::LoadedRoPE;
@@ -47,6 +48,8 @@ pub trait DecoderModelFactory: Sized {
 pub struct DecoderLoader;
 
 impl DecoderLoader {
+    /// Fetch from the registry and load. Native only: wasm has no filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn load_from_registry<M: DecoderModelFactory>(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -82,6 +85,8 @@ impl DecoderLoader {
         Self::load_from_pretrained::<M>(&model_dir, device, context, load_config, Some(model_type))
     }
 
+    /// Load from a directory on disk. Native only.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_from_pretrained<M: DecoderModelFactory>(
         model_path: &Path,
         device: Device,
@@ -171,6 +176,83 @@ impl DecoderLoader {
         ))
     }
 
+    /// Load a decoder from raw safetensors plus its config and tokenizer.
+    ///
+    /// The browser counterpart to `load_from_pretrained`: there is no filesystem to
+    /// read from and no GPU context to build, so everything arrives as bytes and the
+    /// plan is always CPU. Mirrors `EncoderLoader::load_from_bytes`.
+    pub fn load_from_bytes<M: DecoderModelFactory>(
+        safetensors_data: &[u8],
+        config_json: &str,
+        tokenizer_json: &[u8],
+        load_config: Option<ModelLoadConfig>,
+        model_type: Option<ModelType>,
+    ) -> Result<M> {
+        let weights = ModelWeights::from_safetensors_bytes(safetensors_data, config_json)?;
+        let load_config: ModelLoadConfig = load_config.unwrap_or_default();
+
+        let config = M::load_config(&weights)?;
+        let meta = config.metadata();
+        let layout = config.layout();
+
+        let mut tokenizer = Tokenizer::from_bytes(tokenizer_json)
+            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+        let _ = tokenizer.with_truncation(Some(tokenizers::TruncationParams {
+            max_length: meta.max_seq_len,
+            ..Default::default()
+        }));
+        tokenizer.with_padding(None);
+
+        // The wasm constructor takes no context and no GPU flag.
+        #[cfg(not(target_arch = "wasm32"))]
+        let rope = LoadedRoPE::new(None, &meta, false)?;
+        #[cfg(target_arch = "wasm32")]
+        let rope = LoadedRoPE::new(&meta)?;
+
+        let (cpu_decoder, gpu_decoder) = M::build_backends(
+            &weights,
+            &meta,
+            &layout,
+            &rope,
+            load_config,
+            None,
+            Device::Cpu,
+        )?;
+
+        let pipeline: DecoderPipeline = DecoderPipelineBuilder::new(&weights, config.clone())
+            .with_load_config(load_config)
+            .with_backends(cpu_decoder, gpu_decoder)
+            .build()?;
+
+        let chat_template: Option<Box<dyn ChatTemplate>> = model_type.and_then(|mt| {
+            if !mt.is_instruct_model() {
+                return None;
+            }
+            match mt.architecture() {
+                ModelArchitecture::Llama => {
+                    Some(Box::new(Llama3ChatTemplate::for_generation()) as Box<dyn ChatTemplate>)
+                }
+                ModelArchitecture::Qwen2 => {
+                    Some(Box::new(ChatMLTemplate::new()) as Box<dyn ChatTemplate>)
+                }
+                ModelArchitecture::Mistral => {
+                    Some(Box::new(MistralChatTemplate::new()) as Box<dyn ChatTemplate>)
+                }
+                _ => None,
+            }
+        });
+
+        Ok(M::new_from_pipeline(
+            pipeline,
+            tokenizer,
+            config,
+            model_type,
+            None,
+            chat_template,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn try_load_generation_defaults(model_path: &Path) -> Option<HFGenerationDefaults> {
         let gen_config_path = if model_path.is_file() {
             model_path.parent()?.join("generation_config.json")

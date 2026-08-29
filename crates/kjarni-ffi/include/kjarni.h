@@ -14,152 +14,165 @@
 /**
  * Error codes returned by Kjarni FFI functions.
  */
-typedef enum KjarniKjarniErrorCode {
+typedef enum KjarniErrorCode {
   /**
    * Operation completed successfully
    */
-  KJARNI_KJARNI_ERROR_CODE_OK = 0,
+  KJARNI_ERROR_CODE_OK = 0,
   /**
    * Null pointer passed to function
    */
-  KJARNI_KJARNI_ERROR_CODE_NULL_POINTER = 1,
+  KJARNI_ERROR_CODE_NULL_POINTER = 1,
   /**
    * Invalid UTF-8 string
    */
-  KJARNI_KJARNI_ERROR_CODE_INVALID_UTF8 = 2,
+  KJARNI_ERROR_CODE_INVALID_UTF8 = 2,
   /**
    * Model not found in registry
    */
-  KJARNI_KJARNI_ERROR_CODE_MODEL_NOT_FOUND = 3,
+  KJARNI_ERROR_CODE_MODEL_NOT_FOUND = 3,
   /**
    * Failed to load model
    */
-  KJARNI_KJARNI_ERROR_CODE_LOAD_FAILED = 4,
+  KJARNI_ERROR_CODE_LOAD_FAILED = 4,
   /**
    * Inference operation failed
    */
-  KJARNI_KJARNI_ERROR_CODE_INFERENCE_FAILED = 5,
+  KJARNI_ERROR_CODE_INFERENCE_FAILED = 5,
   /**
    * GPU not available
    */
-  KJARNI_KJARNI_ERROR_CODE_GPU_UNAVAILABLE = 6,
+  KJARNI_ERROR_CODE_GPU_UNAVAILABLE = 6,
   /**
    * Invalid configuration
    */
-  KJARNI_KJARNI_ERROR_CODE_INVALID_CONFIG = 7,
+  KJARNI_ERROR_CODE_INVALID_CONFIG = 7,
   /**
    * Operation was cancelled
    */
-  KJARNI_KJARNI_ERROR_CODE_CANCELLED = 8,
+  KJARNI_ERROR_CODE_CANCELLED = 8,
   /**
    * Operation timed out
    */
-  KJARNI_KJARNI_ERROR_CODE_TIMEOUT = 9,
+  KJARNI_ERROR_CODE_TIMEOUT = 9,
   /**
    * Stream has ended
    */
-  KJARNI_KJARNI_ERROR_CODE_STREAM_ENDED = 10,
+  KJARNI_ERROR_CODE_STREAM_ENDED = 10,
   /**
    * Unknown error
    */
-  KJARNI_KJARNI_ERROR_CODE_UNKNOWN = 255,
-} KjarniKjarniErrorCode;
+  KJARNI_ERROR_CODE_UNKNOWN = 255,
+} KjarniErrorCode;
 
 /**
  * Device selection for inference.
  */
-typedef enum KjarniKjarniDevice {
+typedef enum KjarniDevice {
   /**
    * Use CPU for inference
    */
-  KJARNI_KJARNI_DEVICE_CPU = 0,
+  KJARNI_DEVICE_CPU = 0,
   /**
    * Use GPU for inference
    */
-  KJARNI_KJARNI_DEVICE_GPU = 1,
-} KjarniKjarniDevice;
+  KJARNI_DEVICE_GPU = 1,
+} KjarniDevice;
 
 /**
  * Progress stage enum for FFI
  */
-typedef enum KjarniKjarniProgressStage {
-  KJARNI_KJARNI_PROGRESS_STAGE_SCANNING = 0,
-  KJARNI_KJARNI_PROGRESS_STAGE_LOADING = 1,
-  KJARNI_KJARNI_PROGRESS_STAGE_EMBEDDING = 2,
-  KJARNI_KJARNI_PROGRESS_STAGE_WRITING = 3,
-  KJARNI_KJARNI_PROGRESS_STAGE_COMMITTING = 4,
-  KJARNI_KJARNI_PROGRESS_STAGE_SEARCHING = 5,
-  KJARNI_KJARNI_PROGRESS_STAGE_RERANKING = 6,
-} KjarniKjarniProgressStage;
+typedef enum KjarniProgressStage {
+  KJARNI_PROGRESS_STAGE_SCANNING = 0,
+  KJARNI_PROGRESS_STAGE_LOADING = 1,
+  KJARNI_PROGRESS_STAGE_EMBEDDING = 2,
+  KJARNI_PROGRESS_STAGE_WRITING = 3,
+  KJARNI_PROGRESS_STAGE_COMMITTING = 4,
+  KJARNI_PROGRESS_STAGE_SEARCHING = 5,
+  KJARNI_PROGRESS_STAGE_RERANKING = 6,
+} KjarniProgressStage;
 
-typedef enum KjarniKjarniSearchMode {
-  KJARNI_KJARNI_SEARCH_MODE_KEYWORD = 0,
-  KJARNI_KJARNI_SEARCH_MODE_SEMANTIC = 1,
-  KJARNI_KJARNI_SEARCH_MODE_HYBRID = 2,
-} KjarniKjarniSearchMode;
+typedef enum KjarniSearchMode {
+  KJARNI_SEARCH_MODE_KEYWORD = 0,
+  KJARNI_SEARCH_MODE_SEMANTIC = 1,
+  KJARNI_SEARCH_MODE_HYBRID = 2,
+} KjarniSearchMode;
 
 /**
  * Cancellation token
  */
-typedef struct KjarniKjarniCancelToken KjarniKjarniCancelToken;
+typedef struct KjarniCancelToken KjarniCancelToken;
+
+/**
+ * Opaque handle to a Chat instance.
+ */
+typedef struct KjarniChat KjarniChat;
+
+/**
+ * Opaque handle to a stateful ChatConversation.
+ *
+ * Owns the history and holds a raw pointer back to the parent Chat.
+ * The parent Chat must outlive this handle.
+ */
+typedef struct KjarniChatConversation KjarniChatConversation;
 
 /**
  * Opaque handle to a Classifier.
  */
-typedef struct KjarniKjarniClassifier KjarniKjarniClassifier;
+typedef struct KjarniClassifier KjarniClassifier;
 
 /**
  * Opaque handle to an Embedder instance.
  */
-typedef struct KjarniKjarniEmbedder KjarniKjarniEmbedder;
+typedef struct KjarniEmbedder KjarniEmbedder;
 
 /**
  * Opaque handle to an Indexer instance.
  *
  * Created via `kjarni_indexer_new`, must be freed via `kjarni_indexer_free`
  */
-typedef struct KjarniKjarniIndexer KjarniKjarniIndexer;
+typedef struct KjarniIndexer KjarniIndexer;
 
 /**
  * Opaque handle to a Reranker
  */
-typedef struct KjarniKjarniReranker KjarniKjarniReranker;
+typedef struct KjarniReranker KjarniReranker;
 
-typedef struct KjarniKjarniSearcher KjarniKjarniSearcher;
+typedef struct KjarniSearcher KjarniSearcher;
 
 /**
  * Float array returned by FFI functions. Caller must free with kjarni_float_array_free.
  */
-typedef struct KjarniKjarniFloatArray {
+typedef struct KjarniFloatArray {
   float *data;
   uintptr_t len;
-} KjarniKjarniFloatArray;
+} KjarniFloatArray;
 
 /**
  * 2D float array for batch results. Caller must free with kjarni_float_2d_array_free.
  */
-typedef struct KjarniKjarniFloat2DArray {
+typedef struct KjarniFloat2DArray {
   float *data;
   uintptr_t rows;
   uintptr_t cols;
-} KjarniKjarniFloat2DArray;
+} KjarniFloat2DArray;
 
 /**
  * String array. Caller must free with kjarni_string_array_free.
  */
-typedef struct KjarniKjarniStringArray {
+typedef struct KjarniStringArray {
   char **strings;
   uintptr_t len;
-} KjarniKjarniStringArray;
+} KjarniStringArray;
 
 /**
  * Configuration for creating an Embedder.
  */
-typedef struct KjarniKjarniEmbedderConfig {
+typedef struct KjarniEmbedderConfig {
   /**
    * Device to use (CPU or GPU)
    */
-  enum KjarniKjarniDevice device;
+  enum KjarniDevice device;
   /**
    * Cache directory for models (NULL = default)
    */
@@ -180,26 +193,26 @@ typedef struct KjarniKjarniEmbedderConfig {
    * Suppress progress output (1 = quiet, 0 = verbose)
    */
   int32_t quiet;
-} KjarniKjarniEmbedderConfig;
+} KjarniEmbedderConfig;
 
 /**
  * Single classification result (label + score).
  */
-typedef struct KjarniKjarniClassResult {
+typedef struct KjarniClassResult {
   char *label;
   float score;
-} KjarniKjarniClassResult;
+} KjarniClassResult;
 
-typedef struct KjarniKjarniClassResults {
-  struct KjarniKjarniClassResult *results;
+typedef struct KjarniClassResults {
+  struct KjarniClassResult *results;
   uintptr_t len;
-} KjarniKjarniClassResults;
+} KjarniClassResults;
 
-typedef struct KjarniKjarniClassifierConfig {
+typedef struct KjarniClassifierConfig {
   /**
    * Device to use
    */
-  enum KjarniKjarniDevice device;
+  enum KjarniDevice device;
   /**
    * Cache directory (NULL = default)
    */
@@ -228,39 +241,39 @@ typedef struct KjarniKjarniClassifierConfig {
    * Suppress output
    */
   int32_t quiet;
-} KjarniKjarniClassifierConfig;
+} KjarniClassifierConfig;
 
 /**
  * Single rerank result
  */
-typedef struct KjarniKjarniRerankResult {
+typedef struct KjarniRerankResult {
   uintptr_t index;
   float score;
-} KjarniKjarniRerankResult;
+} KjarniRerankResult;
 
 /**
  * Array of rerank results
  */
-typedef struct KjarniKjarniRerankResults {
-  struct KjarniKjarniRerankResult *results;
+typedef struct KjarniRerankResults {
+  struct KjarniRerankResult *results;
   uintptr_t len;
-} KjarniKjarniRerankResults;
+} KjarniRerankResults;
 
 /**
  * Configuration for Reranker
  */
-typedef struct KjarniKjarniRerankerConfig {
-  enum KjarniKjarniDevice device;
+typedef struct KjarniRerankerConfig {
+  enum KjarniDevice device;
   const char *cache_dir;
   const char *model_name;
   const char *model_path;
   int32_t quiet;
-} KjarniKjarniRerankerConfig;
+} KjarniRerankerConfig;
 
 /**
  * Information about an existing index
  */
-typedef struct KjarniKjarniIndexInfo {
+typedef struct KjarniIndexInfo {
   /**
    * Path to the index directory (must be freed)
    */
@@ -285,16 +298,16 @@ typedef struct KjarniKjarniIndexInfo {
    * Embedding model name used to create the index (may be NULL, must be freed if not)
    */
   char *embedding_model;
-} KjarniKjarniIndexInfo;
+} KjarniIndexInfo;
 
 /**
  * Configuration for creating an Indexer
  */
-typedef struct KjarniKjarniIndexerConfig {
+typedef struct KjarniIndexerConfig {
   /**
    * Device to run embeddings on (CPU or GPU)
    */
-  enum KjarniKjarniDevice device;
+  enum KjarniDevice device;
   /**
    * Directory to cache downloaded models (NULL = system default)
    */
@@ -339,9 +352,9 @@ typedef struct KjarniKjarniIndexerConfig {
    * Suppress progress output to stderr (1 = quiet, 0 = verbose)
    */
   int32_t quiet;
-} KjarniKjarniIndexerConfig;
+} KjarniIndexerConfig;
 
-typedef struct KjarniKjarniIndexStats {
+typedef struct KjarniIndexStats {
   /**
    * Number of document chunks indexed (after splitting)
    */
@@ -370,36 +383,36 @@ typedef struct KjarniKjarniIndexStats {
    * Total time taken in milliseconds
    */
   uint64_t elapsed_ms;
-} KjarniKjarniIndexStats;
+} KjarniIndexStats;
 
 /**
  * Progress data passed to callbacks
  */
-typedef struct KjarniKjarniProgress {
-  enum KjarniKjarniProgressStage stage;
+typedef struct KjarniProgress {
+  enum KjarniProgressStage stage;
   uintptr_t current;
   uintptr_t total;
   const char *message;
-} KjarniKjarniProgress;
+} KjarniProgress;
 
 /**
  * Generic callback function pointer type for progress
  */
-typedef void (*KjarniKjarniProgressCallbackFn)(struct KjarniKjarniProgress progress, void *user_data);
+typedef void (*KjarniProgressCallbackFn)(struct KjarniProgress progress, void *user_data);
 
-typedef struct KjarniKjarniSearchResult {
+typedef struct KjarniSearchResult {
   float score;
   uintptr_t document_id;
   char *text;
   char *metadata_json;
-} KjarniKjarniSearchResult;
+} KjarniSearchResult;
 
-typedef struct KjarniKjarniSearchResults {
-  struct KjarniKjarniSearchResult *results;
+typedef struct KjarniSearchResults {
+  struct KjarniSearchResult *results;
   uintptr_t len;
-} KjarniKjarniSearchResults;
+} KjarniSearchResults;
 
-typedef struct KjarniKjarniSearchOptions {
+typedef struct KjarniSearchOptions {
   int32_t mode;
   uintptr_t top_k;
   int32_t use_reranker;
@@ -407,136 +420,209 @@ typedef struct KjarniKjarniSearchOptions {
   const char *source_pattern;
   const char *filter_key;
   const char *filter_value;
-} KjarniKjarniSearchOptions;
+} KjarniSearchOptions;
 
-typedef struct KjarniKjarniSearcherConfig {
-  enum KjarniKjarniDevice device;
+typedef struct KjarniSearcherConfig {
+  enum KjarniDevice device;
   const char *cache_dir;
   const char *model_name;
   const char *rerank_model;
-  enum KjarniKjarniSearchMode default_mode;
+  enum KjarniSearchMode default_mode;
   uintptr_t default_top_k;
   int32_t quiet;
-} KjarniKjarniSearcherConfig;
+} KjarniSearcherConfig;
+
+/**
+ * Configuration for creating a Chat instance.
+ */
+typedef struct KjarniChatConfig {
+  /**
+   * Device to use (0 = CPU, 1 = GPU)
+   */
+  enum KjarniDevice device;
+  /**
+   * Cache directory (NULL = default)
+   */
+  const char *cache_dir;
+  /**
+   * Model name (required) - e.g. "llama3.2-1b-instruct"
+   */
+  const char *model_name;
+  /**
+   * Model path (NULL = use registry)
+   */
+  const char *model_path;
+  /**
+   * System prompt (NULL = use model default)
+   */
+  const char *system_prompt;
+  /**
+   * Chat mode: 0 = default, 1 = creative, 2 = reasoning
+   */
+  int32_t mode;
+  /**
+   * Suppress output
+   */
+  int32_t quiet;
+} KjarniChatConfig;
+
+/**
+ * Generation parameters. Use -1 sentinel values to keep model defaults.
+ */
+typedef struct KjarniGenerationConfig {
+  /**
+   * Sampling temperature. -1.0 = use default.
+   */
+  float temperature;
+  /**
+   * Top-k sampling. -1 = use default.
+   */
+  int32_t top_k;
+  /**
+   * Top-p (nucleus) sampling. -1.0 = use default.
+   */
+  float top_p;
+  /**
+   * Min-p sampling threshold. -1.0 = use default.
+   */
+  float min_p;
+  /**
+   * Repetition penalty. -1.0 = use default.
+   */
+  float repetition_penalty;
+  /**
+   * Max new tokens to generate. -1 = use default.
+   */
+  int32_t max_new_tokens;
+  /**
+   * Sampling mode. -1 = default, 0 = greedy, 1 = sample.
+   */
+  int32_t do_sample;
+} KjarniGenerationConfig;
+
+/**
+ * Token callback for streaming. Return false to stop generation.
+ */
+typedef bool (*KjarniStreamCallbackFn)(const char *text, void *user_data);
+
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
 
 /**
  * Initialize the Kjarni runtime. Optional - auto-initialized on first use.
  */
-kjarni_ enum KjarniKjarniErrorCode kjarni_init(void);
+enum KjarniErrorCode kjarni_init(void);
 
 /**
  * Shutdown and cleanup. Call before process exit.
  */
-kjarni_ void kjarni_shutdown(void);
+void kjarni_shutdown(void);
 
 /**
  * Get the library version string.
  */
-kjarni_ const char *kjarni_version(void);
+const char *kjarni_version(void);
 
 /**
  * Free a float array allocated by Kjarni.
  */
-kjarni_ void kjarni_float_array_free(struct KjarniKjarniFloatArray arr);
+void kjarni_float_array_free(struct KjarniFloatArray arr);
 
 /**
  * Free a 2D float array allocated by Kjarni.
  */
-kjarni_ void kjarni_float_2d_array_free(struct KjarniKjarniFloat2DArray arr);
+void kjarni_float_2d_array_free(struct KjarniFloat2DArray arr);
 
 /**
  * Free a string allocated by Kjarni.
  */
-kjarni_ void kjarni_string_free(char *s);
+void kjarni_string_free(char *s);
 
 /**
  * Free a string array allocated by Kjarni.
  */
-kjarni_ void kjarni_string_array_free(struct KjarniKjarniStringArray arr);
+void kjarni_string_array_free(struct KjarniStringArray arr);
 
-kjarni_ float kjarni_cosine_similarity(const float *a, const float *b, uintptr_t len);
+float kjarni_cosine_similarity(const float *a, const float *b, uintptr_t len);
 
-kjarni_ struct KjarniKjarniCancelToken *kjarni_cancel_token_new(void);
+struct KjarniCancelToken *kjarni_cancel_token_new(void);
 
-kjarni_ void kjarni_cancel_token_cancel(struct KjarniKjarniCancelToken *token);
+void kjarni_cancel_token_cancel(struct KjarniCancelToken *token);
 
-kjarni_ bool kjarni_cancel_token_is_cancelled(const struct KjarniKjarniCancelToken *token);
+bool kjarni_cancel_token_is_cancelled(const struct KjarniCancelToken *token);
 
-kjarni_ void kjarni_cancel_token_reset(struct KjarniKjarniCancelToken *token);
+void kjarni_cancel_token_reset(struct KjarniCancelToken *token);
 
-kjarni_ void kjarni_cancel_token_free(struct KjarniKjarniCancelToken *token);
+void kjarni_cancel_token_free(struct KjarniCancelToken *token);
 
-kjarni_ const char *kjarni_error_code_to_string(enum KjarniKjarniErrorCode err);
+const char *kjarni_error_code_to_string(enum KjarniErrorCode err);
 
 /**
  * Get the name of an error code as a C string.
  */
-kjarni_ const char *kjarni_error_name(enum KjarniKjarniErrorCode err);
+const char *kjarni_error_name(enum KjarniErrorCode err);
 
 /**
  * Get the last error message. Returns NULL if no error.
  */
-kjarni_ const char *kjarni_last_error_message(void);
+const char *kjarni_last_error_message(void);
 
 /**
  * Clear the last error.
  */
-kjarni_ void kjarni_clear_error(void);
+void kjarni_clear_error(void);
 
 /**
  * Get default embedder configuration.
  */
-kjarni_ struct KjarniKjarniEmbedderConfig kjarni_embedder_config_default(void);
+struct KjarniEmbedderConfig kjarni_embedder_config_default(void);
 
 /**
  * Create a new Embedder.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_new(const struct KjarniKjarniEmbedderConfig *config,
-                                               struct KjarniKjarniEmbedder **out);
+enum KjarniErrorCode kjarni_embedder_new(const struct KjarniEmbedderConfig *config,
+                                         struct KjarniEmbedder **out);
 
 /**
  * Free an Embedder instance.
  */
-kjarni_ void kjarni_embedder_free(struct KjarniKjarniEmbedder *embedder);
+void kjarni_embedder_free(struct KjarniEmbedder *embedder);
 
 /**
  * Encode a single text to an embedding vector.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_encode(struct KjarniKjarniEmbedder *embedder,
-                                                  const char *text,
-                                                  struct KjarniKjarniFloatArray *out);
+enum KjarniErrorCode kjarni_embedder_encode(struct KjarniEmbedder *embedder,
+                                            const char *text,
+                                            struct KjarniFloatArray *out);
 
 /**
  * Encode multiple texts to embedding vectors.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_encode_batch(struct KjarniKjarniEmbedder *embedder,
-                                                        const char *const *texts,
-                                                        uintptr_t num_texts,
-                                                        struct KjarniKjarniFloat2DArray *out);
+enum KjarniErrorCode kjarni_embedder_encode_batch(struct KjarniEmbedder *embedder,
+                                                  const char *const *texts,
+                                                  uintptr_t num_texts,
+                                                  struct KjarniFloat2DArray *out);
 
 /**
  * Compute cosine similarity between two texts.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_embedder_similarity(struct KjarniKjarniEmbedder *embedder,
-                                                      const char *text1,
-                                                      const char *text2,
-                                                      float *out);
+enum KjarniErrorCode kjarni_embedder_similarity(struct KjarniEmbedder *embedder,
+                                                const char *text1,
+                                                const char *text2,
+                                                float *out);
 
 /**
  * Get the embedding dimension.
  */
-kjarni_ uintptr_t kjarni_embedder_dim(const struct KjarniKjarniEmbedder *embedder);
+uintptr_t kjarni_embedder_dim(const struct KjarniEmbedder *embedder);
 
-kjarni_ void kjarni_class_results_free(struct KjarniKjarniClassResults results);
+void kjarni_class_results_free(struct KjarniClassResults results);
 
 /**
  * Get default classifier configuration.
  */
-kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default(void);
+struct KjarniClassifierConfig kjarni_classifier_config_default(void);
 
 /**
  * Create a new Classifier.
@@ -546,264 +632,397 @@ kjarni_ struct KjarniKjarniClassifierConfig kjarni_classifier_config_default(voi
  * - `out` must be a valid pointer
  * - The returned handle must be freed with `kjarni_classifier_free`
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_new(const struct KjarniKjarniClassifierConfig *config,
-                                                 struct KjarniKjarniClassifier **out);
+enum KjarniErrorCode kjarni_classifier_new(const struct KjarniClassifierConfig *config,
+                                           struct KjarniClassifier **out);
 
 /**
  * Free a Classifier.
  */
-kjarni_ void kjarni_classifier_free(struct KjarniKjarniClassifier *classifier);
+void kjarni_classifier_free(struct KjarniClassifier *classifier);
 
 /**
  * Classify a single text.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_classify(struct KjarniKjarniClassifier *classifier,
-                                                      const char *text,
-                                                      struct KjarniKjarniClassResults *out);
+enum KjarniErrorCode kjarni_classifier_classify(struct KjarniClassifier *classifier,
+                                                const char *text,
+                                                struct KjarniClassResults *out);
 
 /**
  * Get the classifier's labels.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_classifier_labels(const struct KjarniKjarniClassifier *classifier,
-                                                    struct KjarniKjarniStringArray *out);
+enum KjarniErrorCode kjarni_classifier_labels(const struct KjarniClassifier *classifier,
+                                              struct KjarniStringArray *out);
 
 /**
  * Get number of labels.
  */
-kjarni_ uintptr_t kjarni_classifier_num_labels(const struct KjarniKjarniClassifier *classifier);
+uintptr_t kjarni_classifier_num_labels(const struct KjarniClassifier *classifier);
 
 /**
  * Free rerank results
  */
-kjarni_ void kjarni_rerank_results_free(struct KjarniKjarniRerankResults results);
+void kjarni_rerank_results_free(struct KjarniRerankResults results);
 
 /**
  * Get default reranker configuration
  */
-kjarni_ struct KjarniKjarniRerankerConfig kjarni_reranker_config_default(void);
+struct KjarniRerankerConfig kjarni_reranker_config_default(void);
 
 /**
  * Create a new Reranker
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_new(const struct KjarniKjarniRerankerConfig *config,
-                                               struct KjarniKjarniReranker **out);
+enum KjarniErrorCode kjarni_reranker_new(const struct KjarniRerankerConfig *config,
+                                         struct KjarniReranker **out);
 
 /**
  * Free a Reranker
  */
-kjarni_ void kjarni_reranker_free(struct KjarniKjarniReranker *reranker);
+void kjarni_reranker_free(struct KjarniReranker *reranker);
 
 /**
  * Score a single query-document pair
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_score(struct KjarniKjarniReranker *reranker,
-                                                 const char *query,
-                                                 const char *document,
-                                                 float *out);
+enum KjarniErrorCode kjarni_reranker_score(struct KjarniReranker *reranker,
+                                           const char *query,
+                                           const char *document,
+                                           float *out);
 
 /**
  * Rerank documents by relevance to query
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_rerank(struct KjarniKjarniReranker *reranker,
-                                                  const char *query,
-                                                  const char *const *documents,
-                                                  uintptr_t num_docs,
-                                                  struct KjarniKjarniRerankResults *out);
+enum KjarniErrorCode kjarni_reranker_rerank(struct KjarniReranker *reranker,
+                                            const char *query,
+                                            const char *const *documents,
+                                            uintptr_t num_docs,
+                                            struct KjarniRerankResults *out);
 
 /**
  * Rerank and return top-k results
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniKjarniReranker *reranker,
-                                                        const char *query,
-                                                        const char *const *documents,
-                                                        uintptr_t num_docs,
-                                                        uintptr_t top_k,
-                                                        struct KjarniKjarniRerankResults *out);
+enum KjarniErrorCode kjarni_reranker_rerank_top_k(struct KjarniReranker *reranker,
+                                                  const char *query,
+                                                  const char *const *documents,
+                                                  uintptr_t num_docs,
+                                                  uintptr_t top_k,
+                                                  struct KjarniRerankResults *out);
 
 /**
  * Free memory allocated for index info strings
  */
-kjarni_ void kjarni_index_info_free(struct KjarniKjarniIndexInfo info);
+void kjarni_index_info_free(struct KjarniIndexInfo info);
 
 /**
  * Get default indexer configuration
  */
-kjarni_ struct KjarniKjarniIndexerConfig kjarni_indexer_config_default(void);
+struct KjarniIndexerConfig kjarni_indexer_config_default(void);
 
 /**
  * Create a new Indexer
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_new(const struct KjarniKjarniIndexerConfig *config,
-                                              struct KjarniKjarniIndexer **out);
+enum KjarniErrorCode kjarni_indexer_new(const struct KjarniIndexerConfig *config,
+                                        struct KjarniIndexer **out);
 
 /**
  * Free an Indexer handle
  */
-kjarni_ void kjarni_indexer_free(struct KjarniKjarniIndexer *indexer);
+void kjarni_indexer_free(struct KjarniIndexer *indexer);
 
 /**
  * Create a new index from files/directories
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_create(struct KjarniKjarniIndexer *indexer,
-                                                 const char *index_path,
-                                                 const char *const *inputs,
-                                                 uintptr_t num_inputs,
-                                                 int32_t force,
-                                                 struct KjarniKjarniIndexStats *out);
+enum KjarniErrorCode kjarni_indexer_create(struct KjarniIndexer *indexer,
+                                           const char *index_path,
+                                           const char *const *inputs,
+                                           uintptr_t num_inputs,
+                                           int32_t force,
+                                           struct KjarniIndexStats *out);
 
 /**
  * Create a new index with progress callback and cancellation support.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniKjarniIndexer *indexer,
-                                                               const char *index_path,
-                                                               const char *const *inputs,
-                                                               uintptr_t num_inputs,
-                                                               int32_t force,
-                                                               KjarniKjarniProgressCallbackFn progress_callback,
-                                                               void *user_data,
-                                                               const struct KjarniKjarniCancelToken *cancel_token,
-                                                               struct KjarniKjarniIndexStats *out);
+enum KjarniErrorCode kjarni_indexer_create_with_callback(struct KjarniIndexer *indexer,
+                                                         const char *index_path,
+                                                         const char *const *inputs,
+                                                         uintptr_t num_inputs,
+                                                         int32_t force,
+                                                         KjarniProgressCallbackFn progress_callback,
+                                                         void *user_data,
+                                                         const struct KjarniCancelToken *cancel_token,
+                                                         struct KjarniIndexStats *out);
 
 /**
- * Add documents to an existing index
+ * Add documents to an existing index 
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_add(struct KjarniKjarniIndexer *indexer,
-                                              const char *index_path,
-                                              const char *const *inputs,
-                                              uintptr_t num_inputs,
-                                              uintptr_t *documents_added);
+enum KjarniErrorCode kjarni_indexer_add(struct KjarniIndexer *indexer,
+                                        const char *index_path,
+                                        const char *const *inputs,
+                                        uintptr_t num_inputs,
+                                        uintptr_t *documents_added);
 
 /**
  * Add documents to an existing index with progress callback and cancellation support.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniKjarniIndexer *indexer,
-                                                            const char *index_path,
-                                                            const char *const *inputs,
-                                                            uintptr_t num_inputs,
-                                                            KjarniKjarniProgressCallbackFn progress_callback,
-                                                            void *user_data,
-                                                            const struct KjarniKjarniCancelToken *cancel_token,
-                                                            uintptr_t *documents_added);
+enum KjarniErrorCode kjarni_indexer_add_with_callback(struct KjarniIndexer *indexer,
+                                                      const char *index_path,
+                                                      const char *const *inputs,
+                                                      uintptr_t num_inputs,
+                                                      KjarniProgressCallbackFn progress_callback,
+                                                      void *user_data,
+                                                      const struct KjarniCancelToken *cancel_token,
+                                                      uintptr_t *documents_added);
 
 /**
  * Get information about an existing index
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_index_info(const char *index_path,
-                                             struct KjarniKjarniIndexInfo *out);
+enum KjarniErrorCode kjarni_index_info(const char *index_path, struct KjarniIndexInfo *out);
 
 /**
  * Delete an index.
  */
-kjarni_ enum KjarniKjarniErrorCode kjarni_index_delete(const char *index_path);
+enum KjarniErrorCode kjarni_index_delete(const char *index_path);
 
 /**
  * Get the embedding model name used by the indexer.
  */
-kjarni_
-uintptr_t kjarni_indexer_model_name(const struct KjarniKjarniIndexer *indexer,
+uintptr_t kjarni_indexer_model_name(const struct KjarniIndexer *indexer,
                                     char *buf,
                                     uintptr_t buf_len);
 
 /**
  * Get the embedding dimension used by the indexer.
  */
-kjarni_ uintptr_t kjarni_indexer_dimension(const struct KjarniKjarniIndexer *indexer);
+uintptr_t kjarni_indexer_dimension(const struct KjarniIndexer *indexer);
 
 /**
  * Get the chunk size configured for the indexer.
  */
-kjarni_ uintptr_t kjarni_indexer_chunk_size(const struct KjarniKjarniIndexer *indexer);
+uintptr_t kjarni_indexer_chunk_size(const struct KjarniIndexer *indexer);
 
 /**
  * # Safety
  * Must only be called once per `KjarniSearchResults` returned from search functions.
  */
-kjarni_ void kjarni_search_results_free(struct KjarniKjarniSearchResults results);
+void kjarni_search_results_free(struct KjarniSearchResults results);
 
-kjarni_ struct KjarniKjarniSearchOptions kjarni_search_options_default(void);
+struct KjarniSearchOptions kjarni_search_options_default(void);
 
-kjarni_ struct KjarniKjarniSearcherConfig kjarni_searcher_config_default(void);
+struct KjarniSearcherConfig kjarni_searcher_config_default(void);
 
 /**
  * - The returned handle must be freed with `kjarni_searcher_free`
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_new(const struct KjarniKjarniSearcherConfig *config,
-                                               struct KjarniKjarniSearcher **out);
+enum KjarniErrorCode kjarni_searcher_new(const struct KjarniSearcherConfig *config,
+                                         struct KjarniSearcher **out);
 
-kjarni_ void kjarni_searcher_free(struct KjarniKjarniSearcher *searcher);
-
-/**
- * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
- */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_search(struct KjarniKjarniSearcher *searcher,
-                                                  const char *index_path,
-                                                  const char *query,
-                                                  struct KjarniKjarniSearchResults *out);
+void kjarni_searcher_free(struct KjarniSearcher *searcher);
 
 /**
  * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_searcher_search_with_options(struct KjarniKjarniSearcher *searcher,
-                                                               const char *index_path,
-                                                               const char *query,
-                                                               const struct KjarniKjarniSearchOptions *options,
-                                                               struct KjarniKjarniSearchResults *out);
+enum KjarniErrorCode kjarni_searcher_search(struct KjarniSearcher *searcher,
+                                            const char *index_path,
+                                            const char *query,
+                                            struct KjarniSearchResults *out);
 
 /**
  * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
  */
-kjarni_
-enum KjarniKjarniErrorCode kjarni_search_keywords(const char *index_path,
-                                                  const char *query,
-                                                  uintptr_t top_k,
-                                                  struct KjarniKjarniSearchResults *out);
+enum KjarniErrorCode kjarni_searcher_search_with_options(struct KjarniSearcher *searcher,
+                                                         const char *index_path,
+                                                         const char *query,
+                                                         const struct KjarniSearchOptions *options,
+                                                         struct KjarniSearchResults *out);
+
+/**
+ * All pointers must be valid. Results must be freed with `kjarni_search_results_free`.
+ */
+enum KjarniErrorCode kjarni_search_keywords(const char *index_path,
+                                            const char *query,
+                                            uintptr_t top_k,
+                                            struct KjarniSearchResults *out);
 
 /**
  * `searcher` must be a valid handle or null.
  */
-kjarni_ bool kjarni_searcher_has_reranker(const struct KjarniKjarniSearcher *searcher);
+bool kjarni_searcher_has_reranker(const struct KjarniSearcher *searcher);
 
 /**
  * `searcher` must be a valid handle or null.
  */
-kjarni_
-enum KjarniKjarniSearchMode kjarni_searcher_default_mode(const struct KjarniKjarniSearcher *searcher);
+enum KjarniSearchMode kjarni_searcher_default_mode(const struct KjarniSearcher *searcher);
 
 /**
  * `searcher` must be a valid handle or null.
  */
-kjarni_ uintptr_t kjarni_searcher_default_top_k(const struct KjarniKjarniSearcher *searcher);
+uintptr_t kjarni_searcher_default_top_k(const struct KjarniSearcher *searcher);
 
 /**
  * Get searcher model name into caller-provided buffer
  */
-kjarni_
-uintptr_t kjarni_searcher_model_name(const struct KjarniKjarniSearcher *searcher,
+uintptr_t kjarni_searcher_model_name(const struct KjarniSearcher *searcher,
                                      char *buf,
                                      uintptr_t buf_len);
 
 /**
  * Get reranker model name into caller-provided buffer
  */
-kjarni_
-uintptr_t kjarni_searcher_reranker_model(const struct KjarniKjarniSearcher *searcher,
+uintptr_t kjarni_searcher_reranker_model(const struct KjarniSearcher *searcher,
                                          char *buf,
                                          uintptr_t buf_len);
+
+/**
+ * Get default chat configuration.
+ */
+struct KjarniChatConfig kjarni_chat_config_default(void);
+
+/**
+ * Get default generation configuration (all sentinels = use model defaults).
+ */
+struct KjarniGenerationConfig kjarni_generation_config_default(void);
+
+/**
+ * Create a new Chat instance.
+ *
+ * # Safety
+ * - `config` must be valid or NULL (uses defaults)
+ * - `out` must be a valid pointer
+ * - The returned handle must be freed with `kjarni_chat_free`
+ */
+enum KjarniErrorCode kjarni_chat_new(const struct KjarniChatConfig *config,
+                                     struct KjarniChat **out);
+
+/**
+ * Free a Chat instance.
+ */
+void kjarni_chat_free(struct KjarniChat *chat);
+
+/**
+ * Send a message and get the full response.
+ *
+ * # Safety
+ * - `chat` must be a valid handle from `kjarni_chat_new`
+ * - `message` must be a valid UTF-8 C string
+ * - `gen_config` may be NULL (uses defaults)
+ * - `out` must be a valid pointer; caller must free result with `kjarni_string_free`
+ */
+enum KjarniErrorCode kjarni_chat_send(struct KjarniChat *chat,
+                                      const char *message,
+                                      const struct KjarniGenerationConfig *gen_config,
+                                      char **out);
+
+/**
+ * Stream a response token by token via callback.
+ *
+ * The callback receives each token's text as a C string. Return `false`
+ * from the callback to stop generation early.
+ *
+ * # Safety
+ * - `chat` must be a valid handle
+ * - `message` must be valid UTF-8
+ * - `callback` must be a valid function pointer
+ * - `cancel_token` may be NULL
+ */
+enum KjarniErrorCode kjarni_chat_stream(struct KjarniChat *chat,
+                                        const char *message,
+                                        const struct KjarniGenerationConfig *gen_config,
+                                        KjarniStreamCallbackFn callback,
+                                        void *user_data,
+                                        const struct KjarniCancelToken *cancel_token);
+
+/**
+ * Send a message with explicit history. Does not modify the history
+ */
+enum KjarniErrorCode kjarni_chat_send_with_history(struct KjarniChat *chat,
+                                                   const int32_t *roles,
+                                                   const char *const *contents,
+                                                   uintptr_t history_len,
+                                                   const char *message,
+                                                   const struct KjarniGenerationConfig *gen_config,
+                                                   char **out);
+
+/**
+ * Stream a response with explicit history. Does not modify the history.
+ *
+ * The counterpart to `kjarni_chat_send_with_history`. `IChatClient` and other
+ * stateless APIs hand back the whole transcript on every call, so streaming has
+ * to accept a history the same way sending does; without this, a streaming
+ * caller could only ever produce single-turn replies.
+ *
+ * Roles follow the same encoding as `kjarni_chat_send_with_history`:
+ * 0 = system, 1 = user, 2 = assistant.
+ */
+enum KjarniErrorCode kjarni_chat_stream_with_history(struct KjarniChat *chat,
+                                                     const int32_t *roles,
+                                                     const char *const *contents,
+                                                     uintptr_t history_len,
+                                                     const char *message,
+                                                     const struct KjarniGenerationConfig *gen_config,
+                                                     KjarniStreamCallbackFn callback,
+                                                     void *user_data,
+                                                     const struct KjarniCancelToken *cancel_token);
+
+/**
+ * Create a new stateful conversation from a Chat instance
+ */
+enum KjarniErrorCode kjarni_chat_conversation_new(struct KjarniChat *chat,
+                                                  struct KjarniChatConversation **out);
+
+/**
+ * Free a ChatConversation.
+ */
+void kjarni_chat_conversation_free(struct KjarniChatConversation *convo);
+
+/**
+ * Send a message in a conversation and get the response
+ */
+enum KjarniErrorCode kjarni_chat_conversation_send(struct KjarniChatConversation *convo,
+                                                   const char *message,
+                                                   const struct KjarniGenerationConfig *gen_config,
+                                                   char **out);
+
+/**
+ * Stream a response in a conversation.
+ *
+ * The user message is added to history before streaming.
+ * After streaming completes, the full response is added to history.
+ *
+ * # Safety
+ * - Same requirements as `kjarni_chat_stream`
+ * - Parent Chat must still be alive
+ */
+enum KjarniErrorCode kjarni_chat_conversation_stream(struct KjarniChatConversation *convo,
+                                                     const char *message,
+                                                     const struct KjarniGenerationConfig *gen_config,
+                                                     KjarniStreamCallbackFn callback,
+                                                     void *user_data,
+                                                     const struct KjarniCancelToken *cancel_token);
+
+/**
+ * Get the number of messages in the conversation history.
+ */
+uintptr_t kjarni_chat_conversation_len(const struct KjarniChatConversation *convo);
+
+/**
+ * Clear the conversation history.
+ *
+ * If `keep_system` is non-zero, the system prompt is preserved.
+ */
+void kjarni_chat_conversation_clear(struct KjarniChatConversation *convo, int32_t keep_system);
+
+/**
+ * Get the model name. Returns number of bytes written (excluding null).
+ *
+ * If `buf` is NULL or `buf_len` is 0, returns the required buffer size.
+ */
+uintptr_t kjarni_chat_model_name(const struct KjarniChat *chat, char *buf, uintptr_t buf_len);
+
+/**
+ * Get the context window size.
+ */
+uintptr_t kjarni_chat_context_size(const struct KjarniChat *chat);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  /* KJARNI_FFI_H */

@@ -5,12 +5,15 @@ use std::any::Any;
 use crate::ChatTemplate;
 use crate::cache::Cache;
 use crate::common::GenerationConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::encoder_decoder::traits::GpuCrossAttentionKVCache;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuKVCache, GpuTensor, GpuTensorPool};
 use crate::models::base::{AutoregressiveLoop, LanguageModel, ModelInput};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};
+#[cfg(not(target_arch = "wasm32"))]
 use wgpu::CommandEncoder;
 
 /// Defines the generation loop.
@@ -43,6 +46,17 @@ pub trait DecoderGenerationBackend: Send + Sync {
     ) -> Result<Array1<f32>>;
 }
 
+/// Placeholder GPU decoder trait for wasm builds.
+///
+/// There is no GPU backend on wasm, but the decoder pipeline still carries
+/// `Option<Box<dyn GpuDecoder>>` in its fields and signatures. An empty trait keeps
+/// those compiling against a value that can only ever be `None`, which is far less
+/// invasive than threading `#[cfg]` through the pipeline. Mirrors what
+/// `cpu::encoder::traits::GpuEncoder` does for the encoder path.
+#[cfg(target_arch = "wasm32")]
+pub trait GpuDecoder: Send + Sync {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub trait GpuDecoder: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
 
@@ -247,6 +261,17 @@ pub trait CpuDecoderOps: Send + Sync {
     }
 }
 
+/// Placeholder GPU decoder trait for wasm builds.
+///
+/// There is no GPU backend on wasm, but the decoder pipeline still carries
+/// `Option<Box<dyn GpuDecoderOps>>` in its fields and signatures. An empty trait keeps
+/// those compiling against a value that can only ever be `None`, which is far less
+/// invasive than threading `#[cfg]` through the pipeline. Mirrors what
+/// `cpu::encoder::traits::GpuEncoder` does for the encoder path.
+#[cfg(target_arch = "wasm32")]
+pub trait GpuDecoderOps: Send + Sync {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub trait GpuDecoderOps: Send + Sync {
     /// Access the underlying GPU compute component.
     fn decoder(&self) -> &dyn GpuDecoder;
@@ -274,6 +299,7 @@ pub trait DecoderLanguageModel: LanguageModel {
     fn decoder_cpu_ops(&self) -> Option<&dyn CpuDecoderOps>;
 
     /// Access GPU operations strategy. Returns `None` if model is CPU-only.
+    #[cfg(not(target_arch = "wasm32"))]
     fn decoder_gpu_ops(&self) -> Option<&dyn GpuDecoderOps>;
 
     /// Specifies the generation loop strategy (e.g., Pipelined vs Legacy).
@@ -316,6 +342,7 @@ pub trait DecoderLanguageModel: LanguageModel {
         ops.project_to_logits(&decoder_output)
     }
     
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get_logits_gpu(&self, text: &str) -> Result<Array3<f32>> {
         let input_ids = self.tokenize(text)?;
         // let input_slice = input_ids.as_slice().unwrap();

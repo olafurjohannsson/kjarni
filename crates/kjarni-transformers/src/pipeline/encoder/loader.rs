@@ -12,7 +12,7 @@ use crate::{
         config::PoolingStrategy,
         traits::{CpuEncoder, GpuEncoder},
     },
-    models::{base::ModelLoadConfig, download_model_files, registry::WeightsFormat},
+    models::base::ModelLoadConfig,
     pipeline::encoder::{EncoderPipeline, EncoderPipelineBuilder},
     traits::{ModelConfig, ModelLayout, ModelMetadata},
     weights::ModelWeights,
@@ -59,7 +59,13 @@ pub trait EncoderModelFactory: Sized {
 
 pub struct EncoderLoader;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::{download_model_files, registry::WeightsFormat};
+
 impl EncoderLoader {
+    /// Fetch from the registry and load. Native only: wasm has no filesystem to
+    /// cache into, so the browser path is [`EncoderLoader::load_from_bytes`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn load_from_registry<M: EncoderModelFactory>(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -84,6 +90,9 @@ impl EncoderLoader {
         Self::load_from_pretrained::<M>(&model_dir, device, context, load_config, Some(model_type))
     }
 
+    /// Load from a directory on disk. Native only, for the same reason as
+    /// [`EncoderLoader::load_from_registry`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_from_pretrained<M: EncoderModelFactory>(
         model_path: &Path,
         device: Device,

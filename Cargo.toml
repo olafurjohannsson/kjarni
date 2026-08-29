@@ -7,11 +7,15 @@ members = [
     "crates/kjarni-search",     
     "crates/kjarni-rag", 
     "crates/kjarni-models",      
+    "crates/kjarni-wasm",
 ]
 
 resolver = "2"
 
-exclude = ["crates/kjarni-examples", "crates/kjarni-wasm"]
+# kjarni-wasm was excluded here and was also `#![cfg(target_arch = "wasm32")]`, so no
+# `cargo test` run could reach it. That is how it accumulated a duplicate encoder
+# stack that drifted from the engine unnoticed. It is a workspace member now.
+exclude = ["crates/kjarni-examples"]
 
 
 [workspace.package]

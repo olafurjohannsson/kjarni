@@ -1,5 +1,9 @@
 //! Weight loading
 
+/// The `.kjq` single-file model container. Available on every target: the browser
+/// is its main consumer, but nothing about it is wasm-specific.
+pub mod kjq;
+
 mod gguf_conversion;
 
 #[cfg(not(target_arch = "wasm32"))]

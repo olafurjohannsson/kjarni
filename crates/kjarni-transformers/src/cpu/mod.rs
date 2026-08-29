@@ -7,7 +7,6 @@ pub mod encoder_decoder;
 pub mod kernels;
 pub mod ops;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod decoder;
 
 pub mod strategy;

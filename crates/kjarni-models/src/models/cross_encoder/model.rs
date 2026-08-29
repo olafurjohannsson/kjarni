@@ -2,15 +2,17 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
 use kjarni_transformers::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
 use kjarni_transformers::models::base::ModelInput;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::gpu::encoder::GpuTransformerEncoder;
 use kjarni_transformers::{
     WgpuContext,
-    gpu::encoder::GpuTransformerEncoder,
     cpu::encoder::{
         CpuTransformerEncoder, 
         classifier::CpuSequenceClassificationHead,
@@ -75,6 +77,7 @@ impl EncoderModelFactory for CrossEncoder {
                     load_config,
                 )?) as Box<dyn CpuEncoder>);
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Device::Wgpu => {
                 let ctx = context.ok_or_else(|| anyhow!("GPU context required"))?;
                 gpu = Some(Box::new(GpuTransformerEncoder::new(
@@ -84,6 +87,12 @@ impl EncoderModelFactory for CrossEncoder {
                     layout.clone(),
                     load_config,
                 )?) as Box<dyn GpuEncoder>);
+            }
+            // No GPU backend exists on wasm, and no context can be built,
+            // so this arm is unreachable rather than merely unsupported.
+            #[cfg(target_arch = "wasm32")]
+            Device::Wgpu => {
+                return Err(anyhow!("GPU inference is not available in WebAssembly"));
             }
             _ => {
                 panic!("No CPU or GPU encoder on CrossEncoder, will not work!");
@@ -126,6 +135,60 @@ impl EncoderModelFactory for CrossEncoder {
 
 
 impl CrossEncoder {
+    /// Run the encoder on the GPU, or `None` when there is no GPU backend.
+    ///
+    /// Extracted from the inference path so the wasm build has something to call:
+    /// the GPU tensor types do not exist there, so the body cannot simply be
+    /// `#[cfg]`-ed out of the middle of an `else if` chain.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn forward_gpu(
+        &self,
+        input_ids: &ndarray::Array2<u32>,
+        attention_mask: &ndarray::Array2<f32>,
+        token_type_ids: &ndarray::Array2<u32>,
+    ) -> Result<Option<ndarray::Array3<f32>>> {
+        let Some(ops) = self.encoder_gpu_ops() else {
+            return Ok(None);
+        };
+        let context = self
+            .context()
+            .ok_or_else(|| anyhow!("GPU model missing context"))?;
+        let pool = context.get_inference_pool();
+        let pool_guard = pool.lock().await;
+        let mut frame = GpuFrameContext::new(&context, pool_guard);
+        let (encoder_cmd, pool_ref) = frame.resources();
+
+        let input_ids_gpu = GpuTensor::from_ndarray(&context, input_ids)?;
+        let attention_mask_gpu = GpuTensor::from_ndarray(&context, attention_mask)?;
+        let token_types_gpu = GpuTensor::from_ndarray(&context, token_type_ids)?;
+
+        let gpu_output = ops.encoder().forward(
+            encoder_cmd,
+            pool_ref,
+            ModelInput::TokensGpu(&input_ids_gpu),
+            &attention_mask_gpu,
+            Some(ModelInput::TokensGpu(&token_types_gpu)),
+        )?;
+
+        frame.finish();
+
+        Ok(Some(gpu_output.last_hidden_state.to_ndarray_3d().await?))
+    }
+
+    /// No GPU backend exists in WebAssembly, so the CPU path is the only path.
+    #[cfg(target_arch = "wasm32")]
+    async fn forward_gpu(
+        &self,
+        _input_ids: &ndarray::Array2<u32>,
+        _attention_mask: &ndarray::Array2<f32>,
+        _token_type_ids: &ndarray::Array2<u32>,
+    ) -> Result<Option<ndarray::Array3<f32>>> {
+        Ok(None)
+    }
+
+    /// Native only: loading from the registry or from disk needs a filesystem,
+    /// which wasm does not have. Browser callers construct from bytes instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn from_registry(
         model_type: ModelType,
         cache_dir: Option<PathBuf>,
@@ -143,6 +206,9 @@ impl CrossEncoder {
         .await
     }
 
+    /// Native only: loading from the registry or from disk needs a filesystem,
+    /// which wasm does not have. Browser callers construct from bytes instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_pretrained(
         model_path: &Path,
         device: Device,
@@ -197,32 +263,11 @@ impl CrossEncoder {
         let hidden_states = if let Some(ops) = self.encoder_cpu_ops() {
             ops.forward_tokens(&input_ids, Some(&attention_mask), Some(&token_type_ids), 0)?
                 .last_hidden_state
-        } else if let Some(ops) = self.encoder_gpu_ops() {
-            let context = self
-                .context()
-                .ok_or_else(|| anyhow!("GPU model missing context"))?;
-            let pool = context.get_inference_pool();
-            let pool_guard = pool.lock().await;
-            let mut frame = GpuFrameContext::new(&context, pool_guard);
-            let (encoder_cmd, pool_ref) = frame.resources();
-
-            // Upload data to GPU
-            let input_ids_gpu = GpuTensor::from_ndarray(&context, &input_ids)?;
-            let attention_mask_gpu = GpuTensor::from_ndarray(&context, &attention_mask)?;
-            let token_types_gpu = GpuTensor::from_ndarray(&context, &token_type_ids)?;
-            // Run the forward pass
-            let gpu_output = ops.encoder().forward(
-                encoder_cmd,
-                pool_ref,
-                ModelInput::TokensGpu(&input_ids_gpu),
-                &attention_mask_gpu,
-                Some(ModelInput::TokensGpu(&token_types_gpu)),
-            )?;
-
-            frame.finish();
-
-            // Download the result back to CPU
-            gpu_output.last_hidden_state.to_ndarray_3d().await?
+        } else if let Some(hidden) = self
+            .forward_gpu(&input_ids, &attention_mask, &token_type_ids)
+            .await?
+        {
+            hidden
         } else {
             return Err(anyhow!(
                 "No available CPU or GPU encoder implementation for this model."
@@ -331,6 +376,7 @@ impl InferenceModel for CrossEncoder {
     fn device(&self) -> Device {
         self.pipeline.plan().layers
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn context(&self) -> Option<Arc<WgpuContext>> {
         self.pipeline.context().cloned()
     }
@@ -357,6 +403,7 @@ impl CpuEncoderOps for CrossEncoder {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GpuEncoderOps for CrossEncoder {
     fn encoder(&self) -> &dyn GpuEncoder {
         self.pipeline
@@ -386,6 +433,7 @@ impl EncoderLanguageModel for CrossEncoder {
             None
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn encoder_gpu_ops(&self) -> Option<&dyn GpuEncoderOps> {
         if self.pipeline.gpu_encoder().is_some() {
             Some(self)

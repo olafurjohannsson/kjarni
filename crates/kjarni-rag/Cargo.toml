@@ -23,6 +23,10 @@ glob-match = "0.2"
 version = "0.3"
 features = ["console"]
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# getrandom 0.3 refuses to build for wasm without an explicit backend feature.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
 [profile.release]
 opt-level = "z"
 lto = true

@@ -9,11 +9,15 @@ use ndarray::{Array1, Array2};
 
 use crate::cache::Cache;
 use crate::decoder::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::GpuTensor;
 
 #[derive(Clone)]
 pub enum AnyDecoderBackend {
     Cpu(CpuDecoderBackend),
+    // No GPU backend exists on wasm, so the variant does not either. Every match on
+    // this enum is exhaustive on both targets because the arm is gated too.
+    #[cfg(not(target_arch = "wasm32"))]
     Gpu(Arc<GpuDecoderBackend>),
 }
 
@@ -22,6 +26,7 @@ impl AnyDecoderBackend {
         AnyDecoderBackend::Cpu(CpuDecoderBackend::new())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn gpu(backend: Arc<GpuDecoderBackend>) -> Self {
         AnyDecoderBackend::Gpu(backend)
     }
@@ -31,12 +36,16 @@ impl AnyDecoderBackend {
     }
 
     pub fn is_gpu(&self) -> bool {
-        matches!(self, AnyDecoderBackend::Gpu(_))
+        #[cfg(not(target_arch = "wasm32"))]
+        return matches!(self, AnyDecoderBackend::Gpu(_));
+        #[cfg(target_arch = "wasm32")]
+        return false;
     }
 
     pub fn backend_type(&self) -> &'static str {
         match self {
             AnyDecoderBackend::Cpu(_) => "CPU",
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(_) => "GPU",
         }
     }
@@ -52,6 +61,7 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
                 let token = backend.new_decode_token()?;
                 Ok(Box::new(token))
             }
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(backend) => {
                 let token = backend.new_decode_token()?;
                 Ok(Box::new(token))
@@ -71,6 +81,7 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
                     .ok_or_else(|| anyhow!("cpu backend expected Array2<u32>, got wrong type"))?;
                 backend.update_decode_token(concrete, new_token_id)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(backend) => {
                 let concrete = token
                     .downcast_mut::<GpuTensor>()
@@ -88,6 +99,7 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
     ) -> Result<Array1<f32>> {
         match self {
             AnyDecoderBackend::Cpu(backend) => backend.prefill(model, tokens, cache).await,
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(backend) => backend.prefill(model, tokens, cache).await,
         }
     }
@@ -106,6 +118,7 @@ impl DecoderGenerationBackend for AnyDecoderBackend {
                     .ok_or_else(|| anyhow!("cpu backend expected Array2<u32>, got wrong type"))?;
                 backend.decode_one(model, concrete, seq_len, cache).await
             }
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(backend) => {
                 let concrete = token
                     .downcast_ref::<GpuTensor>()
@@ -120,6 +133,7 @@ impl std::fmt::Debug for AnyDecoderBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AnyDecoderBackend::Cpu(_) => write!(f, "AnyDecoderBackend::Cpu"),
+            #[cfg(not(target_arch = "wasm32"))]
             AnyDecoderBackend::Gpu(_) => write!(f, "AnyDecoderBackend::Gpu"),
         }
     }
