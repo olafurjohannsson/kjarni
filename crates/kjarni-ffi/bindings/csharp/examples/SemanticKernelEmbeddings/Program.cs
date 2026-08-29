@@ -1,5 +1,6 @@
-// Local embeddings through Microsoft.Extensions.AI — the abstraction Semantic Kernel builds on.
-// No Python, no ONNX, no cloud, no API key. Everything runs in this process.
+// Local embeddings through Microsoft.Extensions.AI, the abstraction Semantic Kernel
+// builds on. Code already written against IEmbeddingGenerator keeps working unchanged;
+// only the registration differs, and the model then runs inside this process.
 
 using Kjarni.Extensions.AI;
 using Microsoft.Extensions.AI;

@@ -1,8 +1,8 @@
 # Kjarni for agents
 
-Kjarni is a single native binary that runs transformer models locally. No Python,
-no ONNX Runtime, no CUDA, no model server, no API key. The only runtime dependency
-is glibc.
+Kjarni is a single native binary that runs transformer models locally. Install it,
+name a model, and call it; models download on first use and are cached, so
+everything after that works offline. The only runtime dependency is glibc.
 
 If you are an AI agent with shell access, this gives you transcription,
 classification, embeddings, reranking, semantic search, summarization, translation

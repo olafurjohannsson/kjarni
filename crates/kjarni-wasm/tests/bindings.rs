@@ -294,9 +294,26 @@ fn classifier_rejects_an_embedding_model() {
 
 const CHAT_KJQ: &str = "../../../web.kjarni.ai/src/static/models/qwen05b-q8.kjq";
 
-fn chat() -> Option<kjarni_wasm::WasmChat> {
-    let bytes = model_bytes(CHAT_KJQ)?;
-    Some(kjarni_wasm::WasmChat::load_core(&bytes, Some("qwen2.5-0.5b-instruct")).expect("load chat"))
+/// The chat model, loaded once for the whole binary.
+///
+/// Each test used to load its own. That means reading 500MB from disk and
+/// dequantising half a billion int8 weights to f32 per test, several times over in
+/// parallel, which is a few gigabytes of resident memory and most of the runtime.
+/// Generation is not re-entrant either, so the mutex is doing real work rather than
+/// just satisfying `Sync`.
+fn chat() -> Option<std::sync::MutexGuard<'static, kjarni_wasm::WasmChat>> {
+    use std::sync::{Mutex, OnceLock};
+    static CHAT: OnceLock<Option<Mutex<kjarni_wasm::WasmChat>>> = OnceLock::new();
+
+    CHAT.get_or_init(|| {
+        let bytes = model_bytes(CHAT_KJQ)?;
+        Some(Mutex::new(
+            kjarni_wasm::WasmChat::load_core(&bytes, Some("qwen2.5-0.5b-instruct"))
+                .expect("load chat"),
+        ))
+    })
+    .as_ref()
+    .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 #[test]
@@ -309,6 +326,10 @@ fn chat_loads_and_reports_its_context_window() {
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
 fn chat_generates_a_factual_completion() {
     // Greedy, so this is deterministic. A weaker assertion than it looks: what it
     // really catches is the decode loop producing garbage, which is the failure mode
@@ -323,6 +344,10 @@ fn chat_generates_a_factual_completion() {
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
 fn chat_is_deterministic_at_temperature_zero() {
     let Some(chat) = chat() else { return };
 
@@ -332,6 +357,10 @@ fn chat_is_deterministic_at_temperature_zero() {
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
 fn chat_respects_max_new_tokens() {
     let Some(chat) = chat() else { return };
 

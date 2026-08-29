@@ -99,6 +99,21 @@ jobs:
           KJARNI_KJQ_DIR: /tmp/kjq
         run: cargo test --workspace
 
+      # Decoder generation is ignored in the debug run above because an unoptimised
+      # decode loop is roughly twenty times slower: one generation test measured
+      # 110s debug against 5s release, and the whole job was being cancelled at 54
+      # minutes because of it. Skipping them outright would leave the decode loop,
+      # the sampler and the KV cache with no CI coverage at all, so they run here
+      # optimised instead. The main run stays in debug to keep the engine's 47
+      # `debug_assert!`s live, which a wholesale switch to --release would silence.
+      - name: Run generation tests (optimised)
+        env:
+          KJARNI_KJQ_DIR: /tmp/kjq
+        # Not `-- --ignored`: the gate is `cfg_attr(debug_assertions, ignore)`, so in
+        # a release build these tests are not ignored at all and `--ignored` filters
+        # them out, running the unconditionally-ignored GPU parity suite instead.
+        run: cargo test --release -p kjarni-models -p kjarni-wasm
+
   # ─── C# binding tests (the shipped NuGet surface) ───────────────
   csharp-test:
     name: Test (C# binding)

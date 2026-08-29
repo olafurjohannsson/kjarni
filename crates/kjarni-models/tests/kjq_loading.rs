@@ -168,6 +168,10 @@ async fn int8_quantization_stays_within_a_known_bound() {
 const CHAT_KJQ: &str = "../../../web.kjarni.ai/src/static/models/qwen05b-q8.kjq";
 
 #[tokio::test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "decoder generation is orders of magnitude slower unoptimised; run with --release"
+)]
 async fn decoder_loads_from_kjq_bytes_and_generates() {
     // `DecoderLoader::load_from_bytes` was added for the browser: there is no
     // filesystem there, so the file-backed loaders cannot be used. It had no test,

@@ -5,7 +5,7 @@
 //   - Content moderation (toxic comment detection)
 //   - Semantic search (search docs by meaning, not keywords)
 //
-// Zero external dependencies. No Python. No cloud APIs. No API keys.
+// One NuGet package with no dependencies of its own, running in the API process.
 // Just: dotnet add package Kjarni && dotnet run
 //
 // Usage:

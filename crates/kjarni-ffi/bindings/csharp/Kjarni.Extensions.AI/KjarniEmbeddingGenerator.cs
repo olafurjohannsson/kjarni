@@ -9,7 +9,8 @@ namespace Kjarni.Extensions.AI
 {
     /// <summary>
     /// A <see cref="IEmbeddingGenerator{TInput, TEmbedding}"/> backed by a local Kjarni
-    /// <see cref="Embedder"/>. Runs entirely in-process: no HTTP, no Python, no cloud.
+    /// <see cref="Embedder"/>. The model is loaded into your process and runs there, so
+    /// text never leaves the machine and no network call is made after the first download.
     /// </summary>
     /// <remarks>
     /// <para>
