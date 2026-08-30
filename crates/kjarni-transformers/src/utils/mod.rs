@@ -58,6 +58,7 @@ pub fn configure_threading() {
     log::info!("Threading: {} threads, hybrid={}", num_threads, is_hybrid);
 }
 
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn is_intel_hybrid() -> bool {
     // Check for Intel 12th gen+ hybrid architecture
     #[cfg(target_os = "linux")]
@@ -87,6 +88,7 @@ fn is_intel_hybrid() -> bool {
     false
 }
 
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn get_p_core_count() -> Option<usize> {
     #[cfg(target_os = "linux")]
     {

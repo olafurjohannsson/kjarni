@@ -15,6 +15,7 @@ use super::gguf_loader::GgufLoader;
 use super::safetensors_loader::SafeTensorsLoader;
 use crate::tensor::raw_tensor::TensorView;
 use crate::tensor::{CpuTensor, DType, QuantizedMatrix};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::weights::raw_to_typed_gguf;
 
 #[derive(Debug, Clone, Copy)]

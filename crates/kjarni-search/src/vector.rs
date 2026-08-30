@@ -178,7 +178,9 @@ impl VectorStore {
         let query_norm = query_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         // Below this the scan finishes in well under a millisecond and thread
-        // hand-off costs more than it saves.
+        // hand-off costs more than it saves. Only the parallel branch consults
+        // it, and wasm does not compile that branch.
+        #[cfg(not(target_arch = "wasm32"))]
         const PARALLEL_THRESHOLD: usize = 2048;
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -262,6 +264,8 @@ impl TopK {
         }
     }
 
+    /// Only the parallel reduce calls this, so wasm never does.
+    #[cfg(not(target_arch = "wasm32"))]
     fn merged(mut self, other: Self) -> Self {
         for (idx, score) in other.items {
             self.offer(idx, score);

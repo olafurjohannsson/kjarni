@@ -317,8 +317,14 @@ jobs:
         with:
           key: wasm-check
 
-      - name: Check kjarni-transformers for wasm32
-        run: cargo check -p kjarni-transformers --target wasm32-unknown-unknown --no-default-features
+      # -D warnings on purpose. `cargo clippy --workspace` only ever lints the
+      # native target, so wasm-only warnings accumulated invisibly: unused imports
+      # behind cfg gates, dead code, and 26 `unsafe_op_in_unsafe_fn` in the SIMD
+      # kernels. Checking kjarni-wasm pulls in the whole dependency tree.
+      - name: Check for wasm32
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo check -p kjarni-wasm --target wasm32-unknown-unknown --no-default-features
 
   # ─── Browser test (the actual WASM artifact) ────────────────────
   #

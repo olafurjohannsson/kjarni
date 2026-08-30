@@ -17,3 +17,5 @@ bin/
 obj/
 *.pyc
 node_modules/
+.test-venv/
+.test-logs/

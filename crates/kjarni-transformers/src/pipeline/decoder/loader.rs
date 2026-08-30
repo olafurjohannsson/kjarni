@@ -1,4 +1,6 @@
 use anyhow::{Result, anyhow};
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -10,12 +12,14 @@ use crate::common::HFGenerationDefaults;
 use crate::decoder::traits::{CpuDecoder, GpuDecoder};
 use crate::loaders::LoadedRoPE;
 use crate::models::base::ModelLoadConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::models::get_default_cache_dir;
 use crate::models::{ModelArchitecture, ModelType};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::models::{download_model_files, registry::WeightsFormat};
 use crate::pipeline::DecoderPipeline;
 use crate::pipeline::decoder::DecoderPipelineBuilder;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::tensor::DType;
 use crate::traits::{Device, ModelConfig, ModelLayout, ModelMetadata};
 use crate::weights::ModelWeights;

@@ -9,7 +9,9 @@ use crate::common::GenerationConfig;
 use crate::encoder_decoder::traits::GpuCrossAttentionKVCache;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuKVCache, GpuTensor, GpuTensorPool};
-use crate::models::base::{AutoregressiveLoop, LanguageModel, ModelInput};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::base::ModelInput;
+use crate::models::base::{AutoregressiveLoop, LanguageModel};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use ndarray::{Array1, Array2, Array3};

@@ -1,5 +1,7 @@
 //! LLaMA-style decoder
 
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -50,6 +52,12 @@ impl DecoderModelFactory for LlamaModel {
         LlamaConfig::from_loader(weights.loader(), Some(weights.config_json()))
     }
 
+    // On wasm there is no GPU backend, so `context` goes unread and the
+    // locals are never reassigned. The signature is shared with native.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_variables, unused_mut, unused_assignments)
+    )]
     fn build_backends(
         weights: &ModelWeights,
         meta: &ModelMetadata,
@@ -198,7 +206,10 @@ impl LanguageModel for LlamaModel {
         let meta = self.config.metadata();
         let head_dim = meta.head_dim;
 
+        // Read by the GPU cache arm below, which wasm does not compile.
+        #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
         let effective_max_len = self.pipeline.max_sequence_length().unwrap_or(max_len);
+        #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
         let effective_batch_size = self.pipeline.max_batch_size().unwrap_or(batch_size);
 
         // Create cache based on where layers run (not the model's primary device)

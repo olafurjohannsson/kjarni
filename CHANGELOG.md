@@ -93,6 +93,40 @@ equally-scoring documents between runs.
 
 WASM keeps the serial path, since rayon there needs a threaded build.
 
+### A TypeScript package for the browser, published to npm
+
+`npm i kjarni-wasm` gets embeddings, classification, reranking and chat running
+in a Web Worker, so loading a model or generating a reply never freezes the page.
+Every method returns a promise, and chat is an async iterator.
+
+```ts
+const kjarni = await Kjarni.load({ encoder: "/models/minilm-l6-v2-q8.kjq" });
+for await (const piece of kjarni.chat("Explain RAG")) out.textContent += piece;
+```
+
+The raw wasm-bindgen bundle is still in `kjarni-wasm.tar.gz` for anyone who
+would rather drive it directly.
+
+### Browser generation actually streams
+
+`WasmChat` ran the whole decode loop to completion and only then drained the
+channel the engine had been streaming into, so callers could show nothing until
+the reply was finished. Polling the loop together with its own drain fixes that
+on wasm's single thread, and the channel goes back to being a small buffer that
+applies real back-pressure rather than one sized to hold an entire response.
+
+`generate_stream` exposes it to JavaScript.
+
+### The WASM bundle is now tested in a browser
+
+Everything testing `kjarni-wasm` ran the Rust natively, which covers the engine
+and misses the artifact entirely: a broken import, a bundle compiled from stale
+sources, a binding that only fails through wasm-bindgen's glue. A new CI job
+loads the built bundle in Chromium and checks it encodes text correctly.
+
+This was not hypothetical. The live demo served a bundle containing neither
+classification nor chat for days while every test stayed green.
+
 ### C++ is built and tested in CI
 
 The C ABI header had never been compiled by CI, and shipped in every release archive

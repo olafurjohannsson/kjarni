@@ -1,10 +1,11 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::sync::Arc;
+// Filesystem paths are a native-only concern: the wasm builds load from bytes.
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use tokenizers::Tokenizer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::models::get_default_cache_dir;
 use crate::{
     Device, ModelType, WgpuContext,
@@ -77,6 +78,7 @@ use crate::models::{download_model_files, registry::WeightsFormat};
 ///
 /// Returns `None` when the model ships no such file, which is the case for
 /// anything that is not a sentence-transformers export.
+#[allow(dead_code, reason = "reachable only on some targets")]
 fn sentence_transformers_max_seq_len(model_path: &std::path::Path) -> Option<usize> {
     #[derive(serde::Deserialize)]
     struct SentenceBertConfig {

@@ -163,7 +163,7 @@ pub fn matmul_2d_cpu_q4_k(a: &ArrayView2<f32>, b_weights: &[BlockQ4_K]) -> Array
     // TODO: Add WASM SIMD Q4_K kernel
     // For now, use scalar
     for row in 0..m {
-        let a_row = &a_s.as_slice().unwrap()[row * k..(row + 1) * k];
+        let _a_row = &a_s.as_slice().unwrap()[row * k..(row + 1) * k];
         let out_row = &mut c.as_slice_mut().unwrap()[row * n..(row + 1) * n];
 
         for j in 0..n {

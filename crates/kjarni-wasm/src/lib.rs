@@ -899,7 +899,7 @@ mod browser_only {
         MiniLML6V2,
     }
 
-    enum Global {
+    pub(crate) enum Global {
         Window(Window),
         Worker(WorkerGlobalScope),
     }

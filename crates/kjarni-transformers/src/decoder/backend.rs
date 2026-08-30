@@ -1,6 +1,7 @@
 //! Type-erased backend that dispatches to CPU or GPU implementations.
 
 use std::any::Any;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};

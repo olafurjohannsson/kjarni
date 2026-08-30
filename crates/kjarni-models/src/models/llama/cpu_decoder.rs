@@ -1,12 +1,13 @@
 //! CPU implementation of the Llama decoder architecture.
 
+#[cfg(not(target_arch = "wasm32"))]
+use kjarni_transformers::WgpuContext;
 use std::sync::Arc;
 
 use anyhow::Result;
 use ndarray::{Array2, Array3};
 
 use kjarni_transformers::{
-    WgpuContext,
     activations::Activation,
     cache::CpuKVCache,
     decoder::prelude::*,

@@ -13,7 +13,9 @@ use crate::cpu::encoder::config::{EncodingConfig, PoolingStrategy};
 use crate::cpu::strategy::ComputeStrategy;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::{GpuFrameContext, GpuTensor, GpuTensorPool};
-use crate::models::base::{LanguageModel, ModelInput};
+use crate::models::base::LanguageModel;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::base::ModelInput;
 use crate::pooling::mean_pool;
 use crate::traits::CpuTransformerCore;
 use crate::{last_token_pool, max_pool};

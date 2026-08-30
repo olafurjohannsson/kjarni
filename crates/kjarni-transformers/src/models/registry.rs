@@ -1,7 +1,9 @@
 //! Pretrained model registry with metadata and download utilities.
 
 use crate::utils::levenshtein;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::anyhow;
 use std::path::{Path, PathBuf};
 use strum_macros::EnumIter;
 
@@ -896,6 +898,7 @@ pub async fn download_model_files(
 /// stored per model, so every registry entry gets the behaviour without thirty new
 /// string literals to keep in sync.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code, reason = "reachable only on some targets")]
 async fn download_sentence_bert_config(model_dir: &Path, config_url: &str) {
     let Some(base) = config_url.strip_suffix("config.json") else {
         return;
@@ -910,6 +913,10 @@ async fn download_sentence_bert_config(model_dir: &Path, config_url: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(
+    dead_code,
+    reason = "the caller is native-only; this keeps the signature honest"
+)]
 async fn download_sentence_bert_config(_model_dir: &Path, _config_url: &str) {}
 
 #[cfg(not(target_arch = "wasm32"))]
