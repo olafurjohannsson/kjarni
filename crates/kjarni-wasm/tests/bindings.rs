@@ -488,10 +488,15 @@ fn chat_streams_tokens_as_they_are_generated() {
 fn streaming_and_batched_generation_agree() {
     let Some(chat) = chat() else { return };
 
-    let batched = chat.generate_core("The capital of Iceland is", 12, 0.0).unwrap();
+    let batched = chat
+        .generate_core("The capital of Iceland is", 12, 0.0)
+        .unwrap();
     let streamed = chat
         .generate_stream_core("The capital of Iceland is", 12, 0.0, |_| {})
         .unwrap();
 
-    assert_eq!(batched, streamed, "greedy decoding must not vary by call path");
+    assert_eq!(
+        batched, streamed,
+        "greedy decoding must not vary by call path"
+    );
 }
