@@ -97,22 +97,14 @@ jobs:
         working-directory: crates/kjarni-wasm/scripts
         run: python3 -m unittest discover -p "test_*.py" -v
 
-      # kjarni-wasm was excluded because the crate was `#![cfg(target_arch = "wasm32")]`
-      # and could not build natively. Browser-only code now lives in a gated module,
-      # so its 18 binding tests compile and run here like any other crate.
+      # Run tests
       - name: Run tests
         env:
           KJARNI_KJQ_DIR: /tmp/kjq
-        run: cargo test --workspace
+        run: cargo test --release --workspace
 
-      # Decoder generation is ignored in the debug run above because an unoptimised
-      # decode loop is roughly twenty times slower: one generation test measured
-      # 110s debug against 5s release, and the whole job was being cancelled at 54
-      # minutes because of it. Skipping them outright would leave the decode loop,
-      # the sampler and the KV cache with no CI coverage at all, so they run here
-      # optimised instead. The main run stays in debug to keep the engine's 47
-      # `debug_assert!`s live, which a wholesale switch to --release would silence.
-      - name: Run generation tests (optimised)
+      # Run decoder tests
+      - name: Run generation tests
         env:
           KJARNI_KJQ_DIR: /tmp/kjq
         # Not `-- --ignored`: the gate is `cfg_attr(debug_assertions, ignore)`, so in
@@ -147,7 +139,7 @@ jobs:
         run: cargo build --release --package kjarni-ffi
 
       - name: Build CLI for model downloads
-        run: cargo build --release --package kjarni-cli
+        run: cargo build --profile ci --package kjarni-cli
 
       - name: Download models used by the C# tests
         run: |
@@ -235,7 +227,7 @@ jobs:
             -Ltarget/release -lkjarni_ffi -o /tmp/abi
 
       - name: Build CLI for model downloads
-        run: cargo build --release --package kjarni-cli
+        run: cargo build --profile ci --package kjarni-cli
 
       - name: Download models used by the C++ tests
         run: |
