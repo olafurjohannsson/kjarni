@@ -320,6 +320,77 @@ jobs:
       - name: Check kjarni-transformers for wasm32
         run: cargo check -p kjarni-transformers --target wasm32-unknown-unknown --no-default-features
 
+  # ─── Browser test (the actual WASM artifact) ────────────────────
+  #
+  # Everything else testing kjarni-wasm runs the Rust natively, which covers the
+  # engine and misses the artifact entirely: a broken import, a bundle built from
+  # stale sources, a binding that only throws through wasm-bindgen's glue. All of
+  # those ship green otherwise, which is how the live demo served a bundle with no
+  # classification or chat in it while CI stayed green.
+  wasm-browser-test:
+    name: Test (browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-browser-test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kjarni
+          key: kjarni-models-browser-v3
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      # The same flags the release build uses, so this exercises the artifact
+      # people actually download rather than a debug approximation of it.
+      - name: Build WASM
+        run: |
+          cd crates/kjarni-wasm
+          RUSTFLAGS='-C target-feature=+simd128' \
+            wasm-pack build --release --target web -- --no-default-features --locked
+
+      - name: Build CLI and fetch the encoder weights
+        run: |
+          cargo build --release --package kjarni-cli
+          ./target/release/kjarni model download minilm-l6-v2
+
+      # Served locally rather than fetched from Hugging Face: the point of this
+      # job is the bundle, and a network hiccup should not turn into a red build.
+      - name: Export the .kjq fixture
+        run: |
+          pip install -r crates/kjarni-wasm/scripts/requirements.txt
+          mkdir -p /tmp/kjq
+          python3 crates/kjarni-wasm/scripts/quantize_model.py \
+            --model-dir ~/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2 \
+            --output /tmp/kjq/all-MiniLM-L6-v2-q8.kjq
+
+      - name: Install the browser
+        working-directory: crates/kjarni-wasm/tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run
+        working-directory: crates/kjarni-wasm/tests/browser
+        env:
+          KJARNI_KJQ_DIR: /tmp/kjq
+        run: node run.mjs
+
   # ─── Linux x86_64 ──────────────────────────────────────────────
   build-linux:
     name: Build (Linux x86_64)
@@ -498,6 +569,11 @@ jobs:
       [
         test,
         csharp-test,
+        # cpp-test gates the C ABI header against the library shipping beside it.
+        # Without it here, a stale or uncompilable kjarni.h reaches every release
+        # archive, which is the exact failure that job was added to catch.
+        cpp-test,
+        wasm-browser-test,
         build-linux,
         build-linux-arm,
         build-macos,

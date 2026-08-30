@@ -155,7 +155,7 @@ impl DeviceTimeoutExt for Device {
             let maintained = self.poll(wgpu::PollType::Poll);
 
             // If no more work to do, we're done
-            if !maintained.is_ok() {
+            if maintained.is_err() {
                 return Ok(());
             }
 

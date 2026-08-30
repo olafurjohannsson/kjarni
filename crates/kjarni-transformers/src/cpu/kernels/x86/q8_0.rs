@@ -25,10 +25,8 @@ pub unsafe fn matmul_vec_q8_0_avx2(
             let mut sum3 = _mm256_setzero_ps();
 
             // Process blocks in groups of 4 (4 * 32 = 128 weights)
-            #[allow(
-                clippy::chunks_exact_to_as_chunks,
-                reason = "the remainder() of this iterator is used below"
-            )]
+            // chunks_exact rather than as_chunks: the remainder() of this
+            // iterator is used below to handle the tail.
             let mut chunks = row_blocks.chunks_exact(4);
             for chunk in chunks.by_ref() {
                 {

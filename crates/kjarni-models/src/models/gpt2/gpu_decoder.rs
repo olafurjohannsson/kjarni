@@ -27,7 +27,9 @@ pub struct Gpt2GpuDecoder {
     final_layer_norm: GpuNormalization,
     final_ln_weights: GpuNormalizationWeights,
 
-    #[expect(
+    // `allow` rather than `expect`: this field is read under `--all-targets`,
+    // so an `expect` goes unfulfilled and fails the lint-gated build.
+    #[allow(
         dead_code,
         reason = "held for the decoder path; read once GPT-2 generation uses it"
     )]

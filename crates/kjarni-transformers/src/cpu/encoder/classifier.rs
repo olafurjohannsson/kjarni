@@ -225,14 +225,12 @@ impl CpuSequenceClassificationHead {
             PoolingStrategy::LastToken => {
                 if let Some(mask) = attention_mask {
                     last_token_pool(encoder_hidden_states, mask)?
+                } else if seq_len == 1 {
+                    encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
                 } else {
-                    if seq_len == 1 {
-                        encoder_hidden_states.slice(s![.., 0, ..]).to_owned()
-                    } else {
-                        return Err(anyhow!(
-                            "LastToken pooling requires an attention mask for seq_len > 1"
-                        ));
-                    }
+                    return Err(anyhow!(
+                        "LastToken pooling requires an attention mask for seq_len > 1"
+                    ));
                 }
             }
             _ => {

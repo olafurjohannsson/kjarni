@@ -766,6 +766,10 @@ mod ffi_bridge_tests {
     fn test_init_thread_safe() {
         use std::thread;
 
+        // The closure is not redundant: `kjarni_init` is `extern "C" fn`, which
+        // does not satisfy `thread::spawn`'s `FnOnce()` bound directly. Clippy's
+        // suggested rewrite does not compile.
+        #[allow(clippy::redundant_closure)]
         let handles: Vec<_> = (0..8).map(|_| thread::spawn(|| kjarni_init())).collect();
 
         for handle in handles {
