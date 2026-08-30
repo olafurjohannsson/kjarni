@@ -36,11 +36,17 @@ jobs:
           toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
 
+      # One key across the test, csharp-test and cpp-test jobs on purpose. They
+      # cache the same path, and eight of the models they pull overlap, so
+      # separate keys stored MiniLM, the cross-encoder and distilbert-sentiment
+      # three times each. GitHub allows 10GB of cache per repository on every
+      # plan and evicts silently past it, which shows up as jobs mysteriously
+      # re-downloading gigabytes rather than as a failure.
       - name: Cache models
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-v2
+          key: kjarni-models-v3
 
       - name: Build CLI for model downloads
         run: cargo build --release --package kjarni-cli
@@ -135,7 +141,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-csharp-v1
+          key: kjarni-models-v3
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -197,7 +203,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-cpp-v1
+          key: kjarni-models-v3
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi

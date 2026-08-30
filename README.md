@@ -7,68 +7,51 @@
 
 **Local embeddings, semantic search, classification, reranking and chat for C#, Go, Rust, Python, C++ and the command line.**
 
-Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine: on a laptop, in a container, or inside an air-gapped network.
+Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine.
+
+## Try it in 30 seconds
+
+**Nothing to install:** the [browser demo](https://kjarni.ai/demo) runs the engine in your own tab.
+
+**Or one command, and it works:**
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh    # Windows: irm https://kjarni.ai/install.ps1 | iex
+```
+
+```console
+$ kjarni classify "This is wonderful"
+  ✓       POSITIVE  ████████████████████  100.0%
+          NEGATIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
+
+$ kjarni similarity "doctor" "physician"
+  █████████████████░░░   86.0%  highly similar
+
+$ echo "Great service" | kjarni classify --format json | jq -r '.label'
+POSITIVE
+```
+
+The model downloads on first use and is cached. Everything after that works offline.
+
+**In your own code**, it is the same three lines in every language:
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+Console.WriteLine(embedder.Similarity("doctor", "physician"));   // 0.8598
+```
 
 ```bash
 dotnet add package Kjarni                             # C# / .NET
 go get github.com/olafurjohannsson/kjarni-go@latest   # Go
-curl -fsSL https://kjarni.ai/install.sh | sh          # CLI
 ```
 
-```csharp
-using Kjarni;
+[Every language below](#install), including C++ and the browser.
 
-using var embedder = new Embedder("minilm-l6-v2");
-Console.WriteLine(embedder.Similarity("doctor", "physician"));
-// 0.8598132
-```
+<sub>The name is Icelandic [ˈkʰjartnɪ]. It means "core."</sub>
 
-That is the whole setup. Add the package, name a model, call a method. The model downloads on first use and everything after that works offline.
-
-The name is Icelandic [ˈkʰjartnɪ]. It means "core."
+**[Install](#install)** · **[Examples](#the-same-thing-in-every-language)** · **[Browser demo](https://kjarni.ai/demo)** · **[Why it exists](#why-kjarni-exists)** · **[How it compares](#how-it-compares)**
 
 ---
-
-## Why Kjarni exists
-
-Adding semantic search or classification to a .NET or Go application usually means standing up a Python service, shipping a 2GB PyTorch image, or exporting models to ONNX and hand-writing the tokenization and pooling around them. If your data cannot leave the building — legal, healthcare, defense, finance — the hosted-API path is closed to you entirely.
-
-Kjarni is a single `.so`/`.dll`/`.dylib` that runs inside your process, with predictable behavior and no external infrastructure.
-
-## How it compares
-
-|                              | **Kjarni** | ONNX Runtime | sentence-transformers | fastembed |
-| ---------------------------- | ---------- | ------------ | --------------------- | --------- |
-| Setup steps                  | 1 (add package) | Runtime + export each model | Python + PyTorch + model | Python + onnxruntime |
-| Python runtime required      | **No**     | No           | Yes                   | Yes       |
-| Model conversion step        | **None**   | `.onnx` export required | None        | None      |
-| First-class C# API           | **Yes**    | Low-level tensors only | No             | No        |
-| First-class Go API           | **Yes**    | Third-party cgo wrappers | No           | No        |
-| Tokenization included        | **Yes**    | Bring your own | Yes                  | Yes       |
-| Pooling / normalization      | **Yes**    | Bring your own | Yes                  | Yes       |
-| Built-in hybrid search (BM25 + vector) | **Yes** | No | No                | No        |
-| Built-in cross-encoder rerank | **Yes**   | No           | Separate model plumbing | Limited |
-| Runs in the browser (WASM)   | **Yes**    | Yes (ort-web) | No                   | No        |
-| GPU                          | WebGPU (Vulkan / DX12 / Metal) | CUDA, DirectML, others | CUDA | No |
-| Runtime dependency footprint | glibc 2.17 | ONNX Runtime native libs | ~2 GB       | onnxruntime |
-| License                      | MIT / Apache-2.0 | MIT     | Apache-2.0            | Apache-2.0 |
-
-ONNX Runtime is a general-purpose tensor executor and does that job well. Kjarni is task-level: you ask for an embedding or a ranking, not for a graph execution. That is the difference the table is describing.
-
-## Verified against PyTorch
-
-Kjarni's outputs are tested for numerical parity against PyTorch/HuggingFace golden values, and its GPU path is tested for parity against its own CPU path — encoders, cross-encoders, decoders, RoPE, RMSNorm, and full generation traces:
-
-```
-test models::sentence_encoder::...::test_torch_sentence_encoder_golden_values ... ok
-test models::sequence_classifier::...::test_cross_encoder_rerank_torch_parity ... ok
-test tests::encoder_parity_test::test_encoder_cpu_gpu_parity                   ... ok
-test tests::decoder_parity_test::test_full_text_generation_parity              ... ok
-
-test result: ok. 44 passed; 0 failed
-```
-
-A reimplemented engine is only worth using if it agrees with the reference implementation. These tests are how that claim is kept honest.
 
 ## Install
 
@@ -186,6 +169,47 @@ echo "I love this product" | kjarni classify
 ```
 
 **More examples:** [C#](crates/kjarni-ffi/bindings/csharp/examples) (RAG pipeline, ASP.NET API, Semantic Kernel) · [C++](crates/kjarni-ffi/examples/cpp) and [Qt/QML](crates/kjarni-ffi/examples/qml) · [browser](crates/kjarni-wasm/examples) · [Go](crates/kjarni-ffi/bindings/go/examples) · [Rust](crates/kjarni-examples/examples) · or try the [live demo](https://kjarni.ai/demo) with nothing installed.
+
+## Why Kjarni exists
+
+Adding semantic search or classification to a .NET or Go application usually means standing up a Python service, shipping a 2GB PyTorch image, or exporting models to ONNX and hand-writing the tokenization and pooling around them. If your data cannot leave the building — legal, healthcare, defense, finance — the hosted-API path is closed to you entirely.
+
+Kjarni is a single `.so`/`.dll`/`.dylib` that runs inside your process, with predictable behavior and no external infrastructure.
+
+## How it compares
+
+|                              | **Kjarni** | ONNX Runtime | sentence-transformers | fastembed |
+| ---------------------------- | ---------- | ------------ | --------------------- | --------- |
+| Setup steps                  | 1 (add package) | Runtime + export each model | Python + PyTorch + model | Python + onnxruntime |
+| Python runtime required      | **No**     | No           | Yes                   | Yes       |
+| Model conversion step        | **None**   | `.onnx` export required | None        | None      |
+| First-class C# API           | **Yes**    | Low-level tensors only | No             | No        |
+| First-class Go API           | **Yes**    | Third-party cgo wrappers | No           | No        |
+| Tokenization included        | **Yes**    | Bring your own | Yes                  | Yes       |
+| Pooling / normalization      | **Yes**    | Bring your own | Yes                  | Yes       |
+| Built-in hybrid search (BM25 + vector) | **Yes** | No | No                | No        |
+| Built-in cross-encoder rerank | **Yes**   | No           | Separate model plumbing | Limited |
+| Runs in the browser (WASM)   | **Yes**    | Yes (ort-web) | No                   | No        |
+| GPU                          | WebGPU (Vulkan / DX12 / Metal) | CUDA, DirectML, others | CUDA | No |
+| Runtime dependency footprint | glibc 2.17 | ONNX Runtime native libs | ~2 GB       | onnxruntime |
+| License                      | MIT / Apache-2.0 | MIT     | Apache-2.0            | Apache-2.0 |
+
+ONNX Runtime is a general-purpose tensor executor and does that job well. Kjarni is task-level: you ask for an embedding or a ranking, not for a graph execution. That is the difference the table is describing.
+
+## Verified against PyTorch
+
+Kjarni's outputs are tested for numerical parity against PyTorch/HuggingFace golden values, and its GPU path is tested for parity against its own CPU path — encoders, cross-encoders, decoders, RoPE, RMSNorm, and full generation traces:
+
+```
+test models::sentence_encoder::...::test_torch_sentence_encoder_golden_values ... ok
+test models::sequence_classifier::...::test_cross_encoder_rerank_torch_parity ... ok
+test tests::encoder_parity_test::test_encoder_cpu_gpu_parity                   ... ok
+test tests::decoder_parity_test::test_full_text_generation_parity              ... ok
+
+test result: ok. 44 passed; 0 failed
+```
+
+A reimplemented engine is only worth using if it agrees with the reference implementation. These tests are how that claim is kept honest.
 
 ## What it does
 
