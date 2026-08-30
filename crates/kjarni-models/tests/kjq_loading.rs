@@ -31,6 +31,21 @@ const F32_CACHE: &str = "sentence-transformers_all-MiniLM-L6-v2";
 /// variable at that directory. A fixture missing from an explicitly configured
 /// directory is a broken CI step, not an absent optional file, so it fails loudly
 /// instead of skipping.
+///
+/// The fallback path below is the sibling website checkout, which no longer holds
+/// these files: they moved to Hugging Face once `qwen05b-q8.kjq` outgrew GitHub's
+/// 100MB per-file limit. In practice fixtures now arrive one of two ways, and both
+/// are cheap:
+///
+/// ```text
+/// python crates/kjarni-wasm/scripts/quantize_model.py \
+///     --model-dir ~/.cache/kjarni/sentence-transformers_all-MiniLM-L6-v2 \
+///     --output /tmp/kjq/all-MiniLM-L6-v2-q8.kjq
+/// KJARNI_KJQ_DIR=/tmp/kjq cargo test --release
+/// ```
+///
+/// or download them from <https://huggingface.co/olafuraron>. CI takes the first
+/// route, building them from weights it already caches.
 fn fixture(rel: &str) -> Option<Vec<u8>> {
     if let Ok(dir) = std::env::var("KJARNI_KJQ_DIR") {
         let name = std::path::Path::new(rel).file_name().expect("fixture name");

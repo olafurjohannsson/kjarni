@@ -7,27 +7,168 @@
 
 **Local embeddings, semantic search, classification, reranking and chat for C#, Go, Rust, Python, C++ and the command line.**
 
-Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine: on a laptop, in a container, or inside an air-gapped network.
+Kjarni is a native inference engine written from scratch in Rust. It ships as a single shared library, downloads its own models, and runs entirely on your machine.
+
+## Try it in 30 seconds
+
+**Nothing to install:** the [browser demo](https://kjarni.ai/demo) runs the engine in your own tab.
+
+**Or one command, and it works:**
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh    # Windows: irm https://kjarni.ai/install.ps1 | iex
+```
+
+```console
+$ kjarni classify "This is wonderful"
+  ✓       POSITIVE  ████████████████████  100.0%
+          NEGATIVE  ░░░░░░░░░░░░░░░░░░░░    0.0%
+
+$ kjarni similarity "doctor" "physician"
+  █████████████████░░░   86.0%  highly similar
+
+$ echo "Great service" | kjarni classify --format json | jq -r '.label'
+POSITIVE
+```
+
+The model downloads on first use and is cached. Everything after that works offline.
+
+**In your own code**, it is the same three lines in every language:
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+Console.WriteLine(embedder.Similarity("doctor", "physician"));   // 0.8598
+```
 
 ```bash
 dotnet add package Kjarni                             # C# / .NET
 go get github.com/olafurjohannsson/kjarni-go@latest   # Go
-curl -fsSL https://kjarni.ai/install.sh | sh          # CLI
 ```
 
-```csharp
-using Kjarni;
+[Every language below](#install), including C++ and the browser.
 
-using var embedder = new Embedder("minilm-l6-v2");
-Console.WriteLine(embedder.Similarity("doctor", "physician"));
-// 0.8598132
-```
+<sub>The name is Icelandic [ˈkʰjartnɪ]. It means "core."</sub>
 
-That is the whole setup. Add the package, name a model, call a method. The model downloads on first use and everything after that works offline.
-
-The name is Icelandic [ˈkʰjartnɪ]. It means "core."
+**[Install](#install)** · **[Examples](#the-same-thing-in-every-language)** · **[Browser demo](https://kjarni.ai/demo)** · **[Why it exists](#why-kjarni-exists)** · **[How it compares](#how-it-compares)**
 
 ---
+
+## Install
+
+**C# / .NET** — [nuget.org/packages/Kjarni](https://www.nuget.org/packages/Kjarni)
+
+```bash
+dotnet add package Kjarni
+```
+
+**Go** — [pkg.go.dev/github.com/olafurjohannsson/kjarni-go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
+
+```bash
+go get github.com/olafurjohannsson/kjarni-go@latest
+```
+
+**CLI**
+
+```bash
+curl -fsSL https://kjarni.ai/install.sh | sh    # Linux / macOS
+irm https://kjarni.ai/install.ps1 | iex         # Windows
+```
+
+**Python** *(pre-release)*
+
+```bash
+pip install --pre kjarni
+```
+
+**Rust** *(pre-release)*
+
+```bash
+cargo add kjarni@0.0.1-alpha.1
+```
+
+**C++** — download the archive for your platform from [releases](https://github.com/olafurjohannsson/kjarni/releases). It contains the shared library, `kjarni.h` (the C ABI) and `kjarni.hpp` (a header-only C++23 wrapper with RAII handles and `std::expected` errors).
+
+```bash
+tar -xzf kjarni-x86_64-linux.tar.gz -C kjarni/
+g++ -std=c++23 main.cpp -Ikjarni -Lkjarni -lkjarni_ffi -o app
+```
+
+**Browser (WebAssembly)** — download `kjarni-wasm.tar.gz` from [releases](https://github.com/olafurjohannsson/kjarni/releases), or build it yourself:
+
+```bash
+cd crates/kjarni-wasm && wasm-pack build --target web --release
+```
+
+Models for the browser are packed as `.kjq`, a single file holding config, tokenizer and int8 weights. See [the format guide](crates/kjarni-wasm/scripts/README.md) for how to make your own.
+
+Models download on first use and are cached in `~/.cache/kjarni` (`%LOCALAPPDATA%\kjarni` on Windows). No configuration required.
+
+## The same thing in every language
+
+Semantic similarity, the smallest useful program, in each binding.
+
+**C#**
+
+```csharp
+using var embedder = new Embedder("minilm-l6-v2");
+Console.WriteLine(embedder.Similarity("doctor", "physician"));   // 0.8598
+```
+
+**C++**
+
+```cpp
+#include "kjarni.hpp"
+
+auto embedder = kjarni::Embedder::create({.model = "minilm-l6-v2"});
+auto a = embedder->encode("doctor");
+auto b = embedder->encode("physician");
+std::println("{:.4f}", kjarni::cosine(*a, *b));                  // 0.8598
+```
+
+**Go**
+
+```go
+e, _ := kjarni.NewEmbedder("minilm-l6-v2")
+defer e.Close()
+sim, _ := e.Similarity("doctor", "physician")
+fmt.Println(sim)                                                 // 0.8598
+```
+
+**Python** *(pre-release)*
+
+```python
+from kjarni import Classifier
+
+classifier = Classifier("distilbert-sentiment")
+print(classifier.classify("i love kjarni").label)                # positive
+```
+
+**Rust** *(pre-release)*
+
+```rust
+let result = classifier::classify("distilbert-sentiment", "I love this product!").await?;
+println!("{} ({:.1}%)", result.label, result.score * 100.0);
+```
+
+**Browser**
+
+```js
+import init, { WasmModel } from "./pkg/kjarni_wasm.js";
+
+await init();
+const bytes = new Uint8Array(await (await fetch("model.kjq")).arrayBuffer());
+const model = WasmModel.from_quantized(bytes);
+const vectors = model.encode(["doctor", "physician"], true);
+```
+
+**CLI**
+
+```bash
+kjarni embed "doctor" --format json
+echo "I love this product" | kjarni classify
+```
+
+**More examples:** [C#](crates/kjarni-ffi/bindings/csharp/examples) (RAG pipeline, ASP.NET API, Semantic Kernel) · [C++](crates/kjarni-ffi/examples/cpp) and [Qt/QML](crates/kjarni-ffi/examples/qml) · [browser](crates/kjarni-wasm/examples) · [Go](crates/kjarni-ffi/bindings/go/examples) · [Rust](crates/kjarni-examples/examples) · or try the [live demo](https://kjarni.ai/demo) with nothing installed.
 
 ## Why Kjarni exists
 
@@ -69,41 +210,6 @@ test result: ok. 44 passed; 0 failed
 ```
 
 A reimplemented engine is only worth using if it agrees with the reference implementation. These tests are how that claim is kept honest.
-
-## Install
-
-**C# / .NET** — [nuget.org/packages/Kjarni](https://www.nuget.org/packages/Kjarni)
-
-```bash
-dotnet add package Kjarni
-```
-
-**Go** — [pkg.go.dev/github.com/olafurjohannsson/kjarni-go](https://pkg.go.dev/github.com/olafurjohannsson/kjarni-go)
-
-```bash
-go get github.com/olafurjohannsson/kjarni-go@latest
-```
-
-**CLI**
-
-```bash
-curl -fsSL https://kjarni.ai/install.sh | sh    # Linux / macOS
-irm https://kjarni.ai/install.ps1 | iex         # Windows
-```
-
-**Python** *(pre-release)*
-
-```bash
-pip install --pre kjarni
-```
-
-**Rust** *(pre-release)*
-
-```bash
-cargo add kjarni@0.0.1-alpha.1
-```
-
-Models download on first use and are cached in `~/.cache/kjarni` (`%LOCALAPPDATA%\kjarni` on Windows). No configuration required.
 
 ## What it does
 
@@ -214,7 +320,7 @@ Referenced by short name; the underlying HuggingFace model is listed for searcha
 
 \* Downloaded from a safetensors conversion mirrored under [`olafuraron`](https://huggingface.co/olafuraron); the upstream model and its license are unchanged.
 
-`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation works but is not the focus of this release — for local chat, [llama.cpp](https://github.com/ggerganov/llama.cpp) is the more mature choice. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
+`kjarni model list` shows the full catalog, including the decoder LLMs (Llama 3.2, Qwen 2.5, Mistral, Phi-3.5, DeepSeek-R1) the engine supports. Text generation runs through the same engine, in C#, Rust, the CLI and the browser. If raw single-model generation throughput is what you are optimising for, [llama.cpp](https://github.com/ggerganov/llama.cpp) is more specialised. Kjarni's lane is breadth of language and deployment rather than raw generation speed: the same engine behind a NuGet package, a Go module, a C header, a CLI binary and a WASM bundle.
 
 ## FAQ
 
@@ -250,7 +356,7 @@ Yes. The encoder path compiles to WebAssembly and runs client-side, which means 
 | Linux ARM64 | Yes | Yes (Vulkan) | Built in CI |
 | Windows x64 | Yes | Yes (DX12 / Vulkan) | Built in CI |
 | macOS ARM64 | Yes | Metal | Binaries published; test coverage in progress |
-| WebAssembly | Yes | — | Encoder path |
+| WebAssembly | Yes | n/a | Embeddings, classification, reranking, search, chat |
 
 The only system dependency on Linux is glibc 2.17 or newer.
 

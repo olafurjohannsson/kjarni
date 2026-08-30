@@ -137,4 +137,12 @@ strip = true
 # The cost is a larger binary and landing pads the optimiser must preserve. That is
 # the correct trade for a library whose entire premise is running in-process.
 
-
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug-assertions = true
+overflow-checks = true
+panic = "unwind"
+strip = false
+debug = "line-tables-only"

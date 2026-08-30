@@ -62,14 +62,22 @@ jobs:
           toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
 
+      # One key per job, deliberately. These three jobs download different model
+      # sets (13 here, 9 for csharp-test, 3 for cpp-test) and run concurrently.
+      # `actions/cache` keys are immutable and a job only saves when it missed, so
+      # a single shared key is won permanently by whichever job saves first --
+      # usually cpp-test, which downloads the least. Every later run would then
+      # restore a three-model cache and this job would re-download the other ten
+      # each time, unable to save because the key already exists. The overlap
+      # costs roughly 1GB against a 10GB per-repository limit; the race does not.
       - name: Cache models
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-v2
+          key: kjarni-models-test-v3
 
-      # Built under the same profile as the tests below, so the two share artifacts
-      # rather than compiling the whole dependency graph twice.
+      # Built under the same profile as the tests below so the two share
+      # artifacts instead of compiling the dependency graph twice.
       - name: Build CLI for model downloads
         run: cargo build --profile ci --package kjarni-cli
 
@@ -119,15 +127,15 @@ jobs:
         working-directory: crates/kjarni-wasm/scripts
         run: python3 -m unittest discover -p "test_*.py" -v
 
-      # kjarni-wasm was excluded because the crate was `#![cfg(target_arch = "wasm32")]`
-      # and could not build natively. Browser-only code now lives in a gated module,
-      # so its 18 binding tests compile and run here like any other crate.
       # `cargo test` with no profile flag uses `test`, which inherits `dev` at
-      # opt-level 0. That is what made this job take an hour: the engine's decode
-      # loop is roughly twenty times slower unoptimised. `--profile ci` is release
-      # optimisation with `debug_assert!`s and overflow checks kept on, so this run
-      # checks everything the dev-profile run checked -- see [profile.ci] in the
-      # root Cargo.toml.
+      # opt-level 0; the decode loop is roughly twenty times slower unoptimised and
+      # that is what made this job take an hour. `--profile ci` is release
+      # optimisation with `debug_assert!`s and overflow checks still on, so this
+      # checks everything the dev-profile run checked. Plain `--release` would
+      # silence all 51 `debug_assert!`s and the 20 `#[cfg(debug_assertions)]`
+      # blocks -- the GPU buffer-aliasing check, the FFN dimension check, the
+      # encoder capacity check -- and would pay fat LTO for no benefit here.
+      # See [profile.ci] in the root Cargo.toml.
       - name: Run tests (optimised)
         env:
           KJARNI_KJQ_DIR: /tmp/kjq
@@ -154,11 +162,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-csharp-v1
+          key: kjarni-models-csharp-v3
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
 
+      # --release, matching the FFI build above: these jobs link the shipped
+      # release artifact, so building the CLI under another profile would compile
+      # the dependency graph a second time and leave the binary in target/ci
+      # while the step below looks in target/release.
       - name: Build CLI for model downloads
         run: cargo build --release --package kjarni-cli
 
@@ -216,7 +228,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kjarni
-          key: kjarni-models-cpp-v1
+          key: kjarni-models-cpp-v3
 
       - name: Build native FFI library
         run: cargo build --release --package kjarni-ffi
@@ -247,6 +259,10 @@ jobs:
             -Icrates/kjarni-ffi/include /tmp/abi.c \
             -Ltarget/release -lkjarni_ffi -o /tmp/abi
 
+      # --release, matching the FFI build above: these jobs link the shipped
+      # release artifact, so building the CLI under another profile would compile
+      # the dependency graph a second time and leave the binary in target/ci
+      # while the step below looks in target/release.
       - name: Build CLI for model downloads
         run: cargo build --release --package kjarni-cli
 
@@ -334,7 +350,8 @@ jobs:
           mkdir -p dist
           cp target/x86_64-unknown-linux-gnu/release/kjarni dist/
           cp target/x86_64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -371,7 +388,8 @@ jobs:
           mkdir -p dist
           cp target/aarch64-unknown-linux-gnu/release/kjarni dist/
           cp target/aarch64-unknown-linux-gnu/release/libkjarni_ffi.so dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -403,7 +421,8 @@ jobs:
           mkdir -p dist
           cp target/aarch64-apple-darwin/release/kjarni dist/
           cp target/aarch64-apple-darwin/release/libkjarni_ffi.dylib dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -436,7 +455,8 @@ jobs:
           mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/kjarni.exe dist/
           cp target/x86_64-pc-windows-msvc/release/kjarni_ffi.dll dist/
-          cp crates/kjarni-ffi/include/kjarni.h dist/ 2>/dev/null || true
+          cp crates/kjarni-ffi/include/kjarni.h dist/
+          cp crates/kjarni-ffi/include/kjarni.hpp dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -525,6 +545,49 @@ jobs:
             artifacts/kjarni-aarch64-macos.tar.gz
             artifacts/kjarni-x86_64-windows.zip
             artifacts/kjarni-wasm.tar.gz
+
+  # ─── Publish to npm ─────────────────────────────────────────────
+  #
+  # Needs an NPM_TOKEN secret: an npm automation token with publish rights on
+  # `kjarni-wasm`. Create it at npmjs.com under Access Tokens, then add it in
+  # Settings > Secrets and variables > Actions. Without it this job fails at the
+  # publish step rather than silently skipping.
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # The published package is the TypeScript wrapper plus the wasm-pack output
+      # it wraps, so both have to be present before packing.
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kjarni-wasm
+          path: crates/kjarni-wasm/pkg/
+
+      - name: Build the TypeScript wrapper
+        working-directory: crates/kjarni-wasm/ts
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      # npm versions are immutable like NuGet's, so the version has to come from
+      # the tag rather than whatever is committed in package.json.
+      - name: Publish
+        working-directory: crates/kjarni-wasm/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+          npm publish --access public
 
   # ─── Publish to NuGet ───────────────────────────────────────────
   # This lives here, not in a release-triggered workflow, because GitHub does
