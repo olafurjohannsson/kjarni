@@ -649,11 +649,17 @@ jobs:
           name: kjarni-wasm
           path: crates/kjarni-wasm/pkg/
 
+      # `npm run build` runs prebuild first, which copies ../pkg into the package.
+      # The bundle has to live inside the package directory: npm silently drops
+      # any `files` entry outside it, so publishing without this ships a package
+      # whose every import fails at runtime.
       - name: Build the TypeScript wrapper
         working-directory: crates/kjarni-wasm/ts
         run: |
           npm install --no-audit --no-fund
           npm run build
+          test -f pkg/kjarni_wasm_bg.wasm || {
+            echo "::error::the wasm bundle is missing from the package"; exit 1; }
 
       # npm versions are immutable like NuGet's, so the version has to come from
       # the tag rather than whatever is committed in package.json.

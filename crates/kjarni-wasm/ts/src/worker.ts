@@ -10,7 +10,7 @@ import init, {
   WasmClassifier,
   WasmReranker,
   WasmChat,
-} from "../../pkg/kjarni_wasm.js";
+} from "../pkg/kjarni_wasm.js";
 
 import type { Request, Response } from "./protocol.js";
 
